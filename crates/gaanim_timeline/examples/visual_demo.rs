@@ -1,17 +1,14 @@
 use std::f64::consts::PI;
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
-use gaanim_math::{Camera, GlobalSpatialTransform, RateFunc, SpatialTransform};
-use gaanim_scene::{
-    FillBrush, GlobalOpacity, GaanimScenePlugin, MobjectId, Opacity, Path2D,
-    RenderLayer, RenderOrder, StrokeBrush, Visible,
-};
+use gaanim_math::{Camera, RateFunc, SpatialTransform};
+use gaanim_scene::{FillBrush, GaanimScenePlugin, StrokeBrush};
 use gaanim_animation::{GaanimAnimationPlugin, DeltaTime};
 use gaanim_timeline::{
     GaanimTimelinePlugin, timeline::Timeline, clip::ClipPayload, clip::AnimationSpec, clip::PropertyLensSpec,
 };
 use gaanim_renderer::prelude::*;
-use gaanim_core::kurbo::{self, Shape};
+use gaanim_objects::prelude::*;
 
 fn main() {
     App::new()
@@ -47,51 +44,29 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
     let parent_id = ObjectId::from_parts(1, 1);
     let child_id = ObjectId::from_parts(2, 1);
 
-    // 2. Spawn Parent Mobject (represented as a dynamic rotating rounded rectangle)
-    let parent_entity = commands
-        .spawn((
-            MobjectId(parent_id),
-            SpatialTransform::new_2d(-200.0, 0.0), // Starts on the left
-            GlobalSpatialTransform::default(),
-            Opacity(1.0),
-            GlobalOpacity(1.0),
-            FillBrush(Some(gaanim_core::peniko::Brush::Solid(
-                gaanim_core::peniko::Color::from_rgba8(0, 102, 204, 255), // Slick blue
-            ))),
-            StrokeBrush {
-                brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
-                style: gaanim_core::kurbo::Stroke::new(3.0),
-            },
-            // True vector shape: Rounded Rectangle!
-            Path2D(kurbo::RoundedRect::new(-50.0, -50.0, 50.0, 50.0, 12.0).to_path(0.1)),
-            RenderOrder::default(),
-            RenderLayer::Vello2D,
-            Visible,
-        ))
-        .id();
+    // 2. Spawn Parent Mobject using our high-level gaanim_objects primitives!
+    let mut parent_bundle = rounded_rect(parent_id, 100.0, 100.0, 12.0);
+    parent_bundle.transform = SpatialTransform::new_2d(-200.0, 0.0); // Starts on the left
+    parent_bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::from_rgba8(0, 102, 204, 255), // Slick blue
+    )));
+    parent_bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        style: gaanim_core::kurbo::Stroke::new(3.0),
+    };
+    let parent_entity = commands.spawn(parent_bundle).id();
 
-    // 3. Spawn Child Mobject (orbiting circle) parented to the rotating block
-    let child_entity = commands
-        .spawn((
-            MobjectId(child_id),
-            SpatialTransform::new_2d(150.0, 0.0), // Local offset to the right
-            GlobalSpatialTransform::default(),
-            Opacity(1.0),
-            GlobalOpacity(1.0),
-            FillBrush(Some(gaanim_core::peniko::Brush::Solid(
-                gaanim_core::peniko::Color::from_rgba8(235, 64, 120, 255), // Modern pink
-            ))),
-            StrokeBrush {
-                brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
-                style: gaanim_core::kurbo::Stroke::new(2.0),
-            },
-            // True vector shape: Circle!
-            Path2D(kurbo::Circle::new((0.0, 0.0), 25.0).to_path(0.1)),
-            RenderOrder::default(),
-            RenderLayer::Vello2D,
-            Visible,
-        ))
-        .id();
+    // 3. Spawn Child Mobject using our high-level gaanim_objects primitives!
+    let mut child_bundle = circle(child_id, 25.0);
+    child_bundle.transform = SpatialTransform::new_2d(150.0, 0.0); // Local offset to the right
+    child_bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::from_rgba8(235, 64, 120, 255), // Modern pink
+    )));
+    child_bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        style: gaanim_core::kurbo::Stroke::new(2.0),
+    };
+    let child_entity = commands.spawn(child_bundle).id();
 
     // Set parent-child relationship via Bevy's built-in command hierarchy
     commands.entity(child_entity).set_parent_in_place(parent_entity);
