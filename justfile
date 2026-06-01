@@ -72,7 +72,7 @@ run-smoke: build
 
 # Run an example by name without rebuilding. Usage: just run my_example
 run EX:
-    {{ python }} examples\{{ EX }}.py
+    {{ python }} examples/{{ EX }}.py
 
 # ---- Doctor -----------------------------------------------------------------
 
