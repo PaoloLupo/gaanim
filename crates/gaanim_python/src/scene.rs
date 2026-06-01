@@ -527,8 +527,8 @@ impl PyScene {
     /// Drain the deferred op queue into a Bevy `App` and run the GPU window.
     /// Blocking: returns when the window is closed.
     fn render(&self, py: Python<'_>) -> PyResult<()> {
-        let inner = lock_inner!(self.inner);
-        let ops = inner.ops.clone();
+        let mut inner = lock_inner!(self.inner);
+        let ops = std::mem::take(&mut inner.ops);
         let width = inner.width;
         let height = inner.height;
         let title = inner.title.clone();
