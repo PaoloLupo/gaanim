@@ -42,13 +42,14 @@ from .gaanim_core import (
     AnimSpec,
     Color,
     ObjectId,
+    Theme,
     # Color palette
     GOLD, CORAL, BLUE, WHITE, BLACK, RED, GREEN, YELLOW,
     ORANGE, PURPLE, PINK, GRAY, CYAN, NAVY, TEAL,
 )
 
 __all__ = [
-    "Scene", "Mobject", "Selection", "SelectionAnim", "AnimSpec", "Color", "ObjectId",
+    "Scene", "Mobject", "Selection", "SelectionAnim", "AnimSpec", "Color", "ObjectId", "Theme",
     "GOLD", "CORAL", "BLUE", "WHITE", "BLACK", "RED", "GREEN", "YELLOW",
     "ORANGE", "PURPLE", "PINK", "GRAY", "CYAN", "NAVY", "TEAL",
 ]

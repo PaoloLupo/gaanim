@@ -8,6 +8,7 @@ mod animation;
 mod color;
 mod id;
 mod mobject;
+mod theme;
 mod runtime;
 mod scene;
 mod selection;
@@ -22,6 +23,7 @@ fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<animation::PyAnimationSpec>()?;
     m.add_class::<color::PyColor>()?;
     m.add_class::<id::PyObjectId>()?;
+    m.add_class::<theme::PyTheme>()?;
 
     // Color palette — exposed as module-level constants.
     m.add("GOLD", color::PyColor(engine::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00)))?;

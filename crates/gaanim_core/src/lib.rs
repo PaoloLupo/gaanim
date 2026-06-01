@@ -11,6 +11,9 @@ pub use color::{interpolate_color, interpolate_rgba8};
 pub mod id;
 pub use id::ObjectId;
 
+pub mod theme;
+pub use theme::Theme;
+
 #[derive(Error, Debug)]
 pub enum GaanimError {
     #[error("entity not found: {0}")]

@@ -12,6 +12,7 @@ use crate::color::PyColor;
 use crate::mobject::{MobjectSpec, PyMobject, TextRoleKind};
 use crate::runtime;
 use crate::selection::PySelection;
+use crate::theme::PyTheme;
 
 /// A single deferred operation. The runtime replays these in order during
 /// the Bevy `Startup` system.
@@ -72,6 +73,7 @@ pub(crate) struct SceneInner {
     pub height: u32,
     pub background: Option<peniko::Color>,
     pub title: String,
+    pub theme: PyTheme,
 }
 
 impl SceneInner {
@@ -102,19 +104,39 @@ pub struct PyScene {
 #[pymethods]
 impl PyScene {
     #[new]
-    #[pyo3(signature = (width=1280, height=720, title=None))]
-    fn new(width: u32, height: u32, title: Option<String>) -> Self {
+    #[pyo3(signature = (width=1280, height=720, title=None, theme=None))]
+    fn new(
+        width: u32,
+        height: u32,
+        title: Option<String>,
+        theme: Option<PyTheme>,
+    ) -> Self {
         let title = title.unwrap_or_else(|| "Gaanim Scene".to_string());
+        let active_theme = theme.unwrap_or_else(PyTheme::DARK);
+        let background = Some(active_theme.0.background);
         Self {
             inner: Mutex::new(SceneInner {
                 ops: Vec::new(),
                 id_counter: 0,
                 width,
                 height,
-                background: None,
+                background,
                 title,
+                theme: active_theme,
             }),
         }
+    }
+
+    #[getter]
+    fn theme(&self) -> PyResult<PyTheme> {
+        Ok(lock_inner!(self.inner).theme.clone())
+    }
+
+    fn set_theme(&self, theme: PyTheme) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        inner.background = Some(theme.0.background);
+        inner.theme = theme;
+        Ok(())
     }
 
     #[getter]
@@ -153,9 +175,10 @@ impl PyScene {
     fn circle(&self, radius: f64) -> PyResult<PyMobject> {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
+        let primary_color = inner.theme.0.primary;
         let spec = Arc::new(Mutex::new(MobjectSpec::Circle {
             radius,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -172,10 +195,11 @@ impl PyScene {
     }
 
     fn rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Rectangle {
             width,
             height,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -185,11 +209,12 @@ impl PyScene {
     }
 
     fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::RoundedRect {
             width,
             height,
             radius,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -199,9 +224,10 @@ impl PyScene {
     }
 
     fn square(&self, side: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Square {
             side,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -211,9 +237,10 @@ impl PyScene {
     }
 
     fn dot(&self, radius: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Dot {
             radius,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -223,10 +250,11 @@ impl PyScene {
     }
 
     fn ellipse(&self, rx: f64, ry: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Ellipse {
             rx,
             ry,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -236,10 +264,11 @@ impl PyScene {
     }
 
     fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Line {
             start: (x1, y1),
             end: (x2, y2),
-            stroke: Some((peniko::Color::WHITE, 2.0)),
+            stroke: Some((primary_color, 2.0)),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -248,11 +277,12 @@ impl PyScene {
     }
 
     fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Arrow {
             start: (x1, y1),
             end: (x2, y2),
-            stroke: Some((peniko::Color::WHITE, 2.0)),
-            fill: Some(peniko::Color::WHITE),
+            stroke: Some((primary_color, 2.0)),
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -261,9 +291,10 @@ impl PyScene {
     }
 
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Polygon {
             points,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -273,11 +304,12 @@ impl PyScene {
     }
 
     fn star(&self, n_points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Star {
             n_points,
             outer_radius,
             inner_radius,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -287,9 +319,10 @@ impl PyScene {
     }
 
     fn checkmark(&self, size: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Checkmark {
             size,
-            stroke: Some((peniko::Color::WHITE, 4.0)),
+            stroke: Some((primary_color, 4.0)),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -298,10 +331,11 @@ impl PyScene {
     }
 
     fn regular_polygon(&self, n_sides: u32, radius: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::RegularPolygon {
             n_sides,
             radius,
-            fill: Some(peniko::Color::WHITE),
+            fill: Some(primary_color),
             stroke: None,
             z_index: 0,
             opacity: 1.0,
@@ -312,10 +346,11 @@ impl PyScene {
 
     fn text(&self, content: &str, role: Option<&str>) -> PyResult<PyMobject> {
         let role = TextRoleKind::from_str(role.unwrap_or("body"));
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role,
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -324,10 +359,11 @@ impl PyScene {
     }
 
     fn title(&self, content: &str) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Title,
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -336,10 +372,11 @@ impl PyScene {
     }
 
     fn subtitle(&self, content: &str) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Subtitle,
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -348,10 +385,11 @@ impl PyScene {
     }
 
     fn body(&self, content: &str) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Body,
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -360,10 +398,11 @@ impl PyScene {
     }
 
     fn caption(&self, content: &str) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Caption,
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
@@ -372,9 +411,10 @@ impl PyScene {
     }
 
     fn equation(&self, formula: &str) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Equation {
             formula: formula.to_string(),
-            fill: None,
+            fill: Some(primary_color),
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
