@@ -9,143 +9,36 @@ use crate::animation::PyAnimationSpec;
 use crate::color::PyColor;
 use crate::id::PyObjectId;
 
+/// Visual properties shared by all mobject kinds.
+#[derive(Clone, Copy, Debug)]
+pub struct CommonSpec {
+    pub fill: Option<peniko::Color>,
+    pub stroke: Option<(peniko::Color, f64)>,
+    pub z_index: i32,
+    pub opacity: f32,
+    pub transform: SpatialTransform,
+    pub next_to: Option<(ObjectId, LayoutDirection, f64)>,
+}
+
 /// What kind of mobject will be spawned at replay time. The configuration
 /// (`fill`, `stroke`, `z_index`, `transform`, `next_to`, …) is attached and
 /// replayed during the Bevy `Startup` system.
 #[derive(Clone, Debug)]
 pub enum MobjectSpec {
-    Circle {
-        radius: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Rectangle {
-        width: f64,
-        height: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    RoundedRect {
-        width: f64,
-        height: f64,
-        radius: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Line {
-        start: (f64, f64),
-        end: (f64, f64),
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Polygon {
-        points: Vec<(f64, f64)>,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Star {
-        n_points: u32,
-        outer_radius: f64,
-        inner_radius: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Ellipse {
-        rx: f64,
-        ry: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Dot {
-        radius: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Square {
-        side: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Checkmark {
-        size: f64,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Arrow {
-        start: (f64, f64),
-        end: (f64, f64),
-        stroke: Option<(peniko::Color, f64)>,
-        fill: Option<peniko::Color>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    RegularPolygon {
-        n_sides: u32,
-        radius: f64,
-        fill: Option<peniko::Color>,
-        stroke: Option<(peniko::Color, f64)>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Text {
-        content: String,
-        role: TextRoleKind,
-        fill: Option<peniko::Color>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
-    Equation {
-        formula: String,
-        fill: Option<peniko::Color>,
-        z_index: i32,
-        opacity: f32,
-        transform: SpatialTransform,
-        next_to: Option<(ObjectId, LayoutDirection, f64)>,
-    },
+    Circle { common: CommonSpec, radius: f64 },
+    Rectangle { common: CommonSpec, width: f64, height: f64 },
+    RoundedRect { common: CommonSpec, width: f64, height: f64, radius: f64 },
+    Line { common: CommonSpec, start: (f64, f64), end: (f64, f64) },
+    Polygon { common: CommonSpec, points: Vec<(f64, f64)> },
+    Star { common: CommonSpec, n_points: u32, outer_radius: f64, inner_radius: f64 },
+    Ellipse { common: CommonSpec, rx: f64, ry: f64 },
+    Dot { common: CommonSpec, radius: f64 },
+    Square { common: CommonSpec, side: f64 },
+    Checkmark { common: CommonSpec, size: f64 },
+    Arrow { common: CommonSpec, start: (f64, f64), end: (f64, f64) },
+    RegularPolygon { common: CommonSpec, n_sides: u32, radius: f64 },
+    Text { common: CommonSpec, content: String, role: TextRoleKind },
+    Equation { common: CommonSpec, formula: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +73,44 @@ impl TextRoleKind {
 }
 
 impl MobjectSpec {
+    fn common(&self) -> &CommonSpec {
+        match self {
+            Self::Circle { common, .. }
+            | Self::Rectangle { common, .. }
+            | Self::RoundedRect { common, .. }
+            | Self::Line { common, .. }
+            | Self::Polygon { common, .. }
+            | Self::Star { common, .. }
+            | Self::Ellipse { common, .. }
+            | Self::Dot { common, .. }
+            | Self::Square { common, .. }
+            | Self::Checkmark { common, .. }
+            | Self::Arrow { common, .. }
+            | Self::RegularPolygon { common, .. }
+            | Self::Text { common, .. }
+            | Self::Equation { common, .. } => common,
+        }
+    }
+
+    fn common_mut(&mut self) -> &mut CommonSpec {
+        match self {
+            Self::Circle { common, .. }
+            | Self::Rectangle { common, .. }
+            | Self::RoundedRect { common, .. }
+            | Self::Line { common, .. }
+            | Self::Polygon { common, .. }
+            | Self::Star { common, .. }
+            | Self::Ellipse { common, .. }
+            | Self::Dot { common, .. }
+            | Self::Square { common, .. }
+            | Self::Checkmark { common, .. }
+            | Self::Arrow { common, .. }
+            | Self::RegularPolygon { common, .. }
+            | Self::Text { common, .. }
+            | Self::Equation { common, .. } => common,
+        }
+    }
+
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Circle { .. } => "circle",
@@ -199,248 +130,20 @@ impl MobjectSpec {
         }
     }
 
-    pub fn fill(&self) -> Option<peniko::Color> {
-        match self {
-            Self::Circle { fill, .. }
-            | Self::Rectangle { fill, .. }
-            | Self::RoundedRect { fill, .. }
-            | Self::Polygon { fill, .. }
-            | Self::Star { fill, .. }
-            | Self::Ellipse { fill, .. }
-            | Self::Dot { fill, .. }
-            | Self::Square { fill, .. }
-            | Self::RegularPolygon { fill, .. }
-            | Self::Arrow { fill, .. }
-            | Self::Text { fill, .. }
-            | Self::Equation { fill, .. } => *fill,
-            Self::Line { .. } | Self::Checkmark { .. } => None,
-        }
-    }
+    pub fn fill(&self) -> Option<peniko::Color> { self.common().fill }
+    pub fn stroke(&self) -> Option<(peniko::Color, f64)> { self.common().stroke }
+    pub fn opacity(&self) -> f32 { self.common().opacity }
+    pub fn z_index(&self) -> i32 { self.common().z_index }
+    pub fn transform(&self) -> SpatialTransform { self.common().transform }
+    pub fn next_to(&self) -> Option<(ObjectId, LayoutDirection, f64)> { self.common().next_to }
 
-    pub fn stroke(&self) -> Option<(peniko::Color, f64)> {
-        match self {
-            Self::Circle { stroke, .. }
-            | Self::Rectangle { stroke, .. }
-            | Self::RoundedRect { stroke, .. }
-            | Self::Line { stroke, .. }
-            | Self::Polygon { stroke, .. }
-            | Self::Star { stroke, .. }
-            | Self::Ellipse { stroke, .. }
-            | Self::Dot { stroke, .. }
-            | Self::Square { stroke, .. }
-            | Self::Checkmark { stroke, .. }
-            | Self::Arrow { stroke, .. }
-            | Self::RegularPolygon { stroke, .. } => *stroke,
-            Self::Text { .. } | Self::Equation { .. } => None,
-        }
-    }
-
-    pub fn opacity(&self) -> f32 {
-        match self {
-            Self::Circle { opacity, .. }
-            | Self::Rectangle { opacity, .. }
-            | Self::RoundedRect { opacity, .. }
-            | Self::Line { opacity, .. }
-            | Self::Polygon { opacity, .. }
-            | Self::Star { opacity, .. }
-            | Self::Ellipse { opacity, .. }
-            | Self::Dot { opacity, .. }
-            | Self::Square { opacity, .. }
-            | Self::Checkmark { opacity, .. }
-            | Self::Arrow { opacity, .. }
-            | Self::RegularPolygon { opacity, .. }
-            | Self::Text { opacity, .. }
-            | Self::Equation { opacity, .. } => *opacity,
-        }
-    }
-
-    pub fn z_index(&self) -> i32 {
-        match self {
-            Self::Circle { z_index, .. }
-            | Self::Rectangle { z_index, .. }
-            | Self::RoundedRect { z_index, .. }
-            | Self::Line { z_index, .. }
-            | Self::Polygon { z_index, .. }
-            | Self::Star { z_index, .. }
-            | Self::Ellipse { z_index, .. }
-            | Self::Dot { z_index, .. }
-            | Self::Square { z_index, .. }
-            | Self::Checkmark { z_index, .. }
-            | Self::Arrow { z_index, .. }
-            | Self::RegularPolygon { z_index, .. }
-            | Self::Text { z_index, .. }
-            | Self::Equation { z_index, .. } => *z_index,
-        }
-    }
-
-    pub fn transform(&self) -> SpatialTransform {
-        match self {
-            Self::Circle { transform, .. }
-            | Self::Rectangle { transform, .. }
-            | Self::RoundedRect { transform, .. }
-            | Self::Line { transform, .. }
-            | Self::Polygon { transform, .. }
-            | Self::Star { transform, .. }
-            | Self::Ellipse { transform, .. }
-            | Self::Dot { transform, .. }
-            | Self::Square { transform, .. }
-            | Self::Checkmark { transform, .. }
-            | Self::Arrow { transform, .. }
-            | Self::RegularPolygon { transform, .. }
-            | Self::Text { transform, .. }
-            | Self::Equation { transform, .. } => *transform,
-        }
-    }
-
-    pub fn next_to(&self) -> Option<(ObjectId, LayoutDirection, f64)> {
-        match self {
-            Self::Circle { next_to, .. }
-            | Self::Rectangle { next_to, .. }
-            | Self::RoundedRect { next_to, .. }
-            | Self::Line { next_to, .. }
-            | Self::Polygon { next_to, .. }
-            | Self::Star { next_to, .. }
-            | Self::Ellipse { next_to, .. }
-            | Self::Dot { next_to, .. }
-            | Self::Square { next_to, .. }
-            | Self::Checkmark { next_to, .. }
-            | Self::Arrow { next_to, .. }
-            | Self::RegularPolygon { next_to, .. }
-            | Self::Text { next_to, .. }
-            | Self::Equation { next_to, .. } => *next_to,
-        }
-    }
-
-    fn set_fill(&mut self, color: Option<peniko::Color>) {
-        match self {
-            Self::Circle { fill, .. }
-            | Self::Rectangle { fill, .. }
-            | Self::RoundedRect { fill, .. }
-            | Self::Polygon { fill, .. }
-            | Self::Star { fill, .. }
-            | Self::Ellipse { fill, .. }
-            | Self::Dot { fill, .. }
-            | Self::Square { fill, .. }
-            | Self::RegularPolygon { fill, .. }
-            | Self::Arrow { fill, .. }
-            | Self::Text { fill, .. }
-            | Self::Equation { fill, .. } => *fill = color,
-            Self::Line { .. } | Self::Checkmark { .. } => {}
-        }
-    }
-
-    fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) {
-        match self {
-            Self::Circle { stroke: s, .. }
-            | Self::Rectangle { stroke: s, .. }
-            | Self::RoundedRect { stroke: s, .. }
-            | Self::Line { stroke: s, .. }
-            | Self::Polygon { stroke: s, .. }
-            | Self::Star { stroke: s, .. }
-            | Self::Ellipse { stroke: s, .. }
-            | Self::Dot { stroke: s, .. }
-            | Self::Square { stroke: s, .. }
-            | Self::Checkmark { stroke: s, .. }
-            | Self::Arrow { stroke: s, .. }
-            | Self::RegularPolygon { stroke: s, .. } => *s = stroke,
-            Self::Text { .. } | Self::Equation { .. } => {}
-        }
-    }
-
-    fn set_opacity(&mut self, opacity: f32) {
-        match self {
-            Self::Circle { opacity: o, .. }
-            | Self::Rectangle { opacity: o, .. }
-            | Self::RoundedRect { opacity: o, .. }
-            | Self::Line { opacity: o, .. }
-            | Self::Polygon { opacity: o, .. }
-            | Self::Star { opacity: o, .. }
-            | Self::Ellipse { opacity: o, .. }
-            | Self::Dot { opacity: o, .. }
-            | Self::Square { opacity: o, .. }
-            | Self::Checkmark { opacity: o, .. }
-            | Self::Arrow { opacity: o, .. }
-            | Self::RegularPolygon { opacity: o, .. }
-            | Self::Text { opacity: o, .. }
-            | Self::Equation { opacity: o, .. } => *o = opacity,
-        }
-    }
-
-    fn set_z_index(&mut self, z: i32) {
-        match self {
-            Self::Circle { z_index, .. }
-            | Self::Rectangle { z_index, .. }
-            | Self::RoundedRect { z_index, .. }
-            | Self::Line { z_index, .. }
-            | Self::Polygon { z_index, .. }
-            | Self::Star { z_index, .. }
-            | Self::Ellipse { z_index, .. }
-            | Self::Dot { z_index, .. }
-            | Self::Square { z_index, .. }
-            | Self::Checkmark { z_index, .. }
-            | Self::Arrow { z_index, .. }
-            | Self::RegularPolygon { z_index, .. }
-            | Self::Text { z_index, .. }
-            | Self::Equation { z_index, .. } => *z_index = z,
-        }
-    }
-
-    fn set_transform(&mut self, transform: SpatialTransform) {
-        match self {
-            Self::Circle { transform: t, .. }
-            | Self::Rectangle { transform: t, .. }
-            | Self::RoundedRect { transform: t, .. }
-            | Self::Line { transform: t, .. }
-            | Self::Polygon { transform: t, .. }
-            | Self::Star { transform: t, .. }
-            | Self::Ellipse { transform: t, .. }
-            | Self::Dot { transform: t, .. }
-            | Self::Square { transform: t, .. }
-            | Self::Checkmark { transform: t, .. }
-            | Self::Arrow { transform: t, .. }
-            | Self::RegularPolygon { transform: t, .. }
-            | Self::Text { transform: t, .. }
-            | Self::Equation { transform: t, .. } => *t = transform,
-        }
-    }
-
-    fn transform_mut(&mut self) -> &mut SpatialTransform {
-        match self {
-            Self::Circle { transform, .. }
-            | Self::Rectangle { transform, .. }
-            | Self::RoundedRect { transform, .. }
-            | Self::Line { transform, .. }
-            | Self::Polygon { transform, .. }
-            | Self::Star { transform, .. }
-            | Self::Ellipse { transform, .. }
-            | Self::Dot { transform, .. }
-            | Self::Square { transform, .. }
-            | Self::Checkmark { transform, .. }
-            | Self::Arrow { transform, .. }
-            | Self::RegularPolygon { transform, .. }
-            | Self::Text { transform, .. }
-            | Self::Equation { transform, .. } => transform,
-        }
-    }
-
-    fn set_next_to(&mut self, hint: Option<(ObjectId, LayoutDirection, f64)>) {
-        match self {
-            Self::Circle { next_to, .. }
-            | Self::Rectangle { next_to, .. }
-            | Self::RoundedRect { next_to, .. }
-            | Self::Line { next_to, .. }
-            | Self::Polygon { next_to, .. }
-            | Self::Star { next_to, .. }
-            | Self::Ellipse { next_to, .. }
-            | Self::Dot { next_to, .. }
-            | Self::Square { next_to, .. }
-            | Self::Checkmark { next_to, .. }
-            | Self::Arrow { next_to, .. }
-            | Self::RegularPolygon { next_to, .. }
-            | Self::Text { next_to, .. }
-            | Self::Equation { next_to, .. } => *next_to = hint,
-        }
-    }
+    fn set_fill(&mut self, color: Option<peniko::Color>) { self.common_mut().fill = color; }
+    fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) { self.common_mut().stroke = stroke; }
+    fn set_opacity(&mut self, opacity: f32) { self.common_mut().opacity = opacity; }
+    fn set_z_index(&mut self, z: i32) { self.common_mut().z_index = z; }
+    fn set_transform(&mut self, t: SpatialTransform) { self.common_mut().transform = t; }
+    fn transform_mut(&mut self) -> &mut SpatialTransform { &mut self.common_mut().transform }
+    fn set_next_to(&mut self, hint: Option<(ObjectId, LayoutDirection, f64)>) { self.common_mut().next_to = hint; }
 }
 
 /// A Python handle to a Mobject (real or about to be spawned).

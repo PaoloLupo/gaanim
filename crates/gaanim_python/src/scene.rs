@@ -9,7 +9,7 @@ use gaanim_math::RateFunc;
 
 use crate::animation::PyAnimationSpec;
 use crate::color::PyColor;
-use crate::mobject::{MobjectSpec, PyMobject, TextRoleKind};
+use crate::mobject::{CommonSpec, MobjectSpec, PyMobject, TextRoleKind};
 use crate::runtime;
 use crate::selection::PySelection;
 use crate::theme::PyTheme;
@@ -174,15 +174,10 @@ impl PyScene {
     fn circle(&self, radius: f64) -> PyResult<PyMobject> {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
-        let primary_color = inner.theme.0.primary;
+        let common = Self::default_common(inner.theme.0.primary);
         let spec = Arc::new(Mutex::new(MobjectSpec::Circle {
+            common,
             radius,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         }));
         let order = id.index() as u64;
         inner.ops.push(DeferredOp::Spawn {
@@ -200,150 +195,118 @@ impl PyScene {
     fn rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Rectangle {
+            common: Self::default_common(primary_color),
             width,
             height,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::RoundedRect {
+            common: Self::default_common(primary_color),
             width,
             height,
             radius,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn square(&self, side: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Square {
+            common: Self::default_common(primary_color),
             side,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn dot(&self, radius: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Dot {
+            common: Self::default_common(primary_color),
             radius,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn ellipse(&self, rx: f64, ry: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Ellipse {
+            common: Self::default_common(primary_color),
             rx,
             ry,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Line {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
             start: (x1, y1),
             end: (x2, y2),
-            stroke: Some((primary_color, 2.0)),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Arrow {
+            common: CommonSpec {
+                fill: Some(primary_color),
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
             start: (x1, y1),
             end: (x2, y2),
-            stroke: Some((primary_color, 2.0)),
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Polygon {
+            common: Self::default_common(primary_color),
             points,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn star(&self, n_points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Star {
+            common: Self::default_common(primary_color),
             n_points,
             outer_radius,
             inner_radius,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn checkmark(&self, size: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Checkmark {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 4.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
             size,
-            stroke: Some((primary_color, 4.0)),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn regular_polygon(&self, n_sides: u32, radius: f64) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::RegularPolygon {
+            common: Self::default_common(primary_color),
             n_sides,
             radius,
-            fill: Some(primary_color),
-            stroke: None,
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
@@ -351,77 +314,53 @@ impl PyScene {
         let role = TextRoleKind::from_str(role.unwrap_or("body"));
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary_color),
             content: content.to_string(),
             role,
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn title(&self, content: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary_color),
             content: content.to_string(),
             role: TextRoleKind::Title,
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn subtitle(&self, content: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary_color),
             content: content.to_string(),
             role: TextRoleKind::Subtitle,
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn body(&self, content: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary_color),
             content: content.to_string(),
             role: TextRoleKind::Body,
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn caption(&self, content: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary_color),
             content: content.to_string(),
             role: TextRoleKind::Caption,
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
     fn equation(&self, formula: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Equation {
+            common: Self::default_common(primary_color),
             formula: formula.to_string(),
-            fill: Some(primary_color),
-            z_index: 0,
-            opacity: 1.0,
-            transform: gaanim_math::SpatialTransform::default(),
-            next_to: None,
         })
     }
 
@@ -543,8 +482,18 @@ impl PyScene {
     }
 }
 
-// Helpers (internal use by Selection).
+// Helpers (internal use by Selection, constructors).
 impl PyScene {
+    fn default_common(primary_color: peniko::Color) -> CommonSpec {
+        CommonSpec {
+            fill: Some(primary_color),
+            stroke: None,
+            z_index: 0,
+            opacity: 1.0,
+            transform: gaanim_math::SpatialTransform::default(),
+            next_to: None,
+        }
+    }
     pub(crate) fn push_selection_fill(
         &self,
         selection: ObjectId,

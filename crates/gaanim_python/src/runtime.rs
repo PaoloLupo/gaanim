@@ -275,209 +275,138 @@ fn spawn_mobject(
     };
 
     let id = match spec {
-        MobjectSpec::Circle {
-            radius,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Circle { common, radius } => {
             let b = scene.circle(radius);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::Rectangle {
+            common,
             width,
             height,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.rectangle(width, height);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::RoundedRect {
+            common,
             width,
             height,
             radius,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.rounded_rect(width, height, radius);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::Line {
+            common,
             start,
             end,
-            stroke,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.line(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
             );
-            let b = apply_visual(b, None, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Polygon {
-            points,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Polygon { common, points } => {
             let pts: Vec<gaanim_core::kurbo::Point> = points
                 .iter()
                 .map(|(x, y)| gaanim_core::kurbo::Point::new(*x, *y))
                 .collect();
             let b = scene.polygon(&pts);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::Star {
+            common,
             n_points,
             outer_radius,
             inner_radius,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.star(n_points, outer_radius, inner_radius);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Ellipse {
-            rx,
-            ry,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Ellipse { common, rx, ry } => {
             let b = scene.ellipse(rx, ry);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Dot {
-            radius,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Dot { common, radius } => {
             let b = scene.dot(radius);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Square {
-            side,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Square { common, side } => {
             let b = scene.square(side);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Checkmark {
-            size,
-            stroke,
-            opacity,
-            transform,
-            ..
-        } => {
+        MobjectSpec::Checkmark { common, size } => {
             let b = scene.checkmark(size);
-            let b = apply_visual(b, None, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::Arrow {
+            common,
             start,
             end,
-            stroke,
-            fill,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.arrow(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
             );
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::RegularPolygon {
+            common,
             n_sides,
             radius,
-            fill,
-            stroke,
-            opacity,
-            transform,
-            ..
         } => {
             let b = scene.regular_polygon(n_sides, radius);
-            let b = apply_visual(b, fill, stroke);
-            let b = b.transform(transform).opacity(opacity);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
         MobjectSpec::Text {
+            common,
             content,
             role,
-            fill,
-            opacity,
-            transform,
-            ..
         } => {
             let tr = to_text_role(role);
             let mut mref = scene.spawn_text(&content, tr);
-            if let Some(c) = fill {
+            if let Some(c) = common.fill {
                 mref = paint_fill(scene, mref, c);
             }
-            mref = apply_2d_transform(scene, mref, transform);
-            mref = apply_opacity(scene, mref, opacity);
+            mref = apply_2d_transform(scene, mref, common.transform);
+            mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
         MobjectSpec::Equation {
+            common,
             formula,
-            fill,
-            opacity,
-            transform,
-            ..
         } => {
             let mut mref = scene.equation(&formula);
-            if let Some(c) = fill {
+            if let Some(c) = common.fill {
                 mref = paint_fill(scene, mref, c);
             }
-            mref = apply_2d_transform(scene, mref, transform);
-            mref = apply_opacity(scene, mref, opacity);
+            mref = apply_2d_transform(scene, mref, common.transform);
+            mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
     };
