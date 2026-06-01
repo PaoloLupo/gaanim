@@ -161,18 +161,23 @@ pub fn gaanim_render_system(
             .unwrap_or(1.0);
 
         // Fragment Retain: Retrieve the cached scene or compile a new local vector fragment.
-        // Clones of geometry data only happen inside the closure when a rebuild is necessary.
+        // Geometry data is borrowed from the Ref-components instead of cloned,
+        // avoiding redundant allocations when only some visual components change.
+        let empty_bez = kurbo::BezPath::new();
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let mut scene = vello::Scene::new();
 
-            let elem_path = path_ref.as_ref().map(|p| p.0.clone()).unwrap_or_default();
-            let elem_fill = fill_ref.as_ref().and_then(|f| f.0.clone());
-            let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.clone());
-            let elem_stroke_style = stroke_ref.as_ref().map(|s| s.style.clone());
-            let elem_shadow = shadow_ref.as_ref().map(|s| (*s).clone());
+            let elem_path = path_ref
+                .as_ref()
+                .map(|p| &p.0)
+                .unwrap_or(&empty_bez);
+            let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
+            let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
+            let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
+            let elem_shadow = shadow_ref.as_ref().map(|s| &**s);
 
             // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
-            if let Some(ref shadow) = elem_shadow {
+            if let Some(shadow) = elem_shadow {
                 let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
                 let shadow_brush = peniko::Brush::Solid(shadow.color);
                 scene.fill(
@@ -180,7 +185,7 @@ pub fn gaanim_render_system(
                     shadow_transform,
                     &shadow_brush,
                     None,
-                    &elem_path,
+                    elem_path,
                 );
             }
 
@@ -193,25 +198,25 @@ pub fn gaanim_render_system(
             // during the cross-fade, but the user-visible effect is
             // preserved: outline first, then fill).
             if fill_alpha < 1.0 {
-                if let Some(ref fill_brush) = elem_fill {
+                if let Some(fill_brush) = elem_fill {
                     let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
-                    if let Some(brush) = modulated {
+                    if let Some(ref brush) = modulated {
                         scene.fill(
                             peniko::Fill::NonZero,
                             kurbo::Affine::IDENTITY,
-                            &brush,
+                            brush,
                             None,
-                            &elem_path,
+                            elem_path,
                         );
                     }
                 }
-            } else if let Some(ref fill_brush) = elem_fill {
+            } else if let Some(fill_brush) = elem_fill {
                 scene.fill(
                     peniko::Fill::NonZero,
                     kurbo::Affine::IDENTITY,
                     fill_brush,
                     None,
-                    &elem_path,
+                    elem_path,
                 );
             }
 
@@ -228,8 +233,8 @@ pub fn gaanim_render_system(
             // over them clips the stroke to nothing and the line
             // becomes invisible. So we only push the layer when the
             // path actually contains a `ClosePath` element.
-            if let Some(ref stroke_brush) = elem_stroke
-                && let Some(ref style) = elem_stroke_style
+            if let Some(stroke_brush) = elem_stroke
+                && let Some(style) = elem_stroke_style
             {
                 let has_closed_contour = elem_path
                     .elements()
@@ -241,14 +246,14 @@ pub fn gaanim_render_system(
                         peniko::BlendMode::default(),
                         1.0,
                         kurbo::Affine::IDENTITY,
-                        &elem_path,
+                        elem_path,
                     );
                     scene.stroke(
                         style,
                         kurbo::Affine::IDENTITY,
                         stroke_brush,
                         None,
-                        &elem_path,
+                        elem_path,
                     );
                     scene.pop_layer();
                 } else {
@@ -257,7 +262,7 @@ pub fn gaanim_render_system(
                         kurbo::Affine::IDENTITY,
                         stroke_brush,
                         None,
-                        &elem_path,
+                        elem_path,
                     );
                 }
             }
