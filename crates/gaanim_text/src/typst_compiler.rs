@@ -1,5 +1,5 @@
-use bevy::prelude::{Commands, Entity, BuildChildrenTransformExt};
-use gaanim_core::{kurbo, ObjectId, peniko};
+use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
+use gaanim_core::{ObjectId, kurbo, peniko};
 use gaanim_math::Bounds3D;
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush};
@@ -8,17 +8,17 @@ use crate::font::{FontRegistry, OutlineCollector};
 
 // Typst imports
 use typst::{
+    Library, LibraryExt, World,
     diag::FileError,
     foundations::{Bytes, Datetime},
     layout::{Frame, FrameItem, PagedDocument, Transform},
     syntax::{FileId, Source, VirtualPath},
     text::{Font, FontBook},
     utils::LazyHash,
-    visualize::{Paint, Color, Geometry, CurveItem as TypstCurveItem, FixedStroke, LineCap, LineJoin},
-    World, Library, LibraryExt,
+    visualize::{CurveItem as TypstCurveItem, FixedStroke, Geometry, LineCap, LineJoin, Paint},
 };
 
-use kurbo::{Shape, Cap, Join};
+use kurbo::{Cap, Join, Shape};
 
 /// A custom self-contained implementation of `typst::World` for math and document vector compilation.
 pub struct GaanimTypstWorld {
@@ -112,16 +112,23 @@ impl World for GaanimTypstWorld {
     }
 }
 
-/// Convert a Typst `Color` into a `peniko::Color`.
-fn typst_color_to_peniko(color: &Color) -> peniko::Color {
-    let [r, g, b, a] = color.to_vec4_u8();
-    peniko::Color::from_rgba8(r, g, b, a)
-}
-
-/// Convert a Typst `Paint` into an optional `peniko::Brush`.
-fn typst_paint_to_brush(paint: &Paint) -> Option<peniko::Brush> {
+/// Convert a Typst `Paint` into an optional `peniko::Brush`, overriding default black with `default_brush` if provided.
+fn typst_paint_to_brush(
+    paint: &Paint,
+    default_brush: &Option<peniko::Brush>,
+) -> Option<peniko::Brush> {
     match paint {
-        Paint::Solid(color) => Some(peniko::Brush::Solid(typst_color_to_peniko(color))),
+        Paint::Solid(color) => {
+            let [r, g, b, a] = color.to_vec4_u8();
+            // Typst uses black (#000000) as its default document color.
+            // In Gaanim, we want defaults to match the parent's default_fill (often white on a dark background).
+            if r == 0 && g == 0 && b == 0 && a == 255 {
+                if let Some(db) = default_brush {
+                    return Some(db.clone());
+                }
+            }
+            Some(peniko::Brush::Solid(peniko::Color::from_rgba8(r, g, b, a)))
+        }
         _ => None,
     }
 }
@@ -236,16 +243,14 @@ fn extract_frame_items(
                 let ttf = font.ttf();
 
                 // Determine effective fill brush
-                let fill_brush = default_fill
-                    .clone()
-                    .or_else(|| typst_paint_to_brush(&text.fill));
+                let fill_brush = typst_paint_to_brush(&text.fill, default_fill);
 
                 // Typst accumulates advances manually when rendering.
                 // We must do the same to recover each glyph's correct position
                 // inside the text run.
                 let mut pen_x = 0.0;
                 let mut pen_y = 0.0;
-                for (i, glyph) in text.glyphs.iter().enumerate() {
+                for glyph in text.glyphs.iter() {
                     let mut collector = OutlineCollector::new();
                     let glyph_id = ttf_parser::GlyphId(glyph.id);
                     if ttf.outline_glyph(glyph_id, &mut collector).is_some() {
@@ -271,7 +276,9 @@ fn extract_frame_items(
                         bundle.tag = ObjectTag("TypstGlyph".into());
 
                         let child_entity = commands.spawn(bundle).id();
-                        commands.entity(child_entity).set_parent_in_place(parent_entity);
+                        commands
+                            .entity(child_entity)
+                            .set_parent_in_place(parent_entity);
 
                         *total_bounds = total_bounds.union(&local_bounds);
                     }
@@ -290,20 +297,23 @@ fn extract_frame_items(
                 let child_id = next_id_fn();
                 let mut bundle = MobjectBundle::new(child_id, path, local_bounds);
                 bundle.fill = FillBrush(
-                    default_fill
-                        .clone()
-                        .or_else(|| shape.fill.as_ref().and_then(typst_paint_to_brush)),
+                    shape
+                        .fill
+                        .as_ref()
+                        .and_then(|p| typst_paint_to_brush(p, default_fill)),
                 );
                 if let Some(stroke) = &shape.stroke {
                     bundle.stroke = StrokeBrush {
-                        brush: typst_paint_to_brush(&stroke.paint),
+                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
                         style: typst_stroke_to_kurbo(stroke),
                     };
                 }
                 bundle.tag = ObjectTag("TypstShape".into());
 
                 let child_entity = commands.spawn(bundle).id();
-                commands.entity(child_entity).set_parent_in_place(parent_entity);
+                commands
+                    .entity(child_entity)
+                    .set_parent_in_place(parent_entity);
 
                 *total_bounds = total_bounds.union(&local_bounds);
             }
@@ -410,7 +420,9 @@ pub fn compile_typst_to_hierarchy(
         );
     }
 
-    commands.entity(parent_entity).insert(gaanim_scene::LocalBounds(total_bounds));
+    commands
+        .entity(parent_entity)
+        .insert(gaanim_scene::LocalBounds(total_bounds));
 
     (parent_entity, total_bounds)
 }

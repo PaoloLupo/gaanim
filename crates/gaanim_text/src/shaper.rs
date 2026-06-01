@@ -60,10 +60,20 @@ pub fn compile_text_to_hierarchy(
     mut next_id_fn: impl FnMut() -> ObjectId,
 ) -> (Entity, Bounds3D) {
     // 1. Fetch font bytes
-    let font_bytes = font_registry.get_font(font_family).unwrap_or_else(|| {
-        bevy::prelude::warn!("Font family not found in registry: {}. Falling back to default.", font_family);
-        font_registry.get_font("sans-serif").expect("Sans-serif font missing")
-    });
+    let font_bytes = match font_registry.get_font(font_family) {
+        Some(bytes) => bytes,
+        None => {
+            bevy::prelude::warn!("FontRegistry has no fonts loaded at all. Cannot render text.");
+            // Spawning empty parent to prevent crash
+            let parent_path = gaanim_core::kurbo::BezPath::new();
+            let parent_bounds = Bounds3D::default();
+            let mut parent_bundle = MobjectBundle::new(parent_id, parent_path, parent_bounds);
+            parent_bundle.tag = ObjectTag(format!("Text('{}')", text));
+            parent_bundle.fill = gaanim_scene::FillBrush(None);
+            let parent_entity = commands.spawn(parent_bundle).id();
+            return (parent_entity, parent_bounds);
+        }
+    };
 
     // 2. Shape text with HarfBuzz (RustyBuzz)
     let shaped_glyphs = shape_text(font_bytes, text);

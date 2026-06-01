@@ -34,43 +34,25 @@ fn setup_scene(
     mut commands: Commands,
     mut timeline: ResMut<Timeline>,
     font_registry: Res<FontRegistry>,
+    text_config: Res<gaanim_text::prelude::TextConfig>,
 ) {
     // 1. Spawn viewport camera and Vello view
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
     // 2. Initialize the fluent SceneBuilder
-    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry);
+    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
 
-    // 3. Spawn a plain, non-Typst vector text title using HarfBuzz shaper
-    // Shapes standard strings using "Arial" system font (or sans-serif fallback)
-    let title_text = scene.text(
-        "Gaanim Vector Engine",
-        "Arial", // Font family
-        48.0,    // Font size in pixels
-    );
+    // 3. Spawn a plain Title text using HarfBuzz shaper (Arial, 64px, White by default)
+    let title_text = scene.title("Gaanim Vector Engine");
 
-    // 4. Spawn a premium mathematical formula (LaTeX / Typst math mode)
+    // 4. Spawn a premium mathematical formula using default Math role (NewCMMath, 48pt by default)
     // Formula: E = m c^2
-    let math_formula = scene.typst(
-        "E = m c^2",
-        true,          // is_math
-        None,          // text_font
-        None,          // math_font
-        None,          // text_size
-        Some(64.0),    // math_size in pt
-    );
+    let math_formula = scene.equation("E = m c^2");
 
-    // 5. Spawn another formula showing fraction and sum
+    // 5. Spawn another equation showing fraction and sum limits
     // Formula: sum_(i=1)^n i = (n(n+1))/2
-    let sum_formula = scene.typst(
-        "sum_(i=1)^n i = frac(n(n+1), 2)",
-        true,
-        None,
-        None,
-        None,
-        Some(48.0),
-    );
+    let sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)");
 
     // 6. Spawn a beautiful decorative circle in the background
     let bg_circle = scene

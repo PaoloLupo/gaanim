@@ -44,6 +44,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub commands: &'a mut Commands<'w, 's>,
     pub timeline: &'a mut Timeline,
     pub font_registry: &'a FontRegistry,
+    pub text_config: &'a gaanim_text::prelude::TextConfig,
     pub id_counter: u32,
     pub current_time: f64,
     pub states: HashMap<ObjectId, MobjectState>,
@@ -56,6 +57,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         commands: &'a mut Commands<'w, 's>,
         timeline: &'a mut Timeline,
         font_registry: &'a FontRegistry,
+        text_config: &'a gaanim_text::prelude::TextConfig,
     ) -> Self {
         // Ensure a default track exists on the timeline
         let default_track = if let Some(track_id) = timeline.tracks.keys().next() {
@@ -68,6 +70,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             commands,
             timeline,
             font_registry,
+            text_config,
             id_counter: 0,
             current_time: 0.0,
             states: HashMap::new(),
@@ -468,6 +471,119 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             transform: SpatialTransform::default(),
             opacity: 1.0,
             fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity,
+        };
+        self.states.insert(parent_id, state);
+
+        MobjectRef { id: parent_id }
+    }
+
+    /// Spawns a vector text Mobject using the default styling of the requested `TextRole`.
+    pub fn spawn_text(&mut self, content: &str, role: gaanim_text::prelude::TextRole) -> MobjectRef {
+        let style = self.text_config.roles.get(&role)
+            .cloned()
+            .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
+                font_family: "Arial".to_string(),
+                size: 32.0,
+                fill_color: gaanim_core::peniko::Color::WHITE,
+            });
+
+        let parent_id = self.next_id();
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color.clone()));
+        let stroke = gaanim_scene::StrokeBrush::transparent();
+
+        let id_counter = &mut self.id_counter;
+        let next_id_fn = move || {
+            *id_counter += 1;
+            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+        };
+
+        let (entity, bounds) = compile_text_to_hierarchy(
+            self.commands,
+            self.font_registry,
+            content,
+            &style.font_family,
+            style.size,
+            fill,
+            stroke,
+            parent_id,
+            next_id_fn,
+        );
+
+        let state = MobjectState {
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity,
+        };
+        self.states.insert(parent_id, state);
+
+        MobjectRef { id: parent_id }
+    }
+
+    /// Shorthand to spawn a Title text Mobject.
+    pub fn title(&mut self, content: &str) -> MobjectRef {
+        self.spawn_text(content, gaanim_text::prelude::TextRole::Title)
+    }
+
+    /// Shorthand to spawn a Subtitle text Mobject.
+    pub fn subtitle(&mut self, content: &str) -> MobjectRef {
+        self.spawn_text(content, gaanim_text::prelude::TextRole::Subtitle)
+    }
+
+    /// Shorthand to spawn a Body text Mobject.
+    pub fn body(&mut self, content: &str) -> MobjectRef {
+        self.spawn_text(content, gaanim_text::prelude::TextRole::Body)
+    }
+
+    /// Shorthand to spawn a Caption text Mobject.
+    pub fn caption(&mut self, content: &str) -> MobjectRef {
+        self.spawn_text(content, gaanim_text::prelude::TextRole::Caption)
+    }
+
+    /// Shorthand to spawn a mathematical equation Mobject (LaTeX style) with default Math styling.
+    pub fn equation(&mut self, formula: &str) -> MobjectRef {
+        let style = self.text_config.roles.get(&gaanim_text::prelude::TextRole::Math)
+            .cloned()
+            .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
+                font_family: "NewCMMath".to_string(),
+                size: 48.0,
+                fill_color: gaanim_core::peniko::Color::WHITE,
+            });
+
+        let parent_id = self.next_id();
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color.clone()));
+        let stroke = gaanim_scene::StrokeBrush::transparent();
+
+        let id_counter = &mut self.id_counter;
+        let next_id_fn = move || {
+            *id_counter += 1;
+            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+        };
+
+        let (entity, bounds) = compile_typst_to_hierarchy(
+            self.commands,
+            self.font_registry,
+            formula,
+            true, // is_math
+            None,
+            Some(&style.font_family),
+            None,
+            Some(style.size),
+            fill,
+            stroke,
+            parent_id,
+            next_id_fn,
+        );
+
+        let state = MobjectState {
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
         };

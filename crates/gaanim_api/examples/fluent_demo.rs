@@ -7,7 +7,6 @@ use gaanim_scene::GaanimScenePlugin;
 use gaanim_text::GaanimTextPlugin;
 use gaanim_text::font::FontRegistry;
 use gaanim_timeline::{GaanimTimelinePlugin, timeline::Timeline};
-use std::f64::consts::PI;
 
 fn main() {
     App::new()
@@ -40,15 +39,16 @@ fn setup_scene(
     mut commands: Commands,
     mut timeline: ResMut<Timeline>,
     font_registry: Res<FontRegistry>,
+    text_config: Res<gaanim_text::prelude::TextConfig>,
 ) {
     // 1. Spawn a default Orthographic camera resource and entity
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
     // 2. Initialize the premium SceneBuilder!
-    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry);
+    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
 
-    let text_doc = scene.typst("Paolo", false, None, None, Some(64.0), None);
+    let _text_doc = scene.typst("Paolo", false, None, None, Some(64.0), None);
 
     // Loop duration marker setup
     timeline.loop_range = Some((0.0, timeline.cached_duration + 0.5));

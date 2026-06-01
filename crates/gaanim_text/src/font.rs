@@ -88,17 +88,27 @@ impl FontRegistry {
     }
 
     /// Retrieves a reference to the registered font bytes for a given family.
-    /// Falls back to standard "sans-serif" if the font family is not registered.
+    /// Falls back to standard "sans-serif" or "monospace" if the font family is not registered.
     pub fn get_font(&self, family_name: &str) -> Option<&[u8]> {
         let name = family_name.to_lowercase();
-        self.fonts.get(&name).map(|v| v.as_slice()).or_else(|| {
-            // Fallback chain: try sans-serif, Arial, Segoe UI, and finally any available font
-            self.fonts.get("sans-serif")
-                .or_else(|| self.fonts.get("arial"))
-                .or_else(|| self.fonts.get("segoe ui"))
-                .or_else(|| self.fonts.values().next())
-                .map(|v| v.as_slice())
-        })
+        if let Some(bytes) = self.fonts.get(&name) {
+            return Some(bytes.as_slice());
+        }
+
+        // If the requested font looks like a monospace/code font, try monospace first
+        if name.contains("code") || name.contains("mono") || name == "consolas" || name == "courier" {
+            if let Some(bytes) = self.fonts.get("monospace") {
+                return Some(bytes.as_slice());
+            }
+        }
+
+        // General fallback chain: try sans-serif, monospace, arial, segoe ui, and finally any available font
+        self.fonts.get("sans-serif")
+            .or_else(|| self.fonts.get("monospace"))
+            .or_else(|| self.fonts.get("arial"))
+            .or_else(|| self.fonts.get("segoe ui"))
+            .or_else(|| self.fonts.values().next())
+            .map(|v| v.as_slice())
     }
 
     /// Auto-discovers and registers default fonts from the host operating system.
@@ -126,7 +136,30 @@ impl FontRegistry {
                     .first()
                     .map(|(name, _)| name.as_str())
                     .unwrap_or("Unknown");
-                self.register_font(family, bytes);
+                self.register_font(family, bytes.clone());
+
+                // Assign standard multiplatform aliases
+                let family_lower = family.to_lowercase();
+                if family_lower == "arial" 
+                    || family_lower == "helvetica" 
+                    || family_lower == "liberation sans" 
+                    || family_lower == "dejavu sans" 
+                    || family_lower == "segoe ui"
+                    || family_lower == "system-ui"
+                {
+                    self.fonts.insert("sans-serif".to_string(), bytes.clone());
+                }
+
+                if family_lower == "consolas" 
+                    || family_lower == "courier new" 
+                    || family_lower == "liberation mono" 
+                    || family_lower == "dejavu sans mono" 
+                    || family_lower == "menlo" 
+                    || family_lower == "monaco"
+                    || face.monospaced
+                {
+                    self.fonts.insert("monospace".to_string(), bytes);
+                }
             }
         }
 
