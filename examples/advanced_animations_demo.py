@@ -19,10 +19,10 @@ def main():
 
     # 1. Spawn a series of distinct mobjects
     print("[Gaanim Python] Spawning shapes, text and equation...")
-    square = scene.rectangle(150.0, 150.0).stroke(CORAL, 6.0).no_fill().at(200.0, 200.0)
-    circle = scene.circle(75.0).fill(BLUE).at(640.0, 200.0)
-    title_text = scene.title("Advanced Animations").at(150.0, 450.0)
-    math_eq = scene.equation("f(x) = integral_(-oo)^oo e^(-x^2) d x").at(150.0, 580.0)
+    square = scene.rectangle(150.0, 150.0).stroke(CORAL, 6.0).no_fill().at(300.0, -20.0)
+    circle = scene.circle(75.0).fill(BLUE).at(-300.0, -20.0)
+    title_text = scene.title("Advanced Animations").at(0.0, 180.0)
+    math_eq = scene.equation("f(x) = integral_(-oo)^oo e^(-x^2) d x").at(0.0, -200.0)
 
     # 2. Play creation / entry animations in parallel
     print("[Gaanim Python] Phase 1: Playing entry animations (Create, Grow, Spin)...")
