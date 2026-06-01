@@ -338,13 +338,22 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 }
             }
 
-            if let (Some(source), Some(mut path)) = (
-                world
-                    .get::<gaanim_animation::PathSource>(target)
-                    .map(|s| s.0.clone()),
-                world.get_mut::<Path2D>(target),
-            ) {
-                path.0 = gaanim_math::get_subpath(&source, completion);
+            if completion >= 1.0 {
+                // Full path: assign source directly.
+                // Avoids get_subpath's internal clone at alpha=1.0.
+                if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
+                    let full = source.0.clone();
+                    if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                        path.0 = full;
+                    }
+                }
+            } else if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
+                // Take by reference instead of cloning — get_subpath
+                // already returns an owned trimmed BezPath.
+                let trimmed = gaanim_math::get_subpath(&source.0, completion);
+                if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                    path.0 = trimmed;
+                }
             }
         }
         PropertyLensSpec::FillDrawProgress { from, to } => {
