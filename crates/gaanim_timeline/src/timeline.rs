@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
 use bevy::prelude::{Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
+use std::collections::BTreeMap;
 
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, Track, TrackId};
 use crate::snapshot::WorldSnapshot;
@@ -77,7 +77,13 @@ impl Timeline {
     }
 
     /// Adds a clip to the timeline under a specific track and time interval.
-    pub fn add_clip(&mut self, track: TrackId, start: f64, duration: f64, payload: ClipPayload) -> ClipId {
+    pub fn add_clip(
+        &mut self,
+        track: TrackId,
+        start: f64,
+        duration: f64,
+        payload: ClipPayload,
+    ) -> ClipId {
         let clip_id = self.clips.insert_with_key(|id| Clip {
             id,
             track,
@@ -106,7 +112,7 @@ impl Timeline {
     /// Removes a clip from the timeline.
     pub fn remove_clip(&mut self, id: ClipId) -> Option<Clip> {
         let clip = self.clips.remove(id)?;
-        
+
         // Remove from index
         let start_key = OrderedFloat(clip.start);
         if let Some(ids) = self.clip_index.get_mut(&start_key) {
@@ -159,13 +165,14 @@ impl Timeline {
         // A clip is active if: clip.start <= time && clip.start + clip.duration > time
         // Therefore, clip.start must be in the range [time - max_clip_duration, time]
         let lower_bound = OrderedFloat((time - self.max_clip_duration).max(0.0));
-        
+
         for (_, ids) in self.clip_index.range(lower_bound..=time_key) {
             for &id in ids {
                 if let Some(clip) = self.clips.get(id)
-                    && clip.end() > time {
-                        result.push(clip);
-                    }
+                    && clip.end() > time
+                {
+                    result.push(clip);
+                }
             }
         }
 
@@ -196,11 +203,15 @@ impl Timeline {
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
     /// animations in correct temporal order up to `target_time`.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
-        let max_time = self.loop_range.map(|(_, end)| end).unwrap_or(self.cached_duration);
+        let max_time = self
+            .loop_range
+            .map(|(_, end)| end)
+            .unwrap_or(self.cached_duration);
         self.current_time = target_time.clamp(0.0, max_time);
 
         // 1. Locate the nearest recorded keyframe <= target_time
-        let keyframe = self.keyframes
+        let keyframe = self
+            .keyframes
             .range(..=OrderedFloat(self.current_time))
             .next_back();
 
@@ -226,17 +237,19 @@ impl Timeline {
         // 3. Replay and interpolate clip properties up to target_time
         for clip in candidate_clips {
             if let ClipPayload::Animation(ref anim) = clip.payload
-                && let Some(&target_entity) = entity_map.get(&anim.target) {
-                    if clip.end() <= self.current_time {
-                        // Animation finished before or at seek head: apply final state
-                        apply_lens_spec(world, target_entity, &anim.lens, 1.0);
-                    } else if clip.start <= self.current_time && clip.end() > self.current_time {
-                        // Animation is actively running at seek head: interpolate
-                        let progress = ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
-                        let t = anim.rate_func.evaluate(progress);
-                        apply_lens_spec(world, target_entity, &anim.lens, t);
-                    }
+                && let Some(&target_entity) = entity_map.get(&anim.target)
+            {
+                if clip.end() <= self.current_time {
+                    // Animation finished before or at seek head: apply final state
+                    apply_lens_spec(world, target_entity, &anim.lens, 1.0);
+                } else if clip.start <= self.current_time && clip.end() > self.current_time {
+                    // Animation is actively running at seek head: interpolate
+                    let progress =
+                        ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
+                    let t = anim.rate_func.evaluate(progress);
+                    apply_lens_spec(world, target_entity, &anim.lens, t);
                 }
+            }
         }
     }
 }
@@ -290,9 +303,7 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
             // no-op and the full path would stay visible the whole
             // time.
             if world.get::<gaanim_animation::PathSource>(target).is_none() {
-                let path_clone = world
-                    .get::<Path2D>(target)
-                    .map(|p| p.0.clone());
+                let path_clone = world.get::<Path2D>(target).map(|p| p.0.clone());
                 if let Some(bez) = path_clone
                     && let Ok(mut em) = world.get_entity_mut(target)
                 {
@@ -301,7 +312,9 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
             }
 
             if let (Some(source), Some(mut path)) = (
-                world.get::<gaanim_animation::PathSource>(target).map(|s| s.0.clone()),
+                world
+                    .get::<gaanim_animation::PathSource>(target)
+                    .map(|s| s.0.clone()),
                 world.get_mut::<Path2D>(target),
             ) {
                 path.0 = gaanim_math::get_subpath(&source, completion);
@@ -329,14 +342,13 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
         }
         PropertyLensSpec::CameraZoom { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
-                && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
-                    *zoom = *from + (*to - *from) * t;
-                }
+                && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
+            {
+                *zoom = *from + (*to - *from) * t;
+            }
         }
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }
     }
 }
-
-

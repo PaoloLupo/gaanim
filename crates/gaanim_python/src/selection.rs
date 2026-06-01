@@ -1,9 +1,9 @@
-use pyo3::prelude::*;
 use gaanim_api::anim::AnimationType;
 use gaanim_core::glam::DVec3;
 use gaanim_core::ObjectId;
+use pyo3::prelude::*;
 
-use crate::animation::{PyAnimationSpec, rate_func_from_name};
+use crate::animation::{rate_func_from_name, PyAnimationSpec};
 use crate::id::PyObjectId;
 use crate::scene::PyScene;
 
@@ -130,5 +130,3 @@ impl PySelectionAnim {
         ))
     }
 }
-
-

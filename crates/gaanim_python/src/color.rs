@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
 use gaanim_core::peniko;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 
 /// Native color type backed by `peniko::Color` (RGBA8 internally).
 ///
@@ -71,16 +71,24 @@ impl PyColor {
     }
 
     #[getter]
-    fn r(&self) -> u8 { self.0.to_rgba8().r }
+    fn r(&self) -> u8 {
+        self.0.to_rgba8().r
+    }
 
     #[getter]
-    fn g(&self) -> u8 { self.0.to_rgba8().g }
+    fn g(&self) -> u8 {
+        self.0.to_rgba8().g
+    }
 
     #[getter]
-    fn b(&self) -> u8 { self.0.to_rgba8().b }
+    fn b(&self) -> u8 {
+        self.0.to_rgba8().b
+    }
 
     #[getter]
-    fn a(&self) -> u8 { self.0.to_rgba8().a }
+    fn a(&self) -> u8 {
+        self.0.to_rgba8().a
+    }
 
     fn __repr__(&self) -> String {
         let rgba = self.0.to_rgba8();
@@ -100,4 +108,3 @@ impl PyColor {
         a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a
     }
 }
-

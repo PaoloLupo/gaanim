@@ -170,8 +170,7 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
                 }
             }
             PathEl::ClosePath => {
-                let segment =
-                    PathSeg::Line(kurbo::Line::new(current_pos, start_of_subpath));
+                let segment = PathSeg::Line(kurbo::Line::new(current_pos, start_of_subpath));
                 let seg_len = segment.arclen(0.1);
 
                 if current_length + seg_len <= target_length {

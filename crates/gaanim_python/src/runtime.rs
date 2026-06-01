@@ -61,15 +61,24 @@ fn replay_into(
     // This avoids Bevy's per-borrow restrictions.
     let mut timeline = match world.remove_resource::<Timeline>() {
         Some(res) => res,
-        None => { bevy::prelude::error!("Timeline resource missing"); return; }
+        None => {
+            bevy::prelude::error!("Timeline resource missing");
+            return;
+        }
     };
     let font_registry = match world.remove_resource::<FontRegistry>() {
         Some(res) => res,
-        None => { bevy::prelude::error!("FontRegistry resource missing"); return; }
+        None => {
+            bevy::prelude::error!("FontRegistry resource missing");
+            return;
+        }
     };
     let text_config = match world.remove_resource::<gaanim_text::prelude::TextConfig>() {
         Some(res) => res,
-        None => { bevy::prelude::error!("TextConfig resource missing"); return; }
+        None => {
+            bevy::prelude::error!("TextConfig resource missing");
+            return;
+        }
     };
 
     // Scope the mut borrow on `world` so we can reinsert resources at the end.
@@ -81,12 +90,8 @@ fn replay_into(
         commands.insert_resource(Camera::ortho_2d(width, height));
         commands.spawn((Camera2d, VelloView));
 
-        let mut scene = SceneBuilder::new(
-            &mut commands,
-            &mut timeline,
-            &font_registry,
-            &text_config,
-        );
+        let mut scene =
+            SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
         run_replay(&mut scene, ops)
     };
 
@@ -111,10 +116,7 @@ struct ReplayResult {
     loop_range: Option<(f64, f64)>,
 }
 
-fn run_replay(
-    scene: &mut SceneBuilder<'_, '_, '_>,
-    ops: Vec<DeferredOp>,
-) -> ReplayResult {
+fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut selection_map: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     let loop_range: Option<(f64, f64)>;
@@ -143,11 +145,8 @@ fn run_replay(
                             z_index,
                             creation_order,
                         };
-                        scene
-                            .commands
-                            .entity(state.entity)
-                            .insert(order.clone());
-                        
+                        scene.commands.entity(state.entity).insert(order.clone());
+
                         for (_, child_entity, _) in &state.child_spans {
                             scene.commands.entity(*child_entity).insert(order.clone());
                         }
@@ -204,10 +203,7 @@ fn run_replay(
                                 let width = state.stroke.style.width;
                                 let new_stroke = StrokeBrush::new(color, width);
                                 state.stroke = new_stroke.clone();
-                                scene
-                                    .commands
-                                    .entity(state.entity)
-                                    .insert(new_stroke);
+                                scene.commands.entity(state.entity).insert(new_stroke);
                             }
                         }
                     }
@@ -546,10 +542,7 @@ fn apply_opacity(
 ) -> MobjectRef {
     if let Some(state) = scene.states.get_mut(&mref.id) {
         state.opacity = opacity;
-        scene
-            .commands
-            .entity(state.entity)
-            .insert(Opacity(opacity));
+        scene.commands.entity(state.entity).insert(Opacity(opacity));
     }
     mref
 }
@@ -561,10 +554,7 @@ fn apply_2d_transform(
 ) -> MobjectRef {
     if let Some(state) = scene.states.get_mut(&mref.id) {
         state.transform = transform;
-        scene
-            .commands
-            .entity(state.entity)
-            .insert(transform);
+        scene.commands.entity(state.entity).insert(transform);
     }
     mref
 }

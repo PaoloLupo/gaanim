@@ -1,6 +1,6 @@
+use bevy::prelude::Resource;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::Affine;
-use bevy::prelude::Resource;
 
 /// Extensible camera projection types.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -150,7 +150,10 @@ mod tests {
         assert_eq!(cam.rotation, DQuat::IDENTITY);
         assert_eq!(cam.viewport_width, 1280);
         assert_eq!(cam.viewport_height, 720);
-        assert!(matches!(cam.projection, Projection::Orthographic { zoom: 1.0 }));
+        assert!(matches!(
+            cam.projection,
+            Projection::Orthographic { zoom: 1.0 }
+        ));
     }
 
     #[test]

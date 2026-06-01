@@ -1,5 +1,5 @@
 use gaanim_core::ObjectId;
-use gaanim_core::glam::{DVec3, DQuat};
+use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_math::RateFunc;
 
@@ -7,18 +7,38 @@ use gaanim_math::RateFunc;
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
 pub enum AnimationType {
-    TranslateTo { to: DVec3 },
-    TranslateBy { delta: DVec3 },
-    RotateTo { to: DQuat },
-    RotateBy { angle_radians: f64 },
-    ScaleTo { to: DVec3 },
-    ScaleUniform { factor: f64 },
-    FadeTo { to: f32 },
+    TranslateTo {
+        to: DVec3,
+    },
+    TranslateBy {
+        delta: DVec3,
+    },
+    RotateTo {
+        to: DQuat,
+    },
+    RotateBy {
+        angle_radians: f64,
+    },
+    ScaleTo {
+        to: DVec3,
+    },
+    ScaleUniform {
+        factor: f64,
+    },
+    FadeTo {
+        to: f32,
+    },
     FadeIn,
     FadeOut,
-    FillColorTo { to: Color },
-    StrokeColorTo { to: Color },
-    StrokeWidthTo { to: f64 },
+    FillColorTo {
+        to: Color,
+    },
+    StrokeColorTo {
+        to: Color,
+    },
+    StrokeWidthTo {
+        to: f64,
+    },
     /// Manim-style `Write`: progressively draw the target's path(s) along
     /// their arc length, then cross-fade the fill in once the outline is
     /// complete. This produces the characteristic "pen draws the object,
@@ -372,10 +392,12 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Indicate { color, scale_factor },
+            anim_type: AnimationType::Indicate {
+                color,
+                scale_factor,
+            },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
         }
     }
 }
-

@@ -1,10 +1,10 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
 use gaanim_api::anim::{AnimationBuilder, AnimationType};
 use gaanim_api::prelude::MobjectRef;
 use gaanim_core::glam::DVec3;
 use gaanim_core::ObjectId;
 use gaanim_math::{EasingCurve, RateFunc};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 
 use crate::color::PyColor;
 use crate::id::PyObjectId;
@@ -29,9 +29,7 @@ impl PyAnimationSpec {
         Self {
             inner: AnimationBuilder {
                 target,
-                anim_type: AnimationType::TranslateBy {
-                    delta: DVec3::ZERO,
-                },
+                anim_type: AnimationType::TranslateBy { delta: DVec3::ZERO },
                 duration: 1.0,
                 rate_func: RateFunc::Smooth,
             },
@@ -106,7 +104,10 @@ impl PyAnimationSpec {
             AnimationType::GrowFromCenter => "grow_from_center".to_string(),
             AnimationType::ShrinkToCenter => "shrink_to_center".to_string(),
             AnimationType::SpinInFromNothing => "spin_in_from_nothing".to_string(),
-            AnimationType::Indicate { color, scale_factor } => {
+            AnimationType::Indicate {
+                color,
+                scale_factor,
+            } => {
                 format!("indicate(color={:?}, scale_factor={})", color, scale_factor)
             }
         };
@@ -307,7 +308,8 @@ impl PyAnimationSpec {
     fn indicate(&self, color: Option<&PyColor>, scale_factor: f64) -> Self {
         let target = self.inner.target;
         Self {
-            inner: MobjectRef { id: target }.indicate_with_color_and_scale(color.map(|c| c.0), scale_factor),
+            inner: MobjectRef { id: target }
+                .indicate_with_color_and_scale(color.map(|c| c.0), scale_factor),
         }
     }
 }
@@ -377,4 +379,3 @@ pub fn rate_func_name(rf: &RateFunc) -> String {
         _ => "<custom>".into(),
     }
 }
-

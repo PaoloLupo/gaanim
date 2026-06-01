@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
+use gaanim_core::kurbo::{self, Shape};
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer,
-    RenderOrder, StrokeBrush, Visible,
+    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
+    RenderLayer, RenderOrder, StrokeBrush, Visible,
 };
-use gaanim_core::kurbo::{self, Shape};
 
 /// A standard, complete Bevy Bundle representing a 2D vector Mobject.
 ///
@@ -42,7 +42,9 @@ impl MobjectBundle {
             bounds: LocalBounds(bounds),
             transform: SpatialTransform::identity(),
             global_transform: GlobalSpatialTransform::default(),
-            fill: FillBrush(Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE))),
+            fill: FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::WHITE,
+            ))),
             stroke: StrokeBrush::transparent(),
             opacity: Opacity(1.0),
             global_opacity: GlobalOpacity(1.0),
@@ -155,18 +157,17 @@ pub fn polygon(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
 }
 
 /// Creates a symmetric star Mobject bundle.
-pub fn star(
-    id: ObjectId,
-    n_points: u32,
-    outer_radius: f64,
-    inner_radius: f64,
-) -> MobjectBundle {
+pub fn star(id: ObjectId, n_points: u32, outer_radius: f64, inner_radius: f64) -> MobjectBundle {
     use std::f64::consts::PI;
     let mut points = Vec::new();
     let steps = 2 * n_points;
     for i in 0..steps {
         let angle = i as f64 * PI / n_points as f64 - PI / 2.0;
-        let r = if i % 2 == 0 { outer_radius } else { inner_radius };
+        let r = if i % 2 == 0 {
+            outer_radius
+        } else {
+            inner_radius
+        };
         let x = r * angle.cos();
         let y = r * angle.sin();
         points.push(kurbo::Point::new(x, y));
@@ -201,7 +202,12 @@ pub fn square(id: ObjectId, side_length: f64) -> MobjectBundle {
 }
 
 /// Creates a triangle Mobject bundle from three vertices.
-pub fn triangle(id: ObjectId, p1: kurbo::Point, p2: kurbo::Point, p3: kurbo::Point) -> MobjectBundle {
+pub fn triangle(
+    id: ObjectId,
+    p1: kurbo::Point,
+    p2: kurbo::Point,
+    p3: kurbo::Point,
+) -> MobjectBundle {
     let mut bundle = polygon(id, &[p1, p2, p3]);
     bundle.tag = ObjectTag("Triangle".into());
     bundle
@@ -230,11 +236,13 @@ pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
     path.line_to(kurbo::Point::new(0.4 * size, 0.4 * size));
     let bounds = Bounds3D::new_2d(-0.4 * size, -0.35 * size, 0.4 * size, 0.4 * size);
     let mut bundle = MobjectBundle::new(id, path, bounds);
-    
+
     // Checkmarks default to stroke-only
     bundle.fill = FillBrush(None);
     bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: kurbo::Stroke::new(3.0),
     };
     bundle.tag = ObjectTag("Checkmark".into());
@@ -246,48 +254,51 @@ pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBun
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
-    
+
     let mut path = kurbo::BezPath::new();
     if len > 0.0 {
         let ux = dx / len;
         let uy = dy / len;
-        
+
         let head_len = 15.0;
         let head_half_width = 7.5;
-        
+
         let base_x = end.x - ux * head_len;
         let base_y = end.y - uy * head_len;
-        
+
         path.move_to(start);
         path.line_to(kurbo::Point::new(base_x, base_y));
-        
+
         let perp_x = -uy;
         let perp_y = ux;
-        
+
         let h1_x = base_x + perp_x * head_half_width;
         let h1_y = base_y + perp_y * head_half_width;
         let h2_x = base_x - perp_x * head_half_width;
         let h2_y = base_y - perp_y * head_half_width;
-        
+
         path.move_to(kurbo::Point::new(h1_x, h1_y));
         path.line_to(end);
         path.line_to(kurbo::Point::new(h2_x, h2_y));
         path.close_path();
     }
-    
+
     let min_x = start.x.min(end.x) - 15.0;
     let max_x = start.x.max(end.x) + 15.0;
     let min_y = start.y.min(end.y) - 15.0;
     let max_y = start.y.max(end.y) + 15.0;
     let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
-    
+
     let mut bundle = MobjectBundle::new(id, path, bounds);
-    bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)));
+    bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::WHITE,
+    )));
     bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: kurbo::Stroke::new(2.5),
     };
     bundle.tag = ObjectTag("Arrow".into());
     bundle
 }
-

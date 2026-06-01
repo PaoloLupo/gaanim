@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
 use gaanim_core::peniko::Color;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A generic, observable reactive signal component.
 ///
@@ -44,7 +44,10 @@ pub struct SignalBinding {
 
 impl SignalBinding {
     /// Creates a new signal binding between a source signal and a target.
-    pub fn new(source: Entity, apply: impl Fn(Entity, &mut Commands) + Send + Sync + 'static) -> Self {
+    pub fn new(
+        source: Entity,
+        apply: impl Fn(Entity, &mut Commands) + Send + Sync + 'static,
+    ) -> Self {
         Self {
             source,
             apply: Arc::new(apply),
@@ -102,7 +105,10 @@ pub struct AlwaysRedraw {
 
 impl AlwaysRedraw {
     /// Creates a new AlwaysRedraw component with a list of signals and a builder function.
-    pub fn new(signals: Vec<Entity>, builder: impl Fn(&World) -> MobjectSpec + Send + Sync + 'static) -> Self {
+    pub fn new(
+        signals: Vec<Entity>,
+        builder: impl Fn(&World) -> MobjectSpec + Send + Sync + 'static,
+    ) -> Self {
         Self {
             signals,
             builder: Arc::new(builder),

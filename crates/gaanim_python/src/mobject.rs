@@ -708,7 +708,8 @@ impl PyMobject {
     #[pyo3(signature = (color=None, scale_factor=1.25))]
     fn indicate(&self, color: Option<&PyColor>, scale_factor: f64) -> PyAnimationSpec {
         use gaanim_api::builder::MobjectRef;
-        let builder = MobjectRef { id: self.id }.indicate_with_color_and_scale(color.map(|c| c.0), scale_factor);
+        let builder = MobjectRef { id: self.id }
+            .indicate_with_color_and_scale(color.map(|c| c.0), scale_factor);
         PyAnimationSpec::from_builder(builder)
     }
 }

@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
-use gaanim_core::Theme;
 use crate::color::PyColor;
+use gaanim_core::Theme;
+use pyo3::prelude::*;
 
 /// A role-based color theme that defines the visual aesthetic of the scene.
 ///

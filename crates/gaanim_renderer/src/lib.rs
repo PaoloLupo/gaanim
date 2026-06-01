@@ -25,16 +25,14 @@ impl Plugin for GaanimRendererPlugin {
         // matches gaanim's Camera resource before Vello renders in Extraction.
         app.add_systems(
             Update,
-            pipeline::sync_gaanim_camera_to_bevy_system
-                .in_set(gaanim_scene::SceneSet::Bounds),
+            pipeline::sync_gaanim_camera_to_bevy_system.in_set(gaanim_scene::SceneSet::Bounds),
         );
 
         // Register cache cleanup systems before extraction.
         // Sweep dead fragments by comparing active ObjectIds against cache keys.
         app.add_systems(
             Update,
-            pipeline::gaanim_render_cache_sweep_system
-                .before(gaanim_scene::SceneSet::Extraction),
+            pipeline::gaanim_render_cache_sweep_system.before(gaanim_scene::SceneSet::Extraction),
         );
 
         // Register the extraction and composition system in the scene extraction phase

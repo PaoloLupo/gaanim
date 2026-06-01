@@ -41,7 +41,12 @@ fn setup_scene(
     commands.spawn((Camera2d, VelloView));
 
     // 2. Initialize the fluent SceneBuilder
-    let mut scene = SceneBuilder::new(&mut commands, &mut *timeline, &*font_registry, &*text_config);
+    let mut scene = SceneBuilder::new(
+        &mut commands,
+        &mut *timeline,
+        &*font_registry,
+        &*text_config,
+    );
 
     // 3. Spawn a plain Title text using HarfBuzz shaper (Arial, 64px, White by default)
     let title_text = scene.title("Gaanim Vector Engine");
@@ -65,9 +70,18 @@ fn setup_scene(
     // Slide plain text, formulas and scale the circle in parallel
     scene.play_parallel(vec![
         bg_circle.scale_uniform(1.2).spring().duration(1.5),
-        title_text.translate_to_2d(-230.0, 240.0).spring().duration(1.8),
-        math_formula.translate_to_2d(-100.0, 60.0).smooth().duration(1.0),
-        sum_formula.translate_to_2d(-200.0, -150.0).spring().duration(2.0),
+        title_text
+            .translate_to_2d(-230.0, 240.0)
+            .spring()
+            .duration(1.8),
+        math_formula
+            .translate_to_2d(-100.0, 60.0)
+            .smooth()
+            .duration(1.0),
+        sum_formula
+            .translate_to_2d(-200.0, -150.0)
+            .spring()
+            .duration(2.0),
     ]);
 
     // Let the scene hold for a brief moment
@@ -83,7 +97,8 @@ fn setup_scene(
     numerator_selection.set_fill(gaanim_core::peniko::Color::from_rgb8(255, 100, 100)); // Premium Coral Red
 
     // Coordinated animation: shift numerator "n(n+1)" up slightly in parallel
-    numerator_selection.animate()
+    numerator_selection
+        .animate()
         .spring()
         .duration(1.5)
         .shift_2d(0.0, 30.0);

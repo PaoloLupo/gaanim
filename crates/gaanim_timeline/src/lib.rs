@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 
 pub mod clip;
+pub mod prelude;
 pub mod snapshot;
 pub mod timeline;
-pub mod prelude;
 
-use timeline::Timeline;
 use gaanim_scene::hierarchy::SceneSet;
+use timeline::Timeline;
 
 /// The Bevy plugin that registers the `Timeline` resource and its scheduling systems.
 pub struct GaanimTimelinePlugin;

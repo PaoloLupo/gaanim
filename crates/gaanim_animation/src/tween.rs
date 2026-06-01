@@ -1,6 +1,6 @@
 use bevy::prelude::{Component, Entity, Query, Res, ResMut, Resource};
-use gaanim_core::peniko::Color;
 use gaanim_core::kurbo::BezPath;
+use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform};
 use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
 
@@ -85,29 +85,69 @@ pub struct MorphTable;
 #[derive(Component, Clone)]
 pub enum PropertyLens {
     // === Spatial (3D-Ready) ===
-    Translation { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
-    Rotation { from: gaanim_core::glam::DQuat, to: gaanim_core::glam::DQuat },
-    Scale { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
+    Translation {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    Rotation {
+        from: gaanim_core::glam::DQuat,
+        to: gaanim_core::glam::DQuat,
+    },
+    Scale {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
 
     // === Visuals ===
-    Opacity { from: f32, to: f32 },
-    FillColor { from: Color, to: Color },
-    StrokeColor { from: Color, to: Color },
-    StrokeWidth { from: f64, to: f64 },
+    Opacity {
+        from: f32,
+        to: f32,
+    },
+    FillColor {
+        from: Color,
+        to: Color,
+    },
+    StrokeColor {
+        from: Color,
+        to: Color,
+    },
+    StrokeWidth {
+        from: f64,
+        to: f64,
+    },
 
     // === Geometry & Paths ===
-    PathMorph { from: BezPath, to: BezPath, table: MorphTable },
-    PathCompletion { from: f64, to: f64 },
+    PathMorph {
+        from: BezPath,
+        to: BezPath,
+        table: MorphTable,
+    },
+    PathCompletion {
+        from: f64,
+        to: f64,
+    },
     /// Cross-fade the fill alpha during a Write animation.
     /// The renderer multiplies the fill brush's color alpha by
     /// `from + (to - from) * t`. Inserted into the entity as
     /// a `FillDrawProgress` component.
-    FillDrawProgress { from: f32, to: f32 },
+    FillDrawProgress {
+        from: f32,
+        to: f32,
+    },
 
     // === Camera ===
-    CameraPosition { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
-    CameraRotation { from: gaanim_core::glam::DQuat, to: gaanim_core::glam::DQuat },
-    CameraZoom { from: f64, to: f64 },
+    CameraPosition {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    CameraRotation {
+        from: gaanim_core::glam::DQuat,
+        to: gaanim_core::glam::DQuat,
+    },
+    CameraZoom {
+        from: f64,
+        to: f64,
+    },
 
     // === Extensibility ===
     Custom(Box<dyn AnimatableLens>),
@@ -128,8 +168,12 @@ impl std::fmt::Debug for PropertyLens {
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
-            Self::CameraPosition { from, to } => write!(f, "CameraPosition({:?} -> {:?})", from, to),
-            Self::CameraRotation { from, to } => write!(f, "CameraRotation({:?} -> {:?})", from, to),
+            Self::CameraPosition { from, to } => {
+                write!(f, "CameraPosition({:?} -> {:?})", from, to)
+            }
+            Self::CameraRotation { from, to } => {
+                write!(f, "CameraRotation({:?} -> {:?})", from, to)
+            }
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
             Self::Custom(c) => write!(f, "Custom({:?})", c.type_name()),
         }
@@ -272,10 +316,11 @@ pub fn evaluate_tweens_system(
 ///
 /// This system runs after `evaluate_tweens_system` and handles any tween whose `PropertyLens`
 /// is `Custom`. Since custom lenses may read/write arbitrary components, they need exclusive access.
-pub fn evaluate_custom_tweens_system(
-    world: &mut bevy::prelude::World,
-) {
-    let dt = world.get_resource::<DeltaTime>().map(|d| d.dt).unwrap_or(0.0);
+pub fn evaluate_custom_tweens_system(world: &mut bevy::prelude::World) {
+    let dt = world
+        .get_resource::<DeltaTime>()
+        .map(|d| d.dt)
+        .unwrap_or(0.0);
 
     let mut updates = Vec::new();
     {

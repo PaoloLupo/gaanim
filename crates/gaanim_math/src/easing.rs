@@ -71,7 +71,11 @@ impl std::fmt::Debug for RateFunc {
             Self::EaseOut(c) => write!(f, "EaseOut({:?})", c),
             Self::EaseInOut(c) => write!(f, "EaseInOut({:?})", c),
             Self::Spring { stiffness, damping } => {
-                write!(f, "Spring {{ stiffness: {}, damping: {} }}", stiffness, damping)
+                write!(
+                    f,
+                    "Spring {{ stiffness: {}, damping: {} }}",
+                    stiffness, damping
+                )
             }
             Self::Steps(steps) => write!(f, "Steps({})", steps),
             Self::Mirror(inner) => write!(f, "Mirror({:?})", inner),
@@ -79,7 +83,9 @@ impl std::fmt::Debug for RateFunc {
             Self::ThereAndBackWithPause(p) => write!(f, "ThereAndBackWithPause({})", p),
             Self::Lingering => write!(f, "Lingering"),
             Self::RunningStart => write!(f, "RunningStart"),
-            Self::CubicBezier(x1, y1, x2, y2) => write!(f, "CubicBezier({}, {}, {}, {})", x1, y1, x2, y2),
+            Self::CubicBezier(x1, y1, x2, y2) => {
+                write!(f, "CubicBezier({}, {}, {}, {})", x1, y1, x2, y2)
+            }
             Self::Custom(_) => write!(f, "Custom(<closure>)"),
         }
     }
@@ -98,7 +104,9 @@ impl serde::Serialize for RateFunc {
             Self::DoubleSmooth => serializer.serialize_unit_variant("RateFunc", 2, "DoubleSmooth"),
             Self::EaseIn(c) => serializer.serialize_newtype_variant("RateFunc", 3, "EaseIn", c),
             Self::EaseOut(c) => serializer.serialize_newtype_variant("RateFunc", 4, "EaseOut", c),
-            Self::EaseInOut(c) => serializer.serialize_newtype_variant("RateFunc", 5, "EaseInOut", c),
+            Self::EaseInOut(c) => {
+                serializer.serialize_newtype_variant("RateFunc", 5, "EaseInOut", c)
+            }
             Self::Spring { stiffness, damping } => {
                 let mut state = serializer.serialize_struct("Spring", 2)?;
                 state.serialize_field("stiffness", stiffness)?;
@@ -106,9 +114,13 @@ impl serde::Serialize for RateFunc {
                 state.end()
             }
             Self::Steps(s) => serializer.serialize_newtype_variant("RateFunc", 6, "Steps", s),
-            Self::Mirror(inner) => serializer.serialize_newtype_variant("RateFunc", 7, "Mirror", inner),
+            Self::Mirror(inner) => {
+                serializer.serialize_newtype_variant("RateFunc", 7, "Mirror", inner)
+            }
             Self::ThereAndBack => serializer.serialize_unit_variant("RateFunc", 8, "ThereAndBack"),
-            Self::ThereAndBackWithPause(p) => serializer.serialize_newtype_variant("RateFunc", 9, "ThereAndBackWithPause", p),
+            Self::ThereAndBackWithPause(p) => {
+                serializer.serialize_newtype_variant("RateFunc", 9, "ThereAndBackWithPause", p)
+            }
             Self::Lingering => serializer.serialize_unit_variant("RateFunc", 10, "Lingering"),
             Self::RunningStart => serializer.serialize_unit_variant("RateFunc", 11, "RunningStart"),
             Self::CubicBezier(x1, y1, x2, y2) => {
@@ -196,10 +208,10 @@ impl RateFunc {
                 let k = *stiffness;
                 let c = *damping;
                 let mass = 1.0;
-                
+
                 let omega_n = (k / mass).sqrt();
                 let zeta = c / (2.0 * (mass * k).sqrt());
-                
+
                 // Scale evaluation time. Usually spring animations look best if normalized time t [0..1]
                 // maps to physical time. Let's map t to ~5.0 seconds of physical time.
                 let t_phys = t * 5.0;
@@ -208,7 +220,9 @@ impl RateFunc {
                     // Underdamped oscillation
                     let omega_d = omega_n * (1.0 - zeta * zeta).sqrt();
                     let exponent = (-zeta * omega_n * t_phys).exp();
-                    1.0 - exponent * ((zeta * omega_n / omega_d) * (omega_d * t_phys).sin() + (omega_d * t_phys).cos())
+                    1.0 - exponent
+                        * ((zeta * omega_n / omega_d) * (omega_d * t_phys).sin()
+                            + (omega_d * t_phys).cos())
                 } else if (zeta - 1.0).abs() < 1e-5 {
                     // Critically damped
                     let exponent = (-omega_n * t_phys).exp();
@@ -263,9 +277,7 @@ impl RateFunc {
                 let s = 1.70158;
                 t * t * ((s + 1.0) * t - s)
             }
-            Self::CubicBezier(x1, y1, x2, y2) => {
-                Self::solve_cubic_bezier(*x1, *y1, *x2, *y2, t)
-            }
+            Self::CubicBezier(x1, y1, x2, y2) => Self::solve_cubic_bezier(*x1, *y1, *x2, *y2, t),
             Self::Custom(f) => f(t),
         }
     }
@@ -298,12 +310,11 @@ impl RateFunc {
                     let p = 0.3;
                     let s = p / 4.0;
                     let t_scaled = t - 1.0;
-                    -(2.0f64.powf(10.0 * t_scaled) * ((t_scaled - s) * (2.0 * std::f64::consts::PI) / p).sin())
+                    -(2.0f64.powf(10.0 * t_scaled)
+                        * ((t_scaled - s) * (2.0 * std::f64::consts::PI) / p).sin())
                 }
             }
-            EasingCurve::Bounce => {
-                1.0 - Self::eval_bounce_out(1.0 - t)
-            }
+            EasingCurve::Bounce => 1.0 - Self::eval_bounce_out(1.0 - t),
         }
     }
 
@@ -329,15 +340,21 @@ impl RateFunc {
     fn solve_cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, t: f64) -> f64 {
         // De Casteljau bezier parameter solver for X(p) = t, then evaluate Y(p)
         // Check edge cases
-        if t <= 0.0 { return 0.0; }
-        if t >= 1.0 { return 1.0; }
+        if t <= 0.0 {
+            return 0.0;
+        }
+        if t >= 1.0 {
+            return 1.0;
+        }
 
         let mut p = t;
         // Run a few Newton-Raphson iterations to solve for x(p) = t
         for _ in 0..8 {
             let x = Self::bezier_coord(x1, x2, p);
             let slope = Self::bezier_slope(x1, x2, p);
-            if slope.abs() < 1e-6 { break; }
+            if slope.abs() < 1e-6 {
+                break;
+            }
             let diff = x - t;
             p -= diff / slope;
             p = p.clamp(0.0, 1.0);
@@ -432,11 +449,18 @@ mod tests {
 
     #[test]
     fn rate_func_spring_approaches_one() {
-        let rf = RateFunc::Spring { stiffness: 90.0, damping: 12.0 };
+        let rf = RateFunc::Spring {
+            stiffness: 90.0,
+            damping: 12.0,
+        };
         assert!((rf.evaluate(0.0) - 0.0).abs() < 1e-9);
         // At t=1.0 spring is close to but may slightly overshoot 1.0 due to FP math
         let v = rf.evaluate(1.0);
-        assert!((v - 1.0).abs() < 1e-6, "spring at t=1 should be close to 1, got {}", v);
+        assert!(
+            (v - 1.0).abs() < 1e-6,
+            "spring at t=1 should be close to 1, got {}",
+            v
+        );
     }
 
     #[test]

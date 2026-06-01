@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::anim::AnimationBuilder;
@@ -87,7 +87,11 @@ macro_rules! lock_inner {
     ($inner:expr) => {
         match $inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         }
     };
 }
@@ -105,12 +109,7 @@ pub struct PyScene {
 impl PyScene {
     #[new]
     #[pyo3(signature = (width=1280, height=720, title=None, theme=None))]
-    fn new(
-        width: u32,
-        height: u32,
-        title: Option<String>,
-        theme: Option<PyTheme>,
-    ) -> Self {
+    fn new(width: u32, height: u32, title: Option<String>, theme: Option<PyTheme>) -> Self {
         let title = title.unwrap_or_else(|| "Gaanim Scene".to_string());
         let active_theme = theme.unwrap_or_else(PyTheme::DARK);
         let background = Some(active_theme.0.background);
@@ -191,7 +190,11 @@ impl PyScene {
             spec: spec.clone(),
             creation_order: order,
         });
-        Ok(PyMobject { id, spec, creation_order: order })
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
     }
 
     fn rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
@@ -454,7 +457,9 @@ impl PyScene {
     }
 
     fn wait(&self, duration: f64) -> PyResult<()> {
-        lock_inner!(self.inner).ops.push(DeferredOp::Wait { duration });
+        lock_inner!(self.inner)
+            .ops
+            .push(DeferredOp::Wait { duration });
         Ok(())
     }
 
@@ -540,7 +545,11 @@ impl PyScene {
 
 // Helpers (internal use by Selection).
 impl PyScene {
-    pub(crate) fn push_selection_fill(&self, selection: ObjectId, color: peniko::Color) -> PyResult<()> {
+    pub(crate) fn push_selection_fill(
+        &self,
+        selection: ObjectId,
+        color: peniko::Color,
+    ) -> PyResult<()> {
         lock_inner!(self.inner)
             .ops
             .push(DeferredOp::SelectionFill { selection, color });
@@ -571,13 +580,15 @@ impl PyScene {
         duration: f64,
         rate_func: RateFunc,
     ) -> PyResult<()> {
-        lock_inner!(self.inner).ops.push(DeferredOp::SelectionShift {
-            selection,
-            dx,
-            dy,
-            duration,
-            rate_func,
-        });
+        lock_inner!(self.inner)
+            .ops
+            .push(DeferredOp::SelectionShift {
+                selection,
+                dx,
+                dy,
+                duration,
+                rate_func,
+            });
         Ok(())
     }
 

@@ -1,8 +1,6 @@
+use crate::components::{GlobalOpacity, LocalBounds, Opacity, WorldBounds};
 use bevy::prelude::{Added, ChildOf, Entity, Local, ParamSet, Query, With, Without};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
-use crate::components::{GlobalOpacity, LocalBounds, Opacity, WorldBounds};
-
-
 
 /// System: Propagate spatial transforms hierarchically using Bevy 0.18's `ChildOf` relation.
 ///
@@ -42,7 +40,8 @@ pub fn transform_propagation_system(
             let (child_local, mut child_global) = child_data;
             let (_, parent_global) = parent_data;
 
-            *child_global = GlobalSpatialTransform::from_parent_and_local(&parent_global, child_local);
+            *child_global =
+                GlobalSpatialTransform::from_parent_and_local(&parent_global, child_local);
         } else {
             // Fallback: If parent's global transform cannot be read, treat child as root
             if let Ok((local, mut global)) = transforms.get_mut(child_entity) {
@@ -113,19 +112,11 @@ pub fn world_bounds_propagation_system(
 
 /// System: Approximate WorldBounds for entities without LocalBounds using transform position.
 pub fn world_bounds_fallback_system(
-    mut query: Query<
-        (&GlobalSpatialTransform, &mut WorldBounds),
-        Without<LocalBounds>,
-    >,
+    mut query: Query<(&GlobalSpatialTransform, &mut WorldBounds), Without<LocalBounds>>,
 ) {
     for (global, mut world) in &mut query {
         // Approximate a 1x1 unit box centered at the transform's translation.
         let pos = global.affine_2d * gaanim_core::kurbo::Point::new(0.0, 0.0);
-        world.0 = gaanim_math::Bounds3D::new_2d(
-            pos.x - 0.5,
-            pos.y - 0.5,
-            pos.x + 0.5,
-            pos.y + 0.5,
-        );
+        world.0 = gaanim_math::Bounds3D::new_2d(pos.x - 0.5, pos.y - 0.5, pos.x + 0.5, pos.y + 0.5);
     }
 }

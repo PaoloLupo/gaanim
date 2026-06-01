@@ -1,11 +1,11 @@
-use bevy::prelude::{Commands, Entity, BuildChildrenTransformExt};
+use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo::{Affine, Shape};
 use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_scene::ObjectTag;
 use gaanim_objects::prelude::MobjectBundle;
+use gaanim_scene::ObjectTag;
 
-use crate::font::{OutlineCollector, FontRegistry};
+use crate::font::{FontRegistry, OutlineCollector};
 
 #[derive(thiserror::Error, Debug)]
 pub enum TextError {
@@ -56,7 +56,7 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
 ///
 /// This registers each letter as a fully animatable `MobjectBundle` with its own
 /// local bounds, spatial offset, and distinct `ObjectTag`.
-    pub fn compile_text_to_hierarchy(
+pub fn compile_text_to_hierarchy(
     commands: &mut Commands,
     font_registry: &FontRegistry,
     text: &str,
@@ -69,14 +69,16 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
 ) -> Result<(Entity, Bounds3D), TextError> {
     // 1. Fetch font bytes
-    let font_bytes = font_registry.get_font(font_family)
+    let font_bytes = font_registry
+        .get_font(font_family)
         .ok_or(TextError::FontNotFound)?;
 
     // 2. Shape text with HarfBuzz (RustyBuzz)
     let shaped_glyphs = shape_text(font_bytes, text);
 
     // 3. Parse OpenType font outlines using ttf-parser
-    let parser_face = ttf_parser::Face::parse(font_bytes, 0).map_err(|_| TextError::FontParseError)?;
+    let parser_face =
+        ttf_parser::Face::parse(font_bytes, 0).map_err(|_| TextError::FontParseError)?;
     let units_per_em = parser_face.units_per_em() as f64;
     let scale = font_size / units_per_em;
 
@@ -86,7 +88,7 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     let mut parent_bundle = MobjectBundle::new(parent_id, parent_path, parent_bounds);
     parent_bundle.tag = ObjectTag(format!("Text('{}')", text));
     parent_bundle.fill = gaanim_scene::FillBrush(None); // Parent is just a group container
-    
+
     let parent_entity = commands.spawn(parent_bundle).id();
 
     // 5. Spawn child letter Mobjects
@@ -105,10 +107,10 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
             // Apply horizontal Pen offsets and EM scale
             let glyph_x = pen_x + glyph.x_offset;
             let glyph_y = pen_y + glyph.y_offset;
-            
+
             // Transform path: scale it and vertically flip the outline to correct Y-down space
             path.apply_affine(Affine::scale_non_uniform(scale, -scale));
-            
+
             let path_bounding_rect = path.bounding_box();
             let mut glyph_local_bounds = Bounds3D::new_2d(
                 path_bounding_rect.x0,
@@ -128,20 +130,20 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
             let mut child_bundle = MobjectBundle::new(char_id, path, glyph_local_bounds);
             child_bundle.fill = gaanim_scene::FillBrush(fill.clone());
             child_bundle.stroke = stroke.clone();
-            
+
             // Try to extract character representation for tag debug readability
             let c = text.chars().nth(i).unwrap_or('?');
             child_bundle.tag = ObjectTag(format!("Char('{}')", c));
-            
+
             // Offset the child's local transform according to pen advances
             child_bundle.transform = SpatialTransform::new_2d(glyph_x * scale, glyph_y * scale);
 
             let child_entity = commands.spawn(child_bundle).id();
-            
+
             // Calculate UTF-8 byte range of this character in the source text
             let char_byte_start = text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(0);
             let char_byte_end = char_byte_start + c.len_utf8();
-            
+
             let span = gaanim_scene::components::TextSpan {
                 character: c,
                 char_index: i,
@@ -150,11 +152,13 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
                     end: char_byte_end,
                 },
             };
-            
+
             commands.entity(child_entity).insert(span);
             child_spans.push((char_id, child_entity, span));
-            
-            commands.entity(child_entity).set_parent_in_place(parent_entity);
+
+            commands
+                .entity(child_entity)
+                .set_parent_in_place(parent_entity);
 
             // Accumulate total bounding box of the entire text string
             total_bounds = total_bounds.union(&glyph_local_bounds);
@@ -166,7 +170,9 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     }
 
     // 6. Update parent Mobject bounds with the union of all child letter boundaries
-    commands.entity(parent_entity).insert(gaanim_scene::LocalBounds(total_bounds));
+    commands
+        .entity(parent_entity)
+        .insert(gaanim_scene::LocalBounds(total_bounds));
 
     Ok((parent_entity, total_bounds))
 }

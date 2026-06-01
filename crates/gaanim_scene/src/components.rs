@@ -1,6 +1,6 @@
 use bevy::prelude::Component;
-use gaanim_core::peniko::Brush;
 use gaanim_core::kurbo::{BezPath, Stroke};
+use gaanim_core::peniko::Brush;
 use gaanim_math::Bounds3D;
 
 /// Represents the fill style of a visual Mobject.
@@ -11,7 +11,6 @@ use gaanim_math::Bounds3D;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 pub struct FillBrush(pub Option<Brush>);
-
 
 impl FillBrush {
     /// Creates a solid color fill.
@@ -40,7 +39,6 @@ pub struct StrokeBrush {
     /// The geometric line properties (width, caps, joins, miter limit, dash patterns).
     pub style: Stroke,
 }
-
 
 impl StrokeBrush {
     /// Creates a new solid color stroke with a given width.
@@ -103,7 +101,6 @@ pub struct PathSource(pub BezPath);
 #[derive(Default)]
 pub struct LocalBounds(pub Bounds3D);
 
-
 /// The computed world bounding box of a Mobject in world coordinates.
 ///
 /// Propagated automatically down the scene hierarchy.
@@ -111,7 +108,6 @@ pub struct LocalBounds(pub Bounds3D);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 pub struct WorldBounds(pub Bounds3D);
-
 
 /// Deterministic rendering order of Mobjects.
 ///
@@ -128,7 +124,6 @@ pub struct RenderOrder {
     /// Monotonically increasing creation counter.
     pub creation_order: u64,
 }
-
 
 /// Marker component indicating that the Mobject is visible and should be extracted for rendering.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -162,7 +157,6 @@ pub enum RenderLayer {
     Overlay,
 }
 
-
 /// A Bevy ECS component wrapping the zero-dependency `ObjectId`.
 ///
 /// This resolves Bevy integration and Orphan Rule constraints while preserving
@@ -170,7 +164,6 @@ pub enum RenderLayer {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
-
 
 /// A metadata component attached to individual glyph and shape entities of text or equations,
 /// tracking their character value, sequence index, and source range.
@@ -184,5 +177,3 @@ pub struct TextSpan {
     /// The source span range in the original source markup text.
     pub source_range: core::range::Range<usize>,
 }
-
-

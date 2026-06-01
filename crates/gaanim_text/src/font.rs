@@ -1,10 +1,10 @@
+use bevy::prelude::Resource;
+use gaanim_core::kurbo::{BezPath, Point};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use bevy::prelude::Resource;
 use ttf_parser::OutlineBuilder;
-use gaanim_core::kurbo::{BezPath, Point};
 
 /// A custom builder that collects OpenType glyph outline instructions
 /// and translates them directly into a `kurbo::BezPath`.
@@ -29,7 +29,10 @@ impl OutlineBuilder for OutlineCollector {
     }
 
     fn quad_to(&mut self, x0: f32, y0: f32, x: f32, y: f32) {
-        self.path.quad_to(Point::new(x0 as f64, y0 as f64), Point::new(x as f64, y as f64));
+        self.path.quad_to(
+            Point::new(x0 as f64, y0 as f64),
+            Point::new(x as f64, y as f64),
+        );
     }
 
     fn curve_to(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, x: f32, y: f32) {
@@ -79,7 +82,11 @@ impl FontRegistry {
     }
 
     /// Registers a font file from a local filesystem path.
-    pub fn register_font_file(&mut self, family_name: impl Into<String>, path: impl AsRef<Path>) -> std::io::Result<()> {
+    pub fn register_font_file(
+        &mut self,
+        family_name: impl Into<String>,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
         let mut file = File::open(path)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
@@ -96,14 +103,16 @@ impl FontRegistry {
         }
 
         // If the requested font looks like a monospace/code font, try monospace first
-        if name.contains("code") || name.contains("mono") || name == "consolas" || name == "courier" {
+        if name.contains("code") || name.contains("mono") || name == "consolas" || name == "courier"
+        {
             if let Some(bytes) = self.fonts.get("monospace") {
                 return Some(bytes.as_slice());
             }
         }
 
         // General fallback chain: try sans-serif, monospace, arial, segoe ui, and finally any available font
-        self.fonts.get("sans-serif")
+        self.fonts
+            .get("sans-serif")
             .or_else(|| self.fonts.get("monospace"))
             .or_else(|| self.fonts.get("arial"))
             .or_else(|| self.fonts.get("segoe ui"))
@@ -140,21 +149,21 @@ impl FontRegistry {
 
                 // Assign standard multiplatform aliases
                 let family_lower = family.to_lowercase();
-                if family_lower == "arial" 
-                    || family_lower == "helvetica" 
-                    || family_lower == "liberation sans" 
-                    || family_lower == "dejavu sans" 
+                if family_lower == "arial"
+                    || family_lower == "helvetica"
+                    || family_lower == "liberation sans"
+                    || family_lower == "dejavu sans"
                     || family_lower == "segoe ui"
                     || family_lower == "system-ui"
                 {
                     self.fonts.insert("sans-serif".to_string(), bytes.clone());
                 }
 
-                if family_lower == "consolas" 
-                    || family_lower == "courier new" 
-                    || family_lower == "liberation mono" 
-                    || family_lower == "dejavu sans mono" 
-                    || family_lower == "menlo" 
+                if family_lower == "consolas"
+                    || family_lower == "courier new"
+                    || family_lower == "liberation mono"
+                    || family_lower == "dejavu sans mono"
+                    || family_lower == "menlo"
                     || family_lower == "monaco"
                     || face.monospaced
                 {

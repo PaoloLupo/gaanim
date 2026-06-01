@@ -1,8 +1,10 @@
-use std::collections::HashMap;
 use bevy::prelude::{BuildChildrenTransformExt, Entity, EntityWorldMut, World};
 use gaanim_core::ObjectId;
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, MobjectId, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible, ObjectTag};
+use gaanim_scene::{
+    FillBrush, MobjectId, ObjectTag, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible,
+};
+use std::collections::HashMap;
 
 /// A snapshot capturing the complete state of a single Mobject entity.
 ///
@@ -113,11 +115,13 @@ impl WorldSnapshot {
             render_order_opt,
             render_layer_opt,
             tag_opt,
-        ) in query.iter(world) {
+        ) in query.iter(world)
+        {
             let obj_id = mobj_id.0;
             // Find parent entity's ObjectId if parent is set
             let parent_entity = child_of_opt.map(|c| c.parent());
-            let parent_id = parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
+            let parent_id =
+                parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
 
             let transform = transform_opt.copied().unwrap_or_default();
             let opacity = opacity_opt.map(|o| o.0).unwrap_or(1.0);
@@ -134,20 +138,23 @@ impl WorldSnapshot {
                 tags.push(tag.0.clone());
             }
 
-            captured_data.push((obj_id, EntitySnapshot {
-                id: obj_id,
-                parent: parent_id,
-                transform,
-                opacity,
-                fill,
-                stroke,
-                stroke_style,
-                render_order,
-                creation_order,
-                render_layer,
-                visible,
-                tags,
-            }));
+            captured_data.push((
+                obj_id,
+                EntitySnapshot {
+                    id: obj_id,
+                    parent: parent_id,
+                    transform,
+                    opacity,
+                    fill,
+                    stroke,
+                    stroke_style,
+                    render_order,
+                    creation_order,
+                    render_layer,
+                    visible,
+                    tags,
+                },
+            ));
         }
 
         for (id, snapshot) in captured_data {
@@ -195,13 +202,15 @@ impl WorldSnapshot {
                 }
             } else {
                 // Entity was deleted or missing; spawn a new entity with the snapshotted components
-                let new_entity = world.spawn((
-                    MobjectId(*obj_id),
-                    snap.transform,
-                    Opacity(snap.opacity),
-                    FillBrush(snap.fill.clone()),
-                    snap.render_layer,
-                )).id();
+                let new_entity = world
+                    .spawn((
+                        MobjectId(*obj_id),
+                        snap.transform,
+                        Opacity(snap.opacity),
+                        FillBrush(snap.fill.clone()),
+                        snap.render_layer,
+                    ))
+                    .id();
 
                 entity_map.insert(*obj_id, new_entity);
 
@@ -209,9 +218,10 @@ impl WorldSnapshot {
                 insert_snapshot_components(&mut entity_mut, snap);
 
                 if let Some(parent_id) = snap.parent
-                    && let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        entity_mut.set_parent_in_place(parent_entity);
-                    }
+                    && let Some(&parent_entity) = entity_map.get(&parent_id)
+                {
+                    entity_mut.set_parent_in_place(parent_entity);
+                }
             }
         }
     }
@@ -292,13 +302,15 @@ impl SnapshotDiff {
                 }
             } else {
                 // Spawn missing entity
-                let new_entity = world.spawn((
-                    MobjectId(snap.id),
-                    snap.transform,
-                    Opacity(snap.opacity),
-                    FillBrush(snap.fill.clone()),
-                    snap.render_layer,
-                )).id();
+                let new_entity = world
+                    .spawn((
+                        MobjectId(snap.id),
+                        snap.transform,
+                        Opacity(snap.opacity),
+                        FillBrush(snap.fill.clone()),
+                        snap.render_layer,
+                    ))
+                    .id();
 
                 entity_map.insert(snap.id, new_entity);
 
@@ -306,9 +318,10 @@ impl SnapshotDiff {
                 insert_snapshot_components(&mut entity_mut, snap);
 
                 if let Some(parent_id) = snap.parent
-                    && let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        entity_mut.set_parent_in_place(parent_entity);
-                    }
+                    && let Some(&parent_entity) = entity_map.get(&parent_id)
+                {
+                    entity_mut.set_parent_in_place(parent_entity);
+                }
             }
         }
     }

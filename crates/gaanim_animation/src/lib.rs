@@ -4,14 +4,14 @@ pub mod tween;
 pub mod writing;
 
 pub use signals::{
-    signal_binding_system, AlwaysRedraw, ColorSignal, FloatSignal, MobjectSpec, Signal,
-    SignalBinding, SpecValue, Vec3Signal,
+    AlwaysRedraw, ColorSignal, FloatSignal, MobjectSpec, Signal, SignalBinding, SpecValue,
+    Vec3Signal, signal_binding_system,
 };
 pub use tween::{
-    evaluate_tweens_system, evaluate_custom_tweens_system, sync_delta_time_system,
-    AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState,
+    AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState, evaluate_custom_tweens_system,
+    evaluate_tweens_system, sync_delta_time_system,
 };
-pub use writing::{path_source_seed_added_system, FillDrawProgress, PathSource};
+pub use writing::{FillDrawProgress, PathSource, path_source_seed_added_system};
 
 use bevy::prelude::*;
 use gaanim_scene::SceneSet;
@@ -25,11 +25,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         app.init_resource::<DeltaTime>();
 
         // Sync Bevy's Time -> DeltaTime before animation evaluation.
-        app.add_systems(
-            Update,
-            sync_delta_time_system
-                .in_set(SceneSet::Input),
-        );
+        app.add_systems(Update, sync_delta_time_system.in_set(SceneSet::Input));
 
         // PathSource seed runs in Input so that any entity that has just
         // received a `Path2D` (from spawn, snapshot restore, morph, etc.)

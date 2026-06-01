@@ -285,7 +285,9 @@ fn extract_frame_items(
 
                         // Match glyph to corresponding source char and range
                         let byte_offset = glyph.span.1 as usize;
-                        let c = text.text.get(byte_offset..)
+                        let c = text
+                            .text
+                            .get(byte_offset..)
                             .and_then(|s| s.chars().next())
                             .unwrap_or('?');
 
@@ -497,13 +499,20 @@ mod tests {
     fn test_default_math_font_loaded() {
         let registry = FontRegistry::new();
         let world = GaanimTypstWorld::new("", &registry);
-        assert!(!world.fonts.is_empty(), "World fonts list must not be empty");
-        
+        assert!(
+            !world.fonts.is_empty(),
+            "World fonts list must not be empty"
+        );
+
         let has_math_font = world.fonts.iter().any(|font| {
-            font.info().families.iter().any(|info| info.as_str() == "New Computer Modern Math")
+            font.info()
+                .families
+                .iter()
+                .any(|info| info.as_str() == "New Computer Modern Math")
         });
-        assert!(has_math_font, "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld");
+        assert!(
+            has_math_font,
+            "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld"
+        );
     }
 }
-
-

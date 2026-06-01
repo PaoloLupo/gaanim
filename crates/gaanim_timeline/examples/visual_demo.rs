@@ -1,14 +1,15 @@
-use std::f64::consts::PI;
 use bevy::prelude::*;
+use gaanim_animation::{DeltaTime, GaanimAnimationPlugin};
 use gaanim_core::ObjectId;
 use gaanim_math::{Camera, RateFunc, SpatialTransform};
-use gaanim_scene::{FillBrush, GaanimScenePlugin, StrokeBrush};
-use gaanim_animation::{GaanimAnimationPlugin, DeltaTime};
-use gaanim_timeline::{
-    GaanimTimelinePlugin, timeline::Timeline, clip::ClipPayload, clip::AnimationSpec, clip::PropertyLensSpec,
-};
-use gaanim_renderer::prelude::*;
 use gaanim_objects::prelude::*;
+use gaanim_renderer::prelude::*;
+use gaanim_scene::{FillBrush, GaanimScenePlugin, StrokeBrush};
+use gaanim_timeline::{
+    GaanimTimelinePlugin, clip::AnimationSpec, clip::ClipPayload, clip::PropertyLensSpec,
+    timeline::Timeline,
+};
+use std::f64::consts::PI;
 
 fn main() {
     App::new()
@@ -51,7 +52,9 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
         gaanim_core::peniko::Color::from_rgba8(0, 102, 204, 255), // Slick blue
     )));
     parent_bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: gaanim_core::kurbo::Stroke::new(3.0),
     };
     let parent_entity = commands.spawn(parent_bundle).id();
@@ -63,13 +66,17 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
         gaanim_core::peniko::Color::from_rgba8(235, 64, 120, 255), // Modern pink
     )));
     child_bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: gaanim_core::kurbo::Stroke::new(2.0),
     };
     let child_entity = commands.spawn(child_bundle).id();
 
     // Set parent-child relationship via Bevy's built-in command hierarchy
-    commands.entity(child_entity).set_parent_in_place(parent_entity);
+    commands
+        .entity(child_entity)
+        .set_parent_in_place(parent_entity);
 
     // 4. Setup tracks in the Timeline
     let track_id = timeline.add_track("Main Graphics", 0);
@@ -142,9 +149,6 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
 }
 
 /// System: Synchronizes simulation DeltaTime and ticks the timeline
-fn drive_timeline_clock(
-    time: Res<Time>,
-    mut delta_time: ResMut<DeltaTime>,
-) {
+fn drive_timeline_clock(time: Res<Time>, mut delta_time: ResMut<DeltaTime>) {
     delta_time.dt = time.delta_secs() as f64;
 }

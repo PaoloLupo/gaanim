@@ -1,6 +1,6 @@
+use bevy::prelude::Component;
 use gaanim_core::glam::{DMat4, DQuat, DVec3};
 use gaanim_core::kurbo::Affine;
-use bevy::prelude::Component;
 
 /// A unified 2D/3D spatial transform representing translation, rotation, scale, and pivot (anchor).
 ///
@@ -114,9 +114,11 @@ impl SpatialTransform {
     /// `translate(translation + anchor) * rotate(z_angle) * scale(scale.x, scale.y) * translate(-anchor)`
     pub fn to_affine_2d(&self) -> Affine {
         let (_, _, z_angle) = self.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
-        
-        Affine::translate((self.translation.x + self.anchor.x, self.translation.y + self.anchor.y))
-            * Affine::rotate(z_angle)
+
+        Affine::translate((
+            self.translation.x + self.anchor.x,
+            self.translation.y + self.anchor.y,
+        )) * Affine::rotate(z_angle)
             * Affine::scale_non_uniform(self.scale.x, self.scale.y)
             * Affine::translate((-self.anchor.x, -self.anchor.y))
     }
@@ -262,7 +264,8 @@ mod tests {
         let child_local = SpatialTransform::new_2d(5.0, 0.0);
 
         let parent_global = GlobalSpatialTransform::from_local(&parent_local);
-        let child_global = GlobalSpatialTransform::from_parent_and_local(&parent_global, &child_local);
+        let child_global =
+            GlobalSpatialTransform::from_parent_and_local(&parent_global, &child_local);
 
         // Child at local 5 under parent at 10 should be at world 15
         let point = kurbo::Point::new(0.0, 0.0);

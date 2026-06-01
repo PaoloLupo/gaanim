@@ -1,10 +1,13 @@
+use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
 use bevy::prelude::*;
-use std::collections::HashMap;
 use gaanim_animation::FillDrawProgress;
 use gaanim_core::ObjectId;
 use gaanim_math::GlobalSpatialTransform;
-use gaanim_scene::{FillBrush, GlobalOpacity, MobjectId, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds};
-use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
+use gaanim_scene::{
+    FillBrush, GlobalOpacity, MobjectId, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible,
+    WorldBounds,
+};
+use std::collections::HashMap;
 
 // Explicit imports from bevy_vello instead of glob for clarity
 use bevy_vello::integrations::scene::VelloScene2d;
@@ -85,22 +88,25 @@ pub fn gaanim_render_cache_sweep_system(
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
-    query_mobjects: Query<(
-        Ref<MobjectId>,
-        Ref<GlobalSpatialTransform>,
-        Ref<GlobalOpacity>,
-        Ref<RenderOrder>,
-        Ref<RenderLayer>,
-        Option<Ref<Path2D>>,
-        Option<Ref<FillBrush>>,
-        Option<Ref<StrokeBrush>>,
-        Option<Ref<DropShadow>>,
-        Option<Ref<Glow>>,
-        Option<Ref<GaussianBlur>>,
-        Option<Ref<ClipMask>>,
-        Option<Ref<FillDrawProgress>>,
-        Option<&WorldBounds>,
-    ), With<Visible>>,
+    query_mobjects: Query<
+        (
+            Ref<MobjectId>,
+            Ref<GlobalSpatialTransform>,
+            Ref<GlobalOpacity>,
+            Ref<RenderOrder>,
+            Ref<RenderLayer>,
+            Option<Ref<Path2D>>,
+            Option<Ref<FillBrush>>,
+            Option<Ref<StrokeBrush>>,
+            Option<Ref<DropShadow>>,
+            Option<Ref<Glow>>,
+            Option<Ref<GaussianBlur>>,
+            Option<Ref<ClipMask>>,
+            Option<Ref<FillDrawProgress>>,
+            Option<&WorldBounds>,
+        ),
+        With<Visible>,
+    >,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d), With<MainVelloScene>>,
 ) {
     let mut extracted = Vec::new();
@@ -122,7 +128,8 @@ pub fn gaanim_render_system(
         clip_ref,
         fill_progress_ref,
         world_bounds_opt,
-    ) in &query_mobjects {
+    ) in &query_mobjects
+    {
         // Only process visible Vello2D elements
         if *render_layer != RenderLayer::Vello2D {
             continue;
@@ -288,14 +295,15 @@ pub fn gaanim_render_system(
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
-    extracted.sort_by(|a, b| {
-        match a.render_order.z_index.cmp(&b.render_order.z_index) {
-            std::cmp::Ordering::Equal => {
-                a.render_order.creation_order.cmp(&b.render_order.creation_order)
-            }
+    extracted.sort_by(
+        |a, b| match a.render_order.z_index.cmp(&b.render_order.z_index) {
+            std::cmp::Ordering::Equal => a
+                .render_order
+                .creation_order
+                .cmp(&b.render_order.creation_order),
             other => other,
-        }
-    });
+        },
+    );
 
     // Assemble the global composited Scene in Bevy world coordinates
     let mut main_scene = vello::Scene::new();
@@ -325,7 +333,7 @@ pub fn gaanim_render_system(
             );
             layers_to_pop += 1;
         }
-        
+
         main_scene.append(&elem.scene, Some(elem.transform));
 
         for _ in 0..layers_to_pop {
@@ -346,11 +354,15 @@ pub fn gaanim_render_system(
     let mut scene_entity_found = false;
     for (entity, mut scene) in &mut query_vello_scene {
         scene.reset();
-        scene.append(&main_scene, None);
+        scene.append(main_scene, None);
         scene_entity_found = true;
 
         // Update AABB to match current scene bounds
-        commands.entity(entity).insert(bevy::camera::primitives::Aabb::from_min_max(aabb_min, aabb_max));
+        commands
+            .entity(entity)
+            .insert(bevy::camera::primitives::Aabb::from_min_max(
+                aabb_min, aabb_max,
+            ));
     }
 
     if !scene_entity_found {

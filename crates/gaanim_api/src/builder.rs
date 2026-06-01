@@ -1,19 +1,19 @@
-use std::collections::HashMap;
-use bevy::prelude::{Commands, Entity, BuildChildrenTransformExt};
+use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
-use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
-use gaanim_objects::prelude::MobjectBundle;
-use gaanim_timeline::{
-    timeline::Timeline,
-    clip::{ClipPayload, AnimationSpec, PropertyLensSpec, TrackId},
-};
-use gaanim_layout::{LayoutAnchor, LayoutDirection};
-use gaanim_core::peniko::{Brush, Color};
 use gaanim_core::kurbo;
+use gaanim_core::peniko::{Brush, Color};
+use gaanim_layout::{LayoutAnchor, LayoutDirection};
+use gaanim_math::{Bounds3D, SpatialTransform};
+use gaanim_objects::prelude::MobjectBundle;
+use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_hierarchy;
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
+use gaanim_timeline::{
+    clip::{AnimationSpec, ClipPayload, PropertyLensSpec, TrackId},
+    timeline::Timeline,
+};
+use std::collections::HashMap;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 
@@ -74,13 +74,17 @@ impl<'a, 'w, 's, 'b> MobjectSelection<'a, 'w, 's, 'b> {
         for child_id in &self.child_ids {
             if let Some(state) = self.builder.states.get_mut(child_id) {
                 state.fill = Some(Brush::Solid(color));
-                self.builder.commands.entity(state.entity)
+                self.builder
+                    .commands
+                    .entity(state.entity)
                     .insert(FillBrush(Some(Brush::Solid(color))));
                 if state.stroke.brush.is_some() {
                     let width = state.stroke.style.width;
                     let new_stroke = StrokeBrush::new(color, width);
                     state.stroke = new_stroke.clone();
-                    self.builder.commands.entity(state.entity)
+                    self.builder
+                        .commands
+                        .entity(state.entity)
                         .insert(new_stroke);
                 }
             }
@@ -93,7 +97,9 @@ impl<'a, 'w, 's, 'b> MobjectSelection<'a, 'w, 's, 'b> {
         for child_id in &self.child_ids {
             if let Some(state) = self.builder.states.get_mut(child_id) {
                 state.stroke = StrokeBrush::new(color, width);
-                self.builder.commands.entity(state.entity)
+                self.builder
+                    .commands
+                    .entity(state.entity)
                     .insert(StrokeBrush::new(color, width));
             }
         }
@@ -156,7 +162,7 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
                 MobjectRef { id }
                     .shift_2d(x, y)
                     .duration(self.duration)
-                    .rate_func(self.rate_func.clone())
+                    .rate_func(self.rate_func.clone()),
             );
         }
         self.builder.play_parallel(anims);
@@ -170,7 +176,7 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
                 MobjectRef { id }
                     .fade_out()
                     .duration(self.duration)
-                    .rate_func(self.rate_func.clone())
+                    .rate_func(self.rate_func.clone()),
             );
         }
         self.builder.play_parallel(anims);
@@ -184,7 +190,7 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
                 MobjectRef { id }
                     .scale_uniform(factor)
                     .duration(self.duration)
-                    .rate_func(self.rate_func.clone())
+                    .rate_func(self.rate_func.clone()),
             );
         }
         self.builder.play_parallel(anims);
@@ -198,13 +204,12 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
                 MobjectRef { id }
                     .fill_color_to(color)
                     .duration(self.duration)
-                    .rate_func(self.rate_func.clone())
+                    .rate_func(self.rate_func.clone()),
             );
         }
         self.builder.play_parallel(anims);
     }
 }
-
 
 /// The high-level fluent API builder for constructing gaanim scenes.
 ///
@@ -324,7 +329,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let state = match self.states.get_mut(&anim.target) {
             Some(s) => s,
             None => {
-                bevy::prelude::warn!("Attempted to animate unregistered Mobject: {:?}", anim.target);
+                bevy::prelude::warn!(
+                    "Attempted to animate unregistered Mobject: {:?}",
+                    anim.target
+                );
                 return;
             }
         };
@@ -422,7 +430,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Unwrite { .. }
             | AnimationType::Uncreate { .. }
             | AnimationType::SpinInFromNothing
-            | AnimationType::Indicate { .. } => unreachable!("Expansion is dispatched in the early branch above"),
+            | AnimationType::Indicate { .. } => {
+                unreachable!("Expansion is dispatched in the early branch above")
+            }
         };
 
         // Add the resolved clip to the Timeline resource
@@ -459,7 +469,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// will render an empty/invisible fill, so the user only ever sees
     /// Internal: generalize a draw/erase animation (Write, Create, Unwrite, Uncreate)
     /// as one or more staggered or parallel sub-clip sequences.
-    fn play_draw_erase_internal(&mut self, anim: AnimationBuilder, is_erase: bool, staggered: bool) {
+    fn play_draw_erase_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        is_erase: bool,
+        staggered: bool,
+    ) {
         let stroke_width = match anim.anim_type {
             AnimationType::Write { stroke_width } => stroke_width,
             AnimationType::Create { stroke_width } => stroke_width,
@@ -528,7 +543,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if !is_erase {
                     self.commands
                         .entity(state.entity)
-                        .insert(gaanim_scene::components::Path2D(gaanim_core::kurbo::BezPath::new()));
+                        .insert(gaanim_scene::components::Path2D(
+                            gaanim_core::kurbo::BezPath::new(),
+                        ));
                 }
             }
         }
@@ -543,7 +560,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } else {
             anim.duration
         };
-        let lag_step = if staggered { item_duration * LAG_RATIO } else { 0.0 };
+        let lag_step = if staggered {
+            item_duration * LAG_RATIO
+        } else {
+            0.0
+        };
         let min_step = 1e-6_f64.max(item_duration * 0.01);
 
         let draw_duration = (item_duration * DRAW_RATIO).max(min_step);
@@ -560,7 +581,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress { from: reset_fill_val, to: reset_fill_val },
+                    lens: PropertyLensSpec::FillDrawProgress {
+                        from: reset_fill_val,
+                        to: reset_fill_val,
+                    },
                     rate_func: anim.rate_func.clone(),
                 }),
             );
@@ -570,7 +594,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
-                    lens: PropertyLensSpec::PathCompletion { from: reset_path_val, to: reset_path_val },
+                    lens: PropertyLensSpec::PathCompletion {
+                        from: reset_path_val,
+                        to: reset_path_val,
+                    },
                     rate_func: anim.rate_func.clone(),
                 }),
             );
@@ -710,8 +737,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // To avoid quaternion SLERP shortest-path 0-rotation logic issues for 360 degrees,
         // we split the rotation into two consecutive 180-degree clips (PI radians each).
-        let mid_rotation = initial_rotation * gaanim_core::glam::DQuat::from_rotation_z(std::f64::consts::PI);
-        let end_rotation = initial_rotation * gaanim_core::glam::DQuat::from_rotation_z(2.0 * std::f64::consts::PI);
+        let mid_rotation =
+            initial_rotation * gaanim_core::glam::DQuat::from_rotation_z(std::f64::consts::PI);
+        let end_rotation = initial_rotation
+            * gaanim_core::glam::DQuat::from_rotation_z(2.0 * std::f64::consts::PI);
 
         // Pre-set the scale to 0.0 right now via deferred commands to avoid first-frame flickers
         let mut temp_transform = state.transform;
@@ -771,7 +800,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Internal: materialize `Indicate` as a temporary scale-up and color highlight.
     fn play_indicate_internal(&mut self, anim: AnimationBuilder) {
         let (highlight_color, scale_factor) = match anim.anim_type {
-            AnimationType::Indicate { color, scale_factor } => (color, scale_factor),
+            AnimationType::Indicate {
+                color,
+                scale_factor,
+            } => (color, scale_factor),
             _ => unreachable!(),
         };
 
@@ -880,7 +912,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a rounded rectangle primitive.
-    pub fn rounded_rect(&mut self, width: f64, height: f64, corner_radius: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn rounded_rect(
+        &mut self,
+        width: f64,
+        height: f64,
+        corner_radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::rounded_rect(id, width, height, corner_radius);
         MobjectSpawnBuilder {
@@ -892,7 +929,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a line segment primitive.
-    pub fn line(&mut self, start: kurbo::Point, end: kurbo::Point) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn line(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::line(id, start, end);
         MobjectSpawnBuilder {
@@ -916,7 +957,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a symmetric star primitive.
-    pub fn star(&mut self, n_points: u32, outer_radius: f64, inner_radius: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn star(
+        &mut self,
+        n_points: u32,
+        outer_radius: f64,
+        inner_radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::star(id, n_points, outer_radius, inner_radius);
         MobjectSpawnBuilder {
@@ -976,7 +1022,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a directional arrow primitive.
-    pub fn arrow(&mut self, start: kurbo::Point, end: kurbo::Point) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn arrow(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::arrow(id, start, end);
         MobjectSpawnBuilder {
@@ -988,7 +1038,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a regular polygon primitive.
-    pub fn regular_polygon(&mut self, n_sides: u32, radius: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn regular_polygon(
+        &mut self,
+        n_sides: u32,
+        radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::regular_polygon(id, n_sides, radius);
         MobjectSpawnBuilder {
@@ -1018,7 +1072,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         math_size: Option<f64>,
     ) -> MobjectRef {
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::BLACK));
+        let fill = Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::BLACK,
+        ));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
@@ -1051,7 +1107,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 bounds: Bounds3D::default(),
                 transform: SpatialTransform::default(),
                 opacity: 1.0,
-                fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::BLACK)),
+                fill: Some(gaanim_core::peniko::Brush::Solid(
+                    gaanim_core::peniko::Color::BLACK,
+                )),
                 stroke: gaanim_scene::StrokeBrush::transparent(),
                 entity: *child_entity,
                 child_spans: Vec::new(),
@@ -1063,7 +1121,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             bounds,
             transform: SpatialTransform::default(),
             opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::BLACK)),
+            fill: Some(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::BLACK,
+            )),
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
@@ -1081,7 +1141,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         text_font: &str,
         math_font: &str,
     ) -> MobjectRef {
-        self.typst(source, is_math, Some(text_font), Some(math_font), None, None)
+        self.typst(
+            source,
+            is_math,
+            Some(text_font),
+            Some(math_font),
+            None,
+            None,
+        )
     }
 
     /// Compiles a plain text string into a hierarchy of vector character Mobjects.
@@ -1091,14 +1158,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// `font_size` is the text size in pixels/points.
     ///
     /// Returns a reference to the parent container of the text.
-    pub fn text(
-        &mut self,
-        content: &str,
-        font_family: &str,
-        font_size: f64,
-    ) -> MobjectRef {
+    pub fn text(&mut self, content: &str, font_family: &str, font_size: f64) -> MobjectRef {
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE));
+        let fill = Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        ));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
@@ -1149,7 +1213,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             bounds,
             transform: SpatialTransform::default(),
             opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            fill: Some(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::WHITE,
+            )),
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
@@ -1160,8 +1226,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a vector text Mobject using the default styling of the requested `TextRole`.
-    pub fn spawn_text(&mut self, content: &str, role: gaanim_text::prelude::TextRole) -> MobjectRef {
-        let style = self.text_config.roles.get(&role)
+    pub fn spawn_text(
+        &mut self,
+        content: &str,
+        role: gaanim_text::prelude::TextRole,
+    ) -> MobjectRef {
+        let style = self
+            .text_config
+            .roles
+            .get(&role)
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
                 font_family: "Arial".to_string(),
@@ -1252,7 +1325,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Shorthand to spawn a mathematical equation Mobject (LaTeX style) with default Math styling.
     pub fn equation(&mut self, formula: &str) -> MobjectRef {
-        let style = self.text_config.roles.get(&gaanim_text::prelude::TextRole::Math)
+        let style = self
+            .text_config
+            .roles
+            .get(&gaanim_text::prelude::TextRole::Math)
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
@@ -1318,7 +1394,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Selects a subset of characters/shapes in a text or equation Mobject by exact substring.
     /// This implementation is robust: it is case-insensitive, whitespace-insensitive,
     /// format-insensitive (ignores ^, _, $), and correctly maps UTF-8 byte offsets back to glyph IDs.
-    pub fn select<'q>(&'q mut self, target: MobjectRef, substring: &str) -> MobjectSelection<'q, 'w, 's, 'a> {
+    pub fn select<'q>(
+        &'q mut self,
+        target: MobjectRef,
+        substring: &str,
+    ) -> MobjectSelection<'q, 'w, 's, 'a> {
         // Helper function to normalize mathematical italic/bold alphanumeric characters back to standard Latin/numeric equivalents.
         fn to_standard_char(c: char) -> char {
             let cp = c as u32;
@@ -1382,10 +1462,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
                     continue;
                 }
-                
+
                 // Map mathematical alphanumeric variants to standard equivalents
                 let c = to_standard_char(raw_c);
-                
+
                 // Keep the lowercase version
                 let lower_chars: Vec<char> = c.to_lowercase().collect();
                 for lc in lower_chars {
@@ -1415,7 +1495,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if !normalized_query.is_empty() {
                 if let Some(start_byte_idx) = normalized_text.find(&normalized_query) {
                     let end_byte_idx = start_byte_idx + normalized_query.len();
-                    
+
                     // We gather unique child_spans indices that fall within the matched byte range
                     let mut matched_span_indices = Vec::new();
                     for byte_idx in start_byte_idx..end_byte_idx {
@@ -1444,7 +1524,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Selects a subset of characters/shapes in a text or equation Mobject by a custom closure predicate.
-    pub fn select_by<'q, F>(&'q mut self, target: MobjectRef, predicate: F) -> MobjectSelection<'q, 'w, 's, 'a>
+    pub fn select_by<'q, F>(
+        &'q mut self,
+        target: MobjectRef,
+        predicate: F,
+    ) -> MobjectSelection<'q, 'w, 's, 'a>
     where
         F: Fn(&gaanim_scene::components::TextSpan) -> bool,
     {
@@ -1465,7 +1549,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Selects a subset of characters/shapes in a text or equation Mobject by a sequential character range.
-    pub fn select_range<'q>(&'q mut self, target: MobjectRef, range: std::ops::Range<usize>) -> MobjectSelection<'q, 'w, 's, 'a> {
+    pub fn select_range<'q>(
+        &'q mut self,
+        target: MobjectRef,
+        range: std::ops::Range<usize>,
+    ) -> MobjectSelection<'q, 'w, 's, 'a> {
         let mut child_ids = Vec::new();
         if let Some(state) = self.states.get(&target.id) {
             for (id, _, span) in &state.child_spans {
@@ -1482,7 +1570,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 }
-
 
 /// Helper structure providing fluent configuration for Mobjects before spawning them.
 pub struct MobjectSpawnBuilder<'b, 'w, 's, 'a> {
@@ -1561,7 +1648,12 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
     /// Positions this object adjacent to a reference object in a specific layout direction.
     /// Centered along the orthogonal axis (like Manim).
-    pub fn next_to(mut self, reference: MobjectRef, direction: LayoutDirection, spacing: f64) -> Self {
+    pub fn next_to(
+        mut self,
+        reference: MobjectRef,
+        direction: LayoutDirection,
+        spacing: f64,
+    ) -> Self {
         if let Some(ref_state) = self.builder.states.get(&reference.id) {
             let shift = gaanim_layout::compute_next_to(
                 self.bundle.bounds.0,
@@ -1577,7 +1669,12 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
     }
 
     /// Aligns a target anchor point on this object with a reference anchor point on the reference object.
-    pub fn align_to(mut self, reference: MobjectRef, target_anchor: LayoutAnchor, ref_anchor: LayoutAnchor) -> Self {
+    pub fn align_to(
+        mut self,
+        reference: MobjectRef,
+        target_anchor: LayoutAnchor,
+        ref_anchor: LayoutAnchor,
+    ) -> Self {
         if let Some(ref_state) = self.builder.states.get(&reference.id) {
             let shift = gaanim_layout::compute_align_to(
                 self.bundle.bounds.0,

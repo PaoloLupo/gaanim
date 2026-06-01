@@ -1,6 +1,6 @@
+use gaanim_animation::PropertyLens;
 use gaanim_core::{ObjectId, peniko::Color};
 use gaanim_math::RateFunc;
-use gaanim_animation::PropertyLens;
 
 // We use slotmap to manage IDs cleanly without generational index validation bugs
 slotmap::new_key_type! {
@@ -94,48 +94,119 @@ pub struct AnimationSpec {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PropertyLensSpec {
-    Translation { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
-    Rotation { from: gaanim_core::glam::DQuat, to: gaanim_core::glam::DQuat },
-    Scale { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
-    Opacity { from: f32, to: f32 },
-    FillColor { from: Color, to: Color },
-    StrokeColor { from: Color, to: Color },
-    StrokeWidth { from: f64, to: f64 },
-    PathCompletion { from: f64, to: f64 },
+    Translation {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    Rotation {
+        from: gaanim_core::glam::DQuat,
+        to: gaanim_core::glam::DQuat,
+    },
+    Scale {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    Opacity {
+        from: f32,
+        to: f32,
+    },
+    FillColor {
+        from: Color,
+        to: Color,
+    },
+    StrokeColor {
+        from: Color,
+        to: Color,
+    },
+    StrokeWidth {
+        from: f64,
+        to: f64,
+    },
+    PathCompletion {
+        from: f64,
+        to: f64,
+    },
     /// Cross-fade the fill alpha from `from` to `to` (both in `[0, 1]`).
     /// Used by the Write animation to reveal the fill after the path
     /// has been fully drawn. Applied by inserting/updating a
     /// `gaanim_animation::FillDrawProgress` component on the target.
-    FillDrawProgress { from: f32, to: f32 },
-    CameraPosition { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
-    CameraRotation { from: gaanim_core::glam::DQuat, to: gaanim_core::glam::DQuat },
-    CameraZoom { from: f64, to: f64 },
-    Custom { type_name: String, params: String },
+    FillDrawProgress {
+        from: f32,
+        to: f32,
+    },
+    CameraPosition {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    CameraRotation {
+        from: gaanim_core::glam::DQuat,
+        to: gaanim_core::glam::DQuat,
+    },
+    CameraZoom {
+        from: f64,
+        to: f64,
+    },
+    Custom {
+        type_name: String,
+        params: String,
+    },
 }
 
 impl PropertyLensSpec {
     /// Converts this serializable specification into a runtime Bevy `PropertyLens`.
     pub fn to_lens(&self) -> PropertyLens {
         match self {
-            Self::Translation { from, to } => PropertyLens::Translation { from: *from, to: *to },
-            Self::Rotation { from, to } => PropertyLens::Rotation { from: *from, to: *to },
-            Self::Scale { from, to } => PropertyLens::Scale { from: *from, to: *to },
-            Self::Opacity { from, to } => PropertyLens::Opacity { from: *from, to: *to },
-            Self::FillColor { from, to } => PropertyLens::FillColor { from: *from, to: *to },
-            Self::StrokeColor { from, to } => PropertyLens::StrokeColor { from: *from, to: *to },
-            Self::StrokeWidth { from, to } => PropertyLens::StrokeWidth { from: *from, to: *to },
-            Self::PathCompletion { from, to } => PropertyLens::PathCompletion { from: *from, to: *to },
-            Self::FillDrawProgress { from, to } => {
-                PropertyLens::FillDrawProgress { from: *from, to: *to }
-            }
-            Self::CameraPosition { from, to } => PropertyLens::CameraPosition { from: *from, to: *to },
-            Self::CameraRotation { from, to } => PropertyLens::CameraRotation { from: *from, to: *to },
-            Self::CameraZoom { from, to } => PropertyLens::CameraZoom { from: *from, to: *to },
-            Self::Custom { type_name, .. } => {
-                PropertyLens::Custom(Box::new(DummyLens {
-                    type_name: type_name.clone(),
-                }))
-            }
+            Self::Translation { from, to } => PropertyLens::Translation {
+                from: *from,
+                to: *to,
+            },
+            Self::Rotation { from, to } => PropertyLens::Rotation {
+                from: *from,
+                to: *to,
+            },
+            Self::Scale { from, to } => PropertyLens::Scale {
+                from: *from,
+                to: *to,
+            },
+            Self::Opacity { from, to } => PropertyLens::Opacity {
+                from: *from,
+                to: *to,
+            },
+            Self::FillColor { from, to } => PropertyLens::FillColor {
+                from: *from,
+                to: *to,
+            },
+            Self::StrokeColor { from, to } => PropertyLens::StrokeColor {
+                from: *from,
+                to: *to,
+            },
+            Self::StrokeWidth { from, to } => PropertyLens::StrokeWidth {
+                from: *from,
+                to: *to,
+            },
+            Self::PathCompletion { from, to } => PropertyLens::PathCompletion {
+                from: *from,
+                to: *to,
+            },
+            Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
+                from: *from,
+                to: *to,
+            },
+            Self::CameraPosition { from, to } => PropertyLens::CameraPosition {
+                from: *from,
+                to: *to,
+            },
+            Self::CameraRotation { from, to } => PropertyLens::CameraRotation {
+                from: *from,
+                to: *to,
+            },
+            Self::CameraZoom { from, to } => PropertyLens::CameraZoom {
+                from: *from,
+                to: *to,
+            },
+            Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
+                type_name: type_name.clone(),
+            })),
         }
     }
 }
@@ -147,7 +218,12 @@ pub struct DummyLens {
 }
 
 impl gaanim_animation::AnimatableLens for DummyLens {
-    fn interpolate(&self, _world: &mut bevy::prelude::World, _entity: bevy::prelude::Entity, _t: f64) {
+    fn interpolate(
+        &self,
+        _world: &mut bevy::prelude::World,
+        _entity: bevy::prelude::Entity,
+        _t: f64,
+    ) {
         // Fallback: does nothing
     }
 

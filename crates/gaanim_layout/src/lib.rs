@@ -139,8 +139,10 @@ pub fn compute_next_to(
         LayoutDirection::Custom(v) => {
             // Fallback for custom vector directions: project target center alongside standard spacing
             let dir = v.normalize();
-            let p_ref = ref_world_bounds.center() + dir * (ref_world_bounds.size().dot(dir) * 0.5 + spacing);
-            let p_target = target_world_bounds.center() - dir * (target_world_bounds.size().dot(dir) * 0.5);
+            let p_ref = ref_world_bounds.center()
+                + dir * (ref_world_bounds.size().dot(dir) * 0.5 + spacing);
+            let p_target =
+                target_world_bounds.center() - dir * (target_world_bounds.size().dot(dir) * 0.5);
             p_ref - p_target
         }
     }

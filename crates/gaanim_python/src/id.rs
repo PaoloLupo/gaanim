@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use gaanim_core::ObjectId;
+use pyo3::prelude::*;
 
 /// Stable handle to a Mobject allocated by `gaanim`.
 ///
@@ -40,4 +40,3 @@ impl PyObjectId {
         self.0.as_raw()
     }
 }
-
