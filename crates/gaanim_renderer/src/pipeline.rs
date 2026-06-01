@@ -129,7 +129,8 @@ pub fn gaanim_render_system(
         }
 
         // Fragment Invalidation Check: Only visual components trigger rebuild.
-        let changed = path_ref.as_ref().is_some_and(|r| r.is_changed())
+        let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
+        let changed = path_changed
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -205,33 +206,51 @@ pub fn gaanim_render_system(
                 );
             }
 
-            // 3. Draw Stroke (as an inner border)
+            // 3. Draw Stroke. We clip the stroke to the path region
+            // so the outline is rendered as an "inner border" rather
+            // than straddling the contour — this matches Manim's
+            // `stroke_behind_fill=False` default and prevents the
+            // glyphs from looking artificially thick.
             //
-            // Vello's `stroke()` is always centered on the path, so the
-            // default would extend half the stroke width outside the
-            // glyph contour, making the character look visibly thicker.
-            // To get an inner border we push a layer clipped to the
-            // path itself, then stroke, then pop: the outer half of
-            // the stroke is masked away, leaving only the inner half
-            // drawn on top of the fill.
+            // The clip only makes sense for **closed contours**
+            // (text glyphs, filled shapes). Open paths like the
+            // Typst `frac` horizontal rule are 1D curves with zero
+            // fillable area; pushing a layer with `Fill::NonZero`
+            // over them clips the stroke to nothing and the line
+            // becomes invisible. So we only push the layer when the
+            // path actually contains a `ClosePath` element.
             if let Some(ref stroke_brush) = elem_stroke
                 && let Some(ref style) = elem_stroke_style
             {
-                scene.push_layer(
-                    peniko::Fill::NonZero,
-                    peniko::BlendMode::default(),
-                    1.0,
-                    kurbo::Affine::IDENTITY,
-                    &elem_path,
-                );
-                scene.stroke(
-                    style,
-                    kurbo::Affine::IDENTITY,
-                    stroke_brush,
-                    None,
-                    &elem_path,
-                );
-                scene.pop_layer();
+                let has_closed_contour = elem_path
+                    .elements()
+                    .iter()
+                    .any(|&el| el == kurbo::PathEl::ClosePath);
+                if has_closed_contour {
+                    scene.push_layer(
+                        peniko::Fill::NonZero,
+                        peniko::BlendMode::default(),
+                        1.0,
+                        kurbo::Affine::IDENTITY,
+                        &elem_path,
+                    );
+                    scene.stroke(
+                        style,
+                        kurbo::Affine::IDENTITY,
+                        stroke_brush,
+                        None,
+                        &elem_path,
+                    );
+                    scene.pop_layer();
+                } else {
+                    scene.stroke(
+                        style,
+                        kurbo::Affine::IDENTITY,
+                        stroke_brush,
+                        None,
+                        &elem_path,
+                    );
+                }
             }
 
             // TODO: GaussianBlur and Glow effects are not yet implemented

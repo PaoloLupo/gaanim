@@ -36,9 +36,9 @@ def main():
     print("[Gaanim Python] Queueing Write animations (pen-stroke draw)...")
     scene.play(
         bg_circle.animate().scale(1.2).duration(1.5).spring(),
-        title_text.animate().write(duration=5.0).linear(),
-        math_formula.animate().write(duration=1.5).smooth(),
-        sum_formula.animate().write(duration=2.5).linear(),
+        title_text.animate().write(duration=1.0).linear(),
+        math_formula.animate().write(duration=5.0).smooth(),
+        sum_formula.animate().write(duration=5.0).linear(),
     )
 
     # 6. Wait for a moment

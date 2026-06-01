@@ -62,12 +62,27 @@ pub struct MobjectSelection<'a, 'w, 's, 'b> {
 
 impl<'a, 'w, 's, 'b> MobjectSelection<'a, 'w, 's, 'b> {
     /// Instantly colors the fill of all selected symbols.
+    ///
+    /// If the entity already carries a stroke brush (for example the
+    /// auto-stroke synthesized by a `Write` animation), the stroke is
+    /// retinted to match the new fill so the progressive outline stays
+    /// color-coordinated with the selection. The accompanying
+    /// `PathCompletion` global reset in `play_write_internal` is what
+    /// prevents the outline from being visible at frame 0, so updating
+    /// the stroke here does not reintroduce that regression.
     pub fn set_fill(&mut self, color: Color) -> &mut Self {
         for child_id in &self.child_ids {
             if let Some(state) = self.builder.states.get_mut(child_id) {
                 state.fill = Some(Brush::Solid(color));
                 self.builder.commands.entity(state.entity)
                     .insert(FillBrush(Some(Brush::Solid(color))));
+                if state.stroke.brush.is_some() {
+                    let width = state.stroke.style.width;
+                    let new_stroke = StrokeBrush::new(color, width);
+                    state.stroke = new_stroke.clone();
+                    self.builder.commands.entity(state.entity)
+                        .insert(new_stroke);
+                }
             }
         }
         self
@@ -455,25 +470,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // user would only ever see the fill.
         for item_id in &items {
             if let Some(state) = self.states.get_mut(item_id) {
-                eprintln!("[DEBUG AutoStroke] item={} state.fill={:?} state.stroke.brush={:?}",
-                    item_id.as_raw(),
-                    state.fill.as_ref().map(|b| match b {
-                        Brush::Solid(c) => format!("Solid({:?})", c),
-                        Brush::Gradient(_) => "Gradient".to_string(),
-                        _ => "Other".to_string(),
-                    }),
-                    state.stroke.brush.as_ref().map(|_| "Some"),
-                );
                 if state.stroke.brush.is_none() {
                     let color = state
                         .fill
                         .as_ref()
                         .and_then(extract_brush_color)
                         .unwrap_or(Color::WHITE);
-                    let width = stroke_width.unwrap_or(1.0);
-                    let new_stroke = StrokeBrush::new(color, width);
-                    state.stroke = new_stroke.clone();
-                    self.commands.entity(state.entity).insert(new_stroke);
                     let width = stroke_width.unwrap_or(1.0);
                     let new_stroke = StrokeBrush::new(color, width);
                     state.stroke = new_stroke.clone();
@@ -534,6 +536,28 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
                     lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+        }
+
+        // (C') Global outline reset: the same trick applied to
+        // `PathCompletion`. Without this, every entity keeps its
+        // default full path (PathCompletion at 1.0) between frame 0
+        // and its own `item_start`, so the full stroke of every
+        // glyph is visible at the very first frame. Trimming the
+        // path to 0% here means no stroke is drawn until each
+        // character's own draw clip starts increasing the
+        // completion. The clip runs at `self.current_time` for
+        // every entity at once (same rationale as the fill reset).
+        for item_id in &items {
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time,
+                min_step,
+                ClipPayload::Animation(AnimationSpec {
+                    target: *item_id,
+                    lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
                     rate_func: anim.rate_func.clone(),
                 }),
             );

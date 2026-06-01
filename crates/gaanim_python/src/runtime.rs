@@ -189,6 +189,26 @@ fn run_replay(
                                 .commands
                                 .entity(state.entity)
                                 .insert(FillBrush(Some(peniko::Brush::Solid(color))));
+                            // If the entity already has a stroke
+                            // (typically the auto-stroke synthesized
+                            // by a prior `Write` animation), retint
+                            // it to match the new fill so the
+                            // progressive outline uses the selection
+                            // color. The global PathCompletion reset
+                            // in `play_write_internal` is what keeps
+                            // the outline hidden until the draw phase
+                            // starts, so re-inserting a stroke here
+                            // does not produce the "visible from
+                            // start" regression.
+                            if state.stroke.brush.is_some() {
+                                let width = state.stroke.style.width;
+                                let new_stroke = StrokeBrush::new(color, width);
+                                state.stroke = new_stroke.clone();
+                                scene
+                                    .commands
+                                    .entity(state.entity)
+                                    .insert(new_stroke);
+                            }
                         }
                     }
                 }
