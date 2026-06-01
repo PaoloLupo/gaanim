@@ -49,12 +49,17 @@ impl Plugin for GaanimScenePlugin {
                 .chain(),
         );
 
-        // Register default propagation systems in the Propagation SystemSet
+        // Register default propagation systems in the Propagation SystemSet.
+        // Both propagation systems use `run_if` to skip entirely when no
+        // local component has changed, avoiding unnecessary per-entity iteration
+        // on static frames.
         app.add_systems(
             Update,
             (
-                crate::systems::transform_propagation_system,
-                crate::systems::opacity_propagation_system,
+                crate::systems::transform_propagation_system
+                    .run_if(crate::systems::has_transform_changes),
+                crate::systems::opacity_propagation_system
+                    .run_if(crate::systems::has_opacity_changes),
                 crate::systems::sync_new_opacities,
             )
                 .in_set(SceneSet::Propagation),

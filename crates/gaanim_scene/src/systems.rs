@@ -1,6 +1,20 @@
 use crate::components::{GlobalOpacity, LocalBounds, Opacity, WorldBounds};
-use bevy::prelude::{Added, ChildOf, Entity, Local, ParamSet, Query, With, Without};
+use bevy::prelude::{
+    Added, Changed, ChildOf, Entity, Local, Or, ParamSet, Query, With, Without,
+};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
+
+/// Run condition: skip transform propagation when no local transform has changed.
+///
+/// Since all clip animations explicitly store `from`/`to` values and write to
+/// `SpatialTransform` (which updates Bevy's change tick), and the only other
+/// mutation path is `seek()` snapshot restore (which also updates ticks), this
+/// condition correctly detects every scenario where propagation is needed.
+pub fn has_transform_changes(
+    query: Query<&SpatialTransform, Or<(Changed<SpatialTransform>, Added<SpatialTransform>)>>,
+) -> bool {
+    !query.is_empty()
+}
 
 /// System: Propagate spatial transforms hierarchically using Bevy 0.18's `ChildOf` relation.
 ///
@@ -10,11 +24,20 @@ use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 ///
 /// Under Bevy 0.18, standard `Parent`/`Children` components are replaced with the highly
 /// efficient relationship-based `ChildOf` system, which we target here directly.
+///
+/// # Performance
+/// The root pass only processes entities whose `SpatialTransform` actually changed
+/// or were newly added. The child pass still iterates all children to handle parent
+/// chain changes, but the entire system is skipped via `run_if(has_transform_changes)`
+/// when no entity's local transform was modified.
 #[allow(clippy::type_complexity)]
 pub fn transform_propagation_system(
     mut param_set: ParamSet<(
-        // P0: Root entities transform query
-        Query<(&SpatialTransform, &mut GlobalSpatialTransform), Without<ChildOf>>,
+        // P0: Root entities whose local transform changed
+        Query<
+            (&SpatialTransform, &mut GlobalSpatialTransform),
+            (Without<ChildOf>, Or<(Changed<SpatialTransform>, Added<SpatialTransform>)>),
+        >,
         // P1: Child entities parent lookup query
         Query<(Entity, &ChildOf), With<SpatialTransform>>,
         // P2: General transform query for hierarchy resolution
@@ -22,7 +45,7 @@ pub fn transform_propagation_system(
     )>,
     mut children_to_update: Local<Vec<(Entity, Entity)>>,
 ) {
-    // 1. Root pass: Initialize global transforms from local transforms for all roots
+    // 1. Root pass: Only process roots whose local transform changed or were added
     for (local, mut global) in param_set.p0().iter_mut() {
         *global = GlobalSpatialTransform::from_local(local);
     }
@@ -51,12 +74,22 @@ pub fn transform_propagation_system(
     }
 }
 
+/// Run condition: skip opacity propagation when no local opacity has changed.
+pub fn has_opacity_changes(
+    query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
+) -> bool {
+    !query.is_empty()
+}
+
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.18's `ChildOf` relation.
 #[allow(clippy::type_complexity)]
 pub fn opacity_propagation_system(
     mut param_set: ParamSet<(
-        // P0: Root entities opacity query
-        Query<(&Opacity, &mut GlobalOpacity), Without<ChildOf>>,
+        // P0: Root entities whose local opacity changed
+        Query<
+            (&Opacity, &mut GlobalOpacity),
+            (Without<ChildOf>, Or<(Changed<Opacity>, Added<Opacity>)>),
+        >,
         // P1: Child entities parent lookup query
         Query<(Entity, &ChildOf), With<Opacity>>,
         // P2: General opacity query for hierarchy resolution
@@ -64,7 +97,7 @@ pub fn opacity_propagation_system(
     )>,
     mut children_to_update: Local<Vec<(Entity, Entity)>>,
 ) {
-    // 1. Root pass: Global opacity equals local opacity
+    // 1. Root pass: Only process roots whose opacity changed or were added
     for (local, mut global) in param_set.p0().iter_mut() {
         global.0 = local.0;
     }
