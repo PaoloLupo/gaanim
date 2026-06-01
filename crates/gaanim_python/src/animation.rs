@@ -94,6 +94,21 @@ impl PyAnimationSpec {
             AnimationType::Write { stroke_width } => {
                 format!("write(stroke_width={:?})", stroke_width)
             }
+            AnimationType::Create { stroke_width } => {
+                format!("create(stroke_width={:?})", stroke_width)
+            }
+            AnimationType::Uncreate { stroke_width } => {
+                format!("uncreate(stroke_width={:?})", stroke_width)
+            }
+            AnimationType::Unwrite { stroke_width } => {
+                format!("unwrite(stroke_width={:?})", stroke_width)
+            }
+            AnimationType::GrowFromCenter => "grow_from_center".to_string(),
+            AnimationType::ShrinkToCenter => "shrink_to_center".to_string(),
+            AnimationType::SpinInFromNothing => "spin_in_from_nothing".to_string(),
+            AnimationType::Indicate { color, scale_factor } => {
+                format!("indicate(color={:?}, scale_factor={})", color, scale_factor)
+            }
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",
@@ -233,6 +248,66 @@ impl PyAnimationSpec {
         let target = self.inner.target;
         Self {
             inner: MobjectRef { id: target }.write_with_stroke_width(duration, stroke_width),
+        }
+    }
+
+    /// Progressive draw animation in parallel (without character/element stagger).
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn create(&self, duration: f64, stroke_width: Option<f64>) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.create_with_stroke_width(duration, stroke_width),
+        }
+    }
+
+    /// Progressive erasure of the Mobject's path(s) and fill in parallel.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn uncreate(&self, duration: f64, stroke_width: Option<f64>) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.uncreate_with_stroke_width(duration, stroke_width),
+        }
+    }
+
+    /// Staggered sequential erasure of the Mobject's path(s) and fill in reverse order.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn unwrite(&self, duration: f64, stroke_width: Option<f64>) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.unwrite_with_stroke_width(duration, stroke_width),
+        }
+    }
+
+    /// Scale up from 0.0 to original size centered at current local position.
+    fn grow_from_center(&self) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.grow_from_center(),
+        }
+    }
+
+    /// Scale down from current size to 0.0 centered at current local position.
+    fn shrink_to_center(&self) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.shrink_to_center(),
+        }
+    }
+
+    /// Scale up from 0.0 and rotate 360 degrees concurrently.
+    fn spin_in_from_nothing(&self) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.spin_in_from_nothing(),
+        }
+    }
+
+    /// Temporarily scale up and highlight with custom parameters before returning to baseline.
+    #[pyo3(signature = (color=None, scale_factor=1.25))]
+    fn indicate(&self, color: Option<&PyColor>, scale_factor: f64) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.indicate_with_color_and_scale(color.map(|c| c.0), scale_factor),
         }
     }
 }

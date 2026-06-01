@@ -58,6 +58,22 @@ pub enum AnimationType {
         /// draw phase. `None` means "use the target's existing stroke width".
         stroke_width: Option<f64>,
     },
+    Create {
+        stroke_width: Option<f64>,
+    },
+    Uncreate {
+        stroke_width: Option<f64>,
+    },
+    Unwrite {
+        stroke_width: Option<f64>,
+    },
+    GrowFromCenter,
+    ShrinkToCenter,
+    SpinInFromNothing,
+    Indicate {
+        color: Option<Color>,
+        scale_factor: f64,
+    },
 }
 
 /// A fluent builder for an animation tween clip.
@@ -244,6 +260,121 @@ impl MobjectRef {
             anim_type: AnimationType::Write { stroke_width },
             duration,
             rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Manim-style **Create**: progressively draws the Mobject's path(s) along
+    /// their arc length in parallel (without character/element stagger).
+    pub fn create(self, duration: f64) -> AnimationBuilder {
+        self.create_with_stroke_width(duration, None)
+    }
+
+    /// Same as [`create`](Self::create) but with an explicit outline stroke width.
+    pub fn create_with_stroke_width(
+        self,
+        duration: f64,
+        stroke_width: Option<f64>,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Create { stroke_width },
+            duration,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Progressive erasure of the Mobject's path(s) and fill in parallel.
+    pub fn uncreate(self, duration: f64) -> AnimationBuilder {
+        self.uncreate_with_stroke_width(duration, None)
+    }
+
+    /// Same as [`uncreate`](Self::uncreate) but with an explicit outline stroke width.
+    pub fn uncreate_with_stroke_width(
+        self,
+        duration: f64,
+        stroke_width: Option<f64>,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Uncreate { stroke_width },
+            duration,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Staggered sequential erasure of the Mobject's path(s) and fill in reverse order (e.g. right-to-left).
+    pub fn unwrite(self, duration: f64) -> AnimationBuilder {
+        self.unwrite_with_stroke_width(duration, None)
+    }
+
+    /// Same as [`unwrite`](Self::unwrite) but with an explicit outline stroke width.
+    pub fn unwrite_with_stroke_width(
+        self,
+        duration: f64,
+        stroke_width: Option<f64>,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Unwrite { stroke_width },
+            duration,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Scale up from 0.0 to original size centered at current local position.
+    pub fn grow_from_center(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::GrowFromCenter,
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Scale down from current size to 0.0 centered at current local position.
+    pub fn shrink_to_center(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::ShrinkToCenter,
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Scale up from 0.0 and rotate 360 degrees concurrently.
+    pub fn spin_in_from_nothing(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::SpinInFromNothing,
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Temporarily scale up to 1.25x and highlight with GOLD color before returning to baseline.
+    pub fn indicate(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Indicate {
+                color: Some(Color::from_rgb8(255, 215, 0)),
+                scale_factor: 1.25,
+            },
+            duration: 1.0,
+            rate_func: RateFunc::ThereAndBack,
+        }
+    }
+
+    /// Temporarily scale up and highlight with custom parameters before returning to baseline.
+    pub fn indicate_with_color_and_scale(
+        self,
+        color: Option<Color>,
+        scale_factor: f64,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Indicate { color, scale_factor },
+            duration: 1.0,
+            rate_func: RateFunc::ThereAndBack,
         }
     }
 }

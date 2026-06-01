@@ -658,6 +658,59 @@ impl PyMobject {
         let builder = MobjectRef { id: self.id }.write_with_stroke_width(duration, stroke_width);
         PyAnimationSpec::from_builder(builder)
     }
+
+    /// Progressive draw animation in parallel (without character/element stagger).
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn create(&self, duration: f64, stroke_width: Option<f64>) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.create_with_stroke_width(duration, stroke_width);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Progressive erasure of the Mobject's path(s) and fill in parallel.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn uncreate(&self, duration: f64, stroke_width: Option<f64>) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.uncreate_with_stroke_width(duration, stroke_width);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Staggered sequential erasure of the Mobject's path(s) and fill in reverse order.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn unwrite(&self, duration: f64, stroke_width: Option<f64>) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.unwrite_with_stroke_width(duration, stroke_width);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Scale up from 0.0 to original size centered at current local position.
+    fn grow_from_center(&self) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.grow_from_center();
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Scale down from current size to 0.0 centered at current local position.
+    fn shrink_to_center(&self) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.shrink_to_center();
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Scale up from 0.0 and rotate 360 degrees concurrently.
+    fn spin_in_from_nothing(&self) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.spin_in_from_nothing();
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Temporarily scale up and highlight with custom parameters before returning to baseline.
+    #[pyo3(signature = (color=None, scale_factor=1.25))]
+    fn indicate(&self, color: Option<&PyColor>, scale_factor: f64) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.indicate_with_color_and_scale(color.map(|c| c.0), scale_factor);
+        PyAnimationSpec::from_builder(builder)
+    }
 }
 
 fn direction_from_str(s: &str) -> Option<LayoutDirection> {

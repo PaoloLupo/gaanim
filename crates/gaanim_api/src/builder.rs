@@ -292,12 +292,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
-        // The Write animation expands into N staggered sub-clips, so it
-        // needs its own branch that can clone child ids and access the
-        // timeline multiple times. All other variants collapse to a
+        // The Write/Create/Uncreate/Unwrite/SpinIn/Indicate animations expand into
+        // multiple staggered or parallel sub-clips, so they have their own branches
+        // that access the timeline multiple times. All other variants collapse to a
         // single clip below.
         if matches!(anim.anim_type, AnimationType::Write { .. }) {
-            self.play_write_internal(anim);
+            self.play_draw_erase_internal(anim, false, true);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Create { .. }) {
+            self.play_draw_erase_internal(anim, false, false);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Unwrite { .. }) {
+            self.play_draw_erase_internal(anim, true, true);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Uncreate { .. }) {
+            self.play_draw_erase_internal(anim, true, false);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::SpinInFromNothing) {
+            self.play_spin_in_from_nothing_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Indicate { .. }) {
+            self.play_indicate_internal(anim);
             return;
         }
 
@@ -382,7 +402,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.stroke.style.width = to;
                 PropertyLensSpec::StrokeWidth { from, to }
             }
-            AnimationType::Write { .. } => unreachable!("Write is dispatched in the early branch above"),
+            AnimationType::GrowFromCenter => {
+                let to = state.transform.scale;
+                let from = gaanim_core::glam::DVec3::ZERO;
+                // Pre-set the scale to 0.0 right now via deferred commands to avoid flickers
+                let mut temp_transform = state.transform;
+                temp_transform.scale = from;
+                self.commands.entity(state.entity).insert(temp_transform);
+                PropertyLensSpec::Scale { from, to }
+            }
+            AnimationType::ShrinkToCenter => {
+                let from = state.transform.scale;
+                let to = gaanim_core::glam::DVec3::ZERO;
+                state.transform.scale = to;
+                PropertyLensSpec::Scale { from, to }
+            }
+            AnimationType::Write { .. }
+            | AnimationType::Create { .. }
+            | AnimationType::Unwrite { .. }
+            | AnimationType::Uncreate { .. }
+            | AnimationType::SpinInFromNothing
+            | AnimationType::Indicate { .. } => unreachable!("Expansion is dispatched in the early branch above"),
         };
 
         // Add the resolved clip to the Timeline resource
@@ -417,27 +457,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// (via the deferred command queue). By the time the first render
     /// frame runs, the fill alpha multiplier is `0.0` and the renderer
     /// will render an empty/invisible fill, so the user only ever sees
-    /// the progressive path draw followed by the fill cross-fade.
-    ///
-    /// Stagger math (ported from `crabanim::engine::animation::drawing`):
-    /// `item_duration = duration / (1 + (n - 1) * lag_ratio)`,
-    /// `lag_step = item_duration * lag_ratio` with `lag_ratio = 0.25`.
-    /// So the next child starts when the previous one is 25% drawn.
-    fn play_write_internal(&mut self, anim: AnimationBuilder) {
+    /// Internal: generalize a draw/erase animation (Write, Create, Unwrite, Uncreate)
+    /// as one or more staggered or parallel sub-clip sequences.
+    fn play_draw_erase_internal(&mut self, anim: AnimationBuilder, is_erase: bool, staggered: bool) {
         let stroke_width = match anim.anim_type {
             AnimationType::Write { stroke_width } => stroke_width,
-            _ => unreachable!(),
+            AnimationType::Create { stroke_width } => stroke_width,
+            AnimationType::Unwrite { stroke_width } => stroke_width,
+            AnimationType::Uncreate { stroke_width } => stroke_width,
+            _ => None,
         };
 
         // Collect target ids: the target's own id plus all child spans.
-        // We snapshot the ids because the inner loop needs `self.timeline`
-        // (which immutably borrows `self`).
-        let items: Vec<ObjectId> = {
+        let mut items: Vec<ObjectId> = {
             let state = match self.states.get(&anim.target) {
                 Some(s) => s,
                 None => {
                     bevy::prelude::warn!(
-                        "Attempted to Write unregistered Mobject: {:?}",
+                        "Attempted to animate unregistered Mobject: {:?}",
                         anim.target
                     );
                     return;
@@ -455,19 +492,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
-        // (A) Auto-stroke: entities that have no stroke brush yet
-        // (the common case for text glyphs, which default to
-        // `StrokeBrush::transparent()`) get a stroke synthesized from
-        // the fill color and the user-supplied `stroke_width`
-        // (or 1.0). The fill color is extracted from:
-        //   1. `Brush::Solid(c)` — direct color.
-        //   2. `Brush::Gradient(g)` — first color stop of the gradient.
-        //   3. `Brush::Image(_)` — falls back to white (no meaningful
-        //      single color).
-        // Without an outline brush the renderer's
-        // `if let Some(stroke_brush)` branch is skipped, so the
-        // progressive `PathCompletion` trim would be invisible — the
-        // user would only ever see the fill.
+        // If staggered and is_erase, we reverse the items so sequential erasure happens in reverse (right-to-left)
+        if staggered && is_erase {
+            items.reverse();
+        }
+
+        // (A) Auto-stroke: entities that have no stroke brush yet get a stroke synthesized
+        // from the fill color and the user-supplied stroke_width (or 1.0) so the outline
+        // is visible during drawing/erasing.
         for item_id in &items {
             if let Some(state) = self.states.get_mut(item_id) {
                 if state.stroke.brush.is_none() {
@@ -484,50 +516,43 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        // (B) Hide the fill on every target entity right now. The next
-        // four clips (reset, hold, PathCompletion, then FillDrawProgress
-        // fade) animate it back to fully drawn, so the user only sees
-        // the path being drawn and then the fill cross-fading in. The
-        // insert is a best-effort initial value; the "reset" clip
-        // below is the authoritative boundary reset.
+        // (B) Set initial value via deferred commands to avoid flicker
         for item_id in &items {
             if let Some(state) = self.states.get(item_id) {
+                let initial_val = if is_erase { 1.0 } else { 0.0 };
                 self.commands
                     .entity(state.entity)
-                    .insert(gaanim_animation::FillDrawProgress(0.0));
+                    .insert(gaanim_animation::FillDrawProgress(initial_val));
+
+                // If drawing, immediately insert an empty Path2D to guarantee no first-frame flash!
+                if !is_erase {
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::components::Path2D(gaanim_core::kurbo::BezPath::new()));
+                }
             }
         }
 
-        /// Lag ratio between consecutive items in a multi-character
-        /// Write. With 0.25, the next character starts its own outline
-        /// draw when the previous one is 25% through its total duration,
-        /// producing a tighter, faster cascade than the Manim default
-        /// 0.5 (which leaves a more visible per-character pause).
+        /// Lag ratio between consecutive items.
         const LAG_RATIO: f64 = 0.25;
-        /// Fraction of `item_duration` spent drawing the outline before
-        /// the fill cross-fade starts. Matches Manim's default split
-        /// (~70% draw, ~30% fade-in).
+        /// Fraction of item_duration spent drawing/erasing the outline vs fill fade.
         const DRAW_RATIO: f64 = 0.7;
 
-        let item_duration = anim.duration / (1.0 + (n as f64 - 1.0) * LAG_RATIO);
-        let lag_step = item_duration * LAG_RATIO;
+        let item_duration = if staggered {
+            anim.duration / (1.0 + (n as f64 - 1.0) * LAG_RATIO)
+        } else {
+            anim.duration
+        };
+        let lag_step = if staggered { item_duration * LAG_RATIO } else { 0.0 };
         let min_step = 1e-6_f64.max(item_duration * 0.01);
 
         let draw_duration = (item_duration * DRAW_RATIO).max(min_step);
         let fade_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
 
-        // (C) Global fill reset: a 0-duration clip scheduled at
-        // `self.current_time` (the start of the entire Write, *not*
-        // per-character) that forces `FillDrawProgress` back to 0.0
-        // for every target entity at once. This is what prevents the
-        // "blinking" effect in back-to-back playbacks: a per-character
-        // hold would only hide the fill for one character at a time
-        // (because of the LAG_RATIO stagger), so a character whose
-        // `item_start` is still in the future would render fully filled
-        // for that interval. The reset clip runs for every character
-        // at the same instant, so the fill is hidden from the very
-        // first frame of the Write and stays hidden until the fade
-        // clip kicks in.
+        // (C) Global resets at self.current_time to ensure determinism during seek/rewind.
+        let reset_fill_val = if is_erase { 1.0 } else { 0.0 };
+        let reset_path_val = if is_erase { 1.0 } else { 0.0 };
+
         for item_id in &items {
             self.timeline.add_clip(
                 self.default_track,
@@ -535,95 +560,120 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                    lens: PropertyLensSpec::FillDrawProgress { from: reset_fill_val, to: reset_fill_val },
                     rate_func: anim.rate_func.clone(),
                 }),
             );
-        }
-
-        // (C') Global outline reset: the same trick applied to
-        // `PathCompletion`. Without this, every entity keeps its
-        // default full path (PathCompletion at 1.0) between frame 0
-        // and its own `item_start`, so the full stroke of every
-        // glyph is visible at the very first frame. Trimming the
-        // path to 0% here means no stroke is drawn until each
-        // character's own draw clip starts increasing the
-        // completion. The clip runs at `self.current_time` for
-        // every entity at once (same rationale as the fill reset).
-        for item_id in &items {
             self.timeline.add_clip(
                 self.default_track,
                 self.current_time,
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
-                    lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
+                    lens: PropertyLensSpec::PathCompletion { from: reset_path_val, to: reset_path_val },
                     rate_func: anim.rate_func.clone(),
                 }),
             );
         }
 
+        // (D) Schedule per-item sequence
         for (i, item_id) in items.iter().enumerate() {
             let item_delay = (i as f64 * lag_step).max(0.0);
             let item_start = self.current_time + item_delay;
-            let fade_start = item_start + draw_duration;
 
-            // (1) Fill hold: clamps `FillDrawProgress` to 0.0 for the
-            // entire draw phase. Belt-and-suspenders alongside the
-            // global reset clip: it keeps the fill hidden even if a
-            // stray clip from a different animation tries to mutate
-            // the component mid-draw.
-            self.timeline.add_clip(
-                self.default_track,
-                item_start,
-                draw_duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                    rate_func: anim.rate_func.clone(),
-                }),
-            );
+            if !is_erase {
+                // DRAW FLOW: outline draws first, then fill fades in
+                let fade_start = item_start + draw_duration;
 
-            // (2) Outline draw: PathCompletion 0.0 -> 1.0 over draw_duration.
-            // The lens application reads the cached `PathSource` and
-            // trims the visible `Path2D` directly. With the auto-stroke
-            // fix above, the trimmed path is now actually visible in the
-            // renderer's stroke pass.
-            self.timeline.add_clip(
-                self.default_track,
-                item_start,
-                draw_duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: *item_id,
-                    lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                    rate_func: anim.rate_func.clone(),
-                }),
-            );
+                // 1. Fill hold at 0.0 during draw phase
+                self.timeline.add_clip(
+                    self.default_track,
+                    item_start,
+                    draw_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
 
-            // (3) Fill cross-fade: FillDrawProgress 0.0 -> 1.0 over
-            // fade_duration, starting right after the path draw completes.
-            // The lens inserts/updates a `FillDrawProgress` component on
-            // the entity, which the renderer reads to modulate the fill
-            // brush's color alpha. The preceding hold clip ends exactly
-            // at `fade_start`, so the fade clip's t=0 value (0.0) takes
-            // over seamlessly.
-            self.timeline.add_clip(
-                self.default_track,
-                fade_start,
-                fade_duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
-                    rate_func: anim.rate_func.clone(),
-                }),
-            );
+                // 2. Outline draw: PathCompletion 0.0 -> 1.0
+                self.timeline.add_clip(
+                    self.default_track,
+                    item_start,
+                    draw_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
 
-            // (3) Optional stroke width override during the draw phase.
-            // We schedule a 0-duration `StrokeWidthTo` clip at item_start
-            // so the outline thickness is set to the user-requested value
-            // before any pixels of the draw are visible. We don't restore
-            // the original — the user can chain a later StrokeWidthTo if
-            // they want to revert.
+                // 3. Fill fade-in: FillDrawProgress 0.0 -> 1.0
+                self.timeline.add_clip(
+                    self.default_track,
+                    fade_start,
+                    fade_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+            } else {
+                // ERASE FLOW: fill fades out first, then outline erases
+                let draw_start = item_start + fade_duration;
+
+                // 1. Fill fade-out: FillDrawProgress 1.0 -> 0.0
+                self.timeline.add_clip(
+                    self.default_track,
+                    item_start,
+                    fade_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+
+                // 2. Outline hold at 1.0 during fade phase
+                self.timeline.add_clip(
+                    self.default_track,
+                    item_start,
+                    fade_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+
+                // 3. Outline erase: PathCompletion 1.0 -> 0.0
+                self.timeline.add_clip(
+                    self.default_track,
+                    draw_start,
+                    draw_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+
+                // 4. Fill hold at 0.0 during erase phase
+                self.timeline.add_clip(
+                    self.default_track,
+                    draw_start,
+                    draw_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+            }
+
+            // Stroke width override if requested
             if let Some(width) = stroke_width {
                 self.timeline.add_clip(
                     self.default_track,
@@ -638,6 +688,169 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         rate_func: anim.rate_func.clone(),
                     }),
                 );
+            }
+        }
+    }
+
+    /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
+    fn play_spin_in_from_nothing_internal(&mut self, anim: AnimationBuilder) {
+        let state = match self.states.get_mut(&anim.target) {
+            Some(s) => s,
+            None => {
+                bevy::prelude::warn!(
+                    "Attempted to SpinInFromNothing unregistered Mobject: {:?}",
+                    anim.target
+                );
+                return;
+            }
+        };
+
+        let initial_scale = state.transform.scale;
+        let initial_rotation = state.transform.rotation;
+
+        // To avoid quaternion SLERP shortest-path 0-rotation logic issues for 360 degrees,
+        // we split the rotation into two consecutive 180-degree clips (PI radians each).
+        let mid_rotation = initial_rotation * gaanim_core::glam::DQuat::from_rotation_z(std::f64::consts::PI);
+        let end_rotation = initial_rotation * gaanim_core::glam::DQuat::from_rotation_z(2.0 * std::f64::consts::PI);
+
+        // Pre-set the scale to 0.0 right now via deferred commands to avoid first-frame flickers
+        let mut temp_transform = state.transform;
+        temp_transform.scale = gaanim_core::glam::DVec3::ZERO;
+        self.commands.entity(state.entity).insert(temp_transform);
+
+        // Update the final expected state at the end of scheduling
+        state.transform.rotation = end_rotation;
+
+        // 1. Unified scale clip (0.0 -> target_scale) over the full duration
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: initial_scale,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        // 2. Rotation part 1 (0 -> 180 deg) over first half
+        let half_duration = anim.duration * 0.5;
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            half_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Rotation {
+                    from: initial_rotation,
+                    to: mid_rotation,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        // 3. Rotation part 2 (180 -> 360 deg) over second half
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + half_duration,
+            half_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Rotation {
+                    from: mid_rotation,
+                    to: end_rotation,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+    }
+
+    /// Internal: materialize `Indicate` as a temporary scale-up and color highlight.
+    fn play_indicate_internal(&mut self, anim: AnimationBuilder) {
+        let (highlight_color, scale_factor) = match anim.anim_type {
+            AnimationType::Indicate { color, scale_factor } => (color, scale_factor),
+            _ => unreachable!(),
+        };
+
+        // Collect target ids: root target plus all child spans for coloring.
+        let items: Vec<ObjectId> = {
+            let state = match self.states.get(&anim.target) {
+                Some(s) => s,
+                None => {
+                    bevy::prelude::warn!(
+                        "Attempted to Indicate unregistered Mobject: {:?}",
+                        anim.target
+                    );
+                    return;
+                }
+            };
+            if state.child_spans.is_empty() {
+                vec![anim.target]
+            } else {
+                state.child_spans.iter().map(|(id, _, _)| *id).collect()
+            }
+        };
+
+        // 1. Schedule unified scale clip on root target using ThereAndBack
+        let root_state = match self.states.get(&anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+        let scale_from = root_state.transform.scale;
+        let scale_to = scale_from * scale_factor;
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: scale_from,
+                    to: scale_to,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        // 2. Schedule color highlighting on children (if highlight color is requested)
+        if let Some(color) = highlight_color {
+            for item_id in &items {
+                if let Some(state) = self.states.get(item_id) {
+                    if let Some(Brush::Solid(c)) = &state.fill {
+                        self.timeline.add_clip(
+                            self.default_track,
+                            self.current_time,
+                            anim.duration,
+                            ClipPayload::Animation(AnimationSpec {
+                                target: *item_id,
+                                lens: PropertyLensSpec::FillColor {
+                                    from: *c,
+                                    to: color,
+                                },
+                                rate_func: anim.rate_func.clone(),
+                            }),
+                        );
+                    }
+                    if let Some(Brush::Solid(c)) = &state.stroke.brush {
+                        self.timeline.add_clip(
+                            self.default_track,
+                            self.current_time,
+                            anim.duration,
+                            ClipPayload::Animation(AnimationSpec {
+                                target: *item_id,
+                                lens: PropertyLensSpec::StrokeColor {
+                                    from: *c,
+                                    to: color,
+                                },
+                                rate_func: anim.rate_func.clone(),
+                            }),
+                        );
+                    }
+                }
             }
         }
     }
