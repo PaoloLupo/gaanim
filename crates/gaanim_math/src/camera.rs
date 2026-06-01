@@ -88,6 +88,13 @@ impl Camera {
         }
     }
 
+    /// Extract the Z-axis rotation angle from the camera's quaternion.
+    ///
+    /// Like [`SpatialTransform::z_angle`], this avoids computing unused Euler angles.
+    pub fn z_angle(&self) -> f64 {
+        2.0 * f64::atan2(self.rotation.z, self.rotation.w)
+    }
+
     /// Computes the 2D affine transformation matrix for Vello (only when Orthographic projection is used).
     ///
     /// Maps coordinates from world space into centered pixel coordinates:
@@ -97,7 +104,7 @@ impl Camera {
             Projection::Orthographic { zoom } => zoom,
             _ => 1.0,
         };
-        let (_, _, z_angle) = self.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
+        let z_angle = self.z_angle();
         let hw = (self.viewport_width as f64) / 2.0;
         let hh = (self.viewport_height as f64) / 2.0;
 

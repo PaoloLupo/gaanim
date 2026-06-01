@@ -108,12 +108,22 @@ impl SpatialTransform {
         self
     }
 
+    /// Extract the Z-axis rotation angle from the quaternion.
+    ///
+    /// In 2D mode the rotation is always around Z, so computing all three Euler
+    /// angles and discarding X/Y is wasteful. This method directly computes only
+    /// the Z angle from the quaternion's `z` and `w` components with a single
+    /// `atan2` call.
+    pub fn z_angle(&self) -> f64 {
+        2.0 * f64::atan2(self.rotation.z, self.rotation.w)
+    }
+
     /// Computes the 2D affine transformation matrix for Vello rendering.
     ///
     /// The transformation order takes the pivot/anchor into account:
     /// `translate(translation + anchor) * rotate(z_angle) * scale(scale.x, scale.y) * translate(-anchor)`
     pub fn to_affine_2d(&self) -> Affine {
-        let (_, _, z_angle) = self.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
+        let z_angle = self.z_angle();
 
         Affine::translate((
             self.translation.x + self.anchor.x,

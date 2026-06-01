@@ -48,8 +48,9 @@ pub fn sync_gaanim_camera_to_bevy_system(
         // Position
         transform.translation.x = cam.position.x as f32;
         transform.translation.y = cam.position.y as f32;
-        // Rotation (2D Z-axis only)
-        let (_, _, z_angle) = cam.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
+        // Rotation (2D Z-axis only) — compute directly from quaternion
+        // to avoid the three-trig overhead of full Euler decomposition.
+        let z_angle = 2.0 * f64::atan2(cam.rotation.z, cam.rotation.w);
         transform.rotation = Quat::from_rotation_z(-z_angle as f32);
 
         // Projection: only Orthographic is supported for 2D Vello
