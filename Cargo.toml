@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/gaanim_core",
+  "crates/gaanim_math",
+  "crates/gaanim_scene",
+  "crates/gaanim_animation",
+  "crates/gaanim_timeline"
+]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[workspace.dependencies]
+bevy = {version = "0.18", default-features = false, features = [
+  "2d"
+]}
+thiserror = "2.0"
+peniko = "0.6.1"
+kurbo = "0.13.1"
+glam = {version = "0.33.0", features = ["f64"]}

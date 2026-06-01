@@ -1,0 +1,30 @@
+[package]
+name = "gaanim_animation"
+version = "0.1.0"
+edition = "2024"
+description = "Tween systems, interpolation lenses, keyframes, and reactive signals for gaanim v2"
+
+[dependencies]
+# Local workspace dependencies
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+
+# Re-use workspace dependencies
+bevy = { workspace = true }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+thiserror = { workspace = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = [
+    "dep:serde",
+    "gaanim_core/serde",
+    "gaanim_math/serde",
+    "gaanim_scene/serde",
+    "peniko/serde",
+    "kurbo/serde"
+]

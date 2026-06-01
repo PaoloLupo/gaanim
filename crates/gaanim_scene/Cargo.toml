@@ -1,0 +1,22 @@
+[package]
+name = "gaanim_scene"
+version = "0.1.0"
+edition = "2024"
+description = "ECS Scene graph, mobject components, and hierarchical propagation systems for gaanim v2"
+
+[dependencies]
+# Local workspace dependencies
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+
+# Re-use workspace dependencies
+bevy = { workspace = true }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+thiserror = { workspace = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "gaanim_core/serde", "gaanim_math/serde", "peniko/serde", "kurbo/serde"]

@@ -1,0 +1,13 @@
+/target
+Cargo.lock
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+.cargo/
+*.svg
+*.png
+*.mp4
+*.webp
+*.webm
+.venv/
