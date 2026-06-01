@@ -1,0 +1,20 @@
+[package]
+name = "gaanim_python"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "gaanim_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py312", "py-clone"] }
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_text = { path = "../gaanim_text" }
+gaanim_api = { path = "../gaanim_api" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+bevy = { version = "0.18", default-features = false }

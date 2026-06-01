@@ -10,7 +10,8 @@ members = [
   "crates/gaanim_objects",
   "crates/gaanim_layout",
   "crates/gaanim_api",
-  "crates/gaanim_text"
+  "crates/gaanim_text",
+  "crates/gaanim_python"
 ]
 
 [profile.dev]
