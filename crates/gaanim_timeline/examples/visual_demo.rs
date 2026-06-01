@@ -3,20 +3,22 @@ use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_math::{Camera, GlobalSpatialTransform, RateFunc, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, GaanimScenePlugin, MobjectId, Opacity,
-    RenderLayer, RenderOrder, StrokeBrush, Visible, SceneSet,
+    FillBrush, GlobalOpacity, GaanimScenePlugin, MobjectId, Opacity, Path2D,
+    RenderLayer, RenderOrder, StrokeBrush, Visible,
 };
 use gaanim_animation::{GaanimAnimationPlugin, DeltaTime};
 use gaanim_timeline::{
     GaanimTimelinePlugin, timeline::Timeline, clip::ClipPayload, clip::AnimationSpec, clip::PropertyLensSpec,
 };
+use gaanim_renderer::prelude::*;
+use gaanim_core::kurbo::{self, Shape};
 
 fn main() {
     App::new()
         // Add Bevy's rendering and windowing defaults
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Gaanim v2 — Real-time Visual ECS Demo".into(),
+                title: "Gaanim v2 — Real-time Visual Vello Vector Demo".into(),
                 resolution: (1280, 720).into(),
                 ..default()
             }),
@@ -26,10 +28,10 @@ fn main() {
         .add_plugins(GaanimScenePlugin)
         .add_plugins(GaanimAnimationPlugin)
         .add_plugins(GaanimTimelinePlugin)
+        // Add the high-performance Vello GPU renderer plugin
+        .add_plugins(GaanimRendererPlugin)
         // Setup initial camera and scene graph
         .add_systems(Startup, setup_scene)
-        // Draw Mobjects to Bevy screen using high-performance 2D Gizmos
-        .add_systems(Update, draw_mobjects_gizmos.after(SceneSet::Propagation))
         // Simple timeline clock driver
         .add_systems(Update, drive_timeline_clock)
         .run();
@@ -39,13 +41,13 @@ fn main() {
 fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
     // 1. Spawn a default Orthographic camera resource and entity
     commands.insert_resource(Camera::ortho_2d(1280, 720));
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, VelloView));
 
     // Create unique IDs for our Mobjects (matching Bevy bitwise Entities)
     let parent_id = ObjectId::from_parts(1, 1);
     let child_id = ObjectId::from_parts(2, 1);
 
-    // 2. Spawn Parent Mobject (represented as a dynamic rotating block)
+    // 2. Spawn Parent Mobject (represented as a dynamic rotating rounded rectangle)
     let parent_entity = commands
         .spawn((
             MobjectId(parent_id),
@@ -60,6 +62,8 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
                 brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
                 style: gaanim_core::kurbo::Stroke::new(3.0),
             },
+            // True vector shape: Rounded Rectangle!
+            Path2D(kurbo::RoundedRect::new(-50.0, -50.0, 50.0, 50.0, 12.0).to_path(0.1)),
             RenderOrder::default(),
             RenderLayer::Vello2D,
             Visible,
@@ -81,6 +85,8 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
                 brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
                 style: gaanim_core::kurbo::Stroke::new(2.0),
             },
+            // True vector shape: Circle!
+            Path2D(kurbo::Circle::new((0.0, 0.0), 25.0).to_path(0.1)),
             RenderOrder::default(),
             RenderLayer::Vello2D,
             Visible,
@@ -166,89 +172,4 @@ fn drive_timeline_clock(
     mut delta_time: ResMut<DeltaTime>,
 ) {
     delta_time.dt = time.delta_secs() as f64;
-}
-
-/// System: Queries the accumulated global properties and renders everything in real-time
-fn draw_mobjects_gizmos(
-    query: Query<(
-        &MobjectId,
-        &GlobalSpatialTransform,
-        &GlobalOpacity,
-        Option<&FillBrush>,
-        Option<&StrokeBrush>,
-    ), With<Visible>>,
-    mut gizmos: Gizmos,
-) {
-    // Draw each Mobject
-    for (mobj_id, global_transform, opacity, fill_opt, stroke_opt) in &query {
-        // Extract 2D translation and scale from the propagated 4x4 matrix
-        let (_, _, translation) = global_transform.mat4.to_scale_rotation_translation();
-        let pos = Vec2::new(translation.x as f32, translation.y as f32);
-        
-        let alpha = opacity.0;
-
-        // Render Parent Mobject (ID = index 1) as a beautiful blue circle
-        if mobj_id.0.index() == 1 {
-            if let Some(fill) = fill_opt
-                && let Some(gaanim_core::peniko::Brush::Solid(color)) = &fill.0 {
-                    let rgba = color.to_rgba8();
-                    let bevy_color = Color::srgba(
-                        rgba.r as f32 / 255.0,
-                        rgba.g as f32 / 255.0,
-                        rgba.b as f32 / 255.0,
-                        rgba.a as f32 / 255.0 * alpha,
-                    );
-                    
-                    gizmos.circle_2d(pos, 50.0, bevy_color);
-                }
-
-            // Draw border outline
-            if let Some(stroke) = stroke_opt
-                && let Some(gaanim_core::peniko::Brush::Solid(color)) = &stroke.brush {
-                    let rgba = color.to_rgba8();
-                    let bevy_color = Color::srgba(
-                        rgba.r as f32 / 255.0,
-                        rgba.g as f32 / 255.0,
-                        rgba.b as f32 / 255.0,
-                        rgba.a as f32 / 255.0 * alpha,
-                    );
-                    gizmos.circle_2d(pos, 52.0, bevy_color);
-                }
-        }
-        // Render Child Mobject (ID = index 2) as an orbiting pink circle
-        else if mobj_id.0.index() == 2 {
-            if let Some(fill) = fill_opt
-                && let Some(gaanim_core::peniko::Brush::Solid(color)) = &fill.0 {
-                    let rgba = color.to_rgba8();
-                    let bevy_color = Color::srgba(
-                        rgba.r as f32 / 255.0,
-                        rgba.g as f32 / 255.0,
-                        rgba.b as f32 / 255.0,
-                        rgba.a as f32 / 255.0 * alpha,
-                    );
-                    
-                    // Extract local scaling multiplier
-                    let (scale, _, _) = global_transform.mat4.to_scale_rotation_translation();
-                    let radius = 25.0 * scale.x as f32;
-
-                    gizmos.circle_2d(pos, radius, bevy_color);
-                }
-
-            // Draw orbit path border outline
-            if let Some(stroke) = stroke_opt
-                && let Some(gaanim_core::peniko::Brush::Solid(color)) = &stroke.brush {
-                    let rgba = color.to_rgba8();
-                    let bevy_color = Color::srgba(
-                        rgba.r as f32 / 255.0,
-                        rgba.g as f32 / 255.0,
-                        rgba.b as f32 / 255.0,
-                        rgba.a as f32 / 255.0 * alpha,
-                    );
-                    let (scale, _, _) = global_transform.mat4.to_scale_rotation_translation();
-                    let radius = 25.0 * scale.x as f32;
-
-                    gizmos.circle_2d(pos, radius + 2.0, bevy_color);
-                }
-        }
-    }
 }

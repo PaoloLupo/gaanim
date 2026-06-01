@@ -1,29 +1,28 @@
 [package]
-name = "gaanim_timeline"
+name = "gaanim_renderer"
 version = "0.1.0"
 edition = "2024"
-description = "Timeline resource, event-sourced seek, snapshots, presentation slides, and audio synchronization for gaanim v2"
+description = "Vello GPU 2D vector renderer, Fragment Retain caching, wgpu integrations, and effects for gaanim v2"
 
 [dependencies]
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
-gaanim_animation = { path = "../gaanim_animation" }
 
-# Third-party dependencies from workspace / registry
+# Third-party dependencies from workspace
 bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
 
-# Timeline-specific dependencies
-slotmap = { version = "1.1" }
-ordered-float = { version = "5.3" }
+# Graphics & GPU dependencies
+vello = { version = "0.7.0" }
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }
+bevy_vello = "0.13.1"
 
 [features]
 default = []
@@ -32,14 +31,7 @@ serde = [
     "gaanim_core/serde",
     "gaanim_math/serde",
     "gaanim_scene/serde",
-    "gaanim_animation/serde",
     "peniko/serde",
     "kurbo/serde",
-    "glam/serde",
-    "slotmap/serde",
-    "ordered-float/serde"
+    "glam/serde"
 ]
-
-[dev-dependencies]
-gaanim_renderer = { path = "../gaanim_renderer" }
-
