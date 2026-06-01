@@ -354,7 +354,7 @@ pub fn gaanim_render_system(
     let mut scene_entity_found = false;
     for (entity, mut scene) in &mut query_vello_scene {
         scene.reset();
-        scene.append(main_scene, None);
+        scene.append(&main_scene, None);
         scene_entity_found = true;
 
         // Update AABB to match current scene bounds
