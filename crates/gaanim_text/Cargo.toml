@@ -1,25 +1,29 @@
 [package]
-name = "gaanim_api"
+name = "gaanim_text"
 version = "0.1.0"
 edition = "2024"
-description = "Premium fluent script API and animation builder for gaanim v2"
+description = "High-performance vector text outline parser, shaper, and LaTeX/Typst mathematical formula compiler for gaanim v2"
 
 [dependencies]
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
-gaanim_animation = { path = "../gaanim_animation" }
-gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_objects = { path = "../gaanim_objects" }
-gaanim_layout = { path = "../gaanim_layout" }
-gaanim_text = { path = "../gaanim_text" }
 
 # Third-party dependencies from workspace
 bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
+
+# Text shaping and parsing libraries
+ttf-parser = "0.25"
+rustybuzz = "0.20"
+typst = "0.14"
+typst-assets = { version = "0.14", features = ["fonts"] }
+typst-kit = { version = "0.14", features = ["embed-fonts"] }
+fontdb = "0.23"
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }
@@ -31,15 +35,8 @@ serde = [
     "gaanim_core/serde",
     "gaanim_math/serde",
     "gaanim_scene/serde",
-    "gaanim_animation/serde",
-    "gaanim_timeline/serde",
     "gaanim_objects/serde",
-    "gaanim_layout/serde",
-    "gaanim_text/serde",
     "peniko/serde",
     "kurbo/serde",
     "glam/serde"
 ]
-
-[dev-dependencies]
-gaanim_renderer = { path = "../gaanim_renderer" }

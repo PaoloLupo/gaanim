@@ -11,6 +11,9 @@ use gaanim_timeline::{
 use gaanim_layout::{LayoutAnchor, LayoutDirection};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_core::kurbo;
+use gaanim_text::font::FontRegistry;
+use gaanim_text::shaper::compile_text_to_hierarchy;
+use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 
@@ -40,6 +43,7 @@ pub struct MobjectRef {
 pub struct SceneBuilder<'w, 's, 'a> {
     pub commands: &'a mut Commands<'w, 's>,
     pub timeline: &'a mut Timeline,
+    pub font_registry: &'a FontRegistry,
     pub id_counter: u32,
     pub current_time: f64,
     pub states: HashMap<ObjectId, MobjectState>,
@@ -47,18 +51,23 @@ pub struct SceneBuilder<'w, 's, 'a> {
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
-    /// Creates a new `SceneBuilder` wrapping the Bevy `Commands` context and `Timeline` resource.
-    pub fn new(commands: &'a mut Commands<'w, 's>, timeline: &'a mut Timeline) -> Self {
+    /// Creates a new `SceneBuilder` wrapping the Bevy `Commands` context, `Timeline` resource, and `FontRegistry`.
+    pub fn new(
+        commands: &'a mut Commands<'w, 's>,
+        timeline: &'a mut Timeline,
+        font_registry: &'a FontRegistry,
+    ) -> Self {
         // Ensure a default track exists on the timeline
-        let default_track = if timeline.tracks.is_empty() {
-            timeline.add_track("Main Graphics", 0)
+        let default_track = if let Some(track_id) = timeline.tracks.keys().next() {
+            track_id.clone()
         } else {
-            timeline.tracks.keys().next().unwrap()
+            timeline.add_track("Main Graphics", 0)
         };
 
         Self {
             commands,
             timeline,
+            font_registry,
             id_counter: 0,
             current_time: 0.0,
             states: HashMap::new(),
@@ -348,6 +357,123 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             bundle,
             parent_entity: None,
         }
+    }
+
+    /// Compiles a Typst markup or math formula into a hierarchy of vector Mobjects.
+    ///
+    /// `text_font` and `math_font` are optional font family names. When `None`,
+    /// Typst uses its bundled defaults (LibertinusSerif for text, NewCMMath for math).
+    ///
+    /// `text_size` and `math_size` are optional sizes in **pt**. When `None`, Typst
+    /// uses its default (11pt). For a comfortable canvas size, 24pt–32pt is recommended.
+    ///
+    /// Returns a reference to the parent container of the compiled formula.
+    pub fn typst(
+        &mut self,
+        source: &str,
+        is_math: bool,
+        text_font: Option<&str>,
+        math_font: Option<&str>,
+        text_size: Option<f64>,
+        math_size: Option<f64>,
+    ) -> MobjectRef {
+        let parent_id = self.next_id();
+        let fill = Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::BLACK));
+        let stroke = gaanim_scene::StrokeBrush::transparent();
+
+        // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
+        let id_counter = &mut self.id_counter;
+        let next_id_fn = move || {
+            *id_counter += 1;
+            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+        };
+
+        let (entity, bounds) = compile_typst_to_hierarchy(
+            self.commands,
+            self.font_registry,
+            source,
+            is_math,
+            text_font,
+            math_font,
+            text_size,
+            math_size,
+            fill,
+            stroke,
+            parent_id,
+            next_id_fn,
+        );
+
+        let state = MobjectState {
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::BLACK)),
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity,
+        };
+        self.states.insert(parent_id, state);
+
+        MobjectRef { id: parent_id }
+    }
+
+    /// Convenience wrapper for `typst` that uses explicit fonts for both text and math.
+    pub fn typst_with_fonts(
+        &mut self,
+        source: &str,
+        is_math: bool,
+        text_font: &str,
+        math_font: &str,
+    ) -> MobjectRef {
+        self.typst(source, is_math, Some(text_font), Some(math_font), None, None)
+    }
+
+    /// Compiles a plain text string into a hierarchy of vector character Mobjects.
+    ///
+    /// Shapes the text using HarfBuzz (`rustybuzz`) and extracts outlines via `ttf-parser`.
+    /// `font_family` is the font name (e.g. "Arial", "sans-serif").
+    /// `font_size` is the text size in pixels/points.
+    ///
+    /// Returns a reference to the parent container of the text.
+    pub fn text(
+        &mut self,
+        content: &str,
+        font_family: &str,
+        font_size: f64,
+    ) -> MobjectRef {
+        let parent_id = self.next_id();
+        let fill = Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE));
+        let stroke = gaanim_scene::StrokeBrush::transparent();
+
+        // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
+        let id_counter = &mut self.id_counter;
+        let next_id_fn = move || {
+            *id_counter += 1;
+            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+        };
+
+        let (entity, bounds) = compile_text_to_hierarchy(
+            self.commands,
+            self.font_registry,
+            content,
+            font_family,
+            font_size,
+            fill,
+            stroke,
+            parent_id,
+            next_id_fn,
+        );
+
+        let state = MobjectState {
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity,
+        };
+        self.states.insert(parent_id, state);
+
+        MobjectRef { id: parent_id }
     }
 }
 

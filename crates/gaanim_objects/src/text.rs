@@ -23,33 +23,17 @@ impl Default for TextContent {
 }
 
 /// Component: Represents a LaTeX/Typst mathematical formula expression.
-#[derive(Component, Debug, Clone, PartialEq)]
+#[derive(Component, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MathContent {
     /// The raw math expression source string.
     pub source: String,
 }
 
-impl Default for MathContent {
-    fn default() -> Self {
-        Self {
-            source: String::new(),
-        }
-    }
-}
-
 /// Component: Represents a full Typst markup document to compile into vector art.
-#[derive(Component, Debug, Clone, PartialEq)]
+#[derive(Component, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TypstDocument {
     /// The raw Typst markup code document.
     pub source: String,
-}
-
-impl Default for TypstDocument {
-    fn default() -> Self {
-        Self {
-            source: String::new(),
-        }
-    }
 }

@@ -1,6 +1,8 @@
 use bevy::prelude::{Added, ChildOf, Entity, Local, ParamSet, Query, With, Without};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
-use crate::components::{GlobalOpacity, Opacity};
+use crate::components::{GlobalOpacity, LocalBounds, Opacity, WorldBounds};
+
+
 
 /// System: Propagate spatial transforms hierarchically using Bevy 0.18's `ChildOf` relation.
 ///
@@ -10,6 +12,7 @@ use crate::components::{GlobalOpacity, Opacity};
 ///
 /// Under Bevy 0.18, standard `Parent`/`Children` components are replaced with the highly
 /// efficient relationship-based `ChildOf` system, which we target here directly.
+#[allow(clippy::type_complexity)]
 pub fn transform_propagation_system(
     mut param_set: ParamSet<(
         // P0: Root entities transform query
@@ -50,6 +53,7 @@ pub fn transform_propagation_system(
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.18's `ChildOf` relation.
+#[allow(clippy::type_complexity)]
 pub fn opacity_propagation_system(
     mut param_set: ParamSet<(
         // P0: Root entities opacity query
@@ -92,5 +96,36 @@ pub fn opacity_propagation_system(
 pub fn sync_new_opacities(mut query: Query<(&Opacity, &mut GlobalOpacity), Added<Opacity>>) {
     for (local, mut global) in &mut query {
         global.0 = local.0;
+    }
+}
+
+/// System: Compute world-space bounding boxes from local bounds and propagated transforms.
+///
+/// Runs in the `Bounds` phase after transform propagation so that `GlobalSpatialTransform`
+/// already contains the full hierarchy matrix for each entity.
+pub fn world_bounds_propagation_system(
+    mut query: Query<(&LocalBounds, &GlobalSpatialTransform, &mut WorldBounds)>,
+) {
+    for (local, global, mut world) in &mut query {
+        world.0 = local.0.transform_2d(&global.affine_2d);
+    }
+}
+
+/// System: Approximate WorldBounds for entities without LocalBounds using transform position.
+pub fn world_bounds_fallback_system(
+    mut query: Query<
+        (&GlobalSpatialTransform, &mut WorldBounds),
+        Without<LocalBounds>,
+    >,
+) {
+    for (global, mut world) in &mut query {
+        // Approximate a 1x1 unit box centered at the transform's translation.
+        let pos = global.affine_2d * gaanim_core::kurbo::Point::new(0.0, 0.0);
+        world.0 = gaanim_math::Bounds3D::new_2d(
+            pos.x - 0.5,
+            pos.y - 0.5,
+            pos.x + 0.5,
+            pos.y + 0.5,
+        );
     }
 }

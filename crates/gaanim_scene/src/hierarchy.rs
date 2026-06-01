@@ -59,5 +59,15 @@ impl Plugin for GaanimScenePlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
+
+        // Register bounds systems in the Bounds SystemSet
+        app.add_systems(
+            Update,
+            (
+                crate::systems::world_bounds_propagation_system,
+                crate::systems::world_bounds_fallback_system,
+            )
+                .in_set(SceneSet::Bounds),
+        );
     }
 }

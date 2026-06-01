@@ -1,4 +1,4 @@
-use bevy::prelude::{Component, Entity, Resource, World};
+use bevy::prelude::{Component, Entity, Query, Res, ResMut, Resource};
 use gaanim_core::peniko::Color;
 use gaanim_core::kurbo::BezPath;
 use gaanim_math::{RateFunc, SpatialTransform};
@@ -9,6 +9,15 @@ use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
 pub struct DeltaTime {
     /// Time delta in seconds.
     pub dt: f64,
+}
+
+/// System: Copies Bevy's `Time` delta into `DeltaTime` so that tween evaluation
+/// is decoupled from Bevy internals and can be paused / scaled independently.
+pub fn sync_delta_time_system(
+    bevy_time: Res<bevy::prelude::Time>,
+    mut delta_time: ResMut<DeltaTime>,
+) {
+    delta_time.dt = bevy_time.delta_secs() as f64;
 }
 
 /// The state of an active Mobject animation tween.
@@ -120,7 +129,7 @@ impl std::fmt::Debug for PropertyLens {
 /// Extensible lens trait for custom third-party plugins.
 pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     /// Interpolate the target Mobject's components directly using World access.
-    fn interpolate(&self, world: &mut World, entity: Entity, t: f64);
+    fn interpolate(&self, world: &mut bevy::prelude::World, entity: Entity, t: f64);
     /// Helper to clone dyn boxes.
     fn clone_box(&self) -> Box<dyn AnimatableLens>;
     /// Returns the descriptive type name of the custom lens.
@@ -140,26 +149,26 @@ impl Clone for Box<dyn AnimatableLens> {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PathCompletion(pub f64);
 
-/// System: Evaluates all scheduled property tweens in the world.
+/// System: Evaluates all scheduled property tweens using parallel ECS queries.
 ///
-/// Runs as an exclusive system with World access, supporting FFI/Python-safe
-/// dynamic `AnimatableLens` plugins.
-pub fn evaluate_tweens_system(world: &mut World) {
-    let dt = if let Some(dt_res) = world.get_resource::<DeltaTime>() {
-        dt_res.dt
-    } else {
-        0.0
-    };
-
-    let mut updates = Vec::new();
-    let mut query = world.query::<(Entity, &mut Tween, &PropertyLens)>();
-
-    for (_tween_entity, mut tween, lens) in query.iter_mut(world) {
+/// Built-in lenses (Translation, Rotation, Scale, Opacity, FillColor, StrokeColor, StrokeWidth, PathCompletion)
+/// are applied directly via Bevy's parallel query system. Custom lenses are handled separately
+/// by `evaluate_custom_tweens_system` due to their need for exclusive World access.
+pub fn evaluate_tweens_system(
+    dt: Res<DeltaTime>,
+    mut tweens: Query<(Entity, &mut Tween, &PropertyLens)>,
+    mut transforms: Query<&mut SpatialTransform>,
+    mut opacities: Query<&mut Opacity>,
+    mut fills: Query<&mut FillBrush>,
+    mut strokes: Query<&mut StrokeBrush>,
+    mut completions: Query<&mut PathCompletion>,
+) {
+    for (_tween_entity, mut tween, lens) in &mut tweens {
         if tween.state == TweenState::Completed {
             continue;
         }
 
-        tween.elapsed += dt;
+        tween.elapsed += dt.dt;
 
         let progress = if tween.elapsed < tween.delay {
             tween.state = TweenState::Pending;
@@ -176,64 +185,109 @@ pub fn evaluate_tweens_system(world: &mut World) {
         };
 
         let t = tween.rate_func.evaluate(progress);
-        updates.push((tween.target, lens.clone(), t));
+
+        match lens {
+            PropertyLens::Translation { from, to } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.translation = from.lerp(*to, t);
+                }
+            }
+            PropertyLens::Rotation { from, to } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.rotation = from.slerp(*to, t);
+                }
+            }
+            PropertyLens::Scale { from, to } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.scale = from.lerp(*to, t);
+                }
+            }
+            PropertyLens::Opacity { from, to } => {
+                if let Ok(mut opacity) = opacities.get_mut(tween.target) {
+                    opacity.0 = *from + (*to - *from) * t as f32;
+                }
+            }
+            PropertyLens::FillColor { from, to } => {
+                if let Ok(mut fill) = fills.get_mut(tween.target) {
+                    let c = gaanim_core::interpolate_color(*from, *to, t);
+                    *fill = FillBrush::color(c);
+                }
+            }
+            PropertyLens::StrokeColor { from, to } => {
+                if let Ok(mut stroke) = strokes.get_mut(tween.target) {
+                    let c = gaanim_core::interpolate_color(*from, *to, t);
+                    stroke.brush = Some(gaanim_core::peniko::Brush::Solid(c));
+                }
+            }
+            PropertyLens::StrokeWidth { from, to } => {
+                if let Ok(mut stroke) = strokes.get_mut(tween.target) {
+                    stroke.style.width = *from + (*to - *from) * t;
+                }
+            }
+            PropertyLens::PathCompletion { from, to } => {
+                if let Ok(mut completion) = completions.get_mut(tween.target) {
+                    completion.0 = *from + (*to - *from) * t;
+                }
+            }
+            PropertyLens::CameraPosition { from, to } => {
+                // Camera is a resource, not a component. Custom lenses can handle this.
+            }
+            PropertyLens::CameraRotation { from, to } => {}
+            PropertyLens::CameraZoom { from, to } => {}
+            PropertyLens::PathMorph { .. } => {}
+            PropertyLens::Custom(_) => {
+                // Custom lenses require exclusive World access.
+                // They are processed by evaluate_custom_tweens_system.
+            }
+        }
+    }
+}
+
+/// System: Evaluates only custom `AnimatableLens` tweens that require exclusive World access.
+///
+/// This system runs after `evaluate_tweens_system` and handles any tween whose `PropertyLens`
+/// is `Custom`. Since custom lenses may read/write arbitrary components, they need exclusive access.
+pub fn evaluate_custom_tweens_system(
+    world: &mut bevy::prelude::World,
+) {
+    let dt = world.get_resource::<DeltaTime>().map(|d| d.dt).unwrap_or(0.0);
+
+    let mut updates = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &mut Tween, &PropertyLens)>();
+        for (_tween_entity, mut tween, lens) in query.iter_mut(world) {
+            if tween.state == TweenState::Completed {
+                continue;
+            }
+
+            tween.elapsed += dt;
+
+            let progress = if tween.elapsed < tween.delay {
+                tween.state = TweenState::Pending;
+                continue;
+            } else {
+                tween.state = TweenState::Active;
+                let actual_elapsed = tween.elapsed - tween.delay;
+                if actual_elapsed >= tween.duration {
+                    tween.state = TweenState::Completed;
+                    1.0
+                } else {
+                    actual_elapsed / tween.duration
+                }
+            };
+
+            let t = tween.rate_func.evaluate(progress);
+
+            if let PropertyLens::Custom(_) = lens {
+                updates.push((tween.target, lens.clone(), t));
+            }
+        }
     }
 
-    // Apply computed property interpolations to targeted entities
+    // Apply computed custom interpolations
     for (target_entity, lens, t) in updates {
-        apply_lens_update(world, target_entity, &lens, t);
+        if let PropertyLens::Custom(ref custom_lens) = lens {
+            custom_lens.interpolate(world, target_entity, t);
+        }
     }
 }
-
-fn apply_lens_update(world: &mut World, target: Entity, lens: &PropertyLens, t: f64) {
-    match lens {
-        PropertyLens::Translation { from, to } => {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
-                transform.translation = from.lerp(*to, t);
-            }
-        }
-        PropertyLens::Rotation { from, to } => {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
-                transform.rotation = from.slerp(*to, t);
-            }
-        }
-        PropertyLens::Scale { from, to } => {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
-                transform.scale = from.lerp(*to, t);
-            }
-        }
-        PropertyLens::Opacity { from, to } => {
-            if let Some(mut opacity) = world.get_mut::<Opacity>(target) {
-                opacity.0 = *from + (*to - *from) * t as f32;
-            }
-        }
-        PropertyLens::FillColor { from, to } => {
-            if let Some(mut fill) = world.get_mut::<FillBrush>(target) {
-                let c = gaanim_core::interpolate_color(*from, *to, t);
-                *fill = FillBrush::color(c);
-            }
-        }
-        PropertyLens::StrokeColor { from, to } => {
-            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
-                let c = gaanim_core::interpolate_color(*from, *to, t);
-                stroke.brush = Some(gaanim_core::peniko::Brush::Solid(c));
-            }
-        }
-        PropertyLens::StrokeWidth { from, to } => {
-            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
-                stroke.style.width = *from + (*to - *from) * t;
-            }
-        }
-        PropertyLens::PathCompletion { from, to } => {
-            if let Some(mut completion) = world.get_mut::<PathCompletion>(target) {
-                completion.0 = *from + (*to - *from) * t;
-            }
-        }
-        PropertyLens::Custom(custom_lens) => {
-            custom_lens.interpolate(world, target, t);
-        }
-        _ => {}
-    }
-}
-
-

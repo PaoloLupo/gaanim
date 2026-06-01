@@ -7,7 +7,7 @@ pub use signals::{
     SignalBinding, SpecValue, Vec3Signal,
 };
 pub use tween::{
-    evaluate_tweens_system, AnimatableLens, DeltaTime, PathCompletion, PropertyLens, Tween,
+    evaluate_tweens_system, evaluate_custom_tweens_system, sync_delta_time_system, AnimatableLens, DeltaTime, PathCompletion, PropertyLens, Tween,
     TweenState,
 };
 
@@ -22,10 +22,23 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register DeltaTime resource
         app.init_resource::<DeltaTime>();
 
-        // Register tween evaluation in the Animation Phase
+        // Sync Bevy's Time -> DeltaTime before animation evaluation.
         app.add_systems(
             Update,
-            evaluate_tweens_system.in_set(SceneSet::Animation),
+            sync_delta_time_system
+                .in_set(SceneSet::Input),
+        );
+
+        // Register tween evaluation in the Animation Phase.
+        // evaluate_tweens_system runs in parallel for built-in lenses,
+        // followed by evaluate_custom_tweens_system for exclusive World access.
+        app.add_systems(
+            Update,
+            (
+                evaluate_tweens_system,
+                evaluate_custom_tweens_system.after(evaluate_tweens_system),
+            )
+                .in_set(SceneSet::Animation),
         );
 
         // Register standard signal binders in the Updaters Phase
