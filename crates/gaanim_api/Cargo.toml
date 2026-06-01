@@ -1,0 +1,43 @@
+[package]
+name = "gaanim_api"
+version = "0.1.0"
+edition = "2024"
+description = "Premium fluent script API and animation builder for gaanim v2"
+
+[dependencies]
+# Local workspace dependencies
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_objects = { path = "../gaanim_objects" }
+gaanim_layout = { path = "../gaanim_layout" }
+
+# Third-party dependencies from workspace
+bevy = { workspace = true }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+
+# Serialization (conditional)
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = [
+    "dep:serde",
+    "gaanim_core/serde",
+    "gaanim_math/serde",
+    "gaanim_scene/serde",
+    "gaanim_animation/serde",
+    "gaanim_timeline/serde",
+    "gaanim_objects/serde",
+    "gaanim_layout/serde",
+    "peniko/serde",
+    "kurbo/serde",
+    "glam/serde"
+]
+
+[dev-dependencies]
+gaanim_renderer = { path = "../gaanim_renderer" }

@@ -7,7 +7,9 @@ members = [
   "crates/gaanim_animation",
   "crates/gaanim_timeline",
   "crates/gaanim_renderer",
-  "crates/gaanim_objects"
+  "crates/gaanim_objects",
+  "crates/gaanim_layout",
+  "crates/gaanim_api"
 ]
 
 [profile.dev]
