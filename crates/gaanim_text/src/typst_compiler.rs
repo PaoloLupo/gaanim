@@ -504,12 +504,10 @@ mod tests {
             "World fonts list must not be empty"
         );
 
-        let has_math_font = world.fonts.iter().any(|font| {
-            font.info()
-                .families
-                .iter()
-                .any(|info| info.as_str() == "New Computer Modern Math")
-        });
+        let has_math_font = world
+            .fonts
+            .iter()
+            .any(|font| font.info().family.as_str().eq("New Computer Modern Math"));
         assert!(
             has_math_font,
             "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld"
