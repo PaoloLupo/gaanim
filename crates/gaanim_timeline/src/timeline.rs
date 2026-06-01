@@ -40,6 +40,13 @@ pub struct Timeline {
     /// Pending seek request, processed at the end of the frame using exclusive world access.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub seek_request: Option<f64>,
+    /// The keyframe time last used as a restore base.
+    ///
+    /// When seeking forward within the same keyframe interval, the full snapshot
+    /// restore can be skipped because clip replay (which uses explicit `from`/`to`
+    /// values) produces the same deterministic result regardless of prior entity state.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub last_restore_kf_time: Option<OrderedFloat<f64>>,
 }
 
 impl Default for Timeline {
@@ -57,6 +64,7 @@ impl Default for Timeline {
             breakpoints: Vec::new(),
             loop_range: None,
             seek_request: None,
+            last_restore_kf_time: None,
         }
     }
 }
@@ -202,27 +210,41 @@ impl Timeline {
     ///
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
     /// animations in correct temporal order up to `target_time`.
+    ///
+    /// During sequential forward playback (the common case), the full snapshot restore is
+    /// skipped because each clip stores explicit `from`/`to` values, making clip replay
+    /// deterministic and independent of prior entity state. This avoids cloning and writing
+    /// all entity components every frame.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
         let max_time = self
             .loop_range
             .map(|(_, end)| end)
             .unwrap_or(self.cached_duration);
-        self.current_time = target_time.clamp(0.0, max_time);
+        let clamped_target = target_time.clamp(0.0, max_time);
 
         // 1. Locate the nearest recorded keyframe <= target_time
         let keyframe = self
             .keyframes
-            .range(..=OrderedFloat(self.current_time))
+            .range(..=OrderedFloat(clamped_target))
             .next_back();
 
         let kf_start_time = if let Some((&kf_time, snapshot)) = keyframe {
-            // Restore snapshot state
-            snapshot.restore(world);
+            // Skip full restore when seeking forward within the same keyframe interval:
+            // clip replay is deterministic and produces correct state from any baseline.
+            let same_kf_and_forward = self.last_restore_kf_time == Some(kf_time)
+                && clamped_target >= self.current_time;
+            if !same_kf_and_forward {
+                snapshot.restore(world);
+                self.last_restore_kf_time = Some(kf_time);
+            }
             kf_time.0
         } else {
+            self.last_restore_kf_time = None;
             // No keyframe found: keep active Mobjects visible as default baseline
             0.0
         };
+
+        self.current_time = clamped_target;
 
         // 2. Fetch all clips starting within [kf_start_time, target_time]
         let candidate_clips = self.clips_in_range(kf_start_time, self.current_time);
