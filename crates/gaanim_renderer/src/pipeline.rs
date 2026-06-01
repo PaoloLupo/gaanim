@@ -8,6 +8,7 @@ use gaanim_scene::{
     WorldBounds,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // Explicit imports from bevy_vello instead of glob for clarity
 use bevy_vello::integrations::scene::VelloScene2d;
@@ -23,14 +24,14 @@ pub struct MainVelloScene;
 /// the Mobject's visual components (geometry or brushes) change.
 #[derive(Resource, Default)]
 pub struct GaanimRenderCache {
-    pub fragment_cache: HashMap<ObjectId, vello::Scene>,
+    pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
 }
 
 struct ExtractedElement {
     transform: kurbo::Affine,
     opacity: f32,
     render_order: RenderOrder,
-    scene: vello::Scene,
+    scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
 }
 
@@ -265,14 +266,14 @@ pub fn gaanim_render_system(
             // but do not affect the scene until a post-processing pass is wired.
             let _ = (glow_ref, blur_ref);
 
-            scene
+            Arc::new(scene)
         });
 
         extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             render_order: *render_order,
-            scene: fragment.clone(),
+            scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (*c).clone()),
         });
 
@@ -334,7 +335,7 @@ pub fn gaanim_render_system(
             layers_to_pop += 1;
         }
 
-        main_scene.append(&elem.scene, Some(elem.transform));
+        main_scene.append(&*elem.scene, Some(elem.transform));
 
         for _ in 0..layers_to_pop {
             main_scene.pop_layer();
