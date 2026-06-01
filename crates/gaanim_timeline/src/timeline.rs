@@ -130,8 +130,13 @@ impl Timeline {
             }
         }
 
-        // Recompute max duration and total duration if needed
-        self.recompute_bounds();
+        // Update cached bounds incrementally: only recompute when the removed
+        // clip defined one of the extremes. In the common case (removing a
+        // non-max clip) this is O(1) instead of O(n).
+        let removed_end = clip.start + clip.duration;
+        if clip.duration >= self.max_clip_duration || removed_end >= self.cached_duration {
+            self.recompute_bounds();
+        }
 
         Some(clip)
     }
