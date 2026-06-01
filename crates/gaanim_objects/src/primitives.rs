@@ -44,7 +44,10 @@ impl MobjectBundle {
             stroke: StrokeBrush::transparent(),
             opacity: Opacity(1.0),
             global_opacity: GlobalOpacity(1.0),
-            render_order: RenderOrder::default(),
+            render_order: RenderOrder {
+                z_index: 0,
+                creation_order: id.index() as u64,
+            },
             render_layer: RenderLayer::Vello2D,
             visible: Visible,
             tag: ObjectTag("Mobject".into()),

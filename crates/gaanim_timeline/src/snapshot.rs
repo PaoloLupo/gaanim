@@ -29,6 +29,8 @@ pub struct EntitySnapshot {
     pub path: Option<gaanim_core::kurbo::BezPath>,
     /// Ordering layer index.
     pub render_order: i32,
+    /// Tie-breaker creation sequence index.
+    pub creation_order: u64,
     /// The rendering pipeline backend target.
     pub render_layer: RenderLayer,
     /// Whether the object is active and visible in the scene.
@@ -71,7 +73,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
 
     entity_mut.insert(RenderOrder {
         z_index: snap.render_order,
-        creation_order: snap.id.as_raw(),
+        creation_order: snap.creation_order,
     });
 
     entity_mut.insert(snap.render_layer);
@@ -134,6 +136,7 @@ impl WorldSnapshot {
             let stroke_style = stroke_opt.map(|s| s.style.clone());
             let path = path_opt.map(|p| p.0.clone());
             let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
+            let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
             let render_layer = render_layer_opt.copied().unwrap_or(RenderLayer::Vello2D);
             let visible = world.get::<Visible>(entity).is_some();
 
@@ -152,6 +155,7 @@ impl WorldSnapshot {
                 stroke_style,
                 path,
                 render_order,
+                creation_order,
                 render_layer,
                 visible,
                 tags,

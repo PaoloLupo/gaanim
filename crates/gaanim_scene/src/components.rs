@@ -165,3 +165,18 @@ pub enum RenderLayer {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
 
+
+/// A metadata component attached to individual glyph and shape entities of text or equations,
+/// tracking their character value, sequence index, and source range.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TextSpan {
+    /// The character represented by this entity (e.g. 'E', '=', '+', 'x', '2').
+    pub character: char,
+    /// The 0-indexed character sequence index within the flat string representation.
+    pub char_index: usize,
+    /// The source span range in the original source markup text.
+    pub source_range: core::range::Range<usize>,
+}
+
+

@@ -213,6 +213,9 @@ fn extract_frame_items(
     total_bounds: &mut Bounds3D,
     default_fill: &Option<peniko::Brush>,
     default_stroke: &StrokeBrush,
+    source: &Source,
+    char_index_counter: &mut usize,
+    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
 ) {
     for (pos, item) in frame.items() {
         // Typst frames use Y-down coordinate system, and we convert it to Y-up
@@ -233,6 +236,9 @@ fn extract_frame_items(
                     total_bounds,
                     default_fill,
                     default_stroke,
+                    source,
+                    char_index_counter,
+                    child_spans,
                 );
             }
             FrameItem::Text(text) => {
@@ -276,6 +282,31 @@ fn extract_frame_items(
                         bundle.tag = ObjectTag("TypstGlyph".into());
 
                         let child_entity = commands.spawn(bundle).id();
+
+                        // Match glyph to corresponding source char and range
+                        let byte_offset = glyph.span.1 as usize;
+                        let c = text.text.get(byte_offset..)
+                            .and_then(|s| s.chars().next())
+                            .unwrap_or('?');
+
+                        let span_range = source.range(glyph.span.0).unwrap_or(0..0);
+                        let source_start = span_range.start + byte_offset;
+                        let source_end = source_start + c.len_utf8();
+
+                        let span = gaanim_scene::components::TextSpan {
+                            character: c,
+                            char_index: *char_index_counter,
+                            source_range: core::range::Range {
+                                start: source_start,
+                                end: source_end,
+                            },
+                        };
+
+                        commands.entity(child_entity).insert(span.clone());
+                        child_spans.push((child_id, child_entity, span));
+
+                        *char_index_counter += 1;
+
                         commands
                             .entity(child_entity)
                             .set_parent_in_place(parent_entity);
@@ -311,6 +342,20 @@ fn extract_frame_items(
                 bundle.tag = ObjectTag("TypstShape".into());
 
                 let child_entity = commands.spawn(bundle).id();
+
+                let span_range = source.range(*_span).unwrap_or(0..0);
+                let span = gaanim_scene::components::TextSpan {
+                    character: '_', // Marker for drawing shapes
+                    char_index: *char_index_counter,
+                    source_range: core::range::Range {
+                        start: span_range.start,
+                        end: span_range.end,
+                    },
+                };
+                commands.entity(child_entity).insert(span.clone());
+                child_spans.push((child_id, child_entity, span));
+                *char_index_counter += 1;
+
                 commands
                     .entity(child_entity)
                     .set_parent_in_place(parent_entity);
@@ -322,7 +367,7 @@ fn extract_frame_items(
     }
 }
 
-/// Compiles a LaTeX-style math formula or Typst markup into a structured hierarchy of visual vector Mobjects.
+/// Compiles a LaTeX-style math formula or Typst markup into a structured hierarchy of visual Mobjects.
 pub fn compile_typst_to_hierarchy(
     commands: &mut Commands,
     font_registry: &FontRegistry,
@@ -336,6 +381,7 @@ pub fn compile_typst_to_hierarchy(
     stroke: gaanim_scene::StrokeBrush,
     parent_id: ObjectId,
     mut next_id_fn: impl FnMut() -> ObjectId,
+    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
 ) -> (Entity, Bounds3D) {
     // Build optional font directives.
     // Typst default fonts (LibertinusSerif / NewCMMath) are already loaded in the FontBook,
@@ -408,6 +454,8 @@ pub fn compile_typst_to_hierarchy(
 
     // Process the first page only (formulas are typically single-page).
     if let Some(page) = document.pages.first() {
+        let source_obj = world.source(world.main()).expect("Failed to get main source");
+        let mut char_index_counter = 0;
         extract_frame_items(
             commands,
             &page.frame,
@@ -417,6 +465,9 @@ pub fn compile_typst_to_hierarchy(
             &mut total_bounds,
             &fill,
             &stroke,
+            &source_obj,
+            &mut char_index_counter,
+            child_spans,
         );
     }
 

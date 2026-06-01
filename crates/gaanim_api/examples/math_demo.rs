@@ -41,7 +41,7 @@ fn setup_scene(
     commands.spawn((Camera2d, VelloView));
 
     // 2. Initialize the fluent SceneBuilder
-    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
+    let mut scene = SceneBuilder::new(&mut commands, &mut *timeline, &*font_registry, &*text_config);
 
     // 3. Spawn a plain Title text using HarfBuzz shaper (Arial, 64px, White by default)
     let title_text = scene.title("Gaanim Vector Engine");
@@ -58,6 +58,7 @@ fn setup_scene(
     let bg_circle = scene
         .circle(80.0)
         .fill(gaanim_core::peniko::Color::from_rgb8(25, 50, 100))
+        .z_index(-10)
         .spawn();
 
     // Setup initial animation timeline
@@ -71,6 +72,24 @@ fn setup_scene(
 
     // Let the scene hold for a brief moment
     scene.wait(1.0);
+
+    // INNOVATION DEMO: Select specific characters semantically and color/animate them!
+    // 1. Select "m c^2" in the first equation and color it bright gold!
+    let mut mc2_selection = scene.select(math_formula, "m c^2");
+    mc2_selection.set_fill(gaanim_core::peniko::Color::from_rgb8(255, 215, 0)); // Gold
+
+    // 2. Select "n(n+1)" in the sum equation and color it coral red, then animate it!
+    let mut numerator_selection = scene.select(sum_formula, "n(n+1)");
+    numerator_selection.set_fill(gaanim_core::peniko::Color::from_rgb8(255, 100, 100)); // Premium Coral Red
+
+    // Coordinated animation: shift numerator "n(n+1)" up slightly in parallel
+    numerator_selection.animate()
+        .spring()
+        .duration(1.5)
+        .shift_2d(0.0, 30.0);
+
+    // Hold at the end of the animation sequence
+    scene.wait(1.5);
 
     // Add a breakpoint marker
     scene.slide();

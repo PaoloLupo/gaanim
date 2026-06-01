@@ -48,7 +48,7 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
 ///
 /// This registers each letter as a fully animatable `MobjectBundle` with its own
 /// local bounds, spatial offset, and distinct `ObjectTag`.
-pub fn compile_text_to_hierarchy(
+    pub fn compile_text_to_hierarchy(
     commands: &mut Commands,
     font_registry: &FontRegistry,
     text: &str,
@@ -58,6 +58,7 @@ pub fn compile_text_to_hierarchy(
     stroke: gaanim_scene::StrokeBrush,
     parent_id: ObjectId,
     mut next_id_fn: impl FnMut() -> ObjectId,
+    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
 ) -> (Entity, Bounds3D) {
     // 1. Fetch font bytes
     let font_bytes = match font_registry.get_font(font_family) {
@@ -140,6 +141,23 @@ pub fn compile_text_to_hierarchy(
             child_bundle.transform = SpatialTransform::new_2d(glyph_x * scale, glyph_y * scale);
 
             let child_entity = commands.spawn(child_bundle).id();
+            
+            // Calculate UTF-8 byte range of this character in the source text
+            let char_byte_start = text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(0);
+            let char_byte_end = char_byte_start + c.len_utf8();
+            
+            let span = gaanim_scene::components::TextSpan {
+                character: c,
+                char_index: i,
+                source_range: core::range::Range {
+                    start: char_byte_start,
+                    end: char_byte_end,
+                },
+            };
+            
+            commands.entity(child_entity).insert(span);
+            child_spans.push((char_id, child_entity, span));
+            
             commands.entity(child_entity).set_parent_in_place(parent_entity);
 
             // Accumulate total bounding box of the entire text string
