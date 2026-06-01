@@ -121,7 +121,7 @@ impl PySelectionAnim {
             self.dy,
             self.duration,
             self.rate_func.clone(),
-        );
+        )?;
         Ok(PyAnimationSpec::from_kind(
             self.parent,
             AnimationType::TranslateBy {

@@ -7,6 +7,14 @@ use gaanim_objects::prelude::MobjectBundle;
 
 use crate::font::{OutlineCollector, FontRegistry};
 
+#[derive(thiserror::Error, Debug)]
+pub enum TextError {
+    #[error("Failed to parse OTF/TTF font face")]
+    FontParseError,
+    #[error("Font family not found in registry")]
+    FontNotFound,
+}
+
 /// Represents a successfully shaped glyph with font spacing coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct ShapedGlyph {
@@ -59,28 +67,16 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     parent_id: ObjectId,
     mut next_id_fn: impl FnMut() -> ObjectId,
     child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
-) -> (Entity, Bounds3D) {
+) -> Result<(Entity, Bounds3D), TextError> {
     // 1. Fetch font bytes
-    let font_bytes = match font_registry.get_font(font_family) {
-        Some(bytes) => bytes,
-        None => {
-            bevy::prelude::warn!("FontRegistry has no fonts loaded at all. Cannot render text.");
-            // Spawning empty parent to prevent crash
-            let parent_path = gaanim_core::kurbo::BezPath::new();
-            let parent_bounds = Bounds3D::default();
-            let mut parent_bundle = MobjectBundle::new(parent_id, parent_path, parent_bounds);
-            parent_bundle.tag = ObjectTag(format!("Text('{}')", text));
-            parent_bundle.fill = gaanim_scene::FillBrush(None);
-            let parent_entity = commands.spawn(parent_bundle).id();
-            return (parent_entity, parent_bounds);
-        }
-    };
+    let font_bytes = font_registry.get_font(font_family)
+        .ok_or(TextError::FontNotFound)?;
 
     // 2. Shape text with HarfBuzz (RustyBuzz)
     let shaped_glyphs = shape_text(font_bytes, text);
 
     // 3. Parse OpenType font outlines using ttf-parser
-    let parser_face = ttf_parser::Face::parse(font_bytes, 0).expect("Failed to parse OTF font face");
+    let parser_face = ttf_parser::Face::parse(font_bytes, 0).map_err(|_| TextError::FontParseError)?;
     let units_per_em = parser_face.units_per_em() as f64;
     let scale = font_size / units_per_em;
 
@@ -172,5 +168,5 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     // 6. Update parent Mobject bounds with the union of all child letter boundaries
     commands.entity(parent_entity).insert(gaanim_scene::LocalBounds(total_bounds));
 
-    (parent_entity, total_bounds)
+    Ok((parent_entity, total_bounds))
 }

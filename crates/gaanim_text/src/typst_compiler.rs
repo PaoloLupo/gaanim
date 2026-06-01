@@ -395,9 +395,14 @@ pub fn compile_typst_to_hierarchy(
     }
     if is_math {
         if let Some(family) = math_font {
+            let actual_family = if family.eq_ignore_ascii_case("newcmmath") {
+                "New Computer Modern Math"
+            } else {
+                family
+            };
             directives.push_str(&format!(
                 "#show math.equation: set text(font: \"{}\")\n",
-                family
+                actual_family
             ));
         }
         if let Some(size) = math_size {
@@ -454,7 +459,13 @@ pub fn compile_typst_to_hierarchy(
 
     // Process the first page only (formulas are typically single-page).
     if let Some(page) = document.pages.first() {
-        let source_obj = world.source(world.main()).expect("Failed to get main source");
+        let source_obj = match world.source(world.main()) {
+            Ok(s) => s,
+            Err(_) => {
+                bevy::prelude::error!("Failed to get main source from Typst world");
+                return (parent_entity, total_bounds);
+            }
+        };
         let mut char_index_counter = 0;
         extract_frame_items(
             commands,
@@ -477,3 +488,22 @@ pub fn compile_typst_to_hierarchy(
 
     (parent_entity, total_bounds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_math_font_loaded() {
+        let registry = FontRegistry::new();
+        let world = GaanimTypstWorld::new("", &registry);
+        assert!(!world.fonts.is_empty(), "World fonts list must not be empty");
+        
+        let has_math_font = world.fonts.iter().any(|font| {
+            font.info().families.iter().any(|info| info.as_str() == "New Computer Modern Math")
+        });
+        assert!(has_math_font, "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld");
+    }
+}
+
+

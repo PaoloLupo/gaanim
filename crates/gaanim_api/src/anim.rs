@@ -19,6 +19,45 @@ pub enum AnimationType {
     FillColorTo { to: Color },
     StrokeColorTo { to: Color },
     StrokeWidthTo { to: f64 },
+    /// Manim-style `Write`: progressively draw the target's path(s) along
+    /// their arc length, then cross-fade the fill in once the outline is
+    /// complete. This produces the characteristic "pen draws the object,
+    /// then ink fills it" effect that Manim's `Write` is known for.
+    ///
+    /// Internally, each item gets a triplet of clips scheduled on the
+    /// default track:
+    ///
+    /// 1. A `FillDrawProgress` hold (`0 -> 0`) spanning the draw phase.
+    ///    This is the authoritative reset that guarantees the fill is
+    ///    hidden from the very first frame of every Write — even if a
+    ///    previous Write left the component at 1.0, the hold lens runs
+    ///    at `item_start` and overwrites it to 0.0.
+    /// 2. A `PathCompletion` (`0 -> 1`) over the draw phase. The lens
+    ///    trims the cached `PathSource` along its arc length, producing
+    ///    the progressive pen-stroke effect.
+    /// 3. A `FillDrawProgress` cross-fade (`0 -> 1`) over the fade
+    ///    phase, starting right after the draw completes. The renderer
+    ///    reads this component and modulates the fill brush's color
+    ///    alpha uniformly (works for Solid / Gradient / Image brushes).
+    ///
+    /// - If the target has children (text root, equation root, group),
+    ///   each child gets its own staggered sub-clip triplet. The
+    ///   per-item timeline math is
+    ///   `item_duration = duration / (1 + (n - 1) * lag_ratio)` and the
+    ///   lag step is `item_duration * lag_ratio`, so the next child
+    ///   starts when the previous one is `lag_ratio` (default 0.5)
+    ///   through its total duration.
+    /// - If the target has no children, a single sub-clip triplet is
+    ///   scheduled on the target itself.
+    /// - The draw phase occupies ~70% of each item's duration; the
+    ///   fill cross-fade occupies the remaining ~30%.
+    /// - The `stroke_width` controls the outline thickness used during the
+    ///   draw phase (defaults to the target's existing stroke width).
+    Write {
+        /// Optional override for the outline stroke width used during the
+        /// draw phase. `None` means "use the target's existing stroke width".
+        stroke_width: Option<f64>,
+    },
 }
 
 /// A fluent builder for an animation tween clip.
@@ -181,6 +220,29 @@ impl MobjectRef {
             target: self.id,
             anim_type: AnimationType::StrokeWidthTo { to },
             duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Manim-style **Write**: progressively draws the Mobject's path(s) along
+    /// their arc length, then cross-fades from the outline to the final
+    /// fill/stroke. If the Mobject has children (e.g. a text root or an
+    /// equation), each child is drawn in a staggered sequence.
+    pub fn write(self, duration: f64) -> AnimationBuilder {
+        self.write_with_stroke_width(duration, None)
+    }
+
+    /// Same as [`write`](Self::write) but with an explicit outline stroke
+    /// width used during the draw phase.
+    pub fn write_with_stroke_width(
+        self,
+        duration: f64,
+        stroke_width: Option<f64>,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Write { stroke_width },
+            duration,
             rate_func: RateFunc::Smooth,
         }
     }

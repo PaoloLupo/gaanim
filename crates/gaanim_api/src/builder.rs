@@ -17,6 +17,21 @@ use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 
+/// Extracts a representative `Color` from a `peniko::Brush` for use as a
+/// stroke color in the `Write` animation's auto-stroke fallback.
+///
+/// - `Brush::Solid(c)` → `Some(c)`
+/// - `Brush::Gradient(g)` → first color stop, if any
+/// - `Brush::Image(_)` → `None` (no meaningful single color)
+fn extract_brush_color(brush: &Brush) -> Option<Color> {
+    use gaanim_core::peniko::color::Srgb;
+    match brush {
+        Brush::Solid(c) => Some(*c),
+        Brush::Gradient(g) => g.stops.first().map(|s| s.color.to_alpha_color::<Srgb>()),
+        _ => None,
+    }
+}
+
 /// Tracks the active hot state of an Mobject during scene construction.
 /// This enables subsequent layouts and animations to automatically calculate
 /// their offsets and "from" properties without manual user input.
@@ -262,6 +277,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        // The Write animation expands into N staggered sub-clips, so it
+        // needs its own branch that can clone child ids and access the
+        // timeline multiple times. All other variants collapse to a
+        // single clip below.
+        if matches!(anim.anim_type, AnimationType::Write { .. }) {
+            self.play_write_internal(anim);
+            return;
+        }
+
         let state = match self.states.get_mut(&anim.target) {
             Some(s) => s,
             None => {
@@ -343,6 +367,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.stroke.style.width = to;
                 PropertyLensSpec::StrokeWidth { from, to }
             }
+            AnimationType::Write { .. } => unreachable!("Write is dispatched in the early branch above"),
         };
 
         // Add the resolved clip to the Timeline resource
@@ -356,6 +381,228 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 rate_func: anim.rate_func,
             }),
         );
+    }
+
+    /// Internal: materialize a `Write` animation as one or more staggered
+    /// sub-clip pairs. If the target has children (text/equation glyphs,
+    /// group members), each child draws in sequence. If the target is a
+    /// leaf (e.g. a single `circle`/`line`), one pair is scheduled on the
+    /// target itself.
+    ///
+    /// Each item receives two clips:
+    /// 1. `PathCompletion 0.0 -> 1.0` over the first `DRAW_RATIO` of
+    ///    `item_duration` — progressively reveals the outline.
+    /// 2. `FillDrawProgress 0.0 -> 1.0` over the remaining
+    ///    `1 - DRAW_RATIO` of `item_duration`, starting right after the
+    ///    path draw completes — cross-fades the fill in once the outline
+    ///    is fully drawn.
+    ///
+    /// To prevent the "object fully visible from the start" bug, we also
+    /// `insert(FillDrawProgress(0.0))` on every target entity right here
+    /// (via the deferred command queue). By the time the first render
+    /// frame runs, the fill alpha multiplier is `0.0` and the renderer
+    /// will render an empty/invisible fill, so the user only ever sees
+    /// the progressive path draw followed by the fill cross-fade.
+    ///
+    /// Stagger math (ported from `crabanim::engine::animation::drawing`):
+    /// `item_duration = duration / (1 + (n - 1) * lag_ratio)`,
+    /// `lag_step = item_duration * lag_ratio` with `lag_ratio = 0.25`.
+    /// So the next child starts when the previous one is 25% drawn.
+    fn play_write_internal(&mut self, anim: AnimationBuilder) {
+        let stroke_width = match anim.anim_type {
+            AnimationType::Write { stroke_width } => stroke_width,
+            _ => unreachable!(),
+        };
+
+        // Collect target ids: the target's own id plus all child spans.
+        // We snapshot the ids because the inner loop needs `self.timeline`
+        // (which immutably borrows `self`).
+        let items: Vec<ObjectId> = {
+            let state = match self.states.get(&anim.target) {
+                Some(s) => s,
+                None => {
+                    bevy::prelude::warn!(
+                        "Attempted to Write unregistered Mobject: {:?}",
+                        anim.target
+                    );
+                    return;
+                }
+            };
+            if state.child_spans.is_empty() {
+                vec![anim.target]
+            } else {
+                state.child_spans.iter().map(|(id, _, _)| *id).collect()
+            }
+        };
+
+        let n = items.len();
+        if n == 0 {
+            return;
+        }
+
+        // (A) Auto-stroke: entities that have no stroke brush yet
+        // (the common case for text glyphs, which default to
+        // `StrokeBrush::transparent()`) get a stroke synthesized from
+        // the fill color and the user-supplied `stroke_width`
+        // (or 1.0). The fill color is extracted from:
+        //   1. `Brush::Solid(c)` — direct color.
+        //   2. `Brush::Gradient(g)` — first color stop of the gradient.
+        //   3. `Brush::Image(_)` — falls back to white (no meaningful
+        //      single color).
+        // Without an outline brush the renderer's
+        // `if let Some(stroke_brush)` branch is skipped, so the
+        // progressive `PathCompletion` trim would be invisible — the
+        // user would only ever see the fill.
+        for item_id in &items {
+            if let Some(state) = self.states.get_mut(item_id) {
+                if state.stroke.brush.is_none() {
+                    let color = state
+                        .fill
+                        .as_ref()
+                        .and_then(extract_brush_color)
+                        .unwrap_or(Color::WHITE);
+                    let width = stroke_width.unwrap_or(1.0);
+                    let new_stroke = StrokeBrush::new(color, width);
+                    state.stroke = new_stroke.clone();
+                    self.commands.entity(state.entity).insert(new_stroke);
+                }
+            }
+        }
+
+        // (B) Hide the fill on every target entity right now. The next
+        // four clips (reset, hold, PathCompletion, then FillDrawProgress
+        // fade) animate it back to fully drawn, so the user only sees
+        // the path being drawn and then the fill cross-fading in. The
+        // insert is a best-effort initial value; the "reset" clip
+        // below is the authoritative boundary reset.
+        for item_id in &items {
+            if let Some(state) = self.states.get(item_id) {
+                self.commands
+                    .entity(state.entity)
+                    .insert(gaanim_animation::FillDrawProgress(0.0));
+            }
+        }
+
+        /// Lag ratio between consecutive items in a multi-character
+        /// Write. With 0.25, the next character starts its own outline
+        /// draw when the previous one is 25% through its total duration,
+        /// producing a tighter, faster cascade than the Manim default
+        /// 0.5 (which leaves a more visible per-character pause).
+        const LAG_RATIO: f64 = 0.25;
+        /// Fraction of `item_duration` spent drawing the outline before
+        /// the fill cross-fade starts. Matches Manim's default split
+        /// (~70% draw, ~30% fade-in).
+        const DRAW_RATIO: f64 = 0.7;
+
+        let item_duration = anim.duration / (1.0 + (n as f64 - 1.0) * LAG_RATIO);
+        let lag_step = item_duration * LAG_RATIO;
+        let min_step = 1e-6_f64.max(item_duration * 0.01);
+
+        let draw_duration = (item_duration * DRAW_RATIO).max(min_step);
+        let fade_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
+
+        // (C) Global fill reset: a 0-duration clip scheduled at
+        // `self.current_time` (the start of the entire Write, *not*
+        // per-character) that forces `FillDrawProgress` back to 0.0
+        // for every target entity at once. This is what prevents the
+        // "blinking" effect in back-to-back playbacks: a per-character
+        // hold would only hide the fill for one character at a time
+        // (because of the LAG_RATIO stagger), so a character whose
+        // `item_start` is still in the future would render fully filled
+        // for that interval. The reset clip runs for every character
+        // at the same instant, so the fill is hidden from the very
+        // first frame of the Write and stays hidden until the fade
+        // clip kicks in.
+        for item_id in &items {
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time,
+                min_step,
+                ClipPayload::Animation(AnimationSpec {
+                    target: *item_id,
+                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+        }
+
+        for (i, item_id) in items.iter().enumerate() {
+            let item_delay = (i as f64 * lag_step).max(0.0);
+            let item_start = self.current_time + item_delay;
+            let fade_start = item_start + draw_duration;
+
+            // (1) Fill hold: clamps `FillDrawProgress` to 0.0 for the
+            // entire draw phase. Belt-and-suspenders alongside the
+            // global reset clip: it keeps the fill hidden even if a
+            // stray clip from a different animation tries to mutate
+            // the component mid-draw.
+            self.timeline.add_clip(
+                self.default_track,
+                item_start,
+                draw_duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: *item_id,
+                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+
+            // (2) Outline draw: PathCompletion 0.0 -> 1.0 over draw_duration.
+            // The lens application reads the cached `PathSource` and
+            // trims the visible `Path2D` directly. With the auto-stroke
+            // fix above, the trimmed path is now actually visible in the
+            // renderer's stroke pass.
+            self.timeline.add_clip(
+                self.default_track,
+                item_start,
+                draw_duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: *item_id,
+                    lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+
+            // (3) Fill cross-fade: FillDrawProgress 0.0 -> 1.0 over
+            // fade_duration, starting right after the path draw completes.
+            // The lens inserts/updates a `FillDrawProgress` component on
+            // the entity, which the renderer reads to modulate the fill
+            // brush's color alpha. The preceding hold clip ends exactly
+            // at `fade_start`, so the fade clip's t=0 value (0.0) takes
+            // over seamlessly.
+            self.timeline.add_clip(
+                self.default_track,
+                fade_start,
+                fade_duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: *item_id,
+                    lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+
+            // (3) Optional stroke width override during the draw phase.
+            // We schedule a 0-duration `StrokeWidthTo` clip at item_start
+            // so the outline thickness is set to the user-requested value
+            // before any pixels of the draw are visible. We don't restore
+            // the original — the user can chain a later StrokeWidthTo if
+            // they want to revert.
+            if let Some(width) = stroke_width {
+                self.timeline.add_clip(
+                    self.default_track,
+                    item_start,
+                    min_step,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::StrokeWidth {
+                            from: width,
+                            to: width,
+                        },
+                        rate_func: anim.rate_func.clone(),
+                    }),
+                );
+            }
+        }
     }
 
     /// Spawns a circle primitive.
@@ -612,7 +859,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         let mut child_spans = Vec::new();
-        let (entity, bounds) = compile_text_to_hierarchy(
+        let (entity, bounds) = match compile_text_to_hierarchy(
             self.commands,
             self.font_registry,
             content,
@@ -623,7 +870,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id,
             next_id_fn,
             &mut child_spans,
-        );
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                bevy::prelude::error!("Text compilation failed: {}", e);
+                let bounds = Bounds3D::default();
+                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
+                let entity = self.commands.spawn(bundle).id();
+                (entity, bounds)
+            }
+        };
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
@@ -674,7 +930,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         let mut child_spans = Vec::new();
-        let (entity, bounds) = compile_text_to_hierarchy(
+        let (entity, bounds) = match compile_text_to_hierarchy(
             self.commands,
             self.font_registry,
             content,
@@ -685,7 +941,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id,
             next_id_fn,
             &mut child_spans,
-        );
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                bevy::prelude::error!("Text compilation failed: {}", e);
+                let bounds = Bounds3D::default();
+                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
+                let entity = self.commands.spawn(bundle).id();
+                (entity, bounds)
+            }
+        };
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
@@ -740,7 +1005,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let style = self.text_config.roles.get(&gaanim_text::prelude::TextRole::Math)
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
-                font_family: "NewCMMath".to_string(),
+                font_family: "New Computer Modern Math".to_string(),
                 size: 48.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });

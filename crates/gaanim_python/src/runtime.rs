@@ -59,11 +59,18 @@ fn replay_into(
 ) {
     // Take ownership of the resources SceneBuilder needs, then reinsert after.
     // This avoids Bevy's per-borrow restrictions.
-    let mut timeline = world.remove_resource::<Timeline>().expect("Timeline missing");
-    let font_registry = world.remove_resource::<FontRegistry>().expect("FontRegistry missing");
-    let text_config = world
-        .remove_resource::<gaanim_text::prelude::TextConfig>()
-        .expect("TextConfig missing");
+    let mut timeline = match world.remove_resource::<Timeline>() {
+        Some(res) => res,
+        None => { bevy::prelude::error!("Timeline resource missing"); return; }
+    };
+    let font_registry = match world.remove_resource::<FontRegistry>() {
+        Some(res) => res,
+        None => { bevy::prelude::error!("FontRegistry resource missing"); return; }
+    };
+    let text_config = match world.remove_resource::<gaanim_text::prelude::TextConfig>() {
+        Some(res) => res,
+        None => { bevy::prelude::error!("TextConfig resource missing"); return; }
+    };
 
     // Scope the mut borrow on `world` so we can reinsert resources at the end.
     let result = {
@@ -122,16 +129,28 @@ fn run_replay(
                 // Lock and clone the spec at replay time so we see the
                 // final state after all chain mutations (.fill().z_index()…)
                 // have been applied.
-                let spec_value = spec.lock().unwrap().clone();
-                if let Some(bevy_id) = spawn_mobject(scene, spec_value, &py_to_bevy) {
+                let spec_value = match spec.lock() {
+                    Ok(guard) => guard.clone(),
+                    Err(_) => {
+                        bevy::prelude::error!("Failed to lock MobjectSpec during replay");
+                        continue;
+                    }
+                };
+                if let Some(bevy_id) = spawn_mobject(scene, spec_value.clone(), &py_to_bevy) {
+                    let z_index = spec_value.z_index();
                     if let Some(state) = scene.states.get(&bevy_id) {
+                        let order = RenderOrder {
+                            z_index,
+                            creation_order,
+                        };
                         scene
                             .commands
                             .entity(state.entity)
-                            .insert(RenderOrder {
-                                z_index: 0,
-                                creation_order,
-                            });
+                            .insert(order.clone());
+                        
+                        for (_, child_entity, _) in &state.child_spans {
+                            scene.commands.entity(*child_entity).insert(order.clone());
+                        }
                     }
                     py_to_bevy.insert(id, bevy_id);
                 }
@@ -538,4 +557,3 @@ fn drive_timeline_clock(
     dt.dt = time.delta_secs_f64();
     timeline.is_playing = true;
 }
-

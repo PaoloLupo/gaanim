@@ -1,15 +1,17 @@
 pub mod prelude;
 pub mod signals;
 pub mod tween;
+pub mod writing;
 
 pub use signals::{
     signal_binding_system, AlwaysRedraw, ColorSignal, FloatSignal, MobjectSpec, Signal,
     SignalBinding, SpecValue, Vec3Signal,
 };
 pub use tween::{
-    evaluate_tweens_system, evaluate_custom_tweens_system, sync_delta_time_system, AnimatableLens, DeltaTime, PathCompletion, PropertyLens, Tween,
-    TweenState,
+    evaluate_tweens_system, evaluate_custom_tweens_system, sync_delta_time_system,
+    AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState,
 };
+pub use writing::{path_source_seed_added_system, FillDrawProgress, PathSource};
 
 use bevy::prelude::*;
 use gaanim_scene::SceneSet;
@@ -29,9 +31,22 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 .in_set(SceneSet::Input),
         );
 
+        // PathSource seed runs in Input so that any entity that has just
+        // received a `Path2D` (from spawn, snapshot restore, morph, etc.)
+        // gets a `PathSource` mirror before the animation phase reads it.
+        app.add_systems(
+            Update,
+            path_source_seed_added_system
+                .in_set(SceneSet::Input)
+                .after(sync_delta_time_system),
+        );
+
         // Register tween evaluation in the Animation Phase.
         // evaluate_tweens_system runs in parallel for built-in lenses,
         // followed by evaluate_custom_tweens_system for exclusive World access.
+        // The `PathCompletion` lens writes the trimmed `Path2D` directly
+        // from the cached `PathSource` (seeded once at spawn), so we no
+        // longer need a separate application system for it.
         app.add_systems(
             Update,
             (

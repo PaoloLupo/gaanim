@@ -6,7 +6,7 @@ use slotmap::SlotMap;
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, Track, TrackId};
 use crate::snapshot::WorldSnapshot;
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
+use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
 
 /// The primary Timeline manager, stored as a Bevy ECS resource.
 ///
@@ -282,8 +282,39 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
             }
         }
         PropertyLensSpec::PathCompletion { from, to } => {
-            if let Some(mut completion) = world.get_mut::<gaanim_animation::PathCompletion>(target) {
-                completion.0 = *from + (*to - *from) * t;
+            let completion = *from + (*to - *from) * t;
+
+            // Safety net: if the `PathSource` seed system didn't run
+            // (timing race between Startup and the first Update frame,
+            // keyframe restore, etc.) the lens would otherwise be a
+            // no-op and the full path would stay visible the whole
+            // time.
+            if world.get::<gaanim_animation::PathSource>(target).is_none() {
+                let path_clone = world
+                    .get::<Path2D>(target)
+                    .map(|p| p.0.clone());
+                if let Some(bez) = path_clone
+                    && let Ok(mut em) = world.get_entity_mut(target)
+                {
+                    em.insert(gaanim_animation::PathSource(bez));
+                }
+            }
+
+            if let (Some(source), Some(mut path)) = (
+                world.get::<gaanim_animation::PathSource>(target).map(|s| s.0.clone()),
+                world.get_mut::<Path2D>(target),
+            ) {
+                path.0 = gaanim_math::get_subpath(&source, completion);
+            }
+        }
+        PropertyLensSpec::FillDrawProgress { from, to } => {
+            // Insert/update the `FillDrawProgress` component. The
+            // renderer reads it to modulate the fill brush's color
+            // alpha, producing the cross-fade from outline to fill
+            // that the Write animation needs.
+            let v = *from + (*to - *from) * t as f32;
+            if let Ok(mut em) = world.get_entity_mut(target) {
+                em.insert(gaanim_animation::FillDrawProgress(v));
             }
         }
         PropertyLensSpec::CameraPosition { from, to } => {

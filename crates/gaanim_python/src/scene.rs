@@ -81,6 +81,15 @@ impl SceneInner {
     }
 }
 
+macro_rules! lock_inner {
+    ($inner:expr) => {
+        match $inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        }
+    };
+}
+
 /// The Python entry point for authoring a scene.
 ///
 /// Holds a deferred op queue. Calling `render()` drains the queue into a
@@ -109,39 +118,41 @@ impl PyScene {
     }
 
     #[getter]
-    fn width(&self) -> u32 {
-        self.inner.lock().unwrap().width
+    fn width(&self) -> PyResult<u32> {
+        Ok(lock_inner!(self.inner).width)
     }
 
     #[getter]
-    fn height(&self) -> u32 {
-        self.inner.lock().unwrap().height
+    fn height(&self) -> PyResult<u32> {
+        Ok(lock_inner!(self.inner).height)
     }
 
     #[getter]
-    fn title_str(&self) -> String {
-        self.inner.lock().unwrap().title.clone()
+    fn title_str(&self) -> PyResult<String> {
+        Ok(lock_inner!(self.inner).title.clone())
     }
 
-    fn __repr__(&self) -> String {
-        let inner = self.inner.lock().unwrap();
-        format!(
+    fn __repr__(&self) -> PyResult<String> {
+        let inner = lock_inner!(self.inner);
+        Ok(format!(
             "Scene({}x{}, \"{}\", ops={})",
             inner.width,
             inner.height,
             inner.title,
             inner.ops.len(),
-        )
+        ))
     }
 
-    fn background(&self, color: &PyColor) {
-        self.inner.lock().unwrap().background = Some(color.0);
+    fn background(&self, color: &PyColor) -> PyResult<()> {
+        lock_inner!(self.inner).background = Some(color.0);
+        Ok(())
     }
 
     // ====== spawn helpers ======
 
-    fn circle(&self, radius: f64) -> PyMobject {
-        let id = self.inner.lock().unwrap().next_id();
+    fn circle(&self, radius: f64) -> PyResult<PyMobject> {
+        let mut inner = lock_inner!(self.inner);
+        let id = inner.next_id();
         let spec = Arc::new(Mutex::new(MobjectSpec::Circle {
             radius,
             fill: Some(peniko::Color::WHITE),
@@ -152,15 +163,15 @@ impl PyScene {
             next_to: None,
         }));
         let order = id.index() as u64;
-        self.inner.lock().unwrap().ops.push(DeferredOp::Spawn {
+        inner.ops.push(DeferredOp::Spawn {
             id,
             spec: spec.clone(),
             creation_order: order,
         });
-        PyMobject { id, spec, creation_order: order }
+        Ok(PyMobject { id, spec, creation_order: order })
     }
 
-    fn rectangle(&self, width: f64, height: f64) -> PyMobject {
+    fn rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Rectangle {
             width,
             height,
@@ -173,7 +184,7 @@ impl PyScene {
         })
     }
 
-    fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyMobject {
+    fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::RoundedRect {
             width,
             height,
@@ -187,7 +198,7 @@ impl PyScene {
         })
     }
 
-    fn square(&self, side: f64) -> PyMobject {
+    fn square(&self, side: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Square {
             side,
             fill: Some(peniko::Color::WHITE),
@@ -199,7 +210,7 @@ impl PyScene {
         })
     }
 
-    fn dot(&self, radius: f64) -> PyMobject {
+    fn dot(&self, radius: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Dot {
             radius,
             fill: Some(peniko::Color::WHITE),
@@ -211,7 +222,7 @@ impl PyScene {
         })
     }
 
-    fn ellipse(&self, rx: f64, ry: f64) -> PyMobject {
+    fn ellipse(&self, rx: f64, ry: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Ellipse {
             rx,
             ry,
@@ -224,7 +235,7 @@ impl PyScene {
         })
     }
 
-    fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyMobject {
+    fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Line {
             start: (x1, y1),
             end: (x2, y2),
@@ -236,7 +247,7 @@ impl PyScene {
         })
     }
 
-    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyMobject {
+    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Arrow {
             start: (x1, y1),
             end: (x2, y2),
@@ -249,7 +260,7 @@ impl PyScene {
         })
     }
 
-    fn polygon(&self, points: Vec<(f64, f64)>) -> PyMobject {
+    fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Polygon {
             points,
             fill: Some(peniko::Color::WHITE),
@@ -261,7 +272,7 @@ impl PyScene {
         })
     }
 
-    fn star(&self, n_points: u32, outer_radius: f64, inner_radius: f64) -> PyMobject {
+    fn star(&self, n_points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Star {
             n_points,
             outer_radius,
@@ -275,7 +286,7 @@ impl PyScene {
         })
     }
 
-    fn checkmark(&self, size: f64) -> PyMobject {
+    fn checkmark(&self, size: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Checkmark {
             size,
             stroke: Some((peniko::Color::WHITE, 4.0)),
@@ -286,7 +297,7 @@ impl PyScene {
         })
     }
 
-    fn regular_polygon(&self, n_sides: u32, radius: f64) -> PyMobject {
+    fn regular_polygon(&self, n_sides: u32, radius: f64) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::RegularPolygon {
             n_sides,
             radius,
@@ -299,7 +310,7 @@ impl PyScene {
         })
     }
 
-    fn text(&self, content: &str, role: Option<&str>) -> PyMobject {
+    fn text(&self, content: &str, role: Option<&str>) -> PyResult<PyMobject> {
         let role = TextRoleKind::from_str(role.unwrap_or("body"));
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
@@ -312,7 +323,7 @@ impl PyScene {
         })
     }
 
-    fn title(&self, content: &str) -> PyMobject {
+    fn title(&self, content: &str) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Title,
@@ -324,7 +335,7 @@ impl PyScene {
         })
     }
 
-    fn subtitle(&self, content: &str) -> PyMobject {
+    fn subtitle(&self, content: &str) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Subtitle,
@@ -336,7 +347,7 @@ impl PyScene {
         })
     }
 
-    fn body(&self, content: &str) -> PyMobject {
+    fn body(&self, content: &str) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Body,
@@ -348,7 +359,7 @@ impl PyScene {
         })
     }
 
-    fn caption(&self, content: &str) -> PyMobject {
+    fn caption(&self, content: &str) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Text {
             content: content.to_string(),
             role: TextRoleKind::Caption,
@@ -360,7 +371,7 @@ impl PyScene {
         })
     }
 
-    fn equation(&self, formula: &str) -> PyMobject {
+    fn equation(&self, formula: &str) -> PyResult<PyMobject> {
         self.spawn_with(MobjectSpec::Equation {
             formula: formula.to_string(),
             fill: None,
@@ -397,28 +408,29 @@ impl PyScene {
         }
         let _ = py;
         if !specs.is_empty() {
-            self.inner.lock().unwrap().ops.push(DeferredOp::Play { specs });
+            lock_inner!(self.inner).ops.push(DeferredOp::Play { specs });
         }
         Ok(())
     }
 
-    fn wait(&self, duration: f64) {
-        self.inner.lock().unwrap().ops.push(DeferredOp::Wait { duration });
+    fn wait(&self, duration: f64) -> PyResult<()> {
+        lock_inner!(self.inner).ops.push(DeferredOp::Wait { duration });
+        Ok(())
     }
 
-    fn slide(&self) {
+    fn slide(&self) -> PyResult<()> {
         // Slides are markers in the timeline; the runtime translates them
         // into a Breakpoint clip on the default track.
-        self.inner
-            .lock().unwrap()
+        lock_inner!(self.inner)
             .ops
             .push(DeferredOp::Play { specs: Vec::new() });
+        Ok(())
     }
 
     // ====== selection ======
 
     fn select(&self, parent: &PyMobject, query: &str) -> PyResult<PySelection> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = lock_inner!(self.inner);
         let selection_id = inner.next_id();
         let parent_id = parent.id;
         inner.ops.push(DeferredOp::Select {
@@ -434,8 +446,8 @@ impl PyScene {
     }
 
     /// Apply a fill to all glyphs in a selection (instant, at build time).
-    fn fill_selection(&self, selection: &PySelection, color: &PyColor) {
-        self.push_selection_fill(selection.id, color.0);
+    fn fill_selection(&self, selection: &PySelection, color: &PyColor) -> PyResult<()> {
+        self.push_selection_fill(selection.id, color.0)
     }
 
     /// Apply a stroke to all glyphs in a selection (instant, at build time).
@@ -444,8 +456,8 @@ impl PyScene {
         selection: &PySelection,
         color: &PyColor,
         width: f64,
-    ) {
-        self.push_selection_stroke(selection.id, color.0, width);
+    ) -> PyResult<()> {
+        self.push_selection_stroke(selection.id, color.0, width)
     }
 
     /// Begin a coordinated per-glyph shift animation across a selection.
@@ -470,7 +482,7 @@ impl PyScene {
     /// Drain the deferred op queue into a Bevy `App` and run the GPU window.
     /// Blocking: returns when the window is closed.
     fn render(&self, py: Python<'_>) -> PyResult<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = lock_inner!(self.inner);
         let ops = inner.ops.clone();
         let width = inner.width;
         let height = inner.height;
@@ -488,11 +500,11 @@ impl PyScene {
 
 // Helpers (internal use by Selection).
 impl PyScene {
-    pub(crate) fn push_selection_fill(&self, selection: ObjectId, color: peniko::Color) {
-        self.inner
-            .lock().unwrap()
+    pub(crate) fn push_selection_fill(&self, selection: ObjectId, color: peniko::Color) -> PyResult<()> {
+        lock_inner!(self.inner)
             .ops
             .push(DeferredOp::SelectionFill { selection, color });
+        Ok(())
     }
 
     pub(crate) fn push_selection_stroke(
@@ -500,15 +512,15 @@ impl PyScene {
         selection: ObjectId,
         color: peniko::Color,
         width: f64,
-    ) {
-        self.inner
-            .lock().unwrap()
+    ) -> PyResult<()> {
+        lock_inner!(self.inner)
             .ops
             .push(DeferredOp::SelectionStroke {
                 selection,
                 color,
                 width,
             });
+        Ok(())
     }
 
     pub(crate) fn push_selection_shift(
@@ -518,18 +530,19 @@ impl PyScene {
         dy: f64,
         duration: f64,
         rate_func: RateFunc,
-    ) {
-        self.inner.lock().unwrap().ops.push(DeferredOp::SelectionShift {
+    ) -> PyResult<()> {
+        lock_inner!(self.inner).ops.push(DeferredOp::SelectionShift {
             selection,
             dx,
             dy,
             duration,
             rate_func,
         });
+        Ok(())
     }
 
-    fn spawn_with(&self, spec: MobjectSpec) -> PyMobject {
-        let mut inner = self.inner.lock().unwrap();
+    fn spawn_with(&self, spec: MobjectSpec) -> PyResult<PyMobject> {
+        let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
         let order = id.index() as u64;
         let spec = Arc::new(Mutex::new(spec));
@@ -538,11 +551,10 @@ impl PyScene {
             spec: spec.clone(),
             creation_order: order,
         });
-        PyMobject {
+        Ok(PyMobject {
             id,
             spec,
             creation_order: order,
-        }
+        })
     }
 }
-

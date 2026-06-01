@@ -2,7 +2,10 @@ use bevy::prelude::{Component, Entity, Query, Res, ResMut, Resource};
 use gaanim_core::peniko::Color;
 use gaanim_core::kurbo::BezPath;
 use gaanim_math::{RateFunc, SpatialTransform};
-use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
+use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
+
+use crate::writing::FillDrawProgress;
+use crate::writing::PathSource;
 
 /// Resource containing the current simulation delta time.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -96,6 +99,11 @@ pub enum PropertyLens {
     // === Geometry & Paths ===
     PathMorph { from: BezPath, to: BezPath, table: MorphTable },
     PathCompletion { from: f64, to: f64 },
+    /// Cross-fade the fill alpha during a Write animation.
+    /// The renderer multiplies the fill brush's color alpha by
+    /// `from + (to - from) * t`. Inserted into the entity as
+    /// a `FillDrawProgress` component.
+    FillDrawProgress { from: f32, to: f32 },
 
     // === Camera ===
     CameraPosition { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
@@ -118,6 +126,9 @@ impl std::fmt::Debug for PropertyLens {
             Self::StrokeWidth { from, to } => write!(f, "StrokeWidth({} -> {})", from, to),
             Self::PathMorph { .. } => write!(f, "PathMorph"),
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
+            Self::FillDrawProgress { from, to } => {
+                write!(f, "FillDrawProgress({} -> {})", from, to)
+            }
             Self::CameraPosition { from, to } => write!(f, "CameraPosition({:?} -> {:?})", from, to),
             Self::CameraRotation { from, to } => write!(f, "CameraRotation({:?} -> {:?})", from, to),
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
@@ -142,13 +153,6 @@ impl Clone for Box<dyn AnimatableLens> {
     }
 }
 
-/// Component representing the path drawing progress (0.0 to 1.0).
-///
-/// Highly useful for trace, writing, and path creation animations.
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PathCompletion(pub f64);
-
 /// System: Evaluates all scheduled property tweens using parallel ECS queries.
 ///
 /// Built-in lenses (Translation, Rotation, Scale, Opacity, FillColor, StrokeColor, StrokeWidth, PathCompletion)
@@ -161,7 +165,9 @@ pub fn evaluate_tweens_system(
     mut opacities: Query<&mut Opacity>,
     mut fills: Query<&mut FillBrush>,
     mut strokes: Query<&mut StrokeBrush>,
-    mut completions: Query<&mut PathCompletion>,
+    sources: Query<&PathSource>,
+    mut paths: Query<&mut Path2D>,
+    mut fill_progress: Query<&mut FillDrawProgress>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
         if tween.state == TweenState::Completed {
@@ -225,8 +231,28 @@ pub fn evaluate_tweens_system(
                 }
             }
             PropertyLens::PathCompletion { from, to } => {
-                if let Ok(mut completion) = completions.get_mut(tween.target) {
-                    completion.0 = *from + (*to - *from) * t;
+                // Trim the entity's `Path2D` directly from the cached
+                // `PathSource`. The `PathCompletion` component is no
+                // longer needed because the lens already carries
+                // `from`/`to`; the source of truth is the `PathSource`
+                // mirror seeded once at spawn.
+                let completion = *from + (*to - *from) * t;
+                if let Ok(source) = sources.get(tween.target)
+                    && let Ok(mut path) = paths.get_mut(tween.target)
+                {
+                    path.0 = gaanim_math::get_subpath(&source.0, completion);
+                }
+            }
+            PropertyLens::FillDrawProgress { from, to } => {
+                // Update the `FillDrawProgress` component. The renderer
+                // reads it to modulate the fill brush's color alpha.
+                // If the entity doesn't have the component yet (e.g. the
+                // Write animation was scheduled but the entity is a
+                // fresh spawn), this branch is a no-op; the renderer
+                // still falls back to full-opacity fill.
+                let v = *from + (*to - *from) * t as f32;
+                if let Ok(mut fdp) = fill_progress.get_mut(tween.target) {
+                    fdp.0 = v;
                 }
             }
             PropertyLens::CameraPosition { from: _, to: _ } => {

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
+use gaanim_animation::FillDrawProgress;
 use gaanim_core::ObjectId;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{FillBrush, GlobalOpacity, MobjectId, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds};
@@ -27,6 +28,7 @@ struct ExtractedElement {
     opacity: f32,
     render_order: RenderOrder,
     scene: vello::Scene,
+    clip_mask: Option<ClipMask>,
 }
 
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
@@ -96,6 +98,7 @@ pub fn gaanim_render_system(
         Option<Ref<Glow>>,
         Option<Ref<GaussianBlur>>,
         Option<Ref<ClipMask>>,
+        Option<Ref<FillDrawProgress>>,
         Option<&WorldBounds>,
     ), With<Visible>>,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d), With<MainVelloScene>>,
@@ -117,6 +120,7 @@ pub fn gaanim_render_system(
         glow_ref,
         blur_ref,
         clip_ref,
+        fill_progress_ref,
         world_bounds_opt,
     ) in &query_mobjects {
         // Only process visible Vello2D elements
@@ -131,11 +135,20 @@ pub fn gaanim_render_system(
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            || clip_ref.as_ref().is_some_and(|r| r.is_changed());
+            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed());
 
         if changed {
             cache.fragment_cache.remove(&mobj_id.0);
         }
+
+        // Read the current fill progress. If the component is absent
+        // (the common case for non-Writing entities) the fill is
+        // rendered at full opacity, preserving legacy behavior.
+        let fill_alpha = fill_progress_ref
+            .as_ref()
+            .map(|f| f.0.clamp(0.0, 1.0))
+            .unwrap_or(1.0);
 
         // Fragment Retain: Retrieve the cached scene or compile a new local vector fragment.
         // Clones of geometry data only happen inside the closure when a rebuild is necessary.
@@ -162,7 +175,27 @@ pub fn gaanim_render_system(
             }
 
             // 2. Draw Fill
-            if let Some(ref fill_brush) = elem_fill {
+            //
+            // When the entity is mid-Write, the cached fill_alpha is < 1.0
+            // and we modulate the brush's color alpha accordingly. This
+            // only works cleanly for `Brush::Solid`; for gradient/image
+            // brushes we still draw at full alpha (a small visual quirk
+            // during the cross-fade, but the user-visible effect is
+            // preserved: outline first, then fill).
+            if fill_alpha < 1.0 {
+                if let Some(ref fill_brush) = elem_fill {
+                    let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
+                    if let Some(brush) = modulated {
+                        scene.fill(
+                            peniko::Fill::NonZero,
+                            kurbo::Affine::IDENTITY,
+                            &brush,
+                            None,
+                            &elem_path,
+                        );
+                    }
+                }
+            } else if let Some(ref fill_brush) = elem_fill {
                 scene.fill(
                     peniko::Fill::NonZero,
                     kurbo::Affine::IDENTITY,
@@ -172,10 +205,25 @@ pub fn gaanim_render_system(
                 );
             }
 
-            // 3. Draw Stroke
+            // 3. Draw Stroke (as an inner border)
+            //
+            // Vello's `stroke()` is always centered on the path, so the
+            // default would extend half the stroke width outside the
+            // glyph contour, making the character look visibly thicker.
+            // To get an inner border we push a layer clipped to the
+            // path itself, then stroke, then pop: the outer half of
+            // the stroke is masked away, leaving only the inner half
+            // drawn on top of the fill.
             if let Some(ref stroke_brush) = elem_stroke
                 && let Some(ref style) = elem_stroke_style
             {
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    1.0,
+                    kurbo::Affine::IDENTITY,
+                    &elem_path,
+                );
                 scene.stroke(
                     style,
                     kurbo::Affine::IDENTITY,
@@ -183,12 +231,13 @@ pub fn gaanim_render_system(
                     None,
                     &elem_path,
                 );
+                scene.pop_layer();
             }
 
-            // TODO: GaussianBlur, Glow, and ClipMask effects are not yet implemented
+            // TODO: GaussianBlur and Glow effects are not yet implemented
             // in Vello's native pipeline. They are read above to invalidate cache,
             // but do not affect the scene until a post-processing pass is wired.
-            let _ = (glow_ref, blur_ref, clip_ref);
+            let _ = (glow_ref, blur_ref);
 
             scene
         });
@@ -198,6 +247,7 @@ pub fn gaanim_render_system(
             opacity: global_opacity.0,
             render_order: *render_order,
             scene: fragment.clone(),
+            clip_mask: clip_ref.as_ref().map(|c| (*c).clone()),
         });
 
         // Accumulate AABB from WorldBounds if available, otherwise approximate from transform
@@ -232,6 +282,19 @@ pub fn gaanim_render_system(
     let mut main_scene = vello::Scene::new();
 
     for elem in extracted {
+        let mut layers_to_pop = 0;
+
+        if let Some(clip) = &elem.clip_mask {
+            main_scene.push_layer(
+                clip.rule,
+                peniko::BlendMode::default(),
+                1.0,
+                elem.transform,
+                &clip.path,
+            );
+            layers_to_pop += 1;
+        }
+
         if elem.opacity < 1.0 {
             // Apply opacity layer with composite transform
             main_scene.push_layer(
@@ -241,11 +304,13 @@ pub fn gaanim_render_system(
                 kurbo::Affine::IDENTITY,
                 &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
             );
-            main_scene.append(&elem.scene, Some(elem.transform));
+            layers_to_pop += 1;
+        }
+        
+        main_scene.append(&elem.scene, Some(elem.transform));
+
+        for _ in 0..layers_to_pop {
             main_scene.pop_layer();
-        } else {
-            // Append directly with transform
-            main_scene.append(&elem.scene, Some(elem.transform));
         }
     }
 
@@ -281,4 +346,19 @@ pub fn gaanim_render_system(
             ViewVisibility::default(),
         ));
     }
+}
+
+/// Returns a new `Brush` whose color alpha has been multiplied by `alpha`.
+///
+/// Used by the Write animation's cross-fade phase to fade the fill in
+/// from `FillDrawProgress = 0.0` (invisible) to `1.0` (fully visible)
+/// without changing the underlying brush. Delegates to `peniko::Brush`'s
+/// built-in `multiply_alpha`, which handles `Solid`, `Gradient`, and
+/// `Image` brush variants uniformly (with overflow saturation).
+fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Brush> {
+    if alpha >= 1.0 {
+        return None; // caller can use the original brush unmodified
+    }
+    let alpha = alpha.max(0.0);
+    Some(brush.clone().multiply_alpha(alpha))
 }

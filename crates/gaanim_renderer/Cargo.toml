@@ -9,6 +9,7 @@ description = "Vello GPU 2D vector renderer, Fragment Retain caching, wgpu integ
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
 
 # Third-party dependencies from workspace
 bevy = { workspace = true }

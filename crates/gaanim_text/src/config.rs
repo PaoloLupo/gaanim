@@ -63,7 +63,7 @@ impl Default for TextConfig {
         
         // Mathematical / Equation role (Typst default math font)
         roles.insert(TextRole::Math, RoleStyle {
-            font_family: "NewCMMath".to_string(),
+            font_family: "New Computer Modern Math".to_string(),
             size: 48.0,
             fill_color: gaanim_core::peniko::Color::WHITE,
         });

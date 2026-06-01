@@ -49,6 +49,13 @@ impl PyAnimationSpec {
             },
         }
     }
+
+    /// Internal constructor that wraps a pre-built `AnimationBuilder`
+    /// (used by the `Mobject.write(...)` shortcut to forward the duration
+    /// set by `MobjectRef::write_with_stroke_width`).
+    pub fn from_builder(builder: AnimationBuilder) -> Self {
+        Self { inner: builder }
+    }
 }
 
 #[pymethods]
@@ -84,6 +91,9 @@ impl PyAnimationSpec {
             AnimationType::FillColorTo { to } => format!("fill_color({:?})", to),
             AnimationType::StrokeColorTo { to } => format!("stroke_color({:?})", to),
             AnimationType::StrokeWidthTo { to } => format!("stroke_width({})", to),
+            AnimationType::Write { stroke_width } => {
+                format!("write(stroke_width={:?})", stroke_width)
+            }
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",
@@ -210,6 +220,19 @@ impl PyAnimationSpec {
         let target = self.inner.target;
         Self {
             inner: MobjectRef { id: target }.stroke_width_to(width),
+        }
+    }
+
+    /// Manim-style **Write** animation. Replaces the underlying animation
+    /// kind, so chaining order matters: `mobject.animate().write(1.5)`
+    /// will write, but `mobject.animate().shift(50,0).write(1.5)` will
+    /// *only* write (the shift is discarded). Combine with other animations
+    /// via parallel `play()` calls if you need both.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn write(&self, duration: f64, stroke_width: Option<f64>) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.write_with_stroke_width(duration, stroke_width),
         }
     }
 }

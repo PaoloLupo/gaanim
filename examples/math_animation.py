@@ -4,6 +4,7 @@ Demonstrates the fluent Gaanim Python API:
   - Scene construction with viewport
   - Text and equation mobjects via Typst
   - Instant configuration chaining (fill, z_index, at, etc.)
+  - **Manim-style Write animation** (progressive pen-stroke draw)
   - Coordinated parallel animations via .animate() + .play()
   - Glyph-level selection and styling (math character highlighting)
   - Selection-based per-glyph shift animations
@@ -15,26 +16,29 @@ from gaanim import BLUE, CORAL, GOLD, WHITE, Scene
 def main():
     # 1. Initialize a high-performance Python GPU scene
     print("[Gaanim Python] Initializing GPU Scene...")
-    scene = Scene(width=1280, height=720, title="Gaanim — Math Demo")
+    scene = Scene(width=1280, height=720, title="Gaanim — Math Demo (Write)")
 
     # 2. Spawn a plain Title text (white by default, HarfBuzz-shaped)
     print("[Gaanim Python] Spawning Title text and Mathematical Equations...")
     title_text = scene.title("Gaanim Vector Engine")
 
     # 3. Spawn premium math formulas (rendered and compiled with Typst/NewCMMath)
-    math_formula = scene.equation("E = m c^3")
+    math_formula = scene.equation("E = m c^2")
     sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)")
 
     # 4. Spawn a beautiful dark blue decorative circle in the background
     bg_circle = scene.circle(80).fill(BLUE).z_index(-10)
 
-    # 5. Play coordinated initial spring animations in parallel
-    print("[Gaanim Python] Queueing parallel animations...")
+    # 5. Play the new **Write** effect in parallel on the text and equations,
+    #    plus a regular scale animation on the bg circle.
+    #    Write progressively draws the path along its arc length, with
+    #    staggered per-glyph clips for text/equation roots.
+    print("[Gaanim Python] Queueing Write animations (pen-stroke draw)...")
     scene.play(
         bg_circle.animate().scale(1.2).duration(1.5).spring(),
-        title_text.animate().translate_to(-230.0, 240.0).duration(1.8).spring(),
-        math_formula.animate().translate_to(-100.0, 60.0).duration(1.0).smooth(),
-        sum_formula.animate().translate_to(-200.0, -150.0).duration(2.0).spring(),
+        title_text.animate().write(duration=5.0).linear(),
+        math_formula.animate().write(duration=1.5).smooth(),
+        sum_formula.animate().write(duration=2.5).linear(),
     )
 
     # 6. Wait for a moment

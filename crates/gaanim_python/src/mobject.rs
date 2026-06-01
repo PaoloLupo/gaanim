@@ -1,8 +1,8 @@
-use pyo3::prelude::*;
 use gaanim_api::prelude::LayoutDirection;
 use gaanim_core::peniko;
 use gaanim_core::ObjectId;
 use gaanim_math::SpatialTransform;
+use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
 use crate::animation::PyAnimationSpec;
@@ -459,6 +459,19 @@ pub struct PyMobject {
     pub creation_order: u64,
 }
 
+macro_rules! lock_spec {
+    ($spec:expr) => {
+        match $spec.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "MobjectSpec mutex is poisoned",
+                ))
+            }
+        }
+    };
+}
+
 #[pymethods]
 impl PyMobject {
     #[getter]
@@ -466,101 +479,94 @@ impl PyMobject {
         PyObjectId(self.id)
     }
 
-    fn __repr__(&self) -> String {
-        let kind = self.spec.lock().unwrap().kind_name().to_string();
-        format!(
+    fn __repr__(&self) -> PyResult<String> {
+        let kind = lock_spec!(self.spec).kind_name().to_string();
+        Ok(format!(
             "Mobject(ObjectId({}v{}), kind={}, creation_order={})",
             self.id.index(),
             self.id.generation(),
             kind,
             self.creation_order,
-        )
+        ))
     }
 
     // ====== instant configuration (return new Mobject, mutate shared spec) ======
 
-    fn fill(&self, color: &PyColor) -> Self {
+    fn fill(&self, color: &PyColor) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_fill(Some(color.0));
-        new
+        lock_spec!(new.spec).set_fill(Some(color.0));
+        Ok(new)
     }
 
-    fn no_fill(&self) -> Self {
+    fn no_fill(&self) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_fill(None);
-        new
+        lock_spec!(new.spec).set_fill(None);
+        Ok(new)
     }
 
-    fn stroke(&self, color: &PyColor, width: f64) -> Self {
+    fn stroke(&self, color: &PyColor, width: f64) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_stroke(Some((color.0, width)));
-        new
+        lock_spec!(new.spec).set_stroke(Some((color.0, width)));
+        Ok(new)
     }
 
-    fn no_stroke(&self) -> Self {
+    fn no_stroke(&self) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_stroke(None);
-        new
+        lock_spec!(new.spec).set_stroke(None);
+        Ok(new)
     }
 
-    fn opacity(&self, opacity: f32) -> Self {
+    fn opacity(&self, opacity: f32) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_opacity(opacity);
-        new
+        lock_spec!(new.spec).set_opacity(opacity);
+        Ok(new)
     }
 
-    fn z_index(&self, z: i32) -> Self {
+    fn z_index(&self, z: i32) -> PyResult<Self> {
         let new = self.clone();
-        new.spec.lock().unwrap().set_z_index(z);
-        new
+        lock_spec!(new.spec).set_z_index(z);
+        Ok(new)
     }
 
     /// Set absolute 2D position (applied at spawn time as the initial transform).
-    fn at(&self, x: f64, y: f64) -> Self {
+    fn at(&self, x: f64, y: f64) -> PyResult<Self> {
         let new = self.clone();
-        new.spec
-            .lock().unwrap()
-            .set_transform(SpatialTransform::new_2d(x, y));
-        new
+        lock_spec!(new.spec).set_transform(SpatialTransform::new_2d(x, y));
+        Ok(new)
     }
 
     /// Add to existing 2D position.
-    fn shift(&self, dx: f64, dy: f64) -> Self {
+    fn shift(&self, dx: f64, dy: f64) -> PyResult<Self> {
         let new = self.clone();
-        let mut s = new.spec.lock().unwrap();
+        let mut s = lock_spec!(new.spec);
         let t = s.transform_mut();
         *t = t.shift_2d(dx, dy);
         drop(s);
-        new
+        Ok(new)
     }
 
-    fn scale(&self, factor: f64) -> Self {
+    fn scale(&self, factor: f64) -> PyResult<Self> {
         let new = self.clone();
-        let mut s = new.spec.lock().unwrap();
+        let mut s = lock_spec!(new.spec);
         let t = s.transform_mut();
         *t = t.scale_uniform(factor);
         drop(s);
-        new
+        Ok(new)
     }
 
-    fn rotate(&self, radians: f64) -> Self {
+    fn rotate(&self, radians: f64) -> PyResult<Self> {
         let new = self.clone();
-        let mut s = new.spec.lock().unwrap();
+        let mut s = lock_spec!(new.spec);
         let t = s.transform_mut();
         *t = t.with_rotation_2d(radians);
         drop(s);
-        new
+        Ok(new)
     }
 
     /// Place this mobject adjacent to a reference mobject in a layout direction.
     /// Resolved at spawn time using the reference's state in the scene.
     #[pyo3(signature = (reference, direction, spacing=10.0))]
-    fn next_to(
-        &self,
-        reference: &PyMobject,
-        direction: &str,
-        spacing: f64,
-    ) -> PyResult<Self> {
+    fn next_to(&self, reference: &PyMobject, direction: &str, spacing: f64) -> PyResult<Self> {
         let dir = direction_from_str(direction).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!(
                 "unknown direction: {} (use 'up', 'down', 'left', 'right')",
@@ -568,9 +574,7 @@ impl PyMobject {
             ))
         })?;
         let new = self.clone();
-        new.spec
-            .lock().unwrap()
-            .set_next_to(Some((reference.id, dir, spacing)));
+        lock_spec!(new.spec).set_next_to(Some((reference.id, dir, spacing)));
         Ok(new)
     }
 
@@ -610,7 +614,9 @@ impl PyMobject {
     fn rotate_anim(&self, radians: f64) -> PyAnimationSpec {
         PyAnimationSpec::from_kind(
             self.id,
-            gaanim_api::anim::AnimationType::RotateBy { angle_radians: radians },
+            gaanim_api::anim::AnimationType::RotateBy {
+                angle_radians: radians,
+            },
         )
     }
 
@@ -642,6 +648,16 @@ impl PyMobject {
             gaanim_api::anim::AnimationType::StrokeColorTo { to: color.0 },
         )
     }
+
+    /// Begin a Write (pen-stroke draw) animation. Chain `.smooth()` /
+    /// `.linear()` / `.spring()` to choose a rate function, then pass
+    /// to `Scene.play(*specs)`.
+    #[pyo3(signature = (duration=1.0, stroke_width=None))]
+    fn write(&self, duration: f64, stroke_width: Option<f64>) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.write_with_stroke_width(duration, stroke_width);
+        PyAnimationSpec::from_builder(builder)
+    }
 }
 
 fn direction_from_str(s: &str) -> Option<LayoutDirection> {
@@ -653,4 +669,3 @@ fn direction_from_str(s: &str) -> Option<LayoutDirection> {
         _ => return None,
     })
 }
-

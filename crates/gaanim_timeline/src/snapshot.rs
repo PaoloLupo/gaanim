@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use bevy::prelude::{BuildChildrenTransformExt, Entity, EntityWorldMut, World};
 use gaanim_core::ObjectId;
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, MobjectId, Opacity, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible, ObjectTag};
+use gaanim_scene::{FillBrush, MobjectId, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible, ObjectTag};
 
 /// A snapshot capturing the complete state of a single Mobject entity.
 ///
@@ -25,8 +25,6 @@ pub struct EntitySnapshot {
     pub stroke: Option<gaanim_core::peniko::Brush>,
     /// Optional outline styling parameters (width, dashes, joins).
     pub stroke_style: Option<gaanim_core::kurbo::Stroke>,
-    /// The 2D geometry Bezier path outline.
-    pub path: Option<gaanim_core::kurbo::BezPath>,
     /// Ordering layer index.
     pub render_order: i32,
     /// Tie-breaker creation sequence index.
@@ -65,12 +63,6 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.remove::<StrokeBrush>();
     }
 
-    if let Some(ref path) = snap.path {
-        entity_mut.insert(Path2D(path.clone()));
-    } else {
-        entity_mut.remove::<Path2D>();
-    }
-
     entity_mut.insert(RenderOrder {
         z_index: snap.render_order,
         creation_order: snap.creation_order,
@@ -103,7 +95,6 @@ impl WorldSnapshot {
             Option<&Opacity>,
             Option<&FillBrush>,
             Option<&StrokeBrush>,
-            Option<&Path2D>,
             Option<&RenderOrder>,
             Option<&RenderLayer>,
             Option<&ObjectTag>,
@@ -119,7 +110,6 @@ impl WorldSnapshot {
             opacity_opt,
             fill_opt,
             stroke_opt,
-            path_opt,
             render_order_opt,
             render_layer_opt,
             tag_opt,
@@ -134,7 +124,6 @@ impl WorldSnapshot {
             let fill = fill_opt.and_then(|f| f.0.clone());
             let stroke = stroke_opt.and_then(|s| s.brush.clone());
             let stroke_style = stroke_opt.map(|s| s.style.clone());
-            let path = path_opt.map(|p| p.0.clone());
             let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
             let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
             let render_layer = render_layer_opt.copied().unwrap_or(RenderLayer::Vello2D);
@@ -153,7 +142,6 @@ impl WorldSnapshot {
                 fill,
                 stroke,
                 stroke_style,
-                path,
                 render_order,
                 creation_order,
                 render_layer,

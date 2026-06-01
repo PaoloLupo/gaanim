@@ -102,6 +102,11 @@ pub enum PropertyLensSpec {
     StrokeColor { from: Color, to: Color },
     StrokeWidth { from: f64, to: f64 },
     PathCompletion { from: f64, to: f64 },
+    /// Cross-fade the fill alpha from `from` to `to` (both in `[0, 1]`).
+    /// Used by the Write animation to reveal the fill after the path
+    /// has been fully drawn. Applied by inserting/updating a
+    /// `gaanim_animation::FillDrawProgress` component on the target.
+    FillDrawProgress { from: f32, to: f32 },
     CameraPosition { from: gaanim_core::glam::DVec3, to: gaanim_core::glam::DVec3 },
     CameraRotation { from: gaanim_core::glam::DQuat, to: gaanim_core::glam::DQuat },
     CameraZoom { from: f64, to: f64 },
@@ -120,6 +125,9 @@ impl PropertyLensSpec {
             Self::StrokeColor { from, to } => PropertyLens::StrokeColor { from: *from, to: *to },
             Self::StrokeWidth { from, to } => PropertyLens::StrokeWidth { from: *from, to: *to },
             Self::PathCompletion { from, to } => PropertyLens::PathCompletion { from: *from, to: *to },
+            Self::FillDrawProgress { from, to } => {
+                PropertyLens::FillDrawProgress { from: *from, to: *to }
+            }
             Self::CameraPosition { from, to } => PropertyLens::CameraPosition { from: *from, to: *to },
             Self::CameraRotation { from, to } => PropertyLens::CameraRotation { from: *from, to: *to },
             Self::CameraZoom { from, to } => PropertyLens::CameraZoom { from: *from, to: *to },
