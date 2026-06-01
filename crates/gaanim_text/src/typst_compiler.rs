@@ -216,15 +216,6 @@ fn extract_frame_items(
         match item {
             FrameItem::Group(group) => {
                 let group_affine = typst_transform_to_affine(&group.transform);
-                eprintln!(
-                    "[TypstGroup] transform=({:.2},{:.2},{:.2},{:.2},{:.2},{:.2})",
-                    group.transform.sx.get(),
-                    group.transform.ky.get(),
-                    group.transform.kx.get(),
-                    group.transform.sy.get(),
-                    group.transform.tx.to_pt(),
-                    group.transform.ty.to_pt()
-                );
                 let new_transform = item_transform * group_affine;
                 extract_frame_items(
                     commands,
@@ -238,7 +229,6 @@ fn extract_frame_items(
                 );
             }
             FrameItem::Text(text) => {
-                eprintln!("[TypstText] pos=({:.2},{:.2}) size={:.2}", pos.x.to_pt(), pos.y.to_pt(), text.size.to_pt());
                 let font = &text.font;
                 let size = text.size;
                 let upem = font.units_per_em();
@@ -263,13 +253,6 @@ fn extract_frame_items(
 
                         let glyph_x = pen_x + glyph.x_offset.at(size).to_pt();
                         let glyph_y = pen_y + glyph.y_offset.at(size).to_pt();
-
-                        eprintln!(
-                            "[TypstGlyph] idx={} id={} pen=({:.2},{:.2}) offset=({:.2},{:.2}) pos=({:.2},{:.2})",
-                            i, glyph.id, pen_x, pen_y,
-                            glyph.x_offset.at(size).to_pt(), glyph.y_offset.at(size).to_pt(),
-                            glyph_x, glyph_y
-                        );
 
                         // Scale outline and vertically flip it to map Y-up font outline to Y-down Typst canvas space
                         let glyph_transform = item_transform
