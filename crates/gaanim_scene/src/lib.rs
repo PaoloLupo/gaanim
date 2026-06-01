@@ -4,7 +4,7 @@ pub mod prelude;
 pub mod systems;
 
 pub use components::{
-    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, RenderLayer,
+    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer,
     RenderOrder, StrokeBrush, Visible, WorldBounds,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};

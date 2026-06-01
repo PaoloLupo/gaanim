@@ -14,14 +14,8 @@
 //! Ported and adapted from `crabanim::engine::animation::path_lens`.
 
 use bevy::prelude::{Added, Commands, Component, Entity, Query, Without};
-use gaanim_core::kurbo::BezPath;
 use gaanim_scene::Path2D;
-
-/// Caches the original, un-trimmed Bézier path of an entity so the
-/// draw-progression lens can recompute the visible subpath every
-/// frame without compounding arc-length error.
-#[derive(Component, Debug, Clone, Default)]
-pub struct PathSource(pub BezPath);
+pub use gaanim_scene::PathSource;
 
 /// Multiplier applied to the fill brush's color alpha by the renderer
 /// during a Write animation. `0.0` = fill fully hidden, `1.0` = fill

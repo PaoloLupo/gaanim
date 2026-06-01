@@ -2,10 +2,9 @@ use bevy::prelude::{Component, Entity, Query, Res, ResMut, Resource};
 use gaanim_core::peniko::Color;
 use gaanim_core::kurbo::BezPath;
 use gaanim_math::{RateFunc, SpatialTransform};
-use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
+use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
 
 use crate::writing::FillDrawProgress;
-use crate::writing::PathSource;
 
 /// Resource containing the current simulation delta time.
 #[derive(Resource, Debug, Clone, Copy, Default)]

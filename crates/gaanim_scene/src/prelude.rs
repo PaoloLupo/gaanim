@@ -1,5 +1,5 @@
 pub use crate::components::{
-    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, RenderLayer,
+    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer,
     RenderOrder, StrokeBrush, Visible, WorldBounds, TextSpan,
 
 };

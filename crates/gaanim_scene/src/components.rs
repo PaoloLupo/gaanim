@@ -91,6 +91,12 @@ impl Default for GlobalOpacity {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Path2D(pub BezPath);
 
+/// A mirror component that caches the original, unmodified Bézier path
+/// of a Mobject for time-based trimming / interpolation during writing/drawing.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PathSource(pub BezPath);
+
 /// The computed local bounding box of a Mobject.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

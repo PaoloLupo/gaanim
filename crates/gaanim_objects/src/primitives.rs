@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, RenderLayer,
+    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer,
     RenderOrder, StrokeBrush, Visible,
 };
 use gaanim_core::kurbo::{self, Shape};
@@ -15,6 +15,7 @@ use gaanim_core::kurbo::{self, Shape};
 pub struct MobjectBundle {
     pub id: MobjectId,
     pub path: Path2D,
+    pub path_source: PathSource,
     pub bounds: LocalBounds,
     pub transform: SpatialTransform,
     pub global_transform: GlobalSpatialTransform,
@@ -36,7 +37,8 @@ impl MobjectBundle {
     pub fn new(id: ObjectId, path: kurbo::BezPath, bounds: Bounds3D) -> Self {
         Self {
             id: MobjectId(id),
-            path: Path2D(path),
+            path: Path2D(path.clone()),
+            path_source: PathSource(path),
             bounds: LocalBounds(bounds),
             transform: SpatialTransform::identity(),
             global_transform: GlobalSpatialTransform::default(),
