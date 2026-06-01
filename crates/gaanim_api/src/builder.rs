@@ -455,12 +455,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // user would only ever see the fill.
         for item_id in &items {
             if let Some(state) = self.states.get_mut(item_id) {
+                eprintln!("[DEBUG AutoStroke] item={} state.fill={:?} state.stroke.brush={:?}",
+                    item_id.as_raw(),
+                    state.fill.as_ref().map(|b| match b {
+                        Brush::Solid(c) => format!("Solid({:?})", c),
+                        Brush::Gradient(_) => "Gradient".to_string(),
+                        _ => "Other".to_string(),
+                    }),
+                    state.stroke.brush.as_ref().map(|_| "Some"),
+                );
                 if state.stroke.brush.is_none() {
                     let color = state
                         .fill
                         .as_ref()
                         .and_then(extract_brush_color)
                         .unwrap_or(Color::WHITE);
+                    let width = stroke_width.unwrap_or(1.0);
+                    let new_stroke = StrokeBrush::new(color, width);
+                    state.stroke = new_stroke.clone();
+                    self.commands.entity(state.entity).insert(new_stroke);
                     let width = stroke_width.unwrap_or(1.0);
                     let new_stroke = StrokeBrush::new(color, width);
                     state.stroke = new_stroke.clone();
