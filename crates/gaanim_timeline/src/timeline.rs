@@ -196,7 +196,8 @@ impl Timeline {
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
     /// animations in correct temporal order up to `target_time`.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
-        self.current_time = target_time.clamp(0.0, self.cached_duration);
+        let max_time = self.loop_range.map(|(_, end)| end).unwrap_or(self.cached_duration);
+        self.current_time = target_time.clamp(0.0, max_time);
 
         // 1. Locate the nearest recorded keyframe <= target_time
         let keyframe = self.keyframes

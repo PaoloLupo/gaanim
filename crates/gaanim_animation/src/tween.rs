@@ -229,11 +229,11 @@ pub fn evaluate_tweens_system(
                     completion.0 = *from + (*to - *from) * t;
                 }
             }
-            PropertyLens::CameraPosition { from, to } => {
+            PropertyLens::CameraPosition { from: _, to: _ } => {
                 // Camera is a resource, not a component. Custom lenses can handle this.
             }
-            PropertyLens::CameraRotation { from, to } => {}
-            PropertyLens::CameraZoom { from, to } => {}
+            PropertyLens::CameraRotation { from: _, to: _ } => {}
+            PropertyLens::CameraZoom { from: _, to: _ } => {}
             PropertyLens::PathMorph { .. } => {}
             PropertyLens::Custom(_) => {
                 // Custom lenses require exclusive World access.
