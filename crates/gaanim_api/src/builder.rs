@@ -363,6 +363,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_indicate_internal(anim);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::FadeTransform { .. }) {
+            self.play_fade_transform_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Wiggle) {
+            self.play_wiggle_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::GrowFromPoint { .. }) {
+            self.play_grow_from_point_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::GrowFromEdge { .. }) {
+            self.play_grow_from_edge_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::DrawBorderThenFill) {
+            self.play_draw_border_then_fill_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Flash { .. }) {
+            self.play_flash_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Circumscribe { .. }) {
+            self.play_circumscribe_internal(anim);
+            return;
+        }
 
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
@@ -468,7 +496,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Unwrite { .. }
             | AnimationType::Uncreate { .. }
             | AnimationType::SpinInFromNothing
-            | AnimationType::Indicate { .. } => {
+            | AnimationType::Indicate { .. }
+            | AnimationType::FadeTransform { .. }
+            | AnimationType::Wiggle
+            | AnimationType::GrowFromPoint { .. }
+            | AnimationType::GrowFromEdge { .. }
+            | AnimationType::DrawBorderThenFill
+            | AnimationType::Flash { .. }
+            | AnimationType::Circumscribe { .. } => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
         };
@@ -971,6 +1006,419 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    fn play_fade_transform_internal(&mut self, anim: AnimationBuilder) {
+        let target = match &anim.anim_type {
+            AnimationType::FadeTransform { target } => *target,
+            _ => return,
+        };
+
+        {
+            let source_state = match self.states.get(anim.target) {
+                Some(s) => s,
+                None => return,
+            };
+            let from = source_state.opacity;
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Opacity { from, to: 0.0 },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+            if let Some(source_state) = self.states.get_mut(anim.target) {
+                source_state.opacity = 0.0;
+            }
+        }
+
+        {
+            let target_state = match self.states.get(target) {
+                Some(s) => s,
+                None => return,
+            };
+            let target_opacity = target_state.opacity;
+            let target_entity = target_state.entity;
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity { from: 0.0, to: target_opacity },
+                    rate_func: anim.rate_func.clone(),
+                }),
+            );
+            if let Some(target_state) = self.states.get_mut(target) {
+                target_state.opacity = target_opacity;
+            }
+            self.commands
+                .entity(target_entity)
+                .insert(Opacity(0.0));
+        }
+    }
+
+    fn play_wiggle_internal(&mut self, anim: AnimationBuilder) {
+        let state = match self.states.get(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+        let origin = state.transform.translation;
+        let num_wiggles = 6;
+        let step = anim.duration / num_wiggles as f64;
+        let amplitude = 5.0;
+
+        for i in 0..num_wiggles {
+            let dir = if i % 2 == 0 { 1.0_f64 } else { -1.0_f64 };
+            let offset_x = if i == num_wiggles - 1 { 0.0 } else { dir * amplitude };
+            let from_x = if i == 0 { origin.x } else { origin.x - dir * amplitude };
+            let to_x = origin.x + offset_x;
+
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time + i as f64 * step,
+                step,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Translation {
+                        from: gaanim_core::glam::DVec3::new(from_x, origin.y, origin.z),
+                        to: gaanim_core::glam::DVec3::new(to_x, origin.y, origin.z),
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                }),
+            );
+        }
+    }
+
+    fn play_grow_from_point_internal(&mut self, anim: AnimationBuilder) {
+        let (px, py) = match &anim.anim_type {
+            AnimationType::GrowFromPoint { px, py } => (*px, *py),
+            _ => return,
+        };
+
+        let state = match self.states.get_mut(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+
+        let target_scale = state.transform.scale;
+        let target_pos = state.transform.translation;
+
+        let from = gaanim_core::glam::DVec3::ZERO;
+        state.transform.scale = from;
+        let mut temp_transform = state.transform;
+        temp_transform.scale = from;
+        temp_transform.translation = gaanim_core::glam::DVec3::new(px, py, 0.0);
+        self.commands.entity(state.entity).insert(temp_transform);
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from, to: target_scale },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Translation {
+                    from: gaanim_core::glam::DVec3::new(px, py, 0.0),
+                    to: target_pos,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+    }
+
+    fn play_grow_from_edge_internal(&mut self, anim: AnimationBuilder) {
+        let direction = match &anim.anim_type {
+            AnimationType::GrowFromEdge { direction } => direction.clone(),
+            _ => return,
+        };
+
+        let state = match self.states.get_mut(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+
+        let target_scale = state.transform.scale;
+        let target_pos = state.transform.translation;
+        let bounds = state.bounds;
+
+        let (edge_lx, edge_ly) = match direction.as_str() {
+            "up" | "top" => (0.0, bounds.max.y),
+            "down" | "bottom" => (0.0, bounds.min.y),
+            "left" => (bounds.min.x, 0.0),
+            "right" => (bounds.max.x, 0.0),
+            _ => (0.0, 0.0),
+        };
+        let edge_world = target_pos
+            + gaanim_core::glam::DVec3::new(edge_lx, edge_ly, 0.0);
+
+        let from = gaanim_core::glam::DVec3::ZERO;
+        state.transform.scale = from;
+        let mut temp_transform = state.transform;
+        temp_transform.scale = from;
+        temp_transform.translation = edge_world;
+        self.commands.entity(state.entity).insert(temp_transform);
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from, to: target_scale },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Translation {
+                    from: edge_world,
+                    to: target_pos,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+    }
+
+    fn play_draw_border_then_fill_internal(&mut self, anim: AnimationBuilder) {
+        let state = match self.states.get(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+        let entity = state.entity;
+
+        let fill_color = state
+            .fill
+            .as_ref()
+            .and_then(extract_brush_color)
+            .unwrap_or(Color::WHITE);
+        let stroke_width = 2.0;
+
+        if state.stroke.brush.is_none() {
+            let new_stroke = StrokeBrush::new(fill_color, stroke_width);
+            self.commands
+                .entity(entity)
+                .insert(new_stroke.clone());
+            if let Some(s) = self.states.get_mut(anim.target) {
+                s.stroke = new_stroke;
+            }
+        }
+
+        let draw_duration = anim.duration * 0.6;
+        let fill_duration = anim.duration * 0.4;
+        let min_step = 1e-6_f64;
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            min_step,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            min_step,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        self.commands
+            .entity(entity)
+            .insert(gaanim_animation::FillDrawProgress(0.0));
+        self.commands.entity(entity).insert(gaanim_scene::components::Path2D(
+            std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+        ));
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            draw_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        let fill_start = self.current_time + draw_duration;
+        self.timeline.add_clip(
+            self.default_track,
+            fill_start,
+            fill_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+    }
+
+    fn play_flash_internal(&mut self, anim: AnimationBuilder) {
+        let state = match self.states.get(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+        let original_opacity = state.opacity;
+        let original_scale = state.transform.scale;
+
+        let n_lines = match &anim.anim_type {
+            AnimationType::Flash { n_lines, .. } => *n_lines,
+            _ => 12,
+        };
+        let radius = match &anim.anim_type {
+            AnimationType::Flash { radius, .. } => *radius,
+            _ => 100.0,
+        };
+        let half = anim.duration * 0.5;
+
+        // Fade out then back in (1.0 -> 0.0 -> 1.0)
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Opacity { from: original_opacity, to: 0.0 },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + half,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Opacity { from: 0.0, to: original_opacity },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+
+        // Quick scale pulse to amplify the "flash" effect.
+        // Pulse up to scale_factor proportional to the number of lines for visual feedback.
+        let scale_factor = 1.0 + (n_lines as f64 / 12.0) * 0.25;
+        let scale_to = original_scale * scale_factor;
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + half,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+
+        if let Some(s) = self.states.get_mut(anim.target) {
+            s.opacity = original_opacity;
+            s.transform.scale = original_scale;
+        }
+        let _ = radius; // reserved for future "radial line" geometry
+    }
+
+    fn play_circumscribe_internal(&mut self, anim: AnimationBuilder) {
+        let color = match &anim.anim_type {
+            AnimationType::Circumscribe { color } => *color,
+            _ => None,
+        };
+
+        let state = match self.states.get(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+        let original_opacity = state.opacity;
+        let original_scale = state.transform.scale;
+
+        let half = anim.duration * 0.5;
+
+        // Scale up then back down (1.0 -> 1.1 -> 1.0)
+        let scale_to = original_scale * 1.1;
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + half,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+
+        // Optional fill color highlight (like Indicate but without scale_factor difference).
+        if let Some(c) = color {
+            if let Some(Brush::Solid(current)) = &state.fill {
+                self.timeline.add_clip(
+                    self.default_track,
+                    self.current_time,
+                    half,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: anim.target,
+                        lens: PropertyLensSpec::FillColor { from: *current, to: c },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                    }),
+                );
+                self.timeline.add_clip(
+                    self.default_track,
+                    self.current_time + half,
+                    half,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: anim.target,
+                        lens: PropertyLensSpec::FillColor { from: c, to: *current },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                    }),
+                );
+            }
+        }
+
+        let _ = original_opacity; // reserved if we want to fade in/out later
+
+        if let Some(s) = self.states.get_mut(anim.target) {
+            s.transform.scale = original_scale;
+        }
+    }
+
     /// Spawns a circle primitive.
     pub fn circle(&mut self, radius: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
@@ -1129,6 +1577,174 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::regular_polygon(id, n_sides, radius);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a dashed line primitive.
+    pub fn dashed_line(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        dash_length: f64,
+        gap_length: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle =
+            gaanim_objects::primitives::dashed_line(id, start, end, dash_length, gap_length);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a circular/elliptical arc segment primitive.
+    pub fn arc(
+        &mut self,
+        center: kurbo::Point,
+        radii: kurbo::Vec2,
+        start_angle: f64,
+        sweep_angle: f64,
+        x_rotation: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::arc(id, center, radii, start_angle, sweep_angle, x_rotation);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a smooth arc between two points with a given deflection angle.
+    pub fn arc_between_points(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        angle: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::arc_between_points(id, start, end, angle);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a double-headed arrow primitive.
+    pub fn double_arrow(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        head_len: Option<f64>,
+        head_width: Option<f64>,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::double_arrow(id, start, end, head_len, head_width);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a circular sector (pie slice) primitive.
+    pub fn sector(
+        &mut self,
+        center: kurbo::Point,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::sector(id, center, radius, start_angle, sweep_angle);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns an annulus (ring/donut) primitive.
+    pub fn annulus(
+        &mut self,
+        outer_radius: f64,
+        inner_radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::annulus(id, outer_radius, inner_radius);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a surrounding rectangle (no fill, stroke outline).
+    pub fn surrounding_rectangle(
+        &mut self,
+        width: f64,
+        height: f64,
+        corner_radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle =
+            gaanim_objects::primitives::surrounding_rectangle(id, width, height, corner_radius);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a background rectangle (filled, low z-index).
+    pub fn background_rectangle(
+        &mut self,
+        width: f64,
+        height: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::background_rectangle(id, width, height);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a cross (X) symbol primitive.
+    pub fn cross(&mut self, size: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::cross(id, size);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a right-angle indicator primitive.
+    pub fn right_angle(
+        &mut self,
+        arm_length: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::right_angle(id, arm_length);
         MobjectSpawnBuilder {
             builder: self,
             id,

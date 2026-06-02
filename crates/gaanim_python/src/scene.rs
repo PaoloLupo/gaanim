@@ -364,6 +364,204 @@ impl PyScene {
         })
     }
 
+    fn dashed_line(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        dash_length: f64,
+        gap_length: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::DashedLine {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            dash_length,
+            gap_length,
+        })
+    }
+
+    fn arc(
+        &self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Arc {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            center: (cx, cy),
+            rx,
+            ry,
+            start_angle,
+            sweep_angle,
+        })
+    }
+
+    fn arc_between_points(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        angle: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::ArcBetweenPoints {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            angle,
+        })
+    }
+
+    fn double_arrow(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        head_len: Option<f64>,
+        head_width: Option<f64>,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::DoubleArrow {
+            common: CommonSpec {
+                fill: Some(primary_color),
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            head_len,
+            head_width,
+        })
+    }
+
+    fn sector(
+        &self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Sector {
+            common: Self::default_common(primary_color),
+            center: (cx, cy),
+            radius,
+            start_angle,
+            sweep_angle,
+        })
+    }
+
+    fn annulus(&self, outer_radius: f64, inner_radius: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Annulus {
+            common: Self::default_common(primary_color),
+            outer_radius,
+            inner_radius,
+        })
+    }
+
+    fn surrounding_rectangle(
+        &self,
+        width: f64,
+        height: f64,
+        corner_radius: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::SurroundingRectangle {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            width,
+            height,
+            corner_radius,
+        })
+    }
+
+    fn background_rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::BackgroundRectangle {
+            common: CommonSpec {
+                fill: Some(primary_color),
+                stroke: None,
+                z_index: -10,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            width,
+            height,
+        })
+    }
+
+    fn cross(&self, size: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Cross {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 3.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            size,
+        })
+    }
+
+    fn right_angle(&self, arm_length: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::RightAngle {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            arm_length,
+        })
+    }
+
     // ====== animations / waits ======
 
     #[pyo3(signature = (*anims))]

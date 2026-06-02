@@ -37,6 +37,16 @@ pub enum MobjectSpec {
     Checkmark { common: CommonSpec, size: f64 },
     Arrow { common: CommonSpec, start: (f64, f64), end: (f64, f64) },
     RegularPolygon { common: CommonSpec, n_sides: u32, radius: f64 },
+    DashedLine { common: CommonSpec, start: (f64, f64), end: (f64, f64), dash_length: f64, gap_length: f64 },
+    Arc { common: CommonSpec, center: (f64, f64), rx: f64, ry: f64, start_angle: f64, sweep_angle: f64 },
+    ArcBetweenPoints { common: CommonSpec, start: (f64, f64), end: (f64, f64), angle: f64 },
+    DoubleArrow { common: CommonSpec, start: (f64, f64), end: (f64, f64), head_len: Option<f64>, head_width: Option<f64> },
+    Sector { common: CommonSpec, center: (f64, f64), radius: f64, start_angle: f64, sweep_angle: f64 },
+    Annulus { common: CommonSpec, outer_radius: f64, inner_radius: f64 },
+    SurroundingRectangle { common: CommonSpec, width: f64, height: f64, corner_radius: f64 },
+    BackgroundRectangle { common: CommonSpec, width: f64, height: f64 },
+    Cross { common: CommonSpec, size: f64 },
+    RightAngle { common: CommonSpec, arm_length: f64 },
     Text { common: CommonSpec, content: String, role: TextRoleKind },
     Equation { common: CommonSpec, formula: String },
 }
@@ -87,6 +97,16 @@ impl MobjectSpec {
             | Self::Checkmark { common, .. }
             | Self::Arrow { common, .. }
             | Self::RegularPolygon { common, .. }
+            | Self::DashedLine { common, .. }
+            | Self::Arc { common, .. }
+            | Self::ArcBetweenPoints { common, .. }
+            | Self::DoubleArrow { common, .. }
+            | Self::Sector { common, .. }
+            | Self::Annulus { common, .. }
+            | Self::SurroundingRectangle { common, .. }
+            | Self::BackgroundRectangle { common, .. }
+            | Self::Cross { common, .. }
+            | Self::RightAngle { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
         }
@@ -106,6 +126,16 @@ impl MobjectSpec {
             | Self::Checkmark { common, .. }
             | Self::Arrow { common, .. }
             | Self::RegularPolygon { common, .. }
+            | Self::DashedLine { common, .. }
+            | Self::Arc { common, .. }
+            | Self::ArcBetweenPoints { common, .. }
+            | Self::DoubleArrow { common, .. }
+            | Self::Sector { common, .. }
+            | Self::Annulus { common, .. }
+            | Self::SurroundingRectangle { common, .. }
+            | Self::BackgroundRectangle { common, .. }
+            | Self::Cross { common, .. }
+            | Self::RightAngle { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
         }
@@ -125,6 +155,16 @@ impl MobjectSpec {
             Self::Checkmark { .. } => "checkmark",
             Self::Arrow { .. } => "arrow",
             Self::RegularPolygon { .. } => "regular_polygon",
+            Self::DashedLine { .. } => "dashed_line",
+            Self::Arc { .. } => "arc",
+            Self::ArcBetweenPoints { .. } => "arc_between_points",
+            Self::DoubleArrow { .. } => "double_arrow",
+            Self::Sector { .. } => "sector",
+            Self::Annulus { .. } => "annulus",
+            Self::SurroundingRectangle { .. } => "surrounding_rectangle",
+            Self::BackgroundRectangle { .. } => "background_rectangle",
+            Self::Cross { .. } => "cross",
+            Self::RightAngle { .. } => "right_angle",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
         }
@@ -413,6 +453,59 @@ impl PyMobject {
         use gaanim_api::builder::MobjectRef;
         let builder = MobjectRef { id: self.id }
             .indicate_with_color_and_scale(color.map(|c| c.0), scale_factor);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Fade transform: fade out this mobject while fading in another.
+    fn fade_transform(&self, target: &PyMobject) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.fade_transform(target.id);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Oscillating horizontal wiggle.
+    fn wiggle(&self) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.wiggle();
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Scale from zero at a specific anchor point.
+    fn grow_from_point(&self, px: f64, py: f64) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.grow_from_point(px, py);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Scale from zero at a specific edge.
+    fn grow_from_edge(&self, direction: &str) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.grow_from_edge(direction);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Draw outline first, then fill in.
+    fn draw_border_then_fill(&self) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.draw_border_then_fill();
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Flash radiant lines outward.
+    #[pyo3(signature = (color=None, n_lines=12, radius=100.0))]
+    fn flash(&self, color: Option<&PyColor>, n_lines: u32, radius: f64) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder =
+            MobjectRef { id: self.id }.flash(color.map(|c| c.0), n_lines, radius);
+        PyAnimationSpec::from_builder(builder)
+    }
+
+    /// Highlight with a circumscribing shape that grows and fades.
+    #[pyo3(signature = (color=None))]
+    fn circumscribe(&self, color: Option<&PyColor>) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder =
+            MobjectRef { id: self.id }.circumscribe(color.map(|c| c.0));
         PyAnimationSpec::from_builder(builder)
     }
 }

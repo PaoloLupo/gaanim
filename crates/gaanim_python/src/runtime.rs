@@ -383,6 +383,134 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
+        MobjectSpec::DashedLine {
+            common,
+            start,
+            end,
+            dash_length,
+            gap_length,
+        } => {
+            let b = scene.dashed_line(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                dash_length,
+                gap_length,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Arc {
+            common,
+            center,
+            rx,
+            ry,
+            start_angle,
+            sweep_angle,
+        } => {
+            let b = scene.arc(
+                gaanim_core::kurbo::Point::new(center.0, center.1),
+                gaanim_core::kurbo::Vec2::new(rx, ry),
+                start_angle,
+                sweep_angle,
+                0.0,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::ArcBetweenPoints {
+            common,
+            start,
+            end,
+            angle,
+        } => {
+            let b = scene.arc_between_points(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                angle,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::DoubleArrow {
+            common,
+            start,
+            end,
+            head_len,
+            head_width,
+        } => {
+            let b = scene.double_arrow(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                head_len,
+                head_width,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Sector {
+            common,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            let b = scene.sector(
+                gaanim_core::kurbo::Point::new(center.0, center.1),
+                radius,
+                start_angle,
+                sweep_angle,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Annulus {
+            common,
+            outer_radius,
+            inner_radius,
+        } => {
+            let b = scene.annulus(outer_radius, inner_radius);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::SurroundingRectangle {
+            common,
+            width,
+            height,
+            corner_radius,
+        } => {
+            let b = scene.surrounding_rectangle(width, height, corner_radius);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::BackgroundRectangle {
+            common,
+            width,
+            height,
+        } => {
+            let b = scene.background_rectangle(width, height);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Cross { common, size } => {
+            let b = scene.cross(size);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::RightAngle { common, arm_length } => {
+            let b = scene.right_angle(arm_length);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
         MobjectSpec::Text {
             common,
             content,

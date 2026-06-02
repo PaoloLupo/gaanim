@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 
 use crate::color::PyColor;
 use crate::id::PyObjectId;
+use crate::mobject::PyMobject;
 
 /// A configured animation that targets a single Mobject.
 ///
@@ -110,6 +111,27 @@ impl PyAnimationSpec {
             } => {
                 format!("indicate(color={:?}, scale_factor={})", color, scale_factor)
             }
+            AnimationType::FadeTransform { target } => {
+                format!("fade_transform(target={:?})", target)
+            }
+            AnimationType::Wiggle => "wiggle".to_string(),
+            AnimationType::GrowFromPoint { px, py } => {
+                format!("grow_from_point({}, {})", px, py)
+            }
+            AnimationType::GrowFromEdge { direction } => {
+                format!("grow_from_edge({})", direction)
+            }
+            AnimationType::DrawBorderThenFill => "draw_border_then_fill".to_string(),
+            AnimationType::Flash {
+                color,
+                n_lines,
+                radius,
+            } => {
+                format!("flash(color={:?}, n_lines={}, radius={})", color, n_lines, radius)
+            }
+            AnimationType::Circumscribe { color } => {
+                format!("circumscribe(color={:?})", color)
+            }
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",
@@ -151,6 +173,45 @@ impl PyAnimationSpec {
     fn linear(&self) -> Self {
         Self {
             inner: self.inner.clone().linear(),
+        }
+    }
+
+    /// Discrete step interpolation. Clamps to `n` evenly-spaced levels.
+    fn steps(&self, n: u32) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .rate_func(RateFunc::Steps(n)),
+        }
+    }
+
+    /// CSS-style cubic-bezier easing curve.
+    fn cubic_bezier(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .rate_func(RateFunc::CubicBezier(x1, y1, x2, y2)),
+        }
+    }
+
+    /// Mirror a named rate function (go to peak then back symmetrically).
+    fn mirror(&self, inner_name: &str) -> PyResult<Self> {
+        let inner = rate_func_from_name(inner_name)?;
+        Ok(Self {
+            inner: self.inner.clone().rate_func(RateFunc::Mirror(Box::new(inner))),
+        })
+    }
+
+    /// There-and-back with a pause at the peak.
+    /// `pause_ratio` controls what fraction of duration is spent at peak (0.0–0.9).
+    fn there_and_back_with_pause(&self, pause_ratio: f64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .rate_func(RateFunc::ThereAndBackWithPause(pause_ratio)),
         }
     }
 
@@ -312,6 +373,67 @@ impl PyAnimationSpec {
                 .indicate_with_color_and_scale(color.map(|c| c.0), scale_factor),
         }
     }
+
+    /// Fade out source and fade in target concurrently over the same duration.
+    fn fade_transform(&self, target: &PyMobject) -> Self {
+        let my_target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: my_target }
+                .fade_transform(target.id),
+        }
+    }
+
+    /// Oscillating horizontal wiggle vibration.
+    fn wiggle(&self) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.wiggle(),
+        }
+    }
+
+    /// Scale from zero at a specific anchor point, growing to full size.
+    fn grow_from_point(&self, px: f64, py: f64) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.grow_from_point(px, py),
+        }
+    }
+
+    /// Scale from zero at a specific edge direction (up/down/left/right/top/bottom).
+    fn grow_from_edge(&self, direction: &str) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.grow_from_edge(direction),
+        }
+    }
+
+    /// Draw the outline first, then fill in the shape.
+    fn draw_border_then_fill(&self) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.draw_border_then_fill(),
+        }
+    }
+
+    /// Lines radiating outward from the object (flash of insight effect).
+    #[pyo3(signature = (color=None, n_lines=12, radius=100.0))]
+    fn flash(&self, color: Option<&PyColor>, n_lines: u32, radius: f64) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }
+                .flash(color.map(|c| c.0), n_lines, radius),
+        }
+    }
+
+    /// A rectangle/circle that appears around the target, grows, and fades.
+    #[pyo3(signature = (color=None))]
+    fn circumscribe(&self, color: Option<&PyColor>) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }
+                .circumscribe(color.map(|c| c.0)),
+        }
+    }
 }
 
 pub fn rate_func_from_name(name: &str) -> PyResult<RateFunc> {
@@ -346,6 +468,9 @@ pub fn rate_func_from_name(name: &str) -> PyResult<RateFunc> {
         "elastic_out" => RateFunc::EaseOut(EasingCurve::Elastic),
         "elastic_in_out" => RateFunc::EaseInOut(EasingCurve::Elastic),
         "there_and_back" => RateFunc::ThereAndBack,
+        "there_and_back_with_pause" => RateFunc::ThereAndBackWithPause(0.2),
+        "exponential_decay" => RateFunc::ExponentialDecay,
+        "not_quite_there" => RateFunc::NotQuiteThere,
         _ => {
             return Err(PyValueError::new_err(format!(
                 "unknown rate function: {}",
@@ -376,6 +501,9 @@ pub fn rate_func_name(rf: &RateFunc) -> String {
         RateFunc::EaseOut(EasingCurve::Elastic) => "elastic_out".into(),
         RateFunc::EaseInOut(EasingCurve::Elastic) => "elastic_in_out".into(),
         RateFunc::ThereAndBack => "there_and_back".into(),
+        RateFunc::ThereAndBackWithPause(_) => "there_and_back_with_pause".into(),
+        RateFunc::ExponentialDecay => "exponential_decay".into(),
+        RateFunc::NotQuiteThere => "not_quite_there".into(),
         _ => "<custom>".into(),
     }
 }

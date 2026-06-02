@@ -303,3 +303,277 @@ pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBun
     bundle.tag = ObjectTag("Arrow".into());
     bundle
 }
+
+pub fn dashed_line(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    dash_length: f64,
+    gap_length: f64,
+) -> MobjectBundle {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let len = (dx * dx + dy * dy).sqrt();
+
+    let mut path = kurbo::BezPath::new();
+    if len > 0.0 {
+        let ux = dx / len;
+        let uy = dy / len;
+        let mut travelled = 0.0;
+        let mut drawing = true;
+        while travelled < len {
+            let seg_len = if drawing { dash_length } else { gap_length };
+            let effective = (travelled + seg_len).min(len) - travelled;
+            if drawing && effective > 0.0 {
+                let sx = start.x + ux * travelled;
+                let sy = start.y + uy * travelled;
+                let ex = sx + ux * effective;
+                let ey = sy + uy * effective;
+                path.move_to(kurbo::Point::new(sx, sy));
+                path.line_to(kurbo::Point::new(ex, ey));
+            }
+            travelled += seg_len;
+            drawing = !drawing;
+        }
+    }
+
+    let min_x = start.x.min(end.x);
+    let max_x = start.x.max(end.x);
+    let min_y = start.y.min(end.y);
+    let max_y = start.y.max(end.y);
+    let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.tag = ObjectTag("DashedLine".into());
+    bundle
+}
+
+pub fn arc_between_points(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    angle: f64,
+) -> MobjectBundle {
+    let mid_x = (start.x + end.x) * 0.5;
+    let mid_y = (start.y + end.y) * 0.5;
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let chord = (dx * dx + dy * dy).sqrt();
+    let radius = if angle.abs() < 1e-6 {
+        chord * 0.5
+    } else {
+        (chord * 0.5) / (angle * 0.5).sin().abs()
+    };
+    let r_sign = if angle >= 0.0 { 1.0 } else { -1.0 };
+    let h = (radius * radius - chord * chord * 0.25).sqrt();
+    let nx = -dy / chord;
+    let ny = dx / chord;
+    let cx = mid_x + nx * h * r_sign;
+    let cy = mid_y + ny * h * r_sign;
+
+    let sa = (start.y - cy).atan2(start.x - cx);
+    let ea = (end.y - cy).atan2(end.x - cx);
+    let mut sweep = ea - sa;
+    if angle > 0.0 && sweep < 0.0 {
+        sweep += 2.0 * std::f64::consts::PI;
+    } else if angle < 0.0 && sweep > 0.0 {
+        sweep -= 2.0 * std::f64::consts::PI;
+    }
+
+    let mut bundle = arc(
+        id,
+        kurbo::Point::new(cx, cy),
+        kurbo::Vec2::new(radius, radius),
+        sa,
+        sweep,
+        0.0,
+    );
+    bundle.tag = ObjectTag("ArcBetweenPoints".into());
+    bundle
+}
+
+pub fn double_arrow(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    head_len: Option<f64>,
+    head_width: Option<f64>,
+) -> MobjectBundle {
+    let head_len = head_len.unwrap_or(15.0);
+    let head_half_width = head_width.unwrap_or(7.5) * 0.5;
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let len = (dx * dx + dy * dy).sqrt();
+
+    let mut path = kurbo::BezPath::new();
+    if len > 0.0 {
+        let ux = dx / len;
+        let uy = dy / len;
+        let perp_x = -uy;
+        let perp_y = ux;
+        let base_end_x = end.x - ux * head_len;
+        let base_end_y = end.y - uy * head_len;
+        let base_start_x = start.x + ux * head_len;
+        let base_start_y = start.y + uy * head_len;
+
+        path.move_to(kurbo::Point::new(base_start_x, base_start_y));
+        path.line_to(kurbo::Point::new(base_end_x, base_end_y));
+
+        let h1e_x = base_end_x + perp_x * head_half_width;
+        let h1e_y = base_end_y + perp_y * head_half_width;
+        let h2e_x = base_end_x - perp_x * head_half_width;
+        let h2e_y = base_end_y - perp_y * head_half_width;
+        path.move_to(kurbo::Point::new(h1e_x, h1e_y));
+        path.line_to(end);
+        path.line_to(kurbo::Point::new(h2e_x, h2e_y));
+        path.close_path();
+
+        let h1s_x = base_start_x + perp_x * head_half_width;
+        let h1s_y = base_start_y + perp_y * head_half_width;
+        let h2s_x = base_start_x - perp_x * head_half_width;
+        let h2s_y = base_start_y - perp_y * head_half_width;
+        path.move_to(kurbo::Point::new(h1s_x, h1s_y));
+        path.line_to(start);
+        path.line_to(kurbo::Point::new(h2s_x, h2s_y));
+        path.close_path();
+    }
+
+    let pad = head_len.max(head_half_width * 2.0);
+    let min_x = start.x.min(end.x) - pad;
+    let max_x = start.x.max(end.x) + pad;
+    let min_y = start.y.min(end.y) - pad;
+    let max_y = start.y.max(end.y) + pad;
+    let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
+
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::WHITE,
+    )));
+    bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
+        style: kurbo::Stroke::new(2.5),
+    };
+    bundle.tag = ObjectTag("DoubleArrow".into());
+    bundle
+}
+
+pub fn sector(
+    id: ObjectId,
+    center: kurbo::Point,
+    radius: f64,
+    start_angle: f64,
+    sweep_angle: f64,
+) -> MobjectBundle {
+    let mut path = kurbo::BezPath::new();
+    path.move_to(center);
+    let perimeter = radius * sweep_angle.abs();
+    let max_chord = 4.0_f64;
+    let steps = ((perimeter / max_chord).ceil() as u32).max(8);
+    for i in 0..=steps {
+        let a = start_angle + sweep_angle * (i as f64 / steps as f64);
+        let x = center.x + radius * a.cos();
+        let y = center.y + radius * a.sin();
+        path.line_to(kurbo::Point::new(x, y));
+    }
+    path.close_path();
+    let bounds = Bounds3D::new_2d(
+        center.x - radius, center.y - radius,
+        center.x + radius, center.y + radius,
+    );
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.tag = ObjectTag("Sector".into());
+    bundle
+}
+
+pub fn annulus(id: ObjectId, outer_radius: f64, inner_radius: f64) -> MobjectBundle {
+    let mut path = kurbo::BezPath::new();
+    let perimeter = 2.0 * std::f64::consts::PI * outer_radius;
+    let max_chord = 4.0_f64;
+    let steps = ((perimeter / max_chord).ceil() as u32).max(16);
+    for i in 0..=steps {
+        let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+        let x = outer_radius * a.cos();
+        let y = outer_radius * a.sin();
+        if i == 0 {
+            path.move_to(kurbo::Point::new(x, y));
+        } else {
+            path.line_to(kurbo::Point::new(x, y));
+        }
+    }
+    path.close_path();
+    for i in 0..=steps {
+        let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+        let x = inner_radius * a.cos();
+        let y = inner_radius * a.sin();
+        if i == 0 {
+            path.move_to(kurbo::Point::new(x, y));
+        } else {
+            path.line_to(kurbo::Point::new(x, y));
+        }
+    }
+    path.close_path();
+    let bounds = Bounds3D::new_2d(-outer_radius, -outer_radius, outer_radius, outer_radius);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.tag = ObjectTag("Annulus".into());
+    bundle
+}
+
+pub fn surrounding_rectangle(
+    id: ObjectId,
+    width: f64,
+    height: f64,
+    corner_radius: f64,
+) -> MobjectBundle {
+    let w2 = width / 2.0;
+    let h2 = height / 2.0;
+    let path = if corner_radius > 0.0 {
+        kurbo::RoundedRect::new(-w2, -h2, w2, h2, corner_radius).to_path(0.1)
+    } else {
+        kurbo::Rect::new(-w2, -h2, w2, h2).to_path(0.1)
+    };
+    let bounds = Bounds3D::new_2d(-w2, -h2, w2, h2);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.tag = ObjectTag("SurroundingRectangle".into());
+    bundle
+}
+
+pub fn background_rectangle(id: ObjectId, width: f64, height: f64) -> MobjectBundle {
+    let mut bundle = rectangle(id, width, height);
+    bundle.tag = ObjectTag("BackgroundRectangle".into());
+    bundle.render_order = RenderOrder {
+        z_index: -10,
+        creation_order: id.index() as u64,
+    };
+    bundle
+}
+
+pub fn cross(id: ObjectId, size: f64) -> MobjectBundle {
+    let h = size * 0.5;
+    let mut path = kurbo::BezPath::new();
+    path.move_to(kurbo::Point::new(-h, -h));
+    path.line_to(kurbo::Point::new(h, h));
+    path.move_to(kurbo::Point::new(h, -h));
+    path.line_to(kurbo::Point::new(-h, h));
+    let bounds = Bounds3D::new_2d(-h, -h, h, h);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.tag = ObjectTag("Cross".into());
+    bundle
+}
+
+pub fn right_angle(id: ObjectId, arm_length: f64) -> MobjectBundle {
+    // The corner sits at the origin; arms extend along +x and +y.
+    let mut path = kurbo::BezPath::new();
+    path.move_to(kurbo::Point::new(0.0, 0.0));
+    path.line_to(kurbo::Point::new(arm_length, 0.0));
+    path.line_to(kurbo::Point::new(0.0, 0.0));
+    path.line_to(kurbo::Point::new(0.0, arm_length));
+    let bounds = Bounds3D::new_2d(0.0, 0.0, arm_length, arm_length);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.tag = ObjectTag("RightAngle".into());
+    bundle
+}

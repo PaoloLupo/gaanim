@@ -94,6 +94,33 @@ pub enum AnimationType {
         color: Option<Color>,
         scale_factor: f64,
     },
+    /// Fade out the source and fade in the target concurrently.
+    FadeTransform {
+        target: ObjectId,
+    },
+    /// Oscillating wiggle vibration (horizontal).
+    Wiggle,
+    /// Scale from 0 at a specific anchor point, growing to full size.
+    GrowFromPoint {
+        px: f64,
+        py: f64,
+    },
+    /// Scale from 0 at a specific edge direction.
+    GrowFromEdge {
+        direction: String,
+    },
+    /// Draw the outline first (like Write) then fill in.
+    DrawBorderThenFill,
+    /// Lines radiating outward from a point (flash of insight effect).
+    Flash {
+        color: Option<Color>,
+        n_lines: u32,
+        radius: f64,
+    },
+    /// A rectangle/circle that appears around the target, grows, and fades.
+    Circumscribe {
+        color: Option<Color>,
+    },
 }
 
 /// A fluent builder for an animation tween clip.
@@ -397,6 +424,80 @@ impl MobjectRef {
                 scale_factor,
             },
             duration: 1.0,
+            rate_func: RateFunc::ThereAndBack,
+        }
+    }
+
+    pub fn fade_transform(self, target: ObjectId) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::FadeTransform { target },
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    pub fn wiggle(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Wiggle,
+            duration: 1.0,
+            rate_func: RateFunc::Linear,
+        }
+    }
+
+    pub fn grow_from_point(self, px: f64, py: f64) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::GrowFromPoint { px, py },
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    pub fn grow_from_edge(self, direction: &str) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::GrowFromEdge {
+                direction: direction.to_string(),
+            },
+            duration: 1.0,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    pub fn draw_border_then_fill(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::DrawBorderThenFill,
+            duration: 1.5,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+
+    pub fn flash(
+        self,
+        color: Option<Color>,
+        n_lines: u32,
+        radius: f64,
+    ) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Flash {
+                color,
+                n_lines,
+                radius,
+            },
+            duration: 1.0,
+            rate_func: RateFunc::ThereAndBack,
+        }
+    }
+
+    pub fn circumscribe(self, color: Option<Color>) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::Circumscribe { color },
+            duration: 1.5,
             rate_func: RateFunc::ThereAndBack,
         }
     }

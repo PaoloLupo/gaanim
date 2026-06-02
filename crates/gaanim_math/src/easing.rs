@@ -56,6 +56,10 @@ pub enum RateFunc {
     RunningStart,
     /// CSS-style Cubic Bezier curve using normalized timing points (x1, y1, x2, y2).
     CubicBezier(f64, f64, f64, f64),
+    /// Exponential decay curve: starts fast, decelerates asymptotically towards 1.0.
+    ExponentialDecay,
+    /// Never quite reaches 1.0 — plateaus at 0.95 then settles.
+    NotQuiteThere,
     /// Custom mathematical closure.
     Custom(Arc<dyn Fn(f64) -> f64 + Send + Sync>),
 }
@@ -86,6 +90,8 @@ impl std::fmt::Debug for RateFunc {
             Self::CubicBezier(x1, y1, x2, y2) => {
                 write!(f, "CubicBezier({}, {}, {}, {})", x1, y1, x2, y2)
             }
+            Self::ExponentialDecay => write!(f, "ExponentialDecay"),
+            Self::NotQuiteThere => write!(f, "NotQuiteThere"),
             Self::Custom(_) => write!(f, "Custom(<closure>)"),
         }
     }
@@ -131,6 +137,12 @@ impl serde::Serialize for RateFunc {
                 state.serialize_field("y2", y2)?;
                 state.end()
             }
+            Self::ExponentialDecay => {
+                serializer.serialize_unit_variant("RateFunc", 13, "ExponentialDecay")
+            }
+            Self::NotQuiteThere => {
+                serializer.serialize_unit_variant("RateFunc", 14, "NotQuiteThere")
+            }
             Self::Custom(_) => serializer.serialize_unit_variant("RateFunc", 12, "Custom"),
         }
     }
@@ -163,6 +175,8 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
                 "ThereAndBack" => Ok(Self::ThereAndBack),
                 "Lingering" => Ok(Self::Lingering),
                 "RunningStart" => Ok(Self::RunningStart),
+                "ExponentialDecay" => Ok(Self::ExponentialDecay),
+                "NotQuiteThere" => Ok(Self::NotQuiteThere),
                 _ => Ok(Self::Linear),
             },
             RawRateFunc::Ease(mode, curve) => match mode.as_str() {
@@ -278,6 +292,17 @@ impl RateFunc {
                 t * t * ((s + 1.0) * t - s)
             }
             Self::CubicBezier(x1, y1, x2, y2) => Self::solve_cubic_bezier(*x1, *y1, *x2, *y2, t),
+            Self::ExponentialDecay => {
+                if t >= 1.0 {
+                    1.0
+                } else {
+                    1.0 - (-5.0 * t).exp()
+                }
+            }
+            Self::NotQuiteThere => {
+                let p = 1.0 - (-5.0 * (t / 0.95).clamp(0.0, 1.0)).exp();
+                (p * 0.95).min(0.95)
+            }
             Self::Custom(f) => f(t),
         }
     }
