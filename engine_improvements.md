@@ -95,11 +95,6 @@ reales y propone un roadmap para alcanzar (y superar) el estado del arte.
 | `Homotopy` | Deformación continua con función `(x,y,z,t)→(x',y',z')` | ✅ Movement | 🔴 8h |
 | `ChangeDecimalToValue` | Animar un número cambiando su valor | ✅ Numbers | 🟡 4h |
 
-> [!IMPORTANT]
-> `GrowFromCenter`, `ShrinkToCenter`, `Uncreate`, `Indicate` existen en el engine pero
-> **NO están expuestos como métodos en la Python API** (`MobjectHandle`). Exponerlos
-> es un quick win de ~1 hora.
-
 **Prioridad:**
 1. Exponer animaciones existentes en Python API (1h)
 2. `MoveAlongPath`, `SpinInFromNothing`, `GrowFromEdge` — alto impacto visual
@@ -416,7 +411,7 @@ Integración con LLMs para generar animaciones desde descripción en lenguaje na
 - [x] Portar `RoundedRectangle` y `Ellipse` primitivos a V2 (`gaanim`).
 - [x] Corregir orden de creación del Z-Index (evita superposición incorrecta de texto y rectángulos) en V2.
 - [x] Portar todas las rate functions avanzadas e interpolaciones de Manim a V2.
-- [ ] Exponer animaciones auxiliares (`grow_from_center`, `shrink_to_center`, `uncreate`, `indicate`) en la API de Python de V2.
+- [x] Exponer animaciones auxiliares (`grow_from_center`, `shrink_to_center`, `uncreate`, `indicate`) en la API de Python de V2.
 
 ### SPRINT 2: Mobjects Core (Completado en V1, Pendiente portar a V2)
 - [ ] Portar primitivas: `DashedLine`, `Sector`, `Annulus`.
