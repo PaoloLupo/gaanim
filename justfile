@@ -63,7 +63,7 @@ wheel:
 # ---- Run --------------------------------------------------------------------
 
 # Run an example by name without rebuilding. Usage: just run my_example
-run EX: build
+run EX:
     {{ python }} examples/{{ EX }}.py
 
 # ---- Doctor -----------------------------------------------------------------
