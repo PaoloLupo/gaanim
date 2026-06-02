@@ -571,6 +571,14 @@ class Scene:
         Bevy drives the Vello renderer.
         """
 
+    def edit(self) -> None:
+        """Drain the deferred op queue and open the interactive editor window.
+
+        The editor adds inspector, hierarchy, and playback control panels
+        over the Vello viewport. Click objects to inspect them. Blocking:
+        returns when the window is closed.
+        """
+
 class Mobject:
     """Handle to a scene mobject (shape, text, or equation).
 

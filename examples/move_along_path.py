@@ -98,7 +98,7 @@ def main():
     scene.play(a2.grow_arrow(1.2))
 
     scene.wait(0.5)
-    scene.render()
+    scene.edit()
 
 
 def gaanim_color(rgba):

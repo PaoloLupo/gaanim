@@ -11,7 +11,8 @@ members = [
   "crates/gaanim_layout",
   "crates/gaanim_api",
   "crates/gaanim_text",
-  "crates/gaanim_python"
+  "crates/gaanim_python",
+  "crates/gaanim_editor"
 ]
 
 [profile.dev]

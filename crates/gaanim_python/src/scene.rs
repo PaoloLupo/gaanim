@@ -757,6 +757,26 @@ impl PyScene {
         });
         Ok(())
     }
+
+    // ====== edit ======
+
+    /// Drain the deferred op queue into a Bevy `App` with the interactive
+    /// editor overlay (inspector, hierarchy, playback controls).
+    /// Blocking: returns when the window is closed.
+    fn edit(&self, py: Python<'_>) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        let ops = std::mem::take(&mut inner.ops);
+        let width = inner.width;
+        let height = inner.height;
+        let title = inner.title.clone();
+        let background = inner.background;
+        drop(inner);
+
+        py.detach(|| {
+            runtime::run_editor(ops, width, height, title, background);
+        });
+        Ok(())
+    }
 }
 
 // Helpers (internal use by Selection, constructors).

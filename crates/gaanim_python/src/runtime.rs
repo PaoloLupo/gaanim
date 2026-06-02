@@ -50,6 +50,48 @@ pub fn run(
     app.run();
 }
 
+/// Build a Bevy `App` with the editor plugin, replay the deferred op queue,
+/// and run the interactive editor window.
+pub fn run_editor(
+    ops: Vec<DeferredOp>,
+    width: u32,
+    height: u32,
+    title: String,
+    background: Option<peniko::Color>,
+) {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: format!(
+                "{} [Editor]",
+                if title.trim().is_empty() || title == "Gaanim Scene" {
+                    "Gaanim".to_string()
+                } else {
+                    title
+                }
+            ),
+            resolution: (width, height).into(),
+            ..default()
+        }),
+        ..default()
+    }))
+    .add_plugins(gaanim_scene::GaanimScenePlugin)
+    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+    .add_plugins(gaanim_text::GaanimTextPlugin)
+    .add_plugins(gaanim_api::GaanimApiPlugin)
+    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
+    .add_plugins(gaanim_editor::GaanimEditorPlugin)
+    .add_systems(Startup, move |world: &mut World| {
+        replay_into(world, ops.clone(), width, height, background);
+        // Start paused in editor mode so the user can inspect first.
+        let mut timeline = world.resource_mut::<Timeline>();
+        timeline.is_playing = false;
+    });
+
+    app.run();
+}
+
 fn replay_into(
     world: &mut World,
     ops: Vec<DeferredOp>,

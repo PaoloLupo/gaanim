@@ -1,0 +1,18 @@
+[package]
+name = "gaanim_editor"
+version = "0.1.0"
+edition = "2024"
+description = "Interactive editor with inspector, timeline, and viewport controls for gaanim v2"
+
+[dependencies]
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+
+bevy = { workspace = true, features = ["bevy_ui"] }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+bevy_egui = "0.39"
