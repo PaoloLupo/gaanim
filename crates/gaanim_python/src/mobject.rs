@@ -1,6 +1,7 @@
 use gaanim_api::prelude::LayoutDirection;
 use gaanim_core::peniko;
 use gaanim_core::ObjectId;
+use gaanim_core::kurbo;
 use gaanim_math::SpatialTransform;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -195,85 +196,101 @@ impl MobjectSpec {
 
 impl MobjectSpec {
     /// Reconstruct the path of this mobject as a list of polylines (one per
-    /// outer ring; holes are interleaved using even-odd ordering).
-    /// Used at build time by boolean operations to compose geometry.
+    /// outer ring; holes are interleaved using even-odd ordering). The
+    /// reconstruction runs in **world space** by applying the stored
+    /// `common.transform`, so callers (notably boolean operations) see the
+    /// geometry exactly where it will appear in the rendered scene.
     pub fn to_contours(&self) -> Vec<Vec<[f64; 2]>> {
+        let affine = self.common().transform.to_affine_2d();
         let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
         let push_circle = |cx: f64, cy: f64, r: f64, out: &mut Vec<Vec<[f64; 2]>>| {
             let steps = 64;
             let mut ring = Vec::with_capacity(steps + 1);
             for i in 0..=steps {
                 let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
-                ring.push([cx + r * a.cos(), cy + r * a.sin()]);
+                let p = affine * kurbo::Point::new(cx + r * a.cos(), cy + r * a.sin());
+                ring.push([p.x, p.y]);
             }
             out.push(ring);
         };
         let push_rect = |cx: f64, cy: f64, w: f64, h: f64, out: &mut Vec<Vec<[f64; 2]>>| {
-            out.push(vec![
-                [cx - w / 2.0, cy - h / 2.0],
-                [cx + w / 2.0, cy - h / 2.0],
-                [cx + w / 2.0, cy + h / 2.0],
-                [cx - w / 2.0, cy + h / 2.0],
-            ]);
+            let corners = [
+                (cx - w / 2.0, cy - h / 2.0),
+                (cx + w / 2.0, cy - h / 2.0),
+                (cx + w / 2.0, cy + h / 2.0),
+                (cx - w / 2.0, cy + h / 2.0),
+            ];
+            let mut ring = Vec::with_capacity(corners.len());
+            for (x, y) in corners {
+                let p = affine * kurbo::Point::new(x, y);
+                ring.push([p.x, p.y]);
+            }
+            out.push(ring);
         };
-        let push_polygon = |pts: &[(f64, f64)], out: &mut Vec<Vec<[f64; 2]>>| {
-            out.push(pts.iter().map(|(x, y)| [*x, *y]).collect());
-        };
-        let push_line = |x1: f64, y1: f64, x2: f64, y2: f64, out: &mut Vec<Vec<[f64; 2]>>| {
-            out.push(vec![[x1, y1], [x2, y2]]);
+        let push_transformed_ring = |pts: &[(f64, f64)], out: &mut Vec<Vec<[f64; 2]>>| {
+            let mut ring = Vec::with_capacity(pts.len());
+            for (x, y) in pts {
+                let p = affine * kurbo::Point::new(*x, *y);
+                ring.push([p.x, p.y]);
+            }
+            out.push(ring);
         };
         match self {
             Self::Circle { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
             Self::Square { side, .. } => push_rect(0.0, 0.0, *side, *side, &mut out),
             Self::Rectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
             Self::RoundedRect { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
-            Self::Polygon { points, .. } => push_polygon(points, &mut out),
+            Self::Polygon { points, .. } => push_transformed_ring(points, &mut out),
             Self::Dot { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
             Self::Star { n_points, outer_radius, inner_radius, .. } => {
-                let mut ring = Vec::new();
+                let mut pts = Vec::new();
                 let total = (*n_points as usize) * 2;
                 for i in 0..total {
                     let a = i as f64 * std::f64::consts::PI / *n_points as f64;
                     let r = if i % 2 == 0 { *outer_radius } else { *inner_radius };
-                    ring.push([r * a.cos(), r * a.sin()]);
+                    pts.push((r * a.cos(), r * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
             Self::Ellipse { rx, ry, .. } => {
                 let steps = 64;
-                let mut ring = Vec::with_capacity(steps + 1);
+                let mut pts = Vec::with_capacity(steps + 1);
                 for i in 0..=steps {
                     let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
-                    ring.push([rx * a.cos(), ry * a.sin()]);
+                    pts.push((rx * a.cos(), ry * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
             Self::Checkmark { size, .. } => {
-                out.push(vec![[0.0, 0.0], [*size * 0.5, *size * 0.5], [*size, 0.0]]);
+                let pts = [(0.0, 0.0), (*size * 0.5, *size * 0.5), (*size, 0.0)];
+                push_transformed_ring(&pts, &mut out);
             }
             Self::RegularPolygon { n_sides, radius, .. } => {
-                let mut ring = Vec::new();
+                let mut pts = Vec::new();
                 for i in 0..*n_sides {
                     let a = i as f64 * 2.0 * std::f64::consts::PI / *n_sides as f64;
-                    ring.push([radius * a.cos(), radius * a.sin()]);
+                    pts.push((radius * a.cos(), radius * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
-            Self::Line { start, end, .. } => push_line(start.0, start.1, end.0, end.1, &mut out),
+            Self::Line { start, end, .. } => {
+                let pts = [(start.0, start.1), (end.0, end.1)];
+                push_transformed_ring(&pts, &mut out);
+            }
             Self::Arrow { start, end, .. } => {
-                // Approximate arrow as a thin rectangle for boolean purposes
                 let dx = end.0 - start.0;
                 let dy = end.1 - start.1;
                 let len = (dx * dx + dy * dy).sqrt().max(0.001);
                 let ux = dx / len;
                 let uy = dy / len;
                 let h = 2.0;
-                out.push(vec![
-                    [start.0 - uy * h, start.1 + ux * h],
-                    [end.0 - uy * h, end.1 + ux * h],
-                    [end.0 + uy * h, end.1 - ux * h],
-                    [start.0 + uy * h, start.1 - ux * h],
-                ]);
+                let pts = [
+                    (start.0 - uy * h, start.1 + ux * h),
+                    (end.0 - uy * h, end.1 + ux * h),
+                    (end.0 + uy * h, end.1 - ux * h),
+                    (start.0 + uy * h, start.1 - ux * h),
+                ];
+                push_transformed_ring(&pts, &mut out);
             }
             Self::DoubleArrow { start, end, .. } => {
                 let dx = end.0 - start.0;
@@ -282,23 +299,27 @@ impl MobjectSpec {
                 let ux = dx / len;
                 let uy = dy / len;
                 let h = 2.0;
-                out.push(vec![
-                    [start.0 - uy * h, start.1 + ux * h],
-                    [end.0 - uy * h, end.1 + ux * h],
-                    [end.0 + uy * h, end.1 - ux * h],
-                    [start.0 + uy * h, start.1 - ux * h],
-                ]);
+                let pts = [
+                    (start.0 - uy * h, start.1 + ux * h),
+                    (end.0 - uy * h, end.1 + ux * h),
+                    (end.0 + uy * h, end.1 - ux * h),
+                    (start.0 + uy * h, start.1 - ux * h),
+                ];
+                push_transformed_ring(&pts, &mut out);
             }
-            Self::DashedLine { start, end, .. } => push_line(start.0, start.1, end.0, end.1, &mut out),
+            Self::DashedLine { start, end, .. } => {
+                let pts = [(start.0, start.1), (end.0, end.1)];
+                push_transformed_ring(&pts, &mut out);
+            }
             Self::Arc { center, rx, ry, start_angle, sweep_angle, .. } => {
                 let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
-                let mut ring = Vec::with_capacity(steps as usize + 1);
+                let mut pts = Vec::with_capacity(steps as usize + 1);
                 for i in 0..=steps {
                     let t = i as f64 / steps as f64;
                     let a = start_angle + sweep_angle * t;
-                    ring.push([center.0 + rx * a.cos(), center.1 + ry * a.sin()]);
+                    pts.push((center.0 + rx * a.cos(), center.1 + ry * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
             Self::ArcBetweenPoints { start, end, angle, .. } => {
                 let mid_x = (start.0 + end.0) * 0.5;
@@ -319,48 +340,51 @@ impl MobjectSpec {
                 if *angle > 0.0 && sweep < 0.0 { sweep += 2.0 * std::f64::consts::PI; }
                 if *angle < 0.0 && sweep > 0.0 { sweep -= 2.0 * std::f64::consts::PI; }
                 let steps = ((sweep.abs() * 30.0).ceil() as u32).max(8);
-                let mut ring = Vec::with_capacity(steps as usize + 1);
+                let mut pts = Vec::with_capacity(steps as usize + 1);
                 for i in 0..=steps {
                     let t = i as f64 / steps as f64;
                     let a = sa + sweep * t;
-                    ring.push([cx + radius * a.cos(), cy + radius * a.sin()]);
+                    pts.push((cx + radius * a.cos(), cy + radius * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
             Self::Sector { center, radius, start_angle, sweep_angle, .. } => {
-                let mut ring = vec![[center.0, center.1]];
+                let mut pts = vec![(center.0, center.1)];
                 let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
                 for i in 0..=steps {
                     let t = i as f64 / steps as f64;
                     let a = start_angle + sweep_angle * t;
-                    ring.push([center.0 + radius * a.cos(), center.1 + radius * a.sin()]);
+                    pts.push((center.0 + radius * a.cos(), center.1 + radius * a.sin()));
                 }
-                out.push(ring);
+                push_transformed_ring(&pts, &mut out);
             }
             Self::Annulus { outer_radius, inner_radius, .. } => {
                 let steps = 64;
                 let mut outer = Vec::with_capacity(steps + 1);
                 for i in 0..=steps {
                     let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
-                    outer.push([outer_radius * a.cos(), outer_radius * a.sin()]);
+                    outer.push((outer_radius * a.cos(), outer_radius * a.sin()));
                 }
-                out.push(outer);
+                push_transformed_ring(&outer, &mut out);
                 let mut inner = Vec::with_capacity(steps + 1);
                 for i in 0..=steps {
                     let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
-                    inner.push([inner_radius * a.cos(), inner_radius * a.sin()]);
+                    inner.push((inner_radius * a.cos(), inner_radius * a.sin()));
                 }
-                out.push(inner);
+                push_transformed_ring(&inner, &mut out);
             }
             Self::SurroundingRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
             Self::BackgroundRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
             Self::Cross { size, .. } => {
                 let h = size * 0.5;
-                out.push(vec![[-h, -h], [h, h]]);
-                out.push(vec![[h, -h], [-h, h]]);
+                let d1 = [(-h, -h), (h, h)];
+                let d2 = [(h, -h), (-h, h)];
+                push_transformed_ring(&d1, &mut out);
+                push_transformed_ring(&d2, &mut out);
             }
             Self::RightAngle { arm_length, .. } => {
-                out.push(vec![[0.0, 0.0], [*arm_length, 0.0], [0.0, 0.0], [0.0, *arm_length]]);
+                let pts = [(0.0, 0.0), (*arm_length, 0.0), (0.0, 0.0), (0.0, *arm_length)];
+                push_transformed_ring(&pts, &mut out);
             }
             Self::BooleanResult { contours, .. } => {
                 for c in contours {
@@ -708,4 +732,58 @@ fn direction_from_str(s: &str) -> Option<LayoutDirection> {
         "right" => LayoutDirection::Right,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_core::glam::DVec3;
+
+    fn make_circle(translation: (f64, f64)) -> MobjectSpec {
+        let t = SpatialTransform {
+            translation: DVec3::new(translation.0, translation.1, 0.0),
+            ..Default::default()
+        };
+        MobjectSpec::Circle {
+            common: CommonSpec {
+                fill: None,
+                stroke: None,
+                z_index: 0,
+                opacity: 1.0,
+                transform: t,
+                next_to: None,
+            },
+            radius: 80.0,
+        }
+    }
+
+    #[test]
+    fn circle_at_origin_has_centered_contours() {
+        let spec = make_circle((0.0, 0.0));
+        let contours = spec.to_contours();
+        assert_eq!(contours.len(), 1);
+        let min_x = contours[0].iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let max_x = contours[0].iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = contours[0].iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let max_y = contours[0].iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+        let cx = (min_x + max_x) * 0.5;
+        let cy = (min_y + max_y) * 0.5;
+        assert!(cx.abs() < 0.1, "expected center near 0, got {}", cx);
+        assert!(cy.abs() < 0.1, "expected center near 0, got {}", cy);
+    }
+
+    #[test]
+    fn circle_translated_offset_has_offcenter_contours() {
+        let spec = make_circle((-40.0, 0.0));
+        let contours = spec.to_contours();
+        assert_eq!(contours.len(), 1);
+        let min_x = contours[0].iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let max_x = contours[0].iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = contours[0].iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let max_y = contours[0].iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+        let cx = (min_x + max_x) * 0.5;
+        let cy = (min_y + max_y) * 0.5;
+        assert!((cx - (-40.0)).abs() < 0.1, "expected center near -40, got {}", cx);
+        assert!(cy.abs() < 0.1, "expected center near 0, got {}", cy);
+    }
 }

@@ -5,7 +5,7 @@ primitives. Each result is a single Mobject that you can position, animate,
 or compose with other shapes.
 """
 
-from gaanim import Scene, BLUE, RED, GREEN, GOLD
+from gaanim import BLUE, GOLD, GREEN, RED, Scene
 
 
 def main():
