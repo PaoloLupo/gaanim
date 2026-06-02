@@ -966,6 +966,33 @@ class Mobject:
             An AnimSpec.
         """
 
+    def move_along_path(self, waypoints: list[tuple[float, float]], duration: float = 0.0) -> AnimSpec:
+        """Move the target along a polyline defined by a list of waypoints.
+
+        Adjacent waypoints are connected by line segments. The path is sampled
+        at the rate-function-eased ``t`` (parametric, not arc-length uniform)
+        and applied as the target's world-space translation.
+
+        Args:
+            waypoints: List of ``(x, y)`` tuples defining the trajectory.
+                Must contain at least one point.
+            duration: Duration in seconds. If ``<= 0``, defaults to 2.0s.
+        Returns:
+            An AnimSpec.
+        """
+
+    def grow_arrow(self, duration: float = 0.0) -> AnimSpec:
+        """Specialized draw animation for ``Arrow`` mobjects.
+
+        Traces the outline (70% of duration) then cross-fades the fill with a
+        brief scale "punch" that emphasizes the arrowhead's arrival.
+
+        Args:
+            duration: Duration in seconds. If ``<= 0``, defaults to 1.5s.
+        Returns:
+            An AnimSpec.
+        """
+
 class AnimSpec:
     """A configured animation targeting a single Mobject.
 
@@ -1331,6 +1358,33 @@ class AnimSpec:
 
         Args:
             color: Outline color.
+        Returns:
+            A new AnimSpec.
+        """
+
+    def move_along_path(self, waypoints: list[tuple[float, float]], duration: float = 0.0) -> AnimSpec:
+        """Move the target along a polyline defined by a list of waypoints.
+
+        Adjacent waypoints are connected by line segments. The path is sampled
+        at the rate-function-eased ``t`` (parametric, not arc-length uniform)
+        and applied as the target's world-space translation.
+
+        Args:
+            waypoints: List of ``(x, y)`` tuples defining the trajectory.
+                Must contain at least one point.
+            duration: Duration in seconds. If ``<= 0``, defaults to 2.0s.
+        Returns:
+            A new AnimSpec.
+        """
+
+    def grow_arrow(self, duration: float = 0.0) -> AnimSpec:
+        """Specialized draw animation for ``Arrow`` mobjects.
+
+        Traces the outline (70% of duration) then cross-fades the fill with a
+        brief scale "punch" that emphasizes the arrowhead's arrival.
+
+        Args:
+            duration: Duration in seconds. If ``<= 0``, defaults to 1.5s.
         Returns:
             A new AnimSpec.
         """
