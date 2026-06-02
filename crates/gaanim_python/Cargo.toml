@@ -17,4 +17,5 @@ gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_api = { path = "../gaanim_api" }
 gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_objects = { path = "../gaanim_objects" }
 bevy = { version = "0.18", default-features = false }

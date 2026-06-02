@@ -511,6 +511,20 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
+        MobjectSpec::BooleanResult { common, contours } => {
+            let rings: Vec<Vec<gaanim_core::kurbo::Point>> = contours
+                .iter()
+                .map(|c| {
+                    c.iter()
+                        .map(|p| gaanim_core::kurbo::Point::new(p[0], p[1]))
+                        .collect()
+                })
+                .collect();
+            let b = scene.polylines(rings);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
         MobjectSpec::Text {
             common,
             content,

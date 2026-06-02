@@ -47,6 +47,10 @@ pub enum MobjectSpec {
     BackgroundRectangle { common: CommonSpec, width: f64, height: f64 },
     Cross { common: CommonSpec, size: f64 },
     RightAngle { common: CommonSpec, arm_length: f64 },
+    BooleanResult {
+        common: CommonSpec,
+        contours: Vec<Vec<[f64; 2]>>,
+    },
     Text { common: CommonSpec, content: String, role: TextRoleKind },
     Equation { common: CommonSpec, formula: String },
 }
@@ -107,6 +111,7 @@ impl MobjectSpec {
             | Self::BackgroundRectangle { common, .. }
             | Self::Cross { common, .. }
             | Self::RightAngle { common, .. }
+            | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
         }
@@ -136,6 +141,7 @@ impl MobjectSpec {
             | Self::BackgroundRectangle { common, .. }
             | Self::Cross { common, .. }
             | Self::RightAngle { common, .. }
+            | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
         }
@@ -165,6 +171,7 @@ impl MobjectSpec {
             Self::BackgroundRectangle { .. } => "background_rectangle",
             Self::Cross { .. } => "cross",
             Self::RightAngle { .. } => "right_angle",
+            Self::BooleanResult { .. } => "boolean_result",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
         }
@@ -184,6 +191,189 @@ impl MobjectSpec {
     fn set_transform(&mut self, t: SpatialTransform) { self.common_mut().transform = t; }
     fn transform_mut(&mut self) -> &mut SpatialTransform { &mut self.common_mut().transform }
     fn set_next_to(&mut self, hint: Option<(ObjectId, LayoutDirection, f64)>) { self.common_mut().next_to = hint; }
+}
+
+impl MobjectSpec {
+    /// Reconstruct the path of this mobject as a list of polylines (one per
+    /// outer ring; holes are interleaved using even-odd ordering).
+    /// Used at build time by boolean operations to compose geometry.
+    pub fn to_contours(&self) -> Vec<Vec<[f64; 2]>> {
+        let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+        let push_circle = |cx: f64, cy: f64, r: f64, out: &mut Vec<Vec<[f64; 2]>>| {
+            let steps = 64;
+            let mut ring = Vec::with_capacity(steps + 1);
+            for i in 0..=steps {
+                let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+                ring.push([cx + r * a.cos(), cy + r * a.sin()]);
+            }
+            out.push(ring);
+        };
+        let push_rect = |cx: f64, cy: f64, w: f64, h: f64, out: &mut Vec<Vec<[f64; 2]>>| {
+            out.push(vec![
+                [cx - w / 2.0, cy - h / 2.0],
+                [cx + w / 2.0, cy - h / 2.0],
+                [cx + w / 2.0, cy + h / 2.0],
+                [cx - w / 2.0, cy + h / 2.0],
+            ]);
+        };
+        let push_polygon = |pts: &[(f64, f64)], out: &mut Vec<Vec<[f64; 2]>>| {
+            out.push(pts.iter().map(|(x, y)| [*x, *y]).collect());
+        };
+        let push_line = |x1: f64, y1: f64, x2: f64, y2: f64, out: &mut Vec<Vec<[f64; 2]>>| {
+            out.push(vec![[x1, y1], [x2, y2]]);
+        };
+        match self {
+            Self::Circle { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
+            Self::Square { side, .. } => push_rect(0.0, 0.0, *side, *side, &mut out),
+            Self::Rectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::RoundedRect { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::Polygon { points, .. } => push_polygon(points, &mut out),
+            Self::Dot { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
+            Self::Star { n_points, outer_radius, inner_radius, .. } => {
+                let mut ring = Vec::new();
+                let total = (*n_points as usize) * 2;
+                for i in 0..total {
+                    let a = i as f64 * std::f64::consts::PI / *n_points as f64;
+                    let r = if i % 2 == 0 { *outer_radius } else { *inner_radius };
+                    ring.push([r * a.cos(), r * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::Ellipse { rx, ry, .. } => {
+                let steps = 64;
+                let mut ring = Vec::with_capacity(steps + 1);
+                for i in 0..=steps {
+                    let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+                    ring.push([rx * a.cos(), ry * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::Checkmark { size, .. } => {
+                out.push(vec![[0.0, 0.0], [*size * 0.5, *size * 0.5], [*size, 0.0]]);
+            }
+            Self::RegularPolygon { n_sides, radius, .. } => {
+                let mut ring = Vec::new();
+                for i in 0..*n_sides {
+                    let a = i as f64 * 2.0 * std::f64::consts::PI / *n_sides as f64;
+                    ring.push([radius * a.cos(), radius * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::Line { start, end, .. } => push_line(start.0, start.1, end.0, end.1, &mut out),
+            Self::Arrow { start, end, .. } => {
+                // Approximate arrow as a thin rectangle for boolean purposes
+                let dx = end.0 - start.0;
+                let dy = end.1 - start.1;
+                let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                let ux = dx / len;
+                let uy = dy / len;
+                let h = 2.0;
+                out.push(vec![
+                    [start.0 - uy * h, start.1 + ux * h],
+                    [end.0 - uy * h, end.1 + ux * h],
+                    [end.0 + uy * h, end.1 - ux * h],
+                    [start.0 + uy * h, start.1 - ux * h],
+                ]);
+            }
+            Self::DoubleArrow { start, end, .. } => {
+                let dx = end.0 - start.0;
+                let dy = end.1 - start.1;
+                let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                let ux = dx / len;
+                let uy = dy / len;
+                let h = 2.0;
+                out.push(vec![
+                    [start.0 - uy * h, start.1 + ux * h],
+                    [end.0 - uy * h, end.1 + ux * h],
+                    [end.0 + uy * h, end.1 - ux * h],
+                    [start.0 + uy * h, start.1 - ux * h],
+                ]);
+            }
+            Self::DashedLine { start, end, .. } => push_line(start.0, start.1, end.0, end.1, &mut out),
+            Self::Arc { center, rx, ry, start_angle, sweep_angle, .. } => {
+                let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
+                let mut ring = Vec::with_capacity(steps as usize + 1);
+                for i in 0..=steps {
+                    let t = i as f64 / steps as f64;
+                    let a = start_angle + sweep_angle * t;
+                    ring.push([center.0 + rx * a.cos(), center.1 + ry * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::ArcBetweenPoints { start, end, angle, .. } => {
+                let mid_x = (start.0 + end.0) * 0.5;
+                let mid_y = (start.1 + end.1) * 0.5;
+                let dx = end.0 - start.0;
+                let dy = end.1 - start.1;
+                let chord = (dx * dx + dy * dy).sqrt();
+                let radius = if angle.abs() < 1e-6 { chord * 0.5 } else { (chord * 0.5) / (angle * 0.5).sin().abs() };
+                let r_sign = if *angle >= 0.0 { 1.0 } else { -1.0 };
+                let h = (radius * radius - chord * chord * 0.25).sqrt();
+                let nx = -dy / chord;
+                let ny = dx / chord;
+                let cx = mid_x + nx * h * r_sign;
+                let cy = mid_y + ny * h * r_sign;
+                let sa = (start.1 - cy).atan2(start.0 - cx);
+                let ea = (end.1 - cy).atan2(end.0 - cx);
+                let mut sweep = ea - sa;
+                if *angle > 0.0 && sweep < 0.0 { sweep += 2.0 * std::f64::consts::PI; }
+                if *angle < 0.0 && sweep > 0.0 { sweep -= 2.0 * std::f64::consts::PI; }
+                let steps = ((sweep.abs() * 30.0).ceil() as u32).max(8);
+                let mut ring = Vec::with_capacity(steps as usize + 1);
+                for i in 0..=steps {
+                    let t = i as f64 / steps as f64;
+                    let a = sa + sweep * t;
+                    ring.push([cx + radius * a.cos(), cy + radius * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::Sector { center, radius, start_angle, sweep_angle, .. } => {
+                let mut ring = vec![[center.0, center.1]];
+                let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
+                for i in 0..=steps {
+                    let t = i as f64 / steps as f64;
+                    let a = start_angle + sweep_angle * t;
+                    ring.push([center.0 + radius * a.cos(), center.1 + radius * a.sin()]);
+                }
+                out.push(ring);
+            }
+            Self::Annulus { outer_radius, inner_radius, .. } => {
+                let steps = 64;
+                let mut outer = Vec::with_capacity(steps + 1);
+                for i in 0..=steps {
+                    let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+                    outer.push([outer_radius * a.cos(), outer_radius * a.sin()]);
+                }
+                out.push(outer);
+                let mut inner = Vec::with_capacity(steps + 1);
+                for i in 0..=steps {
+                    let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+                    inner.push([inner_radius * a.cos(), inner_radius * a.sin()]);
+                }
+                out.push(inner);
+            }
+            Self::SurroundingRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::BackgroundRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::Cross { size, .. } => {
+                let h = size * 0.5;
+                out.push(vec![[-h, -h], [h, h]]);
+                out.push(vec![[h, -h], [-h, h]]);
+            }
+            Self::RightAngle { arm_length, .. } => {
+                out.push(vec![[0.0, 0.0], [*arm_length, 0.0], [0.0, 0.0], [0.0, *arm_length]]);
+            }
+            Self::BooleanResult { contours, .. } => {
+                for c in contours {
+                    out.push(c.clone());
+                }
+            }
+            Self::Text { .. } | Self::Equation { .. } => {
+                // Text/equation geometry cannot be reconstructed at build time
+                // because the actual layout is computed at replay time.
+            }
+        }
+        out
+    }
 }
 
 /// A Python handle to a Mobject (real or about to be spawned).

@@ -127,6 +127,42 @@ pub fn arc(
     bundle
 }
 
+/// Creates a MobjectBundle from a list of polylines (closed subpaths).
+/// Multiple polylines are interpreted as outer rings (first) and holes
+/// (rest) using the even-odd fill rule. Used by the boolean-operation
+/// replay path.
+pub fn polylines(id: ObjectId, rings: &[Vec<kurbo::Point>]) -> MobjectBundle {
+    let mut path = kurbo::BezPath::new();
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for ring in rings {
+        if ring.is_empty() {
+            continue;
+        }
+        path.move_to(ring[0]);
+        for &p in &ring[1..] {
+            path.line_to(p);
+        }
+        path.close_path();
+        for &p in ring {
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+        }
+    }
+    let bounds = if rings.is_empty() {
+        Bounds3D::default()
+    } else {
+        Bounds3D::new_2d(min_x, min_y, max_x, max_y)
+    };
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.tag = ObjectTag("BooleanResult".into());
+    bundle
+}
+
 /// Creates a general closed polygon Mobject bundle from a list of vertices.
 pub fn polygon(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
     let mut path = kurbo::BezPath::new();

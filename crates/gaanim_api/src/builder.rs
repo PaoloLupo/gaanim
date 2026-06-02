@@ -1753,6 +1753,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns a mobject from a list of pre-computed closed polylines.
+    /// Used by boolean-operation replay to materialize the result geometry.
+    pub fn polylines(
+        &mut self,
+        rings: Vec<Vec<kurbo::Point>>,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::polylines(id, &rings);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Compiles a Typst markup or math formula into a hierarchy of vector Mobjects.
     ///
     /// `text_font` and `math_font` are optional font family names. When `None`,

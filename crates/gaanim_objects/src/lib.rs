@@ -1,3 +1,4 @@
+pub mod boolean;
 pub mod prelude;
 pub mod primitives;
 pub mod text;

@@ -562,6 +562,29 @@ impl PyScene {
         })
     }
 
+    /// Boolean union: returns a mobject whose filled area is the union of
+    /// the two source mobjects' geometries. The source mobjects are left
+    /// untouched and can be animated or removed independently.
+    fn union(&self, a: &PyMobject, b: &PyMobject) -> PyResult<PyMobject> {
+        self.boolean_op(a, b, gaanim_objects::boolean::BooleanOp::Union)
+    }
+
+    /// Boolean intersection: filled area is the overlap of A and B.
+    fn intersection(&self, a: &PyMobject, b: &PyMobject) -> PyResult<PyMobject> {
+        self.boolean_op(a, b, gaanim_objects::boolean::BooleanOp::Intersection)
+    }
+
+    /// Boolean difference: filled area is A minus B.
+    fn difference(&self, a: &PyMobject, b: &PyMobject) -> PyResult<PyMobject> {
+        self.boolean_op(a, b, gaanim_objects::boolean::BooleanOp::Difference)
+    }
+
+    /// Boolean exclusion: filled area is (A ∪ B) \ (A ∩ B), the symmetric
+    /// difference (XOR).
+    fn exclusion(&self, a: &PyMobject, b: &PyMobject) -> PyResult<PyMobject> {
+        self.boolean_op(a, b, gaanim_objects::boolean::BooleanOp::Exclusion)
+    }
+
     // ====== animations / waits ======
 
     #[pyo3(signature = (*anims))]
@@ -755,4 +778,88 @@ impl PyScene {
             creation_order: order,
         })
     }
+
+    /// Shared implementation of the four boolean ops exposed to Python.
+    /// Reconstructs the source mobjects' geometry from their specs, runs
+    /// the operation via `gaanim_objects::boolean`, and stores the result
+    /// as `MobjectSpec::BooleanResult` for replay.
+    fn boolean_op(
+        &self,
+        a: &PyMobject,
+        b: &PyMobject,
+        op: gaanim_objects::boolean::BooleanOp,
+    ) -> PyResult<PyMobject> {
+        let path_a = contours_to_bezpath(&a.spec.lock().unwrap().to_contours());
+        let path_b = contours_to_bezpath(&b.spec.lock().unwrap().to_contours());
+        let result = gaanim_objects::boolean::apply(&path_a, &path_b, op);
+        let mut combined: Vec<Vec<[f64; 2]>> = Vec::new();
+        for path in &result.paths {
+            for ring in bezpath_to_contours(path) {
+                combined.push(ring);
+            }
+        }
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::BooleanResult {
+            common: CommonSpec {
+                fill: Some(primary_color),
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            contours: combined,
+        })
+    }
+}
+
+fn contours_to_bezpath(contours: &[Vec<[f64; 2]>]) -> gaanim_core::kurbo::BezPath {
+    let mut path = gaanim_core::kurbo::BezPath::new();
+    for ring in contours {
+        if ring.is_empty() {
+            continue;
+        }
+        path.move_to(gaanim_core::kurbo::Point::new(ring[0][0], ring[0][1]));
+        for p in &ring[1..] {
+            path.line_to(gaanim_core::kurbo::Point::new(p[0], p[1]));
+        }
+        path.close_path();
+    }
+    path
+}
+
+fn bezpath_to_contours(path: &gaanim_core::kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut current: Option<Vec<[f64; 2]>> = None;
+    for el in path.iter() {
+        match el {
+            gaanim_core::kurbo::PathEl::MoveTo(p) => {
+                if let Some(buf) = current.take() {
+                    if buf.len() >= 3 {
+                        out.push(buf);
+                    }
+                }
+                current = Some(vec![[p.x, p.y]]);
+            }
+            gaanim_core::kurbo::PathEl::LineTo(p) => {
+                if let Some(buf) = current.as_mut() {
+                    buf.push([p.x, p.y]);
+                }
+            }
+            gaanim_core::kurbo::PathEl::ClosePath => {
+                if let Some(buf) = current.take() {
+                    if buf.len() >= 3 {
+                        out.push(buf);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(buf) = current.take() {
+        if buf.len() >= 3 {
+            out.push(buf);
+        }
+    }
+    out
 }
