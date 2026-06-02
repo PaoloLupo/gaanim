@@ -30,7 +30,7 @@ def main():
         (-300.0, -150.0),
         (300.0, -150.0),
         (300.0, 150.0),
-        (-300.0, 150.0),
+        (-300.0, 300.0),
         (-300.0, -150.0),
     ]
     # Estrella de 5 puntas
@@ -52,12 +52,12 @@ def main():
     guide_sq = scene.polygon(square).stroke(YELLOW, 1.5)
     guide_sq.no_fill()
     guide_sq.opacity(0.4)
-    guide_sq.at(0.0, -350.0)
+    # guide_sq.at(0.0, -350.0)
 
     guide_star = scene.polygon(star_pts).stroke(GREEN, 1.5)
     guide_star.no_fill()
     guide_star.opacity(0.4)
-    guide_star.at(0.0, -350.0)
+    # guide_star.at(0.0, -350.0)
 
     # Mobject 1: circulo sigue el cuadrado ---------------------------------
     traveler = scene.circle(28.0).fill(BLUE).stroke(WHITE, 2.0).at(-300.0, -500.0)
@@ -71,7 +71,7 @@ def main():
         scene.circle(22.0)
         .fill(RED)
         .stroke(WHITE, 1.5)
-        .at(star_pts[0][0], star_pts[0][1] - 350.0)
+        .at(star_pts[0][0], star_pts[0][1])
     )
 
     scene.play(traveler2.move_along_path(star_pts, 4.0).smooth())
@@ -79,7 +79,7 @@ def main():
 
     # Mobject 3: dot pequeño sigue la sinusoide ----------------------------
     dot = scene.dot(12.0).fill(WHITE)
-    dot.at(sine_pts[0][0], sine_pts[0][1] + 250.0)
+    dot.at(sine_pts[0][0], sine_pts[0][1])
 
     scene.play(dot.move_along_path(sine_pts, 3.0).linear())
     scene.wait(0.3)

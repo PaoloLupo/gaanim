@@ -511,6 +511,22 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
+        MobjectSpec::TangentLine { common, curve, t, length } => {
+            let pts: Vec<gaanim_core::kurbo::Point> = curve
+                .iter()
+                .map(|(x, y)| gaanim_core::kurbo::Point::new(*x, *y))
+                .collect();
+            let b = scene.tangent_line(&pts, t, length);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::NumberPlane { common, x_range, y_range, axis_stroke, grid_stroke } => {
+            let b = scene.number_plane(x_range, y_range, axis_stroke, grid_stroke);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
         MobjectSpec::BooleanResult { common, contours } => {
             let rings: Vec<Vec<gaanim_core::kurbo::Point>> = contours
                 .iter()

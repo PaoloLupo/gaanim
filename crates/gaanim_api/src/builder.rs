@@ -1472,6 +1472,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
+        // (B) Set initial value via deferred commands to avoid first-frame
+        // flash: insert FillDrawProgress(0.0) AND an empty Path2D so the
+        // renderer sees "no fill, no path" before the timeline runs.
+        if let Some(state) = self.states.get(anim.target) {
+            self.commands
+                .entity(state.entity)
+                .insert(gaanim_animation::FillDrawProgress(0.0));
+            self.commands
+                .entity(state.entity)
+                .insert(gaanim_scene::components::Path2D(
+                    std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+                ));
+        }
+
         // Phase 1: 70% of duration draws the outline (PathCompletion
         // 0 -> 1). The fill is held hidden during the draw, then
         // cross-fades in over the last 30% to give the arrowhead
@@ -1624,6 +1638,47 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub fn polygon(&mut self, points: &[kurbo::Point]) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::polygon(id, points);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a line tangent to a polyline `curve` at fractional
+    /// position `t` in `[0.0, 1.0]`. The line has half-length `length`
+    /// on either side of the tangent point. Falls back to a line of
+    /// zero length (origin) if the curve is degenerate.
+    pub fn tangent_line(
+        &mut self,
+        curve: &[kurbo::Point],
+        t: f64,
+        length: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::tangent_line(id, curve, t, length)
+            .unwrap_or_else(|| gaanim_objects::primitives::line(id, kurbo::Point::ORIGIN, kurbo::Point::ORIGIN));
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a Cartesian `NumberPlane` with grid + axes.
+    /// `x_range`, `y_range` are `(min, max, step)` tuples.
+    pub fn number_plane(
+        &mut self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        axis_stroke: f64,
+        grid_stroke: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle =
+            gaanim_objects::primitives::number_plane(id, x_range, y_range, axis_stroke, grid_stroke);
         MobjectSpawnBuilder {
             builder: self,
             id,

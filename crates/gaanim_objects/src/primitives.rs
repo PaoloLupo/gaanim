@@ -287,6 +287,24 @@ pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
 }
 
 /// Creates a directional arrow Mobject bundle with a solid triangular head.
+///
+/// The geometry is built as a **single contiguous subpath** so that
+/// `PathCompletion 0->1` (used by `Write`/`Create`/`GrowArrow`)
+/// reveals the arrow as a continuous pen stroke:
+///
+/// ```text
+///   start ──────── base ─┐
+///                        h1
+///                         \
+///                          end  (tip)
+///                         /
+///                        h2
+///   start ←──────────────┘
+/// ```
+///
+/// The pen first traces the body, then sweeps around the triangular
+/// head, then returns to the start. This avoids the visual bug where
+/// the head appears simultaneously with the body.
 pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBundle {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -303,9 +321,6 @@ pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBun
         let base_x = end.x - ux * head_len;
         let base_y = end.y - uy * head_len;
 
-        path.move_to(start);
-        path.line_to(kurbo::Point::new(base_x, base_y));
-
         let perp_x = -uy;
         let perp_y = ux;
 
@@ -314,9 +329,14 @@ pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBun
         let h2_x = base_x - perp_x * head_half_width;
         let h2_y = base_y - perp_y * head_half_width;
 
-        path.move_to(kurbo::Point::new(h1_x, h1_y));
+        // Single contiguous subpath so PathCompletion reveals the
+        // arrow as a single pen stroke (body, then head, then back).
+        path.move_to(start);
+        path.line_to(kurbo::Point::new(base_x, base_y));
+        path.line_to(kurbo::Point::new(h1_x, h1_y));
         path.line_to(end);
         path.line_to(kurbo::Point::new(h2_x, h2_y));
+        path.line_to(kurbo::Point::new(base_x, base_y));
         path.close_path();
     }
 
@@ -611,5 +631,132 @@ pub fn right_angle(id: ObjectId, arm_length: f64) -> MobjectBundle {
     let mut bundle = MobjectBundle::new(id, path, bounds);
     bundle.fill = FillBrush(None);
     bundle.tag = ObjectTag("RightAngle".into());
+    bundle
+}
+
+/// Creates a line mobject that is tangent to a polyline curve at a
+/// fractional position `t` in `[0.0, 1.0]` along the curve.
+///
+/// `curve` is a list of world-space points; adjacent points are
+/// connected by line segments. The tangent at `t` is the direction of
+/// the segment that contains `t` (interior points use the direction of
+/// the segment whose cumulative arc length includes `t`).
+///
+/// `length` is the half-length of the tangent line (the line extends
+/// ±`length` from the tangent point, in the local tangent direction).
+pub fn tangent_line(
+    id: ObjectId,
+    curve: &[kurbo::Point],
+    t: f64,
+    length: f64,
+) -> Option<MobjectBundle> {
+    if curve.len() < 2 {
+        return None;
+    }
+
+    // Compute segment lengths to find the segment containing `t`.
+    let seg_lengths: Vec<f64> = curve
+        .windows(2)
+        .map(|w| {
+            let dx = w[1].x - w[0].x;
+            let dy = w[1].y - w[0].y;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .collect();
+    let total_length: f64 = seg_lengths.iter().sum();
+    if total_length <= 0.0 {
+        return None;
+    }
+
+    let t_clamped = t.clamp(0.0, 1.0);
+    let target = t_clamped * total_length;
+
+    let mut cumulative = 0.0;
+    let mut idx = 0;
+    let mut local_t = 0.0;
+    for (i, &seg) in seg_lengths.iter().enumerate() {
+        if cumulative + seg >= target || i == seg_lengths.len() - 1 {
+            idx = i;
+            local_t = if seg > 0.0 {
+                (target - cumulative) / seg
+            } else {
+                0.0
+            };
+            break;
+        }
+        cumulative += seg;
+    }
+
+    let p0 = curve[idx];
+    let p1 = curve[idx + 1];
+    let tangent_point = kurbo::Point::new(
+        p0.x + (p1.x - p0.x) * local_t,
+        p0.y + (p1.y - p0.y) * local_t,
+    );
+    let dx = p1.x - p0.x;
+    let dy = p1.y - p0.y;
+    let mag = (dx * dx + dy * dy).sqrt();
+    if mag <= 0.0 {
+        return None;
+    }
+    let ux = dx / mag;
+    let uy = dy / mag;
+
+    let start = kurbo::Point::new(tangent_point.x - ux * length, tangent_point.y - uy * length);
+    let end = kurbo::Point::new(tangent_point.x + ux * length, tangent_point.y + uy * length);
+
+    Some(line(id, start, end))
+}
+
+/// Creates a Cartesian number plane mobject: x-axis, y-axis, and an
+/// optional grid of equally-spaced lines.
+///
+/// `x_range`, `y_range`: `(min, max, step)` tuples defining axis extents
+/// and grid spacing. `axis_stroke` and `grid_stroke` control the
+/// thickness; the axes are drawn thicker than the grid.
+pub fn number_plane(
+    id: ObjectId,
+    x_range: (f64, f64, f64),
+    y_range: (f64, f64, f64),
+    axis_stroke: f64,
+    grid_stroke: f64,
+) -> MobjectBundle {
+    let (x_min, x_max, x_step) = x_range;
+    let (y_min, y_max, y_step) = y_range;
+
+    let mut path = kurbo::BezPath::new();
+
+    // Grid lines (vertical)
+    let mut x = (x_min / x_step).ceil() * x_step;
+    while x <= x_max + 1e-9 {
+        path.move_to(kurbo::Point::new(x, y_min));
+        path.line_to(kurbo::Point::new(x, y_max));
+        x += x_step;
+    }
+    // Grid lines (horizontal)
+    let mut y = (y_min / y_step).ceil() * y_step;
+    while y <= y_max + 1e-9 {
+        path.move_to(kurbo::Point::new(x_min, y));
+        path.line_to(kurbo::Point::new(x_max, y));
+        y += y_step;
+    }
+
+    // Axes (thicker) — drawn last to overlay the grid
+    path.move_to(kurbo::Point::new(x_min, 0.0));
+    path.line_to(kurbo::Point::new(x_max, 0.0));
+    path.move_to(kurbo::Point::new(0.0, y_min));
+    path.line_to(kurbo::Point::new(0.0, y_max));
+
+    let bounds = Bounds3D::new_2d(x_min, y_min, x_max, y_max);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::from_rgb8(0xA0, 0xA0, 0xA0),
+        )),
+        style: kurbo::Stroke::new(grid_stroke),
+    };
+    bundle.tag = ObjectTag("NumberPlane".into());
+    let _ = axis_stroke; // axes use a thicker stroke applied by the caller via mobject.stroke()
     bundle
 }

@@ -562,6 +562,62 @@ impl PyScene {
         })
     }
 
+    /// Tangent line to a polyline curve at fractional position `t`.
+    /// `curve` is a list of `(x, y)` waypoints; `length` is the
+    /// half-length of the line on either side of the tangent point.
+    fn tangent_line(
+        &self,
+        curve: Vec<(f64, f64)>,
+        t: f64,
+        length: f64,
+    ) -> PyResult<PyMobject> {
+        if curve.len() < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tangent_line requires at least 2 waypoints",
+            ));
+        }
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::TangentLine {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            curve,
+            t,
+            length,
+        })
+    }
+
+    /// Cartesian number plane with axes and grid.
+    /// `x_range`, `y_range` are `(min, max, step)` tuples.
+    fn number_plane(
+        &self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        axis_stroke: f64,
+        grid_stroke: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::NumberPlane {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, axis_stroke)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+            },
+            x_range,
+            y_range,
+            axis_stroke,
+            grid_stroke,
+        })
+    }
+
     /// Boolean union: returns a mobject whose filled area is the union of
     /// the two source mobjects' geometries. The source mobjects are left
     /// untouched and can be animated or removed independently.

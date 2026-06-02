@@ -48,6 +48,19 @@ pub enum MobjectSpec {
     BackgroundRectangle { common: CommonSpec, width: f64, height: f64 },
     Cross { common: CommonSpec, size: f64 },
     RightAngle { common: CommonSpec, arm_length: f64 },
+    TangentLine {
+        common: CommonSpec,
+        curve: Vec<(f64, f64)>,
+        t: f64,
+        length: f64,
+    },
+    NumberPlane {
+        common: CommonSpec,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        axis_stroke: f64,
+        grid_stroke: f64,
+    },
     BooleanResult {
         common: CommonSpec,
         contours: Vec<Vec<[f64; 2]>>,
@@ -112,6 +125,8 @@ impl MobjectSpec {
             | Self::BackgroundRectangle { common, .. }
             | Self::Cross { common, .. }
             | Self::RightAngle { common, .. }
+            | Self::TangentLine { common, .. }
+            | Self::NumberPlane { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
@@ -142,6 +157,8 @@ impl MobjectSpec {
             | Self::BackgroundRectangle { common, .. }
             | Self::Cross { common, .. }
             | Self::RightAngle { common, .. }
+            | Self::TangentLine { common, .. }
+            | Self::NumberPlane { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. } => common,
@@ -172,6 +189,8 @@ impl MobjectSpec {
             Self::BackgroundRectangle { .. } => "background_rectangle",
             Self::Cross { .. } => "cross",
             Self::RightAngle { .. } => "right_angle",
+            Self::TangentLine { .. } => "tangent_line",
+            Self::NumberPlane { .. } => "number_plane",
             Self::BooleanResult { .. } => "boolean_result",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
@@ -385,6 +404,39 @@ impl MobjectSpec {
             Self::RightAngle { arm_length, .. } => {
                 let pts = [(0.0, 0.0), (*arm_length, 0.0), (0.0, 0.0), (0.0, *arm_length)];
                 push_transformed_ring(&pts, &mut out);
+            }
+            Self::TangentLine { curve, t, length, .. } => {
+                // Reconstruct the tangent line as a 2-point contour for
+                // boolean operations. Reuse the same arc-length
+                // sampling as the primitive.
+                if curve.len() >= 2 {
+                    let pts: Vec<kurbo::Point> = curve
+                        .iter()
+                        .map(|(x, y)| kurbo::Point::new(*x, *y))
+                        .collect();
+                    if let Some(bundle) =
+                        gaanim_objects::primitives::tangent_line(ObjectId::from_raw(0), &pts, *t, *length)
+                    {
+                        // Extract the line's start/end from the bundle
+                        let line_path = bundle.path.0;
+                        let pts2: Vec<kurbo::Point> = line_path
+                            .elements()
+                            .iter()
+                            .filter_map(|e| match e {
+                                kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => Some(*p),
+                                _ => None,
+                            })
+                            .collect();
+                        let ring: Vec<(f64, f64)> =
+                            pts2.iter().map(|p| (p.x, p.y)).collect();
+                        push_transformed_ring(&ring, &mut out);
+                    }
+                }
+            }
+            Self::NumberPlane { .. } => {
+                // NumberPlane has many thin grid lines; for boolean ops
+                // we treat it as empty to avoid generating hundreds of
+                // zero-area contours.
             }
             Self::BooleanResult { contours, .. } => {
                 for c in contours {
