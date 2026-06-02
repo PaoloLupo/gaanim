@@ -2,7 +2,8 @@ use bevy::prelude::{BuildChildrenTransformExt, Entity, EntityWorldMut, World};
 use gaanim_core::ObjectId;
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{
-    FillBrush, MobjectId, ObjectTag, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible,
+    FillBrush, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer, RenderOrder,
+    StrokeBrush, Visible,
 };
 use std::collections::HashMap;
 
@@ -37,6 +38,12 @@ pub struct EntitySnapshot {
     pub visible: bool,
     /// Descriptive tags for identifying the object type or attributes.
     pub tags: Vec<String>,
+    /// Current 2D Bézier path geometry.
+    pub path2d: Option<gaanim_core::kurbo::BezPath>,
+    /// Cached original path for write/unwrite animations.
+    pub path_source: Option<gaanim_core::kurbo::BezPath>,
+    /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
+    pub fill_draw_progress: Option<f32>,
 }
 
 /// Captures the complete state of all Mobject entities within the ECS world.
@@ -81,6 +88,24 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     if !snap.tags.is_empty() {
         entity_mut.insert(ObjectTag(snap.tags[0].clone()));
     }
+
+    if let Some(ref path) = snap.path2d {
+        entity_mut.insert(Path2D(path.clone()));
+    } else {
+        entity_mut.remove::<Path2D>();
+    }
+
+    if let Some(ref path) = snap.path_source {
+        entity_mut.insert(PathSource(path.clone()));
+    } else {
+        entity_mut.remove::<PathSource>();
+    }
+
+    if let Some(progress) = snap.fill_draw_progress {
+        entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
+    } else {
+        entity_mut.remove::<gaanim_animation::FillDrawProgress>();
+    }
 }
 
 impl WorldSnapshot {
@@ -100,6 +125,9 @@ impl WorldSnapshot {
             Option<&RenderOrder>,
             Option<&RenderLayer>,
             Option<&ObjectTag>,
+            Option<&Path2D>,
+            Option<&PathSource>,
+            Option<&gaanim_animation::FillDrawProgress>,
         )>();
 
         let mut captured_data = Vec::new();
@@ -115,6 +143,9 @@ impl WorldSnapshot {
             render_order_opt,
             render_layer_opt,
             tag_opt,
+            path2d_opt,
+            path_source_opt,
+            fill_draw_progress_opt,
         ) in query.iter(world)
         {
             let obj_id = mobj_id.0;
@@ -153,6 +184,9 @@ impl WorldSnapshot {
                     render_layer,
                     visible,
                     tags,
+                    path2d: path2d_opt.map(|p| p.0.clone()),
+                    path_source: path_source_opt.map(|p| p.0.clone()),
+                    fill_draw_progress: fill_draw_progress_opt.map(|p| p.0),
                 },
             ));
         }
