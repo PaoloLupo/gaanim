@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::{
+    egui, input::EguiWantsInput, EguiContexts, EguiPlugin, EguiPrimaryContextPass,
+};
 use gaanim_math::Camera;
 use gaanim_scene::{
     MobjectId, ObjectTag, Opacity, RenderOrder, Visible, WorldBounds,
@@ -10,10 +12,21 @@ pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
-            .init_resource::<EditorState>()
-            .add_systems(EguiPrimaryContextPass, editor_ui_system)
-            .add_systems(Update, picking_system);
+        // Multipass is enabled by default in bevy_egui 0.39, but it causes
+        // the play button's `.clicked()` to fire multiple times per frame
+        // (once per pass), toggling `is_playing` true→false→true within a
+        // single frame. The deprecation says "use EguiPlugin::default()",
+        // but that still defaults to multipass=true; we have to keep this
+        // explicit override until bevy_egui provides a non-deprecated
+        // way to opt out (tracked upstream).
+        #[allow(deprecated)]
+        app.add_plugins(EguiPlugin {
+            enable_multipass_for_primary_context: false,
+            ..default()
+        })
+        .init_resource::<EditorState>()
+        .add_systems(EguiPrimaryContextPass, editor_ui_system)
+        .add_systems(Update, editor_picking_system);
     }
 }
 
@@ -23,6 +36,16 @@ pub struct EditorState {
     pub playing: bool,
     pub show_hierarchy: bool,
     pub show_inspector: bool,
+    /// Persistent slider value. The slider in the bottom bar binds to this
+    /// (NOT to a fresh local copy of `timeline.current_time`) because egui's
+    /// `Slider` has a persistent memory state that diverges from a re-init'd
+    /// local each frame, causing `.changed()` to fire on every external
+    /// timeline tick and reset `is_playing=false` + `seek_request=Some(0)`.
+    pub slider_value: f64,
+    /// True while the user is actively dragging the timeline slider. While
+    /// dragging we DON'T sync `slider_value` from `timeline.current_time`,
+    /// otherwise the slider would jump under the user's cursor.
+    pub slider_dragging: bool,
 }
 
 impl Default for EditorState {
@@ -32,6 +55,8 @@ impl Default for EditorState {
             playing: false,
             show_hierarchy: true,
             show_inspector: true,
+            slider_value: 0.0,
+            slider_dragging: false,
         }
     }
 }
@@ -53,7 +78,6 @@ fn editor_ui_system(
         return;
     };
 
-    // --- Top menu bar ---
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.menu_button("View", |ui| {
@@ -62,11 +86,11 @@ fn editor_ui_system(
             });
             ui.separator();
             if let Some(selected) = state.selected {
-                let name = if let Ok((_, _, tag)) = entity_query.get(selected) {
-                    tag.map(|t| t.0.as_str()).unwrap_or("???")
-                } else {
-                    "???"
-                };
+                let name = entity_query
+                    .get(selected)
+                    .ok()
+                    .and_then(|(_, _, tag)| tag.map(|t| t.0.as_str()))
+                    .unwrap_or("???");
                 ui.label(format!("Selected: {name}"));
             } else {
                 ui.label("Gaanim Editor");
@@ -74,7 +98,6 @@ fn editor_ui_system(
         });
     });
 
-    // --- Hierarchy panel (left) ---
     if state.show_hierarchy {
         egui::SidePanel::left("hierarchy")
             .resizable(true)
@@ -108,7 +131,6 @@ fn editor_ui_system(
             });
     }
 
-    // --- Inspector panel (right) ---
     if state.show_inspector {
         egui::SidePanel::right("inspector")
             .resizable(true)
@@ -204,18 +226,15 @@ fn editor_ui_system(
             });
     }
 
-    // --- Bottom bar: playback controls ---
     egui::TopBottomPanel::bottom("playback").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            if ui
-                .add(egui::Button::new(if timeline.is_playing { "⏸" } else { "▶" }))
-                .clicked()
-            {
+            let play_text = if timeline.is_playing { "⏸ Pause" } else { "▶ Play" };
+            if ui.button(play_text).clicked() {
                 timeline.is_playing = !timeline.is_playing;
                 state.playing = timeline.is_playing;
             }
 
-            if ui.button("⏮").clicked() {
+            if ui.button("⏮ Reset").clicked() {
                 timeline.is_playing = false;
                 state.playing = false;
                 timeline.seek_request = Some(0.0);
@@ -224,26 +243,37 @@ fn editor_ui_system(
             ui.separator();
 
             let cached = timeline.cached_duration;
-            let mut current = timeline.current_time;
-            ui.label(format!("t: {current:.2}s / {cached:.2}s"));
+            ui.label(format!("t: {:.2}s / {:.2}s", timeline.current_time, cached));
 
             if cached > 0.0 {
-                let slider = egui::Slider::new(&mut current, 0.0..=cached)
-                    .text("")
-                    .step_by(0.05);
-                if ui.add(slider).changed() {
+                // Sync slider value from timeline when user isn't actively
+                // dragging — otherwise the slider would fight the timeline
+                // tick by tick.
+                if !state.slider_dragging {
+                    state.slider_value = timeline.current_time;
+                }
+                let response = ui.add(
+                    egui::Slider::new(&mut state.slider_value, 0.0..=cached)
+                        .text("")
+                        .step_by(0.05),
+                );
+                if response.drag_started() {
+                    state.slider_dragging = true;
+                }
+                if response.drag_stopped() || response.clicked() {
+                    state.slider_dragging = false;
                     timeline.is_playing = false;
                     state.playing = false;
-                    timeline.seek_request = Some(current);
+                    timeline.seek_request = Some(state.slider_value);
                 }
             }
 
             ui.separator();
 
-            if ui.button("⏭").clicked() {
+            if ui.button("⏭ End").clicked() {
                 timeline.is_playing = false;
                 state.playing = false;
-                timeline.seek_request = Some(cached);
+                timeline.seek_request = Some(timeline.cached_duration);
             }
         });
     });
@@ -260,38 +290,54 @@ fn brush_label(brush: &gaanim_core::peniko::Brush) -> String {
     }
 }
 
-fn picking_system(
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+/// Picking system that runs in `Update` and uses `EguiWantsInput` (which
+/// includes `is_popup_open`) to skip clicks consumed by egui.
+///
+/// We use Bevy's mouse input directly (not egui) so we have a one-frame
+/// safety margin: a click that closed a popup in the previous frame is
+/// still flagged by `EguiWantsInput::wants_any_pointer_input()` because
+/// egui's resource is updated in PostUpdate, after the popup close.
+fn editor_picking_system(
+    egui_wants: Res<EguiWantsInput>,
     camera: Res<Camera>,
-    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     entities: Query<(Entity, &WorldBounds, Option<&RenderOrder>)>,
     mut state: ResMut<EditorState>,
 ) {
+    // If egui wants any pointer input (pointer over area, popup open,
+    // dragging, etc.) from the previous frame, skip picking. This
+    // handles dropdown/popup clicks without the race where the popup
+    // closes before the picking system runs.
+    if egui_wants.wants_any_pointer_input() {
+        return;
+    }
+
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
     let Ok(window) = windows.single() else {
         return;
     };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
 
-    if mouse_button_input.just_pressed(MouseButton::Left) {
-        let Some(cursor) = window.cursor_position() else {
-            return;
-        };
+    let world_pos = camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
 
-        let world_pos =
-            camera.screen_to_world(glam::DVec2::new(cursor.x as f64, cursor.y as f64));
+    let mut best_z = i32::MIN;
+    let mut best_entity: Option<Entity> = None;
 
-        let mut best_z = i32::MIN;
-        let mut best_entity: Option<Entity> = None;
-
-        for (entity, bounds, render_order) in &entities {
-            if bounds.0.contains(world_pos) {
-                let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
-                if z >= best_z {
-                    best_z = z;
-                    best_entity = Some(entity);
-                }
+    for (entity, bounds, render_order) in &entities {
+        if bounds.0.contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0)) {
+            let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
+            if z >= best_z {
+                best_z = z;
+                best_entity = Some(entity);
             }
         }
-
-        state.selected = best_entity;
     }
+
+    state.selected = best_entity;
 }
