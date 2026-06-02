@@ -385,7 +385,6 @@ pub fn evaluate_custom_tweens_system(world: &mut bevy::prelude::World) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use gaanim_math::get_point_at_alpha;
     use kurbo::BezPath;
 
