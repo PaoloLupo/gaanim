@@ -62,16 +62,8 @@ wheel:
 
 # ---- Run --------------------------------------------------------------------
 
-# Build (release) then run the math animation example.
-run-math: build
-    {{ python }} examples\math_animation.py
-
-# Build (release) then run the write smoke test.
-run-smoke: build
-    {{ python }} examples\write_smoke.py
-
 # Run an example by name without rebuilding. Usage: just run my_example
-run EX:
+run EX: build
     {{ python }} examples/{{ EX }}.py
 
 # ---- Doctor -----------------------------------------------------------------
