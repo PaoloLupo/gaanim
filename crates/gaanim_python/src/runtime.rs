@@ -140,7 +140,7 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                 };
                 if let Some(bevy_id) = spawn_mobject(scene, spec_value.clone(), &py_to_bevy) {
                     let z_index = spec_value.z_index();
-                    if let Some(state) = scene.states.get(&bevy_id) {
+                    if let Some(state) = scene.states.get(bevy_id) {
                         let order = RenderOrder {
                             z_index,
                             creation_order,
@@ -182,7 +182,7 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             DeferredOp::SelectionFill { selection, color } => {
                 if let Some(child_ids) = selection_map.get(&selection) {
                     for child_id in child_ids {
-                        if let Some(state) = scene.states.get_mut(child_id) {
+                        if let Some(state) = scene.states.get_mut(*child_id) {
                             state.fill = Some(peniko::Brush::Solid(color));
                             scene
                                 .commands
@@ -216,7 +216,7 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             } => {
                 if let Some(child_ids) = selection_map.get(&selection) {
                     for child_id in child_ids {
-                        if let Some(state) = scene.states.get_mut(child_id) {
+                        if let Some(state) = scene.states.get_mut(*child_id) {
                             state.stroke = StrokeBrush::new(color, width);
                             scene
                                 .commands
@@ -269,7 +269,7 @@ fn spawn_mobject(
         Some((py_ref_id, dir, spacing)) => py_to_bevy
             .get(&py_ref_id)
             .copied()
-            .filter(|bevy_id| scene.states.contains_key(bevy_id))
+            .filter(|bevy_id| scene.states.contains_key(*bevy_id))
             .map(|bevy_id| (bevy_id, dir, spacing)),
         None => None,
     };
@@ -454,7 +454,7 @@ fn paint_fill(
     mref: MobjectRef,
     color: peniko::Color,
 ) -> MobjectRef {
-    if let Some(state) = scene.states.get_mut(&mref.id) {
+    if let Some(state) = scene.states.get_mut(mref.id) {
         state.fill = Some(peniko::Brush::Solid(color));
         scene
             .commands
@@ -469,7 +469,7 @@ fn apply_opacity(
     mref: MobjectRef,
     opacity: f32,
 ) -> MobjectRef {
-    if let Some(state) = scene.states.get_mut(&mref.id) {
+    if let Some(state) = scene.states.get_mut(mref.id) {
         state.opacity = opacity;
         scene.commands.entity(state.entity).insert(Opacity(opacity));
     }
@@ -481,7 +481,7 @@ fn apply_2d_transform(
     mref: MobjectRef,
     transform: gaanim_math::SpatialTransform,
 ) -> MobjectRef {
-    if let Some(state) = scene.states.get_mut(&mref.id) {
+    if let Some(state) = scene.states.get_mut(mref.id) {
         state.transform = transform;
         scene.commands.entity(state.entity).insert(transform);
     }

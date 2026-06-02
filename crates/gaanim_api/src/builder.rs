@@ -13,8 +13,6 @@ use gaanim_timeline::{
     clip::{AnimationSpec, ClipPayload, PropertyLensSpec, TrackId},
     timeline::Timeline,
 };
-use std::collections::HashMap;
-
 use crate::anim::{AnimationBuilder, AnimationType};
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
@@ -46,6 +44,44 @@ pub struct MobjectState {
     pub child_spans: Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
 }
 
+/// A `Vec`-backed map from `ObjectId` to `MobjectState`.
+///
+/// IDs are allocated sequentially by `SceneBuilder::next_id()`, so a dense
+/// `Vec` indexed by `id.index()` is more cache-friendly and memory-efficient
+/// than a general-purpose `HashMap`.
+#[derive(Debug, Clone)]
+pub struct MobjectStateMap {
+    v: Vec<MobjectState>,
+}
+
+impl MobjectStateMap {
+    pub fn new() -> Self {
+        Self { v: Vec::new() }
+    }
+
+    pub fn insert(&mut self, id: ObjectId, state: MobjectState) {
+        let idx = id.index() as usize;
+        if idx >= self.v.len() {
+            debug_assert_eq!(idx, self.v.len(), "ObjectId index must be sequential");
+            self.v.push(state);
+        } else {
+            self.v[idx] = state;
+        }
+    }
+
+    pub fn get(&self, id: ObjectId) -> Option<&MobjectState> {
+        self.v.get(id.index() as usize)
+    }
+
+    pub fn get_mut(&mut self, id: ObjectId) -> Option<&mut MobjectState> {
+        self.v.get_mut(id.index() as usize)
+    }
+
+    pub fn contains_key(&self, id: ObjectId) -> bool {
+        (id.index() as usize) < self.v.len()
+    }
+}
+
 /// A lightweight reference handle to a spawned Mobject in the Scene.
 #[derive(Clone, Copy, Debug)]
 pub struct MobjectRef {
@@ -72,7 +108,7 @@ impl<'a, 'w, 's, 'b> MobjectSelection<'a, 'w, 's, 'b> {
     /// the stroke here does not reintroduce that regression.
     pub fn set_fill(&mut self, color: Color) -> &mut Self {
         for child_id in &self.child_ids {
-            if let Some(state) = self.builder.states.get_mut(child_id) {
+            if let Some(state) = self.builder.states.get_mut(*child_id) {
                 state.fill = Some(Brush::Solid(color));
                 self.builder
                     .commands
@@ -95,7 +131,7 @@ impl<'a, 'w, 's, 'b> MobjectSelection<'a, 'w, 's, 'b> {
     /// Instantly colors the outline stroke of all selected symbols.
     pub fn set_stroke(&mut self, color: Color, width: f64) -> &mut Self {
         for child_id in &self.child_ids {
-            if let Some(state) = self.builder.states.get_mut(child_id) {
+            if let Some(state) = self.builder.states.get_mut(*child_id) {
                 state.stroke = StrokeBrush::new(color, width);
                 self.builder
                     .commands
@@ -222,7 +258,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub text_config: &'a gaanim_text::prelude::TextConfig,
     pub id_counter: u32,
     pub current_time: f64,
-    pub states: HashMap<ObjectId, MobjectState>,
+    pub states: MobjectStateMap,
     pub default_track: TrackId,
 }
 
@@ -248,15 +284,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_config,
             id_counter: 0,
             current_time: 0.0,
-            states: HashMap::new(),
+            states: MobjectStateMap::new(),
             default_track,
         }
     }
 
-    /// Allocates a new, stable, auto-incremented ObjectId.
+    /// Allocates a new, stable, auto-incremented ObjectId starting at index 0.
     pub fn next_id(&mut self) -> ObjectId {
+        let id = ObjectId::from_parts(self.id_counter, 1);
         self.id_counter += 1;
-        ObjectId::from_parts(self.id_counter, 1)
+        id
     }
 
     /// Advances the internal timeline playhead by the specified duration.
@@ -326,7 +363,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
-        let state = match self.states.get_mut(&anim.target) {
+        let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
                 bevy::prelude::warn!(
@@ -485,7 +522,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Collect target ids: the target's own id plus all child spans.
         let mut items: Vec<ObjectId> = {
-            let state = match self.states.get(&anim.target) {
+            let state = match self.states.get(anim.target) {
                 Some(s) => s,
                 None => {
                     bevy::prelude::warn!(
@@ -516,7 +553,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // from the fill color and the user-supplied stroke_width (or 1.0) so the outline
         // is visible during drawing/erasing.
         for item_id in &items {
-            if let Some(state) = self.states.get_mut(item_id) {
+            if let Some(state) = self.states.get_mut(*item_id) {
                 if state.stroke.brush.is_none() {
                     let color = state
                         .fill
@@ -533,7 +570,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // (B) Set initial value via deferred commands to avoid flicker
         for item_id in &items {
-            if let Some(state) = self.states.get(item_id) {
+            if let Some(state) = self.states.get(*item_id) {
                 let initial_val = if is_erase { 1.0 } else { 0.0 };
                 self.commands
                     .entity(state.entity)
@@ -721,7 +758,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
     fn play_spin_in_from_nothing_internal(&mut self, anim: AnimationBuilder) {
-        let state = match self.states.get_mut(&anim.target) {
+        let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
                 bevy::prelude::warn!(
@@ -809,7 +846,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Collect target ids: root target plus all child spans for coloring.
         let items: Vec<ObjectId> = {
-            let state = match self.states.get(&anim.target) {
+            let state = match self.states.get(anim.target) {
                 Some(s) => s,
                 None => {
                     bevy::prelude::warn!(
@@ -827,7 +864,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         // 1. Schedule unified scale clip on root target using ThereAndBack
-        let root_state = match self.states.get(&anim.target) {
+        let root_state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
         };
@@ -851,7 +888,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // 2. Schedule color highlighting on children (if highlight color is requested)
         if let Some(color) = highlight_color {
             for item_id in &items {
-                if let Some(state) = self.states.get(item_id) {
+                if let Some(state) = self.states.get(*item_id) {
                     if let Some(Brush::Solid(c)) = &state.fill {
                         self.timeline.add_clip(
                             self.default_track,
@@ -1451,7 +1488,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         let mut child_ids = Vec::new();
-        if let Some(state) = self.states.get(&target.id) {
+        if let Some(state) = self.states.get(target.id) {
             // 1. Build a normalized representation of flat_text and keep track of original child_spans indices
             let mut normalized_text = String::new();
             let mut index_mapping = Vec::new(); // maps each byte offset in normalized_text to child_spans index
@@ -1533,7 +1570,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         F: Fn(&gaanim_scene::components::TextSpan) -> bool,
     {
         let mut child_ids = Vec::new();
-        if let Some(state) = self.states.get(&target.id) {
+        if let Some(state) = self.states.get(target.id) {
             for (id, _, span) in &state.child_spans {
                 if predicate(span) {
                     child_ids.push(*id);
@@ -1555,7 +1592,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         range: std::ops::Range<usize>,
     ) -> MobjectSelection<'q, 'w, 's, 'a> {
         let mut child_ids = Vec::new();
-        if let Some(state) = self.states.get(&target.id) {
+        if let Some(state) = self.states.get(target.id) {
             for (id, _, span) in &state.child_spans {
                 if span.char_index >= range.start && span.char_index < range.end {
                     child_ids.push(*id);
@@ -1654,7 +1691,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         direction: LayoutDirection,
         spacing: f64,
     ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(&reference.id) {
+        if let Some(ref_state) = self.builder.states.get(reference.id) {
             let shift = gaanim_layout::compute_next_to(
                 self.bundle.bounds.0,
                 &self.bundle.transform,
@@ -1675,7 +1712,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         target_anchor: LayoutAnchor,
         ref_anchor: LayoutAnchor,
     ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(&reference.id) {
+        if let Some(ref_state) = self.builder.states.get(reference.id) {
             let shift = gaanim_layout::compute_align_to(
                 self.bundle.bounds.0,
                 &self.bundle.transform,
@@ -1691,7 +1728,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
     /// Establishes parent-child relationship via Bevy hierarchy systems.
     pub fn parent(mut self, parent: MobjectRef) -> Self {
-        if let Some(parent_state) = self.builder.states.get(&parent.id) {
+        if let Some(parent_state) = self.builder.states.get(parent.id) {
             self.parent_entity = Some(parent_state.entity);
         }
         self
