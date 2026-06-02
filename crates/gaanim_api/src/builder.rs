@@ -46,12 +46,12 @@ pub struct MobjectState {
 
 /// A `Vec`-backed map from `ObjectId` to `MobjectState`.
 ///
-/// IDs are allocated sequentially by `SceneBuilder::next_id()`, so a dense
-/// `Vec` indexed by `id.index()` is more cache-friendly and memory-efficient
-/// than a general-purpose `HashMap`.
+/// IDs tend to be allocated sequentially by `SceneBuilder::next_id()`, but
+/// the parent state is often inserted *after* its children (higher indices),
+/// so gaps are handled gracefully with `Option`.
 #[derive(Debug, Clone)]
 pub struct MobjectStateMap {
-    v: Vec<MobjectState>,
+    v: Vec<Option<MobjectState>>,
 }
 
 impl MobjectStateMap {
@@ -62,23 +62,24 @@ impl MobjectStateMap {
     pub fn insert(&mut self, id: ObjectId, state: MobjectState) {
         let idx = id.index() as usize;
         if idx >= self.v.len() {
-            debug_assert_eq!(idx, self.v.len(), "ObjectId index must be sequential");
-            self.v.push(state);
-        } else {
-            self.v[idx] = state;
+            self.v.resize_with(idx + 1, || None);
         }
+        self.v[idx] = Some(state);
     }
 
     pub fn get(&self, id: ObjectId) -> Option<&MobjectState> {
-        self.v.get(id.index() as usize)
+        self.v.get(id.index() as usize).and_then(|v| v.as_ref())
     }
 
     pub fn get_mut(&mut self, id: ObjectId) -> Option<&mut MobjectState> {
-        self.v.get_mut(id.index() as usize)
+        self.v.get_mut(id.index() as usize).and_then(|v| v.as_mut())
     }
 
     pub fn contains_key(&self, id: ObjectId) -> bool {
-        (id.index() as usize) < self.v.len()
+        self.v
+            .get(id.index() as usize)
+            .and_then(|v| v.as_ref())
+            .is_some()
     }
 }
 
