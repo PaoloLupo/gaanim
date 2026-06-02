@@ -758,6 +758,94 @@ impl PyScene {
         Ok(())
     }
 
+    /// Exposes a premium offline render and export engine for video, image sequence, and GIF.
+    /// Supports transparent WebM, segment/time-range rendering, and multiple presets.
+    #[pyo3(signature = (
+        output_path,
+        fps = 60,
+        width = None,
+        height = None,
+        transparent = None,
+        aspect_ratio = None,
+        quality = None,
+        start_time = None,
+        end_time = None
+    ))]
+    fn export(
+        &self,
+        py: Python<'_>,
+        output_path: String,
+        fps: u32,
+        width: Option<u32>,
+        height: Option<u32>,
+        transparent: Option<bool>,
+        aspect_ratio: Option<String>,
+        quality: Option<String>,
+        start_time: Option<f64>,
+        end_time: Option<f64>,
+    ) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        let ops = std::mem::take(&mut inner.ops);
+        let w = width.unwrap_or(inner.width);
+        let h = height.unwrap_or(inner.height);
+        let background = inner.background;
+        drop(inner);
+
+        use gaanim_export::prelude::*;
+
+        let mut config = ExportConfig::new(&output_path);
+        config.fps = fps;
+        config.width = w;
+        config.height = h;
+
+        if let Some(t) = transparent {
+            config.transparent = t;
+        }
+
+        if let Some(ar) = aspect_ratio {
+            let preset = match ar.to_lowercase().as_str() {
+                "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
+                "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
+                "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
+                _ => return Err(PyValueError::new_err(format!("Invalid aspect ratio preset: {}. Choose from: youtube, tiktok, instagram", ar))),
+            };
+            config = config.with_aspect_ratio(preset);
+        }
+
+        if let Some(q) = quality {
+            let preset = match q.to_lowercase().as_str() {
+                "draft" => QualityPreset::Draft,
+                "standard" => QualityPreset::Standard,
+                "production" => QualityPreset::Production,
+                _ => return Err(PyValueError::new_err(format!("Invalid quality preset: {}. Choose from: draft, standard, production", q))),
+            };
+            config = config.with_quality(preset);
+        }
+
+        // Custom overrides after presets
+        if let Some(width_val) = width {
+            config.width = width_val;
+        }
+        if let Some(height_val) = height {
+            config.height = height_val;
+        }
+
+        config.start_time = start_time;
+        config.end_time = end_time;
+
+        py.detach(move || {
+            let setup_world = move |world: &mut bevy::prelude::World| {
+                runtime::replay_into(world, ops, w, h, background);
+            };
+
+            if let Err(e) = export_scene(config, setup_world) {
+                bevy::prelude::error!("Export error: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
     // ====== edit ======
 
     /// Drain the deferred op queue into a Bevy `App` with the interactive

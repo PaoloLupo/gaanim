@@ -579,6 +579,25 @@ class Scene:
         returns when the window is closed.
         """
 
+    def export(
+        self,
+        output_path: str,
+        fps: int = 60,
+        width: int | None = None,
+        height: int | None = None,
+        transparent: bool | None = None,
+        aspect_ratio: str | None = None,
+        quality: str | None = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+    ) -> None:
+        """Render and export the scene to a video, image sequence, or GIF.
+
+        Pipes frames asynchronously to an optimized background FFmpeg encoder.
+        Supports aspect ratio presets ('youtube', 'tiktok', 'instagram'),
+        quality presets ('draft', 'standard', 'production'), and transparent WebM layers.
+        """
+
 class Mobject:
     """Handle to a scene mobject (shape, text, or equation).
 

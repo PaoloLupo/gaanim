@@ -1,0 +1,27 @@
+[package]
+name = "gaanim_export"
+version = "0.1.0"
+edition = "2024"
+description = "State-of-the-art deterministic GPU-accelerated video/image/GIF export pipeline for gaanim"
+
+[dependencies]
+# Local workspace dependencies
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_text = { path = "../gaanim_text" }
+
+# Third-party dependencies
+bevy = { workspace = true }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+thiserror = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png"] }
+bevy_vello = "0.13.1"
+indicatif = { version = "0.17", features = ["rayon"] }
+rayon = "1.10"
+crossbeam-channel = "0.5"

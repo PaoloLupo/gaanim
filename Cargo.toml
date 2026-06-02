@@ -12,7 +12,8 @@ members = [
   "crates/gaanim_api",
   "crates/gaanim_text",
   "crates/gaanim_python",
-  "crates/gaanim_editor"
+  "crates/gaanim_editor",
+  "crates/gaanim_export"
 ]
 
 [profile.dev]
@@ -23,7 +24,12 @@ opt-level = 3
 
 [workspace.dependencies]
 bevy = {version = "0.18", default-features = false, features = [
-  "2d"
+  "2d",
+  "bevy_winit",
+  "bevy_render",
+  "bevy_camera",
+  "bevy_window",
+  "png"
 ]}
 thiserror = "2.0"
 peniko = "0.6.1"

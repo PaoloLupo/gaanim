@@ -92,7 +92,7 @@ pub fn run_editor(
     app.run();
 }
 
-fn replay_into(
+pub(crate) fn replay_into(
     world: &mut World,
     ops: Vec<DeferredOp>,
     width: u32,
