@@ -4,6 +4,7 @@ use gaanim_math::Camera;
 use gaanim_scene::{MobjectId, ObjectTag, Opacity, RenderOrder, Visible, WorldBounds};
 use gaanim_timeline::timeline::Timeline;
 
+mod fps_overlay;
 mod timeline_widget;
 
 pub struct GaanimEditorPlugin;
@@ -23,8 +24,12 @@ impl Plugin for GaanimEditorPlugin {
             ..default()
         })
         .init_resource::<EditorState>()
-        .add_systems(EguiPrimaryContextPass, editor_ui_system)
-        .add_systems(Update, editor_picking_system);
+        .init_resource::<fps_overlay::FpsOverlay>()
+        .add_systems(
+            Update,
+            (editor_picking_system, fps_overlay::fps_overlay_system),
+        )
+        .add_systems(EguiPrimaryContextPass, editor_ui_system);
     }
 }
 
@@ -51,6 +56,7 @@ fn editor_ui_system(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
     mut timeline: ResMut<Timeline>,
+    fps_overlay: Res<fps_overlay::FpsOverlay>,
     entity_query: Query<(Entity, Option<&MobjectId>, Option<&ObjectTag>)>,
     transform_query: Query<&gaanim_math::SpatialTransform>,
     fill_query: Query<&gaanim_scene::FillBrush>,
@@ -219,6 +225,8 @@ fn editor_ui_system(
         .show(ctx, |ui| {
             state.timeline_widget.show(ui, &mut timeline);
         });
+
+    fps_overlay.render(ctx);
 }
 
 fn brush_label(brush: &gaanim_core::peniko::Brush) -> String {
