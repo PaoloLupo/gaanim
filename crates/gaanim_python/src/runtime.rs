@@ -421,6 +421,8 @@ fn apply_visual<'b, 'w, 's, 'a>(
 ) -> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
     if let Some(c) = fill {
         b = b.fill(c);
+    } else {
+        b = b.no_fill();
     }
     if let Some((c, w)) = stroke {
         b = b.stroke(c, w);
