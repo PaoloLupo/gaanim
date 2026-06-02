@@ -472,8 +472,10 @@ pub fn double_arrow(
     head_len: Option<f64>,
     head_width: Option<f64>,
 ) -> MobjectBundle {
-    let head_len = head_len.unwrap_or(15.0);
-    let head_half_width = head_width.unwrap_or(7.5) * 0.5;
+    let mut head_len = head_len.unwrap_or(18.0);
+    let head_half_width = head_width.unwrap_or(18.0) * 0.5;
+    let body_half_t: f64 = 3.0;
+
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
@@ -484,34 +486,57 @@ pub fn double_arrow(
         let uy = dy / len;
         let perp_x = -uy;
         let perp_y = ux;
-        let base_end_x = end.x - ux * head_len;
-        let base_end_y = end.y - uy * head_len;
+
+        // Cap head_len so the two heads never overlap.
+        head_len = head_len.min(len * 0.4);
+
         let base_start_x = start.x + ux * head_len;
         let base_start_y = start.y + uy * head_len;
+        let base_end_x = end.x - ux * head_len;
+        let base_end_y = end.y - uy * head_len;
 
-        path.move_to(kurbo::Point::new(base_start_x, base_start_y));
-        path.line_to(kurbo::Point::new(base_end_x, base_end_y));
+        // Start head (tip at `start`)
+        let h1s_x = base_start_x - perp_x * head_half_width;
+        let h1s_y = base_start_y - perp_y * head_half_width;
+        let h2s_x = base_start_x + perp_x * head_half_width;
+        let h2s_y = base_start_y + perp_y * head_half_width;
 
-        let h1e_x = base_end_x + perp_x * head_half_width;
-        let h1e_y = base_end_y + perp_y * head_half_width;
-        let h2e_x = base_end_x - perp_x * head_half_width;
-        let h2e_y = base_end_y - perp_y * head_half_width;
-        path.move_to(kurbo::Point::new(h1e_x, h1e_y));
-        path.line_to(end);
-        path.line_to(kurbo::Point::new(h2e_x, h2e_y));
-        path.close_path();
+        // End head (tip at `end`)
+        let h1e_x = base_end_x - perp_x * head_half_width;
+        let h1e_y = base_end_y - perp_y * head_half_width;
+        let h2e_x = base_end_x + perp_x * head_half_width;
+        let h2e_y = base_end_y + perp_y * head_half_width;
 
-        let h1s_x = base_start_x + perp_x * head_half_width;
-        let h1s_y = base_start_y + perp_y * head_half_width;
-        let h2s_x = base_start_x - perp_x * head_half_width;
-        let h2s_y = base_start_y - perp_y * head_half_width;
+        // Body shoulders (where each head meets the body on each side).
+        let shoulder_top_start_x = base_start_x - perp_x * body_half_t;
+        let shoulder_top_start_y = base_start_y - perp_y * body_half_t;
+        let shoulder_bot_start_x = base_start_x + perp_x * body_half_t;
+        let shoulder_bot_start_y = base_start_y + perp_y * body_half_t;
+        let shoulder_top_end_x = base_end_x - perp_x * body_half_t;
+        let shoulder_top_end_y = base_end_y - perp_y * body_half_t;
+        let shoulder_bot_end_x = base_end_x + perp_x * body_half_t;
+        let shoulder_bot_end_y = base_end_y + perp_y * body_half_t;
+
+        // Single closed subpath shaped like a double-headed arrow.
+        // The fill covers the whole silhouette (body + both heads) so
+        // the body tail never disappears after GrowArrow completes.
+        // Order: start head top -> tip -> start head bottom ->
+        //        body bottom -> end head bottom -> end tip -> end
+        //        head top -> body top -> back to start.
         path.move_to(kurbo::Point::new(h1s_x, h1s_y));
         path.line_to(start);
         path.line_to(kurbo::Point::new(h2s_x, h2s_y));
+        path.line_to(kurbo::Point::new(shoulder_bot_start_x, shoulder_bot_start_y));
+        path.line_to(kurbo::Point::new(shoulder_bot_end_x, shoulder_bot_end_y));
+        path.line_to(kurbo::Point::new(h2e_x, h2e_y));
+        path.line_to(end);
+        path.line_to(kurbo::Point::new(h1e_x, h1e_y));
+        path.line_to(kurbo::Point::new(shoulder_top_end_x, shoulder_top_end_y));
+        path.line_to(kurbo::Point::new(shoulder_top_start_x, shoulder_top_start_y));
         path.close_path();
     }
 
-    let pad = head_len.max(head_half_width * 2.0);
+    let pad = head_half_width.max(body_half_t);
     let min_x = start.x.min(end.x) - pad;
     let max_x = start.x.max(end.x) + pad;
     let min_y = start.y.min(end.y) - pad;
@@ -776,4 +801,82 @@ pub fn number_plane(
     bundle.tag = ObjectTag("NumberPlane".into());
     let _ = axis_stroke; // axes use a thicker stroke applied by the caller via mobject.stroke()
     bundle
+}
+
+#[cfg(test)]
+mod arrow_tests {
+    use super::*;
+    use gaanim_core::ObjectId;
+    use kurbo::Shape;
+
+    fn count_subpaths(path: &kurbo::BezPath) -> usize {
+        path.iter()
+            .filter(|el| matches!(el, kurbo::PathEl::MoveTo(_)))
+            .count()
+    }
+
+    #[test]
+    fn arrow_uses_single_closed_subpath() {
+        let b = arrow(
+            ObjectId::from_raw(0),
+            kurbo::Point::new(0.0, 0.0),
+            kurbo::Point::new(100.0, 0.0),
+        );
+        assert_eq!(
+            count_subpaths(&b.path.0),
+            1,
+            "arrow must be one continuous subpath so PathCompletion reveals it as a pen stroke"
+        );
+    }
+
+    #[test]
+    fn double_arrow_uses_single_closed_subpath() {
+        let b = double_arrow(
+            ObjectId::from_raw(0),
+            kurbo::Point::new(0.0, 0.0),
+            kurbo::Point::new(100.0, 0.0),
+            None,
+            None,
+        );
+        assert_eq!(
+            count_subpaths(&b.path.0),
+            1,
+            "double_arrow must be one continuous subpath so the body fill survives GrowArrow"
+        );
+    }
+
+    #[test]
+    fn double_arrow_body_has_non_zero_area() {
+        // A horizontal double-arrow: the body rectangle (centered on y=0)
+        // must contain interior points well within the silhouette. We
+        // sample a point 30% along the body and 0.5px above the axis;
+        // a proper filled arrow contains it.
+        let b = double_arrow(
+            ObjectId::from_raw(0),
+            kurbo::Point::new(-50.0, 0.0),
+            kurbo::Point::new(50.0, 0.0),
+            Some(15.0),
+            Some(15.0),
+        );
+        let sample = kurbo::Point::new(0.0, 0.5);
+        assert!(
+            b.path.0.winding(sample) != 0,
+            "sample point inside the body must be inside the closed silhouette (winding != 0)"
+        );
+    }
+
+    #[test]
+    fn double_arrow_overlapping_heads_caps_head_len() {
+        // When the two heads would overlap (head_len > 40% of total
+        // length), the geometry should still produce a non-degenerate
+        // single closed subpath (no panic, no zero-length body).
+        let b = double_arrow(
+            ObjectId::from_raw(0),
+            kurbo::Point::new(0.0, 0.0),
+            kurbo::Point::new(10.0, 0.0),
+            Some(50.0),
+            Some(20.0),
+        );
+        assert_eq!(count_subpaths(&b.path.0), 1);
+    }
 }
