@@ -132,6 +132,8 @@ impl PyAnimationSpec {
             AnimationType::Circumscribe { color } => {
                 format!("circumscribe(color={:?})", color)
             }
+            AnimationType::MoveAlongPath { .. } => "move_along_path".to_string(),
+            AnimationType::GrowArrow => "grow_arrow".to_string(),
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",
@@ -433,6 +435,40 @@ impl PyAnimationSpec {
             inner: MobjectRef { id: target }
                 .circumscribe(color.map(|c| c.0)),
         }
+    }
+
+    /// Move the target along a Bézier path defined by a list of
+    /// waypoints. Each waypoint is a `(x, y)` tuple; adjacent points
+    /// are connected by line segments.
+    fn move_along_path(&self, waypoints: Vec<(f64, f64)>, duration: f64) -> PyResult<Self> {
+        if waypoints.is_empty() {
+            return Err(PyValueError::new_err(
+                "move_along_path requires at least one waypoint",
+            ));
+        }
+        let mut path = gaanim_core::kurbo::BezPath::new();
+        let (x0, y0) = waypoints[0];
+        path.move_to(gaanim_core::kurbo::Point::new(x0, y0));
+        for &(x, y) in &waypoints[1..] {
+            path.line_to(gaanim_core::kurbo::Point::new(x, y));
+        }
+        let target = self.inner.target;
+        let mut builder = MobjectRef { id: target }.move_along_path(path);
+        if duration > 0.0 {
+            builder = builder.duration(duration);
+        }
+        Ok(Self { inner: builder })
+    }
+
+    /// Specialized arrow draw. Chain from `.animate()` for the same
+    /// semantics as `Mobject.grow_arrow()`.
+    fn grow_arrow(&self, duration: f64) -> Self {
+        let target = self.inner.target;
+        let mut builder = MobjectRef { id: target }.grow_arrow();
+        if duration > 0.0 {
+            builder = builder.duration(duration);
+        }
+        Self { inner: builder }
     }
 }
 

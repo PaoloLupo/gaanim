@@ -386,6 +386,14 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 *zoom = *from + (*to - *from) * t;
             }
         }
+        PropertyLensSpec::PathFollow { path } => {
+            // Sample the Bézier path at the eased `t` and set the
+            // entity's translation to the sampled world point.
+            let p = gaanim_math::get_point_at_alpha(path, t);
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+                transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+            }
+        }
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }

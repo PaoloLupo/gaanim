@@ -391,6 +391,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_circumscribe_internal(anim);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::MoveAlongPath { .. }) {
+            self.play_move_along_path_internal(anim);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::GrowArrow) {
+            self.play_grow_arrow_internal(anim);
+            return;
+        }
 
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
@@ -503,7 +511,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::GrowFromEdge { .. }
             | AnimationType::DrawBorderThenFill
             | AnimationType::Flash { .. }
-            | AnimationType::Circumscribe { .. } => {
+            | AnimationType::Circumscribe { .. }
+            | AnimationType::MoveAlongPath { .. }
+            | AnimationType::GrowArrow => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
         };
@@ -1417,6 +1427,140 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(s) = self.states.get_mut(anim.target) {
             s.transform.scale = original_scale;
         }
+    }
+
+    /// Internal: schedule a `MoveAlongPath` animation. The target's
+    /// translation is sampled from the Bézier path at the eased `t`
+    /// (parametric, not arc-length uniform). Updates the tracked state
+    /// so the final translation equals `path(1.0)`.
+    fn play_move_along_path_internal(&mut self, anim: AnimationBuilder) {
+        let path = match &anim.anim_type {
+            AnimationType::MoveAlongPath { path } => path.clone(),
+            _ => unreachable!(),
+        };
+
+        // Resolve and persist the final translation so subsequent
+        // animations build on top of the new position.
+        let end_point = gaanim_math::get_point_at_alpha(&path, 1.0);
+        let end_translation = gaanim_core::glam::DVec3::new(end_point.x, end_point.y, 0.0);
+
+        if let Some(state) = self.states.get_mut(anim.target) {
+            state.transform.translation = end_translation;
+        }
+
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathFollow { path },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+    }
+
+    /// Internal: schedule a `GrowArrow` animation as a Create-style
+    /// outline draw followed by a brief scale "punch" that emphasizes
+    /// the arrowhead's arrival at the end of the trajectory.
+    fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder) {
+        if self.states.get(anim.target).is_none() {
+            bevy::prelude::warn!(
+                "Attempted to GrowArrow unregistered Mobject: {:?}",
+                anim.target
+            );
+            return;
+        }
+
+        // Phase 1: 70% of duration draws the outline (PathCompletion
+        // 0 -> 1). The fill is held hidden during the draw, then
+        // cross-fades in over the last 30% to give the arrowhead
+        // emphasis.
+        let draw_duration = anim.duration * 0.7;
+        let fill_duration = anim.duration * 0.3;
+
+        // Hold the fill at 0 during the draw phase so the outline-only
+        // stage is visible.
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            draw_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::FillDrawProgress {
+                    from: 0.0,
+                    to: 0.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+            }),
+        );
+
+        // Trace the outline.
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            draw_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathCompletion {
+                    from: 0.0,
+                    to: 1.0,
+                },
+                rate_func: anim.rate_func.clone(),
+            }),
+        );
+
+        // Cross-fade the fill in over the last segment, then a brief
+        // scale punch (1.0 -> 1.15 -> 1.0) to highlight the arrowhead.
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + draw_duration,
+            fill_duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::FillDrawProgress {
+                    from: 0.0,
+                    to: 1.0,
+                },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+
+        // Brief scale punch on the arrowhead (25% of the fill phase
+        // each way). Yields a quick "pop" as the fill reveals.
+        let punch_half = fill_duration * 0.5;
+        let original_scale = self
+            .states
+            .get(anim.target)
+            .map(|s| s.transform.scale)
+            .unwrap_or(gaanim_core::glam::DVec3::ONE);
+        let scale_to = original_scale * 1.15;
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + draw_duration,
+            punch_half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: original_scale,
+                    to: scale_to,
+                },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + draw_duration + punch_half,
+            punch_half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: scale_to,
+                    to: original_scale,
+                },
+                rate_func: gaanim_math::RateFunc::Smooth,
+            }),
+        );
     }
 
     /// Spawns a circle primitive.

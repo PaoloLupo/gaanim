@@ -1,4 +1,5 @@
 use gaanim_animation::PropertyLens;
+use gaanim_core::kurbo::BezPath;
 use gaanim_core::{ObjectId, peniko::Color};
 use gaanim_math::RateFunc;
 
@@ -146,6 +147,12 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Move the entity's translation along a Bézier path. Sampled at
+    /// the rate-function-eased `t` and applied as the entity's
+    /// world-space translation.
+    PathFollow {
+        path: BezPath,
+    },
     Custom {
         type_name: String,
         params: String,
@@ -203,6 +210,9 @@ impl PropertyLensSpec {
             Self::CameraZoom { from, to } => PropertyLens::CameraZoom {
                 from: *from,
                 to: *to,
+            },
+            Self::PathFollow { path } => PropertyLens::PathFollow {
+                path: std::sync::Arc::new(path.clone()),
             },
             Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
                 type_name: type_name.clone(),

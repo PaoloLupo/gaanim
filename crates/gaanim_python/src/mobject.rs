@@ -722,6 +722,46 @@ impl PyMobject {
             MobjectRef { id: self.id }.circumscribe(color.map(|c| c.0));
         PyAnimationSpec::from_builder(builder)
     }
+
+    /// Move this Mobject along a Bézier path defined by a list of
+    /// waypoints. Each waypoint is a `(x, y)` tuple. Adjacent points
+    /// are connected by line segments, so polylines, polygons, and
+    /// star shapes are all valid trajectories.
+    fn move_along_path(
+        &self,
+        waypoints: Vec<(f64, f64)>,
+        duration: f64,
+    ) -> PyResult<PyAnimationSpec> {
+        use gaanim_api::builder::MobjectRef;
+        if waypoints.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "move_along_path requires at least one waypoint",
+            ));
+        }
+        let mut path = kurbo::BezPath::new();
+        let (x0, y0) = waypoints[0];
+        path.move_to(kurbo::Point::new(x0, y0));
+        for &(x, y) in &waypoints[1..] {
+            path.line_to(kurbo::Point::new(x, y));
+        }
+        let mut builder = MobjectRef { id: self.id }.move_along_path(path);
+        if duration > 0.0 {
+            builder = builder.duration(duration);
+        }
+        Ok(PyAnimationSpec::from_builder(builder))
+    }
+
+    /// Specialized arrow draw: traces the outline and finishes with a
+    /// scale "punch" that emphasizes the arrowhead's arrival at the
+    /// end of the trajectory. Intended for `Arrow` mobjects.
+    fn grow_arrow(&self, duration: f64) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let mut builder = MobjectRef { id: self.id }.grow_arrow();
+        if duration > 0.0 {
+            builder = builder.duration(duration);
+        }
+        PyAnimationSpec::from_builder(builder)
+    }
 }
 
 fn direction_from_str(s: &str) -> Option<LayoutDirection> {

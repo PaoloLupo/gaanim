@@ -121,6 +121,17 @@ pub enum AnimationType {
     Circumscribe {
         color: Option<Color>,
     },
+    /// Move the target's translation along a Bézier path. The path is
+    /// sampled at the rate-function-eased `t` and the target's world
+    /// translation is set to the sampled point. Rotation and scale
+    /// are unaffected.
+    MoveAlongPath {
+        path: gaanim_core::kurbo::BezPath,
+    },
+    /// Specialized Create animation for `Arrow` mobjects. Draws the
+    /// outline first, then finishes with a brief scale "punch" that
+    /// emphasizes the arrowhead's appearance at the end.
+    GrowArrow,
 }
 
 /// A fluent builder for an animation tween clip.
@@ -499,6 +510,29 @@ impl MobjectRef {
             anim_type: AnimationType::Circumscribe { color },
             duration: 1.5,
             rate_func: RateFunc::ThereAndBack,
+        }
+    }
+
+    /// Move the target along a Bézier path. The path is sampled at the
+    /// rate-function-eased `t` (use `.linear()` for uniform parametric
+    /// motion, or a smooth easing for an accelerated start/end).
+    pub fn move_along_path(self, path: gaanim_core::kurbo::BezPath) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::MoveAlongPath { path },
+            duration: 2.0,
+            rate_func: RateFunc::Linear,
+        }
+    }
+
+    /// Specialized arrow draw: traces the outline and finishes with a
+    /// scale "punch" that emphasizes the arrowhead's arrival.
+    pub fn grow_arrow(self) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::GrowArrow,
+            duration: 1.5,
+            rate_func: RateFunc::Smooth,
         }
     }
 }
