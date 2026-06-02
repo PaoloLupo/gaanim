@@ -86,6 +86,8 @@ pub struct AnimationSpec {
     pub lens: PropertyLensSpec,
     /// Easing curve or physical spring rate function.
     pub rate_func: RateFunc,
+    /// High-level animation label (e.g. "Write", "Grow", "SpinIn").
+    pub label: Option<String>,
 }
 
 /// A fully serializable description of a Mobject property lens.

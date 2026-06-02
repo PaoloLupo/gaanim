@@ -17,7 +17,6 @@ const TEXT: Color32 = Color32::from_rgb(200, 200, 200);
 
 const TEXT_LABEL: Color32 = Color32::from_rgb(240, 240, 240);
 
-const CLR_ANIM: Color32 = Color32::from_rgb(70, 130, 220);
 const CLR_AUDIO: Color32 = Color32::from_rgb(70, 180, 90);
 const CLR_WAIT: Color32 = Color32::from_rgb(100, 100, 100);
 const CLR_MARKER: Color32 = Color32::from_rgb(220, 200, 60);
@@ -53,9 +52,12 @@ pub struct TimelineWidget {
     pub ruler_height: f32,
     pub track_height: f32,
     pub zoom_bar_height: f32,
+    pub label_width: f32,
     pub selected_clip: Option<ClipId>,
     pub snap_enabled: bool,
     pub snap_threshold_pixels: f32,
+    pub show_scene_header: bool,
+    pub scene_expanded: bool,
 
     drag_state: DragState,
     drag_mouse_start_x: f32,
@@ -75,9 +77,12 @@ impl Default for TimelineWidget {
             ruler_height: 22.0,
             track_height: 28.0,
             zoom_bar_height: 16.0,
+            label_width: 150.0,
             selected_clip: None,
             snap_enabled: true,
             snap_threshold_pixels: 8.0,
+            show_scene_header: true,
+            scene_expanded: true,
             drag_state: DragState::None,
             drag_mouse_start_x: 0.0,
             drag_orig_start: 0.0,
@@ -95,15 +100,21 @@ impl TimelineWidget {
 
     // ── Main entry point ────────────────────────────────────────────────
     pub fn show(&mut self, ui: &mut egui::Ui, timeline: &mut Timeline) {
+        let header_rows = if self.show_scene_header { 1 } else { 0 };
+        let visible_tracks = if self.show_scene_header && !self.scene_expanded {
+            timeline.tracks.len().min(0)
+        } else {
+            timeline.tracks.len()
+        };
         let track_indices: HashMap<TrackId, usize> = timeline
             .tracks
             .iter()
             .enumerate()
-            .map(|(i, (id, _))| (id, i))
+            .map(|(i, (id, _))| (id, i + header_rows))
             .collect();
 
-        let num_tracks = timeline.tracks.len().max(1) as f32;
-        let tracks_height = self.track_height * num_tracks;
+        let num_tracks = visible_tracks.max(1) as f32;
+        let tracks_height = self.track_height * (num_tracks + header_rows as f32);
         let canvas_height = self.zoom_bar_height + self.ruler_height + tracks_height;
 
         // ── Header ──────────────────────────────────────────────────────
@@ -127,17 +138,30 @@ impl TimelineWidget {
         let (canvas_rect, response) =
             ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
 
+        // Clips area starts after the label sidebar
+        let lw = self.label_width;
+        let clips_left = (canvas_rect.min.x + lw).min(canvas_rect.max.x - 50.0);
+        let clips_w = (canvas_rect.max.x - clips_left).max(50.0);
+
         let zoom_bar_rect = Rect::from_min_size(
-            canvas_rect.min,
-            Vec2::new(canvas_rect.width(), self.zoom_bar_height),
+            Pos2::new(clips_left, canvas_rect.min.y),
+            Vec2::new(clips_w, self.zoom_bar_height),
         );
         let ruler_rect = Rect::from_min_size(
-            Pos2::new(canvas_rect.min.x, zoom_bar_rect.max.y),
-            Vec2::new(canvas_rect.width(), self.ruler_height),
+            Pos2::new(clips_left, zoom_bar_rect.max.y),
+            Vec2::new(clips_w, self.ruler_height),
         );
         let tracks_rect = Rect::from_min_size(
             Pos2::new(canvas_rect.min.x, ruler_rect.max.y),
             Vec2::new(canvas_rect.width(), tracks_height),
+        );
+        let clips_rect = Rect::from_min_size(
+            Pos2::new(clips_left, tracks_rect.min.y),
+            Vec2::new(clips_w, tracks_rect.height()),
+        );
+        let label_rect = Rect::from_min_size(
+            tracks_rect.min,
+            Vec2::new(lw, tracks_rect.height()),
         );
 
         self.last_canvas_width = canvas_rect.width();
@@ -145,10 +169,10 @@ impl TimelineWidget {
         // ── Hover state ──────────────────────────────────────────────────
         let hover_pos = response.hover_pos();
         let hovered_clip = hover_pos.and_then(|pos| {
-            if !tracks_rect.contains(pos) { return None; }
-            let on_edge = self.hit_clip_edge(pos, tracks_rect, timeline, &track_indices);
+            if !clips_rect.contains(pos) { return None; }
+            let on_edge = self.hit_clip_edge(pos, clips_rect, timeline, &track_indices);
             if on_edge.is_some() { return None; }
-            self.hit_clip_body(pos, tracks_rect, timeline, &track_indices)
+            self.hit_clip_body(pos, clips_rect, timeline, &track_indices)
         });
         self.hovered_clip_info = hovered_clip.and_then(|cid| {
             timeline.clips.get(cid).map(|c| {
@@ -158,34 +182,34 @@ impl TimelineWidget {
         });
 
         let on_edge = hover_pos.map_or(false, |pos| {
-            self.hit_clip_edge(pos, tracks_rect, timeline, &track_indices).is_some()
+            self.hit_clip_edge(pos, clips_rect, timeline, &track_indices).is_some()
         });
 
         // Input first so dragging feels responsive
         self.handle_input(
-            ui, &response, zoom_bar_rect, ruler_rect, tracks_rect, timeline,
+            ui, &response, zoom_bar_rect, ruler_rect, clips_rect, tracks_rect, timeline,
             &track_indices, on_edge, hover_pos,
         );
 
         // Paint
         let p = ui.painter_at(canvas_rect);
-        self.paint_zoom_bar(&p, zoom_bar_rect, tracks_rect, timeline);
-        self.paint_tracks(&p, tracks_rect, timeline, &track_indices);
+        self.paint_zoom_bar(&p, zoom_bar_rect, clips_rect, timeline);
+        self.paint_tracks(&p, tracks_rect, label_rect, timeline, &track_indices);
         self.paint_ruler(&p, ruler_rect);
-        self.paint_grid(&p, tracks_rect, timeline);
-        self.paint_clips(&p, tracks_rect, timeline, &track_indices, hover_pos);
+        self.paint_grid(&p, clips_rect, timeline);
+        self.paint_clips(&p, clips_rect, timeline, &track_indices, hover_pos);
         self.paint_keyframes(&p, ruler_rect, timeline);
-        self.paint_playhead(&p, canvas_rect, timeline);
+        self.paint_playhead(&p, clips_rect, ruler_rect.min.y, timeline);
 
         // ── Auto-scroll during playback ─────────────────────────────────
         if timeline.is_playing {
-            let px = self.time_to_x(timeline.current_time, tracks_rect);
+            let px = self.time_to_x(timeline.current_time, clips_rect);
             let margin = 80.0;
-            if px > tracks_rect.max.x - margin {
-                self.scroll_offset += px - (tracks_rect.max.x - margin);
-                self.clamp_scroll(tracks_rect, timeline);
-            } else if px < tracks_rect.min.x + 20.0 {
-                self.scroll_offset -= (tracks_rect.min.x + 20.0 - px).min(self.scroll_offset);
+            if px > clips_rect.max.x - margin {
+                self.scroll_offset += px - (clips_rect.max.x - margin);
+                self.clamp_scroll(clips_rect, timeline);
+            } else if px < clips_rect.min.x + 20.0 {
+                self.scroll_offset -= (clips_rect.min.x + 20.0 - px).min(self.scroll_offset);
             }
         }
     }
@@ -270,34 +294,73 @@ impl TimelineWidget {
         }
     }
 
-    // ── Track backgrounds ───────────────────────────────────────────────
+    // ── Track backgrounds + label sidebar ─────────────────────────────
     fn paint_tracks(
         &self,
         p: &egui::Painter,
         rect: Rect,
+        label_rect: Rect,
         timeline: &Timeline,
         track_indices: &HashMap<TrackId, usize>,
     ) {
         p.rect_filled(rect, 0u8, BG);
 
-        for (track, idx) in track_indices {
-            let y = rect.min.y + *idx as f32 * self.track_height;
-            let tr = Rect::from_min_size(
-                Pos2::new(rect.min.x, y),
+        // Scene header row (only if show_scene_header)
+        if self.show_scene_header {
+            let y0 = rect.min.y;
+            let hdr = Rect::from_min_size(
+                Pos2::new(rect.min.x, y0),
                 Vec2::new(rect.width(), self.track_height),
             );
-            let bg = if idx % 2 == 0 { TRACK_EVEN } else { TRACK_ODD };
-            p.rect_filled(tr, 0u8, bg);
+            p.rect_filled(hdr, 0u8, Color32::from_rgb(30, 30, 30));
+            let arrow = if self.scene_expanded { "▾" } else { "▸" };
+            let count = timeline.tracks.len();
+            p.text(
+                Pos2::new(rect.min.x + 6.0, y0 + self.track_height / 2.0),
+                Align2::LEFT_CENTER,
+                format!("{} Scene  ({})", arrow, count),
+                FontId::proportional(12.0),
+                Color32::from_rgb(180, 180, 180),
+            );
+        }
 
-            if let Some(t) = timeline.tracks.get(*track) {
+        if !self.scene_expanded { return; }
+
+        // Divider line between label area and clips area
+        let div_x = label_rect.max.x;
+        p.line_segment(
+            [Pos2::new(div_x, rect.min.y), Pos2::new(div_x, rect.max.y)],
+            Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+        );
+
+        for (_track, idx) in track_indices {
+            let y = rect.min.y + *idx as f32 * self.track_height;
+
+            // Label sidebar background
+            let lb = Rect::from_min_size(
+                label_rect.min + Vec2::new(0.0, *idx as f32 * self.track_height),
+                Vec2::new(label_rect.width(), self.track_height),
+            );
+            let bg = if idx % 2 == 0 { TRACK_EVEN } else { TRACK_ODD };
+            p.rect_filled(lb, 0u8, bg);
+
+            // Track name in sidebar
+            if let Some(t) = timeline.tracks.get(*_track) {
                 p.text(
-                    Pos2::new(rect.min.x + 4.0, y + self.track_height / 2.0),
+                    Pos2::new(lb.min.x + 6.0, lb.center().y),
                     Align2::LEFT_CENTER,
                     &t.name,
                     FontId::proportional(11.0),
                     TEXT,
                 );
             }
+
+            // Clips area background
+            let cb = Rect::from_min_size(
+                Pos2::new(label_rect.max.x, y),
+                Vec2::new(rect.max.x - label_rect.max.x, self.track_height),
+            );
+            p.rect_filled(cb, 0u8, bg);
         }
     }
 
@@ -365,13 +428,13 @@ impl TimelineWidget {
     }
 
     // ── Zoom bar ────────────────────────────────────────────────────────
-    fn paint_zoom_bar(&self, p: &egui::Painter, rect: Rect, tracks_rect: Rect, timeline: &Timeline) {
+    fn paint_zoom_bar(&self, p: &egui::Painter, rect: Rect, clips_rect: Rect, timeline: &Timeline) {
         p.rect_filled(rect, 0u8, Color32::from_rgb(25, 25, 25));
 
         let total = timeline.cached_duration.max(0.01);
         let bar_w = rect.width();
 
-        let vw = tracks_rect.width() as f64;
+        let vw = clips_rect.width() as f64;
         let v_start = (self.scroll_offset as f64 / self.pixels_per_second).clamp(0.0, total);
         let v_end = ((self.scroll_offset + vw as f32) as f64 / self.pixels_per_second).clamp(0.0, total);
         let v_dur = (v_end - v_start).max(0.01);
@@ -428,24 +491,24 @@ impl TimelineWidget {
     }
 
     // ── Playhead ────────────────────────────────────────────────────────
-    fn paint_playhead(&self, p: &egui::Painter, rect: Rect, timeline: &Timeline) {
+    fn paint_playhead(&self, p: &egui::Painter, rect: Rect, ruler_top: f32, timeline: &Timeline) {
         let x = self.time_to_x(timeline.current_time, rect);
         if x < rect.min.x || x > rect.max.x {
             return;
         }
 
+        // Vertical line from ruler top to tracks bottom
         p.line_segment(
-            [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
+            [Pos2::new(x, ruler_top), Pos2::new(x, rect.max.y)],
             Stroke::new(2.0, PLAYHEAD),
         );
 
-        // Triangle handle in the ruler section
-        let ty = rect.min.y + self.header_height;
+        // Triangle handle at the ruler top
         let ts = 6.0;
         let tri = [
-            Pos2::new(x, ty),
-            Pos2::new(x - ts, ty + ts),
-            Pos2::new(x + ts, ty + ts),
+            Pos2::new(x, ruler_top),
+            Pos2::new(x - ts, ruler_top + ts),
+            Pos2::new(x + ts, ruler_top + ts),
         ];
         p.add(egui::Shape::convex_polygon(tri.to_vec(), PLAYHEAD, Stroke::NONE));
     }
@@ -457,6 +520,7 @@ impl TimelineWidget {
         response: &egui::Response,
         zoom_bar_rect: Rect,
         ruler_rect: Rect,
+        clips_rect: Rect,
         tracks_rect: Rect,
         timeline: &mut Timeline,
         track_indices: &HashMap<TrackId, usize>,
@@ -488,7 +552,7 @@ impl TimelineWidget {
             if let Some(pos) = hover_pos {
                 if zoom_bar_rect.contains(pos) {
                     let dur = timeline.cached_duration.max(1.0);
-                    let w = tracks_rect.width().max(100.0);
+                    let w = clips_rect.width().max(100.0);
                     self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
                     self.scroll_offset = 0.0;
                 }
@@ -498,7 +562,7 @@ impl TimelineWidget {
         // ── Zoom bar helpers (used below) ────────────────────────────────
         let total = timeline.cached_duration.max(0.01);
         let bar_w = zoom_bar_rect.width();
-        let view_w = tracks_rect.width();
+        let view_w = clips_rect.width();
         let min_v_dur = view_w as f64 / 500.0; // max pps
         let zoom_bar_info = |pos_x: f32| -> (f64, f64) {
             let ratio = ((pos_x - zoom_bar_rect.min.x) / bar_w).clamp(0.0, 1.0) as f64;
@@ -525,8 +589,8 @@ impl TimelineWidget {
                     }
                 } else if on_edge {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
-                } else if tracks_rect.contains(pos)
-                    && self.hit_clip_body(pos, tracks_rect, timeline, track_indices).is_some()
+                } else if clips_rect.contains(pos)
+                    && self.hit_clip_body(pos, clips_rect, timeline, track_indices).is_some()
                 {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
@@ -542,19 +606,19 @@ impl TimelineWidget {
             if ctrl || over_zoom_area {
                 let anchor = response
                     .hover_pos()
-                    .unwrap_or(Pos2::new(tracks_rect.center().x, 0.0));
-                let anchor_time = self.x_to_time(anchor.x, tracks_rect);
+                    .unwrap_or(Pos2::new(clips_rect.center().x, 0.0));
+                let anchor_time = self.x_to_time(anchor.x, clips_rect);
                 let old_pps = self.pixels_per_second;
                 self.pixels_per_second *= 1.0 + scroll.y as f64 * -0.002;
                 self.pixels_per_second = self.pixels_per_second.clamp(20.0, 500.0);
                 self.scroll_offset =
-                    (anchor.x - tracks_rect.min.x) + (anchor_time * self.pixels_per_second) as f32
-                        - (anchor.x - tracks_rect.min.x + self.scroll_offset)
+                    (anchor.x - clips_rect.min.x) + (anchor_time * self.pixels_per_second) as f32
+                        - (anchor.x - clips_rect.min.x + self.scroll_offset)
                             * (self.pixels_per_second / old_pps) as f32;
-                self.clamp_scroll(tracks_rect, timeline);
+                self.clamp_scroll(clips_rect, timeline);
             } else {
                 self.scroll_offset = (self.scroll_offset - scroll.x).max(0.0);
-                self.clamp_scroll(tracks_rect, timeline);
+                self.clamp_scroll(clips_rect, timeline);
             }
             ui.ctx().request_repaint();
         }
@@ -599,7 +663,7 @@ impl TimelineWidget {
                                 let new_start = (ct - v_dur / 2.0).clamp(0.0, total - v_dur);
                                 let new_end = new_start + v_dur;
                                 self.scroll_offset = (new_start * self.pixels_per_second) as f32;
-                                self.clamp_scroll(tracks_rect, timeline);
+                                self.clamp_scroll(clips_rect, timeline);
                                 self.drag_state = DragState::ZoomBar {
                                     kind: ZoomBarKind::Body,
                                     initial_start: new_start,
@@ -607,16 +671,16 @@ impl TimelineWidget {
                                 };
                             }
                         } else if ruler_rect.contains(pos)
-                            || (pos.x - self.time_to_x(timeline.current_time, tracks_rect)).abs()
+                            || (pos.x - self.time_to_x(timeline.current_time, clips_rect)).abs()
                                 < 10.0
                         {
                             timeline.is_playing = false;
                             self.drag_state = DragState::Playhead;
                             self.drag_mouse_start_x = pos.x;
-                            let t = self.x_to_time(pos.x, tracks_rect).clamp(0.0, timeline.cached_duration);
+                            let t = self.x_to_time(pos.x, clips_rect).clamp(0.0, timeline.cached_duration);
                             timeline.seek_request = Some(t);
                         } else if let Some((cid, edge)) =
-                            self.hit_clip_edge(pos, tracks_rect, timeline, track_indices)
+                            self.hit_clip_edge(pos, clips_rect, timeline, track_indices)
                         {
                             match edge {
                                 ClipEdge::Left => {
@@ -632,7 +696,7 @@ impl TimelineWidget {
                                 self.drag_orig_duration = c.duration;
                             }
                         } else if let Some(cid) =
-                            self.hit_clip_body(pos, tracks_rect, timeline, track_indices)
+                            self.hit_clip_body(pos, clips_rect, timeline, track_indices)
                         {
                             self.drag_state = DragState::ClipBody(cid);
                             self.drag_mouse_start_x = pos.x;
@@ -642,16 +706,21 @@ impl TimelineWidget {
                             }
                         } else if ruler_rect.contains(pos) {
                             let t =
-                                self.x_to_time(pos.x, tracks_rect).clamp(0.0, timeline.cached_duration);
+                                self.x_to_time(pos.x, clips_rect).clamp(0.0, timeline.cached_duration);
                             timeline.seek_request = Some(t);
                         }
                     }
                 }
                 if response.clicked() {
                     if let Some(pos) = mouse {
-                        if tracks_rect.contains(pos) {
+                        // Scene header toggle (uses full tracks_rect including label sidebar)
+                        if self.show_scene_header && tracks_rect.contains(pos)
+                            && pos.y < tracks_rect.min.y + self.track_height
+                        {
+                            self.scene_expanded = !self.scene_expanded;
+                        } else if clips_rect.contains(pos) {
                             self.selected_clip =
-                                self.hit_clip_body(pos, tracks_rect, timeline, track_indices);
+                                self.hit_clip_body(pos, clips_rect, timeline, track_indices);
                         }
                     }
                 }
@@ -661,7 +730,7 @@ impl TimelineWidget {
                     if let Some(pos) = mouse {
                         match &self.drag_state {
                             DragState::Playhead => {
-                                let t = self.x_to_time(pos.x, tracks_rect)
+                                let t = self.x_to_time(pos.x, clips_rect)
                                     .clamp(0.0, timeline.cached_duration);
                                 timeline.seek_request = Some(t);
                             }
@@ -675,21 +744,21 @@ impl TimelineWidget {
                                         let v_dur = initial_end - initial_start;
                                         let ns = (mouse_time - v_dur / 2.0).clamp(0.0, total - v_dur);
                                         self.scroll_offset = (ns * self.pixels_per_second) as f32;
-                                        self.clamp_scroll(tracks_rect, timeline);
+                                        self.clamp_scroll(clips_rect, timeline);
                                     }
                                     ZoomBarKind::LeftEdge => {
                                         let ns = mouse_time.clamp(0.0, initial_end - min_v_dur);
                                         let nd = (initial_end - ns).max(min_v_dur);
                                         self.pixels_per_second = (vw_f64 / nd).clamp(20.0, 500.0);
                                         self.scroll_offset = (ns * self.pixels_per_second) as f32;
-                                        self.clamp_scroll(tracks_rect, timeline);
+                                        self.clamp_scroll(clips_rect, timeline);
                                     }
                                     ZoomBarKind::RightEdge => {
                                         let ne = mouse_time.clamp(initial_start + min_v_dur, total);
                                         let nd = (ne - initial_start).max(min_v_dur);
                                         self.pixels_per_second = (vw_f64 / nd).clamp(20.0, 500.0);
                                         self.scroll_offset = (initial_start * self.pixels_per_second) as f32;
-                                        self.clamp_scroll(tracks_rect, timeline);
+                                        self.clamp_scroll(clips_rect, timeline);
                                     }
                                 }
                             }
@@ -698,7 +767,7 @@ impl TimelineWidget {
                                 let dt = dx as f64 / self.pixels_per_second;
                                 let ns = (self.drag_orig_start + dt).max(0.0);
                                 let snapped = if self.snap_enabled {
-                                    self.snap_time(ns, tracks_rect, timeline)
+                                    self.snap_time(ns, clips_rect, timeline)
                                 } else {
                                     ns
                                 };
@@ -711,7 +780,7 @@ impl TimelineWidget {
                                 let dt = dx as f64 / self.pixels_per_second;
                                 let ns = (self.drag_orig_start + dt).max(0.0);
                                 let snapped = if self.snap_enabled {
-                                    self.snap_time(ns, tracks_rect, timeline)
+                                    self.snap_time(ns, clips_rect, timeline)
                                 } else {
                                     ns
                                 };
@@ -727,7 +796,7 @@ impl TimelineWidget {
                                 let dt = dx as f64 / self.pixels_per_second;
                                 let ne = self.drag_orig_start + self.drag_orig_duration + dt;
                                 let snapped_end = if self.snap_enabled {
-                                    self.snap_time(ne, tracks_rect, timeline)
+                                    self.snap_time(ne, clips_rect, timeline)
                                 } else {
                                     ne
                                 };
@@ -908,7 +977,7 @@ fn lighten(c: Color32) -> Color32 {
 
 fn clip_color(payload: &ClipPayload) -> Color32 {
     match payload {
-        ClipPayload::Animation(_) => CLR_ANIM,
+        ClipPayload::Animation(anim) => lens_color(&anim.lens),
         ClipPayload::Audio { .. } => CLR_AUDIO,
         ClipPayload::Wait => CLR_WAIT,
         ClipPayload::Marker(_) => CLR_MARKER,
@@ -917,9 +986,32 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
     }
 }
 
+fn lens_color(lens: &PropertyLensSpec) -> Color32 {
+    match lens {
+        PropertyLensSpec::Translation { .. } => Color32::from_rgb(74, 144, 217),
+        PropertyLensSpec::Rotation { .. } => Color32::from_rgb(80, 200, 120),
+        PropertyLensSpec::Scale { .. } => Color32::from_rgb(255, 185, 15),
+        PropertyLensSpec::Opacity { .. } => Color32::from_rgb(255, 140, 0),
+        PropertyLensSpec::FillColor { .. } => Color32::from_rgb(220, 80, 80),
+        PropertyLensSpec::StrokeColor { .. } => Color32::from_rgb(200, 80, 200),
+        PropertyLensSpec::StrokeWidth { .. } => Color32::from_rgb(0, 200, 200),
+        PropertyLensSpec::PathCompletion { .. } => Color32::from_rgb(155, 89, 182),
+        PropertyLensSpec::FillDrawProgress { .. } => Color32::from_rgb(180, 130, 210),
+        PropertyLensSpec::CameraPosition { .. }
+        | PropertyLensSpec::CameraRotation { .. }
+        | PropertyLensSpec::CameraZoom { .. } => Color32::from_rgb(100, 100, 100),
+        PropertyLensSpec::PathFollow { .. } => Color32::from_rgb(26, 188, 156),
+        PropertyLensSpec::Custom { .. } => Color32::from_rgb(200, 200, 200),
+    }
+}
+
 fn clip_label(payload: &ClipPayload) -> String {
     match payload {
         ClipPayload::Animation(a) => {
+            // Use the high-level animation label if available
+            if let Some(label) = &a.label {
+                return label.clone();
+            }
             let n = match &a.lens {
                 PropertyLensSpec::Translation { .. } => "Move",
                 PropertyLensSpec::Rotation { .. } => "Rotate",
@@ -936,7 +1028,7 @@ fn clip_label(payload: &ClipPayload) -> String {
                 PropertyLensSpec::PathFollow { .. } => "Follow",
                 PropertyLensSpec::Custom { type_name, .. } => type_name.as_str(),
             };
-            format!("Anim:{}", n)
+            n.to_string()
         }
         ClipPayload::Audio { source, .. } => {
             if source.len() > 18 {

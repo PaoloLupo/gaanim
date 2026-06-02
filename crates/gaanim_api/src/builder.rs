@@ -14,6 +14,7 @@ use gaanim_timeline::{
     timeline::Timeline,
 };
 use crate::anim::{AnimationBuilder, AnimationType};
+use std::collections::HashMap;
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
 /// stroke color in the `Write` animation's auto-stroke fallback.
@@ -261,6 +262,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub current_time: f64,
     pub states: MobjectStateMap,
     pub default_track: TrackId,
+    mobject_tracks: HashMap<ObjectId, TrackId>,
+    mobject_names: HashMap<ObjectId, String>,
+    next_track: u32,
+    current_label: Option<String>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -287,6 +292,52 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_time: 0.0,
             states: MobjectStateMap::new(),
             default_track,
+            mobject_tracks: HashMap::new(),
+            mobject_names: HashMap::new(),
+            next_track: 0,
+            current_label: None,
+        }
+    }
+
+    /// Returns the per-mobject track for the given target, creating a new
+    /// numbered track if this is the first time we see this ObjectId.
+    fn ensure_track(&mut self, target: ObjectId) -> TrackId {
+        *self.mobject_tracks.entry(target).or_insert_with(|| {
+            self.next_track += 1;
+            let name = self
+                .mobject_names
+                .get(&target)
+                .cloned()
+                .unwrap_or_else(|| format!("Object {}", self.next_track));
+            self.timeline.add_track(&name, self.next_track as i32)
+        })
+    }
+
+    fn anim_label(ty: &AnimationType) -> &'static str {
+        match ty {
+            AnimationType::Write { .. } => "Write",
+            AnimationType::Create { .. } => "Create",
+            AnimationType::Unwrite { .. } => "Unwrite",
+            AnimationType::Uncreate { .. } => "Uncreate",
+            AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
+            AnimationType::RotateTo { .. } | AnimationType::RotateBy { .. } => "Rotate",
+            AnimationType::ScaleTo { .. } | AnimationType::ScaleUniform { .. } => "Scale",
+            AnimationType::FadeTo { .. } | AnimationType::FadeIn | AnimationType::FadeOut => "Fade",
+            AnimationType::FillColorTo { .. } => "Fill",
+            AnimationType::StrokeColorTo { .. } => "Stroke",
+            AnimationType::StrokeWidthTo { .. } => "StrokeW",
+            AnimationType::GrowFromCenter => "Grow",
+            AnimationType::ShrinkToCenter => "Shrink",
+            AnimationType::SpinInFromNothing => "SpinIn",
+            AnimationType::Indicate { .. } => "Indicate",
+            AnimationType::FadeTransform { .. } => "Morph",
+            AnimationType::Wiggle => "Wiggle",
+            AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
+            AnimationType::DrawBorderThenFill => "DrawFill",
+            AnimationType::Flash { .. } => "Flash",
+            AnimationType::Circumscribe { .. } => "Circum",
+            AnimationType::MoveAlongPath { .. } => "Follow",
+            AnimationType::GrowArrow => "Arrow",
         }
     }
 
@@ -335,68 +386,71 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
+        let track = self.ensure_track(anim.target);
+
         // The Write/Create/Uncreate/Unwrite/SpinIn/Indicate animations expand into
         // multiple staggered or parallel sub-clips, so they have their own branches
         // that access the timeline multiple times. All other variants collapse to a
         // single clip below.
         if matches!(anim.anim_type, AnimationType::Write { .. }) {
-            self.play_draw_erase_internal(anim, false, true);
+            self.play_draw_erase_internal(anim, false, true, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Create { .. }) {
-            self.play_draw_erase_internal(anim, false, false);
+            self.play_draw_erase_internal(anim, false, false, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Unwrite { .. }) {
-            self.play_draw_erase_internal(anim, true, true);
+            self.play_draw_erase_internal(anim, true, true, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Uncreate { .. }) {
-            self.play_draw_erase_internal(anim, true, false);
+            self.play_draw_erase_internal(anim, true, false, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::SpinInFromNothing) {
-            self.play_spin_in_from_nothing_internal(anim);
+            self.play_spin_in_from_nothing_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Indicate { .. }) {
-            self.play_indicate_internal(anim);
+            self.play_indicate_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::FadeTransform { .. }) {
-            self.play_fade_transform_internal(anim);
+            self.play_fade_transform_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Wiggle) {
-            self.play_wiggle_internal(anim);
+            self.play_wiggle_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::GrowFromPoint { .. }) {
-            self.play_grow_from_point_internal(anim);
+            self.play_grow_from_point_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::GrowFromEdge { .. }) {
-            self.play_grow_from_edge_internal(anim);
+            self.play_grow_from_edge_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::DrawBorderThenFill) {
-            self.play_draw_border_then_fill_internal(anim);
+            self.play_draw_border_then_fill_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Flash { .. }) {
-            self.play_flash_internal(anim);
+            self.play_flash_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Circumscribe { .. }) {
-            self.play_circumscribe_internal(anim);
+            self.play_circumscribe_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::MoveAlongPath { .. }) {
-            self.play_move_along_path_internal(anim);
+            self.play_move_along_path_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::GrowArrow) {
-            self.play_grow_arrow_internal(anim);
+            self.play_grow_arrow_internal(anim, track);
             return;
         }
 
@@ -520,13 +574,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Add the resolved clip to the Timeline resource
         self.timeline.add_clip(
-            self.default_track,
+            track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: lens_spec,
                 rate_func: anim.rate_func,
+                label: self.current_label.clone(),
             }),
         );
     }
@@ -557,6 +612,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         anim: AnimationBuilder,
         is_erase: bool,
         staggered: bool,
+        parent_track: TrackId,
     ) {
         let stroke_width = match anim.anim_type {
             AnimationType::Write { stroke_width } => stroke_width,
@@ -659,7 +715,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         for item_id in &items {
             self.timeline.add_clip(
-                self.default_track,
+                parent_track,
                 self.current_time,
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
@@ -669,10 +725,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: reset_fill_val,
                     },
                     rate_func: anim.rate_func.clone(),
+                    label: self.current_label.clone(),
                 }),
             );
             self.timeline.add_clip(
-                self.default_track,
+                parent_track,
                 self.current_time,
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
@@ -682,6 +739,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: reset_path_val,
                     },
                     rate_func: anim.rate_func.clone(),
+                    label: self.current_label.clone(),
                 }),
             );
         }
@@ -697,37 +755,40 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
                 // 1. Fill hold at 0.0 during draw phase
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     item_start,
                     draw_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
 
                 // 2. Outline draw: PathCompletion 0.0 -> 1.0
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     item_start,
                     draw_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
 
                 // 3. Fill fade-in: FillDrawProgress 0.0 -> 1.0
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     fade_start,
                     fade_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
             } else {
@@ -736,49 +797,53 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
                 // 1. Fill fade-out: FillDrawProgress 1.0 -> 0.0
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     item_start,
                     fade_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
 
                 // 2. Outline hold at 1.0 during fade phase
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     item_start,
                     fade_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
 
                 // 3. Outline erase: PathCompletion 1.0 -> 0.0
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     draw_start,
                     draw_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
 
                 // 4. Fill hold at 0.0 during erase phase
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     draw_start,
                     draw_duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
             }
@@ -786,7 +851,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             // Stroke width override if requested
             if let Some(width) = stroke_width {
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     item_start,
                     min_step,
                     ClipPayload::Animation(AnimationSpec {
@@ -796,6 +861,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                             to: width,
                         },
                         rate_func: anim.rate_func.clone(),
+                        label: self.current_label.clone(),
                     }),
                 );
             }
@@ -803,7 +869,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
-    fn play_spin_in_from_nothing_internal(&mut self, anim: AnimationBuilder) {
+    fn play_spin_in_from_nothing_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
@@ -835,7 +901,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // 1. Unified scale clip (0.0 -> target_scale) over the full duration
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
@@ -845,13 +911,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: initial_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         // 2. Rotation part 1 (0 -> 180 deg) over first half
         let half_duration = anim.duration * 0.5;
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             half_duration,
             ClipPayload::Animation(AnimationSpec {
@@ -861,12 +928,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: mid_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         // 3. Rotation part 2 (180 -> 360 deg) over second half
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + half_duration,
             half_duration,
             ClipPayload::Animation(AnimationSpec {
@@ -876,6 +944,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: end_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
     }
@@ -886,7 +955,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// shrinks back to its original scale/color over the second half of the duration.
     /// We split it into two consecutive clips so the final state matches the initial
     /// state and subsequent animations start from the correct baseline.
-    fn play_indicate_internal(&mut self, anim: AnimationBuilder) {
+    fn play_indicate_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (highlight_color, scale_factor) = match anim.anim_type {
             AnimationType::Indicate {
                 color,
@@ -925,7 +994,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let scale_to = scale_from * scale_factor;
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             half,
             ClipPayload::Animation(AnimationSpec {
@@ -935,10 +1004,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + half,
             half,
             ClipPayload::Animation(AnimationSpec {
@@ -948,6 +1018,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_from,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                label: self.current_label.clone(),
             }),
         );
 
@@ -957,7 +1028,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if let Some(state) = self.states.get(*item_id) {
                     if let Some(Brush::Solid(c)) = &state.fill {
                         self.timeline.add_clip(
-                            self.default_track,
+                            parent_track,
                             self.current_time,
                             half,
                             ClipPayload::Animation(AnimationSpec {
@@ -967,10 +1038,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                label: self.current_label.clone(),
                             }),
                         );
                         self.timeline.add_clip(
-                            self.default_track,
+                            parent_track,
                             self.current_time + half,
                             half,
                             ClipPayload::Animation(AnimationSpec {
@@ -980,12 +1052,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                label: self.current_label.clone(),
                             }),
                         );
                     }
                     if let Some(Brush::Solid(c)) = &state.stroke.brush {
                         self.timeline.add_clip(
-                            self.default_track,
+                            parent_track,
                             self.current_time,
                             half,
                             ClipPayload::Animation(AnimationSpec {
@@ -995,10 +1068,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                label: self.current_label.clone(),
                             }),
                         );
                         self.timeline.add_clip(
-                            self.default_track,
+                            parent_track,
                             self.current_time + half,
                             half,
                             ClipPayload::Animation(AnimationSpec {
@@ -1008,6 +1082,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                label: self.current_label.clone(),
                             }),
                         );
                     }
@@ -1016,7 +1091,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    fn play_fade_transform_internal(&mut self, anim: AnimationBuilder) {
+    fn play_fade_transform_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let target = match &anim.anim_type {
             AnimationType::FadeTransform { target } => *target,
             _ => return,
@@ -1029,13 +1104,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             };
             let from = source_state.opacity;
             self.timeline.add_clip(
-                self.default_track,
+                parent_track,
                 self.current_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
                     lens: PropertyLensSpec::Opacity { from, to: 0.0 },
                     rate_func: anim.rate_func.clone(),
+                    label: self.current_label.clone(),
                 }),
             );
             if let Some(source_state) = self.states.get_mut(anim.target) {
@@ -1051,13 +1127,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let target_opacity = target_state.opacity;
             let target_entity = target_state.entity;
             self.timeline.add_clip(
-                self.default_track,
+                parent_track,
                 self.current_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target,
                     lens: PropertyLensSpec::Opacity { from: 0.0, to: target_opacity },
                     rate_func: anim.rate_func.clone(),
+                    label: self.current_label.clone(),
                 }),
             );
             if let Some(target_state) = self.states.get_mut(target) {
@@ -1069,7 +1146,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    fn play_wiggle_internal(&mut self, anim: AnimationBuilder) {
+    fn play_wiggle_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
@@ -1086,7 +1163,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let to_x = origin.x + offset_x;
 
             self.timeline.add_clip(
-                self.default_track,
+                parent_track,
                 self.current_time + i as f64 * step,
                 step,
                 ClipPayload::Animation(AnimationSpec {
@@ -1096,12 +1173,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: gaanim_core::glam::DVec3::new(to_x, origin.y, origin.z),
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                    label: self.current_label.clone(),
                 }),
             );
         }
     }
 
-    fn play_grow_from_point_internal(&mut self, anim: AnimationBuilder) {
+    fn play_grow_from_point_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (px, py) = match &anim.anim_type {
             AnimationType::GrowFromPoint { px, py } => (*px, *py),
             _ => return,
@@ -1123,18 +1201,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.commands.entity(state.entity).insert(temp_transform);
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from, to: target_scale },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
@@ -1144,11 +1223,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
     }
 
-    fn play_grow_from_edge_internal(&mut self, anim: AnimationBuilder) {
+    fn play_grow_from_edge_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let direction = match &anim.anim_type {
             AnimationType::GrowFromEdge { direction } => direction.clone(),
             _ => return,
@@ -1181,18 +1261,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.commands.entity(state.entity).insert(temp_transform);
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from, to: target_scale },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
@@ -1202,11 +1283,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
     }
 
-    fn play_draw_border_then_fill_internal(&mut self, anim: AnimationBuilder) {
+    fn play_draw_border_then_fill_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
@@ -1235,23 +1317,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let min_step = 1e-6_f64;
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             min_step,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             min_step,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
@@ -1263,30 +1347,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         ));
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             draw_duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         let fill_start = self.current_time + draw_duration;
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             fill_start,
             fill_duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
     }
 
-    fn play_flash_internal(&mut self, anim: AnimationBuilder) {
+    fn play_flash_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
@@ -1306,23 +1392,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Fade out then back in (1.0 -> 0.0 -> 1.0)
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Opacity { from: original_opacity, to: 0.0 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + half,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Opacity { from: 0.0, to: original_opacity },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
 
@@ -1331,23 +1419,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let scale_factor = 1.0 + (n_lines as f64 / 12.0) * 0.25;
         let scale_to = original_scale * scale_factor;
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + half,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
 
@@ -1358,7 +1448,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let _ = radius; // reserved for future "radial line" geometry
     }
 
-    fn play_circumscribe_internal(&mut self, anim: AnimationBuilder) {
+    fn play_circumscribe_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let color = match &anim.anim_type {
             AnimationType::Circumscribe { color } => *color,
             _ => None,
@@ -1376,23 +1466,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Scale up then back down (1.0 -> 1.1 -> 1.0)
         let scale_to = original_scale * 1.1;
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + half,
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
 
@@ -1400,23 +1492,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(c) = color {
             if let Some(Brush::Solid(current)) = &state.fill {
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     self.current_time,
                     half,
                     ClipPayload::Animation(AnimationSpec {
                         target: anim.target,
                         lens: PropertyLensSpec::FillColor { from: *current, to: c },
                         rate_func: gaanim_math::RateFunc::Linear,
+                        label: self.current_label.clone(),
                     }),
                 );
                 self.timeline.add_clip(
-                    self.default_track,
+                    parent_track,
                     self.current_time + half,
                     half,
                     ClipPayload::Animation(AnimationSpec {
                         target: anim.target,
                         lens: PropertyLensSpec::FillColor { from: c, to: *current },
                         rate_func: gaanim_math::RateFunc::Linear,
+                        label: self.current_label.clone(),
                     }),
                 );
             }
@@ -1433,7 +1527,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// translation is sampled from the Bézier path at the eased `t`
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
-    fn play_move_along_path_internal(&mut self, anim: AnimationBuilder) {
+    fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let path = match &anim.anim_type {
             AnimationType::MoveAlongPath { path } => path.clone(),
             _ => unreachable!(),
@@ -1449,13 +1543,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::PathFollow { path },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
     }
@@ -1463,7 +1558,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Internal: schedule a `GrowArrow` animation as a Create-style
     /// outline draw followed by a brief scale "punch" that emphasizes
     /// the arrowhead's arrival at the end of the trajectory.
-    fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder) {
+    fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         if self.states.get(anim.target).is_none() {
             bevy::prelude::warn!(
                 "Attempted to GrowArrow unregistered Mobject: {:?}",
@@ -1496,7 +1591,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Hold the fill at 0 during the draw phase so the outline-only
         // stage is visible.
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             draw_duration,
             ClipPayload::Animation(AnimationSpec {
@@ -1506,12 +1601,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: 0.0,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                label: self.current_label.clone(),
             }),
         );
 
         // Trace the outline.
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time,
             draw_duration,
             ClipPayload::Animation(AnimationSpec {
@@ -1521,13 +1617,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: 1.0,
                 },
                 rate_func: anim.rate_func.clone(),
+                label: self.current_label.clone(),
             }),
         );
 
         // Cross-fade the fill in over the last segment, then a brief
         // scale punch (1.0 -> 1.15 -> 1.0) to highlight the arrowhead.
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + draw_duration,
             fill_duration,
             ClipPayload::Animation(AnimationSpec {
@@ -1537,6 +1634,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: 1.0,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
 
@@ -1550,7 +1648,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .unwrap_or(gaanim_core::glam::DVec3::ONE);
         let scale_to = original_scale * 1.15;
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + draw_duration,
             punch_half,
             ClipPayload::Animation(AnimationSpec {
@@ -1560,10 +1658,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
         self.timeline.add_clip(
-            self.default_track,
+            parent_track,
             self.current_time + draw_duration + punch_half,
             punch_half,
             ClipPayload::Animation(AnimationSpec {
@@ -1573,6 +1672,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                label: self.current_label.clone(),
             }),
         );
     }
@@ -2216,6 +2316,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans,
         };
         self.states.insert(parent_id, state);
+        self.mobject_names.insert(parent_id, format!("Text('{}')", content));
 
         MobjectRef { id: parent_id }
     }
@@ -2304,6 +2405,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans,
         };
         self.states.insert(parent_id, state);
+        self.mobject_names.insert(parent_id, format!("Typst('{}')", formula));
 
         MobjectRef { id: parent_id }
     }
@@ -2633,6 +2735,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
             child_spans: Vec::new(),
         };
         self.builder.states.insert(self.id, state);
+        self.builder.mobject_names.insert(self.id, self.bundle.tag.0.clone());
 
         MobjectRef { id: self.id }
     }

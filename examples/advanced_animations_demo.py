@@ -85,7 +85,7 @@ def main():
     # 2. Renderizar usando la pipeline GPU Vulkan nativa
     # Esta llamada compila el timeline en Rust, abre la ventana interactiva y reproduce
     # todas las fases que hemos encolado secuencialmente arriba.
-    scene.render()
+    scene.edit()
 
 
 if __name__ == "__main__":
