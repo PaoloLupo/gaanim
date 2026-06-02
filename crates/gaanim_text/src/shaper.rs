@@ -74,11 +74,11 @@ pub fn compile_text_to_hierarchy(
         .ok_or(TextError::FontNotFound)?;
 
     // 2. Shape text with HarfBuzz (RustyBuzz)
-    let shaped_glyphs = shape_text(font_bytes, text);
+    let shaped_glyphs = shape_text(&font_bytes, text);
 
     // 3. Parse OpenType font outlines using ttf-parser
     let parser_face =
-        ttf_parser::Face::parse(font_bytes, 0).map_err(|_| TextError::FontParseError)?;
+        ttf_parser::Face::parse(&font_bytes, 0).map_err(|_| TextError::FontParseError)?;
     let units_per_em = parser_face.units_per_em() as f64;
     let scale = font_size / units_per_em;
 

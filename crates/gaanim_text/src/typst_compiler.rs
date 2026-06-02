@@ -50,8 +50,9 @@ impl GaanimTypstWorld {
             }
         }
 
-        // 2. Append any extra fonts the user registered manually.
-        for (_, bytes) in &font_registry.fonts {
+        // 2. Append any extra fonts the user registered manually
+        //    (system fonts are already loaded by `FontSearcher` above).
+        for (_, bytes) in &font_registry.registered {
             if let Some(font) = Font::new(Bytes::new(bytes.clone()), 0) {
                 font_book.push(font.info().clone());
                 fonts.push(font);
