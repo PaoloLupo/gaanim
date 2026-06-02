@@ -8,6 +8,8 @@ use gaanim_scene::{
 };
 use gaanim_timeline::timeline::Timeline;
 
+mod timeline_widget;
+
 pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
@@ -33,30 +35,18 @@ impl Plugin for GaanimEditorPlugin {
 #[derive(Resource)]
 pub struct EditorState {
     pub selected: Option<Entity>,
-    pub playing: bool,
     pub show_hierarchy: bool,
     pub show_inspector: bool,
-    /// Persistent slider value. The slider in the bottom bar binds to this
-    /// (NOT to a fresh local copy of `timeline.current_time`) because egui's
-    /// `Slider` has a persistent memory state that diverges from a re-init'd
-    /// local each frame, causing `.changed()` to fire on every external
-    /// timeline tick and reset `is_playing=false` + `seek_request=Some(0)`.
-    pub slider_value: f64,
-    /// True while the user is actively dragging the timeline slider. While
-    /// dragging we DON'T sync `slider_value` from `timeline.current_time`,
-    /// otherwise the slider would jump under the user's cursor.
-    pub slider_dragging: bool,
+    pub timeline_widget: timeline_widget::TimelineWidget,
 }
 
 impl Default for EditorState {
     fn default() -> Self {
         Self {
             selected: None,
-            playing: false,
             show_hierarchy: true,
             show_inspector: true,
-            slider_value: 0.0,
-            slider_dragging: false,
+            timeline_widget: timeline_widget::TimelineWidget::new(),
         }
     }
 }
@@ -226,57 +216,13 @@ fn editor_ui_system(
             });
     }
 
-    egui::TopBottomPanel::bottom("playback").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            let play_text = if timeline.is_playing { "⏸ Pause" } else { "▶ Play" };
-            if ui.button(play_text).clicked() {
-                timeline.is_playing = !timeline.is_playing;
-                state.playing = timeline.is_playing;
-            }
-
-            if ui.button("⏮ Reset").clicked() {
-                timeline.is_playing = false;
-                state.playing = false;
-                timeline.seek_request = Some(0.0);
-            }
-
-            ui.separator();
-
-            let cached = timeline.cached_duration;
-            ui.label(format!("t: {:.2}s / {:.2}s", timeline.current_time, cached));
-
-            if cached > 0.0 {
-                // Sync slider value from timeline when user isn't actively
-                // dragging — otherwise the slider would fight the timeline
-                // tick by tick.
-                if !state.slider_dragging {
-                    state.slider_value = timeline.current_time;
-                }
-                let response = ui.add(
-                    egui::Slider::new(&mut state.slider_value, 0.0..=cached)
-                        .text("")
-                        .step_by(0.05),
-                );
-                if response.drag_started() {
-                    state.slider_dragging = true;
-                }
-                if response.drag_stopped() || response.clicked() {
-                    state.slider_dragging = false;
-                    timeline.is_playing = false;
-                    state.playing = false;
-                    timeline.seek_request = Some(state.slider_value);
-                }
-            }
-
-            ui.separator();
-
-            if ui.button("⏭ End").clicked() {
-                timeline.is_playing = false;
-                state.playing = false;
-                timeline.seek_request = Some(timeline.cached_duration);
-            }
+    egui::TopBottomPanel::bottom("timeline")
+        .resizable(true)
+        .default_height(200.0)
+        .min_height(100.0)
+        .show(ctx, |ui| {
+            state.timeline_widget.show(ui, &mut timeline);
         });
-    });
 }
 
 fn brush_label(brush: &gaanim_core::peniko::Brush) -> String {

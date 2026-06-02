@@ -167,6 +167,16 @@ impl Timeline {
         }
     }
 
+    /// Rebuilds the `clip_index` BTreeMap from scratch after direct modification
+    /// of clip start times (e.g. during editor drag/resize operations).
+    pub fn rebuild_clip_index(&mut self) {
+        self.clip_index.clear();
+        for clip in self.clips.values() {
+            let start_key = OrderedFloat(clip.start);
+            self.clip_index.entry(start_key).or_default().push(clip.id);
+        }
+    }
+
     /// Fetches all clips active at the specified timestamp.
     ///
     /// This utilizes `max_clip_duration` to bound the B-Tree range query,
