@@ -1117,8 +1117,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
         let id_counter = &mut self.id_counter;
         let next_id_fn = move || {
+            let id = gaanim_core::ObjectId::from_parts(*id_counter, 1);
             *id_counter += 1;
-            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+            id
         };
 
         let mut child_spans = Vec::new();
@@ -1205,8 +1206,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
         let id_counter = &mut self.id_counter;
         let next_id_fn = move || {
+            let id = gaanim_core::ObjectId::from_parts(*id_counter, 1);
             *id_counter += 1;
-            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+            id
         };
 
         let mut child_spans = Vec::new();
