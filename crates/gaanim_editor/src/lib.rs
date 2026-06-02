@@ -226,6 +226,23 @@ fn editor_ui_system(
             state.timeline_widget.show(ui, &mut timeline);
         });
 
+    // Track sidebar click → select the corresponding entity
+    if let Some(track_id) = state.timeline_widget.selected_track {
+        if let Some(track) = timeline.tracks.get(track_id) {
+            if let Some(obj_id) = track.object_id {
+                for (entity, mobj_id, _) in &entity_query {
+                    if let Some(mid) = mobj_id {
+                        if mid.0 == obj_id {
+                            state.selected = Some(entity);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        state.timeline_widget.selected_track = None;
+    }
+
     fps_overlay.render(ctx);
 }
 

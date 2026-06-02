@@ -63,6 +63,9 @@ pub(crate) enum DeferredOp {
         duration: f64,
         rate_func: RateFunc,
     },
+    Ungroup {
+        group: ObjectId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +169,40 @@ impl PyScene {
 
     fn background(&self, color: &PyColor) -> PyResult<()> {
         lock_inner!(self.inner).background = Some(color.0);
+        Ok(())
+    }
+
+    fn group(&self, children: Vec<PyMobject>) -> PyResult<PyMobject> {
+        let mut inner = lock_inner!(self.inner);
+        let id = inner.next_id();
+        let common = Self::default_common(inner.theme.0.primary);
+        
+        let children_specs = children.iter()
+            .map(|c| (c.id, c.spec.clone(), c.creation_order))
+            .collect();
+            
+        let spec = Arc::new(Mutex::new(MobjectSpec::Group {
+            common,
+            children: children_specs,
+        }));
+        
+        let order = id.index() as u64;
+        inner.ops.push(DeferredOp::Spawn {
+            id,
+            spec: spec.clone(),
+            creation_order: order,
+        });
+        
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
+    }
+
+    fn ungroup(&self, group: &PyMobject) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        inner.ops.push(DeferredOp::Ungroup { group: group.id });
         Ok(())
     }
 

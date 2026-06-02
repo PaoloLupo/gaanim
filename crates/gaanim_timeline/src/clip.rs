@@ -21,6 +21,8 @@ pub struct Track {
     pub name: String,
     /// Layout order for display in the timeline editor panel.
     pub order: i32,
+    /// The ObjectId of the mobject associated with this track (if any).
+    pub object_id: Option<ObjectId>,
 }
 
 /// A discrete event or continuous element in the timeline with a start time and duration.

@@ -81,6 +81,7 @@ impl Timeline {
             id,
             name: name.into(),
             order,
+            object_id: None,
         })
     }
 

@@ -94,6 +94,22 @@ class Scene:
             color: Fill color for the background.
         """
 
+    def group(self, children: List[Mobject]) -> Mobject:
+        """Create a group from a list of Mobjects.
+
+        Args:
+            children: List of Mobjects to group.
+        Returns:
+            A new Group Mobject.
+        """
+
+    def ungroup(self, group: Mobject) -> None:
+        """Ungroup the given group and release its children.
+
+        Args:
+            group: The Group Mobject to dissolve.
+        """
+
     # ---- shape spawners ----
 
     def circle(self, radius: float) -> Mobject:
@@ -617,6 +633,22 @@ class Mobject:
         """The stable ObjectId assigned at creation time."""
 
     def __repr__(self) -> str: ...
+
+    def __getitem__(self, index: int) -> Mobject:
+        """Get the child Mobject at the given index if this is a Group.
+
+        Args:
+            index: The 0-based index.
+        Returns:
+            The child Mobject handle.
+        """
+
+    def __len__(self) -> int:
+        """Get the number of children in this group.
+
+        Returns:
+            The number of children, or 0 if not a Group.
+        """
 
     # ---- display configuration ----
 

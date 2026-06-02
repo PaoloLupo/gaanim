@@ -1,4 +1,4 @@
-use crate::components::{GlobalOpacity, LocalBounds, Opacity, WorldBounds};
+use crate::components::{FillBrush, GlobalOpacity, GroupMarker, LocalBounds, Opacity, StrokeBrush, WorldBounds};
 use bevy::prelude::{
     Added, Changed, ChildOf, Entity, Local, Or, ParamSet, Query, With, Without,
 };
@@ -145,11 +145,131 @@ pub fn world_bounds_propagation_system(
 
 /// System: Approximate WorldBounds for entities without LocalBounds using transform position.
 pub fn world_bounds_fallback_system(
-    mut query: Query<(&GlobalSpatialTransform, &mut WorldBounds), Without<LocalBounds>>,
+    mut query: Query<(&GlobalSpatialTransform, &mut WorldBounds), (Without<LocalBounds>, Without<GroupMarker>)>,
 ) {
     for (global, mut world) in &mut query {
         // Approximate a 1x1 unit box centered at the transform's translation.
         let pos = global.affine_2d * gaanim_core::kurbo::Point::new(0.0, 0.0);
         world.0 = gaanim_math::Bounds3D::new_2d(pos.x - 0.5, pos.y - 0.5, pos.x + 0.5, pos.y + 0.5);
+    }
+}
+
+/// Helper function to compute the depth of an entity in the hierarchy.
+fn get_entity_depth(entity: Entity, child_query: &Query<(Entity, &ChildOf)>) -> usize {
+    let mut depth = 0;
+    let mut current = entity;
+    
+    // Simple traversal up the parent chain
+    while let Ok((_, child_of)) = child_query.get(current) {
+        current = child_of.parent();
+        depth += 1;
+    }
+    
+    depth
+}
+
+/// System: Propagate WorldBounds bottom-up for nested group hierarchies.
+pub fn hierarchical_bounds_system(
+    group_query: Query<Entity, With<GroupMarker>>,
+    child_query: Query<(Entity, &ChildOf)>,
+    mut bounds_query: Query<&mut WorldBounds>,
+) {
+    // 1. Initialize all group bounds to an empty null bounds
+    let null_bounds = gaanim_math::Bounds3D::new(
+        gaanim_core::glam::DVec3::splat(f64::INFINITY),
+        gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY),
+    );
+    
+    for group_entity in &group_query {
+        if let Ok(mut world_bounds) = bounds_query.get_mut(group_entity) {
+            world_bounds.0 = null_bounds;
+        }
+    }
+    
+    // 2. Collect child entities with their hierarchical depth
+    let mut children_with_depth: Vec<(Entity, Entity, usize)> = Vec::new();
+    for (child_entity, child_of) in &child_query {
+        let parent_entity = child_of.parent();
+        let depth = get_entity_depth(child_entity, &child_query);
+        children_with_depth.push((child_entity, parent_entity, depth));
+    }
+    
+    // 3. Sort by depth in descending order (deepest child nodes first)
+    children_with_depth.sort_by_key(|&(_, _, depth)| std::cmp::Reverse(depth));
+    
+    // 4. Propagate child bounds up to their parent's WorldBounds
+    for (child_entity, parent_entity, _) in children_with_depth {
+        if let Ok(child_bounds) = bounds_query.get(child_entity) {
+            let cb = child_bounds.0;
+            // Only propagate if the child has valid bounds (not null/infinite)
+            if cb.min.x != f64::INFINITY {
+                if let Ok(mut parent_bounds) = bounds_query.get_mut(parent_entity) {
+                    parent_bounds.0 = parent_bounds.0.union(&cb);
+                }
+            }
+        }
+    }
+    
+    // 5. Clean up any empty groups (that ended up with no children or infinite bounds)
+    for group_entity in &group_query {
+        if let Ok(mut world_bounds) = bounds_query.get_mut(group_entity) {
+            if world_bounds.0.min.x == f64::INFINITY {
+                world_bounds.0 = gaanim_math::Bounds3D::default();
+            }
+        }
+    }
+}
+
+/// System: Propagate styling changes (FillBrush/StrokeBrush) from groups to their children.
+pub fn style_propagation_system(
+    changed_parents: Query<
+        (Entity, Option<&FillBrush>, Option<&StrokeBrush>),
+        (With<GroupMarker>, Or<(Changed<FillBrush>, Changed<StrokeBrush>)>),
+    >,
+    child_query: Query<(Entity, &ChildOf)>,
+    mut style_query: Query<(Option<&mut FillBrush>, Option<&mut StrokeBrush>)>,
+) {
+    let mut queue = Vec::new();
+    
+    // Collect root style changes
+    for (parent_entity, fill_opt, stroke_opt) in &changed_parents {
+        queue.push((
+            parent_entity,
+            fill_opt.cloned(),
+            stroke_opt.cloned(),
+        ));
+    }
+    
+    // Perform BFS propagation down the hierarchy
+    let mut visited = std::collections::HashSet::new();
+    while let Some((current_parent, fill_val, stroke_val)) = queue.pop() {
+        if !visited.insert(current_parent) {
+            continue;
+        }
+        
+        for (child_entity, child_of) in &child_query {
+            if child_of.parent() == current_parent {
+                // Apply style to child
+                if let Ok((mut child_fill, mut child_stroke)) = style_query.get_mut(child_entity) {
+                    if let Some(ref f) = fill_val {
+                        if let Some(ref mut cf) = child_fill {
+                            cf.0 = f.0.clone();
+                        }
+                    }
+                    if let Some(ref s) = stroke_val {
+                        if let Some(ref mut cs) = child_stroke {
+                            **cs = s.clone();
+                        }
+                    }
+                }
+                
+                // Propagate recursively to child's children
+                queue.push((
+                    child_entity,
+                    fill_val.clone(),
+                    stroke_val.clone(),
+                ));
+            }
+        }
     }
 }

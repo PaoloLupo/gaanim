@@ -18,6 +18,7 @@ gaanim_text = { path = "../gaanim_text" }
 gaanim_api = { path = "../gaanim_api" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_objects = { path = "../gaanim_objects" }
+gaanim_layout = { path = "../gaanim_layout" }
 gaanim_editor = { path = "../gaanim_editor" }
 gaanim_export = { path = "../gaanim_export" }
 bevy = { version = "0.18", default-features = false }

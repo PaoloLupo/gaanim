@@ -211,6 +211,11 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             DeferredOp::Wait { duration } => {
                 scene.wait(duration);
             }
+            DeferredOp::Ungroup { group } => {
+                if let Some(&bevy_group) = py_to_bevy.get(&group) {
+                    scene.ungroup(MobjectRef { id: bevy_group });
+                }
+            }
             DeferredOp::Select {
                 parent,
                 query,
@@ -608,6 +613,60 @@ fn spawn_mobject(
             mref = apply_2d_transform(scene, mref, common.transform);
             mref = apply_opacity(scene, mref, common.opacity);
             mref.id
+        }
+        MobjectSpec::Group { common, children } => {
+            // Translate python-side child IDs to Bevy-side ObjectIds
+            let bevy_children: Vec<MobjectRef> = children
+                .iter()
+                .filter_map(|(py_id, _, _)| py_to_bevy.get(py_id).map(|&bid| MobjectRef { id: bid }))
+                .collect();
+            
+            // Spawn the group natively in SceneBuilder
+            let group_ref = scene.group(&bevy_children);
+            
+            // Apply group-level visual styling/transform components:
+            if let Some(state) = scene.states.get_mut(group_ref.id) {
+                state.transform = common.transform;
+                state.opacity = common.opacity;
+                state.fill = common.fill.map(|c| peniko::Brush::Solid(c));
+                if let Some(stroke) = common.stroke {
+                    state.stroke = StrokeBrush::new(stroke.0, stroke.1);
+                }
+                
+                scene.commands.entity(state.entity)
+                    .insert(common.transform)
+                    .insert(Opacity(common.opacity))
+                    .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
+                
+                if let Some(stroke) = common.stroke {
+                    scene.commands.entity(state.entity)
+                        .insert(StrokeBrush::new(stroke.0, stroke.1));
+                }
+            }
+            
+            // Resolve next_to positioning hint
+            if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
+                if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                    let ref_bounds = ref_state.bounds;
+                    let ref_transform = ref_state.transform;
+
+                    if let Some(group_state) = scene.states.get_mut(group_ref.id) {
+                        let shift = gaanim_layout::compute_next_to(
+                            group_state.bounds,
+                            &group_state.transform,
+                            ref_bounds,
+                            &ref_transform,
+                            dir,
+                            spacing,
+                        );
+                        let new_transform = group_state.transform.shift_3d(shift);
+                        group_state.transform = new_transform;
+                        scene.commands.entity(group_state.entity).insert(new_transform);
+                    }
+                }
+            }
+            
+            group_ref.id
         }
     };
 

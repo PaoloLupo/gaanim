@@ -5,7 +5,7 @@ use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{LayoutAnchor, LayoutDirection};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
-use gaanim_scene::{FillBrush, Opacity, StrokeBrush};
+use gaanim_scene::{FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds};
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_hierarchy;
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
@@ -43,6 +43,7 @@ pub struct MobjectState {
     pub stroke: StrokeBrush,
     pub entity: Entity,
     pub child_spans: Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    pub children: Vec<ObjectId>,
 }
 
 /// A `Vec`-backed map from `ObjectId` to `MobjectState`.
@@ -81,6 +82,13 @@ impl MobjectStateMap {
             .get(id.index() as usize)
             .and_then(|v| v.as_ref())
             .is_some()
+    }
+
+    pub fn remove(&mut self, id: ObjectId) {
+        let idx = id.index() as usize;
+        if idx < self.v.len() {
+            self.v[idx] = None;
+        }
     }
 }
 
@@ -309,7 +317,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .get(&target)
                 .cloned()
                 .unwrap_or_else(|| format!("Object {}", self.next_track));
-            self.timeline.add_track(&name, self.next_track as i32)
+            let track_id = self.timeline.add_track(&name, self.next_track as i32);
+            if let Some(track) = self.timeline.tracks.get_mut(track_id) {
+                track.object_id = Some(target);
+            }
+            track_id
         })
     }
 
@@ -1677,6 +1689,134 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    /// Creates a hierarchical group of Mobjects.
+    ///
+    /// The group is a Mobject itself (with a GroupMarker component).
+    /// The children are reparented under the group using Bevy's hierarchy,
+    /// and their local transforms are adjusted relative to the group's center
+    /// to avoid any spatial offset jumps.
+    pub fn group(&mut self, children: &[MobjectRef]) -> MobjectRef {
+        let id = self.next_id();
+        
+        // 1. Calculate the collective bounds of the children in world space
+        let mut union_bounds = Bounds3D::default();
+        let mut has_bounds = false;
+        
+        for child in children {
+            if let Some(state) = self.states.get(child.id) {
+                // child world bounds = child local bounds transformed by its transform
+                let world_bounds = state.bounds.transform_2d(&state.transform.to_affine_2d());
+                if !has_bounds {
+                    union_bounds = world_bounds;
+                    has_bounds = true;
+                } else {
+                    union_bounds = union_bounds.union(&world_bounds);
+                }
+            }
+        }
+        
+        // 2. Set the group's transform translation to the center of the union bounds
+        let center = union_bounds.center();
+        let group_transform = SpatialTransform::new_2d(center.x, center.y);
+        
+        // 3. Spawn the group entity with GroupMarker, Opacity, WorldBounds etc.
+        let group_entity = self.commands.spawn((
+            GroupMarker,
+            MobjectId(id),
+            group_transform,
+            gaanim_math::GlobalSpatialTransform::from_local(&group_transform),
+            Opacity(1.0),
+            gaanim_scene::GlobalOpacity(1.0),
+            LocalBounds(Bounds3D::new_2d(
+                union_bounds.min.x - center.x,
+                union_bounds.min.y - center.y,
+                union_bounds.max.x - center.x,
+                union_bounds.max.y - center.y,
+            )),
+            WorldBounds(union_bounds),
+            gaanim_scene::RenderOrder::default(),
+            Visible,
+            FillBrush::transparent(),
+            StrokeBrush::transparent(),
+        )).id();
+        
+        // 4. Reparent children and adjust their local transforms
+        let inv_group_affine = group_transform.to_affine_2d().inverse();
+        let mut child_ids = Vec::new();
+        
+        for child in children {
+            child_ids.push(child.id);
+            if let Some(state) = self.states.get_mut(child.id) {
+                // child_local = group_inv * child_world
+                let child_world = state.transform;
+                let child_local_affine = inv_group_affine * child_world.to_affine_2d();
+                let child_local = decompose_affine_2d(&child_local_affine);
+                
+                state.transform = child_local;
+                
+                self.commands.entity(state.entity)
+                    .set_parent_in_place(group_entity)
+                    .insert(child_local);
+            }
+        }
+        
+        // 5. Store group state
+        let group_state = MobjectState {
+            bounds: Bounds3D::new_2d(
+                union_bounds.min.x - center.x,
+                union_bounds.min.y - center.y,
+                union_bounds.max.x - center.x,
+                union_bounds.max.y - center.y,
+            ),
+            transform: group_transform,
+            opacity: 1.0,
+            fill: None,
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity: group_entity,
+            child_spans: Vec::new(),
+            children: child_ids,
+        };
+        self.states.insert(id, group_state);
+        self.mobject_names.insert(id, format!("Group ({} children)", children.len()));
+        
+        MobjectRef { id }
+    }
+
+    /// Discharges all children from the group and despawns the group container entity.
+    ///
+    /// The children's local transforms are adjusted to world space so they remain in their
+    /// absolute positions without any jumps.
+    pub fn ungroup(&mut self, group: MobjectRef) {
+        let (group_entity, children_ids, group_transform) = if let Some(state) = self.states.get(group.id) {
+            (state.entity, state.children.clone(), state.transform)
+        } else {
+            return;
+        };
+        
+        let group_affine = group_transform.to_affine_2d();
+        
+        for child_id in children_ids {
+            if let Some(state) = self.states.get_mut(child_id) {
+                // child_world = group_world * child_local
+                let child_local = state.transform;
+                let child_world_affine = group_affine * child_local.to_affine_2d();
+                let child_world = decompose_affine_2d(&child_world_affine);
+                
+                state.transform = child_world;
+                
+                // Reparent in Bevy
+                self.commands.entity(state.entity)
+                    .remove_parent_in_place()
+                    .insert(child_world);
+            }
+        }
+        
+        // Despawn the group entity
+        self.commands.entity(group_entity).despawn();
+        self.states.remove(group.id);
+        self.mobject_names.remove(&group.id);
+    }
+
     /// Spawns a circle primitive.
     pub fn circle(&mut self, radius: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
@@ -2129,6 +2269,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke: gaanim_scene::StrokeBrush::transparent(),
                 entity: *child_entity,
                 child_spans: Vec::new(),
+                children: Vec::new(),
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2143,6 +2284,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
+            children: Vec::new(),
         };
         self.states.insert(parent_id, state);
 
@@ -2222,6 +2364,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke: stroke.clone(),
                 entity: *child_entity,
                 child_spans: Vec::new(),
+                children: Vec::new(),
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2236,6 +2379,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
+            children: Vec::new(),
         };
         self.states.insert(parent_id, state);
 
@@ -2302,6 +2446,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke: stroke.clone(),
                 entity: *child_entity,
                 child_spans: Vec::new(),
+                children: Vec::new(),
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2314,6 +2459,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
+            children: Vec::new(),
         };
         self.states.insert(parent_id, state);
         self.mobject_names.insert(parent_id, format!("Text('{}')", content));
@@ -2391,6 +2537,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke: stroke.clone(),
                 entity: *child_entity,
                 child_spans: Vec::new(),
+                children: Vec::new(),
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2403,6 +2550,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stroke: gaanim_scene::StrokeBrush::transparent(),
             entity,
             child_spans,
+            children: Vec::new(),
         };
         self.states.insert(parent_id, state);
         self.mobject_names.insert(parent_id, format!("Typst('{}')", formula));
@@ -2733,10 +2881,35 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
             stroke: self.bundle.stroke.clone(),
             entity,
             child_spans: Vec::new(),
+            children: Vec::new(),
         };
         self.builder.states.insert(self.id, state);
         self.builder.mobject_names.insert(self.id, self.bundle.tag.0.clone());
 
         MobjectRef { id: self.id }
     }
+}
+
+/// Helper function to decompose a 2D affine transformation into translation, scaling, and rotation components.
+fn decompose_affine_2d(affine: &gaanim_core::kurbo::Affine) -> SpatialTransform {
+    let coeffs = affine.as_coeffs();
+    let tx = coeffs[4];
+    let ty = coeffs[5];
+    
+    let a = coeffs[0];
+    let b = coeffs[1];
+    let c = coeffs[2];
+    let d = coeffs[3];
+    
+    let sx = (a * a + b * b).sqrt();
+    let sy = (c * c + d * d).sqrt();
+    
+    // Extract rotation angle around Z axis
+    let angle = b.atan2(a);
+    
+    let mut transform = SpatialTransform::new_2d(tx, ty);
+    transform.scale = gaanim_core::glam::DVec3::new(sx, sy, 1.0);
+    transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
+    
+    transform
 }

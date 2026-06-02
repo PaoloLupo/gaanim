@@ -67,6 +67,10 @@ pub enum MobjectSpec {
     },
     Text { common: CommonSpec, content: String, role: TextRoleKind },
     Equation { common: CommonSpec, formula: String },
+    Group {
+        common: CommonSpec,
+        children: Vec<(ObjectId, Arc<Mutex<MobjectSpec>>, u64)>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +133,8 @@ impl MobjectSpec {
             | Self::NumberPlane { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
-            | Self::Equation { common, .. } => common,
+            | Self::Equation { common, .. }
+            | Self::Group { common, .. } => common,
         }
     }
 
@@ -161,7 +166,8 @@ impl MobjectSpec {
             | Self::NumberPlane { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
-            | Self::Equation { common, .. } => common,
+            | Self::Equation { common, .. }
+            | Self::Group { common, .. } => common,
         }
     }
 
@@ -194,6 +200,7 @@ impl MobjectSpec {
             Self::BooleanResult { .. } => "boolean_result",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
+            Self::Group { .. } => "group",
         }
     }
 
@@ -443,8 +450,8 @@ impl MobjectSpec {
                     out.push(c.clone());
                 }
             }
-            Self::Text { .. } | Self::Equation { .. } => {
-                // Text/equation geometry cannot be reconstructed at build time
+            Self::Text { .. } | Self::Equation { .. } | Self::Group { .. } => {
+                // Text/equation/group geometry cannot be reconstructed at build time
                 // because the actual layout is computed at replay time.
             }
         }
@@ -497,6 +504,32 @@ impl PyMobject {
             kind,
             self.creation_order,
         ))
+    }
+
+    fn __getitem__(&self, index: usize) -> PyResult<PyMobject> {
+        let spec_value = lock_spec!(self.spec);
+        if let MobjectSpec::Group { children, .. } = &*spec_value {
+            if let Some((id, spec, creation_order)) = children.get(index) {
+                Ok(PyMobject {
+                    id: *id,
+                    spec: spec.clone(),
+                    creation_order: *creation_order,
+                })
+            } else {
+                Err(pyo3::exceptions::PyIndexError::new_err("Index out of range"))
+            }
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+        }
+    }
+
+    fn __len__(&self) -> PyResult<usize> {
+        let spec_value = lock_spec!(self.spec);
+        if let MobjectSpec::Group { children, .. } = &*spec_value {
+            Ok(children.len())
+        } else {
+            Ok(0)
+        }
     }
 
     // ====== instant configuration (return new Mobject, mutate shared spec) ======

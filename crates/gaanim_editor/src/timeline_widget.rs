@@ -42,6 +42,10 @@ enum DragState {
         initial_start: f64,
         initial_end: f64,
     },
+    Divider {
+        initial_mouse_x: f32,
+        initial_width: f32,
+    },
 }
 
 // ── Widget ─────────────────────────────────────────────────────────────
@@ -54,6 +58,7 @@ pub struct TimelineWidget {
     pub zoom_bar_height: f32,
     pub label_width: f32,
     pub selected_clip: Option<ClipId>,
+    pub selected_track: Option<TrackId>,
     pub snap_enabled: bool,
     pub snap_threshold_pixels: f32,
     pub show_scene_header: bool,
@@ -79,6 +84,7 @@ impl Default for TimelineWidget {
             zoom_bar_height: 16.0,
             label_width: 150.0,
             selected_clip: None,
+            selected_track: None,
             snap_enabled: true,
             snap_threshold_pixels: 8.0,
             show_scene_header: true,
@@ -101,16 +107,22 @@ impl TimelineWidget {
     // ── Main entry point ────────────────────────────────────────────────
     pub fn show(&mut self, ui: &mut egui::Ui, timeline: &mut Timeline) {
         let header_rows = if self.show_scene_header { 1 } else { 0 };
-        let visible_tracks = if self.show_scene_header && !self.scene_expanded {
-            timeline.tracks.len().min(0)
-        } else {
-            timeline.tracks.len()
-        };
-        let track_indices: HashMap<TrackId, usize> = timeline
+        // Filter out the internal "Main Graphics" track
+        let mobject_tracks: Vec<TrackId> = timeline
             .tracks
             .iter()
+            .filter(|(_, t)| t.name != "Main Graphics")
+            .map(|(id, _)| id)
+            .collect();
+        let visible_tracks = if self.show_scene_header && !self.scene_expanded {
+            0
+        } else {
+            mobject_tracks.len()
+        };
+        let track_indices: HashMap<TrackId, usize> = mobject_tracks
+            .iter()
             .enumerate()
-            .map(|(i, (id, _))| (id, i + header_rows))
+            .map(|(i, id)| (*id, i + header_rows))
             .collect();
 
         let num_tracks = visible_tracks.max(1) as f32;
@@ -187,17 +199,21 @@ impl TimelineWidget {
 
         // Input first so dragging feels responsive
         self.handle_input(
-            ui, &response, zoom_bar_rect, ruler_rect, clips_rect, tracks_rect, timeline,
+            ui, &response, zoom_bar_rect, ruler_rect, clips_rect, tracks_rect, label_rect, timeline,
             &track_indices, on_edge, hover_pos,
         );
 
         // Paint
         let p = ui.painter_at(canvas_rect);
         self.paint_zoom_bar(&p, zoom_bar_rect, clips_rect, timeline);
-        self.paint_tracks(&p, tracks_rect, label_rect, timeline, &track_indices);
         self.paint_ruler(&p, ruler_rect);
+        self.paint_track_bg(&p, tracks_rect, label_rect, timeline, &track_indices);
         self.paint_grid(&p, clips_rect, timeline);
         self.paint_clips(&p, clips_rect, timeline, &track_indices, hover_pos);
+        // Scene header and labels on top of everything
+        self.paint_scene_header(&p, tracks_rect, timeline);
+        self.paint_track_labels(&p, label_rect, timeline, &track_indices);
+        self.paint_divider(&p, label_rect, tracks_rect);
         self.paint_keyframes(&p, ruler_rect, timeline);
         self.paint_playhead(&p, clips_rect, ruler_rect.min.y, timeline);
 
@@ -294,18 +310,21 @@ impl TimelineWidget {
         }
     }
 
-    // ── Track backgrounds + label sidebar ─────────────────────────────
-    fn paint_tracks(
+    // ── Track backgrounds (drawn BEFORE clips) ────────────────────────
+    fn paint_track_bg(
         &self,
         p: &egui::Painter,
         rect: Rect,
         label_rect: Rect,
-        timeline: &Timeline,
+        _timeline: &Timeline,
         track_indices: &HashMap<TrackId, usize>,
     ) {
         p.rect_filled(rect, 0u8, BG);
 
-        // Scene header row (only if show_scene_header)
+        // Full-height solid background for the label sidebar
+        p.rect_filled(label_rect, 0u8, Color32::from_rgb(30, 30, 30));
+
+        // Scene header background (full width)
         if self.show_scene_header {
             let y0 = rect.min.y;
             let hdr = Rect::from_min_size(
@@ -313,25 +332,9 @@ impl TimelineWidget {
                 Vec2::new(rect.width(), self.track_height),
             );
             p.rect_filled(hdr, 0u8, Color32::from_rgb(30, 30, 30));
-            let arrow = if self.scene_expanded { "▾" } else { "▸" };
-            let count = timeline.tracks.len();
-            p.text(
-                Pos2::new(rect.min.x + 6.0, y0 + self.track_height / 2.0),
-                Align2::LEFT_CENTER,
-                format!("{} Scene  ({})", arrow, count),
-                FontId::proportional(12.0),
-                Color32::from_rgb(180, 180, 180),
-            );
         }
 
         if !self.scene_expanded { return; }
-
-        // Divider line between label area and clips area
-        let div_x = label_rect.max.x;
-        p.line_segment(
-            [Pos2::new(div_x, rect.min.y), Pos2::new(div_x, rect.max.y)],
-            Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
-        );
 
         for (_track, idx) in track_indices {
             let y = rect.min.y + *idx as f32 * self.track_height;
@@ -344,23 +347,61 @@ impl TimelineWidget {
             let bg = if idx % 2 == 0 { TRACK_EVEN } else { TRACK_ODD };
             p.rect_filled(lb, 0u8, bg);
 
-            // Track name in sidebar
-            if let Some(t) = timeline.tracks.get(*_track) {
-                p.text(
-                    Pos2::new(lb.min.x + 6.0, lb.center().y),
-                    Align2::LEFT_CENTER,
-                    &t.name,
-                    FontId::proportional(11.0),
-                    TEXT,
-                );
-            }
-
             // Clips area background
             let cb = Rect::from_min_size(
                 Pos2::new(label_rect.max.x, y),
                 Vec2::new(rect.max.x - label_rect.max.x, self.track_height),
             );
             p.rect_filled(cb, 0u8, bg);
+        }
+    }
+
+    // ── Scene header text (drawn AFTER clips) ─────────────────────────
+    fn paint_scene_header(&self, p: &egui::Painter, rect: Rect, timeline: &Timeline) {
+        if !self.show_scene_header { return; }
+        let y0 = rect.min.y;
+        let arrow = if self.scene_expanded { "▾" } else { "▸" };
+        let count = timeline.tracks.len();
+        p.text(
+            Pos2::new(rect.min.x + 6.0, y0 + self.track_height / 2.0),
+            Align2::LEFT_CENTER,
+            format!("{} Scene  ({})", arrow, count),
+            FontId::proportional(12.0),
+            Color32::from_rgb(180, 180, 180),
+        );
+    }
+
+    // ── Track labels in sidebar (drawn AFTER clips) ──────────────────
+    fn paint_track_labels(
+        &self,
+        p: &egui::Painter,
+        label_rect: Rect,
+        timeline: &Timeline,
+        track_indices: &HashMap<TrackId, usize>,
+    ) {
+        if !self.scene_expanded { return; }
+        for (track, idx) in track_indices {
+            let y = label_rect.min.y + *idx as f32 * self.track_height;
+            if let Some(t) = timeline.tracks.get(*track) {
+                p.text(
+                    Pos2::new(label_rect.min.x + 6.0, y + self.track_height / 2.0),
+                    Align2::LEFT_CENTER,
+                    &t.name,
+                    FontId::proportional(11.0),
+                    TEXT,
+                );
+            }
+        }
+    }
+
+    // ── Divider line between labels and clips ─────────────────────────
+    fn paint_divider(&self, p: &egui::Painter, label_rect: Rect, tracks_rect: Rect) {
+        let div_x = label_rect.max.x;
+        if div_x < tracks_rect.max.x {
+            p.line_segment(
+                [Pos2::new(div_x, tracks_rect.min.y), Pos2::new(div_x, tracks_rect.max.y)],
+                Stroke::new(1.0, Color32::from_rgb(80, 80, 80)),
+            );
         }
     }
 
@@ -522,6 +563,7 @@ impl TimelineWidget {
         ruler_rect: Rect,
         clips_rect: Rect,
         tracks_rect: Rect,
+        label_rect: Rect,
         timeline: &mut Timeline,
         track_indices: &HashMap<TrackId, usize>,
         on_edge: bool,
@@ -573,7 +615,11 @@ impl TimelineWidget {
         // ── Hover cursor ────────────────────────────────────────────────
         if hover_pos.is_some() && matches!(self.drag_state, DragState::None) {
             if let Some(pos) = hover_pos {
-                if zoom_bar_rect.contains(pos) {
+                if tracks_rect.contains(pos)
+                    && (pos.x - (tracks_rect.min.x + self.label_width)).abs() < 5.0
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+                } else if zoom_bar_rect.contains(pos) {
                     let v_start = (self.scroll_offset as f64 / self.pixels_per_second).max(0.0);
                     let v_end = ((self.scroll_offset + view_w) as f64 / self.pixels_per_second)
                         .min(total);
@@ -629,8 +675,15 @@ impl TimelineWidget {
             DragState::None => {
                 if response.drag_started() {
                     if let Some(pos) = mouse {
-                        // Zoom bar interaction (highest priority)
-                        if zoom_bar_rect.contains(pos) {
+                        // Divider drag (highest priority)
+                        if tracks_rect.contains(pos)
+                            && (pos.x - (tracks_rect.min.x + self.label_width)).abs() < 6.0
+                        {
+                            self.drag_state = DragState::Divider {
+                                initial_mouse_x: pos.x,
+                                initial_width: self.label_width,
+                            };
+                        } else if zoom_bar_rect.contains(pos) {
                             let v_start = (self.scroll_offset as f64 / self.pixels_per_second).max(0.0);
                             let v_end = ((self.scroll_offset + view_w) as f64 / self.pixels_per_second)
                                 .min(total);
@@ -718,6 +771,14 @@ impl TimelineWidget {
                             && pos.y < tracks_rect.min.y + self.track_height
                         {
                             self.scene_expanded = !self.scene_expanded;
+                        } else if label_rect.contains(pos) && self.scene_expanded {
+                            // Track label click → select the track + its mobject
+                            let row = ((pos.y - label_rect.min.y) / self.track_height).floor() as usize;
+                            if row >= 1 {
+                                self.selected_track = track_indices.iter()
+                                    .find(|&(_, r)| *r == row)
+                                    .map(|(id, _)| *id);
+                            }
                         } else if clips_rect.contains(pos) {
                             self.selected_clip =
                                 self.hit_clip_body(pos, clips_rect, timeline, track_indices);
@@ -804,12 +865,17 @@ impl TimelineWidget {
                                     clip.duration = (snapped_end - clip.start).max(0.1);
                                 }
                             }
+                            DragState::Divider { initial_mouse_x, initial_width } => {
+                                let delta = pos.x - initial_mouse_x;
+                                let new_w = (initial_width + delta).clamp(80.0, 400.0);
+                                self.label_width = new_w;
+                            }
                             _ => {}
                         }
                     }
                 }
                 if response.drag_stopped() {
-                    let needs_rebuild = !matches!(self.drag_state, DragState::Playhead | DragState::ZoomBar { .. });
+                    let needs_rebuild = !matches!(self.drag_state, DragState::Playhead | DragState::ZoomBar { .. } | DragState::Divider { .. });
                     if needs_rebuild {
                         timeline.rebuild_clip_index();
                         timeline.recompute_bounds();

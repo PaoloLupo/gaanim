@@ -61,6 +61,7 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::opacity_propagation_system
                     .run_if(crate::systems::has_opacity_changes),
                 crate::systems::sync_new_opacities,
+                crate::systems::style_propagation_system,
             )
                 .in_set(SceneSet::Propagation),
         );
@@ -71,6 +72,7 @@ impl Plugin for GaanimScenePlugin {
             (
                 crate::systems::world_bounds_propagation_system,
                 crate::systems::world_bounds_fallback_system,
+                crate::systems::hierarchical_bounds_system,
             )
                 .in_set(SceneSet::Bounds),
         );

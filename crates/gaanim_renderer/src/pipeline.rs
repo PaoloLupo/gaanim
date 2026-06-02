@@ -90,8 +90,11 @@ pub fn gaanim_render_cache_sweep_system(
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
+    gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    child_query: Query<&ChildOf>,
     query_mobjects: Query<
         (
+            Entity,
             Ref<MobjectId>,
             Ref<GlobalSpatialTransform>,
             Ref<GlobalOpacity>,
@@ -100,14 +103,19 @@ pub fn gaanim_render_system(
             Option<Ref<Path2D>>,
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
+        ),
+        With<Visible>,
+    >,
+    query_effects: Query<
+        (
             Option<Ref<DropShadow>>,
             Option<Ref<Glow>>,
             Option<Ref<GaussianBlur>>,
             Option<Ref<ClipMask>>,
             Option<Ref<FillDrawProgress>>,
             Option<&WorldBounds>,
+            Option<&gaanim_scene::GroupMarker>,
         ),
-        With<Visible>,
     >,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d), With<MainVelloScene>>,
 ) {
@@ -115,7 +123,28 @@ pub fn gaanim_render_system(
     let mut scene_aabb_min = Vec3::splat(f32::INFINITY);
     let mut scene_aabb_max = Vec3::splat(f32::NEG_INFINITY);
 
+    let mut culled_entities = std::collections::HashSet::new();
+
+    // 1. Calculate orthographic camera bounds for culling
+    let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
+        if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
+            let hw = (cam.viewport_width as f64) / (2.0 * zoom);
+            let hh = (cam.viewport_height as f64) / (2.0 * zoom);
+            // Generous margin to avoid popping at boundaries
+            let margin = 100.0 / zoom.max(0.1);
+            Some(gaanim_math::Bounds3D::new_2d(
+                cam.position.x - hw - margin,
+                cam.position.y - hh - margin,
+                cam.position.x + hw + margin,
+                cam.position.y + hh + margin,
+            ))
+        } else {
+            None
+        }
+    });
+
     for (
+        entity,
         mobj_id,
         transform,
         global_opacity,
@@ -124,16 +153,47 @@ pub fn gaanim_render_system(
         path_ref,
         fill_ref,
         stroke_ref,
-        shadow_ref,
-        glow_ref,
-        blur_ref,
-        clip_ref,
-        fill_progress_ref,
-        world_bounds_opt,
     ) in &query_mobjects
     {
+        // Look up effects, bounds and group marker components on-demand to keep Query tuple size small
+        let (shadow_ref, glow_ref, blur_ref, clip_ref, fill_progress_ref, world_bounds_opt, is_group_opt) =
+            query_effects.get(entity).unwrap_or((None, None, None, None, None, None, None));
+
+        // 2. Perform camera frustum culling and hierarchical culling propagation
+        if let Some(bounds) = cam_bounds {
+            // Check if any ancestor of this entity is already culled
+            let mut is_ancestor_culled = false;
+            let mut current = entity;
+            while let Ok(child_of) = child_query.get(current) {
+                let parent = child_of.parent();
+                if culled_entities.contains(&parent) {
+                    is_ancestor_culled = true;
+                    break;
+                }
+                current = parent;
+            }
+
+            if is_ancestor_culled {
+                culled_entities.insert(entity);
+                continue;
+            }
+
+            // Check if this entity's own bounds are out of camera bounds
+            if let Some(w_bounds) = world_bounds_opt {
+                if !bounds.intersects(&w_bounds.0) {
+                    culled_entities.insert(entity);
+                    continue;
+                }
+            }
+        }
+
         // Only process visible Vello2D elements
         if *render_layer != RenderLayer::Vello2D {
+            continue;
+        }
+
+        // Groups do not draw visual geometry directly, they only act as spatial nodes
+        if is_group_opt.is_some() {
             continue;
         }
 
