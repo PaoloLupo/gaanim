@@ -290,11 +290,11 @@ pub fn gaanim_render_system(
             scene_aabb_min = scene_aabb_min.min(min);
             scene_aabb_max = scene_aabb_max.max(max);
         } else {
-            // Fallback: use the translation component of the affine transform as a point estimate
-            // with a generous margin. This avoids the ±1e6 hardcoded hack while still preventing
-            // frustum culling for typical scene sizes.
-            let (_, _, translation) = transform.mat4.to_scale_rotation_translation();
-            let center = Vec3::new(translation.x as f32, translation.y as f32, 0.0);
+            // Fallback: use the translation component of the affine 2D transform as a point
+            // estimate with a generous margin. The 4x4 mat4 field is only available under the
+            // `dim3` feature; for the 2D-only path we extract tx/ty from the affine coefficients.
+            let coeffs = transform.affine_2d.as_coeffs();
+            let center = Vec3::new(coeffs[4] as f32, coeffs[5] as f32, 0.0);
             let margin = Vec3::new(500.0, 500.0, 1.0);
             scene_aabb_min = scene_aabb_min.min(center - margin);
             scene_aabb_max = scene_aabb_max.max(center + margin);

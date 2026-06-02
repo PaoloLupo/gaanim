@@ -149,13 +149,15 @@ impl SpatialTransform {
 
 /// The computed global spatial transform resulting from scene graph hierarchy propagation.
 ///
-/// Stores both the 2D `Affine` representation (for Vello) and the full `DMat4` representation (for 3D).
+/// Stores the 2D `Affine` representation (for Vello) and, when the `dim3` feature
+/// is enabled, the full `DMat4` representation for 3D coordinate spaces.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GlobalSpatialTransform {
     /// Affine 2D representation for Vello vector rendering.
     pub affine_2d: Affine,
     /// 4x4 double-precision matrix for 3D coordinate spaces and cameras.
+    #[cfg(feature = "dim3")]
     pub mat4: DMat4,
 }
 
@@ -163,6 +165,7 @@ impl Default for GlobalSpatialTransform {
     fn default() -> Self {
         Self {
             affine_2d: Affine::IDENTITY,
+            #[cfg(feature = "dim3")]
             mat4: DMat4::IDENTITY,
         }
     }
@@ -173,6 +176,7 @@ impl GlobalSpatialTransform {
     pub fn from_local(local: &SpatialTransform) -> Self {
         Self {
             affine_2d: local.to_affine_2d(),
+            #[cfg(feature = "dim3")]
             mat4: local.to_mat4(),
         }
     }
@@ -181,6 +185,7 @@ impl GlobalSpatialTransform {
     pub fn from_parent_and_local(parent: &Self, local: &SpatialTransform) -> Self {
         Self {
             affine_2d: parent.affine_2d * local.to_affine_2d(),
+            #[cfg(feature = "dim3")]
             mat4: parent.mat4 * local.to_mat4(),
         }
     }
@@ -256,6 +261,7 @@ mod tests {
         assert!((transformed.y - 0.0).abs() < 1e-9);
     }
 
+    #[cfg(feature = "dim3")]
     #[test]
     fn global_spatial_transform_from_local_matches_affine_and_mat4() {
         let local = SpatialTransform::new_2d(3.0, 4.0).scale_uniform(2.0);
