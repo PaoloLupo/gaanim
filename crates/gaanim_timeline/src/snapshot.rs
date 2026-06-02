@@ -39,9 +39,9 @@ pub struct EntitySnapshot {
     /// Descriptive tags for identifying the object type or attributes.
     pub tags: Vec<String>,
     /// Current 2D Bézier path geometry.
-    pub path2d: Option<gaanim_core::kurbo::BezPath>,
+    pub path2d: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Cached original path for write/unwrite animations.
-    pub path_source: Option<gaanim_core::kurbo::BezPath>,
+    pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
 }

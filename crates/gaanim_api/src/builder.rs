@@ -582,7 +582,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     self.commands
                         .entity(state.entity)
                         .insert(gaanim_scene::components::Path2D(
-                            gaanim_core::kurbo::BezPath::new(),
+                            std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
                         ));
                 }
             }

@@ -169,7 +169,7 @@ pub fn gaanim_render_system(
 
             let elem_path = path_ref
                 .as_ref()
-                .map(|p| &p.0)
+                .map(|p| p.0.as_ref())
                 .unwrap_or(&empty_bez);
             let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
             let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());

@@ -283,7 +283,7 @@ pub fn evaluate_tweens_system(
                 if let Ok(source) = sources.get(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
-                    path.0 = gaanim_math::get_subpath(&source.0, completion);
+                    path.0 = std::sync::Arc::new(gaanim_math::get_subpath(&source.0, completion));
                 }
             }
             PropertyLens::FillDrawProgress { from, to } => {

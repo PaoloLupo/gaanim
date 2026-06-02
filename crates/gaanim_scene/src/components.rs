@@ -2,6 +2,7 @@ use bevy::prelude::Component;
 use gaanim_core::kurbo::{BezPath, Stroke};
 use gaanim_core::peniko::Brush;
 use gaanim_math::Bounds3D;
+use std::sync::Arc;
 
 /// Represents the fill style of a visual Mobject.
 ///
@@ -84,16 +85,16 @@ impl Default for GlobalOpacity {
     }
 }
 
-/// A 2D vector geometry represented as a direct Bézier path (`kurbo::BezPath`).
+/// A 2D vector geometry represented as a shared Bézier path (`Arc<kurbo::BezPath>`).
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Path2D(pub BezPath);
+pub struct Path2D(pub Arc<BezPath>);
 
 /// A mirror component that caches the original, unmodified Bézier path
 /// of a Mobject for time-based trimming / interpolation during writing/drawing.
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PathSource(pub BezPath);
+pub struct PathSource(pub Arc<BezPath>);
 
 /// The computed local bounding box of a Mobject.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]

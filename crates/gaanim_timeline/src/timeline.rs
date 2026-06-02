@@ -352,7 +352,7 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 // already returns an owned trimmed BezPath.
                 let trimmed = gaanim_math::get_subpath(&source.0, completion);
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
-                    path.0 = trimmed;
+                    path.0 = std::sync::Arc::new(trimmed);
                 }
             }
         }

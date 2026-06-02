@@ -35,10 +35,11 @@ impl MobjectBundle {
     /// By default, it initializes as a white-filled shape with no outline, located
     /// at the viewport origin `(0, 0)`, fully opaque and visible on the Vello2D rendering layer.
     pub fn new(id: ObjectId, path: kurbo::BezPath, bounds: Bounds3D) -> Self {
+        let arc_path = std::sync::Arc::new(path);
         Self {
             id: MobjectId(id),
-            path: Path2D(path.clone()),
-            path_source: PathSource(path),
+            path: Path2D(arc_path.clone()),
+            path_source: PathSource(arc_path),
             bounds: LocalBounds(bounds),
             transform: SpatialTransform::identity(),
             global_transform: GlobalSpatialTransform::default(),
