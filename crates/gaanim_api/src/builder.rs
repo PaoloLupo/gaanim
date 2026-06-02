@@ -836,6 +836,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal: materialize `Indicate` as a temporary scale-up and color highlight.
+    ///
+    /// Indicate is symmetric: the object grows to `scale_factor`, highlights, then
+    /// shrinks back to its original scale/color over the second half of the duration.
+    /// We split it into two consecutive clips so the final state matches the initial
+    /// state and subsequent animations start from the correct baseline.
     fn play_indicate_internal(&mut self, anim: AnimationBuilder) {
         let (highlight_color, scale_factor) = match anim.anim_type {
             AnimationType::Indicate {
@@ -864,7 +869,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         };
 
-        // 1. Schedule unified scale clip on root target using ThereAndBack
+        let half = anim.duration * 0.5;
+
+        // 1. Scale up on root target (first half), then scale back down (second half)
         let root_state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
@@ -875,18 +882,31 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
-            anim.duration,
+            half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale {
                     from: scale_from,
                     to: scale_to,
                 },
-                rate_func: anim.rate_func.clone(),
+                rate_func: gaanim_math::RateFunc::Linear,
+            }),
+        );
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time + half,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: scale_to,
+                    to: scale_from,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
             }),
         );
 
-        // 2. Schedule color highlighting on children (if highlight color is requested)
+        // 2. Color highlight on children (if requested) — highlight then revert
         if let Some(color) = highlight_color {
             for item_id in &items {
                 if let Some(state) = self.states.get(*item_id) {
@@ -894,14 +914,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         self.timeline.add_clip(
                             self.default_track,
                             self.current_time,
-                            anim.duration,
+                            half,
                             ClipPayload::Animation(AnimationSpec {
                                 target: *item_id,
                                 lens: PropertyLensSpec::FillColor {
                                     from: *c,
                                     to: color,
                                 },
-                                rate_func: anim.rate_func.clone(),
+                                rate_func: gaanim_math::RateFunc::Linear,
+                            }),
+                        );
+                        self.timeline.add_clip(
+                            self.default_track,
+                            self.current_time + half,
+                            half,
+                            ClipPayload::Animation(AnimationSpec {
+                                target: *item_id,
+                                lens: PropertyLensSpec::FillColor {
+                                    from: color,
+                                    to: *c,
+                                },
+                                rate_func: gaanim_math::RateFunc::Linear,
                             }),
                         );
                     }
@@ -909,14 +942,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         self.timeline.add_clip(
                             self.default_track,
                             self.current_time,
-                            anim.duration,
+                            half,
                             ClipPayload::Animation(AnimationSpec {
                                 target: *item_id,
                                 lens: PropertyLensSpec::StrokeColor {
                                     from: *c,
                                     to: color,
                                 },
-                                rate_func: anim.rate_func.clone(),
+                                rate_func: gaanim_math::RateFunc::Linear,
+                            }),
+                        );
+                        self.timeline.add_clip(
+                            self.default_track,
+                            self.current_time + half,
+                            half,
+                            ClipPayload::Animation(AnimationSpec {
+                                target: *item_id,
+                                lens: PropertyLensSpec::StrokeColor {
+                                    from: color,
+                                    to: *c,
+                                },
+                                rate_func: gaanim_math::RateFunc::Linear,
                             }),
                         );
                     }

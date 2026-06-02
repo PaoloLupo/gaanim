@@ -267,8 +267,11 @@ impl Timeline {
                 && let Some(&target_entity) = entity_map.get(&anim.target)
             {
                 if clip.end() <= self.current_time {
-                    // Animation finished before or at seek head: apply final state
-                    apply_lens_spec(world, target_entity, &anim.lens, 1.0);
+                    // Animation finished before or at seek head: apply final state.
+                    // Use rate_func.evaluate(1.0) rather than hard-coding 1.0 so that
+                    // round-trip functions like ThereAndBack correctly restore the baseline.
+                    let final_t = anim.rate_func.evaluate(1.0);
+                    apply_lens_spec(world, target_entity, &anim.lens, final_t);
                 } else if clip.start <= self.current_time && clip.end() > self.current_time {
                     // Animation is actively running at seek head: interpolate
                     let progress =
