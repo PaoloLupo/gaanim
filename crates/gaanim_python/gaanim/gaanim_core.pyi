@@ -1,20 +1,35 @@
-from typing import Any, ClassVar, Literal, Optional, overload
+from typing import ClassVar, Literal, Optional, overload
 
 _RateFuncName = Literal[
-    "linear", "smooth", "double_smooth", "lingering", "running_start",
-    "spring", "spring_soft", "spring_bouncy",
-    "ease_in", "ease_out", "ease_in_out",
-    "back_in", "back_out", "back_in_out",
-    "bounce_in", "bounce_out", "bounce_in_out",
-    "elastic_in", "elastic_out", "elastic_in_out",
-    "there_and_back", "there_and_back_with_pause",
-    "exponential_decay", "not_quite_there",
+    "linear",
+    "smooth",
+    "double_smooth",
+    "lingering",
+    "running_start",
+    "spring",
+    "spring_soft",
+    "spring_bouncy",
+    "ease_in",
+    "ease_out",
+    "ease_in_out",
+    "back_in",
+    "back_out",
+    "back_in_out",
+    "bounce_in",
+    "bounce_out",
+    "bounce_in_out",
+    "elastic_in",
+    "elastic_out",
+    "elastic_in_out",
+    "there_and_back",
+    "there_and_back_with_pause",
+    "exponential_decay",
+    "not_quite_there",
 ]
 
 _Direction = Literal["up", "down", "left", "right"]
 _DirectionOrEdge = Literal["up", "down", "left", "right", "top", "bottom"]
 _TextRole = Literal["title", "subtitle", "body", "caption", "code"]
-
 
 class Scene:
     """Entry point for authoring a Gaanim scene.
@@ -72,7 +87,6 @@ class Scene:
         """
 
     def __repr__(self) -> str: ...
-
     def background(self, color: Color) -> None:
         """Set the scene background color.
 
@@ -378,7 +392,9 @@ class Scene:
             A new Mobject handle.
         """
 
-    def surrounding_rectangle(self, width: float, height: float, corner_radius: float) -> Mobject:
+    def surrounding_rectangle(
+        self, width: float, height: float, corner_radius: float
+    ) -> Mobject:
         """Create a rectangle with rounded corners (no fill, stroked).
 
         Intended as a highlight/surround box.
@@ -519,7 +535,9 @@ class Scene:
             color: Fill color.
         """
 
-    def set_stroke_selection(self, selection: Selection, color: Color, width: float) -> None:
+    def set_stroke_selection(
+        self, selection: Selection, color: Color, width: float
+    ) -> None:
         """Apply a stroke to all glyphs in a selection.
 
         Args:
@@ -528,7 +546,9 @@ class Scene:
             width: Stroke width.
         """
 
-    def selection_anim(self, selection: Selection, dx: float, dy: float) -> SelectionAnim:
+    def selection_anim(
+        self, selection: Selection, dx: float, dy: float
+    ) -> SelectionAnim:
         """Create a coordinated shift animation over a selection of glyphs.
 
         Chain ``.duration(d)`` / ``.spring()`` / ``.smooth()`` then call
@@ -550,7 +570,6 @@ class Scene:
         Blocking: returns when the window is closed. Releases the GIL while
         Bevy drives the Vello renderer.
         """
-
 
 class Mobject:
     """Handle to a scene mobject (shape, text, or equation).
@@ -665,7 +684,9 @@ class Mobject:
             A new handle.
         """
 
-    def next_to(self, reference: Mobject, direction: _Direction, spacing: float = 10.0) -> Mobject:
+    def next_to(
+        self, reference: Mobject, direction: _Direction, spacing: float = 10.0
+    ) -> Mobject:
         """Place this mobject adjacent to a reference mobject.
 
         The relative position is computed at spawn time based on the
@@ -774,7 +795,9 @@ class Mobject:
 
     # ---- complex animations ----
 
-    def write(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def write(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Manim-style Write: stroke draws progressively, then fill fades in.
 
         Elements are staggered for a hand-drawn effect.
@@ -786,7 +809,9 @@ class Mobject:
             An AnimSpec.
         """
 
-    def create(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def create(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Progressive draw animation in parallel (no stagger).
 
         All path elements draw simultaneously.
@@ -798,7 +823,9 @@ class Mobject:
             An AnimSpec.
         """
 
-    def uncreate(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def uncreate(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Progressive erasure of path(s) and fill in parallel.
 
         Inverse of ``create``.
@@ -810,7 +837,9 @@ class Mobject:
             An AnimSpec.
         """
 
-    def unwrite(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def unwrite(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Staggered sequential erasure in reverse order.
 
         Inverse of ``write``.
@@ -928,7 +957,6 @@ class Mobject:
         Returns:
             An AnimSpec.
         """
-
 
 class AnimSpec:
     """A configured animation targeting a single Mobject.
@@ -1149,7 +1177,9 @@ class AnimSpec:
 
     # ---- complex animations ----
 
-    def write(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def write(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Change animation kind to a Write (progressive draw + staggered fill).
 
         Args:
@@ -1159,7 +1189,9 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-    def create(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def create(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Change animation kind to a parallel Create (progressive draw).
 
         Args:
@@ -1169,7 +1201,9 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-    def uncreate(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def uncreate(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Change animation kind to a parallel Uncreate (progressive erase).
 
         Args:
@@ -1179,7 +1213,9 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-    def unwrite(self, duration: float = 1.0, stroke_width: Optional[float] = None) -> AnimSpec:
+    def unwrite(
+        self, duration: float = 1.0, stroke_width: Optional[float] = None
+    ) -> AnimSpec:
         """Change animation kind to a staggered Unwrite (reverse of Write).
 
         Args:
@@ -1291,7 +1327,6 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-
 class Color:
     """An RGBA color backed by peniko (8-bit per channel).
 
@@ -1372,9 +1407,7 @@ class Color:
         """Alpha channel value (0–255)."""
 
     def __repr__(self) -> str: ...
-
     def __eq__(self, other: object) -> bool: ...
-
 
 class ObjectId:
     """Stable handle to a Mobject allocated by the scene.
@@ -1399,11 +1432,8 @@ class ObjectId:
         """The generation part of this ID."""
 
     def __repr__(self) -> str: ...
-
     def __eq__(self, other: object) -> bool: ...
-
     def __hash__(self) -> int: ...
-
 
 class Selection:
     """A handle to a sub-selection of glyphs inside a Text or Equation.
@@ -1423,7 +1453,6 @@ class Selection:
 
     def __repr__(self) -> str: ...
 
-
 class SelectionAnim:
     """Fluent builder for coordinated selection animations.
 
@@ -1439,7 +1468,6 @@ class SelectionAnim:
         """The current animation duration in seconds."""
 
     def __repr__(self) -> str: ...
-
     def duration(self, d: float) -> SelectionAnim:
         """Set the animation duration.
 
@@ -1489,7 +1517,6 @@ class SelectionAnim:
         Returns:
             An AnimSpec representing the group animation.
         """
-
 
 class Theme:
     """A role-based color theme with harmonized palettes.
@@ -1548,7 +1575,6 @@ class Theme:
     @property
     def muted(self) -> Color:
         """Muted/inactive color."""
-
 
 # ---- module-level color constants ----
 GOLD: Color
