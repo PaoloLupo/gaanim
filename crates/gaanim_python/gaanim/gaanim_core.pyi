@@ -1,4 +1,19 @@
-from typing import Any, ClassVar, Optional, overload
+from typing import Any, ClassVar, Literal, Optional, overload
+
+_RateFuncName = Literal[
+    "linear", "smooth", "double_smooth", "lingering", "running_start",
+    "spring", "spring_soft", "spring_bouncy",
+    "ease_in", "ease_out", "ease_in_out",
+    "back_in", "back_out", "back_in_out",
+    "bounce_in", "bounce_out", "bounce_in_out",
+    "elastic_in", "elastic_out", "elastic_in_out",
+    "there_and_back", "there_and_back_with_pause",
+    "exponential_decay", "not_quite_there",
+]
+
+_Direction = Literal["up", "down", "left", "right"]
+_DirectionOrEdge = Literal["up", "down", "left", "right", "top", "bottom"]
+_TextRole = Literal["title", "subtitle", "body", "caption", "code"]
 
 
 class Scene:
@@ -188,7 +203,7 @@ class Scene:
             A new Mobject handle.
         """
 
-    def text(self, content: str, role: Optional[str] = None) -> Mobject:
+    def text(self, content: str, role: Optional[_TextRole] = None) -> Mobject:
         """Create a text mobject with semantic role styling.
 
         Args:
@@ -448,15 +463,22 @@ class Scene:
 
     # ---- timeline ----
 
-    def play(self, *anims: AnimSpec) -> None:
+    @overload
+    def play(self, *anims: AnimSpec) -> None: ...
+    @overload
+    def play(self, *anims: None) -> None: ...
+    def play(self, *anims: AnimSpec | None) -> None:
         """Enqueue one or more animations to play in parallel.
+
+        ``None`` entries are silently skipped (useful for conditional
+        animation slots).
 
         The timeline cursor advances by the maximum duration among all
         animations in the batch.
 
         Args:
             *anims: One or more AnimSpec objects from ``mob.animate()``,
-                ``mob.shift_anim(dx, dy)``, etc.
+                ``mob.shift_anim(dx, dy)``, ``selection_anim(...).build(s)``, etc.
         """
 
     def wait(self, duration: float) -> None:
@@ -643,7 +665,7 @@ class Mobject:
             A new handle.
         """
 
-    def next_to(self, reference: Mobject, direction: str, spacing: float = 10.0) -> Mobject:
+    def next_to(self, reference: Mobject, direction: _Direction, spacing: float = 10.0) -> Mobject:
         """Place this mobject adjacent to a reference mobject.
 
         The relative position is computed at spawn time based on the
@@ -863,7 +885,7 @@ class Mobject:
             An AnimSpec.
         """
 
-    def grow_from_edge(self, direction: str) -> AnimSpec:
+    def grow_from_edge(self, direction: _DirectionOrEdge) -> AnimSpec:
         """Scale from zero originating from a specific edge.
 
         Args:
@@ -948,20 +970,11 @@ class AnimSpec:
             A new AnimSpec with the updated duration.
         """
 
-    def rate_func(self, name: str) -> AnimSpec:
+    def rate_func(self, name: _RateFuncName) -> AnimSpec:
         """Set the rate function (easing curve) by name.
 
-        Supported names: ``"linear"``, ``"smooth"``, ``"double_smooth"``,
-        ``"lingering"``, ``"running_start"``, ``"spring"``, ``"spring_soft"``,
-        ``"spring_bouncy"``, ``"ease_in"``, ``"ease_out"``, ``"ease_in_out"``,
-        ``"back_in"``, ``"back_out"``, ``"back_in_out"``, ``"bounce_in"``,
-        ``"bounce_out"``, ``"bounce_in_out"``, ``"elastic_in"``,
-        ``"elastic_out"``, ``"elastic_in_out"``, ``"there_and_back"``,
-        ``"there_and_back_with_pause"``, ``"exponential_decay"``,
-        ``"not_quite_there"``.
-
         Args:
-            name: Rate function name.
+            name: Rate function name (e.g. ``"smooth"``, ``"spring"``).
         Returns:
             A new AnimSpec.
         """
@@ -1008,7 +1021,7 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-    def mirror(self, inner_name: str) -> AnimSpec:
+    def mirror(self, inner_name: _RateFuncName) -> AnimSpec:
         """Mirror a named rate function (go to peak then back symmetrically).
 
         Args:
@@ -1237,7 +1250,7 @@ class AnimSpec:
             A new AnimSpec.
         """
 
-    def grow_from_edge(self, direction: str) -> AnimSpec:
+    def grow_from_edge(self, direction: _DirectionOrEdge) -> AnimSpec:
         """Change animation kind to grow from an edge.
 
         Args:
@@ -1291,6 +1304,10 @@ class Color:
         c = Color.from_hex("#FFD700")  # gold
     """
 
+    @overload
+    def __init__(self, r: int, g: int, b: int) -> None: ...
+    @overload
+    def __init__(self, r: int, g: int, b: int, a: int) -> None: ...
     def __init__(self, r: int, g: int, b: int, a: Optional[int] = None) -> None:
         """Create a color from 8-bit RGBA components.
 
@@ -1453,13 +1470,11 @@ class SelectionAnim:
             A new SelectionAnim builder.
         """
 
-    def rate_func(self, name: str) -> SelectionAnim:
+    def rate_func(self, name: _RateFuncName) -> SelectionAnim:
         """Set the rate function by name.
 
-        See ``AnimSpec.rate_func`` for the full list of supported names.
-
         Args:
-            name: Rate function name.
+            name: Rate function name (e.g. ``"smooth"``, ``"spring"``).
         Returns:
             A new SelectionAnim builder.
         """
