@@ -1,11 +1,7 @@
 use bevy::prelude::*;
-use bevy_egui::{
-    egui, input::EguiWantsInput, EguiContexts, EguiPlugin, EguiPrimaryContextPass,
-};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_math::Camera;
-use gaanim_scene::{
-    MobjectId, ObjectTag, Opacity, RenderOrder, Visible, WorldBounds,
-};
+use gaanim_scene::{MobjectId, ObjectTag, Opacity, RenderOrder, Visible, WorldBounds};
 use gaanim_timeline::timeline::Timeline;
 
 mod timeline_widget;
@@ -44,8 +40,8 @@ impl Default for EditorState {
     fn default() -> Self {
         Self {
             selected: None,
-            show_hierarchy: true,
-            show_inspector: true,
+            show_hierarchy: false,
+            show_inspector: false,
             timeline_widget: timeline_widget::TimelineWidget::new(),
         }
     }
@@ -270,13 +266,17 @@ fn editor_picking_system(
         return;
     };
 
-    let world_pos = camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+    let world_pos =
+        camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
 
     let mut best_z = i32::MIN;
     let mut best_entity: Option<Entity> = None;
 
     for (entity, bounds, render_order) in &entities {
-        if bounds.0.contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0)) {
+        if bounds
+            .0
+            .contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0))
+        {
             let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
             if z >= best_z {
                 best_z = z;

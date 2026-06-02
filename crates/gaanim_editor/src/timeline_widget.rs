@@ -26,12 +26,23 @@ const CLR_SEGMENT: Color32 = Color32::from_rgb(180, 100, 200);
 const CLR_KEYFRAME: Color32 = Color32::from_rgb(255, 200, 80);
 
 // ── Drag state ─────────────────────────────────────────────────────────
+enum ZoomBarKind {
+    Body,
+    LeftEdge,
+    RightEdge,
+}
+
 enum DragState {
     None,
     Playhead,
     ClipBody(ClipId),
     ClipLeftEdge(ClipId),
     ClipRightEdge(ClipId),
+    ZoomBar {
+        kind: ZoomBarKind,
+        initial_start: f64,
+        initial_end: f64,
+    },
 }
 
 // ── Widget ─────────────────────────────────────────────────────────────
@@ -41,6 +52,7 @@ pub struct TimelineWidget {
     pub header_height: f32,
     pub ruler_height: f32,
     pub track_height: f32,
+    pub zoom_bar_height: f32,
     pub selected_clip: Option<ClipId>,
     pub snap_enabled: bool,
     pub snap_threshold_pixels: f32,
@@ -62,6 +74,7 @@ impl Default for TimelineWidget {
             header_height: 28.0,
             ruler_height: 22.0,
             track_height: 28.0,
+            zoom_bar_height: 16.0,
             selected_clip: None,
             snap_enabled: true,
             snap_threshold_pixels: 8.0,
@@ -91,7 +104,7 @@ impl TimelineWidget {
 
         let num_tracks = timeline.tracks.len().max(1) as f32;
         let tracks_height = self.track_height * num_tracks;
-        let canvas_height = self.ruler_height + tracks_height;
+        let canvas_height = self.zoom_bar_height + self.ruler_height + tracks_height;
 
         // ── Header ──────────────────────────────────────────────────────
         let header_size = Vec2::new(ui.available_width(), self.header_height);
@@ -109,31 +122,72 @@ impl TimelineWidget {
             self.paint_header(&mut hu, timeline);
         }
 
-        // ── Canvas ──────────────────────────────────────────────────────
+        // ── Canvas (zoom bar + ruler + tracks) ─────────────────────────
         let canvas_size = Vec2::new(ui.available_width(), canvas_height.max(100.0));
         let (canvas_rect, response) =
             ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
 
-        let ruler_rect = Rect::from_min_size(
+        let zoom_bar_rect = Rect::from_min_size(
             canvas_rect.min,
+            Vec2::new(canvas_rect.width(), self.zoom_bar_height),
+        );
+        let ruler_rect = Rect::from_min_size(
+            Pos2::new(canvas_rect.min.x, zoom_bar_rect.max.y),
             Vec2::new(canvas_rect.width(), self.ruler_height),
         );
         let tracks_rect = Rect::from_min_size(
             Pos2::new(canvas_rect.min.x, ruler_rect.max.y),
-            Vec2::new(canvas_rect.width(), canvas_rect.height() - self.ruler_height),
+            Vec2::new(canvas_rect.width(), tracks_height),
         );
 
+        self.last_canvas_width = canvas_rect.width();
+
+        // ── Hover state ──────────────────────────────────────────────────
+        let hover_pos = response.hover_pos();
+        let hovered_clip = hover_pos.and_then(|pos| {
+            if !tracks_rect.contains(pos) { return None; }
+            let on_edge = self.hit_clip_edge(pos, tracks_rect, timeline, &track_indices);
+            if on_edge.is_some() { return None; }
+            self.hit_clip_body(pos, tracks_rect, timeline, &track_indices)
+        });
+        self.hovered_clip_info = hovered_clip.and_then(|cid| {
+            timeline.clips.get(cid).map(|c| {
+                let label = clip_label(&c.payload);
+                format!("{} | {:.2}s\u{2192}{:.2}s", label, c.start, c.end())
+            })
+        });
+
+        let on_edge = hover_pos.map_or(false, |pos| {
+            self.hit_clip_edge(pos, tracks_rect, timeline, &track_indices).is_some()
+        });
+
         // Input first so dragging feels responsive
-        self.handle_input(ui, &response, ruler_rect, tracks_rect, timeline, &track_indices);
+        self.handle_input(
+            ui, &response, zoom_bar_rect, ruler_rect, tracks_rect, timeline,
+            &track_indices, on_edge, hover_pos,
+        );
 
         // Paint
         let p = ui.painter_at(canvas_rect);
+        self.paint_zoom_bar(&p, zoom_bar_rect, tracks_rect, timeline);
         self.paint_tracks(&p, tracks_rect, timeline, &track_indices);
         self.paint_ruler(&p, ruler_rect);
         self.paint_grid(&p, tracks_rect, timeline);
-        self.paint_clips(&p, tracks_rect, timeline, &track_indices);
+        self.paint_clips(&p, tracks_rect, timeline, &track_indices, hover_pos);
         self.paint_keyframes(&p, ruler_rect, timeline);
         self.paint_playhead(&p, canvas_rect, timeline);
+
+        // ── Auto-scroll during playback ─────────────────────────────────
+        if timeline.is_playing {
+            let px = self.time_to_x(timeline.current_time, tracks_rect);
+            let margin = 80.0;
+            if px > tracks_rect.max.x - margin {
+                self.scroll_offset += px - (tracks_rect.max.x - margin);
+                self.clamp_scroll(tracks_rect, timeline);
+            } else if px < tracks_rect.min.x + 20.0 {
+                self.scroll_offset -= (tracks_rect.min.x + 20.0 - px).min(self.scroll_offset);
+            }
+        }
     }
 
     // ── Header ──────────────────────────────────────────────────────────
@@ -153,16 +207,23 @@ impl TimelineWidget {
 
         ui.separator();
 
-        ui.label(format!(
-            "{:.2}s / {:.2}s",
-            timeline.current_time, timeline.cached_duration
-        ));
+        // Show clip info on hover, otherwise time label
+        if let Some(info) = &self.hovered_clip_info {
+            ui.label(info);
+        } else {
+            ui.label(format!(
+                "{:.2}s / {:.2}s",
+                timeline.current_time, timeline.cached_duration
+            ));
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(
-                egui::Slider::new(&mut self.pixels_per_second, 20.0..=500.0)
-                    .text(" Zoom"),
-            );
+            if ui.button("Fit").clicked() {
+                let dur = timeline.cached_duration.max(1.0);
+                let w = self.last_canvas_width.max(100.0);
+                self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
+                self.scroll_offset = 0.0;
+            }
         });
     }
 
@@ -266,6 +327,7 @@ impl TimelineWidget {
         rect: Rect,
         timeline: &Timeline,
         track_indices: &HashMap<TrackId, usize>,
+        hover_pos: Option<Pos2>,
     ) {
         for clip in timeline.clips.values() {
             let Some(&track_idx) = track_indices.get(&clip.track) else {
@@ -283,7 +345,9 @@ impl TimelineWidget {
                 Vec2::new((x2 - x1).max(2.0), ch),
             );
 
-            p.rect_filled(cr, 3u8, color);
+            let is_hovered = hover_pos.map_or(false, |pos| cr.contains(pos));
+            let fill = if is_hovered { lighten(color) } else { color };
+            p.rect_filled(cr, 3u8, fill);
 
             let label = clip_label(&clip.payload);
             p.text(
@@ -300,7 +364,47 @@ impl TimelineWidget {
         }
     }
 
-    // ── Keyframes ───────────────────────────────────────────────────────
+    // ── Zoom bar ────────────────────────────────────────────────────────
+    fn paint_zoom_bar(&self, p: &egui::Painter, rect: Rect, tracks_rect: Rect, timeline: &Timeline) {
+        p.rect_filled(rect, 0u8, Color32::from_rgb(25, 25, 25));
+
+        let total = timeline.cached_duration.max(0.01);
+        let bar_w = rect.width();
+
+        let vw = tracks_rect.width() as f64;
+        let v_start = (self.scroll_offset as f64 / self.pixels_per_second).clamp(0.0, total);
+        let v_end = ((self.scroll_offset + vw as f32) as f64 / self.pixels_per_second).clamp(0.0, total);
+        let v_dur = (v_end - v_start).max(0.01);
+
+        let l_ratio = v_start / total;
+        let r_ratio = v_end / total;
+
+        let win_l = rect.min.x + (l_ratio as f32 * bar_w);
+        let win_r = rect.min.x + (r_ratio as f32 * bar_w);
+
+        // Window rect
+        let win_rect = Rect::from_min_size(
+            Pos2::new(win_l, rect.min.y + 2.0),
+            Vec2::new((win_r - win_l).max(12.0), rect.height() - 4.0),
+        );
+        p.rect_filled(win_rect, 3u8, Color32::from_rgb(120, 120, 120));
+        p.rect_stroke(win_rect, 3u8, Stroke::new(1.0, Color32::from_rgb(160, 160, 160)), StrokeKind::Inside);
+
+        // Label showing visible range / total
+        let label = if v_dur >= 1.0 {
+            format!("{:.0}s / {:.0}s", v_dur, total)
+        } else {
+            format!("{:.1}s / {:.0}s", v_dur, total)
+        };
+        let font = FontId::proportional(9.0);
+        let text_color = Color32::from_rgb(200, 200, 200);
+        // Center text in the window if wide enough, otherwise to the right
+        if win_rect.width() > 60.0 {
+            p.text(win_rect.center(), Align2::CENTER_CENTER, label, font, text_color);
+        } else {
+            p.text(Pos2::new(win_r + 4.0, win_rect.center().y), Align2::LEFT_CENTER, label, font, text_color);
+        }
+    }
     fn paint_keyframes(&self, p: &egui::Painter, rect: Rect, timeline: &Timeline) {
         let d = 5.0;
         for &kf_time in timeline.keyframes.keys() {
@@ -351,17 +455,91 @@ impl TimelineWidget {
         &mut self,
         ui: &egui::Ui,
         response: &egui::Response,
+        zoom_bar_rect: Rect,
         ruler_rect: Rect,
         tracks_rect: Rect,
         timeline: &mut Timeline,
         track_indices: &HashMap<TrackId, usize>,
+        on_edge: bool,
+        hover_pos: Option<Pos2>,
     ) {
-        // Scroll → zoom (ctrl) or pan
+        // ── Keyboard shortcuts ──────────────────────────────────────────
+        let pressed = |key| ui.input(|i| i.key_pressed(key));
+        // Space = play/pause (global, no focus needed)
+        if pressed(egui::Key::Space) {
+            timeline.is_playing = !timeline.is_playing;
+        }
+        // Delete/Backspace only when canvas has focus
+        if response.has_focus() {
+            if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
+                if let Some(cid) = self.selected_clip {
+                    timeline.remove_clip(cid);
+                    self.selected_clip = None;
+                    self.drag_state = DragState::None;
+                }
+            }
+        }
+        if response.clicked() {
+            response.request_focus();
+        }
+
+        // ── Zoom bar double-click → Fit ─────────────────────────────────
+        if response.double_clicked() {
+            if let Some(pos) = hover_pos {
+                if zoom_bar_rect.contains(pos) {
+                    let dur = timeline.cached_duration.max(1.0);
+                    let w = tracks_rect.width().max(100.0);
+                    self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
+                    self.scroll_offset = 0.0;
+                }
+            }
+        }
+
+        // ── Zoom bar helpers (used below) ────────────────────────────────
+        let total = timeline.cached_duration.max(0.01);
+        let bar_w = zoom_bar_rect.width();
+        let view_w = tracks_rect.width();
+        let min_v_dur = view_w as f64 / 500.0; // max pps
+        let zoom_bar_info = |pos_x: f32| -> (f64, f64) {
+            let ratio = ((pos_x - zoom_bar_rect.min.x) / bar_w).clamp(0.0, 1.0) as f64;
+            let ct = ratio * total;
+            (ct, ratio)
+        };
+
+        // ── Hover cursor ────────────────────────────────────────────────
+        if hover_pos.is_some() && matches!(self.drag_state, DragState::None) {
+            if let Some(pos) = hover_pos {
+                if zoom_bar_rect.contains(pos) {
+                    let v_start = (self.scroll_offset as f64 / self.pixels_per_second).max(0.0);
+                    let v_end = ((self.scroll_offset + view_w) as f64 / self.pixels_per_second)
+                        .min(total);
+                    let l_ratio = v_start / total;
+                    let r_ratio = v_end / total;
+                    let win_l = zoom_bar_rect.min.x + l_ratio as f32 * bar_w;
+                    let win_r = zoom_bar_rect.min.x + r_ratio as f32 * bar_w;
+                    let edge = 6.0;
+                    if (pos.x - win_l).abs() < edge || (pos.x - win_r).abs() < edge {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+                    } else if pos.x >= win_l && pos.x <= win_r {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                } else if on_edge {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+                } else if tracks_rect.contains(pos)
+                    && self.hit_clip_body(pos, tracks_rect, timeline, track_indices).is_some()
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+            }
+        }
+
+        // Scroll → zoom (ctrl) or pan.
+        // When hovering over the ruler or zoom bar, scroll always zooms.
         let scroll = ui.input(|i| i.smooth_scroll_delta);
         if scroll != Vec2::ZERO {
+            let over_zoom_area = hover_pos.map_or(false, |p| ruler_rect.contains(p) || zoom_bar_rect.contains(p));
             let ctrl = ui.input(|i| i.modifiers.ctrl);
-            if ctrl {
-                // Zoom anchored at cursor
+            if ctrl || over_zoom_area {
                 let anchor = response
                     .hover_pos()
                     .unwrap_or(Pos2::new(tracks_rect.center().x, 0.0));
@@ -387,11 +565,51 @@ impl TimelineWidget {
             DragState::None => {
                 if response.drag_started() {
                     if let Some(pos) = mouse {
-                        if ruler_rect.contains(pos)
+                        // Zoom bar interaction (highest priority)
+                        if zoom_bar_rect.contains(pos) {
+                            let v_start = (self.scroll_offset as f64 / self.pixels_per_second).max(0.0);
+                            let v_end = ((self.scroll_offset + view_w) as f64 / self.pixels_per_second)
+                                .min(total);
+                            let l_ratio = v_start / total;
+                            let r_ratio = v_end / total;
+                            let win_l = zoom_bar_rect.min.x + l_ratio as f32 * bar_w;
+                            let win_r = zoom_bar_rect.min.x + r_ratio as f32 * bar_w;
+                            let edge = 6.0;
+
+                            let kind = if (pos.x - win_l).abs() < edge {
+                                Some(ZoomBarKind::LeftEdge)
+                            } else if (pos.x - win_r).abs() < edge {
+                                Some(ZoomBarKind::RightEdge)
+                            } else if pos.x >= win_l && pos.x <= win_r {
+                                Some(ZoomBarKind::Body)
+                            } else {
+                                None
+                            };
+
+                            if let Some(k) = kind {
+                                self.drag_state = DragState::ZoomBar {
+                                    kind: k,
+                                    initial_start: v_start,
+                                    initial_end: v_end,
+                                };
+                            } else {
+                                // Click on zoom bar track → jump center
+                                let (ct, _) = zoom_bar_info(pos.x);
+                                let v_dur = v_end - v_start;
+                                let new_start = (ct - v_dur / 2.0).clamp(0.0, total - v_dur);
+                                let new_end = new_start + v_dur;
+                                self.scroll_offset = (new_start * self.pixels_per_second) as f32;
+                                self.clamp_scroll(tracks_rect, timeline);
+                                self.drag_state = DragState::ZoomBar {
+                                    kind: ZoomBarKind::Body,
+                                    initial_start: new_start,
+                                    initial_end: new_end,
+                                };
+                            }
+                        } else if ruler_rect.contains(pos)
                             || (pos.x - self.time_to_x(timeline.current_time, tracks_rect)).abs()
                                 < 10.0
                         {
-                            // Playhead drag → pause & seek
                             timeline.is_playing = false;
                             self.drag_state = DragState::Playhead;
                             self.drag_mouse_start_x = pos.x;
@@ -423,14 +641,12 @@ impl TimelineWidget {
                                 self.drag_orig_duration = c.duration;
                             }
                         } else if ruler_rect.contains(pos) {
-                            // Ruler click → seek (no drag)
                             let t =
                                 self.x_to_time(pos.x, tracks_rect).clamp(0.0, timeline.cached_duration);
                             timeline.seek_request = Some(t);
                         }
                     }
                 }
-                // Click (no drag) for selection
                 if response.clicked() {
                     if let Some(pos) = mouse {
                         if tracks_rect.contains(pos) {
@@ -448,6 +664,34 @@ impl TimelineWidget {
                                 let t = self.x_to_time(pos.x, tracks_rect)
                                     .clamp(0.0, timeline.cached_duration);
                                 timeline.seek_request = Some(t);
+                            }
+                            DragState::ZoomBar { kind, initial_start, initial_end, .. } => {
+                                let ratio = ((pos.x - zoom_bar_rect.min.x) / bar_w).clamp(0.0, 1.0) as f64;
+                                let mouse_time = ratio * total;
+                                let vw_f64 = view_w as f64;
+
+                                match kind {
+                                    ZoomBarKind::Body => {
+                                        let v_dur = initial_end - initial_start;
+                                        let ns = (mouse_time - v_dur / 2.0).clamp(0.0, total - v_dur);
+                                        self.scroll_offset = (ns * self.pixels_per_second) as f32;
+                                        self.clamp_scroll(tracks_rect, timeline);
+                                    }
+                                    ZoomBarKind::LeftEdge => {
+                                        let ns = mouse_time.clamp(0.0, initial_end - min_v_dur);
+                                        let nd = (initial_end - ns).max(min_v_dur);
+                                        self.pixels_per_second = (vw_f64 / nd).clamp(20.0, 500.0);
+                                        self.scroll_offset = (ns * self.pixels_per_second) as f32;
+                                        self.clamp_scroll(tracks_rect, timeline);
+                                    }
+                                    ZoomBarKind::RightEdge => {
+                                        let ne = mouse_time.clamp(initial_start + min_v_dur, total);
+                                        let nd = (ne - initial_start).max(min_v_dur);
+                                        self.pixels_per_second = (vw_f64 / nd).clamp(20.0, 500.0);
+                                        self.scroll_offset = (initial_start * self.pixels_per_second) as f32;
+                                        self.clamp_scroll(tracks_rect, timeline);
+                                    }
+                                }
                             }
                             DragState::ClipBody(cid) => {
                                 let dx = pos.x - self.drag_mouse_start_x;
@@ -496,7 +740,8 @@ impl TimelineWidget {
                     }
                 }
                 if response.drag_stopped() {
-                    if !matches!(self.drag_state, DragState::Playhead) {
+                    let needs_rebuild = !matches!(self.drag_state, DragState::Playhead | DragState::ZoomBar { .. });
+                    if needs_rebuild {
                         timeline.rebuild_clip_index();
                         timeline.recompute_bounds();
                     }
@@ -651,6 +896,14 @@ fn nice_round(raw: f64) -> f64 {
         10.0
     };
     nice * 10.0_f64.powf(exp)
+}
+
+fn lighten(c: Color32) -> Color32 {
+    Color32::from_rgb(
+        (c.r() as u16 + 50).min(255) as u8,
+        (c.g() as u16 + 50).min(255) as u8,
+        (c.b() as u16 + 50).min(255) as u8,
+    )
 }
 
 fn clip_color(payload: &ClipPayload) -> Color32 {
