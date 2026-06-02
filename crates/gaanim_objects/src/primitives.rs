@@ -286,64 +286,81 @@ pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
     bundle
 }
 
-/// Creates a directional arrow Mobject bundle with a solid triangular head.
+/// Creates a directional arrow Mobject bundle with a solid filled body
+/// and a triangular head.
 ///
-/// The geometry is built as a **single contiguous subpath** so that
-/// `PathCompletion 0->1` (used by `Write`/`Create`/`GrowArrow`)
-/// reveals the arrow as a continuous pen stroke:
+/// The geometry is built as a **single closed subpath shaped like a
+/// real arrow** (a rectangular body capped by a wider triangular head):
 ///
 /// ```text
-///   start ──────── base ─┐
-///                        h1
-///                         \
-///                          end  (tip)
-///                         /
-///                        h2
-///   start ←──────────────┘
+///        shoulder_top ──────── h1
+///       /                              \
+///   start_back                       tip
+///       \                              /
+///        shoulder_bot ──────── h2
 /// ```
 ///
-/// The pen first traces the body, then sweeps around the triangular
-/// head, then returns to the start. This avoids the visual bug where
-/// the head appears simultaneously with the body.
+/// `start_back` is the (perpendicular) back of the body at `start`;
+/// `shoulder_top` / `shoulder_bot` are where the body meets the head
+/// on the top/bottom; `h1` / `h2` are the wider shoulders of the head;
+/// `tip` is `end`. The body has non-zero area, so the fill covers both
+/// the body and the head — the tail never disappears.
+///
+/// `PathCompletion 0->1` (used by `Write`/`Create`/`GrowArrow`) reveals
+/// the path as a continuous pen stroke: top of body, top of head, tip,
+/// bottom of head, bottom of body, then closes around the tail.
 pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBundle {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
 
+    let head_len: f64 = 18.0;
+    let head_half_width: f64 = 9.0;
+    let body_half_t: f64 = 3.0;
+
     let mut path = kurbo::BezPath::new();
     if len > 0.0 {
         let ux = dx / len;
         let uy = dy / len;
-
-        let head_len = 15.0;
-        let head_half_width = 7.5;
+        let perp_x = -uy;
+        let perp_y = ux;
 
         let base_x = end.x - ux * head_len;
         let base_y = end.y - uy * head_len;
 
-        let perp_x = -uy;
-        let perp_y = ux;
+        let start_top_x = start.x - perp_x * body_half_t;
+        let start_top_y = start.y - perp_y * body_half_t;
+        let start_bot_x = start.x + perp_x * body_half_t;
+        let start_bot_y = start.y + perp_y * body_half_t;
 
-        let h1_x = base_x + perp_x * head_half_width;
-        let h1_y = base_y + perp_y * head_half_width;
-        let h2_x = base_x - perp_x * head_half_width;
-        let h2_y = base_y - perp_y * head_half_width;
+        let shoulder_top_x = base_x - perp_x * body_half_t;
+        let shoulder_top_y = base_y - perp_y * body_half_t;
+        let shoulder_bot_x = base_x + perp_x * body_half_t;
+        let shoulder_bot_y = base_y + perp_y * body_half_t;
 
-        // Single contiguous subpath so PathCompletion reveals the
-        // arrow as a single pen stroke (body, then head, then back).
-        path.move_to(start);
-        path.line_to(kurbo::Point::new(base_x, base_y));
+        let h1_x = base_x - perp_x * head_half_width;
+        let h1_y = base_y - perp_y * head_half_width;
+        let h2_x = base_x + perp_x * head_half_width;
+        let h2_y = base_y + perp_y * head_half_width;
+
+        // Single closed subpath: pentagonal arrow silhouette.
+        // The fill covers the whole shape so the body is just as
+        // visible as the head after PathCompletion reaches 1.0.
+        path.move_to(kurbo::Point::new(start_top_x, start_top_y));
+        path.line_to(kurbo::Point::new(shoulder_top_x, shoulder_top_y));
         path.line_to(kurbo::Point::new(h1_x, h1_y));
         path.line_to(end);
         path.line_to(kurbo::Point::new(h2_x, h2_y));
-        path.line_to(kurbo::Point::new(base_x, base_y));
+        path.line_to(kurbo::Point::new(shoulder_bot_x, shoulder_bot_y));
+        path.line_to(kurbo::Point::new(start_bot_x, start_bot_y));
         path.close_path();
     }
 
-    let min_x = start.x.min(end.x) - 15.0;
-    let max_x = start.x.max(end.x) + 15.0;
-    let min_y = start.y.min(end.y) - 15.0;
-    let max_y = start.y.max(end.y) + 15.0;
+    let pad = head_half_width.max(body_half_t);
+    let min_x = start.x.min(end.x) - pad;
+    let max_x = start.x.max(end.x) + pad;
+    let min_y = start.y.min(end.y) - pad;
+    let max_y = start.y.max(end.y) + pad;
     let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
 
     let mut bundle = MobjectBundle::new(id, path, bounds);

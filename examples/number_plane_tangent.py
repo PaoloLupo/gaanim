@@ -10,9 +10,9 @@ from gaanim import (
     BLUE,
     GREEN,
     RED,
-    Scene,
     WHITE,
     YELLOW,
+    Scene,
 )
 
 
@@ -24,15 +24,15 @@ def main():
     )
     scene.background(gaanim_color((0.07, 0.08, 0.12, 1.0)))
 
-    # Plano cartesiano
+    # Plano cartesiano: usamos rangos pre-escalados (1 unidad = 60 px)
+    # para evitar que el stroke width se multiplique al llamar .scale().
     plane = scene.number_plane(
-        x_range=(-6.0, 6.0, 1.0),
-        y_range=(-3.5, 3.5, 1.0),
+        x_range=(-360.0, 360.0, 60.0),
+        y_range=(-210.0, 210.0, 60.0),
         axis_stroke=2.5,
-        grid_stroke=0.8,
+        grid_stroke=1.2,
     )
-    plane.stroke(gaanim_color((0xA0, 0xC8, 0xFF, 0x40)), 0.8)
-    plane.scale(60.0)  # 1 unidad = 60 pixels
+    plane.stroke(gaanim_color((0xA0, 0xC8, 0xFF, 0x80)), 1.2)
 
     # Curva: f(x) = sin(x) * exp(-x/8) muestreada en 60 puntos
     f = lambda x: math.sin(x) * math.exp(-x / 8.0)
