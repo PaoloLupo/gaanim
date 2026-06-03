@@ -1,9 +1,9 @@
 use bevy::prelude::{BuildChildrenTransformExt, Entity, EntityWorldMut, World};
 use gaanim_core::ObjectId;
-use gaanim_math::SpatialTransform;
+use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, MobjectId, ObjectTag, Opacity, Path2D, PathSource, RenderLayer, RenderOrder,
-    StrokeBrush, Visible,
+    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
+    RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
 };
 use std::collections::HashMap;
 
@@ -44,6 +44,16 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    /// Whether the entity is a group container.
+    pub is_group: bool,
+    /// Propagated global spatial transform.
+    pub global_transform: Option<GlobalSpatialTransform>,
+    /// Optional local bounding box.
+    pub local_bounds: Option<LocalBounds>,
+    /// Optional world bounding box.
+    pub world_bounds: Option<WorldBounds>,
+    /// Propagated global opacity factor.
+    pub global_opacity: Option<GlobalOpacity>,
 }
 
 /// Captures the complete state of all Mobject entities within the ECS world.
@@ -106,6 +116,36 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     } else {
         entity_mut.remove::<gaanim_animation::FillDrawProgress>();
     }
+
+    if snap.is_group {
+        entity_mut.insert(gaanim_scene::GroupMarker);
+    } else {
+        entity_mut.remove::<gaanim_scene::GroupMarker>();
+    }
+
+    if let Some(gt) = snap.global_transform {
+        entity_mut.insert(gt);
+    } else {
+        entity_mut.insert(GlobalSpatialTransform::from_local(&snap.transform));
+    }
+
+    if let Some(go) = snap.global_opacity {
+        entity_mut.insert(go);
+    } else {
+        entity_mut.insert(GlobalOpacity(snap.opacity));
+    }
+
+    if let Some(lb) = snap.local_bounds {
+        entity_mut.insert(lb);
+    } else {
+        entity_mut.remove::<LocalBounds>();
+    }
+
+    if let Some(wb) = snap.world_bounds {
+        entity_mut.insert(wb);
+    } else {
+        entity_mut.remove::<WorldBounds>();
+    }
 }
 
 impl WorldSnapshot {
@@ -114,58 +154,31 @@ impl WorldSnapshot {
         let mut entities = HashMap::new();
 
         // Query all entities with a MobjectId component
-        let mut query = world.query::<(
-            Entity,
-            &MobjectId,
-            Option<&bevy::prelude::ChildOf>,
-            Option<&SpatialTransform>,
-            Option<&Opacity>,
-            Option<&FillBrush>,
-            Option<&StrokeBrush>,
-            Option<&RenderOrder>,
-            Option<&RenderLayer>,
-            Option<&ObjectTag>,
-            Option<&Path2D>,
-            Option<&PathSource>,
-            Option<&gaanim_animation::FillDrawProgress>,
-        )>();
+        let mut query = world.query::<(Entity, &MobjectId)>();
 
         let mut captured_data = Vec::new();
 
-        for (
-            entity,
-            mobj_id,
-            child_of_opt,
-            transform_opt,
-            opacity_opt,
-            fill_opt,
-            stroke_opt,
-            render_order_opt,
-            render_layer_opt,
-            tag_opt,
-            path2d_opt,
-            path_source_opt,
-            fill_draw_progress_opt,
-        ) in query.iter(world)
-        {
+        for (entity, mobj_id) in query.iter(world) {
             let obj_id = mobj_id.0;
             // Find parent entity's ObjectId if parent is set
-            let parent_entity = child_of_opt.map(|c| c.parent());
+            let parent_entity = world.get::<bevy::prelude::ChildOf>(entity).map(|c| c.parent());
             let parent_id =
                 parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
 
-            let transform = transform_opt.copied().unwrap_or_default();
-            let opacity = opacity_opt.map(|o| o.0).unwrap_or(1.0);
-            let fill = fill_opt.and_then(|f| f.0.clone());
-            let stroke = stroke_opt.and_then(|s| s.brush.clone());
-            let stroke_style = stroke_opt.map(|s| s.style.clone());
+            let transform = world.get::<SpatialTransform>(entity).copied().unwrap_or_default();
+            let opacity = world.get::<Opacity>(entity).map(|o| o.0).unwrap_or(1.0);
+            let fill = world.get::<FillBrush>(entity).and_then(|f| f.0.clone());
+            let stroke = world.get::<StrokeBrush>(entity).and_then(|s| s.brush.clone());
+            let stroke_style = world.get::<StrokeBrush>(entity).map(|s| s.style.clone());
+            let render_order_opt = world.get::<RenderOrder>(entity);
             let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
             let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
-            let render_layer = render_layer_opt.copied().unwrap_or(RenderLayer::Vello2D);
+            let render_layer = world.get::<RenderLayer>(entity).copied().unwrap_or(RenderLayer::Vello2D);
             let visible = world.get::<Visible>(entity).is_some();
+            let is_group = world.get::<gaanim_scene::GroupMarker>(entity).is_some();
 
             let mut tags = Vec::new();
-            if let Some(tag) = tag_opt {
+            if let Some(tag) = world.get::<ObjectTag>(entity) {
                 tags.push(tag.0.clone());
             }
 
@@ -184,9 +197,14 @@ impl WorldSnapshot {
                     render_layer,
                     visible,
                     tags,
-                    path2d: path2d_opt.map(|p| p.0.clone()),
-                    path_source: path_source_opt.map(|p| p.0.clone()),
-                    fill_draw_progress: fill_draw_progress_opt.map(|p| p.0),
+                    path2d: world.get::<Path2D>(entity).map(|p| p.0.clone()),
+                    path_source: world.get::<PathSource>(entity).map(|p| p.0.clone()),
+                    fill_draw_progress: world.get::<gaanim_animation::FillDrawProgress>(entity).map(|p| p.0),
+                    is_group,
+                    global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
+                    local_bounds: world.get::<LocalBounds>(entity).copied(),
+                    world_bounds: world.get::<WorldBounds>(entity).copied(),
+                    global_opacity: world.get::<GlobalOpacity>(entity).copied(),
                 },
             ));
         }
@@ -218,24 +236,9 @@ impl WorldSnapshot {
             }
         }
 
-        // 3. Restore properties for entities specified in this snapshot
+        // 3. Spawn any missing entities first so they exist in entity_map
         for (obj_id, snap) in &self.entities {
-            if let Some(&entity) = entity_map.get(obj_id) {
-                // Scope mutable borrow of entity_mut to release the borrow before hierarchy queries
-                {
-                    let mut entity_mut = world.entity_mut(entity);
-                    insert_snapshot_components(&mut entity_mut, snap);
-                }
-
-                if let Some(parent_id) = snap.parent {
-                    if let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        world.entity_mut(entity).set_parent_in_place(parent_entity);
-                    }
-                } else {
-                    world.entity_mut(entity).remove_parent_in_place();
-                }
-            } else {
-                // Entity was deleted or missing; spawn a new entity with the snapshotted components
+            if !entity_map.contains_key(obj_id) {
                 let new_entity = world
                     .spawn((
                         MobjectId(*obj_id),
@@ -247,15 +250,27 @@ impl WorldSnapshot {
                     .id();
 
                 entity_map.insert(*obj_id, new_entity);
+            }
+        }
 
-                let mut entity_mut = world.entity_mut(new_entity);
-                insert_snapshot_components(&mut entity_mut, snap);
-
-                if let Some(parent_id) = snap.parent
-                    && let Some(&parent_entity) = entity_map.get(&parent_id)
-                {
-                    entity_mut.set_parent_in_place(parent_entity);
+        // 4. Pass 1: Set parent-child relationships for all entities
+        for (obj_id, snap) in &self.entities {
+            if let Some(&entity) = entity_map.get(obj_id) {
+                if let Some(parent_id) = snap.parent {
+                    if let Some(&parent_entity) = entity_map.get(&parent_id) {
+                        world.entity_mut(entity).set_parent_in_place(parent_entity);
+                    }
+                } else {
+                    world.entity_mut(entity).remove_parent_in_place();
                 }
+            }
+        }
+
+        // 5. Pass 2: Overwrite all properties (including transforms) with correct snapshot values
+        for (obj_id, snap) in &self.entities {
+            if let Some(&entity) = entity_map.get(obj_id) {
+                let mut entity_mut = world.entity_mut(entity);
+                insert_snapshot_components(&mut entity_mut, snap);
             }
         }
     }
@@ -318,24 +333,9 @@ impl SnapshotDiff {
             }
         }
 
-        // 2. Process updates: Upsert new or modified states
+        // 2. Spawn missing entities first
         for snap in &self.updates {
-            if let Some(&entity) = entity_map.get(&snap.id) {
-                // Scope mutable borrow of entity_mut to release before hierarchy check
-                {
-                    let mut entity_mut = world.entity_mut(entity);
-                    insert_snapshot_components(&mut entity_mut, snap);
-                }
-
-                if let Some(parent_id) = snap.parent {
-                    if let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        world.entity_mut(entity).set_parent_in_place(parent_entity);
-                    }
-                } else {
-                    world.entity_mut(entity).remove_parent_in_place();
-                }
-            } else {
-                // Spawn missing entity
+            if !entity_map.contains_key(&snap.id) {
                 let new_entity = world
                     .spawn((
                         MobjectId(snap.id),
@@ -347,15 +347,27 @@ impl SnapshotDiff {
                     .id();
 
                 entity_map.insert(snap.id, new_entity);
+            }
+        }
 
-                let mut entity_mut = world.entity_mut(new_entity);
-                insert_snapshot_components(&mut entity_mut, snap);
-
-                if let Some(parent_id) = snap.parent
-                    && let Some(&parent_entity) = entity_map.get(&parent_id)
-                {
-                    entity_mut.set_parent_in_place(parent_entity);
+        // 3. Pass 1: hierarchy parenting
+        for snap in &self.updates {
+            if let Some(&entity) = entity_map.get(&snap.id) {
+                if let Some(parent_id) = snap.parent {
+                    if let Some(&parent_entity) = entity_map.get(&parent_id) {
+                        world.entity_mut(entity).set_parent_in_place(parent_entity);
+                    }
+                } else {
+                    world.entity_mut(entity).remove_parent_in_place();
                 }
+            }
+        }
+
+        // 4. Pass 2: Overwrite components with correct snapshot values
+        for snap in &self.updates {
+            if let Some(&entity) = entity_map.get(&snap.id) {
+                let mut entity_mut = world.entity_mut(entity);
+                insert_snapshot_components(&mut entity_mut, snap);
             }
         }
     }

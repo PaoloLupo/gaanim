@@ -1750,7 +1750,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 // child_local = group_inv * child_world
                 let child_world = state.transform;
                 let child_local_affine = inv_group_affine * child_world.to_affine_2d();
-                let child_local = decompose_affine_2d(&child_local_affine);
+                let child_local = SpatialTransform::from_affine_2d(&child_local_affine);
                 
                 state.transform = child_local;
                 
@@ -1787,7 +1787,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// The children's local transforms are adjusted to world space so they remain in their
     /// absolute positions without any jumps.
     pub fn ungroup(&mut self, group: MobjectRef) {
-        let (group_entity, children_ids, group_transform) = if let Some(state) = self.states.get(group.id) {
+        let (_group_entity, children_ids, group_transform) = if let Some(state) = self.states.get(group.id) {
             (state.entity, state.children.clone(), state.transform)
         } else {
             return;
@@ -1795,24 +1795,28 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         
         let group_affine = group_transform.to_affine_2d();
         
-        for child_id in children_ids {
+        for child_id in children_ids.clone() {
             if let Some(state) = self.states.get_mut(child_id) {
                 // child_world = group_world * child_local
                 let child_local = state.transform;
                 let child_world_affine = group_affine * child_local.to_affine_2d();
-                let child_world = decompose_affine_2d(&child_world_affine);
+                let child_world = SpatialTransform::from_affine_2d(&child_world_affine);
                 
                 state.transform = child_world;
-                
-                // Reparent in Bevy
-                self.commands.entity(state.entity)
-                    .remove_parent_in_place()
-                    .insert(child_world);
             }
         }
         
-        // Despawn the group entity
-        self.commands.entity(group_entity).despawn();
+        // Add the Ungroup clip to the timeline
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            0.0,
+            ClipPayload::Ungroup {
+                group: group.id,
+                children: children_ids,
+            },
+        );
+        
         self.states.remove(group.id);
         self.mobject_names.remove(&group.id);
     }
@@ -2888,28 +2892,4 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
         MobjectRef { id: self.id }
     }
-}
-
-/// Helper function to decompose a 2D affine transformation into translation, scaling, and rotation components.
-fn decompose_affine_2d(affine: &gaanim_core::kurbo::Affine) -> SpatialTransform {
-    let coeffs = affine.as_coeffs();
-    let tx = coeffs[4];
-    let ty = coeffs[5];
-    
-    let a = coeffs[0];
-    let b = coeffs[1];
-    let c = coeffs[2];
-    let d = coeffs[3];
-    
-    let sx = (a * a + b * b).sqrt();
-    let sy = (c * c + d * d).sqrt();
-    
-    // Extract rotation angle around Z axis
-    let angle = b.atan2(a);
-    
-    let mut transform = SpatialTransform::new_2d(tx, ty);
-    transform.scale = gaanim_core::glam::DVec3::new(sx, sy, 1.0);
-    transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
-    
-    transform
 }

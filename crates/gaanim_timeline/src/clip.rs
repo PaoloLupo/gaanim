@@ -76,6 +76,13 @@ pub enum ClipPayload {
     Breakpoint,
     /// Named segment start marker for dividing long sequences.
     SegmentStart(String),
+    /// A structural change to ungroup a group and reparent its children.
+    Ungroup {
+        /// The group ObjectId to dissolve.
+        group: ObjectId,
+        /// The list of child ObjectIds.
+        children: Vec<ObjectId>,
+    },
 }
 
 /// Specification of a property tween animation suitable for storage and serialization.

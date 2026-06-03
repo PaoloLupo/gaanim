@@ -145,6 +145,30 @@ impl SpatialTransform {
 
         translate_pivot * rotate * scale * translate_neg_pivot
     }
+
+    /// Decomposes a 2D affine transformation into translation, scaling, and rotation components.
+    pub fn from_affine_2d(affine: &Affine) -> Self {
+        let coeffs = affine.as_coeffs();
+        let tx = coeffs[4];
+        let ty = coeffs[5];
+        
+        let a = coeffs[0];
+        let b = coeffs[1];
+        let c = coeffs[2];
+        let d = coeffs[3];
+        
+        let sx = (a * a + b * b).sqrt();
+        let sy = (c * c + d * d).sqrt();
+        
+        // Extract rotation angle around Z axis
+        let angle = b.atan2(a);
+        
+        let mut transform = Self::new_2d(tx, ty);
+        transform.scale = gaanim_core::glam::DVec3::new(sx, sy, 1.0);
+        transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
+        
+        transform
+    }
 }
 
 /// The computed global spatial transform resulting from scene graph hierarchy propagation.

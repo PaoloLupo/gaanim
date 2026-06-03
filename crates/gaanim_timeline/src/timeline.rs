@@ -1,4 +1,4 @@
-use bevy::prelude::{Entity, Resource, World};
+use bevy::prelude::{BuildChildrenTransformExt, Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
 use std::collections::BTreeMap;
@@ -274,22 +274,55 @@ impl Timeline {
 
         // 3. Replay and interpolate clip properties up to target_time
         for clip in candidate_clips {
-            if let ClipPayload::Animation(ref anim) = clip.payload
-                && let Some(&target_entity) = entity_map.get(&anim.target)
-            {
-                if clip.end() <= self.current_time {
-                    // Animation finished before or at seek head: apply final state.
-                    // Use rate_func.evaluate(1.0) rather than hard-coding 1.0 so that
-                    // round-trip functions like ThereAndBack correctly restore the baseline.
-                    let final_t = anim.rate_func.evaluate(1.0);
-                    apply_lens_spec(world, target_entity, &anim.lens, final_t);
-                } else if clip.start <= self.current_time && clip.end() > self.current_time {
-                    // Animation is actively running at seek head: interpolate
-                    let progress =
-                        ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
-                    let t = anim.rate_func.evaluate(progress);
-                    apply_lens_spec(world, target_entity, &anim.lens, t);
+            match clip.payload {
+                ClipPayload::Animation(ref anim) => {
+                    if let Some(&target_entity) = entity_map.get(&anim.target) {
+                        if clip.end() <= self.current_time {
+                            // Animation finished before or at seek head: apply final state.
+                            let final_t = anim.rate_func.evaluate(1.0);
+                            apply_lens_spec(world, target_entity, &anim.lens, final_t);
+                        } else if clip.start <= self.current_time && clip.end() > self.current_time {
+                            // Animation is actively running at seek head: interpolate
+                            let progress =
+                                ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
+                            let t = anim.rate_func.evaluate(progress);
+                            apply_lens_spec(world, target_entity, &anim.lens, t);
+                        }
+                    }
                 }
+                ClipPayload::Ungroup { group, ref children } => {
+                    if clip.start <= self.current_time {
+                        if let Some(&group_entity) = entity_map.get(&group) {
+                            let group_transform = if let Ok(group_mut) = world.get_entity_mut(group_entity) {
+                                group_mut.get::<SpatialTransform>().copied()
+                            } else {
+                                None
+                            };
+                            
+                            if let Some(group_transform) = group_transform {
+                                let group_affine = group_transform.to_affine_2d();
+                                
+                                for child_id in children {
+                                    if let Some(&child_entity) = entity_map.get(child_id) {
+                                        if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                                            let child_local_transform = child_mut.get::<SpatialTransform>().copied().unwrap_or_default();
+                                            let child_world_affine = group_affine * child_local_transform.to_affine_2d();
+                                            let child_world_transform = SpatialTransform::from_affine_2d(&child_world_affine);
+                                            
+                                            child_mut.remove_parent_in_place();
+                                            child_mut.insert(child_world_transform);
+                                        }
+                                    }
+                                }
+                                
+                                if let Ok(group_mut) = world.get_entity_mut(group_entity) {
+                                    group_mut.despawn();
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }

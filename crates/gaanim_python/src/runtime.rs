@@ -298,7 +298,8 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
         }
     }
 
-    loop_range = Some((0.0, scene.timeline.cached_duration + 0.5));
+    scene.timeline.cached_duration = scene.timeline.cached_duration.max(scene.current_time);
+    loop_range = Some((0.0, scene.timeline.cached_duration));
     ReplayResult { loop_range }
 }
 

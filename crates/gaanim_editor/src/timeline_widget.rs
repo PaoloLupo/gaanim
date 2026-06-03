@@ -1049,6 +1049,7 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
         ClipPayload::Marker(_) => CLR_MARKER,
         ClipPayload::Breakpoint => CLR_BREAKPOINT,
         ClipPayload::SegmentStart(_) => CLR_SEGMENT,
+        ClipPayload::Ungroup { .. } => Color32::from_rgb(230, 100, 50),
     }
 }
 
@@ -1107,5 +1108,6 @@ fn clip_label(payload: &ClipPayload) -> String {
         ClipPayload::Marker(s) => format!("Marker:{}", s),
         ClipPayload::Breakpoint => "BP".into(),
         ClipPayload::SegmentStart(s) => format!("Seg:{}", s),
+        ClipPayload::Ungroup { .. } => "Ungroup".into(),
     }
 }
