@@ -1786,7 +1786,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
         
-        // 5. Store group state
+        // 5. Ensure tracks exist for group and children so the timeline can
+        //    display the group hierarchy (group → children).
+        self.ensure_track(id);
+        for &child_id in &child_ids {
+            self.ensure_track(child_id);
+        }
+
+        // 6. Store group state
         let group_state = MobjectState {
             bounds: Bounds3D::new_2d(
                 union_bounds.min.x - center.x,
@@ -1853,6 +1860,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // in ECS so that group-level animations (shift, rotate, etc.) affect all
         // children, and style propagation works before the ungroup time.
 
+        // Pre-compute each child's world-space transform so the runtime ungroup
+        // clip can re-apply them on subsequent seek frames (after the group entity
+        // has been despawned and animation clips would otherwise overwrite the
+        // correct world positions with stale local-space values).
+        let children_world_transforms: Vec<(ObjectId, SpatialTransform)> = children_ids
+            .iter()
+            .filter_map(|&child_id| {
+                self.states
+                    .get(child_id)
+                    .map(|state| (child_id, state.transform))
+            })
+            .collect();
+
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
@@ -1862,6 +1882,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 children: children_ids,
                 group_parent,
                 group_transform,
+                children_world_transforms,
             },
         );
 

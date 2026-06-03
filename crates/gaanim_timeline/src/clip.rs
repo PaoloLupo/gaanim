@@ -86,6 +86,11 @@ pub enum ClipPayload {
         group_parent: Option<ObjectId>,
         /// The group's spatial transform at the time of ungroup, for reversible regroup.
         group_transform: SpatialTransform,
+        /// Pre-computed world-space transforms for each child at ungroup time.
+        /// After the group entity is despawned, stale local-space animation clips
+        /// keep replaying on each seek. These stored world transforms are
+        /// re-applied to overwrite those stale values.
+        children_world_transforms: Vec<(ObjectId, SpatialTransform)>,
     },
 }
 

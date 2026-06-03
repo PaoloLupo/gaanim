@@ -23,6 +23,7 @@ const CLR_MARKER: Color32 = Color32::from_rgb(220, 200, 60);
 const CLR_BREAKPOINT: Color32 = Color32::from_rgb(220, 80, 80);
 const CLR_SEGMENT: Color32 = Color32::from_rgb(180, 100, 200);
 const CLR_KEYFRAME: Color32 = Color32::from_rgb(255, 200, 80);
+const CLR_UNGROUP: Color32 = Color32::from_rgb(230, 100, 50);
 
 const PROP_ROW_BG: Color32 = Color32::from_rgb(32, 32, 32);
 const PROP_LABEL: Color32 = Color32::from_rgb(160, 160, 160);
@@ -49,6 +50,7 @@ pub struct PropertyValues {
 struct TrackLayout {
     header_y: f32,
     prop_count: usize,
+    depth: u8,
 }
 
 // ── Drag state ─────────────────────────────────────────────────────────
@@ -145,6 +147,7 @@ impl TimelineWidget {
         ui: &mut egui::Ui,
         timeline: &mut Timeline,
         property_values: &HashMap<ObjectId, PropertyValues>,
+        group_children: &HashMap<TrackId, Vec<TrackId>>,
     ) {
         let header_rows = if self.show_scene_header { 1 } else { 0 };
         let mobject_tracks: Vec<TrackId> = timeline
@@ -160,7 +163,7 @@ impl TimelineWidget {
         let tracks_visible = !self.show_scene_header || self.scene_expanded;
 
         let (track_layouts, content_height) =
-            self.compute_track_layouts(&mobject_tracks, tracks_visible, header_rows);
+            self.compute_track_layouts(&mobject_tracks, tracks_visible, header_rows, group_children);
 
         // ── Header ──────────────────────────────────────────────────────
         let header_size = Vec2::new(ui.available_width(), self.header_height);
@@ -238,7 +241,7 @@ impl TimelineWidget {
         // Input first so dragging feels responsive
         self.handle_input(
             ui, &response, zoom_bar_rect, ruler_rect, clips_rect, tracks_rect, label_rect,
-            timeline, &track_layouts, on_edge, hover_pos,
+            timeline, &track_layouts, on_edge, hover_pos, group_children,
         );
 
         // Paint
@@ -248,7 +251,7 @@ impl TimelineWidget {
         self.paint_ruler(&p, ruler_rect);
         self.paint_track_bg(&p, tracks_rect, label_rect, timeline, &track_layouts);
         self.paint_grid(&cp, clips_rect, timeline);
-        self.paint_clips(&cp, clips_rect, timeline, &track_layouts, hover_pos);
+        self.paint_clips(&cp, clips_rect, timeline, &track_layouts, hover_pos, group_children);
         // Scene header: clip to its own row so it doesn't overlap track labels
         let header_clip = Rect::from_min_size(
             tracks_rect.min,
@@ -260,7 +263,7 @@ impl TimelineWidget {
         {
             let mut lp = ui.painter_at(label_rect);
             lp.set_clip_rect(label_rect);
-            self.paint_track_labels(&lp, label_rect, timeline, &track_layouts);
+            self.paint_track_labels(&lp, label_rect, timeline, &track_layouts, group_children);
         }
         self.paint_divider(&p, label_rect, tracks_rect);
         self.paint_keyframes(&p, ruler_rect, timeline);
@@ -285,24 +288,48 @@ impl TimelineWidget {
         tracks: &[TrackId],
         visible: bool,
         header_rows: usize,
+        group_children: &HashMap<TrackId, Vec<TrackId>>,
     ) -> (HashMap<TrackId, TrackLayout>, f32) {
         let mut layouts = HashMap::new();
         let mut total = header_rows as f32 * self.track_height;
         if !visible {
-            // Scene collapsed: no tracks rendered, height is just the scene header row
             return (layouts, total.max(self.track_height));
         }
-        for track_id in tracks {
-            let prop_count = if self.expanded_tracks.contains(track_id) {
+
+        // Collect all children tracks so we skip them in the main loop
+        let child_set: HashSet<TrackId> = group_children
+            .values()
+            .flat_map(|v| v.iter().copied())
+            .collect();
+
+        let mut add_track = |tid: &TrackId, total: &mut f32, depth: u8| {
+            let prop_count = if self.expanded_tracks.contains(tid) {
                 PROPERTY_ROW_COUNT
             } else {
                 0
             };
-            layouts.insert(*track_id, TrackLayout {
-                header_y: total,
+            layouts.insert(*tid, TrackLayout {
+                header_y: *total,
                 prop_count,
+                depth,
             });
-            total += self.track_height + prop_count as f32 * self.property_row_height;
+            *total += self.track_height + prop_count as f32 * self.property_row_height;
+        };
+
+        for track_id in tracks {
+            if child_set.contains(track_id) {
+                continue; // will be rendered under its group parent
+            }
+            add_track(track_id, &mut total, 0);
+
+            // If this is a group track and it's expanded, insert children
+            if let Some(children) = group_children.get(track_id)
+                && self.expanded_tracks.contains(track_id)
+            {
+                for child_id in children {
+                    add_track(child_id, &mut total, 1);
+                }
+            }
         }
         (layouts, total.max(self.track_height))
     }
@@ -464,16 +491,26 @@ impl TimelineWidget {
         label_rect: Rect,
         timeline: &Timeline,
         track_layouts: &HashMap<TrackId, TrackLayout>,
+        group_children: &HashMap<TrackId, Vec<TrackId>>,
     ) {
         if !self.scene_expanded { return; }
         for (track_id, layout) in track_layouts {
             let y = label_rect.min.y + layout.header_y - self.scroll_y;
             if let Some(t) = timeline.tracks.get(*track_id) {
-                let expanded = self.expanded_tracks.contains(track_id);
-                let arrow = if expanded { "\u{25BE}" } else { "\u{25B8}" };
-                let label = format!("{} {}", arrow, t.name);
+                let is_group = group_children.contains_key(track_id);
+                let has_props = timeline.tracks.get(*track_id)
+                    .and_then(|t| t.object_id)
+                    .is_some();
+                let indent = layout.depth as f32 * 16.0;
+                let label = if is_group || has_props {
+                    let expanded = self.expanded_tracks.contains(track_id);
+                    let arrow = if expanded { "\u{25BE}" } else { "\u{25B8}" };
+                    format!("{} {}", arrow, t.name)
+                } else {
+                    t.name.clone()
+                };
                 p.text(
-                    Pos2::new(label_rect.min.x + 6.0, y + self.track_height / 2.0),
+                    Pos2::new(label_rect.min.x + 6.0 + indent, y + self.track_height / 2.0),
                     Align2::LEFT_CENTER,
                     &label,
                     FontId::proportional(11.0),
@@ -592,6 +629,7 @@ impl TimelineWidget {
         timeline: &Timeline,
         track_layouts: &HashMap<TrackId, TrackLayout>,
         hover_pos: Option<Pos2>,
+        group_children: &HashMap<TrackId, Vec<TrackId>>,
     ) {
         // Skip all clips when scene is collapsed
         if !self.scene_expanded {
@@ -628,6 +666,45 @@ impl TimelineWidget {
 
             if self.selected_clip == Some(clip.id) {
                 p.rect_stroke(cr, 3u8, Stroke::new(2.0, SELECTION), StrokeKind::Inside);
+            }
+        }
+
+        // ── Ungroup markers on group tracks ──────────────────────────
+        // Build reverse map: group ObjectId → group TrackId
+        let group_oid_to_tid: HashMap<ObjectId, TrackId> = group_children
+            .keys()
+            .filter_map(|&tid| {
+                timeline.tracks.get(tid)
+                    .and_then(|t| t.object_id)
+                    .map(|oid| (oid, tid))
+            })
+            .collect();
+        for clip in timeline.clips.values() {
+            if let ClipPayload::Ungroup { group, .. } = &clip.payload {
+                let Some(&group_tid) = group_oid_to_tid.get(group) else { continue };
+                let Some(layout) = track_layouts.get(&group_tid) else { continue };
+                let x = self.time_to_x(clip.start, rect);
+                if x < rect.min.x - 20.0 || x > rect.max.x + 20.0 { continue; }
+                let y = rect.min.y + layout.header_y - self.scroll_y;
+                // Dashed vertical line spanning the group track
+                let mut dash_y = y + 2.0;
+                let dash_end = y + self.track_height - 2.0;
+                while dash_y < dash_end {
+                    let seg_end = (dash_y + 4.0).min(dash_end);
+                    p.line_segment(
+                        [Pos2::new(x, dash_y), Pos2::new(x, seg_end)],
+                        Stroke::new(2.0, CLR_UNGROUP),
+                    );
+                    dash_y += 8.0;
+                }
+                // Small label
+                p.text(
+                    Pos2::new(x + 4.0, y + self.track_height / 2.0),
+                    Align2::LEFT_CENTER,
+                    "ungroup",
+                    FontId::proportional(9.0),
+                    CLR_UNGROUP,
+                );
             }
         }
     }
@@ -732,6 +809,7 @@ impl TimelineWidget {
         track_layouts: &HashMap<TrackId, TrackLayout>,
         on_edge: bool,
         hover_pos: Option<Pos2>,
+        group_children: &HashMap<TrackId, Vec<TrackId>>,
     ) {
         // ── Keyboard shortcuts ──────────────────────────────────────────
         let pressed = |key| ui.input(|i| i.key_pressed(key));
@@ -943,15 +1021,21 @@ impl TimelineWidget {
                                 if rel_y >= layout.header_y
                                     && rel_y < layout.header_y + self.track_height
                                 {
-                                    let arrow_x = label_rect.min.x + 6.0;
+                                    let is_group = group_children.contains_key(track_id);
+                                    let has_props = timeline.tracks.get(*track_id)
+                                        .and_then(|t| t.object_id)
+                                        .is_some();
+                                    let indent = layout.depth as f32 * 16.0;
+                                    let arrow_x = label_rect.min.x + 6.0 + indent;
                                     let arrow_w = 16.0;
-                                    if pos.x >= arrow_x && pos.x < arrow_x + arrow_w {
+                                    if (is_group || has_props) && pos.x >= arrow_x && pos.x < arrow_x + arrow_w {
                                         if self.expanded_tracks.contains(track_id) {
                                             self.expanded_tracks.remove(track_id);
                                         } else {
                                             self.expanded_tracks.insert(*track_id);
                                         }
                                     } else {
+                                        self.selected_clip = None;
                                         self.selected_track = Some(*track_id);
                                     }
                                     break;

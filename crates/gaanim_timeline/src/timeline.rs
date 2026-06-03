@@ -290,10 +290,16 @@ impl Timeline {
                         }
                     }
                 }
-                ClipPayload::Ungroup { group, ref children, group_parent, ref group_transform } => {
+                ClipPayload::Ungroup { group, ref children, group_parent, ref group_transform, ref children_world_transforms } => {
                     if clip.start <= self.current_time {
                         if let Some(&group_entity) = entity_map.get(&group) {
-                            let g_affine = group_transform.to_affine_2d();
+                            // Read the group's ACTUAL current transform (which includes
+                            // animations) instead of the initial transform stored in the clip.
+                            let actual_group_transform = world
+                                .get::<SpatialTransform>(group_entity)
+                                .copied()
+                                .unwrap_or(*group_transform);
+                            let g_affine = actual_group_transform.to_affine_2d();
 
                             for child_id in children {
                                 if let Some(&child_entity) = entity_map.get(child_id)
@@ -320,6 +326,23 @@ impl Timeline {
                             if let Ok(group_mut) = world.get_entity_mut(group_entity) {
                                 group_mut.despawn();
                             }
+                        } else {
+                            // Group entity already despawned (from a previous seek).
+                            // Re-apply stored world transforms to prevent stale local-space
+                            // animation clips from overwriting the ungrouped positions.
+                            for &(child_id, world_transform) in children_world_transforms {
+                                if let Some(&child_entity) = entity_map.get(&child_id) {
+                                    if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                                        child_mut.remove_parent_in_place();
+                                        child_mut.insert(world_transform);
+
+                                        if let Some(gp) = group_parent
+                                            && let Some(&gp_entity) = entity_map.get(&gp) {
+                                                child_mut.set_parent_in_place(gp_entity);
+                                            }
+                                    }
+                                }
+                            }
                         }
                     } else {
                         // current_time < clip.start: regroup — restore the group entity
@@ -343,7 +366,15 @@ impl Timeline {
                                 .id()
                         };
 
-                        let inv_g = group_transform.to_affine_2d().inverse();
+                        // Use the same transform the group had at ungroup time.
+                        // If the group entity still exists (was re-created by a forward
+                        // seek), read its actual transform; otherwise fall back to the
+                        // stored initial transform.
+                        let regroup_transform = world
+                            .get::<SpatialTransform>(group_entity)
+                            .copied()
+                            .unwrap_or(*group_transform);
+                        let inv_g = regroup_transform.to_affine_2d().inverse();
 
                         for child_id in children {
                             if let Some(&child_entity) = entity_map.get(child_id)
