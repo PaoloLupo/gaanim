@@ -92,6 +92,8 @@ pub struct TimelineWidget {
     pub scene_expanded: bool,
     pub expanded_tracks: HashSet<TrackId>,
     pub property_row_height: f32,
+    pub scroll_y: f32,
+    known_tracks: HashSet<TrackId>,
 
     drag_state: DragState,
     drag_mouse_start_x: f32,
@@ -120,6 +122,8 @@ impl Default for TimelineWidget {
             scene_expanded: true,
             expanded_tracks: HashSet::new(),
             property_row_height: 20.0,
+            scroll_y: 0.0,
+            known_tracks: HashSet::new(),
             drag_state: DragState::None,
             drag_mouse_start_x: 0.0,
             drag_orig_start: 0.0,
@@ -149,12 +153,14 @@ impl TimelineWidget {
             .filter(|(_, t)| t.name != "Main Graphics")
             .map(|(id, _)| id)
             .collect();
-        let tracks_visible = !(self.show_scene_header && !self.scene_expanded);
+        // Track known tracks (collapsed by default — user expands manually)
+        for &tid in &mobject_tracks {
+            self.known_tracks.insert(tid);
+        }
+        let tracks_visible = !self.show_scene_header || self.scene_expanded;
 
-        let (track_layouts, tracks_height) =
+        let (track_layouts, content_height) =
             self.compute_track_layouts(&mobject_tracks, tracks_visible, header_rows);
-
-        let canvas_height = (self.zoom_bar_height + self.ruler_height + tracks_height).max(100.0);
 
         // ── Header ──────────────────────────────────────────────────────
         let header_size = Vec2::new(ui.available_width(), self.header_height);
@@ -172,7 +178,8 @@ impl TimelineWidget {
             self.paint_header(&mut hu, timeline);
         }
 
-        // ── Canvas (zoom bar + ruler + tracks) ─────────────────────────
+        // ── Canvas (zoom bar + ruler + tracks) — fills remaining height ──
+        let canvas_height = (ui.available_height()).max(100.0);
         let canvas_size = Vec2::new(ui.available_width(), canvas_height);
         let (canvas_rect, response) =
             ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
@@ -189,18 +196,23 @@ impl TimelineWidget {
             Pos2::new(clips_left, zoom_bar_rect.max.y),
             Vec2::new(clips_w, self.ruler_height),
         );
+        // Tracks viewport: visible area (fixed), content extends beyond via scroll_y
+        let tracks_visible_h = (canvas_rect.max.y - ruler_rect.max.y).max(0.0);
         let tracks_rect = Rect::from_min_size(
             Pos2::new(canvas_rect.min.x, ruler_rect.max.y),
-            Vec2::new(canvas_rect.width(), tracks_height),
+            Vec2::new(canvas_rect.width(), tracks_visible_h),
         );
         let clips_rect = Rect::from_min_size(
             Pos2::new(clips_left, tracks_rect.min.y),
-            Vec2::new(clips_w, tracks_rect.height()),
+            Vec2::new(clips_w, tracks_visible_h),
         );
         let label_rect = Rect::from_min_size(
             tracks_rect.min,
-            Vec2::new(lw, tracks_rect.height()),
+            Vec2::new(lw, tracks_visible_h),
         );
+        // Clamp vertical scroll
+        let max_scroll_y = (content_height - tracks_visible_h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
 
         self.last_canvas_width = canvas_rect.width();
 
@@ -219,7 +231,7 @@ impl TimelineWidget {
             })
         });
 
-        let on_edge = hover_pos.map_or(false, |pos| {
+        let on_edge = hover_pos.is_some_and(|pos| {
             self.hit_clip_edge(pos, clips_rect, timeline, &track_layouts).is_some()
         });
 
@@ -230,15 +242,26 @@ impl TimelineWidget {
         );
 
         // Paint
-        let p = ui.painter_at(canvas_rect);
+        let mut p = ui.painter_at(canvas_rect);
         let cp = ui.painter_at(clips_rect); // clips-region painter for clean clipping
         self.paint_zoom_bar(&p, zoom_bar_rect, clips_rect, timeline);
         self.paint_ruler(&p, ruler_rect);
         self.paint_track_bg(&p, tracks_rect, label_rect, timeline, &track_layouts);
         self.paint_grid(&cp, clips_rect, timeline);
         self.paint_clips(&cp, clips_rect, timeline, &track_layouts, hover_pos);
+        // Scene header: clip to its own row so it doesn't overlap track labels
+        let header_clip = Rect::from_min_size(
+            tracks_rect.min,
+            Vec2::new(tracks_rect.width(), self.track_height),
+        );
+        p.set_clip_rect(header_clip);
         self.paint_scene_header(&p, tracks_rect, timeline);
-        self.paint_track_labels(&p, label_rect, timeline, &track_layouts);
+        p.set_clip_rect(canvas_rect);
+        {
+            let mut lp = ui.painter_at(label_rect);
+            lp.set_clip_rect(label_rect);
+            self.paint_track_labels(&lp, label_rect, timeline, &track_layouts);
+        }
         self.paint_divider(&p, label_rect, tracks_rect);
         self.paint_keyframes(&p, ruler_rect, timeline);
         self.paint_playhead(&cp, clips_rect, ruler_rect.min.y, timeline);
@@ -265,8 +288,12 @@ impl TimelineWidget {
     ) -> (HashMap<TrackId, TrackLayout>, f32) {
         let mut layouts = HashMap::new();
         let mut total = header_rows as f32 * self.track_height;
+        if !visible {
+            // Scene collapsed: no tracks rendered, height is just the scene header row
+            return (layouts, total.max(self.track_height));
+        }
         for track_id in tracks {
-            let prop_count = if visible && self.expanded_tracks.contains(track_id) {
+            let prop_count = if self.expanded_tracks.contains(track_id) {
                 PROPERTY_ROW_COUNT
             } else {
                 0
@@ -383,11 +410,11 @@ impl TimelineWidget {
 
         if !self.scene_expanded { return; }
 
-        for (_track_id, layout) in track_layouts {
-            let y = rect.min.y + layout.header_y;
+        for layout in track_layouts.values() {
+            let y = rect.min.y + layout.header_y - self.scroll_y;
 
             let lb = Rect::from_min_size(
-                label_rect.min + Vec2::new(0.0, layout.header_y),
+                label_rect.min + Vec2::new(0.0, layout.header_y - self.scroll_y),
                 Vec2::new(label_rect.width(), self.track_height),
             );
             let bg = TRACK_EVEN;
@@ -418,11 +445,11 @@ impl TimelineWidget {
     // ── Scene header text (drawn AFTER clips) ─────────────────────────
     fn paint_scene_header(&self, p: &egui::Painter, rect: Rect, timeline: &Timeline) {
         if !self.show_scene_header { return; }
-        let y0 = rect.min.y;
+        // Scene header stays fixed at the top of the tracks viewport
         let arrow = if self.scene_expanded { "▾" } else { "▸" };
         let count = timeline.tracks.len();
         p.text(
-            Pos2::new(rect.min.x + 6.0, y0 + self.track_height / 2.0),
+            Pos2::new(rect.min.x + 6.0, rect.min.y + self.track_height / 2.0),
             Align2::LEFT_CENTER,
             format!("{} Scene  ({})", arrow, count),
             FontId::proportional(12.0),
@@ -440,7 +467,7 @@ impl TimelineWidget {
     ) {
         if !self.scene_expanded { return; }
         for (track_id, layout) in track_layouts {
-            let y = label_rect.min.y + layout.header_y;
+            let y = label_rect.min.y + layout.header_y - self.scroll_y;
             if let Some(t) = timeline.tracks.get(*track_id) {
                 let expanded = self.expanded_tracks.contains(track_id);
                 let arrow = if expanded { "\u{25BE}" } else { "\u{25B8}" };
@@ -484,7 +511,7 @@ impl TimelineWidget {
                 None => continue,
             };
 
-            let base_y = clips_rect.min.y + layout.header_y + self.track_height;
+            let base_y = clips_rect.min.y + layout.header_y - self.scroll_y + self.track_height;
 
             let rows: &[(&str, String)] = &[
                 ("Position",  format!("({:.1}, {:.1}, {:.1})", vals.pos_x, vals.pos_y, vals.pos_z)),
@@ -539,6 +566,7 @@ impl TimelineWidget {
 
     // ── Grid ────────────────────────────────────────────────────────────
     fn paint_grid(&self, p: &egui::Painter, rect: Rect, _timeline: &Timeline) {
+        if !self.scene_expanded { return; }
         let (major, minor) = self.tick_intervals(rect);
         let t0 = self.x_to_time(rect.min.x, rect);
         let t1 = self.x_to_time(rect.max.x, rect);
@@ -565,6 +593,10 @@ impl TimelineWidget {
         track_layouts: &HashMap<TrackId, TrackLayout>,
         hover_pos: Option<Pos2>,
     ) {
+        // Skip all clips when scene is collapsed
+        if !self.scene_expanded {
+            return;
+        }
         for clip in timeline.clips.values() {
             let Some(layout) = track_layouts.get(&clip.track) else {
                 continue;
@@ -572,7 +604,7 @@ impl TimelineWidget {
 
             let x1 = self.time_to_x(clip.start, rect);
             let x2 = self.time_to_x(clip.start + clip.duration, rect);
-            let y = rect.min.y + layout.header_y + 2.0;
+            let y = rect.min.y + layout.header_y - self.scroll_y + 2.0;
             let ch = self.track_height - 4.0;
 
             let color = clip_color(&clip.payload);
@@ -581,7 +613,7 @@ impl TimelineWidget {
                 Vec2::new((x2 - x1).max(2.0), ch),
             );
 
-            let is_hovered = hover_pos.map_or(false, |pos| cr.contains(pos));
+            let is_hovered = hover_pos.is_some_and(|pos| cr.contains(pos));
             let fill = if is_hovered { lighten(color) } else { color };
             p.rect_filled(cr, 3u8, fill);
 
@@ -709,29 +741,26 @@ impl TimelineWidget {
         }
         // Delete/Backspace only when canvas has focus
         if response.has_focus() {
-            if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
-                if let Some(cid) = self.selected_clip {
+            if (pressed(egui::Key::Delete) || pressed(egui::Key::Backspace))
+                && let Some(cid) = self.selected_clip {
                     timeline.remove_clip(cid);
                     self.selected_clip = None;
                     self.drag_state = DragState::None;
                 }
-            }
         }
         if response.clicked() {
             response.request_focus();
         }
 
         // ── Zoom bar double-click → Fit ─────────────────────────────────
-        if response.double_clicked() {
-            if let Some(pos) = hover_pos {
-                if zoom_bar_rect.contains(pos) {
+        if response.double_clicked()
+            && let Some(pos) = hover_pos
+                && zoom_bar_rect.contains(pos) {
                     let dur = timeline.cached_duration.max(1.0);
                     let w = clips_rect.width().max(100.0);
                     self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
                     self.scroll_offset = 0.0;
                 }
-            }
-        }
 
         // ── Zoom bar helpers (used below) ────────────────────────────────
         let total = timeline.cached_duration.max(0.01);
@@ -745,8 +774,8 @@ impl TimelineWidget {
         };
 
         // ── Hover cursor ────────────────────────────────────────────────
-        if hover_pos.is_some() && matches!(self.drag_state, DragState::None) {
-            if let Some(pos) = hover_pos {
+        if hover_pos.is_some() && matches!(self.drag_state, DragState::None)
+            && let Some(pos) = hover_pos {
                 if tracks_rect.contains(pos)
                     && (pos.x - (tracks_rect.min.x + self.label_width)).abs() < 5.0
                 {
@@ -773,15 +802,16 @@ impl TimelineWidget {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
             }
-        }
 
-        // Scroll → zoom (ctrl) or pan.
-        // When hovering over the ruler or zoom bar, scroll always zooms.
+        // Scroll → zoom (ctrl), vertical pan (shift or over tracks), or horizontal pan.
         let scroll = ui.input(|i| i.smooth_scroll_delta);
         if scroll != Vec2::ZERO {
-            let over_zoom_area = hover_pos.map_or(false, |p| ruler_rect.contains(p) || zoom_bar_rect.contains(p));
+            let over_zoom_area = hover_pos.is_some_and(|p| ruler_rect.contains(p) || zoom_bar_rect.contains(p));
             let ctrl = ui.input(|i| i.modifiers.ctrl);
+            let shift = ui.input(|i| i.modifiers.shift);
+            let over_tracks = hover_pos.is_some_and(|p| tracks_rect.contains(p));
             if ctrl || over_zoom_area {
+                // Horizontal zoom
                 let anchor = response
                     .hover_pos()
                     .unwrap_or(Pos2::new(clips_rect.center().x, 0.0));
@@ -794,6 +824,11 @@ impl TimelineWidget {
                         - (anchor.x - clips_rect.min.x + self.scroll_offset)
                             * (self.pixels_per_second / old_pps) as f32;
                 self.clamp_scroll(clips_rect, timeline);
+            } else if shift || over_tracks {
+                // Vertical scroll (shift+scroll or scroll directly over tracks area)
+                self.scroll_y -= scroll.y;
+                // clamp is done at the top of next frame via max_scroll_y
+                self.scroll_y = self.scroll_y.max(0.0);
             } else {
                 self.scroll_offset = (self.scroll_offset - scroll.x).max(0.0);
                 self.clamp_scroll(clips_rect, timeline);
@@ -805,8 +840,8 @@ impl TimelineWidget {
 
         match &self.drag_state {
             DragState::None => {
-                if response.drag_started() {
-                    if let Some(pos) = mouse {
+                if response.drag_started()
+                    && let Some(pos) = mouse {
                         // Divider drag (highest priority)
                         if tracks_rect.contains(pos)
                             && (pos.x - (tracks_rect.min.x + self.label_width)).abs() < 6.0
@@ -895,16 +930,15 @@ impl TimelineWidget {
                             timeline.seek_request = Some(t);
                         }
                     }
-                }
-                if response.clicked() {
-                    if let Some(pos) = mouse {
+                if response.clicked()
+                    && let Some(pos) = mouse {
                         // Scene header toggle (uses full tracks_rect including label sidebar)
                         if self.show_scene_header && tracks_rect.contains(pos)
                             && pos.y < tracks_rect.min.y + self.track_height
                         {
                             self.scene_expanded = !self.scene_expanded;
                         } else if label_rect.contains(pos) && self.scene_expanded {
-                            let rel_y = pos.y - label_rect.min.y;
+                            let rel_y = pos.y - label_rect.min.y + self.scroll_y;
                             for (track_id, layout) in track_layouts {
                                 if rel_y >= layout.header_y
                                     && rel_y < layout.header_y + self.track_height
@@ -928,11 +962,10 @@ impl TimelineWidget {
                                 self.hit_clip_body(pos, clips_rect, timeline, track_layouts);
                         }
                     }
-                }
             }
             _ => {
-                if response.dragged() {
-                    if let Some(pos) = mouse {
+                if response.dragged()
+                    && let Some(pos) = mouse {
                         match &self.drag_state {
                             DragState::Playhead => {
                                 let t = self.x_to_time(pos.x, clips_rect)
@@ -1017,7 +1050,6 @@ impl TimelineWidget {
                             _ => {}
                         }
                     }
-                }
                 if response.drag_stopped() {
                     let needs_rebuild = !matches!(self.drag_state, DragState::Playhead | DragState::ZoomBar { .. } | DragState::Divider { .. });
                     if needs_rebuild {
@@ -1045,7 +1077,7 @@ impl TimelineWidget {
             };
             let x1 = self.time_to_x(clip.start, rect);
             let x2 = self.time_to_x(clip.start + clip.duration, rect);
-            let y = rect.min.y + layout.header_y + 2.0;
+            let y = rect.min.y + layout.header_y - self.scroll_y + 2.0;
             let cr = Rect::from_min_size(
                 Pos2::new(x1, y),
                 Vec2::new((x2 - x1).max(2.0), self.track_height - 4.0),
@@ -1077,7 +1109,7 @@ impl TimelineWidget {
             };
             let x1 = self.time_to_x(clip.start, rect);
             let x2 = self.time_to_x(clip.start + clip.duration, rect);
-            let y = rect.min.y + layout.header_y + 2.0;
+            let y = rect.min.y + layout.header_y - self.scroll_y + 2.0;
             let cr = Rect::from_min_size(
                 Pos2::new(x1, y),
                 Vec2::new((x2 - x1).max(2.0), self.track_height - 4.0),

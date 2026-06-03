@@ -161,7 +161,7 @@ struct ReplayResult {
 fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut selection_map: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    let loop_range: Option<(f64, f64)>;
+    
 
     for op in ops {
         match op {
@@ -187,10 +187,10 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                             z_index,
                             creation_order,
                         };
-                        scene.commands.entity(state.entity).insert(order.clone());
+                        scene.commands.entity(state.entity).insert(order);
 
                         for (_, child_entity, _) in &state.child_spans {
-                            scene.commands.entity(*child_entity).insert(order.clone());
+                            scene.commands.entity(*child_entity).insert(order);
                         }
                     }
                     py_to_bevy.insert(id, bevy_id);
@@ -299,7 +299,7 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
     }
 
     scene.timeline.cached_duration = scene.timeline.cached_duration.max(scene.current_time);
-    loop_range = Some((0.0, scene.timeline.cached_duration));
+    let loop_range: Option<(f64, f64)> = Some((0.0, scene.timeline.cached_duration));
     ReplayResult { loop_range }
 }
 
@@ -629,7 +629,7 @@ fn spawn_mobject(
             if let Some(state) = scene.states.get_mut(group_ref.id) {
                 state.transform = common.transform;
                 state.opacity = common.opacity;
-                state.fill = common.fill.map(|c| peniko::Brush::Solid(c));
+                state.fill = common.fill.map(peniko::Brush::Solid);
                 if let Some(stroke) = common.stroke {
                     state.stroke = StrokeBrush::new(stroke.0, stroke.1);
                 }

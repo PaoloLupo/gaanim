@@ -335,7 +335,7 @@ impl SnapshotDiff {
 
         // 2. Spawn missing entities first
         for snap in &self.updates {
-            if !entity_map.contains_key(&snap.id) {
+            entity_map.entry(snap.id).or_insert_with(|| {
                 let new_entity = world
                     .spawn((
                         MobjectId(snap.id),
@@ -346,8 +346,8 @@ impl SnapshotDiff {
                     ))
                     .id();
 
-                entity_map.insert(snap.id, new_entity);
-            }
+                new_entity
+            });
         }
 
         // 3. Pass 1: hierarchy parenting

@@ -135,12 +135,10 @@ impl FontRegistry {
         }
 
         // 4. Fallback: try monospace aliases for code/mono requests.
-        if name.contains("code") || name.contains("mono") || name == "consolas" || name == "courier"
-        {
-            if let Some(bytes) = self.load_system_font("monospace") {
+        if (name.contains("code") || name.contains("mono") || name == "consolas" || name == "courier")
+            && let Some(bytes) = self.load_system_font("monospace") {
                 return Some(bytes);
             }
-        }
 
         // 5. General fallback chain: sans-serif, monospace, arial, segoe ui, any.
         for alias in &["sans-serif", "monospace", "arial", "segoe ui"] {

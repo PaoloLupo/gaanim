@@ -159,11 +159,10 @@ fn export_pipeline_system(
 
 /// Runs the scene setup closure, queuing camera and Mobject creation commands.
 fn setup_scene_system(world: &mut World) {
-    if let Some(mut callback_res) = world.get_resource_mut::<SetupCallback>() {
-        if let Some(callback) = callback_res.0.take() {
+    if let Some(mut callback_res) = world.get_resource_mut::<SetupCallback>()
+        && let Some(callback) = callback_res.0.take() {
             callback(world);
         }
-    }
 }
 
 /// The core offline rendering orchestrator.

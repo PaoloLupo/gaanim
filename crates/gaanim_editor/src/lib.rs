@@ -282,24 +282,22 @@ fn editor_ui_system(
 
     // Track sidebar click → select the corresponding entity
     if let Some(track_id) = state.timeline_widget.selected_track {
-        if let Some(track) = timeline.tracks.get(track_id) {
-            if let Some(obj_id) = track.object_id {
+        if let Some(track) = timeline.tracks.get(track_id)
+            && let Some(obj_id) = track.object_id {
                 for (entity, mobj_id, _) in &entity_query {
-                    if let Some(mid) = mobj_id {
-                        if mid.0 == obj_id {
+                    if let Some(mid) = mobj_id
+                        && mid.0 == obj_id {
                             state.selected = Some(entity);
                             break;
                         }
-                    }
                 }
             }
-        }
         state.timeline_widget.selected_track = None;
     }
 
     // ── Viewport selection indicator ──────────────────────────────────
-    if let Some(selected) = state.selected {
-        if let Ok(bounds) = bounds_query.get(selected) {
+    if let Some(selected) = state.selected
+        && let Ok(bounds) = bounds_query.get(selected) {
             let corners = [
                 glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),
                 glam::DVec3::new(bounds.0.max.x, bounds.0.min.y, 0.0),
@@ -340,7 +338,6 @@ fn editor_ui_system(
                     }
                 });
         }
-    }
 
     fps_overlay.render(ctx);
 }

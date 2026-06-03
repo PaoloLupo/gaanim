@@ -57,6 +57,12 @@ pub struct MobjectStateMap {
     v: Vec<Option<MobjectState>>,
 }
 
+impl Default for MobjectStateMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MobjectStateMap {
     pub fn new() -> Self {
         Self { v: Vec::new() }
@@ -305,7 +311,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> Self {
         // Ensure a default track exists on the timeline
         let default_track = if let Some(track_id) = timeline.tracks.keys().next() {
-            track_id.clone()
+            track_id
         } else {
             timeline.add_track("Main Graphics", 0)
         };
@@ -686,8 +692,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // from the fill color and the user-supplied stroke_width (or 1.0) so the outline
         // is visible during drawing/erasing.
         for item_id in &items {
-            if let Some(state) = self.states.get_mut(*item_id) {
-                if state.stroke.brush.is_none() {
+            if let Some(state) = self.states.get_mut(*item_id)
+                && state.stroke.brush.is_none() {
                     let color = state
                         .fill
                         .as_ref()
@@ -698,7 +704,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     state.stroke = new_stroke.clone();
                     self.commands.entity(state.entity).insert(new_stroke);
                 }
-            }
         }
 
         // (B) Set initial value via deferred commands to avoid flicker
@@ -1520,8 +1525,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
 
         // Optional fill color highlight (like Indicate but without scale_factor difference).
-        if let Some(c) = color {
-            if let Some(Brush::Solid(current)) = &state.fill {
+        if let Some(c) = color
+            && let Some(Brush::Solid(current)) = &state.fill {
                 self.timeline.add_clip(
                     parent_track,
                     self.current_time,
@@ -1545,7 +1550,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     }),
                 );
             }
-        }
 
         let _ = original_opacity; // reserved if we want to fade in/out later
 
@@ -2456,7 +2460,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             });
 
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color.clone()));
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         let id_counter = &mut self.id_counter;
@@ -2555,7 +2559,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             });
 
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color.clone()));
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         let id_counter = &mut self.id_counter;
@@ -2715,18 +2719,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
 
             // 3. Match normalized query against normalized text
-            if !normalized_query.is_empty() {
-                if let Some(start_byte_idx) = normalized_text.find(&normalized_query) {
+            if !normalized_query.is_empty()
+                && let Some(start_byte_idx) = normalized_text.find(&normalized_query) {
                     let end_byte_idx = start_byte_idx + normalized_query.len();
 
                     // We gather unique child_spans indices that fall within the matched byte range
                     let mut matched_span_indices = Vec::new();
                     for byte_idx in start_byte_idx..end_byte_idx {
-                        if let Some(&span_idx) = index_mapping.get(byte_idx) {
-                            if !matched_span_indices.contains(&span_idx) {
+                        if let Some(&span_idx) = index_mapping.get(byte_idx)
+                            && !matched_span_indices.contains(&span_idx) {
                                 matched_span_indices.push(span_idx);
                             }
-                        }
                     }
 
                     // Add the child IDs
@@ -2736,7 +2739,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         }
                     }
                 }
-            }
         }
 
         MobjectSelection {

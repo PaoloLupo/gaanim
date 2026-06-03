@@ -296,8 +296,8 @@ impl Timeline {
                             let g_affine = group_transform.to_affine_2d();
 
                             for child_id in children {
-                                if let Some(&child_entity) = entity_map.get(child_id) {
-                                    if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                                if let Some(&child_entity) = entity_map.get(child_id)
+                                    && let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
                                         let child_local_transform = child_mut
                                             .get::<SpatialTransform>()
                                             .copied()
@@ -310,13 +310,11 @@ impl Timeline {
                                         child_mut.remove_parent_in_place();
                                         child_mut.insert(child_world_transform);
 
-                                        if let Some(gp) = group_parent {
-                                            if let Some(&gp_entity) = entity_map.get(&gp) {
+                                        if let Some(gp) = group_parent
+                                            && let Some(&gp_entity) = entity_map.get(&gp) {
                                                 child_mut.set_parent_in_place(gp_entity);
                                             }
-                                        }
                                     }
-                                }
                             }
 
                             if let Ok(group_mut) = world.get_entity_mut(group_entity) {
@@ -348,8 +346,8 @@ impl Timeline {
                         let inv_g = group_transform.to_affine_2d().inverse();
 
                         for child_id in children {
-                            if let Some(&child_entity) = entity_map.get(child_id) {
-                                if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                            if let Some(&child_entity) = entity_map.get(child_id)
+                                && let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
                                     let child_current = child_mut
                                         .get::<SpatialTransform>()
                                         .copied()
@@ -363,16 +361,14 @@ impl Timeline {
                                     child_mut.insert(child_local);
                                     child_mut.set_parent_in_place(group_entity);
                                 }
-                            }
                         }
 
-                        if let Some(gp) = group_parent {
-                            if let Some(&gp_entity) = entity_map.get(&gp) {
+                        if let Some(gp) = group_parent
+                            && let Some(&gp_entity) = entity_map.get(&gp) {
                                 world
                                     .entity_mut(group_entity)
                                     .set_parent_in_place(gp_entity);
                             }
-                        }
                     }
                 }
                 _ => {}

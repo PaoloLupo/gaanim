@@ -52,7 +52,7 @@ impl GaanimTypstWorld {
 
         // 2. Append any extra fonts the user registered manually
         //    (system fonts are already loaded by `FontSearcher` above).
-        for (_, bytes) in &font_registry.registered {
+        for bytes in font_registry.registered.values() {
             if let Some(font) = Font::new(Bytes::new(bytes.clone()), 0) {
                 font_book.push(font.info().clone());
                 fonts.push(font);
@@ -123,11 +123,10 @@ fn typst_paint_to_brush(
             let [r, g, b, a] = color.to_vec4_u8();
             // Typst uses black (#000000) as its default document color.
             // In Gaanim, we want defaults to match the parent's default_fill (often white on a dark background).
-            if r == 0 && g == 0 && b == 0 && a == 255 {
-                if let Some(db) = default_brush {
+            if r == 0 && g == 0 && b == 0 && a == 255
+                && let Some(db) = default_brush {
                     return Some(db.clone());
                 }
-            }
             Some(peniko::Brush::Solid(peniko::Color::from_rgba8(r, g, b, a)))
         }
         _ => None,
@@ -137,10 +136,10 @@ fn typst_paint_to_brush(
 /// Convert a Typst 2D `Transform` into a `kurbo::Affine`.
 fn typst_transform_to_affine(transform: &Transform) -> kurbo::Affine {
     kurbo::Affine::new([
-        transform.sx.get() as f64,
-        transform.ky.get() as f64,
-        transform.kx.get() as f64,
-        transform.sy.get() as f64,
+        transform.sx.get(),
+        transform.ky.get(),
+        transform.kx.get(),
+        transform.sy.get(),
         transform.tx.to_pt(),
         transform.ty.to_pt(),
     ])
@@ -305,7 +304,7 @@ fn extract_frame_items(
                             },
                         };
 
-                        commands.entity(child_entity).insert(span.clone());
+                        commands.entity(child_entity).insert(span);
                         child_spans.push((child_id, child_entity, span));
 
                         *char_index_counter += 1;
@@ -355,7 +354,7 @@ fn extract_frame_items(
                         end: span_range.end,
                     },
                 };
-                commands.entity(child_entity).insert(span.clone());
+                commands.entity(child_entity).insert(span);
                 child_spans.push((child_id, child_entity, span));
                 *char_index_counter += 1;
 

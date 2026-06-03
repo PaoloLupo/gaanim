@@ -179,12 +179,11 @@ pub fn gaanim_render_system(
             }
 
             // Check if this entity's own bounds are out of camera bounds
-            if let Some(w_bounds) = world_bounds_opt {
-                if !bounds.intersects(&w_bounds.0) {
+            if let Some(w_bounds) = world_bounds_opt
+                && !bounds.intersects(&w_bounds.0) {
                     culled_entities.insert(entity);
                     continue;
                 }
-            }
         }
 
         // Only process visible Vello2D elements
@@ -234,7 +233,7 @@ pub fn gaanim_render_system(
             let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
             let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
             let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
-            let elem_shadow = shadow_ref.as_ref().map(|s| &**s);
+            let elem_shadow = shadow_ref.as_deref();
 
             // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
             if let Some(shadow) = elem_shadow {
@@ -297,9 +296,7 @@ pub fn gaanim_render_system(
                 && let Some(style) = elem_stroke_style
             {
                 let has_closed_contour = elem_path
-                    .elements()
-                    .iter()
-                    .any(|&el| el == kurbo::PathEl::ClosePath);
+                    .elements().contains(&kurbo::PathEl::ClosePath);
                 if has_closed_contour {
                     scene.push_layer(
                         peniko::Fill::NonZero,
@@ -401,7 +398,7 @@ pub fn gaanim_render_system(
             layers_to_pop += 1;
         }
 
-        main_scene.append(&*elem.scene, Some(elem.transform));
+        main_scene.append(&elem.scene, Some(elem.transform));
 
         for _ in 0..layers_to_pop {
             main_scene.pop_layer();

@@ -202,21 +202,19 @@ pub fn hierarchical_bounds_system(
         if let Ok(child_bounds) = bounds_query.get(child_entity) {
             let cb = child_bounds.0;
             // Only propagate if the child has valid bounds (not null/infinite)
-            if cb.min.x != f64::INFINITY {
-                if let Ok(mut parent_bounds) = bounds_query.get_mut(parent_entity) {
+            if cb.min.x != f64::INFINITY
+                && let Ok(mut parent_bounds) = bounds_query.get_mut(parent_entity) {
                     parent_bounds.0 = parent_bounds.0.union(&cb);
                 }
-            }
         }
     }
     
     // 5. Clean up any empty groups (that ended up with no children or infinite bounds)
     for group_entity in &group_query {
-        if let Ok(mut world_bounds) = bounds_query.get_mut(group_entity) {
-            if world_bounds.0.min.x == f64::INFINITY {
+        if let Ok(mut world_bounds) = bounds_query.get_mut(group_entity)
+            && world_bounds.0.min.x == f64::INFINITY {
                 world_bounds.0 = gaanim_math::Bounds3D::default();
             }
-        }
     }
 }
 

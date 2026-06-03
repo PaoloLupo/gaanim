@@ -143,20 +143,18 @@ fn collect_subpaths(path: &kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
                 last_pt = Some(p3);
             }
             PathEl::ClosePath => {
-                if let Some(buf) = current.take() {
-                    if buf.len() >= 3 {
+                if let Some(buf) = current.take()
+                    && buf.len() >= 3 {
                         subpaths.push(buf);
                     }
-                }
                 last_pt = None;
             }
         }
     }
-    if let Some(buf) = current.take() {
-        if buf.len() >= 3 {
+    if let Some(buf) = current.take()
+        && buf.len() >= 3 {
             subpaths.push(buf);
         }
-    }
     subpaths
 }
 
@@ -171,11 +169,10 @@ fn extend_with_flattened<F: FnOnce(&mut dyn FnMut(PathEl))>(
     let mut sink = |el: PathEl| collected.push(el);
     build(&mut sink);
     let mut iter = collected.into_iter();
-    if let Some(first) = iter.next() {
-        if let PathEl::MoveTo(p) = first {
+    if let Some(first) = iter.next()
+        && let PathEl::MoveTo(p) = first {
             buf.push([p.x, p.y]);
         }
-    }
     let mut cb = |el: PathEl| {
         if let PathEl::LineTo(p) = el {
             buf.push([p.x, p.y]);
