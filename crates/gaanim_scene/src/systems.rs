@@ -227,13 +227,12 @@ pub fn style_propagation_system(
             (Entity, Option<&FillBrush>, Option<&StrokeBrush>),
             (With<GroupMarker>, Or<(Changed<FillBrush>, Changed<StrokeBrush>)>),
         >,
-        Query<(Option<&mut FillBrush>, Option<&mut StrokeBrush>)>,
+        Query<(&mut FillBrush, &mut StrokeBrush)>,
     )>,
     child_query: Query<(Entity, &ChildOf)>,
 ) {
     let mut queue = Vec::new();
-    
-    // Collect root style changes using ParamSet P0
+
     for (parent_entity, fill_opt, stroke_opt) in &param_set.p0() {
         queue.push((
             parent_entity,
@@ -241,32 +240,25 @@ pub fn style_propagation_system(
             stroke_opt.cloned(),
         ));
     }
-    
-    // Perform BFS propagation down the hierarchy using ParamSet P1
+
     let mut style_query = param_set.p1();
     let mut visited = std::collections::HashSet::new();
     while let Some((current_parent, fill_val, stroke_val)) = queue.pop() {
         if !visited.insert(current_parent) {
             continue;
         }
-        
+
         for (child_entity, child_of) in &child_query {
             if child_of.parent() == current_parent {
-                // Apply style to child
-                if let Ok((child_fill, child_stroke)) = style_query.get_mut(child_entity) {
+                if let Ok((mut child_fill, mut child_stroke)) = style_query.get_mut(child_entity) {
                     if let Some(ref f) = fill_val {
-                        if let Some(mut cf) = child_fill {
-                            cf.0 = f.0.clone();
-                        }
+                        child_fill.0 = f.0.clone();
                     }
                     if let Some(ref s) = stroke_val {
-                        if let Some(mut cs) = child_stroke {
-                            *cs = s.clone();
-                        }
+                        *child_stroke = s.clone();
                     }
                 }
-                
-                // Propagate recursively to child's children
+
                 queue.push((
                     child_entity,
                     fill_val.clone(),

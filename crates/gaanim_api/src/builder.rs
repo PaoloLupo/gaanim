@@ -44,6 +44,7 @@ pub struct MobjectState {
     pub entity: Entity,
     pub child_spans: Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
     pub children: Vec<ObjectId>,
+    pub parent: Option<ObjectId>,
 }
 
 /// A `Vec`-backed map from `ObjectId` to `MobjectState`.
@@ -277,6 +278,24 @@ pub struct SceneBuilder<'w, 's, 'a> {
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
+    /// Computes the true world-space transform of a Mobject by walking up the parent chain.
+    /// This is necessary during group creation to calculate accurate world bounds for nested children.
+    pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
+        let mut current_id = Some(id);
+        let mut world_affine = gaanim_core::kurbo::Affine::IDENTITY;
+
+        while let Some(obj_id) = current_id {
+            if let Some(state) = self.states.get(obj_id) {
+                world_affine = state.transform.to_affine_2d() * world_affine;
+                current_id = state.parent;
+            } else {
+                break;
+            }
+        }
+
+        SpatialTransform::from_affine_2d(&world_affine)
+    }
+
     /// Creates a new `SceneBuilder` wrapping the Bevy `Commands` context, `Timeline` resource, and `FontRegistry`.
     pub fn new(
         commands: &'a mut Commands<'w, 's>,
@@ -1696,6 +1715,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// and their local transforms are adjusted relative to the group's center
     /// to avoid any spatial offset jumps.
     pub fn group(&mut self, children: &[MobjectRef]) -> MobjectRef {
+        debug_assert!(!children.is_empty(), "Cannot create an empty group");
         let id = self.next_id();
         
         // 1. Calculate the collective bounds of the children in world space
@@ -1704,8 +1724,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         
         for child in children {
             if let Some(state) = self.states.get(child.id) {
-                // child world bounds = child local bounds transformed by its transform
-                let world_bounds = state.bounds.transform_2d(&state.transform.to_affine_2d());
+                // child world bounds = child local bounds transformed by its TRUE world transform
+                let world_transform = self.get_world_transform(child.id);
+                let world_bounds = state.bounds.transform_2d(&world_transform.to_affine_2d());
                 if !has_bounds {
                     union_bounds = world_bounds;
                     has_bounds = true;
@@ -1746,14 +1767,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         
         for child in children {
             child_ids.push(child.id);
+            let child_world = self.get_world_transform(child.id);
             if let Some(state) = self.states.get_mut(child.id) {
                 // child_local = group_inv * child_world
-                let child_world = state.transform;
                 let child_local_affine = inv_group_affine * child_world.to_affine_2d();
                 let child_local = SpatialTransform::from_affine_2d(&child_local_affine);
-                
+
                 state.transform = child_local;
-                
+                state.parent = Some(id); // Track parent for world transform calculation
+
                 self.commands.entity(state.entity)
                     .set_parent_in_place(group_entity)
                     .insert(child_local);
@@ -1775,6 +1797,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             entity: group_entity,
             child_spans: Vec::new(),
             children: child_ids,
+            parent: None,
         };
         self.states.insert(id, group_state);
         self.mobject_names.insert(id, format!("Group ({} children)", children.len()));
@@ -1787,26 +1810,45 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// The children's local transforms are adjusted to world space so they remain in their
     /// absolute positions without any jumps.
     pub fn ungroup(&mut self, group: MobjectRef) {
-        let (_group_entity, children_ids, group_transform) = if let Some(state) = self.states.get(group.id) {
-            (state.entity, state.children.clone(), state.transform)
+        let (children_ids, group_transform, group_parent) = if let Some(state) = self.states.get(group.id) {
+            (state.children.clone(), state.transform, state.parent)
         } else {
             return;
         };
-        
+
+        // Capture group fill/stroke for MobjectState propagation to children
+        let group_fill_clone = self.states.get(group.id).map(|s| s.fill.clone());
+        let group_stroke_clone = self.states.get(group.id).map(|s| s.stroke.clone());
+
         let group_affine = group_transform.to_affine_2d();
-        
+
         for child_id in children_ids.clone() {
-            if let Some(state) = self.states.get_mut(child_id) {
-                // child_world = group_world * child_local
-                let child_local = state.transform;
+            let child_world = if let Some(child_state) = self.states.get(child_id) {
+                let child_local = child_state.transform;
                 let child_world_affine = group_affine * child_local.to_affine_2d();
-                let child_world = SpatialTransform::from_affine_2d(&child_world_affine);
-                
+                SpatialTransform::from_affine_2d(&child_world_affine)
+            } else {
+                continue;
+            };
+
+            if let Some(state) = self.states.get_mut(child_id) {
+                // Propagate fill/stroke to MobjectState for subsequent construction ops
+                if let Some(ref f) = group_fill_clone {
+                    state.fill = f.clone();
+                }
+                if let Some(ref s) = group_stroke_clone {
+                    state.stroke = s.clone();
+                }
                 state.transform = child_world;
+                state.parent = group_parent;
             }
         }
-        
-        // Add the Ungroup clip to the timeline
+
+        // No ECS commands here — the timeline Ungroup clip handles all hierarchy
+        // mutations during playback. This keeps parent-child relationships intact
+        // in ECS so that group-level animations (shift, rotate, etc.) affect all
+        // children, and style propagation works before the ungroup time.
+
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
@@ -1814,9 +1856,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             ClipPayload::Ungroup {
                 group: group.id,
                 children: children_ids,
+                group_parent,
+                group_transform,
             },
         );
-        
+
         self.states.remove(group.id);
         self.mobject_names.remove(&group.id);
     }
@@ -2274,6 +2318,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 entity: *child_entity,
                 child_spans: Vec::new(),
                 children: Vec::new(),
+                parent: None,
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2289,6 +2334,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             entity,
             child_spans,
             children: Vec::new(),
+            parent: None,
         };
         self.states.insert(parent_id, state);
 
@@ -2369,6 +2415,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 entity: *child_entity,
                 child_spans: Vec::new(),
                 children: Vec::new(),
+                parent: None,
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2384,6 +2431,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             entity,
             child_spans,
             children: Vec::new(),
+            parent: None,
         };
         self.states.insert(parent_id, state);
 
@@ -2451,6 +2499,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 entity: *child_entity,
                 child_spans: Vec::new(),
                 children: Vec::new(),
+                parent: None,
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2464,6 +2513,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             entity,
             child_spans,
             children: Vec::new(),
+            parent: None,
         };
         self.states.insert(parent_id, state);
         self.mobject_names.insert(parent_id, format!("Text('{}')", content));
@@ -2542,6 +2592,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 entity: *child_entity,
                 child_spans: Vec::new(),
                 children: Vec::new(),
+                parent: None,
             };
             self.states.insert(*child_id, child_state);
         }
@@ -2555,6 +2606,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             entity,
             child_spans,
             children: Vec::new(),
+            parent: None,
         };
         self.states.insert(parent_id, state);
         self.mobject_names.insert(parent_id, format!("Typst('{}')", formula));
@@ -2886,6 +2938,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
             entity,
             child_spans: Vec::new(),
             children: Vec::new(),
+            parent: None,
         };
         self.builder.states.insert(self.id, state);
         self.builder.mobject_names.insert(self.id, self.bundle.tag.0.clone());

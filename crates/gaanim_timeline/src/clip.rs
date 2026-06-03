@@ -1,7 +1,7 @@
 use gaanim_animation::PropertyLens;
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::{ObjectId, peniko::Color};
-use gaanim_math::RateFunc;
+use gaanim_math::{RateFunc, SpatialTransform};
 
 // We use slotmap to manage IDs cleanly without generational index validation bugs
 slotmap::new_key_type! {
@@ -82,6 +82,10 @@ pub enum ClipPayload {
         group: ObjectId,
         /// The list of child ObjectIds.
         children: Vec<ObjectId>,
+        /// The original parent of the group (if any), for reversible regroup.
+        group_parent: Option<ObjectId>,
+        /// The group's spatial transform at the time of ungroup, for reversible regroup.
+        group_transform: SpatialTransform,
     },
 }
 

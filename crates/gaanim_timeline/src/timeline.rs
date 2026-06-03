@@ -290,34 +290,87 @@ impl Timeline {
                         }
                     }
                 }
-                ClipPayload::Ungroup { group, ref children } => {
+                ClipPayload::Ungroup { group, ref children, group_parent, ref group_transform } => {
                     if clip.start <= self.current_time {
                         if let Some(&group_entity) = entity_map.get(&group) {
-                            let group_transform = if let Ok(group_mut) = world.get_entity_mut(group_entity) {
-                                group_mut.get::<SpatialTransform>().copied()
-                            } else {
-                                None
-                            };
-                            
-                            if let Some(group_transform) = group_transform {
-                                let group_affine = group_transform.to_affine_2d();
-                                
-                                for child_id in children {
-                                    if let Some(&child_entity) = entity_map.get(child_id) {
-                                        if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
-                                            let child_local_transform = child_mut.get::<SpatialTransform>().copied().unwrap_or_default();
-                                            let child_world_affine = group_affine * child_local_transform.to_affine_2d();
-                                            let child_world_transform = SpatialTransform::from_affine_2d(&child_world_affine);
-                                            
-                                            child_mut.remove_parent_in_place();
-                                            child_mut.insert(child_world_transform);
+                            let g_affine = group_transform.to_affine_2d();
+
+                            for child_id in children {
+                                if let Some(&child_entity) = entity_map.get(child_id) {
+                                    if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                                        let child_local_transform = child_mut
+                                            .get::<SpatialTransform>()
+                                            .copied()
+                                            .unwrap_or_default();
+                                        let child_world_affine = g_affine
+                                            * child_local_transform.to_affine_2d();
+                                        let child_world_transform =
+                                            SpatialTransform::from_affine_2d(&child_world_affine);
+
+                                        child_mut.remove_parent_in_place();
+                                        child_mut.insert(child_world_transform);
+
+                                        if let Some(gp) = group_parent {
+                                            if let Some(&gp_entity) = entity_map.get(&gp) {
+                                                child_mut.set_parent_in_place(gp_entity);
+                                            }
                                         }
                                     }
                                 }
-                                
-                                if let Ok(group_mut) = world.get_entity_mut(group_entity) {
-                                    group_mut.despawn();
+                            }
+
+                            if let Ok(group_mut) = world.get_entity_mut(group_entity) {
+                                group_mut.despawn();
+                            }
+                        }
+                    } else {
+                        // current_time < clip.start: regroup — restore the group entity
+                        let group_exists = entity_map.contains_key(&group);
+                        let group_entity = if group_exists {
+                            entity_map[&group]
+                        } else {
+                            world
+                                .spawn((
+                                    gaanim_scene::GroupMarker,
+                                    gaanim_scene::MobjectId(group),
+                                    *group_transform,
+                                    gaanim_math::GlobalSpatialTransform::from_local(group_transform),
+                                    Opacity(1.0),
+                                    gaanim_scene::GlobalOpacity(1.0),
+                                    gaanim_scene::RenderOrder::default(),
+                                    gaanim_scene::Visible,
+                                    FillBrush::transparent(),
+                                    StrokeBrush::transparent(),
+                                ))
+                                .id()
+                        };
+
+                        let inv_g = group_transform.to_affine_2d().inverse();
+
+                        for child_id in children {
+                            if let Some(&child_entity) = entity_map.get(child_id) {
+                                if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
+                                    let child_current = child_mut
+                                        .get::<SpatialTransform>()
+                                        .copied()
+                                        .unwrap_or_default();
+                                    let child_local_affine =
+                                        inv_g * child_current.to_affine_2d();
+                                    let child_local =
+                                        SpatialTransform::from_affine_2d(&child_local_affine);
+
+                                    child_mut.remove_parent_in_place();
+                                    child_mut.insert(child_local);
+                                    child_mut.set_parent_in_place(group_entity);
                                 }
+                            }
+                        }
+
+                        if let Some(gp) = group_parent {
+                            if let Some(&gp_entity) = entity_map.get(&gp) {
+                                world
+                                    .entity_mut(group_entity)
+                                    .set_parent_in_place(gp_entity);
                             }
                         }
                     }

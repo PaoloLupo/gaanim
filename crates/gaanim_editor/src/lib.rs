@@ -1,8 +1,11 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
+use gaanim_core::id::ObjectId;
+use gaanim_core::peniko;
 use gaanim_math::Camera;
-use gaanim_scene::{MobjectId, ObjectTag, Opacity, RenderOrder, Visible, WorldBounds};
+use gaanim_scene::{FillBrush, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, Visible, WorldBounds};
 use gaanim_timeline::timeline::Timeline;
+use std::collections::HashMap;
 
 mod fps_overlay;
 mod timeline_widget;
@@ -56,11 +59,12 @@ fn editor_ui_system(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
     mut timeline: ResMut<Timeline>,
+    camera: Res<Camera>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     entity_query: Query<(Entity, Option<&MobjectId>, Option<&ObjectTag>)>,
     transform_query: Query<&gaanim_math::SpatialTransform>,
-    fill_query: Query<&gaanim_scene::FillBrush>,
-    stroke_query: Query<&gaanim_scene::StrokeBrush>,
+    fill_query: Query<&FillBrush>,
+    stroke_query: Query<&StrokeBrush>,
     opacity_query: Query<&Opacity>,
     render_query: Query<&RenderOrder>,
     visible_query: Query<&Visible>,
@@ -69,6 +73,56 @@ fn editor_ui_system(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
+
+    let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
+    for (entity, mobj_id, _) in &entity_query {
+        let Some(oid) = mobj_id else { continue; };
+
+        let pos = if let Ok(t) = transform_query.get(entity) { t.translation } else { glam::DVec3::ZERO };
+        let scale = if let Ok(t) = transform_query.get(entity) { t.scale } else { glam::DVec3::ONE };
+        let rotation_deg = if let Ok(t) = transform_query.get(entity) {
+            2.0 * f64::atan2(t.rotation.z, t.rotation.w).to_degrees()
+        } else {
+            0.0
+        };
+
+        let fill_label = if let Ok(fb) = fill_query.get(entity) {
+            brush_string(&fb.0)
+        } else {
+            "none".into()
+        };
+
+        let stroke_label = if let Ok(sb) = stroke_query.get(entity) {
+            brush_string(&sb.brush)
+        } else {
+            "none".into()
+        };
+
+        let stroke_width = if let Ok(sb) = stroke_query.get(entity) {
+            sb.style.width
+        } else {
+            0.0
+        };
+
+        let opacity = if let Ok(o) = opacity_query.get(entity) { o.0 } else { 1.0 };
+
+        property_values.insert(
+            oid.0,
+            timeline_widget::PropertyValues {
+                pos_x: pos.x,
+                pos_y: pos.y,
+                pos_z: pos.z,
+                scale_x: scale.x,
+                scale_y: scale.y,
+                scale_z: scale.z,
+                rotation_deg,
+                fill_label,
+                stroke_label,
+                stroke_width,
+                opacity,
+            },
+        );
+    }
 
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         ui.horizontal(|ui| {
@@ -223,7 +277,7 @@ fn editor_ui_system(
         .default_height(200.0)
         .min_height(100.0)
         .show(ctx, |ui| {
-            state.timeline_widget.show(ui, &mut timeline);
+            state.timeline_widget.show(ui, &mut timeline, &property_values);
         });
 
     // Track sidebar click → select the corresponding entity
@@ -243,7 +297,64 @@ fn editor_ui_system(
         state.timeline_widget.selected_track = None;
     }
 
+    // ── Viewport selection indicator ──────────────────────────────────
+    if let Some(selected) = state.selected {
+        if let Ok(bounds) = bounds_query.get(selected) {
+            let corners = [
+                glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),
+                glam::DVec3::new(bounds.0.max.x, bounds.0.min.y, 0.0),
+                glam::DVec3::new(bounds.0.max.x, bounds.0.max.y, 0.0),
+                glam::DVec3::new(bounds.0.min.x, bounds.0.max.y, 0.0),
+            ];
+
+            let screen: Vec<egui::Pos2> = corners
+                .iter()
+                .map(|c| {
+                    let s = camera.world_to_screen(*c);
+                    egui::Pos2::new(s.x as f32, s.y as f32)
+                })
+                .collect();
+
+            let vp = ctx.viewport_rect();
+            let color = egui::Color32::from_rgba_premultiplied(68, 160, 255, 180);
+            let stroke = egui::Stroke::new(2.0, color);
+            egui::Area::new("viewport_selection".into())
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    let _ = ui.allocate_space(vp.size());
+                    let p = ui.painter();
+                    for i in 0..4 {
+                        p.line_segment([screen[i], screen[(i + 1) % 4]], stroke);
+                    }
+                    let cs = 6.0;
+                    for &c in &screen {
+                        p.line_segment(
+                            [egui::Pos2::new(c.x - cs, c.y), egui::Pos2::new(c.x + cs, c.y)],
+                            stroke,
+                        );
+                        p.line_segment(
+                            [egui::Pos2::new(c.x, c.y - cs), egui::Pos2::new(c.x, c.y + cs)],
+                            stroke,
+                        );
+                    }
+                });
+        }
+    }
+
     fps_overlay.render(ctx);
+}
+
+fn brush_string(brush: &Option<peniko::Brush>) -> String {
+    match brush {
+        Some(peniko::Brush::Solid(color)) => {
+            let rgba = color.to_rgba8();
+            format!("#{:02X}{:02X}{:02X}{:02X}", rgba.r, rgba.g, rgba.b, rgba.a)
+        }
+        Some(peniko::Brush::Gradient(_)) => "<gradient>".into(),
+        Some(peniko::Brush::Image(_)) => "<image>".into(),
+        None => "none".into(),
+    }
 }
 
 fn brush_label(brush: &gaanim_core::peniko::Brush) -> String {
