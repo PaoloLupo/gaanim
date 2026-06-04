@@ -8,6 +8,7 @@ description = "Interactive editor with inspector, timeline, and viewport control
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
+gaanim_api = { path = "../gaanim_api" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_export = { path = "../gaanim_export" }

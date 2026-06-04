@@ -40,10 +40,8 @@ impl Plugin for GaanimEditorPlugin {
                 vsync::vsync_toggle_system,
             ),
         )
-        .add_systems(
-            EguiPrimaryContextPass,
-            (editor_ui_system, export::export_dialog_system),
-        );
+        .add_systems(EguiPrimaryContextPass, editor_ui_system)
+        .add_systems(EguiPrimaryContextPass, export::export_dialog_system);
     }
 }
 
@@ -77,9 +75,13 @@ fn editor_ui_system(
     stroke_query: Query<&StrokeBrush>,
     opacity_query: Query<&Opacity>,
     bounds_query: Query<&WorldBounds>,
-    signal_query: Query<(Entity, &MobjectId, &FloatSignal)>,
-    updater_query: Query<&MobjectId, With<Updater>>,
-    decimal_query: Query<(&MobjectId, &DecimalNumber)>,
+    extra_query: Query<(
+        Entity,
+        Option<&MobjectId>,
+        Option<&FloatSignal>,
+        Option<&Updater>,
+        Option<&DecimalNumber>,
+    )>,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
@@ -234,14 +236,44 @@ fn editor_ui_system(
         });
     });
 
+    let mut signal_values: HashMap<ObjectId, f64> = HashMap::new();
+    let mut updater_entities: HashSet<ObjectId> = HashSet::new();
+    let mut signal_by_entity: HashMap<Entity, f64> = HashMap::new();
+    let mut decimal_values: HashMap<ObjectId, f64> = HashMap::new();
+    for (entity, mobj_id, signal, updater, decimal) in &extra_query {
+        let Some(mobj_id) = mobj_id else { continue };
+        let oid = mobj_id.0;
+        if let Some(signal) = signal {
+            signal_values.insert(oid, signal.value);
+            signal_by_entity.insert(entity, signal.value);
+        }
+        if updater.is_some() {
+            updater_entities.insert(oid);
+        }
+        if let Some(decimal) = decimal {
+            let val = signal_by_entity
+                .get(&decimal.signal_entity)
+                .copied()
+                .or(decimal.last_value)
+                .unwrap_or(0.0);
+            decimal_values.insert(oid, val);
+        }
+    }
+
     egui::TopBottomPanel::bottom("timeline")
         .resizable(true)
         .default_height(200.0)
         .min_height(100.0)
         .show(ctx, |ui| {
-            state
-                .timeline_widget
-                .show(ui, &mut timeline, &property_values, &group_children);
+            state.timeline_widget.show(
+                ui,
+                &mut timeline,
+                &property_values,
+                &group_children,
+                &signal_values,
+                &updater_entities,
+                &decimal_values,
+            );
         });
 
     if let Some(track_id) = state.timeline_widget.selected_track {
