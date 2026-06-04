@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 mod fps_overlay;
 mod timeline_widget;
+mod vsync;
 
 pub struct GaanimEditorPlugin;
 
@@ -28,9 +29,14 @@ impl Plugin for GaanimEditorPlugin {
         })
         .init_resource::<EditorState>()
         .init_resource::<fps_overlay::FpsOverlay>()
+        .init_resource::<vsync::VsyncState>()
         .add_systems(
             Update,
-            (editor_picking_system, fps_overlay::fps_overlay_system),
+            (
+                editor_picking_system,
+                fps_overlay::fps_overlay_system,
+                vsync::vsync_toggle_system,
+            ),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system);
     }
