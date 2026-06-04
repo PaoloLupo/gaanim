@@ -1508,3 +1508,271 @@ cargo bench -p crabanim_renderer
 | 3D | Imposible sin rewrite | Plugin-ready desde día 1 |
 | Bevy upgrade | Everything breaks | Cambios contenidos en 1-2 crates |
 | WASM | Imposible | Crates marcados, path claro |
+
+---
+
+## Anexo: Plan de Trabajo — Updaters, ValueTracker y Animaciones Reactivas
+
+### Estado Actual
+
+#### ✅ Ya implementado
+- **`MoveAlongPath`** — Funcional en Rust API + Python bindings (waypoints → polyline → `PathFollow` lens)
+- **`Signal<T>`, `SignalBinding`, `AlwaysRedraw`** — Componentes ECS base en [signals.rs](file:///home/paologl/dev/rust/gaanim/crates/gaanim_animation/src/signals.rs), pero **no expuestos a Python**
+- **`SceneSet::Updaters`** — Fase de ejecución ya configurada en [hierarchy.rs](file:///home/paologl/dev/rust/gaanim/crates/gaanim_scene/src/hierarchy.rs#L14-L15)
+- **`signal_binding_system`** — Registrado para `f64`, `DVec3`, `Color` en [lib.rs](file:///home/paologl/dev/rust/gaanim/crates/gaanim_animation/src/lib.rs#L55-L63)
+
+#### 🔴 No implementado
+| Feature | Descripción | Prioridad |
+|---------|------------|-----------|
+| **Updater component** | Closure por entidad ejecutada cada frame | 🔴 Crítico |
+| **ValueTracker** | Contenedor numérico animable | 🔴 Crítico |
+| **`always_redraw(fn)`** | Reconstruir mobject reactivamente | 🟡 Alto |
+| **Bob/Rotate/Orbit/Pulse** | Updaters visuales presets | 🟡 Alto |
+| **TracedPath** | Traza el camino recorrido por un objeto | 🟡 Alto |
+| **ShowPassingFlash** | Destello que viaja por un path | 🟢 Medio |
+| **DecimalNumber** | Texto animable mostrando un número | 🟢 Medio |
+| **Follow** | Anclar un objeto a otro | 🟡 Alto |
+
+---
+
+### Arquitectura de Diseño
+
+#### Filosofía: Superando Manim + Motion Canvas
+
+| Aspecto | Manim | Motion Canvas | **Gaanim (propuesta)** |
+|---------|-------|---------------|----------------------|
+| Updaters | `add_updater(fn)` — callback Python cada frame, O(n) por frame | Signals + computed | **ECS-native**: `Updater` component con closure Rust, evaluado en paralelo por Bevy |
+| ValueTracker | Python class wrapper | Signal\<T\> | **`Signal<f64>` component** con animación via `Tween` + reactive bindings |
+| always_redraw | Reconstruye mobject cada frame (lento) | Computed signals (eficiente) | **Change-detection**: solo reconstruye cuando `Signal` muta (Bevy `Changed<>` filter) |
+| TracedPath | Python list de puntos, O(n) acumulativo | No existe | **BezPath append** en ECS, con fading y smoothing opcionales |
+
+#### Diagrama de Sistemas
+
+```mermaid
+graph TD
+    A["SceneSet::Animation"] --> B["evaluate_tweens_system"]
+    B --> C["SceneSet::Updaters"]
+    C --> D["updater_system"]
+    C --> E["signal_binding_system<f64>"]
+    C --> F["always_redraw_system"]
+    C --> G["traced_path_system"]
+    C --> H["follow_system"]
+    D --> I["SceneSet::Layout"]
+```
+
+---
+
+### Fase 1: Core Updater System (gaanim_animation)
+
+#### 1.1 `Updater` Component
+
+Nuevo componente en [signals.rs](file:///home/paologl/dev/rust/gaanim/crates/gaanim_animation/src/signals.rs):
+
+```rust
+/// Per-entity updater that runs every frame during SceneSet::Updaters.
+/// Unlike tweens (which are time-bounded), updaters run indefinitely
+/// until explicitly removed.
+#[derive(Component)]
+pub struct Updater {
+    /// The update function receives (dt, total_elapsed) and the entity.
+    /// Returns true to keep running, false to self-remove.
+    pub func: Arc<dyn Fn(f64, f64, Entity, &mut Commands) -> bool + Send + Sync>,
+    /// Total time elapsed since this updater was added.
+    pub elapsed: f64,
+    /// If true, the updater pauses when the timeline is paused.
+    pub time_based: bool,
+}
+```
+
+#### 1.2 `updater_system`
+
+```rust
+pub fn updater_system(
+    mut commands: Commands,
+    dt: Res<DeltaTime>,
+    mut query: Query<(Entity, &mut Updater)>,
+) {
+    let dt_val = dt.dt;
+    let mut to_remove = Vec::new();
+    
+    for (entity, mut updater) in &mut query {
+        updater.elapsed += dt_val;
+        let keep = (updater.func)(dt_val, updater.elapsed, entity, &mut commands);
+        if !keep {
+            to_remove.push(entity);
+        }
+    }
+    
+    for entity in to_remove {
+        commands.entity(entity).remove::<Updater>();
+    }
+}
+```
+
+#### 1.3 Preset Updaters (módulo `updaters.rs`)
+
+Nuevo archivo `crates/gaanim_animation/src/updaters.rs`:
+
+```rust
+/// Oscillates the entity's Y position with a sine wave (hovering effect).
+pub fn bob_updater(amplitude: f64, frequency: f64) -> Updater { ... }
+
+/// Continuously rotates the entity around its center.
+pub fn rotate_updater(speed: f64) -> Updater { ... }
+
+/// Orbits the entity around a center point at a given radius.
+pub fn orbit_updater(center: DVec3, radius: f64, speed: f64) -> Updater { ... }
+
+/// Pulses the entity's scale between min and max.
+pub fn pulse_updater(min_scale: f64, max_scale: f64, frequency: f64) -> Updater { ... }
+
+/// Follows another entity's position with optional offset and smoothing.
+pub fn follow_updater(target: Entity, offset: DVec3, smoothing: f64) -> Updater { ... }
+```
+
+---
+
+### Fase 2: ValueTracker + Reactive Bindings
+
+#### 2.1 ValueTracker (Python-facing wrapper)
+
+En la API de Python, `ValueTracker` es un wrapper alrededor de `Signal<f64>` en ECS:
+
+```python
+tracker = scene.value_tracker(0.0)        # creates Signal<f64> entity
+tracker.get()                              # reads current value
+tracker.set(3.0)                          # sets value (triggers bindings)
+scene.play(tracker.animate_to(3.0, 1.0))  # tween the signal over 1s
+```
+
+Implementación Rust (en `gaanim_api`):
+- `SceneBuilder::value_tracker(initial: f64) -> ValueTrackerRef`
+- `ValueTrackerRef` wraps an `ObjectId` pointing to a `Signal<f64>` entity
+- `animate_to()` crea un `AnimationBuilder` que produce un `Tween` con un custom lens que interpola el `Signal<f64>` value
+
+#### 2.2 `SignalLens` — Nuevo PropertyLens variant
+
+```rust
+PropertyLens::SignalFloat { from: f64, to: f64 }
+```
+
+Evaluado en `evaluate_tweens_system`: escribe directamente en `Signal<f64>`.
+
+#### 2.3 `always_redraw` Python API
+
+```python
+# Reconstruye el mobject cuando cualquier signal dependiente cambia
+circle = scene.always_redraw(
+    lambda: scene.circle(radius=tracker.get()).fill(BLUE)
+)
+```
+
+---
+
+### Fase 3: TracedPath
+
+#### 3.1 `TracedPath` Component
+
+```rust
+#[derive(Component)]
+pub struct TracedPath {
+    /// The entity whose position to trace.
+    pub source: Entity,
+    /// Accumulated path points.
+    pub points: Vec<DVec3>,
+    /// Maximum number of points (circular buffer). None = unlimited.
+    pub max_points: Option<usize>,
+    /// Minimum distance between consecutive points to record.
+    pub min_distance: f64,
+    /// Whether to apply dissipation (fade out older segments).
+    pub dissipation: f64,
+}
+```
+
+#### 3.2 `traced_path_system`
+
+- Runs in `SceneSet::Updaters`
+- Each frame: reads source entity's `SpatialTransform.translation`
+- If distance > `min_distance`, appends to `points`
+- Rebuilds the entity's `Path2D` from accumulated points
+- If dissipation > 0, removes oldest points proportionally
+
+#### 3.3 Python API
+
+```python
+trace = scene.traced_path(circle, color=YELLOW, width=2.0)
+# Automatically traces circle's movement
+```
+
+---
+
+### Fase 4: Updaters preset + Python bindings
+
+#### Python API para updaters
+
+```python
+# Bob (floating effect)
+circle.add_updater("bob", amplitude=20, frequency=1.0)
+
+# Continuous rotation
+circle.add_updater("rotate", speed=1.0)  # rad/s
+
+# Orbit around a point
+circle.add_updater("orbit", center=(0, 0), radius=200, speed=0.5)
+
+# Pulse scale
+circle.add_updater("pulse", min_scale=0.8, max_scale=1.2, frequency=2.0)
+
+# Follow another mobject
+circle.add_updater("follow", target=other_circle, offset=(50, 0))
+
+# Custom updater (Python function called per-frame)
+circle.add_updater("custom", func=lambda mob, dt: mob.shift(dt * 10, 0))
+
+# Remove updater
+circle.remove_updater("bob")
+circle.clear_updaters()
+```
+
+---
+
+### Fase 5: ShowPassingFlash + DecimalNumber
+
+#### ShowPassingFlash
+- Crea un clon parcial del path del target
+- Anima un segmento "ventana" deslizándose por el path
+- El segmento aparece, se desliza, y desaparece
+
+#### DecimalNumber
+- Mobject de texto que muestra `Signal<f64>` formateado
+- Se actualiza reactivamente cuando el signal cambia
+- Configurable: num_decimals, prefix, suffix, font_size
+
+---
+
+### Orden de Implementación
+
+| Paso | Tarea | Archivo(s) | Esfuerzo |
+|------|-------|-----------|----------|
+| 1 | `Updater` component + `updater_system` | `gaanim_animation/src/updaters.rs`, `lib.rs` | 2h |
+| 2 | Preset updaters (bob, rotate, orbit, pulse) | `gaanim_animation/src/updaters.rs` | 3h |
+| 3 | Follow updater | `gaanim_animation/src/updaters.rs` | 1h |
+| 4 | `ValueTracker` + `SignalFloat` lens | `gaanim_animation/src/signals.rs`, `tween.rs`, `clip.rs` | 3h |
+| 5 | TracedPath component + system | `gaanim_animation/src/updaters.rs` | 3h |
+| 6 | Python bindings: `add_updater`, `value_tracker`, `traced_path` | `gaanim_python/src/mobject.rs`, `scene.rs` | 4h |
+| 7 | ShowPassingFlash animation | `gaanim_api/src/anim.rs`, `builder.rs` | 3h |
+| 8 | DecimalNumber mobject | `gaanim_objects/src/`, Python bindings | 3h |
+| 9 | Rust API exposure + tests | `gaanim_api/src/builder.rs` | 2h |
+| 10 | Ejemplo Python de demo completo | `examples/` | 1h |
+| **Total** | | | **~25h** |
+
+---
+
+### Ventajas sobre Manim/Motion Canvas
+
+1. **Parallelismo**: Updaters se evalúan en paralelo via Bevy ECS (vs Python GIL en Manim)
+2. **Change detection**: `always_redraw` solo recalcula cuando un `Signal` muta (vs cada frame en Manim)
+3. **Zero-copy**: `TracedPath` acumula en un `Vec<DVec3>` contiguo (vs lista Python)
+4. **Type-safe presets**: Bob, Orbit, Pulse son structs Rust tipados (vs lambdas frágiles)
+5. **Composable**: Múltiples updaters por entidad, ordenados deterministamente
+
