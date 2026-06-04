@@ -3,7 +3,7 @@ use bevy_egui::egui;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat, ParallelEncoder};
 use gaanim_export::gpu::GpuContext;
 use gaanim_timeline::timeline::Timeline;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Resource)]
 pub struct ExportState {
@@ -266,8 +266,8 @@ pub struct ExportRuntime {
     pub encoder: Option<ParallelEncoder>,
 }
 
-/// Runs one export frame per Bevy Update cycle.
-/// Uses `&mut World` for full access since GpuContext is !Send+!Sync.
+/// Processes as many export frames as possible within ~16ms per Bevy Update,
+/// keeping the UI responsive (progress bar updates at ~60fps).
 pub fn export_per_frame_system(world: &mut World) {
     let is_active = world.resource::<ExportState>().active;
 
@@ -280,143 +280,97 @@ pub fn export_per_frame_system(world: &mut World) {
         return;
     }
 
-    let (total_frames, current_frame, current_time, frame_time_step) = {
-        let state = world.resource::<ExportState>();
-        (
-            state.total_frames,
-            state.current_frame,
-            state.current_time,
-            state.frame_time_step,
-        )
-    };
+    let batch_start = Instant::now();
+    let batch_budget = Duration::from_millis(16);
 
-    if current_frame >= total_frames {
-        return;
-    }
+    loop {
+        let (total_frames, mut current_frame, mut current_time, frame_time_step, export_width, export_height) = {
+            let s = world.resource::<ExportState>();
+            if s.current_frame >= s.total_frames {
+                return;
+            }
+            (s.total_frames, s.current_frame, s.current_time, s.frame_time_step, s.export_width, s.export_height)
+        };
 
-    let is_report_frame = current_frame.is_multiple_of(10) || current_frame == 0;
+        let is_report_frame = current_frame.is_multiple_of(10) || current_frame == 0;
 
-    let export_width;
-    let export_height;
-    {
-        let state = world.resource::<ExportState>();
-        export_width = state.export_width;
-        export_height = state.export_height;
-    }
+        if is_report_frame || current_frame == 0 {
+            let mut timeline = world.resource_mut::<Timeline>();
+            timeline.seek_request = Some(current_time);
+        }
 
-    if is_report_frame || current_frame == 0 {
-        let mut timeline = world.resource_mut::<Timeline>();
-        timeline.seek_request = Some(current_time);
-    }
-
-    if current_frame == 0 {
-        let has_encoder = world.non_send_resource::<ExportRuntime>().encoder.is_some();
-        if !has_encoder {
-            let (output_path, format, fps, crf, encoding_speed) = {
+        if current_frame == 0 && world.non_send_resource::<ExportRuntime>().encoder.is_none() {
+            let (output_path, format, fps, crf, enc_speed) = {
                 let s = world.resource::<ExportState>();
-                (
-                    s.output_path.clone(),
-                    s.format,
-                    s.fps,
-                    s.crf,
-                    s.encoding_speed,
-                )
+                (s.output_path.clone(), s.format, s.fps, s.crf, s.encoding_speed)
             };
             let enc_config = gaanim_export::encoder::EncoderConfig {
-                output_path,
-                width: export_width,
-                height: export_height,
-                fps,
-                format,
-                transparent: false,
-                crf,
-                encoding_speed,
+                output_path, width: export_width, height: export_height,
+                fps, format, transparent: false, crf,
+                encoding_speed: enc_speed,
                 video_encoder: gaanim_export::encoder::detect_best_encoder(),
             };
             match ParallelEncoder::new(enc_config) {
-                Ok(enc) => {
-                    world.non_send_resource_mut::<ExportRuntime>().encoder = Some(enc);
-                }
-                Err(e) => {
-                    error!("Encoder init error: {e}");
-                    world.resource_mut::<ExportState>().active = false;
-                    return;
-                }
+                Ok(enc) => world.non_send_resource_mut::<ExportRuntime>().encoder = Some(enc),
+                Err(e) => { error!("Encoder init error: {e}"); world.resource_mut::<ExportState>().active = false; return; }
             }
         }
-    }
 
-    if current_frame == 0 {
-        let has_gpu = world.non_send_resource::<ExportRuntime>().gpu.is_some();
-        if !has_gpu {
+        if current_frame == 0 && world.non_send_resource::<ExportRuntime>().gpu.is_none() {
             match GpuContext::new(export_width, export_height) {
-                Ok(g) => {
-                    world.non_send_resource_mut::<ExportRuntime>().gpu = Some(g);
-                }
-                Err(e) => {
-                    error!("GPU init error: {e}");
-                    world.resource_mut::<ExportState>().active = false;
-                    return;
-                }
+                Ok(g) => world.non_send_resource_mut::<ExportRuntime>().gpu = Some(g),
+                Err(e) => { error!("GPU init error: {e}"); world.resource_mut::<ExportState>().active = false; return; }
             }
         }
-    }
 
-    let bg_color = world
-        .get_resource::<ClearColor>()
-        .map(|cc| {
-            let rgba = cc.0.to_srgba();
-            peniko::Color::from_rgba8(
-                (rgba.red * 255.0) as u8,
-                (rgba.green * 255.0) as u8,
-                (rgba.blue * 255.0) as u8,
-                (rgba.alpha * 255.0) as u8,
-            )
-        })
-        .unwrap_or(peniko::Color::BLACK);
+        let bg_color = world.get_resource::<ClearColor>()
+            .map(|cc| { let rgba = cc.0.to_srgba(); peniko::Color::from_rgba8((rgba.red * 255.0) as u8, (rgba.green * 255.0) as u8, (rgba.blue * 255.0) as u8, (rgba.alpha * 255.0) as u8) })
+            .unwrap_or(peniko::Color::BLACK);
 
-    let camera = world.get_resource::<gaanim_math::Camera>().cloned();
-    let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(world, camera.as_ref());
+        let camera = world.get_resource::<gaanim_math::Camera>().cloned();
+        let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(world, camera.as_ref());
 
-    let (zoom, cam_x, cam_y) = camera
-        .as_ref()
-        .map(|c| match c.projection {
+        let (zoom, cam_x, cam_y) = camera.as_ref().map(|c| match c.projection {
             gaanim_math::Projection::Orthographic { zoom } => (zoom, c.position.x, c.position.y),
             _ => (1.0, 0.0, 0.0),
-        })
-        .unwrap_or((1.0, 0.0, 0.0));
+        }).unwrap_or((1.0, 0.0, 0.0));
 
-    let mut vello_scene = bevy_vello::vello::Scene::new();
-    let camera_to_vello =
-        kurbo::Affine::translate((export_width as f64 / 2.0, export_height as f64 / 2.0))
+        let mut vello_scene = bevy_vello::vello::Scene::new();
+        let camera_to_vello = kurbo::Affine::translate((export_width as f64 / 2.0, export_height as f64 / 2.0))
             * kurbo::Affine::scale(zoom)
             * kurbo::Affine::translate((-cam_x, cam_y));
-    vello_scene.append(&raw_scene, Some(camera_to_vello));
+        vello_scene.append(&raw_scene, Some(camera_to_vello));
 
-    {
-        let mut rt = world.non_send_resource_mut::<ExportRuntime>();
-        if let Some(ref mut gpu) = rt.gpu {
-            if let Ok(frame_data) = gpu.render_frame(&vello_scene, bg_color) {
-                if let Some(ref enc) = rt.encoder {
-                    if let Err(e) = enc.push_frame(frame_data) {
-                        error!("Encoder push error: {e}");
-                        rt.gpu = None;
-                        rt.encoder = None;
-                        drop(rt);
-                        let mut state = world.resource_mut::<ExportState>();
-                        state.active = false;
-                        return;
+        {
+            let mut rt = world.non_send_resource_mut::<ExportRuntime>();
+            if let Some(ref mut gpu) = rt.gpu {
+                if let Ok(frame_data) = gpu.render_frame(&vello_scene, bg_color) {
+                    if let Some(ref enc) = rt.encoder {
+                        if let Err(e) = enc.push_frame(frame_data) {
+                            error!("Encoder push error: {e}");
+                            rt.gpu = None; rt.encoder = None;
+                            drop(rt);
+                            world.resource_mut::<ExportState>().active = false;
+                            return;
+                        }
                     }
                 }
             }
         }
-    }
 
-    let mut state = world.resource_mut::<ExportState>();
-    state.current_frame += 1;
-    state.current_time += frame_time_step;
+        current_frame += 1;
+        current_time += frame_time_step;
+        {
+            let mut state = world.resource_mut::<ExportState>();
+            state.current_frame = current_frame;
+            state.current_time = current_time;
+            if total_frames > 0 {
+                state.progress = current_frame as f32 / total_frames as f32;
+            }
+        }
 
-    if total_frames > 0 {
-        state.progress = state.current_frame as f32 / total_frames as f32;
+        if batch_start.elapsed() >= batch_budget || current_frame >= total_frames {
+            break;
+        }
     }
 }
