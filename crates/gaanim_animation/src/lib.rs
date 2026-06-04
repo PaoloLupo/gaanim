@@ -1,6 +1,7 @@
 pub mod prelude;
 pub mod signals;
 pub mod tween;
+pub mod updaters;
 pub mod writing;
 
 pub use signals::{
@@ -11,6 +12,7 @@ pub use tween::{
     AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState, evaluate_custom_tweens_system,
     evaluate_tweens_system, sync_delta_time_system,
 };
+pub use updaters::{Updater, updater_system};
 pub use writing::{FillDrawProgress, PathSource, path_source_seed_added_system};
 
 use bevy::prelude::*;
@@ -52,10 +54,11 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 .in_set(SceneSet::Animation),
         );
 
-        // Register standard signal binders in the Updaters Phase
+        // Register standard signal binders and continuous updaters in the Updaters Phase
         app.add_systems(
             Update,
             (
+                updater_system,
                 signal_binding_system::<f64>,
                 signal_binding_system::<gaanim_core::glam::DVec3>,
                 signal_binding_system::<gaanim_core::peniko::Color>,
@@ -64,3 +67,4 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         );
     }
 }
+
