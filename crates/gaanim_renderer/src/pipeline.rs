@@ -74,6 +74,225 @@ pub fn gaanim_render_cache_sweep_system(
     cache.fragment_cache.retain(|id, _| active.contains(id));
 }
 
+/// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
+/// and compiles them into a single composited `vello::Scene`.
+///
+/// This bypasses Bevy's render graph and does NOT require `VelloScene2d`, `Commands`,
+/// or any window/render plugins. It rebuilds all fragments every call (no caching),
+/// making it suitable for headless export where every frame is different.
+///
+/// # Coordinate System
+/// The returned `vello::Scene` is in **Bevy world space** (Y-up, origin at center).
+/// When rendering directly with `vello::Renderer::render_to_texture`, apply a
+/// camera transform that maps world coordinates to the output viewport.
+pub fn compile_scene_from_world(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+) -> vello::Scene {
+    let mut extracted = Vec::new();
+    let mut culled_entities = std::collections::HashSet::new();
+
+    let cam_bounds = camera.and_then(|cam| {
+        if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
+            let hw = (cam.viewport_width as f64) / (2.0 * zoom);
+            let hh = (cam.viewport_height as f64) / (2.0 * zoom);
+            let margin = 100.0 / zoom.max(0.1);
+            Some(gaanim_math::Bounds3D::new_2d(
+                cam.position.x - hw - margin,
+                cam.position.y - hh - margin,
+                cam.position.x + hw + margin,
+                cam.position.y + hh + margin,
+            ))
+        } else {
+            None
+        }
+    });
+
+    let mut query_mobjects = world.query_filtered::<(
+        Entity,
+        &MobjectId,
+        &GlobalSpatialTransform,
+        &GlobalOpacity,
+        &RenderOrder,
+        &RenderLayer,
+        Option<&Path2D>,
+        Option<&FillBrush>,
+        Option<&StrokeBrush>,
+    ), With<Visible>>();
+
+    let mut query_effects = world.query::<(
+        Option<&DropShadow>,
+        Option<&FillDrawProgress>,
+        Option<&ClipMask>,
+        Option<&WorldBounds>,
+        Option<&gaanim_scene::GroupMarker>,
+    )>();
+
+    let mut child_query = world.query::<&ChildOf>();
+
+    for (entity, _mobj_id, transform, global_opacity, render_order, render_layer, path_opt, fill_opt, stroke_opt) in
+        query_mobjects.iter(world)
+    {
+        if *render_layer != RenderLayer::Vello2D {
+            continue;
+        }
+
+        let Ok((shadow_opt, fill_progress_opt, clip_opt, world_bounds_opt, is_group_opt)) =
+            query_effects.get(world, entity)
+        else {
+            continue;
+        };
+
+        if is_group_opt.is_some() {
+            continue;
+        }
+
+        if let Some(ref bounds) = cam_bounds {
+            let mut is_ancestor_culled = false;
+            let mut current = entity;
+            while let Ok(child_of) = child_query.get(world, current) {
+                let parent = child_of.parent();
+                if culled_entities.contains(&parent) {
+                    is_ancestor_culled = true;
+                    break;
+                }
+                current = parent;
+            }
+
+            if is_ancestor_culled {
+                culled_entities.insert(entity);
+                continue;
+            }
+
+            if let Some(w_bounds) = world_bounds_opt
+                && !bounds.intersects(&w_bounds.0) {
+                    culled_entities.insert(entity);
+                    continue;
+                }
+        }
+
+        let fill_alpha = fill_progress_opt
+            .map(|f| f.0.clamp(0.0, 1.0))
+            .unwrap_or(1.0);
+
+        let mut scene = vello::Scene::new();
+        let empty_bez = kurbo::BezPath::new();
+        let elem_path = path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez);
+        let elem_fill = fill_opt.and_then(|f| f.0.as_ref());
+        let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
+        let elem_stroke_style = stroke_opt.map(|s| &s.style);
+
+        if let Some(shadow) = shadow_opt {
+            let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
+            let shadow_brush = peniko::Brush::Solid(shadow.color);
+            scene.fill(
+                peniko::Fill::NonZero,
+                shadow_transform,
+                &shadow_brush,
+                None,
+                elem_path,
+            );
+        }
+
+        if fill_alpha < 1.0 {
+            if let Some(fill_brush) = elem_fill {
+                let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
+                if let Some(ref brush) = modulated {
+                    scene.fill(
+                        peniko::Fill::NonZero,
+                        kurbo::Affine::IDENTITY,
+                        brush,
+                        None,
+                        elem_path,
+                    );
+                }
+            }
+        } else if let Some(fill_brush) = elem_fill {
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                fill_brush,
+                None,
+                elem_path,
+            );
+        }
+
+        if let Some(stroke_brush) = elem_stroke
+            && let Some(style) = elem_stroke_style
+        {
+            let has_closed_contour = elem_path
+                .elements().contains(&kurbo::PathEl::ClosePath);
+            if has_closed_contour {
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    1.0,
+                    kurbo::Affine::IDENTITY,
+                    elem_path,
+                );
+                scene.stroke(style, kurbo::Affine::IDENTITY, stroke_brush, None, elem_path);
+                scene.pop_layer();
+            } else {
+                scene.stroke(style, kurbo::Affine::IDENTITY, stroke_brush, None, elem_path);
+            }
+        }
+
+        extracted.push(ExtractedElement {
+            transform: transform.affine_2d,
+            opacity: global_opacity.0,
+            render_order: *render_order,
+            scene: Arc::new(scene),
+            clip_mask: clip_opt.cloned(),
+        });
+    }
+
+    extracted.sort_by(
+        |a, b| match a.render_order.z_index.cmp(&b.render_order.z_index) {
+            std::cmp::Ordering::Equal => a
+                .render_order
+                .creation_order
+                .cmp(&b.render_order.creation_order),
+            other => other,
+        },
+    );
+
+    let mut main_scene = vello::Scene::new();
+
+    for elem in extracted {
+        let mut layers_to_pop = 0;
+
+        if let Some(clip) = &elem.clip_mask {
+            main_scene.push_layer(
+                clip.rule,
+                peniko::BlendMode::default(),
+                1.0,
+                elem.transform,
+                &clip.path,
+            );
+            layers_to_pop += 1;
+        }
+
+        if elem.opacity < 1.0 {
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::default(),
+                elem.opacity,
+                kurbo::Affine::IDENTITY,
+                &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
+            );
+            layers_to_pop += 1;
+        }
+
+        main_scene.append(&elem.scene, Some(elem.transform));
+
+        for _ in 0..layers_to_pop {
+            main_scene.pop_layer();
+        }
+    }
+
+    main_scene
+}
+
 /// System: Extracts, composites, and renders all visible gaanim 2D Mobjects.
 ///
 /// 1. Queries all active Mobjects marked for Vello2D rendering that are visible.

@@ -1,4 +1,4 @@
-use crate::encoder::{EncodingSpeed, ExportFormat};
+use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AspectRatioPreset {
@@ -42,6 +42,8 @@ pub struct ExportConfig {
     pub crf: u32,
 
     pub encoding_speed: EncodingSpeed,
+    pub video_encoder: VideoEncoder,
+    pub headless: bool,
 }
 
 impl Default for ExportConfig {
@@ -59,6 +61,8 @@ impl Default for ExportConfig {
             end_time: None,
             crf: 18,
             encoding_speed: EncodingSpeed::Balanced,
+            video_encoder: VideoEncoder::Libx264,
+            headless: false,
         }
     }
 }
@@ -97,6 +101,10 @@ impl ExportConfig {
 
     pub fn apply_presets(mut self) -> Self {
         self.encoding_speed = self.quality.encoding_speed();
+
+        if matches!(self.video_encoder, VideoEncoder::Libx264) {
+            self.video_encoder = crate::encoder::detect_best_encoder();
+        }
 
         match self.quality {
             QualityPreset::Draft => {

@@ -10,7 +10,8 @@ use std::time::Instant;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::ExportConfig;
-use crate::encoder::{EncoderConfig, ParallelEncoder, Result};
+use crate::encoder::{EncoderConfig, ExportError, ParallelEncoder, Result};
+use crate::gpu::GpuContext;
 
 fn create_progress_bar(total_frames: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_frames);
@@ -219,6 +220,7 @@ where
         transparent: config.transparent,
         crf: config.crf,
         encoding_speed: config.encoding_speed,
+        video_encoder: config.video_encoder,
     })?;
 
     let mut app = App::new();
@@ -287,6 +289,140 @@ where
     app.add_systems(Update, export_pipeline_system);
 
     app.run();
+
+    Ok(())
+}
+
+/// Headless GPU-direct export: bypasses Bevy's render graph and winit entirely.
+///
+/// Uses a minimal Bevy App (ECS + timeline only), own wgpu context with Vello,
+/// and the standalone `gaanim_renderer::pipeline::compile_scene_from_world`
+/// to produce frames. Frames are piped directly to ffmpeg with no swapchain,
+/// no BGRA conversion, and no screenshot overhead.
+pub fn export_scene_direct<F>(config: ExportConfig, setup_world_fn: F) -> Result<()>
+where
+    F: FnOnce(&mut World) + Send + Sync + 'static,
+{
+    let start_time = Instant::now();
+    let config = config.apply_presets();
+
+    println!("------------------------------------------------------------");
+    println!("🦀 gaanim v2 — Headless GPU-Direct Export");
+    println!("------------------------------------------------------------");
+    println!("  Output file:   {}", config.output_path);
+    println!("  Resolution:    {}x{}", config.width, config.height);
+    println!("  Framerate:     {} FPS", config.fps);
+    println!("  Format:        {}", format_label(&config.format));
+    if matches!(config.format, crate::encoder::ExportFormat::Mp4) {
+        println!("  Encoder:       {}", config.video_encoder.display_name());
+    }
+    println!("  Transparent:   {}", config.transparent);
+    if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
+        println!("  Segment:       {:.2}s to {:.2}s", s, e);
+    }
+    println!("------------------------------------------------------------");
+
+    let mut encoder = ParallelEncoder::new(EncoderConfig {
+        output_path: config.output_path.clone(),
+        width: config.width,
+        height: config.height,
+        fps: config.fps,
+        format: config.format,
+        transparent: config.transparent,
+        crf: config.crf,
+        encoding_speed: config.encoding_speed,
+        video_encoder: config.video_encoder,
+    })?;
+
+    let mut gpu = GpuContext::new(config.width, config.height)
+        .map_err(crate::encoder::ExportError::General)?;
+
+    let mut app = App::new();
+    app.add_plugins(bevy::prelude::MinimalPlugins)
+        .add_plugins(gaanim_scene::GaanimScenePlugin)
+        .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+        .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+        .add_plugins(gaanim_text::GaanimTextPlugin);
+
+    app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
+    app.add_systems(Startup, setup_scene_system);
+
+    app.finish();
+    app.cleanup();
+    app.update();
+
+    let timeline_duration = app.world().resource::<Timeline>().cached_duration;
+    let render_start = config.start_time.unwrap_or(0.0).max(0.0);
+    let render_end = config
+        .end_time
+        .unwrap_or(timeline_duration)
+        .min(timeline_duration);
+    let render_length = render_end - render_start;
+
+    let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    let frame_time_step = 1.0 / config.fps as f64;
+    let pb = create_progress_bar(total_frames);
+
+    let mut current_time = render_start;
+    let mut last_report = Instant::now();
+
+    for frame_idx in 0..total_frames {
+        {
+            let world = app.world_mut();
+            let mut timeline = world.resource_mut::<Timeline>();
+            timeline.seek_request = Some(current_time);
+        }
+
+        app.update();
+
+        let vello_scene = {
+            let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
+            gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref())
+        };
+
+        let bg_color = app
+            .world()
+            .get_resource::<ClearColor>()
+            .map(|cc| {
+                let rgba = cc.0.to_srgba();
+                bevy_vello::vello::peniko::Color::from_rgba8(
+                    (rgba.red * 255.0) as u8,
+                    (rgba.green * 255.0) as u8,
+                    (rgba.blue * 255.0) as u8,
+                    (rgba.alpha * 255.0) as u8,
+                )
+            })
+            .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
+
+        let frame_data = gpu
+            .render_frame(&vello_scene, bg_color)
+            .map_err(ExportError::General)?;
+
+        encoder
+            .push_frame(frame_data)
+            .map_err(|e| ExportError::Capture(format!("Encoder push error: {}", e)))?;
+
+        if frame_idx.is_multiple_of(10) || frame_idx == total_frames - 1 {
+            let speed = 10.0 / last_report.elapsed().as_secs_f64();
+            pb.set_message(format!("{:.1} fps", speed));
+            last_report = Instant::now();
+        }
+        pb.inc(1);
+
+        current_time += frame_time_step;
+    }
+
+    pb.finish_with_message("Done!");
+    println!("  Finalizing video file...");
+
+    if let Err(e) = encoder.finalize() {
+        bevy::prelude::error!("Encoder finalization error: {}", e);
+    }
+
+    let duration = start_time.elapsed();
+    println!("------------------------------------------------------------");
+    println!("✓ Export successfully completed in {:.2}s!", duration.as_secs_f64());
+    println!("------------------------------------------------------------");
 
     Ok(())
 }

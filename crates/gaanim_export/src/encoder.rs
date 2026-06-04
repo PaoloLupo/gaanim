@@ -27,6 +27,127 @@ pub enum ExportFormat {
     PngSequence,
 }
 
+/// Hardware / software video encoder selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VideoEncoder {
+    /// CPU libx264 — always available
+    #[default]
+    Libx264,
+    /// NVIDIA NVENC
+    H264Nvenc,
+    /// AMD AMF
+    H264Amf,
+    /// Intel Quick Sync
+    H264Qsv,
+}
+
+impl VideoEncoder {
+    pub fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Libx264 => "libx264",
+            Self::H264Nvenc => "h264_nvenc",
+            Self::H264Amf => "h264_amf",
+            Self::H264Qsv => "h264_qsv",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Libx264 => "CPU (libx264)",
+            Self::H264Nvenc => "NVIDIA (NVENC)",
+            Self::H264Amf => "AMD (AMF)",
+            Self::H264Qsv => "Intel (QSV)",
+        }
+    }
+}
+
+/// Detect which hardware H.264 encoders are available via ffmpeg.
+pub fn detect_available_encoders() -> Vec<VideoEncoder> {
+    let mut encoders = vec![VideoEncoder::Libx264];
+
+    if let Ok(output) = Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if text.contains("h264_nvenc") {
+            encoders.push(VideoEncoder::H264Nvenc);
+        }
+        if text.contains("h264_amf") {
+            encoders.push(VideoEncoder::H264Amf);
+        }
+        if text.contains("h264_qsv") {
+            encoders.push(VideoEncoder::H264Qsv);
+        }
+    }
+
+    encoders
+}
+
+/// Pick the best available encoder preferring hardware acceleration.
+///
+/// Probes each candidate with a 1-frame test encode to verify it works
+/// with the piped-rawvideo input we use (some encoders need driver-specific
+/// setup or proprietary drivers, e.g. AMF needs AMDGPU-PRO on Linux).
+pub fn detect_best_encoder() -> VideoEncoder {
+    let available = detect_available_encoders();
+    for &candidate in &[VideoEncoder::H264Amf, VideoEncoder::H264Nvenc, VideoEncoder::H264Qsv] {
+        if available.contains(&candidate) && probe_encoder(candidate) {
+            return candidate;
+        }
+    }
+    VideoEncoder::Libx264
+}
+
+fn probe_encoder(encoder: VideoEncoder) -> bool {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-y")
+       .arg("-f").arg("rawvideo")
+       .arg("-pix_fmt").arg("rgba")
+       .arg("-s").arg("64x64")
+       .arg("-r").arg("1")
+       .arg("-i").arg("-")
+       .arg("-frames:v").arg("1");
+
+    match encoder {
+        VideoEncoder::Libx264 => {
+            cmd.arg("-c:v").arg("libx264").arg("-preset").arg("ultrafast");
+        }
+        VideoEncoder::H264Nvenc => {
+            cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg("p1");
+        }
+        VideoEncoder::H264Amf => {
+            cmd.arg("-vf").arg("format=yuv420p")
+               .arg("-c:v").arg("h264_amf")
+               .arg("-quality").arg("speed")
+               .arg("-rc").arg("vbr_latency");
+        }
+        VideoEncoder::H264Qsv => {
+            cmd.arg("-c:v").arg("h264_qsv");
+        }
+    }
+
+    cmd.arg("-pix_fmt").arg("yuv420p")
+       .arg("-f").arg("null")
+       .arg("-")
+       .stdin(Stdio::piped())
+       .stdout(Stdio::null())
+       .stderr(Stdio::null());
+
+    if let Ok(mut child) = cmd.spawn() {
+        // Feed one empty RGBA frame (64x64x4 = 16384 zero bytes)
+        if let Some(mut stdin) = child.stdin.take() {
+            let blank = vec![0u8; 64 * 64 * 4];
+            let _ = stdin.write_all(&blank);
+        }
+        child.wait().map(|s| s.success()).unwrap_or(false)
+    } else {
+        false
+    }
+}
+
 /// Encoding speed tier sent from the config layer.
 /// 0 = fast (Draft), 1 = balanced (Standard), 2 = best (Production).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +177,7 @@ pub struct EncoderConfig {
     pub transparent: bool,
     pub crf: u32,
     pub encoding_speed: EncodingSpeed,
+    pub video_encoder: VideoEncoder,
 }
 
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
@@ -176,10 +298,40 @@ impl ParallelEncoder {
 
                 match config.format {
                     ExportFormat::Mp4 => {
-                        cmd.arg("-c:v").arg("libx264")
-                           .arg("-crf").arg(config.crf.to_string())
-                           .arg("-preset").arg(Self::x264_preset(config.encoding_speed))
-                           .arg("-threads").arg("0");
+                        match config.video_encoder {
+                            VideoEncoder::Libx264 => {
+                                cmd.arg("-c:v").arg("libx264")
+                                   .arg("-crf").arg(config.crf.to_string())
+                                   .arg("-preset").arg(Self::x264_preset(config.encoding_speed))
+                                   .arg("-threads").arg("0");
+                            }
+                            VideoEncoder::H264Nvenc => {
+                                let p = match config.encoding_speed {
+                                    EncodingSpeed::Fast => "p1",
+                                    EncodingSpeed::Balanced => "p4",
+                                    EncodingSpeed::Best => "p7",
+                                };
+                                cmd.arg("-c:v").arg("h264_nvenc")
+                                   .arg("-preset").arg(p)
+                                   .arg("-rc").arg("vbr")
+                                   .arg("-cq").arg(config.crf.to_string());
+                            }
+                            VideoEncoder::H264Amf => {
+                                let quality = match config.encoding_speed {
+                                    EncodingSpeed::Fast => "speed",
+                                    EncodingSpeed::Balanced => "balanced",
+                                    EncodingSpeed::Best => "quality",
+                                };
+                                cmd.arg("-vf").arg("format=yuv420p")
+                                   .arg("-c:v").arg("h264_amf")
+                                   .arg("-quality").arg(quality)
+                                   .arg("-rc").arg("vbr_latency");
+                            }
+                            VideoEncoder::H264Qsv => {
+                                cmd.arg("-c:v").arg("h264_qsv")
+                                   .arg("-global_quality").arg(config.crf.to_string());
+                            }
+                        }
 
                         cmd.arg("-pix_fmt").arg("yuv420p");
                     }
