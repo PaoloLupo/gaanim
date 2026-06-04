@@ -161,7 +161,8 @@ struct ReplayResult {
 fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut selection_map: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    
+    // Track SceneIds by their replay order index for connection processing.
+    let mut scene_ids: Vec<gaanim_timeline::clip::SceneId> = Vec::new();
 
     for op in ops {
         match op {
@@ -293,6 +294,18 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                     if !builders.is_empty() {
                         scene.play_parallel(builders);
                     }
+                }
+            }
+            DeferredOp::SceneBegin { ref name } => {
+                let id = scene.begin_scene(name);
+                scene_ids.push(id);
+            }
+            DeferredOp::SceneEnd => {
+                scene.end_scene();
+            }
+            DeferredOp::SceneConnect { from_index, to_index, transition } => {
+                if from_index < scene_ids.len() && to_index < scene_ids.len() {
+                    scene.timeline.connect(scene_ids[from_index], scene_ids[to_index], transition);
                 }
             }
         }

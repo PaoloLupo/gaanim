@@ -2,6 +2,9 @@
 
 from .gaanim_core import (
     Scene,
+    Engine,
+    SceneBuilder,
+    Transition,
     Mobject,
     Selection,
     SelectionAnim,
@@ -14,7 +17,8 @@ from .gaanim_core import (
 )
 
 __all__ = [
-    "Scene", "Mobject", "Selection", "SelectionAnim", "AnimSpec", "Color", "ObjectId", "Theme",
+    "Scene", "Engine", "SceneBuilder", "Transition",
+    "Mobject", "Selection", "SelectionAnim", "AnimSpec", "Color", "ObjectId", "Theme",
     "GOLD", "CORAL", "BLUE", "WHITE", "BLACK", "RED", "GREEN", "YELLOW",
     "ORANGE", "PURPLE", "PINK", "GRAY", "CYAN", "NAVY", "TEAL",
 ]

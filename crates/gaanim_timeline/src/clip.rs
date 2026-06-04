@@ -9,6 +9,8 @@ slotmap::new_key_type! {
     pub struct ClipId;
     /// Unique identifier for an individual timeline track.
     pub struct TrackId;
+    /// Unique identifier for a scene in a multi-scene timeline.
+    pub struct SceneId;
 }
 
 /// Represents a track in the multi-track timeline (e.g. "Graphics", "Audio", etc.).
@@ -23,6 +25,8 @@ pub struct Track {
     pub order: i32,
     /// The ObjectId of the mobject associated with this track (if any).
     pub object_id: Option<ObjectId>,
+    /// The scene this track belongs to (None for global tracks).
+    pub scene: Option<SceneId>,
 }
 
 /// A discrete event or continuous element in the timeline with a start time and duration.
@@ -91,6 +95,19 @@ pub enum ClipPayload {
         /// keep replaying on each seek. These stored world transforms are
         /// re-applied to overwrite those stale values.
         children_world_transforms: Vec<(ObjectId, SpatialTransform)>,
+    },
+    /// Marks the beginning of a scene at this timestamp.
+    SceneStart(SceneId),
+    /// Marks the end of a scene at this timestamp.
+    SceneEnd(SceneId),
+    /// A scene transition spanning the boundary between two scenes.
+    Transition {
+        /// The outgoing scene.
+        from: SceneId,
+        /// The incoming scene.
+        to: SceneId,
+        /// The transition effect to apply.
+        transition_type: crate::transition::TransitionType,
     },
 }
 

@@ -2,8 +2,10 @@ use bevy::prelude::*;
 
 pub mod clip;
 pub mod prelude;
+pub mod scene;
 pub mod snapshot;
 pub mod timeline;
+pub mod transition;
 
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::Timeline;
@@ -27,6 +29,9 @@ impl Plugin for GaanimTimelinePlugin {
 
 /// System: Exclusive system to capture the initial world state at t=0.0 as a keyframe,
 /// running in the PostStartup stage so all startup commands have completed.
+///
+/// Also triggers an initial seek to t=0 so that scene visibility is applied
+/// immediately (hiding entities that belong to non-active scenes).
 pub fn capture_initial_keyframe_system(world: &mut World) {
     let timeline = world.remove_resource::<Timeline>();
     if let Some(mut tl) = timeline {
@@ -34,6 +39,9 @@ pub fn capture_initial_keyframe_system(world: &mut World) {
             let snapshot = snapshot::WorldSnapshot::capture(world);
             tl.add_keyframe(0.0, snapshot);
         }
+        // Apply scene visibility at t=0 so entities from non-active scenes are hidden
+        // before the first render frame.
+        tl.seek(world, 0.0);
         world.insert_resource(tl);
     }
 }

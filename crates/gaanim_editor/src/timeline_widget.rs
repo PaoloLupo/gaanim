@@ -1309,6 +1309,9 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
         ClipPayload::Breakpoint => CLR_BREAKPOINT,
         ClipPayload::SegmentStart(_) => CLR_SEGMENT,
         ClipPayload::Ungroup { .. } => Color32::from_rgb(230, 100, 50),
+        ClipPayload::SceneStart(_) => Color32::from_rgb(50, 180, 100),
+        ClipPayload::SceneEnd(_) => Color32::from_rgb(180, 50, 50),
+        ClipPayload::Transition { .. } => Color32::from_rgb(200, 200, 50),
     }
 }
 
@@ -1368,5 +1371,8 @@ fn clip_label(payload: &ClipPayload) -> String {
         ClipPayload::Breakpoint => "BP".into(),
         ClipPayload::SegmentStart(s) => format!("Seg:{}", s),
         ClipPayload::Ungroup { .. } => "Ungroup".into(),
+        ClipPayload::SceneStart(_) => "Scene▶".into(),
+        ClipPayload::SceneEnd(_) => "Scene◼".into(),
+        ClipPayload::Transition { .. } => "Transition".into(),
     }
 }

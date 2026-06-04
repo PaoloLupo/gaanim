@@ -3,8 +3,10 @@ use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
 use std::collections::BTreeMap;
 
-use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, Track, TrackId};
+use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
+use crate::scene::{SceneMember, SceneMetadata};
 use crate::snapshot::WorldSnapshot;
+use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
 
@@ -47,6 +49,12 @@ pub struct Timeline {
     /// values) produces the same deterministic result regardless of prior entity state.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub last_restore_kf_time: Option<OrderedFloat<f64>>,
+    /// Arena of scene metadata for multi-scene timelines.
+    pub scenes: SlotMap<SceneId, SceneMetadata>,
+    /// Index mapping scene start times to scene IDs for O(log n) lookup.
+    pub scene_index: BTreeMap<OrderedFloat<f64>, SceneId>,
+    /// Ordered list of connections between scenes.
+    pub scene_connections: Vec<SceneConnection>,
 }
 
 impl Default for Timeline {
@@ -65,6 +73,9 @@ impl Default for Timeline {
             loop_range: None,
             seek_request: None,
             last_restore_kf_time: None,
+            scenes: SlotMap::with_key(),
+            scene_index: BTreeMap::new(),
+            scene_connections: Vec::new(),
         }
     }
 }
@@ -82,7 +93,85 @@ impl Timeline {
             name: name.into(),
             order,
             object_id: None,
+            scene: None,
         })
+    }
+
+    /// Adds a new scene to the timeline and returns its ID.
+    pub fn add_scene(&mut self, name: &str) -> SceneId {
+        let scene_id = self.scenes.insert_with_key(|id| SceneMetadata {
+            id,
+            name: name.to_string(),
+            tracks: Vec::new(),
+            camera_override: None,
+            background_override: None,
+        });
+        scene_id
+    }
+
+    /// Returns the scene active at the given timestamp, if any.
+    ///
+    /// Uses the `scene_index` BTreeMap (populated by `begin_scene`) for O(log n)
+    /// lookup. Returns the scene whose start time is latest but ≤ `time`.
+    pub fn scene_at(&self, time: f64) -> Option<SceneId> {
+        let time_key = OrderedFloat(time);
+        self.scene_index
+            .range(..=time_key)
+            .next_back()
+            .map(|(_, &id)| id)
+    }
+
+    /// Records a scene's start time in the `scene_index` for fast lookup by `scene_at()`.
+    pub fn index_scene(&mut self, scene_id: SceneId, start_time: f64) {
+        self.scene_index.insert(OrderedFloat(start_time), scene_id);
+    }
+
+    /// Returns the (start, end) time bounds for a scene, computed from its clips.
+    pub fn scene_bounds(&self, id: SceneId) -> Option<(f64, f64)> {
+        let mut start: Option<f64> = None;
+        let mut end: Option<f64> = None;
+
+        for clip in self.clips.values() {
+            match &clip.payload {
+                ClipPayload::SceneStart(sid) if *sid == id => {
+                    start = Some(clip.start);
+                }
+                ClipPayload::SceneEnd(sid) if *sid == id => {
+                    end = Some(clip.start);
+                }
+                _ => {}
+            }
+        }
+
+        match (start, end) {
+            (Some(s), Some(e)) => Some((s, e)),
+            _ => None,
+        }
+    }
+
+    /// Records a connection between two scenes with a transition.
+    pub fn connect(&mut self, from: SceneId, to: SceneId, transition: TransitionType) {
+        let from_end = self
+            .scene_bounds(from)
+            .map(|(_, e)| e)
+            .unwrap_or(self.current_time);
+        let duration = transition.duration();
+        self.scene_connections
+            .push(SceneConnection { from, to, transition: transition.clone() });
+        let track = self.tracks.keys().next().unwrap();
+        self.add_clip(
+            track,
+            from_end,
+            duration,
+            ClipPayload::Transition { from, to, transition_type: transition },
+        );
+    }
+
+    /// Connects a sequence of scenes with the same transition type.
+    pub fn sequence(&mut self, scenes: &[SceneId], default_transition: TransitionType) {
+        for window in scenes.windows(2) {
+            self.connect(window[0], window[1], default_transition.clone());
+        }
     }
 
     /// Adds a clip to the timeline under a specific track and time interval.
@@ -273,6 +362,9 @@ impl Timeline {
         }
 
         // 3. Replay and interpolate clip properties up to target_time
+        //    Also track active transitions for scene visibility.
+        let mut active_transition: Option<(&crate::transition::TransitionType, f64, SceneId, SceneId)> = None;
+
         for clip in candidate_clips {
             match clip.payload {
                 ClipPayload::Animation(ref anim) => {
@@ -288,6 +380,19 @@ impl Timeline {
                             let t = anim.rate_func.evaluate(progress);
                             apply_lens_spec(world, target_entity, &anim.lens, t);
                         }
+                    }
+                }
+                ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
+                    // Scene boundary markers — visibility is handled in the post-pass below.
+                }
+                ClipPayload::Transition { ref transition_type, from, to } => {
+                    if clip.start <= self.current_time && clip.end() > self.current_time {
+                        let progress = if clip.duration > 0.0 {
+                            ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        active_transition = Some((transition_type, progress, from, to));
                     }
                 }
                 ClipPayload::Ungroup { group, ref children, group_parent, ref group_transform, ref children_world_transforms } => {
@@ -405,6 +510,50 @@ impl Timeline {
                 _ => {}
             }
         }
+
+        // 4. Scene visibility post-pass.
+        //    Determine which scene is active and toggle visibility on SceneMember entities.
+        if !self.scenes.is_empty() {
+            let active_scene = self.scene_at(self.current_time);
+
+            // Collect entities with SceneMember to avoid borrow conflicts
+            let scene_entities: Vec<(Entity, SceneId)> = {
+                let mut q = world.query::<(Entity, &SceneMember)>();
+                q.iter(world).map(|(e, sm)| (e, sm.0)).collect()
+            };
+
+            // Determine which scenes should be visible
+            let visible_scenes: std::collections::HashSet<SceneId> = if let Some((_, _, from, to)) = active_transition {
+                // During a transition, BOTH scenes are visible
+                [from, to].into_iter().collect()
+            } else if let Some(scene) = active_scene {
+                std::iter::once(scene).collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+
+            // Apply transition effects if active (before visibility toggle)
+            if let Some((ref transition_type, t, from, to)) = active_transition {
+                apply_transition(world, &scene_entities, transition_type, t, from, to);
+            }
+
+            // Toggle visibility: entities belonging to non-visible scenes get hidden
+            for (entity, scene_id) in &scene_entities {
+                if visible_scenes.contains(scene_id) {
+                    if world.get::<gaanim_scene::Visible>(*entity).is_none() {
+                        if let Ok(mut em) = world.get_entity_mut(*entity) {
+                            em.insert(gaanim_scene::Visible);
+                        }
+                    }
+                } else {
+                    if world.get::<gaanim_scene::Visible>(*entity).is_some() {
+                        if let Ok(mut em) = world.get_entity_mut(*entity) {
+                            em.remove::<gaanim_scene::Visible>();
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -520,6 +669,110 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
         }
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
+        }
+    }
+}
+
+/// Applies transition effects to scene entities based on the transition type and progress.
+///
+/// `from` and `to` are the scene IDs involved in the transition.
+fn apply_transition(
+    world: &mut World,
+    scene_entities: &[(Entity, SceneId)],
+    transition: &crate::transition::TransitionType,
+    t: f64,
+    from: SceneId,
+    to: SceneId,
+) {
+    use crate::transition::TransitionType;
+
+    match transition {
+        TransitionType::Cut => {
+            // Instant cut — no visual effect needed.
+        }
+        TransitionType::CrossFade { .. } => {
+            // Crossfade: from scene fades out (opacity 1→0), to scene fades in (opacity 0→1).
+            for (entity, scene_id) in scene_entities {
+                let target_opacity = if *scene_id == from {
+                    1.0 - t as f32
+                } else if *scene_id == to {
+                    t as f32
+                } else {
+                    continue;
+                };
+                if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
+                    opacity.0 = target_opacity;
+                }
+            }
+        }
+        TransitionType::FadeThrough { fade_color, .. } => {
+            // Fade-through: first half fades everything to fade_color, second half reveals to-scene.
+            let _ = fade_color;
+            for (entity, scene_id) in scene_entities {
+                let target_opacity = if t < 0.5 {
+                    // First half: fade out both scenes
+                    if *scene_id == from {
+                        1.0 - (t * 2.0) as f32
+                    } else {
+                        0.0
+                    }
+                } else {
+                    // Second half: fade in to-scene
+                    if *scene_id == to {
+                        ((t - 0.5) * 2.0) as f32
+                    } else {
+                        0.0
+                    }
+                };
+                if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
+                    opacity.0 = target_opacity;
+                }
+            }
+        }
+        TransitionType::Slide { direction, .. } => {
+            // Slide: from scene slides out, to scene slides in from opposite side.
+            let viewport_width = 1280.0;
+            let viewport_height = 720.0;
+
+            for (entity, scene_id) in scene_entities {
+                let (dx, dy) = if *scene_id == from {
+                    match direction {
+                        crate::transition::SlideDirection::Left => (-viewport_width * t, 0.0),
+                        crate::transition::SlideDirection::Right => (viewport_width * t, 0.0),
+                        crate::transition::SlideDirection::Up => (0.0, viewport_height * t),
+                        crate::transition::SlideDirection::Down => (0.0, -viewport_height * t),
+                    }
+                } else if *scene_id == to {
+                    match direction {
+                        crate::transition::SlideDirection::Left => (viewport_width * (1.0 - t), 0.0),
+                        crate::transition::SlideDirection::Right => (-viewport_width * (1.0 - t), 0.0),
+                        crate::transition::SlideDirection::Up => (0.0, -viewport_height * (1.0 - t)),
+                        crate::transition::SlideDirection::Down => (0.0, viewport_height * (1.0 - t)),
+                    }
+                } else {
+                    continue;
+                };
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(*entity) {
+                    transform.translation.x += dx;
+                    transform.translation.y += dy;
+                }
+            }
+        }
+        TransitionType::ZoomThrough { center, max_zoom, .. } => {
+            let _ = (center, max_zoom);
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
+                    let zoom_factor = if t < 0.5 {
+                        1.0 + (max_zoom - 1.0) * (t * 2.0)
+                    } else {
+                        max_zoom - (max_zoom - 1.0) * ((t - 0.5) * 2.0)
+                    };
+                    *zoom = zoom_factor;
+                }
+            }
+        }
+        TransitionType::Morph { mappings, .. } => {
+            let _ = mappings;
         }
     }
 }

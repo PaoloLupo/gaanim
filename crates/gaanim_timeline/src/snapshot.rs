@@ -7,6 +7,9 @@ use gaanim_scene::{
 };
 use std::collections::HashMap;
 
+use crate::clip::SceneId;
+use crate::scene::SceneMember;
+
 /// A snapshot capturing the complete state of a single Mobject entity.
 ///
 /// This structure is fully serializable when the `serde` feature is active,
@@ -54,6 +57,8 @@ pub struct EntitySnapshot {
     pub world_bounds: Option<WorldBounds>,
     /// Propagated global opacity factor.
     pub global_opacity: Option<GlobalOpacity>,
+    /// The scene this entity belongs to (None for global entities).
+    pub scene: Option<SceneId>,
 }
 
 /// Captures the complete state of all Mobject entities within the ECS world.
@@ -146,6 +151,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     } else {
         entity_mut.remove::<WorldBounds>();
     }
+
+    if let Some(scene_id) = snap.scene {
+        entity_mut.insert(SceneMember(scene_id));
+    } else {
+        entity_mut.remove::<SceneMember>();
+    }
 }
 
 impl WorldSnapshot {
@@ -205,6 +216,7 @@ impl WorldSnapshot {
                     local_bounds: world.get::<LocalBounds>(entity).copied(),
                     world_bounds: world.get::<WorldBounds>(entity).copied(),
                     global_opacity: world.get::<GlobalOpacity>(entity).copied(),
+                    scene: world.get::<SceneMember>(entity).map(|s| s.0),
                 },
             ));
         }

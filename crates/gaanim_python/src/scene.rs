@@ -66,6 +66,18 @@ pub(crate) enum DeferredOp {
     Ungroup {
         group: ObjectId,
     },
+    /// Marks the beginning of a new scene scope (multi-scene Engine).
+    SceneBegin {
+        name: String,
+    },
+    /// Marks the end of the current scene scope (multi-scene Engine).
+    SceneEnd,
+    /// Connect two scenes by their replay order index with a transition.
+    SceneConnect {
+        from_index: usize,
+        to_index: usize,
+        transition: gaanim_timeline::transition::TransitionType,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1014,7 +1026,7 @@ impl PyScene {
     }
 }
 
-fn contours_to_bezpath(contours: &[Vec<[f64; 2]>]) -> gaanim_core::kurbo::BezPath {
+pub(crate) fn contours_to_bezpath(contours: &[Vec<[f64; 2]>]) -> gaanim_core::kurbo::BezPath {
     let mut path = gaanim_core::kurbo::BezPath::new();
     for ring in contours {
         if ring.is_empty() {
@@ -1029,7 +1041,7 @@ fn contours_to_bezpath(contours: &[Vec<[f64; 2]>]) -> gaanim_core::kurbo::BezPat
     path
 }
 
-fn bezpath_to_contours(path: &gaanim_core::kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
+pub(crate) fn bezpath_to_contours(path: &gaanim_core::kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
     let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
     let mut current: Option<Vec<[f64; 2]>> = None;
     for el in path.iter() {
