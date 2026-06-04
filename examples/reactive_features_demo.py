@@ -8,8 +8,10 @@ Demonstrates:
   - TracedPath tracing the trail of moving mobjects.
 """
 
-from gaanim import Scene, RED, GREEN, BLUE, ORANGE, GOLD, CORAL, WHITE, CYAN
 import math
+
+from gaanim import BLUE, CORAL, CYAN, GOLD, GREEN, ORANGE, RED, WHITE, Scene
+
 
 def main():
     print("[Gaanim Python] Initializing Reactive Demo Scene...")
@@ -17,13 +19,15 @@ def main():
 
     # 1. Spawn a title
     title = scene.title("Gaanim Reactive Engine")
-    
+
     # 2. Spawn a ValueTracker starting at 0.0
     tracker = scene.value_tracker(0.0)
 
     # 3. Create a DecimalNumber displaying the tracker value
     # Configured with 2 decimal places, a prefix, and Inter font
-    counter = scene.decimal_number(tracker, num_decimals=2, prefix="Contador: ", font_size=40.0)
+    counter = scene.decimal_number(
+        tracker, num_decimals=2, prefix="Contador: ", font_size=40.0
+    )
     counter.shift(-300, 200)
 
     # 4. Create an Orbiting Circle that leaves a trail (TracedPath)
@@ -32,15 +36,23 @@ def main():
     orbiting_dot.add_orbit_updater(scene, cx=0.0, cy=0.0, radius=150.0, speed=2.0)
 
     # Trace the trail of the orbiting dot with a beautiful cyan path
-    trail = scene.traced_path(orbiting_dot, color=CYAN, width=4.0, min_distance=2.0, max_points=200)
+    trail = scene.traced_path(
+        orbiting_dot, color=CYAN, width=4.0, min_distance=2.0, max_points=200
+    )
 
     # 5. Create a bobbing star with follow
-    bobbing_star = scene.star(n_points=5, outer_radius=40, inner_radius=15).fill(GOLD).shift(300, 0)
+    bobbing_star = (
+        scene.star(n_points=5, outer_radius=40, inner_radius=15)
+        .fill(GOLD)
+        .shift(300, 0)
+    )
     bobbing_star.add_bob_updater(scene, amplitude=50.0, frequency=0.5)
 
     # Let a small green circle follow the star with some offset and smoothing
     follower_circle = scene.circle(12).fill(GREEN)
-    follower_circle.add_follow_updater(scene, bobbing_star, ox=50.0, oy=0.0, smoothing=0.1)
+    follower_circle.add_follow_updater(
+        scene, bobbing_star, ox=50.0, oy=0.0, smoothing=0.1
+    )
 
     # 6. Create a pulsing and rotating square
     pulsing_square = scene.square(60).fill(CORAL).shift(-300, -100)
@@ -53,8 +65,7 @@ def main():
     # 8. Let's play the entry write animation for the title and counter
     print("[Gaanim Python] Playing entry animations...")
     scene.play(
-        title.animate().write(duration=1.0),
-        counter.animate().write(duration=1.0)
+        title.animate().write(duration=1.0), counter.animate().write(duration=1.0)
     )
     scene.wait(0.5)
 
@@ -64,21 +75,22 @@ def main():
     print("[Gaanim Python] Animating ValueTracker and running ShowPassingFlash...")
     scene.play(
         tracker.animate_to(100.0, duration=4.0).spring(),
-        line_path.animate().show_passing_flash(duration=4.0, time_width=0.3)
+        line_path.animate().show_passing_flash(duration=4.0, time_width=0.3),
     )
 
     # 10. Wait a bit, then animate the ValueTracker back to 0.0 using smooth easing
     print("[Gaanim Python] Animating ValueTracker back to 0.0...")
     scene.play(
         tracker.animate_to(0.0, duration=3.0).smooth(),
-        line_path.animate().show_passing_flash(duration=3.0, time_width=0.1)
+        line_path.animate().show_passing_flash(duration=3.0, time_width=0.1),
     )
 
     scene.wait(1.0)
 
     # 11. Run rendering window
     print("[Gaanim Python] Starting native Vulkan GPU Renderer window...")
-    scene.render()
+    scene.edit()
+
 
 if __name__ == "__main__":
     main()

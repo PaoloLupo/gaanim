@@ -744,7 +744,8 @@ fn spawn_mobject(
             font_family,
             font_size,
         } => {
-            let tracker_ref = gaanim_api::anim::ValueTrackerRef { id: signal_id };
+            let resolved_id = py_to_bevy.get(&signal_id).copied().unwrap_or(signal_id);
+            let tracker_ref = gaanim_api::anim::ValueTrackerRef { id: resolved_id };
             let mut mref = scene.decimal_number(
                 tracker_ref,
                 num_decimals,
