@@ -13,8 +13,8 @@ def main():
     scene = Scene(width=1920, height=1080, title="Performance / WebP Export Test")
 
     eq = scene.equation("integral_a^b f(x) d x = F(b) - F(a)").at(0, 0).scale(1.2)
-    circle = scene.circle(120).stroke(GOLD, 6).no_fill().at(-250, 0)
-    rect = scene.rectangle(200, 120).fill(BLUE).at(250, 0)
+    circle = scene.circle(120).stroke(GOLD, 6).no_fill().at(0, 0)
+    rect = scene.rectangle(200, 120).fill(BLUE).at(0, 0)
 
     scene.play(eq.write(1.5))
     scene.play(circle.create(1.0), rect.fade_in_anim().duration(1.0))
@@ -23,6 +23,7 @@ def main():
         rect.rotate_anim(3.14 / 2).duration(0.5),
     )
     scene.wait(0.5)
+    # scene.render()
 
     if preset == "webp":
         scene.export(

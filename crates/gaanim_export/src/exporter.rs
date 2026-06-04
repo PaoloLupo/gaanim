@@ -377,7 +377,28 @@ where
 
         let vello_scene = {
             let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
-            gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref())
+            let raw_scene =
+                gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref());
+
+            let (zoom, cam_x, cam_y) = camera
+                .as_ref()
+                .map(|c| {
+                    let z = match c.projection {
+                        gaanim_math::Projection::Orthographic { zoom } => zoom,
+                        _ => 1.0,
+                    };
+                    (z, c.position.x, c.position.y)
+                })
+                .unwrap_or((1.0, 0.0, 0.0));
+
+            let mut scene = bevy_vello::vello::Scene::new();
+            let camera_to_vello = kurbo::Affine::translate((
+                config.width as f64 / 2.0,
+                config.height as f64 / 2.0,
+            )) * kurbo::Affine::scale(zoom)
+                * kurbo::Affine::translate((-cam_x, cam_y));
+            scene.append(&raw_scene, Some(camera_to_vello));
+            scene
         };
 
         let bg_color = app
