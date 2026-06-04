@@ -22,8 +22,28 @@ pub type Result<T> = std::result::Result<T, ExportError>;
 pub enum ExportFormat {
     Mp4,
     Webm,
+    Webp,
     Gif,
     PngSequence,
+}
+
+/// Encoding speed tier sent from the config layer.
+/// 0 = fast (Draft), 1 = balanced (Standard), 2 = best (Production).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodingSpeed {
+    Fast = 0,
+    Balanced = 1,
+    Best = 2,
+}
+
+impl EncodingSpeed {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            2 => Self::Best,
+            1 => Self::Balanced,
+            _ => Self::Fast,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +54,8 @@ pub struct EncoderConfig {
     pub fps: u32,
     pub format: ExportFormat,
     pub transparent: bool,
-    pub crf: u32, // Constant Rate Factor (15-28, lower is better)
+    pub crf: u32,
+    pub encoding_speed: EncodingSpeed,
 }
 
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
@@ -43,10 +64,24 @@ pub struct ParallelEncoder {
     thread_handle: Option<JoinHandle<Result<()>>>,
 }
 
+/// Compute an adaptive channel depth: reserve at least 4 slots, up to 8,
+/// scaling inversely with frame size to keep memory bounded.
+fn adaptive_buffer_depth(width: u32, height: u32) -> usize {
+    let pixels = width as u64 * height as u64 * 4;
+    let per_frame_mb = pixels / (1024 * 1024);
+    if per_frame_mb >= 32 {
+        4
+    } else if per_frame_mb >= 16 {
+        6
+    } else {
+        8
+    }
+}
+
 impl ParallelEncoder {
     pub fn new(config: EncoderConfig) -> Result<Self> {
-        // We use a bounded channel to prevent unbounded memory growth if GPU rendering is faster than video encoding
-        let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(8);
+        let depth = adaptive_buffer_depth(config.width, config.height);
+        let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
 
         let thread_handle = std::thread::spawn(move || {
             Self::encoder_worker(config, receiver)
@@ -58,16 +93,13 @@ impl ParallelEncoder {
         })
     }
 
-    /// Push a raw RGBA frame to the encoder.
     pub fn push_frame(&self, frame: Vec<u8>) -> Result<()> {
         self.sender
             .send(Some(frame))
             .map_err(|e| ExportError::Capture(format!("Failed to send frame to encoder: {}", e)))
     }
 
-    /// Finalize the encoding and wait for FFmpeg to finish.
     pub fn finalize(&mut self) -> Result<()> {
-        // Send termination sentinel
         let _ = self.sender.send(None);
 
         if let Some(handle) = self.thread_handle.take() {
@@ -77,6 +109,26 @@ impl ParallelEncoder {
             }
         }
         Ok(())
+    }
+
+    fn x264_preset(speed: EncodingSpeed) -> &'static str {
+        match speed {
+            EncodingSpeed::Fast => "fast",
+            EncodingSpeed::Balanced => "medium",
+            EncodingSpeed::Best => "slower",
+        }
+    }
+
+    fn webp_quality(crf: u32) -> u32 {
+        ((100_f64 * (1.0 - (crf as f64 - 14.0) / 14.0)) as u32).clamp(10, 100)
+    }
+
+    fn webp_compression(speed: EncodingSpeed) -> u32 {
+        match speed {
+            EncodingSpeed::Fast => 2,
+            EncodingSpeed::Balanced => 4,
+            EncodingSpeed::Best => 6,
+        }
     }
 
     fn encoder_worker(config: EncoderConfig, receiver: Receiver<Option<Vec<u8>>>) -> Result<()> {
@@ -96,61 +148,71 @@ impl ParallelEncoder {
                     );
                     let dest_path = base_path.parent().unwrap_or(std::path::Path::new("")).join(filename);
 
-                    // Write PNG using the image crate in parallel
                     let width = config.width;
                     let height = config.height;
-                    
+                    let color_type = if config.transparent {
+                        image::ExtendedColorType::Rgba8
+                    } else {
+                        image::ExtendedColorType::Rgb8
+                    };
+
                     let mut png_buffer = Vec::new();
                     let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
-                    image::ImageEncoder::write_image(
-                        encoder,
-                        &frame,
-                        width,
-                        height,
-                        if config.transparent { image::ExtendedColorType::Rgba8 } else { image::ExtendedColorType::Rgb8 }
-                    ).map_err(|e| ExportError::General(format!("PNG encode error: {}", e)))?;
+                    image::ImageEncoder::write_image(encoder, &frame, width, height, color_type)
+                        .map_err(|e| ExportError::General(format!("PNG encode error: {}", e)))?;
 
                     std::fs::write(dest_path, png_buffer)?;
                     frame_idx += 1;
                 }
             }
             _ => {
-                // Setup FFmpeg command
                 let mut cmd = Command::new("ffmpeg");
-                cmd.arg("-y") // Overwrite output
+                cmd.arg("-y")
                    .arg("-f").arg("rawvideo")
                    .arg("-pix_fmt").arg("rgba")
                    .arg("-s").arg(format!("{}x{}", config.width, config.height))
                    .arg("-r").arg(config.fps.to_string())
-                   .arg("-i").arg("-"); // Read from stdin
+                   .arg("-i").arg("-");
 
                 match config.format {
                     ExportFormat::Mp4 => {
                         cmd.arg("-c:v").arg("libx264")
                            .arg("-crf").arg(config.crf.to_string())
-                           .arg("-preset").arg("slower");
+                           .arg("-preset").arg(Self::x264_preset(config.encoding_speed))
+                           .arg("-threads").arg("0");
 
-                        if config.transparent {
-                            // Transparent MP4 is not standard, so we blend onto a black background or export transparent WebM
-                            // If transparent is requested for MP4, we still use yuv420p but log a warning.
-                            cmd.arg("-pix_fmt").arg("yuv420p");
-                        } else {
-                            cmd.arg("-pix_fmt").arg("yuv420p");
-                        }
+                        cmd.arg("-pix_fmt").arg("yuv420p");
                     }
                     ExportFormat::Webm => {
                         cmd.arg("-c:v").arg("libvpx-vp9")
                            .arg("-crf").arg(config.crf.to_string())
-                           .arg("-b:v").arg("0"); // Constant quality mode
+                           .arg("-b:v").arg("0")
+                           .arg("-threads").arg("0");
 
                         if config.transparent {
-                            cmd.arg("-pix_fmt").arg("yuva420p"); // WebM with alpha!
+                            cmd.arg("-pix_fmt").arg("yuva420p");
+                        } else {
+                            cmd.arg("-pix_fmt").arg("yuv420p");
+                        }
+                    }
+                    ExportFormat::Webp => {
+                        let quality = Self::webp_quality(config.crf);
+                        let compression = Self::webp_compression(config.encoding_speed);
+
+                        cmd.arg("-c:v").arg("libwebp")
+                           .arg("-lossless").arg("0")
+                           .arg("-compression_level").arg(compression.to_string())
+                           .arg("-quality").arg(quality.to_string())
+                           .arg("-loop").arg("0")
+                           .arg("-threads").arg("0");
+
+                        if config.transparent {
+                            cmd.arg("-pix_fmt").arg("yuva420p");
                         } else {
                             cmd.arg("-pix_fmt").arg("yuv420p");
                         }
                     }
                     ExportFormat::Gif => {
-                        // High quality GIF generation using a custom palette
                         cmd.arg("-filter_complex")
                            .arg("[0:v] split [a][b];[a] palettegen=stats_mode=single [p];[b][p] paletteuse=new=1");
                     }
@@ -178,23 +240,12 @@ impl ParallelEncoder {
                     ExportError::FFmpeg("Failed to open stderr pipe to FFmpeg".to_string())
                 })?;
 
-                // Read frames and write to FFmpeg stdin
                 while let Ok(Some(frame)) = receiver.recv() {
-                    if !config.transparent && config.format != ExportFormat::Webm {
-                        // Blend transparent frames onto solid black background for MP4/GIF if transparent = false
-                        // The raw frame is RGBA, we write it directly if target supports alpha.
-                        // FFmpeg expects the pixel format specified in -pix_fmt.
-                        // Since we specified `-pix_fmt rgba` as input, FFmpeg will read RGBA and handle blending.
-                        stdin.write_all(&frame)?;
-                    } else {
-                        stdin.write_all(&frame)?;
-                    }
+                    stdin.write_all(&frame)?;
                 }
 
-                // Close stdin to signal EOF to FFmpeg
                 drop(stdin);
 
-                // Check FFmpeg exit status
                 let status = child.wait()?;
                 if !status.success() {
                     let mut stderr_content = String::new();
