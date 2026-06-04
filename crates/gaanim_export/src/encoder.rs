@@ -39,6 +39,8 @@ pub enum VideoEncoder {
     H264Amf,
     /// Intel Quick Sync
     H264Qsv,
+    /// Linux VAAPI (works with RADV/Mesa)
+    H264Vaapi,
 }
 
 impl VideoEncoder {
@@ -48,6 +50,7 @@ impl VideoEncoder {
             Self::H264Nvenc => "h264_nvenc",
             Self::H264Amf => "h264_amf",
             Self::H264Qsv => "h264_qsv",
+            Self::H264Vaapi => "h264_vaapi",
         }
     }
 
@@ -57,6 +60,7 @@ impl VideoEncoder {
             Self::H264Nvenc => "NVIDIA (NVENC)",
             Self::H264Amf => "AMD (AMF)",
             Self::H264Qsv => "Intel (QSV)",
+            Self::H264Vaapi => "VAAPI (Linux)",
         }
     }
 }
@@ -81,6 +85,9 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
         if text.contains("h264_qsv") {
             encoders.push(VideoEncoder::H264Qsv);
         }
+        if text.contains("h264_vaapi") {
+            encoders.push(VideoEncoder::H264Vaapi);
+        }
     }
 
     encoders
@@ -93,7 +100,7 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
 /// setup or proprietary drivers, e.g. AMF needs AMDGPU-PRO on Linux).
 pub fn detect_best_encoder() -> VideoEncoder {
     let available = detect_available_encoders();
-    for &candidate in &[VideoEncoder::H264Amf, VideoEncoder::H264Nvenc, VideoEncoder::H264Qsv] {
+    for &candidate in &[VideoEncoder::H264Vaapi, VideoEncoder::H264Amf, VideoEncoder::H264Nvenc, VideoEncoder::H264Qsv] {
         if available.contains(&candidate) && probe_encoder(candidate) {
             return candidate;
         }
@@ -103,10 +110,15 @@ pub fn detect_best_encoder() -> VideoEncoder {
 
 fn probe_encoder(encoder: VideoEncoder) -> bool {
     let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-y")
-       .arg("-f").arg("rawvideo")
+    cmd.arg("-y");
+
+    if matches!(encoder, VideoEncoder::H264Vaapi) {
+        cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
+    }
+
+    cmd.arg("-f").arg("rawvideo")
        .arg("-pix_fmt").arg("rgba")
-       .arg("-s").arg("64x64")
+       .arg("-s").arg("128x128")
        .arg("-r").arg("1")
        .arg("-i").arg("-")
        .arg("-frames:v").arg("1");
@@ -127,10 +139,16 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
         VideoEncoder::H264Qsv => {
             cmd.arg("-c:v").arg("h264_qsv");
         }
+        VideoEncoder::H264Vaapi => {
+            cmd.arg("-vf").arg("format=nv12,hwupload")
+               .arg("-c:v").arg("h264_vaapi");
+        }
     }
 
-    cmd.arg("-pix_fmt").arg("yuv420p")
-       .arg("-f").arg("null")
+    if !matches!(encoder, VideoEncoder::H264Vaapi) {
+        cmd.arg("-pix_fmt").arg("yuv420p");
+    }
+    cmd.arg("-f").arg("null")
        .arg("-")
        .stdin(Stdio::piped())
        .stdout(Stdio::null())
@@ -139,7 +157,7 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
     if let Ok(mut child) = cmd.spawn() {
         // Feed one empty RGBA frame (64x64x4 = 16384 zero bytes)
         if let Some(mut stdin) = child.stdin.take() {
-            let blank = vec![0u8; 64 * 64 * 4];
+            let blank = vec![0u8; 128 * 128 * 4];
             let _ = stdin.write_all(&blank);
         }
         child.wait().map(|s| s.success()).unwrap_or(false)
@@ -289,8 +307,13 @@ impl ParallelEncoder {
             }
             _ => {
                 let mut cmd = Command::new("ffmpeg");
-                cmd.arg("-y")
-                   .arg("-f").arg("rawvideo")
+                cmd.arg("-y");
+
+                if matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
+                    cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
+                }
+
+                cmd.arg("-f").arg("rawvideo")
                    .arg("-pix_fmt").arg("rgba")
                    .arg("-s").arg(format!("{}x{}", config.width, config.height))
                    .arg("-r").arg(config.fps.to_string())
@@ -331,9 +354,15 @@ impl ParallelEncoder {
                                 cmd.arg("-c:v").arg("h264_qsv")
                                    .arg("-global_quality").arg(config.crf.to_string());
                             }
+                            VideoEncoder::H264Vaapi => {
+                                cmd.arg("-vf").arg("format=nv12,hwupload")
+                                   .arg("-c:v").arg("h264_vaapi");
+                            }
                         }
 
-                        cmd.arg("-pix_fmt").arg("yuv420p");
+                        if !matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
+                            cmd.arg("-pix_fmt").arg("yuv420p");
+                        }
                     }
                     ExportFormat::Webm => {
                         cmd.arg("-c:v").arg("libvpx-vp9")
