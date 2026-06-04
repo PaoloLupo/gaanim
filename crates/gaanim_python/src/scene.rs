@@ -434,6 +434,28 @@ impl PyScene {
         })
     }
 
+    #[pyo3(signature = (signal_tracker, num_decimals=2, prefix="", suffix="", font_family="Inter", font_size=36.0))]
+    fn decimal_number(
+        &self,
+        signal_tracker: &crate::animation::PyValueTracker,
+        num_decimals: usize,
+        prefix: &str,
+        suffix: &str,
+        font_family: &str,
+        font_size: f64,
+    ) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::DecimalNumber {
+            common: Self::default_common(primary_color),
+            signal_id: signal_tracker.id,
+            num_decimals,
+            prefix: prefix.to_string(),
+            suffix: suffix.to_string(),
+            font_family: font_family.to_string(),
+            font_size,
+        })
+    }
+
     fn title(&self, content: &str) -> PyResult<PyMobject> {
         let primary_color = lock_inner!(self.inner).theme.0.primary;
         self.spawn_with(MobjectSpec::Text {

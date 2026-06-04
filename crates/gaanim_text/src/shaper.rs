@@ -215,3 +215,59 @@ pub fn compile_text_to_hierarchy(
 
     Ok((parent_entity, total_bounds))
 }
+
+/// Shapes and compiles text directly into a single BezPath outline.
+pub fn compile_text_to_path(
+    font_registry: &FontRegistry,
+    text: &str,
+    font_family: &str,
+    font_size: f64,
+) -> Result<(gaanim_core::kurbo::BezPath, Bounds3D), TextError> {
+    let font_bytes = font_registry
+        .get_font(font_family)
+        .ok_or(TextError::FontNotFound)?;
+
+    let shaped_glyphs = shape_text(&font_bytes, text);
+    let parser_face =
+        ttf_parser::Face::parse(&font_bytes, 0).map_err(|_| TextError::FontParseError)?;
+    let units_per_em = parser_face.units_per_em() as f64;
+    let scale = font_size / units_per_em;
+
+    let mut merged_path = gaanim_core::kurbo::BezPath::new();
+    let mut total_bounds = Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
+    let mut pen_x = 0.0;
+    let mut pen_y = 0.0;
+
+    for glyph in shaped_glyphs.iter() {
+        let glyph_id = ttf_parser::GlyphId(glyph.glyph_id as u16);
+        let mut collector = OutlineCollector::new();
+
+        if let Some(_bounding_box) = parser_face.outline_glyph(glyph_id, &mut collector) {
+            let mut path = collector.path;
+            let glyph_x = pen_x + glyph.x_offset;
+            let glyph_y = pen_y + glyph.y_offset;
+
+            // Apply horizontal pen offsets
+            path.apply_affine(Affine::translate((glyph_x, glyph_y)));
+            // Scale and flip outline
+            path.apply_affine(Affine::scale_non_uniform(scale, -scale));
+
+            let path_bounding_rect = path.bounding_box();
+            let glyph_local_bounds = Bounds3D::new_2d(
+                path_bounding_rect.x0,
+                path_bounding_rect.y0,
+                path_bounding_rect.x1,
+                path_bounding_rect.y1,
+            );
+
+            // Accumulate
+            merged_path.extend(path);
+            total_bounds = total_bounds.union(&glyph_local_bounds);
+        }
+
+        pen_x += glyph.x_advance;
+        pen_y += glyph.y_advance;
+    }
+
+    Ok((merged_path, total_bounds))
+}

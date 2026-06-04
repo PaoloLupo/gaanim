@@ -67,6 +67,15 @@ pub enum MobjectSpec {
     },
     Text { common: CommonSpec, content: String, role: TextRoleKind },
     Equation { common: CommonSpec, formula: String },
+    DecimalNumber {
+        common: CommonSpec,
+        signal_id: ObjectId,
+        num_decimals: usize,
+        prefix: String,
+        suffix: String,
+        font_family: String,
+        font_size: f64,
+    },
     Group {
         common: CommonSpec,
         children: Vec<(ObjectId, Arc<Mutex<MobjectSpec>>, u64)>,
@@ -134,6 +143,7 @@ impl MobjectSpec {
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. }
+            | Self::DecimalNumber { common, .. }
             | Self::Group { common, .. } => common,
         }
     }
@@ -167,6 +177,7 @@ impl MobjectSpec {
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. }
+            | Self::DecimalNumber { common, .. }
             | Self::Group { common, .. } => common,
         }
     }
@@ -200,6 +211,7 @@ impl MobjectSpec {
             Self::BooleanResult { .. } => "boolean_result",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
+            Self::DecimalNumber { .. } => "decimal_number",
             Self::Group { .. } => "group",
         }
     }
@@ -450,8 +462,8 @@ impl MobjectSpec {
                     out.push(c.clone());
                 }
             }
-            Self::Text { .. } | Self::Equation { .. } | Self::Group { .. } => {
-                // Text/equation/group geometry cannot be reconstructed at build time
+            Self::Text { .. } | Self::Equation { .. } | Self::DecimalNumber { .. } | Self::Group { .. } => {
+                // Text/equation/decimal_number/group geometry cannot be reconstructed at build time
                 // because the actual layout is computed at replay time.
             }
         }

@@ -735,6 +735,31 @@ fn spawn_mobject(
             mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
+        MobjectSpec::DecimalNumber {
+            common,
+            signal_id,
+            num_decimals,
+            prefix,
+            suffix,
+            font_family,
+            font_size,
+        } => {
+            let tracker_ref = gaanim_api::anim::ValueTrackerRef { id: signal_id };
+            let mut mref = scene.decimal_number(
+                tracker_ref,
+                num_decimals,
+                &prefix,
+                &suffix,
+                &font_family,
+                font_size,
+            );
+            if let Some(c) = common.fill {
+                mref = paint_fill(scene, mref, c);
+            }
+            mref = apply_2d_transform(scene, mref, common.transform);
+            mref = apply_opacity(scene, mref, common.opacity);
+            mref.id
+        }
         MobjectSpec::Equation {
             common,
             formula,

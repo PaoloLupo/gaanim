@@ -2661,6 +2661,84 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         MobjectRef { id: parent_id }
     }
 
+    /// Spawns a reactive DecimalNumber Mobject that displays and updates according to a ValueTracker signal.
+    pub fn decimal_number(
+        &mut self,
+        signal_ref: ValueTrackerRef,
+        num_decimals: usize,
+        prefix: &str,
+        suffix: &str,
+        font_family: &str,
+        font_size: f64,
+    ) -> MobjectRef {
+        let parent_id = self.next_id();
+        let fill = Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        ));
+        let stroke = gaanim_scene::StrokeBrush::transparent();
+
+        let signal_entity_bevy = match self.states.get(signal_ref.id) {
+            Some(state) => state.entity,
+            None => {
+                bevy::prelude::warn!("ValueTrackerRef id {:?} not found", signal_ref.id);
+                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), Bounds3D::default());
+                self.commands.spawn(bundle);
+                return MobjectRef { id: parent_id };
+            }
+        };
+
+        let initial_val = self.float_signals.get(&signal_ref.id).cloned().unwrap_or(0.0);
+        let text = format!("{}{:.width$}{}", prefix, initial_val, suffix, width = num_decimals);
+
+        let (path, bounds) = match gaanim_text::shaper::compile_text_to_path(
+            self.font_registry,
+            &text,
+            font_family,
+            font_size,
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                bevy::prelude::error!("DecimalNumber initial text compilation failed: {}", e);
+                (kurbo::BezPath::new(), Bounds3D::default())
+            }
+        };
+
+        let mut bundle = MobjectBundle::new(parent_id, path, bounds);
+        bundle.fill = gaanim_scene::FillBrush(fill.clone());
+        bundle.stroke = stroke.clone();
+        bundle.tag = gaanim_scene::ObjectTag(format!("DecimalNumber({})", text));
+
+        let entity = self.commands.spawn(bundle)
+            .insert(crate::DecimalNumber {
+                signal_entity: signal_entity_bevy,
+                num_decimals,
+                prefix: prefix.to_string(),
+                suffix: suffix.to_string(),
+                font_family: font_family.to_string(),
+                font_size,
+                last_value: Some(initial_val),
+            })
+            .id();
+
+        self.tag_entity(entity);
+
+        let state = MobjectState {
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill,
+            stroke,
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+        };
+        self.states.insert(parent_id, state);
+        self.mobject_names.insert(parent_id, format!("DecimalNumber('{}')", text));
+
+        MobjectRef { id: parent_id }
+    }
+
     /// Shorthand to spawn a Title text Mobject.
     pub fn title(&mut self, content: &str) -> MobjectRef {
         self.spawn_text(content, gaanim_text::prelude::TextRole::Title)
