@@ -314,7 +314,7 @@ impl PyEngine {
 }
 
 /// A scene-scoped builder that accumulates deferred ops for one scene in an Engine.
-#[pyclass(name = "SceneBuilder", module = "gaanim_core", frozen)]
+#[pyclass(name = "SceneBuilder", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PySceneBuilder {
     engine: Arc<Mutex<EngineInner>>,

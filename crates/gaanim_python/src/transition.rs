@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use gaanim_timeline::transition::{TransitionType, SlideDirection};
 
 /// Python wrapper for scene transition types.
-#[pyclass(name = "Transition", module = "gaanim_core", frozen)]
+#[pyclass(name = "Transition", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyTransitionType(pub TransitionType);
 
