@@ -847,6 +847,95 @@ impl PyMobject {
         }
         PyAnimationSpec::from_builder(builder)
     }
+
+    fn add_bob_updater(&self, scene: &crate::scene::PyScene, amplitude: f64, frequency: f64) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::AddUpdater {
+            target: self.id,
+            updater_type: "bob".to_string(),
+            params: vec![amplitude, frequency],
+            follow_target: None,
+        });
+        Ok(())
+    }
+
+    fn add_rotate_updater(&self, scene: &crate::scene::PyScene, speed: f64) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::AddUpdater {
+            target: self.id,
+            updater_type: "rotate".to_string(),
+            params: vec![speed],
+            follow_target: None,
+        });
+        Ok(())
+    }
+
+    fn add_orbit_updater(&self, scene: &crate::scene::PyScene, cx: f64, cy: f64, radius: f64, speed: f64) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::AddUpdater {
+            target: self.id,
+            updater_type: "orbit".to_string(),
+            params: vec![cx, cy, radius, speed],
+            follow_target: None,
+        });
+        Ok(())
+    }
+
+    fn add_pulse_updater(&self, scene: &crate::scene::PyScene, min_scale: f64, max_scale: f64, frequency: f64) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::AddUpdater {
+            target: self.id,
+            updater_type: "pulse".to_string(),
+            params: vec![min_scale, max_scale, frequency],
+            follow_target: None,
+        });
+        Ok(())
+    }
+
+    #[pyo3(signature = (scene, target, ox=0.0, oy=0.0, smoothing=0.0))]
+    fn add_follow_updater(
+        &self,
+        scene: &crate::scene::PyScene,
+        target: &PyMobject,
+        ox: f64,
+        oy: f64,
+        smoothing: f64,
+    ) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::AddUpdater {
+            target: self.id,
+            updater_type: "follow".to_string(),
+            params: vec![ox, oy, smoothing],
+            follow_target: Some(target.id),
+        });
+        Ok(())
+    }
+
+    fn remove_updater(&self, scene: &crate::scene::PyScene) -> PyResult<()> {
+        let mut inner = match scene.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+        };
+        inner.ops.push(crate::scene::DeferredOp::RemoveUpdater {
+            target: self.id,
+        });
+        Ok(())
+    }
 }
 
 fn direction_from_str(s: &str) -> Option<LayoutDirection> {

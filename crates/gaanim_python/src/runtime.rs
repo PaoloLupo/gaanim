@@ -308,6 +308,125 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                     scene.timeline.connect(scene_ids[from_index], scene_ids[to_index], transition);
                 }
             }
+            DeferredOp::SpawnValueTracker { id, initial } => {
+                let tracker = scene.value_tracker(initial);
+                py_to_bevy.insert(id, tracker.id);
+            }
+            DeferredOp::AddUpdater {
+                target,
+                updater_type,
+                params,
+                follow_target,
+            } => {
+                if let Some(&bevy_target) = py_to_bevy.get(&target) {
+                    if let Some(state) = scene.states.get(bevy_target) {
+                        let updater = match updater_type.as_str() {
+                            "bob" => {
+                                let amp = params.get(0).copied().unwrap_or(20.0);
+                                let freq = params.get(1).copied().unwrap_or(1.0);
+                                gaanim_animation::updaters::bob_updater(amp, freq)
+                            }
+                            "rotate" => {
+                                let speed = params.get(0).copied().unwrap_or(1.0);
+                                gaanim_animation::updaters::rotate_updater(speed)
+                            }
+                            "orbit" => {
+                                let cx = params.get(0).copied().unwrap_or(0.0);
+                                let cy = params.get(1).copied().unwrap_or(0.0);
+                                let radius = params.get(2).copied().unwrap_or(100.0);
+                                let speed = params.get(3).copied().unwrap_or(1.0);
+                                gaanim_animation::updaters::orbit_updater(
+                                    gaanim_core::glam::DVec3::new(cx, cy, 0.0),
+                                    radius,
+                                    speed,
+                                )
+                            }
+                            "pulse" => {
+                                let min = params.get(0).copied().unwrap_or(0.8);
+                                let max = params.get(1).copied().unwrap_or(1.2);
+                                let freq = params.get(2).copied().unwrap_or(1.0);
+                                gaanim_animation::updaters::pulse_updater(min, max, freq)
+                            }
+                            "follow" => {
+                                let ox = params.get(0).copied().unwrap_or(0.0);
+                                let oy = params.get(1).copied().unwrap_or(0.0);
+                                let smoothing = params.get(2).copied().unwrap_or(0.0);
+                                let f_target = follow_target.and_then(|t| py_to_bevy.get(&t).copied());
+                                if let Some(bevy_ft) = f_target {
+                                    if let Some(ft_state) = scene.states.get(bevy_ft) {
+                                        gaanim_animation::updaters::follow_updater(
+                                            ft_state.entity,
+                                            gaanim_core::glam::DVec3::new(ox, oy, 0.0),
+                                            smoothing,
+                                        )
+                                    } else {
+                                        continue;
+                                    }
+                                } else {
+                                    continue;
+                                }
+                            }
+                            _ => continue,
+                        };
+                        scene.commands.entity(state.entity).insert(updater);
+                    }
+                }
+            }
+            DeferredOp::RemoveUpdater { target } => {
+                if let Some(&bevy_target) = py_to_bevy.get(&target) {
+                    if let Some(state) = scene.states.get(bevy_target) {
+                        scene.commands.entity(state.entity).remove::<gaanim_animation::Updater>();
+                    }
+                }
+            }
+            DeferredOp::SpawnTracedPath {
+                id,
+                source,
+                color,
+                width,
+                min_distance,
+                max_points,
+            } => {
+                if let Some(&bevy_source) = py_to_bevy.get(&source) {
+                    let source_ent = scene.states.get(bevy_source).map(|s| s.entity);
+                    if let Some(source_entity) = source_ent {
+                        let trace_id = scene.next_id();
+                        let bundle = gaanim_objects::primitives::line(
+                            trace_id,
+                            gaanim_core::kurbo::Point::new(0.0, 0.0),
+                            gaanim_core::kurbo::Point::new(0.0, 0.0),
+                        );
+                        let trace_entity = scene.commands.spawn((
+                            bundle,
+                            gaanim_animation::TracedPath::new(
+                                source_entity,
+                                min_distance,
+                                max_points,
+                            ),
+                        )).id();
+                        scene.tag_entity(trace_entity);
+                        
+                        scene.commands.entity(trace_entity).insert((
+                            gaanim_scene::StrokeBrush::new(color, width),
+                            gaanim_scene::FillBrush(None),
+                        ));
+                        
+                        let state = gaanim_api::builder::MobjectState {
+                            bounds: gaanim_math::Bounds3D::default(),
+                            transform: gaanim_math::SpatialTransform::default(),
+                            opacity: 1.0,
+                            fill: None,
+                            stroke: gaanim_scene::StrokeBrush::new(color, width),
+                            entity: trace_entity,
+                            child_spans: Vec::new(),
+                            children: Vec::new(),
+                            parent: None,
+                        };
+                        scene.states.insert(trace_id, state);
+                        py_to_bevy.insert(id, trace_id);
+                    }
+                }
+            }
         }
     }
 

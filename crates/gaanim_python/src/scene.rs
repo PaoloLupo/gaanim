@@ -7,7 +7,7 @@ use gaanim_core::peniko;
 use gaanim_core::ObjectId;
 use gaanim_math::RateFunc;
 
-use crate::animation::PyAnimationSpec;
+use crate::animation::{PyAnimationSpec, PyValueTracker};
 use crate::color::PyColor;
 use crate::mobject::{CommonSpec, MobjectSpec, PyMobject, TextRoleKind};
 use crate::runtime;
@@ -78,6 +78,27 @@ pub(crate) enum DeferredOp {
         to_index: usize,
         transition: gaanim_timeline::transition::TransitionType,
     },
+    SpawnValueTracker {
+        id: ObjectId,
+        initial: f64,
+    },
+    AddUpdater {
+        target: ObjectId,
+        updater_type: String, // "bob" | "rotate" | "orbit" | "pulse" | "follow"
+        params: Vec<f64>,
+        follow_target: Option<ObjectId>,
+    },
+    RemoveUpdater {
+        target: ObjectId,
+    },
+    SpawnTracedPath {
+        id: ObjectId,
+        source: ObjectId,
+        color: peniko::Color,
+        width: f64,
+        min_distance: f64,
+        max_points: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -117,7 +138,7 @@ macro_rules! lock_inner {
 /// Bevy `App` and runs the Vello GPU pipeline.
 #[pyclass(name = "Scene", module = "gaanim_core", frozen)]
 pub struct PyScene {
-    inner: Mutex<SceneInner>,
+    pub(crate) inner: Mutex<SceneInner>,
 }
 
 #[pymethods]
@@ -205,6 +226,50 @@ impl PyScene {
             creation_order: order,
         });
         
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
+    }
+
+    fn value_tracker(&self, initial: f64) -> PyResult<PyValueTracker> {
+        let mut inner = lock_inner!(self.inner);
+        let id = inner.next_id();
+        inner.ops.push(DeferredOp::SpawnValueTracker { id, initial });
+        Ok(PyValueTracker { id })
+    }
+
+    #[pyo3(signature = (source, color=None, width=2.0, min_distance=5.0, max_points=None))]
+    fn traced_path(
+        &self,
+        source: &PyMobject,
+        color: Option<&PyColor>,
+        width: f64,
+        min_distance: f64,
+        max_points: Option<usize>,
+    ) -> PyResult<PyMobject> {
+        let mut inner = lock_inner!(self.inner);
+        let id = inner.next_id();
+        let c = color.map(|c| c.0).unwrap_or(peniko::Color::from_rgb8(255, 215, 0));
+        
+        inner.ops.push(DeferredOp::SpawnTracedPath {
+            id,
+            source: source.id,
+            color: c,
+            width,
+            min_distance,
+            max_points,
+        });
+
+        let common = Self::default_common(inner.theme.0.primary);
+        let spec = Arc::new(Mutex::new(MobjectSpec::Line {
+            common,
+            start: (0.0, 0.0),
+            end: (0.0, 0.0),
+        }));
+        let order = id.index() as u64;
+
         Ok(PyMobject {
             id,
             spec,

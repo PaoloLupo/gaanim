@@ -26,6 +26,7 @@ fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<selection::PySelection>()?;
     m.add_class::<selection::PySelectionAnim>()?;
     m.add_class::<animation::PyAnimationSpec>()?;
+    m.add_class::<animation::PyValueTracker>()?;
     m.add_class::<color::PyColor>()?;
     m.add_class::<id::PyObjectId>()?;
     m.add_class::<theme::PyTheme>()?;

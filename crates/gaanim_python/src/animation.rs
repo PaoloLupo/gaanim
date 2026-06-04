@@ -544,3 +544,28 @@ pub fn rate_func_name(rf: &RateFunc) -> String {
         _ => "<custom>".into(),
     }
 }
+
+/// A ValueTracker wraps an animatable FloatSignal.
+#[pyclass(name = "ValueTracker", module = "gaanim_core", frozen)]
+#[derive(Clone, Debug)]
+pub struct PyValueTracker {
+    pub id: ObjectId,
+}
+
+#[pymethods]
+impl PyValueTracker {
+    #[getter]
+    pub fn id(&self) -> crate::id::PyObjectId {
+        crate::id::PyObjectId(self.id)
+    }
+
+    /// Animates this ValueTracker's float value to a target.
+    fn animate_to(&self, to: f64, duration: f64) -> PyAnimationSpec {
+        use gaanim_api::anim::ValueTrackerRef;
+        let mut builder = ValueTrackerRef { id: self.id }.animate_to(to);
+        if duration > 0.0 {
+            builder = builder.duration(duration);
+        }
+        PyAnimationSpec::from_builder(builder)
+    }
+}
