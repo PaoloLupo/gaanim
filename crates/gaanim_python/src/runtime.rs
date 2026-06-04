@@ -81,9 +81,18 @@ pub fn run_editor(
     .add_plugins(gaanim_text::GaanimTextPlugin)
     .add_plugins(gaanim_api::GaanimApiPlugin)
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
-    .add_plugins(gaanim_editor::GaanimEditorPlugin)
-    .add_systems(Startup, move |world: &mut World| {
-        replay_into(world, ops.clone(), width, height, background);
+    .add_plugins(gaanim_editor::GaanimEditorPlugin);
+    let mut ops = Some(ops);
+    app.add_systems(Startup, move |world: &mut World| {
+        let ops_taken = ops.take().expect("Startup called twice");
+        let ops_clone = ops_taken.clone();
+        let replay_fn: std::sync::Arc<dyn Fn(&mut World) + Send + Sync> = std::sync::Arc::new(
+            move |w: &mut World| {
+                replay_into(w, ops_clone.clone(), width, height, background);
+            }
+        );
+        world.insert_resource(gaanim_editor::export::StashedReplay(Some(replay_fn)));
+        replay_into(world, ops_taken, width, height, background);
         // Start paused in editor mode so the user can inspect first.
         let mut timeline = world.resource_mut::<Timeline>();
         timeline.is_playing = false;

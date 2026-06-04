@@ -9,7 +9,7 @@ use gaanim_scene::{
 use gaanim_timeline::timeline::Timeline;
 use std::collections::HashMap;
 
-mod export;
+pub mod export;
 mod fps_overlay;
 mod timeline_widget;
 mod vsync;
@@ -25,7 +25,7 @@ impl Plugin for GaanimEditorPlugin {
         })
         .init_resource::<EditorState>()
         .init_resource::<export::ExportState>()
-        .init_non_send_resource::<export::ExportRuntime>()
+        .insert_resource(export::StashedReplay(None))
         .init_resource::<fps_overlay::FpsOverlay>()
         .init_resource::<vsync::VsyncState>()
         .add_systems(
@@ -36,7 +36,6 @@ impl Plugin for GaanimEditorPlugin {
                 vsync::vsync_toggle_system,
             ),
         )
-        .add_systems(Update, export::export_per_frame_system)
         .add_systems(
             EguiPrimaryContextPass,
             (editor_ui_system, export::export_dialog_system),
@@ -80,6 +79,14 @@ fn editor_ui_system(
     };
 
     let is_exporting = export_state.active;
+    let (export_progress_pct, export_current, export_total) = if is_exporting {
+        if let Ok(lock) = export_state.progress_shared.lock() {
+            if let Some(ref p) = *lock {
+                let pct = if p.total_frames > 0 { p.current_frame as f32 / p.total_frames as f32 } else { 0.0 };
+                (pct, p.current_frame, p.total_frames)
+            } else { (0.0, 0, 0) }
+        } else { (0.0, 0, 0) }
+    } else { (0.0, 0, 0) };
 
     let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
     for (entity, mobj_id, _) in &entity_query {
@@ -192,13 +199,13 @@ fn editor_ui_system(
 
             if is_exporting {
                 ui.add(
-                    egui::ProgressBar::new(export_state.progress)
+                    egui::ProgressBar::new(export_progress_pct)
                         .desired_width(140.0)
-                        .text(format!("{:.0}%", export_state.progress * 100.0)),
+                        .text(format!("{:.0}%", export_progress_pct * 100.0)),
                 );
                 ui.label(format!(
                     "Frame {}/{}",
-                    export_state.current_frame, export_state.total_frames
+                    export_current, export_total
                 ));
             } else if let Some(selected) = state.selected {
                 let name = entity_query
