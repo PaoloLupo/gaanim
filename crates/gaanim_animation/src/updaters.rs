@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use gaanim_math::SpatialTransform;
 use gaanim_core::glam::DVec3;
+use gaanim_scene::Path2D;
 use crate::tween::DeltaTime;
 
 /// Componente que define una función de actualización continua para una entidad.
@@ -158,3 +159,86 @@ pub fn follow_updater(target: Entity, offset: DVec3, smoothing: f64) -> Updater 
         true
     })
 }
+
+/// Componente que rastrea la posición de una entidad y genera un Path2D continuo de su trayectoria.
+#[derive(Component)]
+pub struct TracedPath {
+    /// La entidad objetivo cuya posición se rastrea.
+    pub source: Entity,
+    /// Historial de puntos acumulados.
+    pub points: Vec<DVec3>,
+    /// Límite máximo de puntos a conservar (None para ilimitados).
+    pub max_points: Option<usize>,
+    /// Distancia mínima para añadir un nuevo punto.
+    pub min_distance: f64,
+    /// Tasa de disipación.
+    pub dissipation: f64,
+}
+
+impl TracedPath {
+    /// Crea un nuevo componente TracedPath
+    pub fn new(source: Entity, min_distance: f64, max_points: Option<usize>) -> Self {
+        Self {
+            source,
+            points: Vec::new(),
+            max_points,
+            min_distance,
+            dissipation: 0.0,
+        }
+    }
+}
+
+/// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.
+pub fn traced_path_system(world: &mut World) {
+    // 1. Extraemos de forma inmutable los datos de los TracedPath que necesitamos
+    let mut trace_jobs = Vec::new();
+    let mut query = world.query::<(Entity, &TracedPath)>();
+    for (trace_entity, traced_path) in query.iter(world) {
+        trace_jobs.push((trace_entity, traced_path.source, traced_path.min_distance, traced_path.max_points));
+    }
+
+    let mut trace_updates = Vec::new();
+
+    // 2. Procesamos cada trace_job consultando el world de forma secuencial y limpia
+    for (trace_entity, source_entity, min_distance, max_points) in trace_jobs {
+        let source_pos = world.get::<SpatialTransform>(source_entity)
+            .map(|t| t.translation);
+
+        if let Some(pos) = source_pos {
+            // Obtenemos acceso mutable al TracedPath específico de forma aislada
+            if let Some(mut traced_path) = world.get_mut::<TracedPath>(trace_entity) {
+                let should_add = match traced_path.points.last() {
+                    Some(last_point) => last_point.distance(pos) >= min_distance,
+                    None => true,
+                };
+
+                if should_add {
+                    traced_path.points.push(pos);
+                    if let Some(max) = max_points {
+                        if traced_path.points.len() > max {
+                            traced_path.points.remove(0);
+                        }
+                    }
+
+                    // Regenerar el path
+                    let mut path = gaanim_core::kurbo::BezPath::new();
+                    if !traced_path.points.is_empty() {
+                        path.move_to(gaanim_core::kurbo::Point::new(traced_path.points[0].x, traced_path.points[0].y));
+                        for pt in &traced_path.points[1..] {
+                            path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
+                        }
+                    }
+                    trace_updates.push((trace_entity, path));
+                }
+            }
+        }
+    }
+
+    // 3. Aplicamos los nuevos paths
+    for (trace_entity, path) in trace_updates {
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(trace_entity) {
+            path_comp.0 = std::sync::Arc::new(path);
+        }
+    }
+}
+
