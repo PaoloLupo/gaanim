@@ -30,7 +30,10 @@ const PROP_LABEL: Color32 = Color32::from_rgb(160, 160, 160);
 const PROP_VALUE: Color32 = Color32::from_rgb(220, 220, 220);
 const PROP_SEPARATOR: Color32 = Color32::from_rgb(50, 50, 50);
 
-const PROPERTY_ROW_COUNT: usize = 6;
+const CLR_SIGNAL_ACCENT: Color32 = Color32::from_rgb(180, 180, 50);
+const CLR_UPDATER_BADGE: Color32 = Color32::from_rgb(100, 200, 255);
+const CLR_DECIMAL_ACCENT: Color32 = Color32::from_rgb(255, 160, 80);
+const BASE_PROP_COUNT: usize = 6;
 
 pub struct PropertyValues {
     pub pos_x: f64,
@@ -51,6 +54,9 @@ struct TrackLayout {
     header_y: f32,
     prop_count: usize,
     depth: u8,
+    has_signal: bool,
+    has_updater: bool,
+    has_decimal: bool,
 }
 
 // ── Drag state ─────────────────────────────────────────────────────────
@@ -148,6 +154,9 @@ impl TimelineWidget {
         timeline: &mut Timeline,
         property_values: &HashMap<ObjectId, PropertyValues>,
         group_children: &HashMap<TrackId, Vec<TrackId>>,
+        signal_values: &HashMap<ObjectId, f64>,
+        updater_entities: &HashSet<ObjectId>,
+        decimal_values: &HashMap<ObjectId, f64>,
     ) {
         let header_rows = if self.show_scene_header { 1 } else { 0 };
         let mobject_tracks: Vec<TrackId> = timeline
@@ -163,7 +172,7 @@ impl TimelineWidget {
         let tracks_visible = !self.show_scene_header || self.scene_expanded;
 
         let (track_layouts, content_height) =
-            self.compute_track_layouts(&mobject_tracks, tracks_visible, header_rows, group_children);
+            self.compute_track_layouts(&mobject_tracks, tracks_visible, header_rows, group_children, timeline, signal_values, updater_entities, decimal_values);
 
         // ── Header ──────────────────────────────────────────────────────
         let header_size = Vec2::new(ui.available_width(), self.header_height);
@@ -268,7 +277,7 @@ impl TimelineWidget {
         self.paint_divider(&p, label_rect, tracks_rect);
         self.paint_keyframes(&p, ruler_rect, timeline);
         self.paint_playhead(&cp, clips_rect, ruler_rect.min.y, timeline);
-        self.paint_track_properties(&p, clips_rect, label_rect, timeline, property_values, &track_layouts);
+        self.paint_track_properties(&p, clips_rect, label_rect, timeline, property_values, &track_layouts, signal_values, decimal_values);
 
         // ── Auto-scroll during playback ─────────────────────────────────
         if timeline.is_playing {
@@ -289,6 +298,10 @@ impl TimelineWidget {
         visible: bool,
         header_rows: usize,
         group_children: &HashMap<TrackId, Vec<TrackId>>,
+        timeline: &Timeline,
+        signal_values: &HashMap<ObjectId, f64>,
+        updater_entities: &HashSet<ObjectId>,
+        decimal_values: &HashMap<ObjectId, f64>,
     ) -> (HashMap<TrackId, TrackLayout>, f32) {
         let mut layouts = HashMap::new();
         let mut total = header_rows as f32 * self.track_height;
@@ -303,8 +316,23 @@ impl TimelineWidget {
             .collect();
 
         let mut add_track = |tid: &TrackId, total: &mut f32, depth: u8| {
-            let prop_count = if self.expanded_tracks.contains(tid) {
-                PROPERTY_ROW_COUNT
+            let has_object = timeline.tracks.get(*tid)
+                .and_then(|t| t.object_id)
+                .is_some();
+            let (has_signal, has_updater, has_decimal) = if let Some(obj_id) = timeline.tracks.get(*tid)
+                .and_then(|t| t.object_id)
+            {
+                (
+                    signal_values.contains_key(&obj_id),
+                    updater_entities.contains(&obj_id),
+                    decimal_values.contains_key(&obj_id),
+                )
+            } else {
+                (false, false, false)
+            };
+            let extra = (has_signal as usize) + (has_updater as usize) + (has_decimal as usize);
+            let prop_count = if self.expanded_tracks.contains(tid) && has_object {
+                BASE_PROP_COUNT + extra
             } else {
                 0
             };
@@ -312,6 +340,9 @@ impl TimelineWidget {
                 header_y: *total,
                 prop_count,
                 depth,
+                has_signal,
+                has_updater,
+                has_decimal,
             });
             *total += self.track_height + prop_count as f32 * self.property_row_height;
         };
@@ -516,6 +547,52 @@ impl TimelineWidget {
                     FontId::proportional(11.0),
                     TEXT,
                 );
+
+                // Badge: updater icon
+                if layout.has_updater {
+                    let badge_x = label_rect.max.x - 18.0;
+                    p.text(
+                        Pos2::new(badge_x, y + self.track_height / 2.0),
+                        Align2::LEFT_CENTER,
+                        "\u{1F504}",
+                        FontId::proportional(9.0),
+                        CLR_UPDATER_BADGE,
+                    );
+                }
+
+                // Badge: signal icon (diamond dot)
+                if layout.has_signal {
+                    let badge_x = if layout.has_updater {
+                        label_rect.max.x - 34.0
+                    } else {
+                        label_rect.max.x - 18.0
+                    };
+                    p.text(
+                        Pos2::new(badge_x, y + self.track_height / 2.0),
+                        Align2::LEFT_CENTER,
+                        "\u{25C6}",
+                        FontId::proportional(9.0),
+                        CLR_SIGNAL_ACCENT,
+                    );
+                }
+
+                // Badge: decimal display icon
+                if layout.has_decimal {
+                    let badge_x = if layout.has_updater && layout.has_signal {
+                        label_rect.max.x - 50.0
+                    } else if layout.has_updater || layout.has_signal {
+                        label_rect.max.x - 34.0
+                    } else {
+                        label_rect.max.x - 18.0
+                    };
+                    p.text(
+                        Pos2::new(badge_x, y + self.track_height / 2.0),
+                        Align2::LEFT_CENTER,
+                        "\u{2116}",
+                        FontId::proportional(9.0),
+                        CLR_DECIMAL_ACCENT,
+                    );
+                }
             }
         }
     }
@@ -528,6 +605,8 @@ impl TimelineWidget {
         timeline: &Timeline,
         property_values: &HashMap<ObjectId, PropertyValues>,
         track_layouts: &HashMap<TrackId, TrackLayout>,
+        signal_values: &HashMap<ObjectId, f64>,
+        decimal_values: &HashMap<ObjectId, f64>,
     ) {
         if !self.scene_expanded { return; }
         let font = FontId::proportional(10.0);
@@ -550,16 +629,36 @@ impl TimelineWidget {
 
             let base_y = clips_rect.min.y + layout.header_y - self.scroll_y + self.track_height;
 
-            let rows: &[(&str, String)] = &[
-                ("Position",  format!("({:.1}, {:.1}, {:.1})", vals.pos_x, vals.pos_y, vals.pos_z)),
-                ("Scale",     format!("({:.2}, {:.2}, {:.2})", vals.scale_x, vals.scale_y, vals.scale_z)),
-                ("Rotation",  format!("{:.2}\u{b0}", vals.rotation_deg)),
-                ("Fill",      vals.fill_label.clone()),
-                ("Stroke",    format!("{}  w:{:.1}", vals.stroke_label, vals.stroke_width)),
-                ("Opacity",   format!("{:.2}", vals.opacity)),
+            let base_rows: &[(&str, String, Color32)] = &[
+                ("Position", format!("({:.1}, {:.1}, {:.1})", vals.pos_x, vals.pos_y, vals.pos_z), PROP_VALUE),
+                ("Scale", format!("({:.2}, {:.2}, {:.2})", vals.scale_x, vals.scale_y, vals.scale_z), PROP_VALUE),
+                ("Rotation", format!("{:.2}\u{b0}", vals.rotation_deg), PROP_VALUE),
+                ("Fill", vals.fill_label.clone(), PROP_VALUE),
+                ("Stroke", format!("{}  w:{:.1}", vals.stroke_label, vals.stroke_width), PROP_VALUE),
+                ("Opacity", format!("{:.2}", vals.opacity), PROP_VALUE),
             ];
 
-            for (i, (label, value)) in rows.iter().enumerate() {
+            let extra_rows: Vec<(&str, String, Color32)> = {
+                let mut r = Vec::new();
+                if layout.has_signal {
+                    if let Some(&val) = signal_values.get(&obj_id) {
+                        r.push(("Signal", format!("{:.4}", val), CLR_SIGNAL_ACCENT));
+                    }
+                }
+                if layout.has_updater {
+                    r.push(("Updater", "\u{1F504} running".into(), CLR_UPDATER_BADGE));
+                }
+                if layout.has_decimal {
+                    if let Some(&val) = decimal_values.get(&obj_id) {
+                        r.push(("Display", format!("{:.4}", val), CLR_DECIMAL_ACCENT));
+                    }
+                }
+                r
+            };
+
+            let row_count = base_rows.len() + extra_rows.len();
+
+            for (i, (label, value, color)) in base_rows.iter().chain(extra_rows.iter()).enumerate() {
                 let y = base_y + i as f32 * self.property_row_height;
                 let mid_y = y + self.property_row_height / 2.0;
 
@@ -584,7 +683,19 @@ impl TimelineWidget {
                     Align2::LEFT_CENTER,
                     value.as_str(),
                     font.clone(),
-                    PROP_VALUE,
+                    *color,
+                );
+            }
+
+            // Fill remaining rows with separators to maintain consistent look
+            for i in row_count..layout.prop_count {
+                let y = base_y + i as f32 * self.property_row_height;
+                p.line_segment(
+                    [
+                        Pos2::new(label_rect.min.x, y),
+                        Pos2::new(clips_rect.max.x, y),
+                    ],
+                    Stroke::new(0.5, PROP_SEPARATOR),
                 );
             }
         }
@@ -654,6 +765,53 @@ impl TimelineWidget {
             let is_hovered = hover_pos.is_some_and(|pos| cr.contains(pos));
             let fill = if is_hovered { lighten(color) } else { color };
             p.rect_filled(cr, 3u8, fill);
+
+            // ── Value ramp indicator for SignalFloat clips ──────────
+            if let ClipPayload::Animation(anim) = &clip.payload {
+                if let PropertyLensSpec::SignalFloat { from, to } = &anim.lens {
+                    if cr.width() > 20.0 {
+                        let ramp_h = 4.0;
+                        let ramp_y = cr.max.y - ramp_h - 2.0;
+                        let from_color = if *from < *to {
+                            Color32::from_rgb(80, 80, 160)
+                        } else {
+                            Color32::from_rgb(160, 80, 80)
+                        };
+                        let to_color = if *from < *to {
+                            Color32::from_rgb(255, 200, 80)
+                        } else {
+                            Color32::from_rgb(200, 100, 100)
+                        };
+                        // Draw a tiny gradient ramp: 4-segment approximation
+                        let segments = 8;
+                        let seg_w = (cr.width() / segments as f32).max(1.0);
+                        for s in 0..segments {
+                            let t = s as f32 / segments as f32;
+                            let t2 = (s + 1) as f32 / segments as f32;
+                            let c = lerp_color(from_color, to_color, (t + t2) / 2.0);
+                            let sx = cr.min.x + s as f32 * seg_w;
+                            p.rect_filled(
+                                Rect::from_min_size(
+                                    Pos2::new(sx, ramp_y),
+                                    Vec2::new(seg_w, ramp_h),
+                                ),
+                                1u8, c,
+                            );
+                        }
+                    }
+                    // Show from→to values on hover
+                    if is_hovered {
+                        let val_label = format!("{:.2}\u{2192}{:.2}", from, to);
+                        p.text(
+                            Pos2::new(cr.min.x + 4.0, cr.max.y - 8.0),
+                            Align2::LEFT_BOTTOM,
+                            val_label,
+                            FontId::proportional(8.0),
+                            Color32::from_rgb(255, 220, 140),
+                        );
+                    }
+                }
+            }
 
             let label = clip_label(&clip.payload);
             p.text(
@@ -1290,6 +1448,15 @@ fn nice_round(raw: f64) -> f64 {
         10.0
     };
     nice * 10.0_f64.powf(exp)
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    Color32::from_rgb(
+        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
+        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
+        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
+    )
 }
 
 fn lighten(c: Color32) -> Color32 {

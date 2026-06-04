@@ -5,7 +5,11 @@ use gaanim_core::peniko;
 use gaanim_math::Camera;
 use gaanim_scene::{FillBrush, GroupMarker, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, WorldBounds};
 use gaanim_timeline::timeline::Timeline;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use gaanim_animation::signals::FloatSignal;
+use gaanim_animation::updaters::Updater;
+use gaanim_api::DecimalNumber;
 
 mod fps_overlay;
 mod timeline_widget;
@@ -71,6 +75,9 @@ fn editor_ui_system(
     stroke_query: Query<&StrokeBrush>,
     opacity_query: Query<&Opacity>,
     bounds_query: Query<&WorldBounds>,
+    signal_query: Query<(Entity, &MobjectId, &FloatSignal)>,
+    updater_query: Query<&MobjectId, With<Updater>>,
+    decimal_query: Query<(&MobjectId, &DecimalNumber)>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -125,6 +132,27 @@ fn editor_ui_system(
                 opacity,
             },
         );
+    }
+
+    // ── Extra track data: signals, updaters, decimal numbers ────────
+    let mut signal_values: HashMap<ObjectId, f64> = HashMap::new();
+    let mut signal_by_entity: HashMap<Entity, f64> = HashMap::new();
+    for (entity, mobj_id, signal) in &signal_query {
+        signal_values.insert(mobj_id.0, signal.value);
+        signal_by_entity.insert(entity, signal.value);
+    }
+
+    let mut updater_entities: HashSet<ObjectId> = HashSet::new();
+    for mobj_id in &updater_query {
+        updater_entities.insert(mobj_id.0);
+    }
+
+    let mut decimal_values: HashMap<ObjectId, f64> = HashMap::new();
+    for (mobj_id, dec) in &decimal_query {
+        let val = dec.last_value
+            .or_else(|| signal_by_entity.get(&dec.signal_entity).copied())
+            .unwrap_or(0.0);
+        decimal_values.insert(mobj_id.0, val);
     }
 
     // ── Build group → children track mapping ────────────────────────
@@ -186,7 +214,10 @@ fn editor_ui_system(
         .default_height(200.0)
         .min_height(100.0)
         .show(ctx, |ui| {
-            state.timeline_widget.show(ui, &mut timeline, &property_values, &group_children);
+            state.timeline_widget.show(
+                ui, &mut timeline, &property_values, &group_children,
+                &signal_values, &updater_entities, &decimal_values,
+            );
         });
 
     // Track sidebar click → select the corresponding entity
