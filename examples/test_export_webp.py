@@ -23,38 +23,38 @@ def main():
         rect.rotate_anim(3.14 / 2).duration(0.5),
     )
     scene.wait(0.5)
-    # scene.render()
+    scene.edit()
 
-    if preset == "webp":
-        scene.export(
-            "output_test.webp", fps=30, quality="draft", aspect_ratio="youtube"
-        )
-    elif preset == "mp4_draft":
-        scene.export(
-            "output_test_draft.mp4", fps=30, quality="draft", aspect_ratio="youtube"
-        )
-    elif preset == "mp4_standard":
-        scene.export(
-            "output_test_standard.mp4",
-            fps=60,
-            quality="standard",
-            aspect_ratio="youtube",
-        )
-    elif preset == "webm":
-        scene.export(
-            "output_test.webm",
-            fps=30,
-            quality="draft",
-            transparent=True,
-            aspect_ratio="youtube",
-        )
-    elif preset == "gif":
-        scene.export("output_test.gif", fps=15, quality="draft", aspect_ratio="youtube")
-    elif preset == "png":
-        scene.export("output_test.png", fps=30, quality="draft", aspect_ratio="youtube")
-    else:
-        print(f"Unknown preset: {preset}")
-        print("Options: webp, mp4_draft, mp4_standard, webm, gif, png")
+    # if preset == "webp":
+    #     scene.export(
+    #         "output_test.webp", fps=30, quality="draft", aspect_ratio="youtube"
+    #     )
+    # elif preset == "mp4_draft":
+    #     scene.export(
+    #         "output_test_draft.mp4", fps=30, quality="draft", aspect_ratio="youtube"
+    #     )
+    # elif preset == "mp4_standard":
+    #     scene.export(
+    #         "output_test_standard.mp4",
+    #         fps=60,
+    #         quality="standard",
+    #         aspect_ratio="youtube",
+    #     )
+    # elif preset == "webm":
+    #     scene.export(
+    #         "output_test.webm",
+    #         fps=30,
+    #         quality="draft",
+    #         transparent=True,
+    #         aspect_ratio="youtube",
+    #     )
+    # elif preset == "gif":
+    #     scene.export("output_test.gif", fps=15, quality="draft", aspect_ratio="youtube")
+    # elif preset == "png":
+    #     scene.export("output_test.png", fps=30, quality="draft", aspect_ratio="youtube")
+    # else:
+    #     print(f"Unknown preset: {preset}")
+    #     print("Options: webp, mp4_draft, mp4_standard, webm, gif, png")
 
 
 if __name__ == "__main__":

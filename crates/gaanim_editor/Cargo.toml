@@ -10,9 +10,12 @@ gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_export = { path = "../gaanim_export" }
+gaanim_renderer = { path = "../gaanim_renderer" }
 
-bevy = { workspace = true, features = ["bevy_ui"] }
+bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 bevy_egui = "0.39"
+bevy_vello = "0.13.1"
