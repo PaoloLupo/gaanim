@@ -190,6 +190,11 @@ pub enum PropertyLensSpec {
     PathFollow {
         path: BezPath,
     },
+    /// Tween a reactive FloatSignal.
+    SignalFloat {
+        from: f64,
+        to: f64,
+    },
     Custom {
         type_name: String,
         params: String,
@@ -250,6 +255,10 @@ impl PropertyLensSpec {
             },
             Self::PathFollow { path } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),
+            },
+            Self::SignalFloat { from, to } => PropertyLens::SignalFloat {
+                from: *from,
+                to: *to,
             },
             Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
                 type_name: type_name.clone(),

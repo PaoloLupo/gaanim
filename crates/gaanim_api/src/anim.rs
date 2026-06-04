@@ -132,6 +132,10 @@ pub enum AnimationType {
     /// outline first, then finishes with a brief scale "punch" that
     /// emphasizes the arrowhead's appearance at the end.
     GrowArrow,
+    /// Interpolate a float signal value to a target.
+    SignalFloat {
+        to: f64,
+    },
 }
 
 /// A fluent builder for an animation tween clip.
@@ -532,6 +536,24 @@ impl MobjectRef {
             target: self.id,
             anim_type: AnimationType::GrowArrow,
             duration: 1.5,
+            rate_func: RateFunc::Smooth,
+        }
+    }
+}
+
+/// Handle reference to a ValueTracker signal in the Scene.
+#[derive(Clone, Copy, Debug)]
+pub struct ValueTrackerRef {
+    pub id: ObjectId,
+}
+
+impl ValueTrackerRef {
+    /// Animate this ValueTracker's float value to a target value.
+    pub fn animate_to(self, to: f64) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::SignalFloat { to },
+            duration: 1.0,
             rate_func: RateFunc::Smooth,
         }
     }

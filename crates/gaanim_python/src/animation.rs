@@ -134,6 +134,7 @@ impl PyAnimationSpec {
             }
             AnimationType::MoveAlongPath { .. } => "move_along_path".to_string(),
             AnimationType::GrowArrow => "grow_arrow".to_string(),
+            AnimationType::SignalFloat { to } => format!("animate_to({})", to),
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",

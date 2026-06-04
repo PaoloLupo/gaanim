@@ -161,6 +161,13 @@ pub enum PropertyLens {
         path: Arc<BezPath>,
     },
 
+    // === Reactive Signals ===
+    /// Tween a reactive FloatSignal from an initial to target value.
+    SignalFloat {
+        from: f64,
+        to: f64,
+    },
+
     // === Extensibility ===
     Custom(Box<dyn AnimatableLens>),
 }
@@ -188,6 +195,7 @@ impl std::fmt::Debug for PropertyLens {
             }
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
+            Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
             Self::Custom(c) => write!(f, "Custom({:?})", c.type_name()),
         }
     }
@@ -224,6 +232,7 @@ pub fn evaluate_tweens_system(
     sources: Query<&PathSource>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
+    mut float_signals: Query<&mut crate::signals::FloatSignal>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
         if tween.state == TweenState::Completed {
@@ -323,6 +332,11 @@ pub fn evaluate_tweens_system(
                 let p = get_point_at_alpha(path, t);
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                }
+            }
+            PropertyLens::SignalFloat { from, to } => {
+                if let Ok(mut signal) = float_signals.get_mut(tween.target) {
+                    signal.value = *from + (*to - *from) * t;
                 }
             }
             PropertyLens::Custom(_) => {

@@ -15,7 +15,7 @@ use gaanim_timeline::{
     timeline::Timeline,
     transition::TransitionType,
 };
-use crate::anim::{AnimationBuilder, AnimationType};
+use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use std::collections::HashMap;
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
@@ -285,6 +285,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     current_label: Option<String>,
     /// The currently active scene (None when outside any scene scope).
     pub current_scene: Option<SceneId>,
+    /// Tracks the current value of each float signal / value tracker
+    pub float_signals: HashMap<ObjectId, f64>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -334,6 +336,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             next_track: 0,
             current_label: None,
             current_scene: None,
+            float_signals: HashMap::new(),
         }
     }
 
@@ -438,6 +441,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Circumscribe { .. } => "Circum",
             AnimationType::MoveAlongPath { .. } => "Follow",
             AnimationType::GrowArrow => "Arrow",
+            AnimationType::SignalFloat { .. } => "Signal",
         }
     }
 
@@ -669,6 +673,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::MoveAlongPath { .. }
             | AnimationType::GrowArrow => {
                 unreachable!("Expansion is dispatched in the early branch above")
+            }
+            AnimationType::SignalFloat { to } => {
+                let from = *self.float_signals.get(&anim.target).unwrap_or(&0.0);
+                self.float_signals.insert(anim.target, to);
+                PropertyLensSpec::SignalFloat { from, to }
             }
         };
 
@@ -1953,6 +1962,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         self.states.remove(group.id);
         self.mobject_names.remove(&group.id);
+    }
+
+    /// Spawns a ValueTracker (FloatSignal) with the given initial value.
+    pub fn value_tracker(&mut self, initial: f64) -> ValueTrackerRef {
+        let id = self.next_id();
+        let entity = self.commands.spawn((
+            gaanim_scene::MobjectId(id),
+            gaanim_animation::signals::FloatSignal::new(initial),
+        )).id();
+        self.tag_entity(entity);
+
+        let state = MobjectState {
+            bounds: Bounds3D::default(),
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: None,
+            stroke: StrokeBrush::default(),
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+        };
+        self.states.insert(id, state);
+        self.float_signals.insert(id, initial);
+
+        ValueTrackerRef { id }
     }
 
     /// Spawns a circle primitive.

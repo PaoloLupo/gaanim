@@ -1,5 +1,5 @@
 pub use crate::GaanimApiPlugin;
-pub use crate::anim::{AnimationBuilder, AnimationType};
+pub use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 pub use crate::builder::{MobjectRef, MobjectSpawnBuilder, SceneBuilder};
 
 // Conveniently re-export relative layout Directions and Anchors for scripts/examples

@@ -667,6 +667,11 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
             }
         }
+        PropertyLensSpec::SignalFloat { from, to } => {
+            if let Some(mut signal) = world.get_mut::<gaanim_animation::signals::FloatSignal>(target) {
+                signal.value = *from + (*to - *from) * t;
+            }
+        }
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }
