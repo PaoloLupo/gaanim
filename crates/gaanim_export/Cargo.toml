@@ -23,5 +23,6 @@ thiserror = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 bevy_vello = "0.13.1"
 indicatif = { version = "0.17", features = ["rayon"] }
+pollster = "0.3"
 rayon = "1.10"
 crossbeam-channel = "0.5"

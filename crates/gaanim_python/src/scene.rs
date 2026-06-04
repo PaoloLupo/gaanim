@@ -905,7 +905,8 @@ impl PyScene {
         aspect_ratio = None,
         quality = None,
         start_time = None,
-        end_time = None
+        end_time = None,
+        headless = true,
     ))]
     fn export(
         &self,
@@ -919,6 +920,7 @@ impl PyScene {
         quality: Option<String>,
         start_time: Option<f64>,
         end_time: Option<f64>,
+        headless: bool,
     ) -> PyResult<()> {
         let mut inner = lock_inner!(self.inner);
         let ops = std::mem::take(&mut inner.ops);
@@ -933,6 +935,7 @@ impl PyScene {
         config.fps = fps;
         config.width = w;
         config.height = h;
+        config.headless = headless;
 
         if let Some(t) = transparent {
             config.transparent = t;
@@ -974,7 +977,12 @@ impl PyScene {
                 runtime::replay_into(world, ops, w, h, background);
             };
 
-            if let Err(e) = export_scene(config, setup_world) {
+            let result = if headless {
+                export_scene_direct(config, setup_world)
+            } else {
+                export_scene(config, setup_world)
+            };
+            if let Err(e) = result {
                 bevy::prelude::error!("Export error: {}", e);
             }
         });
