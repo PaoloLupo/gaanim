@@ -442,6 +442,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::MoveAlongPath { .. } => "Follow",
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
+            AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
         }
     }
 
@@ -678,6 +679,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let from = *self.float_signals.get(&anim.target).unwrap_or(&0.0);
                 self.float_signals.insert(anim.target, to);
                 PropertyLensSpec::SignalFloat { from, to }
+            }
+            AnimationType::ShowPassingFlash { time_width } => {
+                PropertyLensSpec::PathRange {
+                    from: 0.0,
+                    to: 1.0 + time_width,
+                    time_width,
+                }
             }
         };
 

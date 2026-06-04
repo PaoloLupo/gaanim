@@ -136,6 +136,10 @@ pub enum AnimationType {
     SignalFloat {
         to: f64,
     },
+    /// ShowPassingFlash progressively draws a sliding window of the path.
+    ShowPassingFlash {
+        time_width: f64,
+    },
 }
 
 /// A fluent builder for an animation tween clip.
@@ -537,6 +541,17 @@ impl MobjectRef {
             anim_type: AnimationType::GrowArrow,
             duration: 1.5,
             rate_func: RateFunc::Smooth,
+        }
+    }
+
+    /// Manim-style ShowPassingFlash: progressively draws a sliding window of the path
+    /// along its arc length.
+    pub fn show_passing_flash(self, duration: f64, time_width: f64) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::ShowPassingFlash { time_width },
+            duration,
+            rate_func: RateFunc::Linear,
         }
     }
 }

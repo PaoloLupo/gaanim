@@ -135,6 +135,9 @@ impl PyAnimationSpec {
             AnimationType::MoveAlongPath { .. } => "move_along_path".to_string(),
             AnimationType::GrowArrow => "grow_arrow".to_string(),
             AnimationType::SignalFloat { to } => format!("animate_to({})", to),
+            AnimationType::ShowPassingFlash { time_width } => {
+                format!("show_passing_flash(time_width={})", time_width)
+            }
         };
         format!(
             "AnimSpec(target=ObjectId({}v{}), kind={}, duration={}, rate={})",
@@ -470,6 +473,15 @@ impl PyAnimationSpec {
             builder = builder.duration(duration);
         }
         Self { inner: builder }
+    }
+
+    /// ShowPassingFlash animation.
+    #[pyo3(signature = (duration=1.0, time_width=0.2))]
+    fn show_passing_flash(&self, duration: f64, time_width: f64) -> Self {
+        let target = self.inner.target;
+        Self {
+            inner: MobjectRef { id: target }.show_passing_flash(duration, time_width),
+        }
     }
 }
 

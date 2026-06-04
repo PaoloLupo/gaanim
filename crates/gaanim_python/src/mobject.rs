@@ -848,6 +848,14 @@ impl PyMobject {
         PyAnimationSpec::from_builder(builder)
     }
 
+    /// ShowPassingFlash animation shortcut.
+    #[pyo3(signature = (duration=1.0, time_width=0.2))]
+    fn show_passing_flash(&self, duration: f64, time_width: f64) -> PyAnimationSpec {
+        use gaanim_api::builder::MobjectRef;
+        let builder = MobjectRef { id: self.id }.show_passing_flash(duration, time_width);
+        PyAnimationSpec::from_builder(builder)
+    }
+
     fn add_bob_updater(&self, scene: &crate::scene::PyScene, amplitude: f64, frequency: f64) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
