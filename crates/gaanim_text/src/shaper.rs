@@ -106,13 +106,6 @@ pub fn compile_text_to_hierarchy(
     // so we build a map from byte offset → (char, char_index).
     let char_byte_offsets: Vec<(usize, char)> = text.char_indices().collect();
 
-    bevy::prelude::info!(
-        "compile_text_to_hierarchy: text='{}', glyphs={}, chars={}",
-        text,
-        shaped_glyphs.len(),
-        char_byte_offsets.len()
-    );
-
     // Track the next candidate character index for glyphs that share a
     // cluster value (e.g. combining marks attached to the same base).
     // For ligatures (one glyph, multiple chars) the cluster points to
@@ -178,8 +171,6 @@ pub fn compile_text_to_hierarchy(
             let (char_byte_start, c) = char_byte_offsets[char_idx];
             let char_byte_end = char_byte_start + c.len_utf8();
 
-            let path_len = path.elements().len();
-
             // Spawn the child letter Mobject
             let char_id = next_id_fn();
             let mut child_bundle = MobjectBundle::new(char_id, path, glyph_local_bounds);
@@ -201,14 +192,6 @@ pub fn compile_text_to_hierarchy(
                 },
             };
 
-            bevy::prelude::info!(
-                "  glyph[{}]: char='{}', idx={}, glyph_id={}, path_els={}, bounds=[{:.1},{:.1}..{:.1},{:.1}]",
-                child_spans.len(), c, char_idx, glyph.glyph_id,
-                path_len,
-                glyph_local_bounds.min.x, glyph_local_bounds.min.y,
-                glyph_local_bounds.max.x, glyph_local_bounds.max.y
-            );
-
             commands.entity(child_entity).insert(span);
             child_spans.push((char_id, child_entity, span));
 
@@ -229,12 +212,6 @@ pub fn compile_text_to_hierarchy(
     commands
         .entity(parent_entity)
         .insert(gaanim_scene::LocalBounds(total_bounds));
-
-    bevy::prelude::info!(
-        "compile_text_to_hierarchy: spawned {} child entities for '{}'",
-        child_spans.len(),
-        text
-    );
 
     Ok((parent_entity, total_bounds))
 }
