@@ -1,18 +1,28 @@
-use crate::encoder::ExportFormat;
+use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AspectRatioPreset {
-    Youtube,     // 16:9 (1920x1080)
-    TikTok,      // 9:16 (1080x1920) - Vertical
-    Instagram,   // 1:1 (1080x1080) - Square
+    Youtube,
+    TikTok,
+    Instagram,
     Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QualityPreset {
-    Draft,      // 480p, 30fps, fast H.264
-    Standard,   // 1080p, 60fps, medium compression
-    Production, // 4K, 60fps, slower/higher quality compression
+    Draft,
+    Standard,
+    Production,
+}
+
+impl QualityPreset {
+    pub fn encoding_speed(self) -> EncodingSpeed {
+        match self {
+            Self::Draft => EncodingSpeed::Fast,
+            Self::Standard => EncodingSpeed::Balanced,
+            Self::Production => EncodingSpeed::Best,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,13 +35,15 @@ pub struct ExportConfig {
     pub height: u32,
     pub fps: u32,
     pub transparent: bool,
-    
-    // Segment rendering (highly useful for iterative educational content production!)
+
     pub start_time: Option<f64>,
     pub end_time: Option<f64>,
-    
-    // Encoder settings
+
     pub crf: u32,
+
+    pub encoding_speed: EncodingSpeed,
+    pub video_encoder: VideoEncoder,
+    pub headless: bool,
 }
 
 impl Default for ExportConfig {
@@ -47,27 +59,34 @@ impl Default for ExportConfig {
             transparent: false,
             start_time: None,
             end_time: None,
-            crf: 18, // High quality, visually lossless
+            crf: 18,
+            encoding_speed: EncodingSpeed::Balanced,
+            video_encoder: VideoEncoder::Libx264,
+            headless: false,
         }
     }
 }
 
 impl ExportConfig {
     pub fn new(output_path: &str) -> Self {
-        let mut config = Self::default();
-        config.output_path = output_path.to_string();
-        
-        // Auto-detect format from extension
         let path = std::path::Path::new(output_path);
+        let mut config = Self {
+            output_path: output_path.to_string(),
+            ..Default::default()
+        };
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             match ext.to_lowercase().as_str() {
                 "webm" => {
                     config.format = ExportFormat::Webm;
-                    config.transparent = true; // WebM defaults to transparent capability
+                    config.transparent = true;
+                }
+                "webp" => {
+                    config.format = ExportFormat::Webp;
+                    config.fps = 30;
                 }
                 "gif" => {
                     config.format = ExportFormat::Gif;
-                    config.fps = 30; // GIFs are usually 30fps or less
+                    config.fps = 30;
                 }
                 "png" => {
                     config.format = ExportFormat::PngSequence;
@@ -80,9 +99,13 @@ impl ExportConfig {
         config
     }
 
-    /// Apply preset adjustments to width, height, and fps.
     pub fn apply_presets(mut self) -> Self {
-        // Apply Quality preset first
+        self.encoding_speed = self.quality.encoding_speed();
+
+        if matches!(self.video_encoder, VideoEncoder::Libx264) {
+            self.video_encoder = crate::encoder::detect_best_encoder();
+        }
+
         match self.quality {
             QualityPreset::Draft => {
                 self.fps = 30;
@@ -106,7 +129,7 @@ impl ExportConfig {
             }
             QualityPreset::Production => {
                 self.fps = 60;
-                self.crf = 14; // Extreme high quality
+                self.crf = 14;
                 match self.aspect_ratio {
                     AspectRatioPreset::Youtube => { self.width = 3840; self.height = 2160; }
                     AspectRatioPreset::TikTok => { self.width = 2160; self.height = 3840; }

@@ -1,9 +1,11 @@
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
+use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_core::id::ObjectId;
 use gaanim_core::peniko;
 use gaanim_math::Camera;
-use gaanim_scene::{FillBrush, GroupMarker, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, WorldBounds};
+use gaanim_scene::{
+    FillBrush, GroupMarker, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, WorldBounds,
+};
 use gaanim_timeline::timeline::Timeline;
 use std::collections::{HashMap, HashSet};
 
@@ -11,6 +13,7 @@ use gaanim_animation::signals::FloatSignal;
 use gaanim_animation::updaters::Updater;
 use gaanim_api::DecimalNumber;
 
+pub mod export;
 mod fps_overlay;
 mod timeline_widget;
 mod vsync;
@@ -19,19 +22,14 @@ pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
-        // Multipass is enabled by default in bevy_egui 0.39, but it causes
-        // the play button's `.clicked()` to fire multiple times per frame
-        // (once per pass), toggling `is_playing` true→false→true within a
-        // single frame. The deprecation says "use EguiPlugin::default()",
-        // but that still defaults to multipass=true; we have to keep this
-        // explicit override until bevy_egui provides a non-deprecated
-        // way to opt out (tracked upstream).
         #[allow(deprecated)]
         app.add_plugins(EguiPlugin {
             enable_multipass_for_primary_context: false,
             ..default()
         })
         .init_resource::<EditorState>()
+        .init_resource::<export::ExportState>()
+        .insert_resource(export::StashedReplay(None))
         .init_resource::<fps_overlay::FpsOverlay>()
         .init_resource::<vsync::VsyncState>()
         .add_systems(
@@ -42,7 +40,10 @@ impl Plugin for GaanimEditorPlugin {
                 vsync::vsync_toggle_system,
             ),
         )
-        .add_systems(EguiPrimaryContextPass, editor_ui_system);
+        .add_systems(
+            EguiPrimaryContextPass,
+            (editor_ui_system, export::export_dialog_system),
+        );
     }
 }
 
@@ -62,8 +63,9 @@ impl Default for EditorState {
 }
 
 fn editor_ui_system(
-    mut contexts: EguiContexts,
+    mut ctx: bevy_egui::EguiContexts,
     mut state: ResMut<EditorState>,
+    mut export_state: ResMut<export::ExportState>,
     mut timeline: ResMut<Timeline>,
     camera: Res<Camera>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
@@ -79,17 +81,46 @@ fn editor_ui_system(
     updater_query: Query<&MobjectId, With<Updater>>,
     decimal_query: Query<(&MobjectId, &DecimalNumber)>,
 ) {
-    let Ok(ctx) = contexts.ctx_mut() else {
+    let Ok(ctx) = ctx.ctx_mut() else {
         return;
     };
 
-    // ── Property values for timeline ─────────────────────────────────
+    let is_exporting = export_state.active;
+    let (export_progress_pct, export_current, export_total) = if is_exporting {
+        if let Ok(lock) = export_state.progress_shared.lock() {
+            if let Some(ref p) = *lock {
+                let pct = if p.total_frames > 0 {
+                    p.current_frame as f32 / p.total_frames as f32
+                } else {
+                    0.0
+                };
+                (pct, p.current_frame, p.total_frames)
+            } else {
+                (0.0, 0, 0)
+            }
+        } else {
+            (0.0, 0, 0)
+        }
+    } else {
+        (0.0, 0, 0)
+    };
+
     let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
     for (entity, mobj_id, _) in &entity_query {
-        let Some(oid) = mobj_id else { continue; };
+        let Some(oid) = mobj_id else {
+            continue;
+        };
 
-        let pos = if let Ok(t) = transform_query.get(entity) { t.translation } else { glam::DVec3::ZERO };
-        let scale = if let Ok(t) = transform_query.get(entity) { t.scale } else { glam::DVec3::ONE };
+        let pos = if let Ok(t) = transform_query.get(entity) {
+            t.translation
+        } else {
+            glam::DVec3::ZERO
+        };
+        let scale = if let Ok(t) = transform_query.get(entity) {
+            t.scale
+        } else {
+            glam::DVec3::ONE
+        };
         let rotation_deg = if let Ok(t) = transform_query.get(entity) {
             2.0 * f64::atan2(t.rotation.z, t.rotation.w).to_degrees()
         } else {
@@ -114,7 +145,11 @@ fn editor_ui_system(
             0.0
         };
 
-        let opacity = if let Ok(o) = opacity_query.get(entity) { o.0 } else { 1.0 };
+        let opacity = if let Ok(o) = opacity_query.get(entity) {
+            o.0
+        } else {
+            1.0
+        };
 
         property_values.insert(
             oid.0,
@@ -134,38 +169,16 @@ fn editor_ui_system(
         );
     }
 
-    // ── Extra track data: signals, updaters, decimal numbers ────────
-    let mut signal_values: HashMap<ObjectId, f64> = HashMap::new();
-    let mut signal_by_entity: HashMap<Entity, f64> = HashMap::new();
-    for (entity, mobj_id, signal) in &signal_query {
-        signal_values.insert(mobj_id.0, signal.value);
-        signal_by_entity.insert(entity, signal.value);
-    }
-
-    let mut updater_entities: HashSet<ObjectId> = HashSet::new();
-    for mobj_id in &updater_query {
-        updater_entities.insert(mobj_id.0);
-    }
-
-    let mut decimal_values: HashMap<ObjectId, f64> = HashMap::new();
-    for (mobj_id, dec) in &decimal_query {
-        let val = dec.last_value
-            .or_else(|| signal_by_entity.get(&dec.signal_entity).copied())
-            .unwrap_or(0.0);
-        decimal_values.insert(mobj_id.0, val);
-    }
-
-    // ── Build group → children track mapping ────────────────────────
-    // Timeline tracks are flat. We build a virtual hierarchy by finding
-    // group entities (GroupMarker) whose children also have tracks.
     let mobject_to_track: HashMap<gaanim_core::id::ObjectId, gaanim_timeline::clip::TrackId> =
         timeline
             .tracks
             .iter()
             .filter_map(|(tid, t)| t.object_id.map(|oid| (oid, tid)))
             .collect();
-    let mut group_children: HashMap<gaanim_timeline::clip::TrackId, Vec<gaanim_timeline::clip::TrackId>> =
-        HashMap::new();
+    let mut group_children: HashMap<
+        gaanim_timeline::clip::TrackId,
+        Vec<gaanim_timeline::clip::TrackId>,
+    > = HashMap::new();
     for (entity, mobj_id, _) in &entity_query {
         if !group_query.contains(entity) {
             continue;
@@ -192,10 +205,23 @@ fn editor_ui_system(
         }
     }
 
-    // ── Menu bar ────────────────────────────────────────────────────
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            if let Some(selected) = state.selected {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Export...").clicked() {
+                    export_state.dialog_open = true;
+                    ui.close();
+                }
+            });
+
+            if is_exporting {
+                ui.add(
+                    egui::ProgressBar::new(export_progress_pct)
+                        .desired_width(140.0)
+                        .text(format!("{:.0}%", export_progress_pct * 100.0)),
+                );
+                ui.label(format!("Frame {}/{}", export_current, export_total));
+            } else if let Some(selected) = state.selected {
                 let name = entity_query
                     .get(selected)
                     .ok()
@@ -208,76 +234,81 @@ fn editor_ui_system(
         });
     });
 
-    // ── Timeline ────────────────────────────────────────────────────
     egui::TopBottomPanel::bottom("timeline")
         .resizable(true)
         .default_height(200.0)
         .min_height(100.0)
         .show(ctx, |ui| {
-            state.timeline_widget.show(
-                ui, &mut timeline, &property_values, &group_children,
-                &signal_values, &updater_entities, &decimal_values,
-            );
+            state
+                .timeline_widget
+                .show(ui, &mut timeline, &property_values, &group_children);
         });
 
-    // Track sidebar click → select the corresponding entity
     if let Some(track_id) = state.timeline_widget.selected_track {
         if let Some(track) = timeline.tracks.get(track_id)
-            && let Some(obj_id) = track.object_id {
-                for (entity, mobj_id, _) in &entity_query {
-                    if let Some(mid) = mobj_id
-                        && mid.0 == obj_id {
-                            state.selected = Some(entity);
-                            break;
-                        }
+            && let Some(obj_id) = track.object_id
+        {
+            for (entity, mobj_id, _) in &entity_query {
+                if let Some(mid) = mobj_id
+                    && mid.0 == obj_id
+                {
+                    state.selected = Some(entity);
+                    break;
                 }
             }
+        }
         state.timeline_widget.selected_track = None;
     }
 
-    // ── Viewport selection indicator ──────────────────────────────────
     if let Some(selected) = state.selected
-        && let Ok(bounds) = bounds_query.get(selected) {
-            let corners = [
-                glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),
-                glam::DVec3::new(bounds.0.max.x, bounds.0.min.y, 0.0),
-                glam::DVec3::new(bounds.0.max.x, bounds.0.max.y, 0.0),
-                glam::DVec3::new(bounds.0.min.x, bounds.0.max.y, 0.0),
-            ];
+        && let Ok(bounds) = bounds_query.get(selected)
+    {
+        let corners = [
+            glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),
+            glam::DVec3::new(bounds.0.max.x, bounds.0.min.y, 0.0),
+            glam::DVec3::new(bounds.0.max.x, bounds.0.max.y, 0.0),
+            glam::DVec3::new(bounds.0.min.x, bounds.0.max.y, 0.0),
+        ];
 
-            let screen: Vec<egui::Pos2> = corners
-                .iter()
-                .map(|c| {
-                    let s = camera.world_to_screen(*c);
-                    egui::Pos2::new(s.x as f32, s.y as f32)
-                })
-                .collect();
+        let screen: Vec<egui::Pos2> = corners
+            .iter()
+            .map(|c| {
+                let s = camera.world_to_screen(*c);
+                egui::Pos2::new(s.x as f32, s.y as f32)
+            })
+            .collect();
 
-            let vp = ctx.viewport_rect();
-            let color = egui::Color32::from_rgba_premultiplied(68, 160, 255, 180);
-            let stroke = egui::Stroke::new(2.0, color);
-            egui::Area::new("viewport_selection".into())
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .interactable(false)
-                .show(ctx, |ui| {
-                    let _ = ui.allocate_space(vp.size());
-                    let p = ui.painter();
-                    for i in 0..4 {
-                        p.line_segment([screen[i], screen[(i + 1) % 4]], stroke);
-                    }
-                    let cs = 6.0;
-                    for &c in &screen {
-                        p.line_segment(
-                            [egui::Pos2::new(c.x - cs, c.y), egui::Pos2::new(c.x + cs, c.y)],
-                            stroke,
-                        );
-                        p.line_segment(
-                            [egui::Pos2::new(c.x, c.y - cs), egui::Pos2::new(c.x, c.y + cs)],
-                            stroke,
-                        );
-                    }
-                });
-        }
+        let color = egui::Color32::from_rgba_premultiplied(68, 160, 255, 180);
+        let stroke = egui::Stroke::new(2.0, color);
+        egui::Area::new("viewport_selection".into())
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let vp = ctx.viewport_rect();
+                let _ = ui.allocate_space(vp.size());
+                let p = ui.painter();
+                for i in 0..4 {
+                    p.line_segment([screen[i], screen[(i + 1) % 4]], stroke);
+                }
+                let cs = 6.0;
+                for &c in &screen {
+                    p.line_segment(
+                        [
+                            egui::Pos2::new(c.x - cs, c.y),
+                            egui::Pos2::new(c.x + cs, c.y),
+                        ],
+                        stroke,
+                    );
+                    p.line_segment(
+                        [
+                            egui::Pos2::new(c.x, c.y - cs),
+                            egui::Pos2::new(c.x, c.y + cs),
+                        ],
+                        stroke,
+                    );
+                }
+            });
+    }
 
     fps_overlay.render(ctx);
 }
@@ -294,13 +325,6 @@ fn brush_string(brush: &Option<peniko::Brush>) -> String {
     }
 }
 
-/// Picking system that runs in `Update` and uses `EguiWantsInput` (which
-/// includes `is_popup_open`) to skip clicks consumed by egui.
-///
-/// We use Bevy's mouse input directly (not egui) so we have a one-frame
-/// safety margin: a click that closed a popup in the previous frame is
-/// still flagged by `EguiWantsInput::wants_any_pointer_input()` because
-/// egui's resource is updated in PostUpdate, after the popup close.
 fn editor_picking_system(
     egui_wants: Res<EguiWantsInput>,
     camera: Res<Camera>,

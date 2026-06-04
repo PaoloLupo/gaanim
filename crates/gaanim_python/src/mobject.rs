@@ -2,7 +2,8 @@ use gaanim_api::prelude::LayoutDirection;
 use gaanim_core::peniko;
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo;
-use gaanim_math::SpatialTransform;
+use gaanim_math::{Bounds3D, SpatialTransform};
+use gaanim_layout::Anchor;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
@@ -10,8 +11,25 @@ use crate::animation::PyAnimationSpec;
 use crate::color::PyColor;
 use crate::id::PyObjectId;
 
+#[derive(Clone, Debug)]
+pub enum PythonPositioningOp {
+    At { target: gaanim_core::glam::DVec3, anchor: gaanim_layout::Anchor },
+    ToEdge { direction: gaanim_layout::Direction, buff: f64 },
+    ToCorner { corner: gaanim_layout::Anchor, buff: f64 },
+    AlignTo { reference: ObjectId, target_anchor: gaanim_layout::Anchor, ref_anchor: gaanim_layout::Anchor },
+    NextTo { reference: ObjectId, direction: gaanim_layout::Direction, spacing: f64, aligned_edge: gaanim_layout::Anchor },
+}
+
+#[derive(Clone, Debug)]
+pub enum PythonGroupLayoutOp {
+    Arrange { direction: gaanim_layout::Direction, spacing: f64 },
+    ArrangeInGrid { rows: Option<usize>, cols: Option<usize>, h_spacing: f64, v_spacing: f64 },
+    VStack { spacing: f64 },
+    HStack { spacing: f64 },
+}
+
 /// Visual properties shared by all mobject kinds.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CommonSpec {
     pub fill: Option<peniko::Color>,
     pub stroke: Option<(peniko::Color, f64)>,
@@ -19,6 +37,7 @@ pub struct CommonSpec {
     pub opacity: f32,
     pub transform: SpatialTransform,
     pub next_to: Option<(ObjectId, LayoutDirection, f64)>,
+    pub positioning_ops: Vec<PythonPositioningOp>,
 }
 
 /// What kind of mobject will be spawned at replay time. The configuration
@@ -79,6 +98,7 @@ pub enum MobjectSpec {
     Group {
         common: CommonSpec,
         children: Vec<(ObjectId, Arc<Mutex<MobjectSpec>>, u64)>,
+        layout_op: Option<PythonGroupLayoutOp>,
     },
 }
 
@@ -114,7 +134,7 @@ impl TextRoleKind {
 }
 
 impl MobjectSpec {
-    fn common(&self) -> &CommonSpec {
+    pub fn common(&self) -> &CommonSpec {
         match self {
             Self::Circle { common, .. }
             | Self::Rectangle { common, .. }
@@ -148,7 +168,7 @@ impl MobjectSpec {
         }
     }
 
-    fn common_mut(&mut self) -> &mut CommonSpec {
+    pub fn common_mut(&mut self) -> &mut CommonSpec {
         match self {
             Self::Circle { common, .. }
             | Self::Rectangle { common, .. }
@@ -227,9 +247,7 @@ impl MobjectSpec {
     fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) { self.common_mut().stroke = stroke; }
     fn set_opacity(&mut self, opacity: f32) { self.common_mut().opacity = opacity; }
     fn set_z_index(&mut self, z: i32) { self.common_mut().z_index = z; }
-    fn set_transform(&mut self, t: SpatialTransform) { self.common_mut().transform = t; }
     fn transform_mut(&mut self) -> &mut SpatialTransform { &mut self.common_mut().transform }
-    fn set_next_to(&mut self, hint: Option<(ObjectId, LayoutDirection, f64)>) { self.common_mut().next_to = hint; }
 }
 
 impl MobjectSpec {
@@ -469,6 +487,49 @@ impl MobjectSpec {
         }
         out
     }
+
+    pub fn get_local_bounds(&self) -> Bounds3D {
+        match self {
+            Self::Circle { radius, .. } => {
+                Bounds3D::new_2d(-radius, -radius, *radius, *radius)
+            }
+            Self::Rectangle { width, height, .. } => {
+                Bounds3D::new_2d(-width * 0.5, -height * 0.5, *width * 0.5, *height * 0.5)
+            }
+            Self::RoundedRect { width, height, .. } => {
+                Bounds3D::new_2d(-width * 0.5, -height * 0.5, *width * 0.5, *height * 0.5)
+            }
+            Self::Square { side, .. } => {
+                Bounds3D::new_2d(-side * 0.5, -side * 0.5, *side * 0.5, *side * 0.5)
+            }
+            Self::Text { content, .. } => {
+                let w = content.len() as f64 * 15.0;
+                Bounds3D::new_2d(-w * 0.5, -12.0, w * 0.5, 12.0)
+            }
+            Self::Equation { formula, .. } => {
+                let w = formula.len() as f64 * 20.0;
+                Bounds3D::new_2d(-w * 0.5, -15.0, w * 0.5, 15.0)
+            }
+            Self::Group { children, .. } => {
+                let mut union_bounds = Bounds3D::default();
+                let mut first = true;
+                for (_, child_spec_mutex, _) in children {
+                    if let Ok(child_spec) = child_spec_mutex.lock() {
+                        let child_local_bounds = child_spec.get_local_bounds();
+                        let child_world_bounds = gaanim_layout::transform_bounds(child_local_bounds, &child_spec.common().transform);
+                        if first {
+                            union_bounds = child_world_bounds;
+                            first = false;
+                        } else {
+                            union_bounds = union_bounds.union(&child_world_bounds);
+                        }
+                    }
+                }
+                union_bounds
+            }
+            _ => Bounds3D::default(),
+        }
+    }
 }
 
 /// A Python handle to a Mobject (real or about to be spawned).
@@ -582,11 +643,153 @@ impl PyMobject {
         Ok(new)
     }
 
-    /// Set absolute 2D position (applied at spawn time as the initial transform).
-    fn at(&self, x: f64, y: f64) -> PyResult<Self> {
+    /// Set absolute 2D position (default: centers visual bounds at (x, y)).
+    #[pyo3(signature = (x, y, anchor="center"))]
+    fn at(&self, x: f64, y: f64, anchor: &str) -> PyResult<Self> {
+        let anc = anchor_from_str(anchor).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown anchor: {}", anchor))
+        })?;
         let new = self.clone();
-        lock_spec!(new.spec).set_transform(SpatialTransform::new_2d(x, y));
+        let mut s = lock_spec!(new.spec);
+        s.common_mut().positioning_ops.push(PythonPositioningOp::At {
+            target: gaanim_core::glam::DVec3::new(x, y, 0.0),
+            anchor: anc,
+        });
+        drop(s);
         Ok(new)
+    }
+
+    /// Align target anchor (defaults to center) to reference's anchor.
+    #[pyo3(signature = (reference, anchor="center"))]
+    fn move_to(&self, reference: &PyMobject, anchor: &str) -> PyResult<Self> {
+        let anc = anchor_from_str(anchor).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown anchor: {}", anchor))
+        })?;
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        s.common_mut().positioning_ops.push(PythonPositioningOp::AlignTo {
+            reference: reference.id,
+            target_anchor: Anchor::Center,
+            ref_anchor: anc,
+        });
+        drop(s);
+        Ok(new)
+    }
+
+    /// Place this mobject adjacent to a reference mobject in a layout direction.
+    #[pyo3(signature = (reference, direction, spacing=10.0, aligned_edge="center"))]
+    fn next_to(&self, reference: &PyMobject, direction: &str, spacing: f64, aligned_edge: &str) -> PyResult<Self> {
+        let dir = direction_from_str(direction).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown direction: {}", direction))
+        })?;
+        let align = anchor_from_str(aligned_edge).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown aligned_edge: {}", aligned_edge))
+        })?;
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        s.common_mut().positioning_ops.push(PythonPositioningOp::NextTo {
+            reference: reference.id,
+            direction: dir,
+            spacing,
+            aligned_edge: align,
+        });
+        drop(s);
+        Ok(new)
+    }
+
+    /// Position at screen edge with buffer spacing.
+    #[pyo3(signature = (direction, buff=0.5))]
+    fn to_edge(&self, direction: &str, buff: f64) -> PyResult<Self> {
+        let dir = direction_from_str(direction).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown direction: {}", direction))
+        })?;
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        s.common_mut().positioning_ops.push(PythonPositioningOp::ToEdge {
+            direction: dir,
+            buff,
+        });
+        drop(s);
+        Ok(new)
+    }
+
+    /// Position at screen corner with buffer spacing.
+    #[pyo3(signature = (corner, buff=0.5))]
+    fn to_corner(&self, corner: &str, buff: f64) -> PyResult<Self> {
+        let anc = anchor_from_str(corner).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown corner: {}", corner))
+        })?;
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        s.common_mut().positioning_ops.push(PythonPositioningOp::ToCorner {
+            corner: anc,
+            buff,
+        });
+        drop(s);
+        Ok(new)
+    }
+
+    /// Arrange group children linearly.
+    #[pyo3(signature = (direction, spacing=10.0))]
+    fn arrange(&self, direction: &str, spacing: f64) -> PyResult<Self> {
+        let dir = direction_from_str(direction).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown direction: {}", direction))
+        })?;
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        if let MobjectSpec::Group { layout_op, .. } = &mut *s {
+            *layout_op = Some(PythonGroupLayoutOp::Arrange { direction: dir, spacing });
+            drop(s);
+            Ok(new)
+        } else {
+            drop(s);
+            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+        }
+    }
+
+    /// Arrange group children in a grid.
+    #[pyo3(signature = (rows=None, cols=None, h_spacing=10.0, v_spacing=10.0))]
+    fn arrange_in_grid(&self, rows: Option<usize>, cols: Option<usize>, h_spacing: f64, v_spacing: f64) -> PyResult<Self> {
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        if let MobjectSpec::Group { layout_op, .. } = &mut *s {
+            *layout_op = Some(PythonGroupLayoutOp::ArrangeInGrid { rows, cols, h_spacing, v_spacing });
+            drop(s);
+            Ok(new)
+        } else {
+            drop(s);
+            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+        }
+    }
+
+    /// Arrange group children in a vertical stack.
+    #[pyo3(signature = (spacing=10.0))]
+    fn vstack(&self, spacing: f64) -> PyResult<Self> {
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        if let MobjectSpec::Group { layout_op, .. } = &mut *s {
+            *layout_op = Some(PythonGroupLayoutOp::VStack { spacing });
+            drop(s);
+            Ok(new)
+        } else {
+            drop(s);
+            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+        }
+    }
+
+    /// Arrange group children in a horizontal stack.
+    #[pyo3(signature = (spacing=10.0))]
+    fn hstack(&self, spacing: f64) -> PyResult<Self> {
+        let new = self.clone();
+        let mut s = lock_spec!(new.spec);
+        if let MobjectSpec::Group { layout_op, .. } = &mut *s {
+            *layout_op = Some(PythonGroupLayoutOp::HStack { spacing });
+            drop(s);
+            Ok(new)
+        } else {
+            drop(s);
+            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+        }
     }
 
     /// Add to existing 2D position.
@@ -617,19 +820,55 @@ impl PyMobject {
         Ok(new)
     }
 
-    /// Place this mobject adjacent to a reference mobject in a layout direction.
-    /// Resolved at spawn time using the reference's state in the scene.
-    #[pyo3(signature = (reference, direction, spacing=10.0))]
-    fn next_to(&self, reference: &PyMobject, direction: &str, spacing: f64) -> PyResult<Self> {
-        let dir = direction_from_str(direction).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown direction: {} (use 'up', 'down', 'left', 'right')",
-                direction
-            ))
+    // ====== layout queries ======
+
+    fn get_center(&self) -> PyResult<(f64, f64)> {
+        let spec = lock_spec!(self.spec);
+        let common = spec.common();
+        let bounds = spec.get_local_bounds();
+        let world_bounds = gaanim_layout::transform_bounds(bounds, &common.transform);
+        let center = world_bounds.center();
+        Ok((center.x, center.y))
+    }
+
+    fn get_corner(&self, corner: &str) -> PyResult<(f64, f64)> {
+        let anc = anchor_from_str(corner).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown corner: {}", corner))
         })?;
-        let new = self.clone();
-        lock_spec!(new.spec).set_next_to(Some((reference.id, dir, spacing)));
-        Ok(new)
+        let spec = lock_spec!(self.spec);
+        let common = spec.common();
+        let bounds = spec.get_local_bounds();
+        let world_bounds = gaanim_layout::transform_bounds(bounds, &common.transform);
+        let pt = anc.get_point(&world_bounds);
+        Ok((pt.x, pt.y))
+    }
+
+    fn get_edge_center(&self, direction: &str) -> PyResult<(f64, f64)> {
+        let dir = direction_from_str(direction).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("unknown direction: {}", direction))
+        })?;
+        let spec = lock_spec!(self.spec);
+        let common = spec.common();
+        let bounds = spec.get_local_bounds();
+        let world_bounds = gaanim_layout::transform_bounds(bounds, &common.transform);
+        let pt = dir.to_anchor().get_point(&world_bounds);
+        Ok((pt.x, pt.y))
+    }
+
+    fn get_width(&self) -> PyResult<f64> {
+        let spec = lock_spec!(self.spec);
+        let common = spec.common();
+        let bounds = spec.get_local_bounds();
+        let world_bounds = gaanim_layout::transform_bounds(bounds, &common.transform);
+        Ok(world_bounds.size().x)
+    }
+
+    fn get_height(&self) -> PyResult<f64> {
+        let spec = lock_spec!(self.spec);
+        let common = spec.common();
+        let bounds = spec.get_local_bounds();
+        let world_bounds = gaanim_layout::transform_bounds(bounds, &common.transform);
+        Ok(world_bounds.size().y)
     }
 
     // ====== animations (return AnimSpec) ======
@@ -958,15 +1197,36 @@ impl PyMobject {
     }
 }
 
-fn direction_from_str(s: &str) -> Option<LayoutDirection> {
-    Some(match s {
-        "up" => LayoutDirection::Up,
-        "down" => LayoutDirection::Down,
-        "left" => LayoutDirection::Left,
-        "right" => LayoutDirection::Right,
-        _ => return None,
-    })
+fn direction_from_str(s: &str) -> Option<gaanim_layout::Direction> {
+    match s.to_lowercase().as_str() {
+        "up" | "top" => Some(gaanim_layout::Direction::Up),
+        "down" | "bottom" => Some(gaanim_layout::Direction::Down),
+        "left" => Some(gaanim_layout::Direction::Left),
+        "right" => Some(gaanim_layout::Direction::Right),
+        "up_left" | "top_left" => Some(gaanim_layout::Direction::UpLeft),
+        "up_right" | "top_right" => Some(gaanim_layout::Direction::UpRight),
+        "down_left" | "bottom_left" => Some(gaanim_layout::Direction::DownLeft),
+        "down_right" | "bottom_right" => Some(gaanim_layout::Direction::DownRight),
+        _ => None,
+    }
 }
+
+fn anchor_from_str(s: &str) -> Option<gaanim_layout::Anchor> {
+    match s.to_lowercase().as_str() {
+        "center" => Some(gaanim_layout::Anchor::Center),
+        "top" | "up" => Some(gaanim_layout::Anchor::Top),
+        "bottom" | "down" => Some(gaanim_layout::Anchor::Bottom),
+        "left" => Some(gaanim_layout::Anchor::Left),
+        "right" => Some(gaanim_layout::Anchor::Right),
+        "top_left" | "up_left" => Some(gaanim_layout::Anchor::TopLeft),
+        "top_right" | "up_right" => Some(gaanim_layout::Anchor::TopRight),
+        "bottom_left" | "down_left" => Some(gaanim_layout::Anchor::BottomLeft),
+        "bottom_right" | "down_right" => Some(gaanim_layout::Anchor::BottomRight),
+        _ => None,
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -986,6 +1246,7 @@ mod tests {
                 opacity: 1.0,
                 transform: t,
                 next_to: None,
+                positioning_ops: Vec::new(),
             },
             radius: 80.0,
         }

@@ -66,6 +66,9 @@ wheel:
 run EX:
     {{ python }} examples/{{ EX }}.py
 
+docs:
+    cargo run -p docs
+
 # ---- Doctor -----------------------------------------------------------------
 
 # Sanity check: the workspace compiles AND the compiled extension is importable.

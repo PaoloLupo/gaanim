@@ -316,7 +316,6 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
                     let trimmed = segment.subsegment(0.0..t1);
                     if !started {
                         result.move_to(trimmed.start());
-                        started = true;
                     }
                     push_segment_to_path(&mut result, &trimmed);
                     break;

@@ -13,7 +13,8 @@ members = [
   "crates/gaanim_text",
   "crates/gaanim_python",
   "crates/gaanim_editor",
-  "crates/gaanim_export"
+  "crates/gaanim_export",
+  "docs"
 ]
 
 [profile.dev]
