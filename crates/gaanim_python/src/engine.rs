@@ -393,7 +393,7 @@ impl PySceneBuilder {
     fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::Line {
-            common: CommonSpec { fill: None, stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None },
+            common: CommonSpec { fill: None, stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
             start: (x1, y1), end: (x2, y2),
         })
     }
@@ -401,7 +401,7 @@ impl PySceneBuilder {
     fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::Arrow {
-            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None },
+            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
             start: (x1, y1), end: (x2, y2),
         })
     }
@@ -445,7 +445,7 @@ impl PySceneBuilder {
     fn background_rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::BackgroundRectangle {
-            common: CommonSpec { fill: Some(primary), stroke: None, z_index: -10, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None },
+            common: CommonSpec { fill: Some(primary), stroke: None, z_index: -10, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
             width, height,
         })
     }
@@ -457,7 +457,7 @@ impl PySceneBuilder {
         let id = scene.next_id();
         let common = Self::default_common(primary);
         let children_specs = children.iter().map(|c| (c.id, c.spec.clone(), c.creation_order)).collect();
-        let spec = Arc::new(Mutex::new(MobjectSpec::Group { common, children: children_specs }));
+        let spec = Arc::new(Mutex::new(MobjectSpec::Group { common, children: children_specs, layout_op: None }));
         let order = id.index() as u64;
         scene.ops.push(DeferredOp::Spawn { id, spec: spec.clone(), creation_order: order });
         Ok(PyMobject { id, spec, creation_order: order })
@@ -553,6 +553,7 @@ impl PySceneBuilder {
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
             next_to: None,
+            positioning_ops: Vec::new(),
         }
     }
 
@@ -579,7 +580,7 @@ impl PySceneBuilder {
         }
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::BooleanResult {
-            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None },
+            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
             contours: combined,
         })
     }

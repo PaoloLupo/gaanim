@@ -1,6 +1,6 @@
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
-use gaanim_core::{ObjectId, kurbo, peniko};
-use gaanim_math::Bounds3D;
+use gaanim_core::{glam::DVec3, ObjectId, kurbo, peniko};
+use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush};
 
@@ -210,12 +210,13 @@ fn extract_frame_items(
     parent_entity: Entity,
     current_transform: &kurbo::Affine,
     next_id_fn: &mut impl FnMut() -> ObjectId,
-    total_bounds: &mut Bounds3D,
+    total_bounds: &mut Option<Bounds3D>,
     default_fill: &Option<peniko::Brush>,
     default_stroke: &StrokeBrush,
     source: &Source,
     char_index_counter: &mut usize,
     child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    spawned_children: &mut Vec<(Entity, Bounds3D)>,
 ) {
     for (pos, item) in frame.items() {
         // Typst frames use Y-down coordinate system, and we convert it to Y-up
@@ -239,6 +240,7 @@ fn extract_frame_items(
                     source,
                     char_index_counter,
                     child_spans,
+                    spawned_children,
                 );
             }
             FrameItem::Text(text) => {
@@ -282,6 +284,7 @@ fn extract_frame_items(
                         bundle.tag = ObjectTag("TypstGlyph".into());
 
                         let child_entity = commands.spawn(bundle).id();
+                        spawned_children.push((child_entity, local_bounds));
 
                         // Match glyph to corresponding source char and range
                         let byte_offset = glyph.span.1 as usize;
@@ -313,7 +316,11 @@ fn extract_frame_items(
                             .entity(child_entity)
                             .set_parent_in_place(parent_entity);
 
-                        *total_bounds = total_bounds.union(&local_bounds);
+                        if let Some(tb) = total_bounds {
+                            *tb = tb.union(&local_bounds);
+                        } else {
+                            *total_bounds = Some(local_bounds);
+                        }
                     }
 
                     pen_x += glyph.x_advance.at(size).to_pt();
@@ -344,6 +351,7 @@ fn extract_frame_items(
                 bundle.tag = ObjectTag("TypstShape".into());
 
                 let child_entity = commands.spawn(bundle).id();
+                spawned_children.push((child_entity, local_bounds));
 
                 let span_range = source.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {
@@ -362,7 +370,11 @@ fn extract_frame_items(
                     .entity(child_entity)
                     .set_parent_in_place(parent_entity);
 
-                *total_bounds = total_bounds.union(&local_bounds);
+                if let Some(tb) = total_bounds {
+                    *tb = tb.union(&local_bounds);
+                } else {
+                    *total_bounds = Some(local_bounds);
+                }
             }
             _ => {}
         }
@@ -454,7 +466,7 @@ pub fn compile_typst_to_hierarchy(
 
     let parent_entity = commands.spawn(parent_bundle).id();
 
-    let mut total_bounds = Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
+    let mut total_bounds: Option<Bounds3D> = None;
     // The root transform remains IDENTITY because Bevy's world coordinate space
     // inside the Vello canvas is natively Y-down.
     let root_transform = kurbo::Affine::IDENTITY;
@@ -465,10 +477,11 @@ pub fn compile_typst_to_hierarchy(
             Ok(s) => s,
             Err(_) => {
                 bevy::prelude::error!("Failed to get main source from Typst world");
-                return (parent_entity, total_bounds);
+                return (parent_entity, Bounds3D::default());
             }
         };
         let mut char_index_counter = 0;
+        let mut spawned_children = Vec::new();
         extract_frame_items(
             commands,
             &page.frame,
@@ -481,14 +494,45 @@ pub fn compile_typst_to_hierarchy(
             &source_obj,
             &mut char_index_counter,
             child_spans,
+            &mut spawned_children,
         );
+
+        let mut total_bounds = total_bounds.unwrap_or_default();
+
+        // Centering visual adjustment: Shift all children relative to text center
+        let text_center = total_bounds.center();
+        for (child_entity, orig_bounds) in spawned_children {
+            commands
+                .entity(child_entity)
+                .insert(SpatialTransform::new_2d(-text_center.x, -text_center.y));
+
+            let mut new_bounds = orig_bounds;
+            new_bounds.min -= text_center;
+            new_bounds.max -= text_center;
+            commands
+                .entity(child_entity)
+                .insert(gaanim_scene::LocalBounds(new_bounds));
+        }
+
+        // Shift total_bounds to be centered at origin
+        let half_size = total_bounds.size() * 0.5;
+        total_bounds = Bounds3D::new(
+            DVec3::new(-half_size.x, -half_size.y, 0.0),
+            DVec3::new(half_size.x, half_size.y, 0.0),
+        );
+
+        commands
+            .entity(parent_entity)
+            .insert(gaanim_scene::LocalBounds(total_bounds));
+
+        return (parent_entity, total_bounds);
     }
 
     commands
         .entity(parent_entity)
-        .insert(gaanim_scene::LocalBounds(total_bounds));
+        .insert(gaanim_scene::LocalBounds(Bounds3D::default()));
 
-    (parent_entity, total_bounds)
+    (parent_entity, Bounds3D::default())
 }
 
 #[cfg(test)]

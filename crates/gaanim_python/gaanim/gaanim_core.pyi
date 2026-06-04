@@ -705,12 +705,14 @@ class Mobject:
 
     # ---- transform ----
 
-    def at(self, x: float, y: float) -> Mobject:
-        """Set absolute 2D position (replaces any existing transform).
+    def at(self, x: float, y: float, anchor: str = "center") -> Mobject:
+        """Set absolute 2D position (centers the visual bounds anchor at (x, y)).
 
         Args:
             x: World-space X coordinate.
             y: World-space Y coordinate.
+            anchor: Boundary anchor of the object to place at (x, y).
+                Can be "center", "top", "bottom", "left", "right", "top_left", etc.
         Returns:
             A new handle.
         """
@@ -743,8 +745,23 @@ class Mobject:
             A new handle.
         """
 
+    def move_to(self, reference: Mobject, anchor: str = "center") -> Mobject:
+        """Align the center of this mobject to a reference anchor point.
+
+        Args:
+            reference: The target mobject to align with.
+            anchor: The anchor on the reference mobject to align this mobject's center with.
+                Can be "center", "top", "bottom", "left", "right", "top_left", etc.
+        Returns:
+            A new handle.
+        """
+
     def next_to(
-        self, reference: Mobject, direction: _Direction, spacing: float = 10.0
+        self,
+        reference: Mobject,
+        direction: str,
+        spacing: float = 10.0,
+        aligned_edge: str = "center",
     ) -> Mobject:
         """Place this mobject adjacent to a reference mobject.
 
@@ -753,11 +770,115 @@ class Mobject:
 
         Args:
             reference: The mobject to position relative to.
-            direction: One of ``"up"``, ``"down"``, ``"left"``, ``"right"``.
+            direction: Direction to place the mobject. Can be standard ("up", "down",
+                "left", "right") or diagonal ("top_left", "bottom_right", etc.).
             spacing: Gap in pixels between the two mobjects.
+            aligned_edge: Edge anchor on which to align the two objects.
         Returns:
             A new handle.
         """
+
+    def to_edge(self, direction: str, buff: float = 0.5) -> Mobject:
+        """Position the mobject at a screen edge with buffer spacing.
+
+        Args:
+            direction: Screen edge direction (e.g. "up", "down", "left", "right").
+            buff: Buffer spacing in percentage/units from the edge.
+        Returns:
+            A new handle.
+        """
+
+    def to_corner(self, corner: str, buff: float = 0.5) -> Mobject:
+        """Position the mobject at a screen corner with buffer spacing.
+
+        Args:
+            corner: Screen corner anchor (e.g. "top_left", "bottom_right").
+            buff: Buffer spacing from the corner edges.
+        Returns:
+            A new handle.
+        """
+
+    def arrange(self, direction: str, spacing: float = 10.0) -> Mobject:
+        """Arrange group children sequentially in a given direction.
+
+        Only valid if this Mobject is a Group.
+
+        Args:
+            direction: Direction to arrange children (e.g., "right", "left", "up", "down").
+            spacing: Gap in pixels between sequential children.
+        Returns:
+            A new handle.
+        """
+
+    def arrange_in_grid(
+        self,
+        rows: Optional[int] = None,
+        cols: Optional[int] = None,
+        h_spacing: float = 10.0,
+        v_spacing: float = 10.0,
+    ) -> Mobject:
+        """Arrange group children in a standard 2D grid of size rows x cols.
+
+        Only valid if this Mobject is a Group.
+
+        Args:
+            rows: Optional number of grid rows.
+            cols: Optional number of grid columns.
+            h_spacing: Horizontal spacing between columns.
+            v_spacing: Vertical spacing between rows.
+        Returns:
+            A new handle.
+        """
+
+    def vstack(self, spacing: float = 10.0) -> Mobject:
+        """Arrange group children in a vertical stack.
+
+        Only valid if this Mobject is a Group.
+
+        Args:
+            spacing: Vertical gap between items.
+        Returns:
+            A new handle.
+        """
+
+    def hstack(self, spacing: float = 10.0) -> Mobject:
+        """Arrange group children in a horizontal stack.
+
+        Only valid if this Mobject is a Group.
+
+        Args:
+            spacing: Horizontal gap between items.
+        Returns:
+            A new handle.
+        """
+
+    # ---- layout queries ----
+
+    def get_center(self) -> tuple[float, float]:
+        """Get the current visual center (x, y) coordinates of the mobject.
+
+        Calculated based on visual bounds and transform in Python-side immediately.
+        """
+
+    def get_corner(self, corner: str) -> tuple[float, float]:
+        """Get the coordinate (x, y) of a specified corner anchor.
+
+        Args:
+            corner: Anchor name (e.g., "top_left", "bottom_right").
+        """
+
+    def get_edge_center(self, direction: str) -> tuple[float, float]:
+        """Get the coordinate (x, y) of the edge center in a given direction.
+
+        Args:
+            direction: Direction string (e.g., "up", "left").
+        """
+
+    def get_width(self) -> float:
+        """Get the overall width of the mobject's visual bounds."""
+
+    def get_height(self) -> float:
+        """Get the overall height of the mobject's visual bounds."""
 
     # ---- animation constructors ----
 

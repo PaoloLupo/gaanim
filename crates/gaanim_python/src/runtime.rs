@@ -5,14 +5,14 @@ use gaanim_api::anim::AnimationBuilder;
 use gaanim_api::prelude::{LayoutDirection, MobjectRef, MobjectSpawnBuilder, SceneBuilder};
 use gaanim_core::peniko;
 use gaanim_core::ObjectId;
-use gaanim_math::Camera;
+use gaanim_math::{Bounds3D, Camera};
 use gaanim_renderer::prelude::VelloView;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush};
 use gaanim_text::font::FontRegistry;
 use gaanim_text::prelude::TextRole;
 use gaanim_timeline::timeline::Timeline;
 
-use crate::mobject::{MobjectSpec, TextRoleKind};
+use crate::mobject::{MobjectSpec, TextRoleKind, PythonPositioningOp, PythonGroupLayoutOp};
 use crate::scene::DeferredOp;
 
 /// Build a Bevy `App`, replay the deferred op queue, and run the window.
@@ -450,6 +450,12 @@ fn spawn_mobject(
     spec: MobjectSpec,
     py_to_bevy: &HashMap<ObjectId, ObjectId>,
 ) -> Option<ObjectId> {
+    let positioning_ops = spec.common().positioning_ops.clone();
+    let layout_op = if let MobjectSpec::Group { layout_op, .. } = &spec {
+        layout_op.clone()
+    } else {
+        None
+    };
     // Pre-resolve the next_to hint: (bevy_ref_id, dir, spacing) if the
     // referenced mobject is already known to the scene. We do this check
     // up front (releasing the borrow before mutating the scene) to avoid
@@ -782,7 +788,7 @@ fn spawn_mobject(
             mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
-        MobjectSpec::Group { common, children } => {
+        MobjectSpec::Group { common, children, layout_op: _ } => {
             // Translate python-side child IDs to Bevy-side ObjectIds
             let bevy_children: Vec<MobjectRef> = children
                 .iter()
@@ -791,6 +797,23 @@ fn spawn_mobject(
             
             // Spawn the group natively in SceneBuilder
             let group_ref = scene.group(&bevy_children);
+            
+            if let Some(op) = &layout_op {
+                match op {
+                    PythonGroupLayoutOp::Arrange { direction, spacing } => {
+                        scene.arrange(group_ref, *direction, *spacing);
+                    }
+                    PythonGroupLayoutOp::ArrangeInGrid { rows, cols, h_spacing, v_spacing } => {
+                        scene.arrange_in_grid(group_ref, *rows, *cols, *h_spacing, *v_spacing);
+                    }
+                    PythonGroupLayoutOp::VStack { spacing } => {
+                        scene.arrange(group_ref, gaanim_layout::Direction::Down, *spacing);
+                    }
+                    PythonGroupLayoutOp::HStack { spacing } => {
+                        scene.arrange(group_ref, gaanim_layout::Direction::Right, *spacing);
+                    }
+                }
+            }
             
             // Apply group-level visual styling/transform components:
             if let Some(state) = scene.states.get_mut(group_ref.id) {
@@ -837,6 +860,84 @@ fn spawn_mobject(
             group_ref.id
         }
     };
+
+    // Replay new positioning operations!
+    for op in positioning_ops {
+        if let Some(state) = scene.states.get(id) {
+            let mut new_transform = state.transform;
+            match op {
+                PythonPositioningOp::At { target, anchor } => {
+                    new_transform = gaanim_layout::compute_move_to(
+                        state.bounds,
+                        &new_transform,
+                        target,
+                        anchor,
+                    );
+                }
+                PythonPositioningOp::ToEdge { direction, buff } => {
+                    let frame_bounds = Bounds3D::new(
+                        gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
+                        gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
+                    );
+                    new_transform = gaanim_layout::compute_to_edge(
+                        state.bounds,
+                        &new_transform,
+                        direction,
+                        buff,
+                        frame_bounds,
+                    );
+                }
+                PythonPositioningOp::ToCorner { corner, buff } => {
+                    let frame_bounds = Bounds3D::new(
+                        gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
+                        gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
+                    );
+                    new_transform = gaanim_layout::compute_to_corner(
+                        state.bounds,
+                        &new_transform,
+                        corner,
+                        buff,
+                        frame_bounds,
+                    );
+                }
+                PythonPositioningOp::AlignTo { reference, target_anchor, ref_anchor } => {
+                    if let Some(bevy_ref_id) = py_to_bevy.get(&reference).copied() {
+                        if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                            let shift = gaanim_layout::compute_align_to_new(
+                                state.bounds,
+                                &new_transform,
+                                ref_state.bounds,
+                                &ref_state.transform,
+                                target_anchor,
+                                ref_anchor,
+                            );
+                            new_transform = new_transform.shift_3d(shift);
+                        }
+                    }
+                }
+                PythonPositioningOp::NextTo { reference, direction, spacing, aligned_edge } => {
+                    if let Some(bevy_ref_id) = py_to_bevy.get(&reference).copied() {
+                        if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                            let shift = gaanim_layout::compute_next_to_new(
+                                state.bounds,
+                                &new_transform,
+                                ref_state.bounds,
+                                &ref_state.transform,
+                                direction,
+                                spacing,
+                                aligned_edge,
+                            );
+                            new_transform = new_transform.shift_3d(shift);
+                        }
+                    }
+                }
+            }
+            if let Some(state_mut) = scene.states.get_mut(id) {
+                state_mut.transform = new_transform;
+                scene.commands.entity(state_mut.entity).insert(new_transform);
+            }
+        }
+    }
 
     Some(id)
 }

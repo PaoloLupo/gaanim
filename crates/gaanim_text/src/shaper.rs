@@ -1,5 +1,5 @@
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
-use gaanim_core::ObjectId;
+use gaanim_core::{ObjectId, glam::DVec3};
 use gaanim_core::kurbo::{Affine, Shape};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
@@ -99,7 +99,8 @@ pub fn compile_text_to_hierarchy(
     // 5. Spawn child letter Mobjects
     let mut pen_x = 0.0;
     let mut pen_y = 0.0;
-    let mut total_bounds = Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
+    let mut total_bounds: Option<Bounds3D> = None;
+    let mut spawned_children = Vec::new();
 
     // Pre-compute character byte offsets for cluster-based lookup.
     // HarfBuzz `cluster` values are byte indices into the source string,
@@ -143,14 +144,6 @@ pub fn compile_text_to_hierarchy(
             glyph_local_bounds.max.y += glyph_y * scale;
 
             // Resolve character from HarfBuzz cluster (byte offset).
-            // The cluster value is the byte index of the first source
-            // character that produced this glyph.  For normal 1:1
-            // mappings each glyph's cluster advances by one character.
-            // For ligatures (many→one) the next glyph's cluster jumps
-            // past the consumed characters.  For combining marks
-            // (one→many, same cluster) multiple glyphs point to the
-            // same base character; we assign the base to the first
-            // glyph and subsequent characters to following glyphs.
             let cluster_byte = glyph.cluster as usize;
             let mut char_idx = char_byte_offsets
                 .iter()
@@ -179,9 +172,11 @@ pub fn compile_text_to_hierarchy(
             child_bundle.tag = ObjectTag(format!("Char('{}')", c));
 
             // Offset the child's local transform according to pen advances
-            child_bundle.transform = SpatialTransform::new_2d(glyph_x * scale, glyph_y * scale);
+            let local_translation = gaanim_core::glam::DVec3::new(glyph_x * scale, glyph_y * scale, 0.0);
+            child_bundle.transform = SpatialTransform::new_2d(local_translation.x, local_translation.y);
 
             let child_entity = commands.spawn(child_bundle).id();
+            spawned_children.push((child_entity, local_translation, glyph_local_bounds));
 
             let span = gaanim_scene::components::TextSpan {
                 character: c,
@@ -200,13 +195,42 @@ pub fn compile_text_to_hierarchy(
                 .set_parent_in_place(parent_entity);
 
             // Accumulate total bounding box of the entire text string
-            total_bounds = total_bounds.union(&glyph_local_bounds);
+            if let Some(tb) = &mut total_bounds {
+                *tb = tb.union(&glyph_local_bounds);
+            } else {
+                total_bounds = Some(glyph_local_bounds);
+            }
         }
 
         // Advance horizontal pen
         pen_x += glyph.x_advance;
         pen_y += glyph.y_advance;
     }
+
+    let mut total_bounds = total_bounds.unwrap_or_default();
+
+    // Centering visual adjustment: Shift all children relative to the text center
+    let text_center = total_bounds.center();
+    for (child_entity, orig_trans, orig_bounds) in spawned_children {
+        let new_trans = orig_trans - text_center;
+        commands
+            .entity(child_entity)
+            .insert(SpatialTransform::new_2d(new_trans.x, new_trans.y));
+
+        let mut new_bounds = orig_bounds;
+        new_bounds.min -= text_center;
+        new_bounds.max -= text_center;
+        commands
+            .entity(child_entity)
+            .insert(gaanim_scene::LocalBounds(new_bounds));
+    }
+
+    // Shift total_bounds to be centered at origin
+    let half_size = total_bounds.size() * 0.5;
+    total_bounds = Bounds3D::new(
+        DVec3::new(-half_size.x, -half_size.y, 0.0),
+        DVec3::new(half_size.x, half_size.y, 0.0),
+    );
 
     // 6. Update parent Mobject bounds with the union of all child letter boundaries
     commands
