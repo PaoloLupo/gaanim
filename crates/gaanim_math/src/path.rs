@@ -223,3 +223,128 @@ pub fn get_point_at_alpha(path: &BezPath, alpha: f64) -> Point {
     }
     last_point
 }
+
+/// Trims a path to a range [from_alpha, to_alpha] proportionally.
+/// This is used to extract a sliding window (destello) along a curve for ShowPassingFlash.
+pub fn get_subpath_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezPath {
+    let from_alpha = from_alpha.clamp(0.0, 1.0);
+    let to_alpha = to_alpha.clamp(0.0, 1.0);
+    if from_alpha >= to_alpha {
+        let mut result = BezPath::new();
+        if let Some(PathEl::MoveTo(p)) = path.elements().first() {
+            result.move_to(*p);
+        }
+        return result;
+    }
+    
+    let mut result = BezPath::new();
+    let mut current_subpath: Vec<PathEl> = Vec::new();
+
+    let flush = |sub: &[PathEl], result: &mut BezPath, from: f64, to: f64| {
+        if sub.is_empty() {
+            return;
+        }
+        let sub_path = BezPath::from_vec(sub.to_vec());
+        let trimmed = get_subpath_proportional_range(&sub_path, from, to);
+        for el in trimmed.elements() {
+            result.push(*el);
+        }
+    };
+
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                flush(&current_subpath, &mut result, from_alpha, to_alpha);
+                current_subpath.clear();
+                current_subpath.push(PathEl::MoveTo(p));
+            }
+            other => current_subpath.push(other),
+        }
+    }
+    flush(&current_subpath, &mut result, from_alpha, to_alpha);
+
+    result
+}
+
+fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezPath {
+    let total_length = get_path_length(path);
+    let target_start = total_length * from_alpha;
+    let target_end = total_length * to_alpha;
+
+    let mut current_length = 0.0;
+    let mut result = BezPath::new();
+    let mut current_pos = Point::default();
+    let mut started = false;
+
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                current_pos = p;
+            }
+            _ => {
+                let segment = match *el {
+                    PathEl::LineTo(p) => PathSeg::Line(kurbo::Line::new(current_pos, p)),
+                    PathEl::QuadTo(p1, p2) => PathSeg::Quad(kurbo::QuadBez::new(current_pos, p1, p2)),
+                    PathEl::CurveTo(p1, p2, p3) => PathSeg::Cubic(kurbo::CubicBez::new(current_pos, p1, p2, p3)),
+                    PathEl::ClosePath => PathSeg::Line(kurbo::Line::new(current_pos, current_pos)),
+                    _ => unreachable!(),
+                };
+                let seg_len = segment.arclen(0.1);
+                let next_length = current_length + seg_len;
+                let next_pos = segment.end();
+
+                if next_length <= target_start {
+                    // Completamente antes
+                } else if current_length <= target_start && next_length <= target_end {
+                    let start_rem = target_start - current_length;
+                    let t0 = segment.inv_arclen(start_rem, 0.1);
+                    let trimmed = segment.subsegment(t0..1.0);
+                    if !started {
+                        result.move_to(trimmed.start());
+                        started = true;
+                    }
+                    push_segment_to_path(&mut result, &trimmed);
+                } else if current_length >= target_start && next_length <= target_end {
+                    if !started {
+                        result.move_to(segment.start());
+                        started = true;
+                    }
+                    push_segment_to_path(&mut result, &segment);
+                } else if current_length >= target_start && current_length <= target_end && next_length >= target_end {
+                    let end_rem = target_end - current_length;
+                    let t1 = segment.inv_arclen(end_rem, 0.1);
+                    let trimmed = segment.subsegment(0.0..t1);
+                    if !started {
+                        result.move_to(trimmed.start());
+                        started = true;
+                    }
+                    push_segment_to_path(&mut result, &trimmed);
+                    break;
+                } else if current_length <= target_start && next_length >= target_end {
+                    let start_rem = target_start - current_length;
+                    let end_rem = target_end - current_length;
+                    let t0 = segment.inv_arclen(start_rem, 0.1);
+                    let t1 = segment.inv_arclen(end_rem, 0.1);
+                    let trimmed = segment.subsegment(t0..t1);
+                    result.move_to(trimmed.start());
+                    push_segment_to_path(&mut result, &trimmed);
+                    break;
+                }
+
+                current_length = next_length;
+                current_pos = next_pos;
+            }
+        }
+    }
+
+    result
+}
+
+fn push_segment_to_path(path: &mut BezPath, seg: &PathSeg) {
+    match *seg {
+        PathSeg::Line(l) => path.line_to(l.p1),
+        PathSeg::Quad(q) => path.quad_to(q.p1, q.p2),
+        PathSeg::Cubic(c) => path.curve_to(c.p1, c.p2, c.p3),
+    }
+}
+

@@ -672,6 +672,25 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 signal.value = *from + (*to - *from) * t;
             }
         }
+        PropertyLensSpec::PathRange { from, to, time_width } => {
+            let p = *from + (*to - *from) * t;
+            let start = (p - *time_width).max(0.0);
+            let end = p.min(1.0);
+            if world.get::<gaanim_animation::PathSource>(target).is_none() {
+                let path_clone = world.get::<Path2D>(target).map(|p| p.0.clone());
+                if let Some(bez) = path_clone
+                    && let Ok(mut em) = world.get_entity_mut(target)
+                {
+                    em.insert(gaanim_animation::PathSource(bez));
+                }
+            }
+            if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
+                let trimmed = gaanim_math::get_subpath_range(&source.0, start, end);
+                if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                    path.0 = std::sync::Arc::new(trimmed);
+                }
+            }
+        }
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }

@@ -195,6 +195,12 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Trims the path in a sliding range window.
+    PathRange {
+        from: f64,
+        to: f64,
+        time_width: f64,
+    },
     Custom {
         type_name: String,
         params: String,
@@ -259,6 +265,11 @@ impl PropertyLensSpec {
             Self::SignalFloat { from, to } => PropertyLens::SignalFloat {
                 from: *from,
                 to: *to,
+            },
+            Self::PathRange { from, to, time_width } => PropertyLens::PathRange {
+                from: *from,
+                to: *to,
+                time_width: *time_width,
             },
             Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
                 type_name: type_name.clone(),

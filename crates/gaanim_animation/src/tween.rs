@@ -168,6 +168,14 @@ pub enum PropertyLens {
         to: f64,
     },
 
+    // === ShowPassingFlash ===
+    /// Trims the path in a sliding range window.
+    PathRange {
+        from: f64,
+        to: f64,
+        time_width: f64,
+    },
+
     // === Extensibility ===
     Custom(Box<dyn AnimatableLens>),
 }
@@ -196,6 +204,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
+            Self::PathRange { from, to, time_width } => write!(f, "PathRange({} -> {} width {})", from, to, time_width),
             Self::Custom(c) => write!(f, "Custom({:?})", c.type_name()),
         }
     }
@@ -337,6 +346,16 @@ pub fn evaluate_tweens_system(
             PropertyLens::SignalFloat { from, to } => {
                 if let Ok(mut signal) = float_signals.get_mut(tween.target) {
                     signal.value = *from + (*to - *from) * t;
+                }
+            }
+            PropertyLens::PathRange { from, to, time_width } => {
+                let p = *from + (*to - *from) * t;
+                let start = (p - *time_width).max(0.0);
+                let end = p.min(1.0);
+                if let Ok(source) = sources.get(tween.target)
+                    && let Ok(mut path) = paths.get_mut(tween.target)
+                {
+                    path.0 = std::sync::Arc::new(gaanim_math::get_subpath_range(&source.0, start, end));
                 }
             }
             PropertyLens::Custom(_) => {

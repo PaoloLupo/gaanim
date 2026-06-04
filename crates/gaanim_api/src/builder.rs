@@ -404,7 +404,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Tags an entity with the current scene's `SceneMember` component,
     /// if currently inside a scene scope. Call this from ALL entity
     /// spawning paths (not just `MobjectSpawnBuilder::spawn()`).
-    fn tag_entity(&mut self, entity: Entity) {
+    pub fn tag_entity(&mut self, entity: Entity) {
         if let Some(scene_id) = self.current_scene {
             self.commands.entity(entity).insert(SceneMember(scene_id));
         }

@@ -1331,6 +1331,7 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
         | PropertyLensSpec::CameraZoom { .. } => Color32::from_rgb(100, 100, 100),
         PropertyLensSpec::PathFollow { .. } => Color32::from_rgb(26, 188, 156),
         PropertyLensSpec::SignalFloat { .. } => Color32::from_rgb(180, 180, 50),
+        PropertyLensSpec::PathRange { .. } => Color32::from_rgb(255, 105, 180),
         PropertyLensSpec::Custom { .. } => Color32::from_rgb(200, 200, 200),
     }
 }
@@ -1357,6 +1358,7 @@ fn clip_label(payload: &ClipPayload) -> String {
                 PropertyLensSpec::CameraZoom { .. } => "Zoom",
                 PropertyLensSpec::PathFollow { .. } => "Follow",
                 PropertyLensSpec::SignalFloat { .. } => "Signal",
+                PropertyLensSpec::PathRange { .. } => "Flash",
                 PropertyLensSpec::Custom { type_name, .. } => type_name.as_str(),
             };
             n.to_string()
