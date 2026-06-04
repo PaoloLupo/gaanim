@@ -3,7 +3,7 @@ use gaanim_core::peniko;
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo;
 use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_layout::{Anchor, Direction};
+use gaanim_layout::Anchor;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
@@ -247,9 +247,7 @@ impl MobjectSpec {
     fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) { self.common_mut().stroke = stroke; }
     fn set_opacity(&mut self, opacity: f32) { self.common_mut().opacity = opacity; }
     fn set_z_index(&mut self, z: i32) { self.common_mut().z_index = z; }
-    fn set_transform(&mut self, t: SpatialTransform) { self.common_mut().transform = t; }
     fn transform_mut(&mut self) -> &mut SpatialTransform { &mut self.common_mut().transform }
-    fn set_next_to(&mut self, hint: Option<(ObjectId, LayoutDirection, f64)>) { self.common_mut().next_to = hint; }
 }
 
 impl MobjectSpec {

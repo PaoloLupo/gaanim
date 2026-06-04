@@ -82,11 +82,21 @@ fn editor_ui_system(
     let (export_progress_pct, export_current, export_total) = if is_exporting {
         if let Ok(lock) = export_state.progress_shared.lock() {
             if let Some(ref p) = *lock {
-                let pct = if p.total_frames > 0 { p.current_frame as f32 / p.total_frames as f32 } else { 0.0 };
+                let pct = if p.total_frames > 0 {
+                    p.current_frame as f32 / p.total_frames as f32
+                } else {
+                    0.0
+                };
                 (pct, p.current_frame, p.total_frames)
-            } else { (0.0, 0, 0) }
-        } else { (0.0, 0, 0) }
-    } else { (0.0, 0, 0) };
+            } else {
+                (0.0, 0, 0)
+            }
+        } else {
+            (0.0, 0, 0)
+        }
+    } else {
+        (0.0, 0, 0)
+    };
 
     let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
     for (entity, mobj_id, _) in &entity_query {
@@ -203,10 +213,7 @@ fn editor_ui_system(
                         .desired_width(140.0)
                         .text(format!("{:.0}%", export_progress_pct * 100.0)),
                 );
-                ui.label(format!(
-                    "Frame {}/{}",
-                    export_current, export_total
-                ));
+                ui.label(format!("Frame {}/{}", export_current, export_total));
             } else if let Some(selected) = state.selected {
                 let name = entity_query
                     .get(selected)

@@ -52,15 +52,6 @@ impl Default for ExportState {
     }
 }
 
-impl ExportState {
-    fn format_label(&self) -> &'static str {
-        match self.format {
-            ExportFormat::Mp4 => "MP4", ExportFormat::Webm => "WebM",
-            ExportFormat::Webp => "WebP", ExportFormat::Gif => "GIF",
-            ExportFormat::PngSequence => "PNG",
-        }
-    }
-}
 
 /// Shows the export config dialog, progress window, or completion popup.
 pub fn export_dialog_system(
@@ -138,7 +129,7 @@ pub fn export_dialog_system(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Format:");
-                egui::ComboBox::from_id_salt("export_fmt").selected_text(ExportFormat_label(current_format))
+                egui::ComboBox::from_id_salt("export_fmt").selected_text(export_format_label(current_format))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut current_format, ExportFormat::Mp4, "MP4");
                         ui.selectable_value(&mut current_format, ExportFormat::Webm, "WebM");
@@ -211,7 +202,7 @@ pub fn export_dialog_system(
                 config.format = fmt;
                 config.headless = true;
 
-                export_scene_direct(config, move |world| {
+                let _ = export_scene_direct(config, move |world| {
                     replay2(world);
                 });
                 if let Ok(mut lock) = progress_clone.lock() {
@@ -224,7 +215,7 @@ pub fn export_dialog_system(
     }
 }
 
-fn ExportFormat_label(f: ExportFormat) -> &'static str {
+fn export_format_label(f: ExportFormat) -> &'static str {
     match f {
         ExportFormat::Mp4 => "MP4", ExportFormat::Webm => "WebM",
         ExportFormat::Webp => "WebP", ExportFormat::Gif => "GIF",

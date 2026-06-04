@@ -558,7 +558,7 @@ pub fn rate_func_name(rf: &RateFunc) -> String {
 }
 
 /// A ValueTracker wraps an animatable FloatSignal.
-#[pyclass(name = "ValueTracker", module = "gaanim_core", frozen)]
+#[pyclass(name = "ValueTracker", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyValueTracker {
     pub id: ObjectId,
