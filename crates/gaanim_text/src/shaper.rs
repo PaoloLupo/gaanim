@@ -23,6 +23,10 @@ pub struct ShapedGlyph {
     pub y_advance: f64,
     pub x_offset: f64,
     pub y_offset: f64,
+    /// Index of the first source character that produced this glyph.
+    /// Used to correctly map glyphs back to characters when HarfBuzz
+    /// applies ligature or contextual substitution features.
+    pub cluster: u32,
 }
 
 /// Shapes a text string using rustybuzz.
@@ -48,6 +52,7 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
             y_advance: pos.y_advance as f64,
             x_offset: pos.x_offset as f64,
             y_offset: pos.y_offset as f64,
+            cluster: info.cluster,
         })
         .collect()
 }
@@ -96,7 +101,26 @@ pub fn compile_text_to_hierarchy(
     let mut pen_y = 0.0;
     let mut total_bounds = Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
 
-    for (i, glyph) in shaped_glyphs.iter().enumerate() {
+    // Pre-compute character byte offsets for cluster-based lookup.
+    // HarfBuzz `cluster` values are byte indices into the source string,
+    // so we build a map from byte offset → (char, char_index).
+    let char_byte_offsets: Vec<(usize, char)> = text.char_indices().collect();
+
+    bevy::prelude::info!(
+        "compile_text_to_hierarchy: text='{}', glyphs={}, chars={}",
+        text,
+        shaped_glyphs.len(),
+        char_byte_offsets.len()
+    );
+
+    // Track the next candidate character index for glyphs that share a
+    // cluster value (e.g. combining marks attached to the same base).
+    // For ligatures (one glyph, multiple chars) the cluster points to
+    // the first consumed character; subsequent glyphs naturally advance
+    // past it via the sorted-cluster invariant.
+    let mut next_char_idx: usize = 0;
+
+    for glyph in shaped_glyphs.iter() {
         let glyph_id = ttf_parser::GlyphId(glyph.glyph_id as u16);
         let mut collector = OutlineCollector::new();
 
@@ -125,14 +149,42 @@ pub fn compile_text_to_hierarchy(
             glyph_local_bounds.min.y += glyph_y * scale;
             glyph_local_bounds.max.y += glyph_y * scale;
 
+            // Resolve character from HarfBuzz cluster (byte offset).
+            // The cluster value is the byte index of the first source
+            // character that produced this glyph.  For normal 1:1
+            // mappings each glyph's cluster advances by one character.
+            // For ligatures (many→one) the next glyph's cluster jumps
+            // past the consumed characters.  For combining marks
+            // (one→many, same cluster) multiple glyphs point to the
+            // same base character; we assign the base to the first
+            // glyph and subsequent characters to following glyphs.
+            let cluster_byte = glyph.cluster as usize;
+            let mut char_idx = char_byte_offsets
+                .iter()
+                .position(|(byte, _)| *byte == cluster_byte)
+                .unwrap_or(next_char_idx);
+            // Ensure forward progress: if this cluster maps to a
+            // character we already passed, use the next unconsumed one.
+            if char_idx < next_char_idx {
+                char_idx = next_char_idx;
+            }
+            if char_idx >= char_byte_offsets.len() {
+                // No unconsumed character left — skip this glyph.
+                pen_x += glyph.x_advance;
+                pen_y += glyph.y_advance;
+                continue;
+            }
+            next_char_idx = char_idx + 1;
+            let (char_byte_start, c) = char_byte_offsets[char_idx];
+            let char_byte_end = char_byte_start + c.len_utf8();
+
+            let path_len = path.elements().len();
+
             // Spawn the child letter Mobject
             let char_id = next_id_fn();
             let mut child_bundle = MobjectBundle::new(char_id, path, glyph_local_bounds);
             child_bundle.fill = gaanim_scene::FillBrush(fill.clone());
             child_bundle.stroke = stroke.clone();
-
-            // Try to extract character representation for tag debug readability
-            let c = text.chars().nth(i).unwrap_or('?');
             child_bundle.tag = ObjectTag(format!("Char('{}')", c));
 
             // Offset the child's local transform according to pen advances
@@ -140,18 +192,22 @@ pub fn compile_text_to_hierarchy(
 
             let child_entity = commands.spawn(child_bundle).id();
 
-            // Calculate UTF-8 byte range of this character in the source text
-            let char_byte_start = text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(0);
-            let char_byte_end = char_byte_start + c.len_utf8();
-
             let span = gaanim_scene::components::TextSpan {
                 character: c,
-                char_index: i,
+                char_index: char_idx,
                 source_range: core::range::Range {
                     start: char_byte_start,
                     end: char_byte_end,
                 },
             };
+
+            bevy::prelude::info!(
+                "  glyph[{}]: char='{}', idx={}, glyph_id={}, path_els={}, bounds=[{:.1},{:.1}..{:.1},{:.1}]",
+                child_spans.len(), c, char_idx, glyph.glyph_id,
+                path_len,
+                glyph_local_bounds.min.x, glyph_local_bounds.min.y,
+                glyph_local_bounds.max.x, glyph_local_bounds.max.y
+            );
 
             commands.entity(child_entity).insert(span);
             child_spans.push((char_id, child_entity, span));
@@ -173,6 +229,12 @@ pub fn compile_text_to_hierarchy(
     commands
         .entity(parent_entity)
         .insert(gaanim_scene::LocalBounds(total_bounds));
+
+    bevy::prelude::info!(
+        "compile_text_to_hierarchy: spawned {} child entities for '{}'",
+        child_spans.len(),
+        text
+    );
 
     Ok((parent_entity, total_bounds))
 }

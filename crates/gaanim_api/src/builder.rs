@@ -10,8 +10,10 @@ use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_hierarchy;
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
 use gaanim_timeline::{
-    clip::{AnimationSpec, ClipPayload, PropertyLensSpec, TrackId},
+    clip::{AnimationSpec, ClipPayload, PropertyLensSpec, SceneId, TrackId},
+    scene::SceneMember,
     timeline::Timeline,
+    transition::TransitionType,
 };
 use crate::anim::{AnimationBuilder, AnimationType};
 use std::collections::HashMap;
@@ -281,6 +283,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     mobject_names: HashMap<ObjectId, String>,
     next_track: u32,
     current_label: Option<String>,
+    /// The currently active scene (None when outside any scene scope).
+    pub current_scene: Option<SceneId>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -329,12 +333,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             mobject_names: HashMap::new(),
             next_track: 0,
             current_label: None,
+            current_scene: None,
         }
     }
 
     /// Returns the per-mobject track for the given target, creating a new
     /// numbered track if this is the first time we see this ObjectId.
     fn ensure_track(&mut self, target: ObjectId) -> TrackId {
+        let current_scene = self.current_scene;
         *self.mobject_tracks.entry(target).or_insert_with(|| {
             self.next_track += 1;
             let name = self
@@ -345,9 +351,66 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let track_id = self.timeline.add_track(&name, self.next_track as i32);
             if let Some(track) = self.timeline.tracks.get_mut(track_id) {
                 track.object_id = Some(target);
+                track.scene = current_scene;
             }
             track_id
         })
+    }
+
+    /// Begins a new scene scope. All mobjects spawned and animations scheduled
+    /// after this call will belong to the scene until `end_scene()` is called.
+    pub fn begin_scene(&mut self, name: &str) -> SceneId {
+        let scene_id = self.timeline.add_scene(name);
+        self.current_scene = Some(scene_id);
+        // Insert SceneStart marker clip at the current time
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            0.0,
+            ClipPayload::SceneStart(scene_id),
+        );
+        // Index the scene start time for O(log n) lookup in scene_at().
+        self.timeline.index_scene(scene_id, self.current_time);
+        scene_id
+    }
+
+    /// Ends the current scene scope.
+    pub fn end_scene(&mut self) {
+        if let Some(scene_id) = self.current_scene {
+            self.timeline.add_clip(
+                self.default_track,
+                self.current_time,
+                0.0,
+                ClipPayload::SceneEnd(scene_id),
+            );
+            self.current_scene = None;
+        }
+    }
+
+    /// Executes a closure within a scene scope, automatically handling begin/end.
+    pub fn scene_scope<F>(&mut self, name: &str, f: F) -> SceneId
+    where
+        F: FnOnce(&mut Self),
+    {
+        let id = self.begin_scene(name);
+        f(self);
+        self.end_scene();
+        id
+    }
+
+    /// Tags an entity with the current scene's `SceneMember` component,
+    /// if currently inside a scene scope. Call this from ALL entity
+    /// spawning paths (not just `MobjectSpawnBuilder::spawn()`).
+    fn tag_entity(&mut self, entity: Entity) {
+        if let Some(scene_id) = self.current_scene {
+            self.commands.entity(entity).insert(SceneMember(scene_id));
+        }
+    }
+
+    /// Records a transition from the current scene to a target scene.
+    pub fn transition_to(&mut self, target: SceneId, transition: TransitionType) {
+        let current = self.current_scene.expect("Must be inside a scene to call transition_to");
+        self.timeline.connect(current, target, transition);
     }
 
     fn anim_label(ty: &AnimationType) -> &'static str {
@@ -1764,7 +1827,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             FillBrush::transparent(),
             StrokeBrush::transparent(),
         )).id();
-        
+
+        self.tag_entity(group_entity);
+
         // 4. Reparent children and adjust their local transforms
         let inv_group_affine = group_transform.to_affine_2d().inverse();
         let mut child_ids = Vec::new();
@@ -2332,6 +2397,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
+            self.tag_entity(*child_entity);
             let child_state = MobjectState {
                 bounds: Bounds3D::default(),
                 transform: SpatialTransform::default(),
@@ -2348,6 +2414,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.states.insert(*child_id, child_state);
         }
 
+        self.tag_entity(entity);
         let state = MobjectState {
             bounds,
             transform: SpatialTransform::default(),
@@ -2431,6 +2498,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
+            self.tag_entity(*child_entity);
             let child_state = MobjectState {
                 bounds: Bounds3D::default(),
                 transform: SpatialTransform::default(),
@@ -2445,6 +2513,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.states.insert(*child_id, child_state);
         }
 
+        self.tag_entity(entity);
         let state = MobjectState {
             bounds,
             transform: SpatialTransform::default(),
@@ -2486,8 +2555,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let id_counter = &mut self.id_counter;
         let next_id_fn = move || {
+            let id = gaanim_core::ObjectId::from_parts(*id_counter, 1);
             *id_counter += 1;
-            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+            id
         };
 
         let mut child_spans = Vec::new();
@@ -2515,6 +2585,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
+            self.tag_entity(*child_entity);
             let child_state = MobjectState {
                 bounds: Bounds3D::default(),
                 transform: SpatialTransform::default(),
@@ -2529,6 +2600,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.states.insert(*child_id, child_state);
         }
 
+        self.tag_entity(entity);
         let state = MobjectState {
             bounds,
             transform: SpatialTransform::default(),
@@ -2585,8 +2657,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let id_counter = &mut self.id_counter;
         let next_id_fn = move || {
+            let id = gaanim_core::ObjectId::from_parts(*id_counter, 1);
             *id_counter += 1;
-            gaanim_core::ObjectId::from_parts(*id_counter, 1)
+            id
         };
 
         let mut child_spans = Vec::new();
@@ -2608,6 +2681,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Register each child in self.states so they can be styled and animated
         for (child_id, child_entity, _) in &child_spans {
+            self.tag_entity(*child_entity);
             let child_state = MobjectState {
                 bounds: Bounds3D::default(),
                 transform: SpatialTransform::default(),
@@ -2622,6 +2696,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.states.insert(*child_id, child_state);
         }
 
+        self.tag_entity(entity);
         let state = MobjectState {
             bounds,
             transform: SpatialTransform::default(),
@@ -2950,6 +3025,11 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
         if let Some(parent) = self.parent_entity {
             entity_cmd.set_parent_in_place(parent);
+        }
+
+        // Tag entity with the current scene if inside a scene scope
+        if let Some(scene_id) = self.builder.current_scene {
+            self.builder.commands.entity(entity).insert(SceneMember(scene_id));
         }
 
         let state = MobjectState {
