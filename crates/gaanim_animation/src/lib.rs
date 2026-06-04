@@ -57,8 +57,11 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register standard signal binders and continuous updaters in the Updaters Phase
         app.add_systems(
             Update,
+            updater_system.in_set(SceneSet::Updaters)
+        );
+        app.add_systems(
+            Update,
             (
-                updater_system,
                 signal_binding_system::<f64>,
                 signal_binding_system::<gaanim_core::glam::DVec3>,
                 signal_binding_system::<gaanim_core::peniko::Color>,
