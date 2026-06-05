@@ -1,0 +1,8 @@
+#include "home.typ"
+#include "getting-started/index.typ"
+#include "api/scene.typ"
+#include "api/mobjects.typ"
+#include "api/animations.typ"
+#include "api/themes.typ"
+#include "examples/basic.typ"
+#include "examples/advanced.typ"

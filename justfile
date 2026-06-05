@@ -66,8 +66,17 @@ wheel:
 run EX:
     {{ python }} examples/{{ EX }}.py
 
+# Build documentation site (one-shot).
 docs:
-    cargo run -p docs
+    cargo run -p docs -- compile
+
+# Build documentation site and open in browser.
+docs-open:
+    cargo run -p docs -- compile --open
+
+# Watch mode for documentation with live reload.
+docs-watch:
+    cargo run -p docs -- watch
 
 # ---- Doctor -----------------------------------------------------------------
 

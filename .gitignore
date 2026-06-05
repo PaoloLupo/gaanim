@@ -14,3 +14,8 @@ __pycache__/
 *.pdb
 *.pyd
 *.so
+
+# Docs build artifacts
+/docs/dist/
+/docs/assets/generated/
+/docs/target/
