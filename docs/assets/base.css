@@ -132,6 +132,26 @@
     --black-alpha: rgba(0, 0, 0, 0.85);
 }
 
+/* Override Typst inline syntax colors in dark mode (system preference) */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) span[style*="color: #b60157"] { color: #ff9e64 !important; }
+    :root:not([data-theme="light"]) span[style*="color: #4b69c6"] { color: #7aa2f7 !important; }
+    :root:not([data-theme="light"]) span[style*="color: #d73948"] { color: #f7768e !important; }
+    :root:not([data-theme="light"]) span[style*="color: #198810"] { color: #9ece6a !important; }
+    :root:not([data-theme="light"]) span[style*="color: #74747c"] { color: #565f89 !important; }
+    :root:not([data-theme="light"]) pre { background: #1a1b26 !important; }
+    :root:not([data-theme="light"]) code { color: #a9b1d6 !important; }
+}
+
+/* Override Typst inline syntax colors in dark mode (explicit choice) */
+:root[data-theme="dark"] span[style*="color: #b60157"] { color: #ff9e64 !important; }
+:root[data-theme="dark"] span[style*="color: #4b69c6"] { color: #7aa2f7 !important; }
+:root[data-theme="dark"] span[style*="color: #d73948"] { color: #f7768e !important; }
+:root[data-theme="dark"] span[style*="color: #198810"] { color: #9ece6a !important; }
+:root[data-theme="dark"] span[style*="color: #74747c"] { color: #565f89 !important; }
+:root[data-theme="dark"] pre { background: #1a1b26 !important; }
+:root[data-theme="dark"] code { color: #a9b1d6 !important; }
+
 html {
     scroll-behavior: smooth;
 }
