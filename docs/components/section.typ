@@ -34,6 +34,10 @@
       html.meta(name: "view-transition", content: "same-origin")
       html.link(href: prefix + "assets/base.css", rel: "stylesheet")
       html.title(title + " — Gaanim")
+      // Inline script to prevent FOUC — runs before first paint
+      html.elem("script", attrs: (type: "text/javascript"), {
+        [if(localStorage.getItem("theme"))document.documentElement.setAttribute("data-theme",localStorage.getItem("theme"))]
+      })
     })
 
     html.body({

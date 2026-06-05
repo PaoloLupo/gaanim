@@ -19,3 +19,4 @@ __pycache__/
 /docs/dist/
 /docs/assets/generated/
 /docs/target/
+/dist/
