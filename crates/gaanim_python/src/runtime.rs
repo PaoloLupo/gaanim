@@ -44,6 +44,9 @@ pub fn run(
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
     .add_systems(Startup, move |world: &mut World| {
         replay_into(world, ops.clone(), width, height, background);
+        if let Some(mut timeline) = world.get_resource_mut::<Timeline>() {
+            timeline.is_playing = true;
+        }
     })
     .add_systems(Update, drive_timeline_clock);
 
@@ -1053,10 +1056,8 @@ fn apply_2d_transform(
 }
 
 fn drive_timeline_clock(
-    mut timeline: ResMut<Timeline>,
     time: Res<Time>,
     mut dt: ResMut<gaanim_animation::DeltaTime>,
 ) {
     dt.dt = time.delta_secs_f64();
-    timeline.is_playing = true;
 }

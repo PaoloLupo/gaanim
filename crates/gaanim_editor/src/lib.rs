@@ -18,6 +18,13 @@ mod fps_overlay;
 mod timeline_widget;
 mod vsync;
 
+fn sync_editor_input_ignore_system(
+    egui_wants: Res<EguiWantsInput>,
+    mut timeline: ResMut<Timeline>,
+) {
+    timeline.ignore_input = egui_wants.wants_keyboard_input() || egui_wants.wants_any_pointer_input();
+}
+
 pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
@@ -35,6 +42,9 @@ impl Plugin for GaanimEditorPlugin {
         .add_systems(
             Update,
             (
+                sync_editor_input_ignore_system
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                    .before(gaanim_timeline::timeline_playback_system),
                 editor_picking_system,
                 fps_overlay::fps_overlay_system,
                 vsync::vsync_toggle_system,

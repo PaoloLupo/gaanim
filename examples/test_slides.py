@@ -19,4 +19,4 @@ scene.slide()
 # Slide 3: both animate
 scene.play(c.animate().shift(100, 0).duration(0.5).smooth())
 scene.wait(0.3)
-scene.render()
+scene.edit()

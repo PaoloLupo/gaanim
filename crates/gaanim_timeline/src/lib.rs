@@ -21,6 +21,9 @@ impl Plugin for GaanimTimelinePlugin {
                 Update,
                 (
                     timeline_playback_system.in_set(SceneSet::Input),
+                    presentation_input_system
+                        .in_set(SceneSet::Input)
+                        .after(timeline_playback_system),
                     timeline_seek_system.in_set(SceneSet::Animation),
                 ),
             );
@@ -58,7 +61,20 @@ pub fn timeline_playback_system(
         let delta = dt.dt * timeline.playback_rate;
         let next_time = timeline.current_time + delta;
 
-        if let Some((start, end)) = timeline.loop_range {
+        // Check if we crossed a slide breakpoint.
+        let current = timeline.current_time;
+        let mut hit_breakpoint = None;
+        for &bp in &timeline.breakpoints {
+            if bp > current + 1e-5 && bp <= next_time + 1e-5 {
+                hit_breakpoint = Some(bp);
+                break;
+            }
+        }
+
+        if let Some(bp) = hit_breakpoint {
+            timeline.seek_request = Some(bp);
+            timeline.is_playing = false;
+        } else if let Some((start, end)) = timeline.loop_range {
             if next_time >= end {
                 // Loop back around
                 let loop_duration = end - start;
@@ -75,6 +91,65 @@ pub fn timeline_playback_system(
                 timeline.seek_request = Some(next_time);
             }
         }
+    }
+}
+
+/// System: Handles user input (keyboard, mouse) to navigate slide breakpoints in presentation mode.
+pub fn presentation_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut timeline: ResMut<Timeline>,
+) {
+    if timeline.breakpoints.is_empty() || timeline.ignore_input {
+        return;
+    }
+
+    let mut should_advance = false;
+    if keyboard.just_pressed(KeyCode::Space)
+        || keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::ArrowRight)
+        || mouse.just_pressed(MouseButton::Left)
+    {
+        should_advance = true;
+    }
+
+    let mut should_go_back = false;
+    if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::Backspace) {
+        should_go_back = true;
+    }
+
+    if should_advance {
+        if !timeline.is_playing {
+            timeline.is_playing = true;
+        } else {
+            let current = timeline.current_time;
+            let mut next_bp = None;
+            for &bp in &timeline.breakpoints {
+                if bp > current + 1e-5 {
+                    next_bp = Some(bp);
+                    break;
+                }
+            }
+            if let Some(bp) = next_bp {
+                timeline.seek_request = Some(bp);
+                timeline.is_playing = false;
+            } else {
+                timeline.seek_request = Some(timeline.cached_duration);
+                timeline.is_playing = false;
+            }
+        }
+    } else if should_go_back {
+        let current = timeline.current_time;
+        let mut prev_bp = None;
+        for &bp in timeline.breakpoints.iter().rev() {
+            if bp < current - 0.2 {
+                prev_bp = Some(bp);
+                break;
+            }
+        }
+        let target = prev_bp.unwrap_or(0.0);
+        timeline.seek_request = Some(target);
+        timeline.is_playing = false;
     }
 }
 

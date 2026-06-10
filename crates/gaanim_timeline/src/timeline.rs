@@ -37,6 +37,9 @@ pub struct Timeline {
     pub playback_rate: f64,
     /// Interactive slide presentation breakpoints.
     pub breakpoints: Vec<f64>,
+    /// Flag to ignore interactive presentation inputs (e.g. when GUI has focus).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub ignore_input: bool,
     /// Active loop range (start_time, end_time) if loop playback is enabled.
     pub loop_range: Option<(f64, f64)>,
     /// Pending seek request, processed at the end of the frame using exclusive world access.
@@ -70,6 +73,7 @@ impl Default for Timeline {
             is_playing: false,
             playback_rate: 1.0,
             breakpoints: Vec::new(),
+            ignore_input: false,
             loop_range: None,
             seek_request: None,
             last_restore_kf_time: None,
