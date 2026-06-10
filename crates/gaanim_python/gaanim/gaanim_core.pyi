@@ -614,6 +614,35 @@ class Scene:
         quality presets ('draft', 'standard', 'production'), and transparent WebM layers.
         """
 
+    def export_slides(
+        self,
+        output_path: str,
+        fps: int = 60,
+        width: int | None = None,
+        height: int | None = None,
+        transparent: bool | None = None,
+        aspect_ratio: str | None = None,
+        quality: str | None = None,
+        headless: bool = True,
+    ) -> None:
+        """Export each slide as a separate file.
+
+        Slides are defined by calling ``scene.slide()`` during scene
+        construction.  Each segment between consecutive breakpoints becomes
+        a separate output file named ``{base}_{index}.{ext}``.
+
+        Args:
+            output_path: Template path, e.g. ``"output.webp"``.
+            fps: Frames per second.
+            width: Override width (pixels).
+            height: Override height (pixels).
+            transparent: Enable transparency (WebM/WebP).
+            aspect_ratio: Preset name (``'youtube'``, ``'tiktok'``, ``'instagram'``).
+            quality: Preset name (``'draft'``, ``'standard'``, ``'production'``).
+            headless: Use headless GPU-direct export without opening a window.
+        """
+
+
 class Mobject:
     """Handle to a scene mobject (shape, text, or equation).
 

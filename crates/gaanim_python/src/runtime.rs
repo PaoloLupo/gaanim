@@ -167,6 +167,37 @@ struct ReplayResult {
     loop_range: Option<(f64, f64)>,
 }
 
+/// Replay ops into a throwaway Bevy World to extract the breakpoint times
+/// that `scene.slide()` recorded. This is used by `export_slides()` to know
+/// the time boundaries of each slide before doing per-segment exports.
+pub(crate) fn extract_breakpoints(
+    ops: Vec<DeferredOp>,
+    width: u32,
+    height: u32,
+    background: Option<peniko::Color>,
+) -> (Vec<f64>, f64) {
+    let mut app = App::new();
+    app.add_plugins(bevy::prelude::MinimalPlugins)
+        .add_plugins(gaanim_scene::GaanimScenePlugin)
+        .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+        .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+        .add_plugins(gaanim_text::GaanimTextPlugin);
+
+    let world = app.world_mut();
+    replay_into(world, ops, width, height, background);
+
+    let timeline = world.get_resource::<Timeline>();
+    let breakpoints = timeline
+        .map(|t| t.breakpoints.clone())
+        .unwrap_or_default();
+    let duration = timeline
+        .map(|t| t.cached_duration)
+        .unwrap_or(0.0);
+
+    (breakpoints, duration)
+}
+
+
 fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut selection_map: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
@@ -220,6 +251,9 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             }
             DeferredOp::Wait { duration } => {
                 scene.wait(duration);
+            }
+            DeferredOp::Slide => {
+                scene.slide();
             }
             DeferredOp::Ungroup { group } => {
                 if let Some(&bevy_group) = py_to_bevy.get(&group) {

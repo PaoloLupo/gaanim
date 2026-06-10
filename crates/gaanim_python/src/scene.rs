@@ -99,6 +99,8 @@ pub(crate) enum DeferredOp {
         min_distance: f64,
         max_points: Option<usize>,
     },
+    /// Insert a slide breakpoint at the current timeline cursor.
+    Slide,
 }
 
 #[derive(Debug, Clone)]
@@ -817,11 +819,9 @@ impl PyScene {
     }
 
     fn slide(&self) -> PyResult<()> {
-        // Slides are markers in the timeline; the runtime translates them
-        // into a Breakpoint clip on the default track.
         lock_inner!(self.inner)
             .ops
-            .push(DeferredOp::Play { specs: Vec::new() });
+            .push(DeferredOp::Slide);
         Ok(())
     }
 
@@ -987,6 +987,141 @@ impl PyScene {
                 bevy::prelude::error!("Export error: {}", e);
             }
         });
+
+        Ok(())
+    }
+
+    /// Export each slide as a separate file. Slide breakpoints are created by
+    /// calling `scene.slide()` during scene construction. Each segment between
+    /// consecutive breakpoints (and from 0 to the first, last to end) becomes
+    /// a separate output file.
+    ///
+    /// Output files are named `{base}_{index}.{ext}`, e.g. `animation_0.webp`,
+    /// `animation_1.webp`, etc.
+    #[pyo3(signature = (
+        output_path,
+        fps = 60,
+        width = None,
+        height = None,
+        transparent = None,
+        aspect_ratio = None,
+        quality = None,
+        headless = true,
+    ))]
+    fn export_slides(
+        &self,
+        py: Python<'_>,
+        output_path: String,
+        fps: u32,
+        width: Option<u32>,
+        height: Option<u32>,
+        transparent: Option<bool>,
+        aspect_ratio: Option<String>,
+        quality: Option<String>,
+        headless: bool,
+    ) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        let ops = std::mem::take(&mut inner.ops);
+        let w = width.unwrap_or(inner.width);
+        let h = height.unwrap_or(inner.height);
+        let background = inner.background;
+        drop(inner);
+
+        // Clone ops for breakpoint extraction (replay consumes them).
+        let ops_for_bp = ops.clone();
+        let bg_for_bp = background;
+        let (breakpoints, duration) = py.detach(move || {
+            runtime::extract_breakpoints(ops_for_bp, w, h, bg_for_bp)
+        });
+
+        if breakpoints.is_empty() {
+            return Err(PyValueError::new_err(
+                "No slide breakpoints found. Call scene.slide() at least once before export_slides()."
+            ));
+        }
+
+        // Build segment boundaries: [0, bp0], [bp0, bp1], ..., [bpN, None]
+        // Filter out empty or duplicate segments (duration <= 1e-5).
+        let mut segments: Vec<(f64, Option<f64>)> = Vec::new();
+        if breakpoints[0] > 1e-5 {
+            segments.push((0.0, Some(breakpoints[0])));
+        }
+        for i in 1..breakpoints.len() {
+            let start = breakpoints[i - 1];
+            let end = breakpoints[i];
+            if end - start > 1e-5 {
+                segments.push((start, Some(end)));
+            }
+        }
+        // Last segment runs from the last breakpoint to the end (None = no limit).
+        // Only add if the last breakpoint isn't already the end.
+        let last_bp = *breakpoints.last().unwrap();
+        if duration - last_bp > 1e-5 {
+            segments.push((last_bp, None));
+        }
+
+        // Derive output base name and extension.
+        let (base, ext) = match output_path.rfind('.') {
+            Some(dot_pos) => (&output_path[..dot_pos], &output_path[dot_pos + 1..]),
+            None => (output_path.as_str(), "webp"),
+        };
+
+        use gaanim_export::prelude::*;
+
+        for (i, (start, end)) in segments.iter().enumerate() {
+            let slide_path = format!("{}_{}.{}", base, i, ext);
+            let mut config = ExportConfig::new(&slide_path);
+            config.fps = fps;
+            config.width = w;
+            config.height = h;
+            config.headless = headless;
+            config.start_time = Some(*start);
+            config.end_time = *end;
+
+            if let Some(t) = transparent {
+                config.transparent = t;
+            }
+            if let Some(ref ar) = aspect_ratio {
+                let preset = match ar.to_lowercase().as_str() {
+                    "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
+                    "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
+                    "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
+                    _ => return Err(PyValueError::new_err(format!(
+                        "Invalid aspect ratio preset: {}", ar
+                    ))),
+                };
+                config = config.with_aspect_ratio(preset);
+            }
+            if let Some(ref q) = quality {
+                let preset = match q.to_lowercase().as_str() {
+                    "draft" => QualityPreset::Draft,
+                    "standard" => QualityPreset::Standard,
+                    "production" => QualityPreset::Production,
+                    _ => return Err(PyValueError::new_err(format!(
+                        "Invalid quality preset: {}", q
+                    ))),
+                };
+                config = config.with_quality(preset);
+            }
+
+            let ops_clone = ops.clone();
+            let bg = background;
+            let result = py.detach(move || {
+                let setup_world = move |world: &mut bevy::prelude::World| {
+                    runtime::replay_into(world, ops_clone, w, h, bg);
+                };
+                if headless {
+                    export_scene_direct(config, setup_world)
+                } else {
+                    export_scene(config, setup_world)
+                }
+            });
+            if let Err(e) = result {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Export error for slide {}: {}", i, e
+                )));
+            }
+        }
 
         Ok(())
     }

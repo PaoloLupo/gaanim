@@ -503,6 +503,12 @@ impl PySceneBuilder {
         Ok(())
     }
 
+    fn slide(&self) -> PyResult<()> {
+        let mut inner = lock_scene!(self);
+        inner.scenes[self.scene_index].ops.push(DeferredOp::Slide);
+        Ok(())
+    }
+
     // ====== selection ======
 
     fn select(&self, parent: &PyMobject, query: &str) -> PyResult<PySelection> {
