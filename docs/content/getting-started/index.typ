@@ -60,16 +60,16 @@ from gaanim import BLUE, GOLD, Scene
 scene = Scene(1280, 720, title="My First Animation")
 
 circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
-text = scene.title("Hello Gaanim")
+text = scene.title("Hello World")
 
 scene.play(
-    circle.animate().grow_from_center().duration(1.0).spring(),
+    circle.animate().grow_from_center().duration(2.0).spring(),
     text.animate().write(duration=2.0).smooth(),
 )
 
 scene.wait(1.0)
 scene.play(
-    circle.animate().shift(200, 0).duration(1.5).spring(),
+    circle.animate().shift(200, 0).duration(1.5).smooth(),
     text.animate().fade_out().duration(0.5),
 )
 
