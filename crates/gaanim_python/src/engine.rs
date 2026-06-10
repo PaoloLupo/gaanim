@@ -469,6 +469,163 @@ impl PySceneBuilder {
         Ok(())
     }
 
+    fn open_path(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
+        let primary = lock_scene!(self).theme.0.primary;
+        self.spawn_with(MobjectSpec::OpenPath {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            points,
+        })
+    }
+
+    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyResult<PyMobject> {
+        let primary = lock_scene!(self).theme.0.primary;
+        self.spawn_with(MobjectSpec::CurvedArrow {
+            common: CommonSpec {
+                fill: Some(primary),
+                stroke: Some((primary, 2.5)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            angle,
+        })
+    }
+
+    fn vector(&self, x: f64, y: f64) -> PyResult<PyMobject> {
+        self.arrow(0.0, 0.0, x, y)
+    }
+
+    fn brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, height: f64) -> PyResult<PyMobject> {
+        let primary = lock_scene!(self).theme.0.primary;
+        self.spawn_with(MobjectSpec::Brace {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            height,
+        })
+    }
+
+    fn number_line(&self, x_range: (f64, f64, f64), include_labels: bool, vertical: bool) -> PyResult<PyMobject> {
+        let primary = lock_scene!(self).theme.0.primary;
+        self.spawn_with(MobjectSpec::NumberLine {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            x_range,
+            include_labels,
+            vertical,
+        })
+    }
+
+    fn axes(&self, x_range: (f64, f64, f64), y_range: (f64, f64, f64), include_labels: bool) -> PyResult<PyMobject> {
+        let primary = lock_scene!(self).theme.0.primary;
+        self.spawn_with(MobjectSpec::Axes {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            x_range,
+            y_range,
+            include_labels,
+        })
+    }
+
+    fn parametric_curve(&self, _py: Python<'_>, t_range: (f64, f64), steps: usize, f: &Bound<'_, PyAny>) -> PyResult<PyMobject> {
+        let (t_min, t_max) = t_range;
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let t = t_min + (t_max - t_min) * (i as f64 / steps as f64);
+            let res = f.call1((t,))?;
+            let point: (f64, f64) = res.extract()?;
+            points.push(point);
+        }
+        self.open_path(points)
+    }
+
+    fn function_graph(&self, _py: Python<'_>, x_range: (f64, f64), steps: usize, f: &Bound<'_, PyAny>) -> PyResult<PyMobject> {
+        let (x_min, x_max) = x_range;
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let x = x_min + (x_max - x_min) * (i as f64 / steps as f64);
+            let res = f.call1((x,))?;
+            let y: f64 = res.extract()?;
+            points.push((x, y));
+        }
+        self.open_path(points)
+    }
+
+    fn labeled_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, label: String, spacing: f64) -> PyResult<PyMobject> {
+        let arrow_obj = self.arrow(x1, y1, x2, y2)?;
+
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len = (dx * dx + dy * dy).sqrt();
+
+        let mut label_pos = ( (x1 + x2) * 0.5, (y1 + y2) * 0.5 );
+        if len > 1e-6 {
+            let nx = -dy / len;
+            let ny = dx / len;
+            label_pos.0 += nx * spacing;
+            label_pos.1 += ny * spacing;
+        }
+
+        let label_obj = self.text(&label, None)?;
+        if let Ok(mut spec_guard) = label_obj.spec.lock() {
+            spec_guard.common_mut().transform = spec_guard.common_mut().transform.shift_2d(label_pos.0, label_pos.1);
+        }
+
+        self.group(vec![arrow_obj, label_obj])
+    }
+
+    fn labeled_brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, label: String, height: f64, spacing: f64) -> PyResult<PyMobject> {
+        let brace_obj = self.brace(x1, y1, x2, y2, height)?;
+
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len = (dx * dx + dy * dy).sqrt();
+
+        let mut label_pos = ( (x1 + x2) * 0.5, (y1 + y2) * 0.5 );
+        if len > 1e-6 {
+            let nx = -dy / len;
+            let ny = dx / len;
+            label_pos.0 += nx * (height + spacing);
+            label_pos.1 += ny * (height + spacing);
+        }
+
+        let label_obj = self.text(&label, None)?;
+        if let Ok(mut spec_guard) = label_obj.spec.lock() {
+            spec_guard.common_mut().transform = spec_guard.common_mut().transform.shift_2d(label_pos.0, label_pos.1);
+        }
+
+        self.group(vec![brace_obj, label_obj])
+    }
+
     // ====== animations / waits ======
 
     #[pyo3(signature = (*anims))]

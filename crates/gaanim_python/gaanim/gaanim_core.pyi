@@ -1,4 +1,4 @@
-from typing import ClassVar, Literal, Optional, overload
+from typing import ClassVar, Literal, Optional, overload, Callable, List, Tuple
 
 _RateFuncName = Literal[
     "linear",
@@ -447,6 +447,139 @@ class Scene:
 
         Args:
             arm_length: Length of each arm.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def open_path(self, points: List[Tuple[float, float]]) -> Mobject:
+        """Create an open path (polyline) from a list of points.
+
+        Args:
+            points: List of (x, y) coordinates.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Mobject:
+        """Create a curved arrow between two points.
+
+        Args:
+            x1: Start point X.
+            y1: Start point Y.
+            x2: End point X.
+            y2: End point Y.
+            angle: Angle of the curve in radians.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def vector(self, x: float, y: float) -> Mobject:
+        """Create an arrow starting from the origin (0, 0) to (x, y).
+
+        Args:
+            x: End point X.
+            y: End point Y.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def brace(self, x1: float, y1: float, x2: float, y2: float, height: float) -> Mobject:
+        """Create a curly brace between two points.
+
+        Args:
+            x1: Start point X.
+            y1: Start point Y.
+            x2: End point X.
+            y2: End point Y.
+            height: Cusp height/depth of the brace.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def number_line(
+        self, x_range: Tuple[float, float, float], include_labels: bool, vertical: bool
+    ) -> Mobject:
+        """Create a number line.
+
+        Args:
+            x_range: (min, max, step) tuple.
+            include_labels: Whether to generate numeric labels.
+            vertical: Whether the line is vertical.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def axes(
+        self,
+        x_range: Tuple[float, float, float],
+        y_range: Tuple[float, float, float],
+        include_labels: bool,
+    ) -> Mobject:
+        """Create a pair of coordinate axes.
+
+        Args:
+            x_range: (min, max, step) for the horizontal axis.
+            y_range: (min, max, step) for the vertical axis.
+            include_labels: Whether to generate numeric labels.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def parametric_curve(
+        self, t_range: Tuple[float, float], steps: int, f: Callable[[float], Tuple[float, float]]
+    ) -> Mobject:
+        """Create a parametric curve.
+
+        Args:
+            t_range: (min, max) range for the parameter t.
+            steps: Number of evaluation steps.
+            f: Callback returning (x, y) coordinates for parameter t.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def function_graph(
+        self, x_range: Tuple[float, float], steps: int, f: Callable[[float], float]
+    ) -> Mobject:
+        """Create a graph of a function y = f(x).
+
+        Args:
+            x_range: (min, max) domain for x.
+            steps: Number of evaluation steps.
+            f: Callback returning y for given x.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def labeled_arrow(
+        self, x1: float, y1: float, x2: float, y2: float, label: str, spacing: float
+    ) -> Mobject:
+        """Create an arrow with a text label next to it.
+
+        Args:
+            x1: Start point X.
+            y1: Start point Y.
+            x2: End point X.
+            y2: End point Y.
+            label: Text label content.
+            spacing: Distance from the arrow to the label.
+        Returns:
+            A new Mobject handle.
+        """
+
+    def labeled_brace(
+        self, x1: float, y1: float, x2: float, y2: float, label: str, height: float, spacing: float
+    ) -> Mobject:
+        """Create a brace with a text label next to it.
+
+        Args:
+            x1: Start point X.
+            y1: Start point Y.
+            x2: End point X.
+            y2: End point Y.
+            label: Text label content.
+            height: Brace cusp height.
+            spacing: Distance from cusp to label.
         Returns:
             A new Mobject handle.
         """

@@ -803,6 +803,220 @@ pub fn number_plane(
     bundle
 }
 
+pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
+    let mut path = kurbo::BezPath::new();
+    if !points.is_empty() {
+        path.move_to(points[0]);
+        for &p in &points[1..] {
+            path.line_to(p);
+        }
+    }
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for &p in points {
+        min_x = min_x.min(p.x);
+        max_x = max_x.max(p.x);
+        min_y = min_y.min(p.y);
+        max_y = max_y.max(p.y);
+    }
+    let bounds = if points.is_empty() {
+        Bounds3D::default()
+    } else {
+        Bounds3D::new_2d(min_x, min_y, max_x, max_y)
+    };
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        style: kurbo::Stroke::new(2.0),
+    };
+    bundle.tag = ObjectTag("OpenPath".into());
+    bundle
+}
+
+pub fn curved_arrow(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    angle: f64,
+) -> MobjectBundle {
+    let mid_x = (start.x + end.x) * 0.5;
+    let mid_y = (start.y + end.y) * 0.5;
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let chord = (dx * dx + dy * dy).sqrt();
+    let radius = if angle.abs() < 1e-6 {
+        chord * 0.5
+    } else {
+        (chord * 0.5) / (angle * 0.5).sin().abs()
+    };
+    let r_sign = if angle >= 0.0 { 1.0 } else { -1.0 };
+    let h = (radius * radius - chord * chord * 0.25).sqrt();
+    let nx = -dy / chord;
+    let ny = dx / chord;
+    let cx = mid_x + nx * h * r_sign;
+    let cy = mid_y + ny * h * r_sign;
+    let center = kurbo::Point::new(cx, cy);
+
+    let sa = (start.y - cy).atan2(start.x - cx);
+    let ea = (end.y - cy).atan2(end.x - cx);
+    let mut sweep = ea - sa;
+    if angle > 0.0 && sweep < 0.0 {
+        sweep += 2.0 * std::f64::consts::PI;
+    } else if angle < 0.0 && sweep > 0.0 {
+        sweep -= 2.0 * std::f64::consts::PI;
+    }
+
+    let head_len: f64 = 18.0;
+    let head_half_width: f64 = 9.0;
+    let body_half_t: f64 = 3.0;
+
+    let sweep_sign = sweep.signum();
+    let sweep_abs = sweep.abs();
+    let head_angle = (head_len / radius).min(sweep_abs * 0.5);
+    let shaft_sweep = sweep_abs - head_angle;
+    let sa_shoulder = ea - sweep_sign * head_angle;
+
+    let r_outer = radius + body_half_t;
+    let r_inner = radius - body_half_t;
+
+    let mut path = kurbo::BezPath::new();
+
+    // Outer arc start
+    let p_start_outer = center + kurbo::Vec2::new(r_outer * sa.cos(), r_outer * sa.sin());
+    path.move_to(p_start_outer);
+
+    let steps = ((radius * shaft_sweep / 4.0).ceil() as u32).max(8);
+    for i in 0..=steps {
+        let a = sa + sweep_sign * shaft_sweep * (i as f64 / steps as f64);
+        let p = center + kurbo::Vec2::new(r_outer * a.cos(), r_outer * a.sin());
+        path.line_to(p);
+    }
+
+    // Outer shoulder of the arrow head
+    let p_shoulder_outer = center + kurbo::Vec2::new((radius + head_half_width) * sa_shoulder.cos(), (radius + head_half_width) * sa_shoulder.sin());
+    path.line_to(p_shoulder_outer);
+
+    // Tip
+    path.line_to(end);
+
+    // Inner shoulder of the arrow head
+    let p_shoulder_inner = center + kurbo::Vec2::new((radius - head_half_width) * sa_shoulder.cos(), (radius - head_half_width) * sa_shoulder.sin());
+    path.line_to(p_shoulder_inner);
+
+    // Inner shaft shoulder
+    let p_shaft_shoulder_inner = center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin());
+    path.line_to(p_shaft_shoulder_inner);
+
+    // Inner arc back to start
+    for i in 0..=steps {
+        let a = sa_shoulder - sweep_sign * shaft_sweep * (i as f64 / steps as f64);
+        let p = center + kurbo::Vec2::new(r_inner * a.cos(), r_inner * a.sin());
+        path.line_to(p);
+    }
+
+    path.close_path();
+
+    let mut min_x = start.x.min(end.x);
+    let mut max_x = start.x.max(end.x);
+    let mut min_y = start.y.min(end.y);
+    let mut max_y = start.y.max(end.y);
+
+    for el in path.elements() {
+        if let kurbo::PathEl::LineTo(p) | kurbo::PathEl::MoveTo(p) = el {
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+        }
+    }
+
+    let bounds = Bounds3D::new_2d(
+        min_x - body_half_t.max(head_half_width),
+        min_y - body_half_t.max(head_half_width),
+        max_x + body_half_t.max(head_half_width),
+        max_y + body_half_t.max(head_half_width),
+    );
+
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::WHITE,
+    )));
+    bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
+        style: kurbo::Stroke::new(2.5),
+    };
+    bundle.tag = ObjectTag("CurvedArrow".into());
+    bundle
+}
+
+pub fn brace(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    height: f64,
+) -> MobjectBundle {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    let theta = dy.atan2(dx);
+
+    let mut path = kurbo::BezPath::new();
+    path.move_to(kurbo::Point::new(0.0, 0.0));
+
+    // Segment 1a: (0,0) -> (len/4, -height/2)
+    path.curve_to(
+        kurbo::Point::new(len / 8.0, 0.0),
+        kurbo::Point::new(len / 8.0, -height / 2.0),
+        kurbo::Point::new(len / 4.0, -height / 2.0),
+    );
+
+    // Segment 1b: (len/4, -height/2) -> (len/2, -height)
+    path.curve_to(
+        kurbo::Point::new(3.0 * len / 8.0, -height / 2.0),
+        kurbo::Point::new(len / 2.0 - len / 16.0, -height),
+        kurbo::Point::new(len / 2.0, -height),
+    );
+
+    // Segment 2a: (len/2, -height) -> (3*len/4, -height/2)
+    path.curve_to(
+        kurbo::Point::new(len / 2.0 + len / 16.0, -height),
+        kurbo::Point::new(5.0 * len / 8.0, -height / 2.0),
+        kurbo::Point::new(3.0 * len / 4.0, -height / 2.0),
+    );
+
+    // Segment 2b: (3*len/4, -height/2) -> (len, 0)
+    path.curve_to(
+        kurbo::Point::new(7.0 * len / 8.0, -height / 2.0),
+        kurbo::Point::new(7.0 * len / 8.0, 0.0),
+        kurbo::Point::new(len, 0.0),
+    );
+
+    let trans = kurbo::Affine::translate((start.x, start.y)) * kurbo::Affine::rotate(theta);
+    let final_path = trans * path;
+
+    let bounding_rect = final_path.bounding_box();
+    let bounds = Bounds3D::new_2d(
+        bounding_rect.x0,
+        bounding_rect.y0,
+        bounding_rect.x1,
+        bounding_rect.y1,
+    );
+
+    let mut bundle = MobjectBundle::new(id, final_path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.stroke = StrokeBrush {
+        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        style: kurbo::Stroke::new(2.0),
+    };
+    bundle.tag = ObjectTag("Brace".into());
+    bundle
+}
+
 #[cfg(test)]
 mod arrow_tests {
     use super::*;

@@ -759,6 +759,112 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
+        MobjectSpec::CurvedArrow { common, start, end, angle } => {
+            let b = scene.curved_arrow(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                angle,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Brace { common, start, end, height } => {
+            let b = scene.brace(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                height,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::OpenPath { common, points } => {
+            let pts: Vec<gaanim_core::kurbo::Point> = points
+                .iter()
+                .map(|p| gaanim_core::kurbo::Point::new(p.0, p.1))
+                .collect();
+            let b = scene.open_path(&pts);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::NumberLine { common, x_range, include_labels, vertical } => {
+            let group_ref = scene.number_line(x_range, include_labels, vertical);
+            if let Some(state) = scene.states.get_mut(group_ref.id) {
+                state.transform = common.transform;
+                state.opacity = common.opacity;
+                state.fill = common.fill.map(peniko::Brush::Solid);
+                if let Some(stroke) = common.stroke {
+                    state.stroke = StrokeBrush::new(stroke.0, stroke.1);
+                }
+                scene.commands.entity(state.entity)
+                    .insert(common.transform)
+                    .insert(Opacity(common.opacity))
+                    .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
+                if let Some(stroke) = common.stroke {
+                    scene.commands.entity(state.entity)
+                        .insert(StrokeBrush::new(stroke.0, stroke.1));
+                }
+            }
+            if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
+                if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                    let ref_bounds = ref_state.bounds;
+                    let ref_transform = ref_state.transform;
+                    if let Some(state) = scene.states.get_mut(group_ref.id) {
+                        let shift = gaanim_layout::compute_next_to(
+                            state.bounds,
+                            &state.transform,
+                            ref_bounds,
+                            &ref_transform,
+                            dir,
+                            spacing,
+                        );
+                        state.transform = state.transform.shift_3d(shift);
+                        scene.commands.entity(state.entity).insert(state.transform);
+                    }
+                }
+            }
+            group_ref.id
+        }
+        MobjectSpec::Axes { common, x_range, y_range, include_labels } => {
+            let group_ref = scene.axes(x_range, y_range, include_labels);
+            if let Some(state) = scene.states.get_mut(group_ref.id) {
+                state.transform = common.transform;
+                state.opacity = common.opacity;
+                state.fill = common.fill.map(peniko::Brush::Solid);
+                if let Some(stroke) = common.stroke {
+                    state.stroke = StrokeBrush::new(stroke.0, stroke.1);
+                }
+                scene.commands.entity(state.entity)
+                    .insert(common.transform)
+                    .insert(Opacity(common.opacity))
+                    .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
+                if let Some(stroke) = common.stroke {
+                    scene.commands.entity(state.entity)
+                        .insert(StrokeBrush::new(stroke.0, stroke.1));
+                }
+            }
+            if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
+                if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                    let ref_bounds = ref_state.bounds;
+                    let ref_transform = ref_state.transform;
+                    if let Some(state) = scene.states.get_mut(group_ref.id) {
+                        let shift = gaanim_layout::compute_next_to(
+                            state.bounds,
+                            &state.transform,
+                            ref_bounds,
+                            &ref_transform,
+                            dir,
+                            spacing,
+                        );
+                        state.transform = state.transform.shift_3d(shift);
+                        scene.commands.entity(state.entity).insert(state.transform);
+                    }
+                }
+            }
+            group_ref.id
+        }
         MobjectSpec::BooleanResult { common, contours } => {
             let rings: Vec<Vec<gaanim_core::kurbo::Point>> = contours
                 .iter()

@@ -80,6 +80,11 @@ pub enum MobjectSpec {
         axis_stroke: f64,
         grid_stroke: f64,
     },
+    CurvedArrow { common: CommonSpec, start: (f64, f64), end: (f64, f64), angle: f64 },
+    Brace { common: CommonSpec, start: (f64, f64), end: (f64, f64), height: f64 },
+    OpenPath { common: CommonSpec, points: Vec<(f64, f64)> },
+    NumberLine { common: CommonSpec, x_range: (f64, f64, f64), include_labels: bool, vertical: bool },
+    Axes { common: CommonSpec, x_range: (f64, f64, f64), y_range: (f64, f64, f64), include_labels: bool },
     BooleanResult {
         common: CommonSpec,
         contours: Vec<Vec<[f64; 2]>>,
@@ -160,6 +165,11 @@ impl MobjectSpec {
             | Self::RightAngle { common, .. }
             | Self::TangentLine { common, .. }
             | Self::NumberPlane { common, .. }
+            | Self::CurvedArrow { common, .. }
+            | Self::Brace { common, .. }
+            | Self::OpenPath { common, .. }
+            | Self::NumberLine { common, .. }
+            | Self::Axes { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. }
@@ -194,6 +204,11 @@ impl MobjectSpec {
             | Self::RightAngle { common, .. }
             | Self::TangentLine { common, .. }
             | Self::NumberPlane { common, .. }
+            | Self::CurvedArrow { common, .. }
+            | Self::Brace { common, .. }
+            | Self::OpenPath { common, .. }
+            | Self::NumberLine { common, .. }
+            | Self::Axes { common, .. }
             | Self::BooleanResult { common, .. }
             | Self::Text { common, .. }
             | Self::Equation { common, .. }
@@ -228,6 +243,11 @@ impl MobjectSpec {
             Self::RightAngle { .. } => "right_angle",
             Self::TangentLine { .. } => "tangent_line",
             Self::NumberPlane { .. } => "number_plane",
+            Self::CurvedArrow { .. } => "curved_arrow",
+            Self::Brace { .. } => "brace",
+            Self::OpenPath { .. } => "open_path",
+            Self::NumberLine { .. } => "number_line",
+            Self::Axes { .. } => "axes",
             Self::BooleanResult { .. } => "boolean_result",
             Self::Text { .. } => "text",
             Self::Equation { .. } => "equation",
@@ -470,10 +490,20 @@ impl MobjectSpec {
                     }
                 }
             }
-            Self::NumberPlane { .. } => {
-                // NumberPlane has many thin grid lines; for boolean ops
-                // we treat it as empty to avoid generating hundreds of
-                // zero-area contours.
+            Self::CurvedArrow { start, end, .. } => {
+                let pts = [(start.0, start.1), (end.0, end.1)];
+                push_transformed_ring(&pts, &mut out);
+            }
+            Self::Brace { start, end, .. } => {
+                let pts = [(start.0, start.1), (end.0, end.1)];
+                push_transformed_ring(&pts, &mut out);
+            }
+            Self::OpenPath { points, .. } => {
+                push_transformed_ring(points, &mut out);
+            }
+            Self::NumberPlane { .. } | Self::NumberLine { .. } | Self::Axes { .. } => {
+                // NumberPlane, NumberLine, Axes have many thin lines; for boolean ops
+                // we treat them as empty.
             }
             Self::BooleanResult { contours, .. } => {
                 for c in contours {

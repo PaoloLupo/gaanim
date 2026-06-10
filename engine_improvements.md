@@ -350,13 +350,13 @@ Slide, ZoomThrough, Morph).
 
 ## 🗺️ Roadmap Propuesto
 
-### Sprint 1 — Mobjects Matemáticos (1 semana)
-- [ ] `Vector` (alias de Arrow desde origen)
-- [ ] `CurvedArrow`
-- [ ] `Axes` + `NumberLine` + ticks + labels
-- [ ] `FunctionGraph` (f(x) sobre Axes)
-- [ ] `ParametricCurve`
-- [ ] `Brace` + `LabeledArrow`
+### Sprint 1 — Mobjects Matemáticos (1 semana) [Completado ✅ 2026-06-10]
+- [x] `Vector` (alias de Arrow desde origen)
+- [x] `CurvedArrow`
+- [x] `Axes` + `NumberLine` + ticks + labels
+- [x] `FunctionGraph` (f(x) sobre Axes)
+- [x] `ParametricCurve`
+- [x] `Brace` + `LabeledArrow`
 
 ### Sprint 2 — Transform/Morph (1 semana)
 - [ ] `Transform` (interpolación de paths entre dos mobjects)
