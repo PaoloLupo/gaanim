@@ -169,13 +169,16 @@ pub fn compile_code_cell(
     let mut cmd = "python".to_string();
     let ext = "py";
 
-    // Auto-detect venv
-    let venv_python_unix = Path::new(".venv/bin/python");
-    let venv_python_win = Path::new(".venv/Scripts/python.exe");
-    if venv_python_unix.exists() {
-        cmd = venv_python_unix.to_string_lossy().to_string();
-    } else if venv_python_win.exists() {
-        cmd = venv_python_win.to_string_lossy().to_string();
+    // Auto-detect venv (make absolute without resolving symlinks, so the venv
+    // python is used even when current_dir is set to a subdirectory like docs/).
+    if let Ok(cwd) = std::env::current_dir() {
+        let venv_unix = cwd.join(".venv/bin/python");
+        let venv_win = cwd.join(".venv/Scripts/python.exe");
+        if venv_unix.exists() {
+            cmd = venv_unix.to_string_lossy().to_string();
+        } else if venv_win.exists() {
+            cmd = venv_win.to_string_lossy().to_string();
+        }
     }
 
     // Parse lines: >>> / <<< markers and magic comments
