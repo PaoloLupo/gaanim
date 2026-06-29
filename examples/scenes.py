@@ -4,7 +4,7 @@ engine = Engine(width=1920, height=1080, title="Presentation")
 
 intro = engine.scene("intro")
 title = intro.title("Welcome")
-intro.play(title.create())
+intro.play(title.write())
 intro.wait(1.0)
 
 demo = engine.scene("demo")

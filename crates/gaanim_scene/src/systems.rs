@@ -177,7 +177,11 @@ pub fn hierarchical_bounds_system(
     root_query: Query<Entity, (With<bevy::prelude::Children>, Without<ChildOf>)>,
     empty_root_group_query: Query<
         Entity,
-        (With<GroupMarker>, Without<bevy::prelude::Children>, Without<ChildOf>),
+        (
+            With<GroupMarker>,
+            Without<bevy::prelude::Children>,
+            Without<ChildOf>,
+        ),
     >,
     children_query: Query<&bevy::prelude::Children>,
     mut bounds_query: Query<&mut WorldBounds>,

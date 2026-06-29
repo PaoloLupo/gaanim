@@ -15,10 +15,6 @@ use gaanim_timeline::timeline::Timeline;
 use crate::mobject::{MobjectSpec, PythonGroupLayoutOp, PythonPositioningOp, TextRoleKind};
 use crate::scene::DeferredOp;
 
-
-
-
-
 pub fn replay_into(
     world: &mut World,
     ops: Vec<DeferredOp>,
@@ -116,16 +112,11 @@ pub(crate) fn extract_breakpoints(
     replay_into(world, ops, width, height, background);
 
     let timeline = world.get_resource::<Timeline>();
-    let breakpoints = timeline
-        .map(|t| t.breakpoints.clone())
-        .unwrap_or_default();
-    let duration = timeline
-        .map(|t| t.cached_duration)
-        .unwrap_or(0.0);
+    let breakpoints = timeline.map(|t| t.breakpoints.clone()).unwrap_or_default();
+    let duration = timeline.map(|t| t.cached_duration).unwrap_or(0.0);
 
     (breakpoints, duration)
 }
-
 
 fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
@@ -701,7 +692,12 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::CurvedArrow { common, start, end, angle } => {
+        MobjectSpec::CurvedArrow {
+            common,
+            start,
+            end,
+            angle,
+        } => {
             let b = scene.curved_arrow(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
@@ -711,7 +707,12 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Brace { common, start, end, height } => {
+        MobjectSpec::Brace {
+            common,
+            start,
+            end,
+            height,
+        } => {
             let b = scene.brace(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
@@ -731,7 +732,12 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::NumberLine { common, x_range, include_labels, vertical } => {
+        MobjectSpec::NumberLine {
+            common,
+            x_range,
+            include_labels,
+            vertical,
+        } => {
             let group_ref = scene.number_line(x_range, include_labels, vertical);
             if let Some(state) = scene.states.get_mut(group_ref.id) {
                 state.transform = common.transform;
@@ -740,12 +746,16 @@ fn spawn_mobject(
                 if let Some(stroke) = common.stroke {
                     state.stroke = StrokeBrush::new(stroke.0, stroke.1);
                 }
-                scene.commands.entity(state.entity)
+                scene
+                    .commands
+                    .entity(state.entity)
                     .insert(common.transform)
                     .insert(Opacity(common.opacity))
                     .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
                 if let Some(stroke) = common.stroke {
-                    scene.commands.entity(state.entity)
+                    scene
+                        .commands
+                        .entity(state.entity)
                         .insert(StrokeBrush::new(stroke.0, stroke.1));
                 }
             }
@@ -769,7 +779,12 @@ fn spawn_mobject(
             }
             group_ref.id
         }
-        MobjectSpec::Axes { common, x_range, y_range, include_labels } => {
+        MobjectSpec::Axes {
+            common,
+            x_range,
+            y_range,
+            include_labels,
+        } => {
             let group_ref = scene.axes(x_range, y_range, include_labels);
             if let Some(state) = scene.states.get_mut(group_ref.id) {
                 state.transform = common.transform;
@@ -778,12 +793,16 @@ fn spawn_mobject(
                 if let Some(stroke) = common.stroke {
                     state.stroke = StrokeBrush::new(stroke.0, stroke.1);
                 }
-                scene.commands.entity(state.entity)
+                scene
+                    .commands
+                    .entity(state.entity)
                     .insert(common.transform)
                     .insert(Opacity(common.opacity))
                     .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
                 if let Some(stroke) = common.stroke {
-                    scene.commands.entity(state.entity)
+                    scene
+                        .commands
+                        .entity(state.entity)
                         .insert(StrokeBrush::new(stroke.0, stroke.1));
                 }
             }
@@ -1127,5 +1146,5 @@ fn apply_2d_transform(
         state.transform = transform;
         scene.commands.entity(state.entity).insert(transform);
     }
-        mref
+    mref
 }

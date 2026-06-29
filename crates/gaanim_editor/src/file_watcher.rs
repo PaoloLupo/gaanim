@@ -1,11 +1,11 @@
 //! File-system watcher that triggers a script re-run on save.
 
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use notify::{EventKind, RecursiveMode, Watcher};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// Handle to the watcher thread. Exposes a [`Receiver`](mpsc::Receiver) that
 /// fires whenever the watched script file (or its parent directory) changes.
@@ -33,11 +33,7 @@ impl FileWatcher {
     }
 }
 
-fn watch_loop(
-    script_path: PathBuf,
-    stop: Arc<AtomicBool>,
-    changed_tx: mpsc::Sender<()>,
-) {
+fn watch_loop(script_path: PathBuf, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender<()>) {
     let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
     let mut watcher = match notify::recommended_watcher(tx) {
         Ok(w) => w,
@@ -71,8 +67,7 @@ fn watch_loop(
                     continue;
                 }
                 let touches_script = event.paths.iter().any(|p| {
-                    p == &script_path
-                        || script_path.parent().map(|d| p == d).unwrap_or(false)
+                    p == &script_path || script_path.parent().map(|d| p == d).unwrap_or(false)
                 });
                 if !touches_script {
                     continue;
@@ -93,4 +88,3 @@ fn watch_loop(
         }
     }
 }
-

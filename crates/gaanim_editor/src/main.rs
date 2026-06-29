@@ -110,4 +110,3 @@ fn parse_args() -> PathBuf {
     // Canonicalize so the file watcher can match absolute event paths.
     path.canonicalize().unwrap_or(path)
 }
-

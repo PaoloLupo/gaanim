@@ -2443,17 +2443,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let mut line_bundle = MobjectBundle::new(line_id, path, bounds);
         line_bundle.fill = FillBrush(None);
         line_bundle.stroke = StrokeBrush {
-            brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            brush: Some(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::WHITE,
+            )),
             style: kurbo::Stroke::new(2.0),
         };
-        line_bundle.tag = gaanim_scene::ObjectTag(if vertical { "VerticalNumberLineBase".into() } else { "NumberLineBase".into() });
+        line_bundle.tag = gaanim_scene::ObjectTag(if vertical {
+            "VerticalNumberLineBase".into()
+        } else {
+            "NumberLineBase".into()
+        });
 
         let line_ref = MobjectSpawnBuilder {
             builder: self,
             id: line_id,
             bundle: line_bundle,
             parent_entity: None,
-        }.spawn();
+        }
+        .spawn();
 
         let mut children = vec![line_ref];
 

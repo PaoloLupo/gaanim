@@ -8,8 +8,8 @@
 //! scene in place — enabling hot-reload without restarting the window.
 
 use crate::scene::DeferredOp;
-use gaanim_core::peniko;
 use crossbeam_channel::Sender;
+use gaanim_core::peniko;
 use std::sync::{Mutex, OnceLock};
 
 /// A complete, self-contained description of a scene ready to be replayed

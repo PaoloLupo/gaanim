@@ -84,6 +84,12 @@ pub struct EditorState {
     /// animation preview occupies the full window; the compact playback overlay
     /// is shown instead.
     pub timeline_visible: bool,
+    /// Hover time on the seek bar (in seconds), used for tooltip display.
+    seek_bar_hover: Option<f64>,
+    /// Auto-hide animation progress (0.0 = hidden, 1.0 = fully visible).
+    bar_visibility: f32,
+    /// Whether the cursor is currently hovering the playback bar.
+    bar_hovered: bool,
 }
 
 impl Default for EditorState {
@@ -92,6 +98,9 @@ impl Default for EditorState {
             selected: None,
             timeline_widget: timeline_widget::TimelineWidget::new(),
             timeline_visible: false,
+            seek_bar_hover: None,
+            bar_visibility: 1.0, // start visible
+            bar_hovered: false,
         }
     }
 }
@@ -327,7 +336,7 @@ fn editor_ui_system(
         .unwrap_or(0.0);
     inset.bottom = panel_h;
 
-    // ── Compact playback overlay ──────────────────────────────────────────
+    // ── Compact playback overlay (auto-hide) ──────────────────────────────
     {
         let scene_name: String = timeline
             .scene_at(timeline.current_time)
@@ -337,94 +346,320 @@ fn editor_ui_system(
         let total = timeline.cached_duration.max(0.0);
         let current = timeline.current_time.clamp(0.0, total);
 
-        egui::Area::new("playback_overlay".into())
-            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -panel_h))
-            .order(egui::Order::Foreground)
-            .interactable(true)
-            .show(ctx, |ui| {
-                let screen_w = ctx.viewport_rect().width();
-                let bar_w = (screen_w * 0.70).min(900.0).max(400.0);
+        // Auto-hide logic: show when cursor is near the bottom edge.
+        let vp = ctx.viewport_rect();
+        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        let pointer_near_bottom = pointer
+            .map(|p| p.y > vp.height() - 90.0)
+            .unwrap_or(false);
+        let should_show = pointer_near_bottom || state.bar_hovered;
+        let dt = ctx.input(|i| i.unstable_dt);
+        let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
+        let speed = if should_show { 8.0_f32 } else { 3.0_f32 };
+        state.bar_visibility += (target_vis - state.bar_visibility) * (speed * dt).min(1.0);
+        if (state.bar_visibility - target_vis).abs() < 0.01 {
+            state.bar_visibility = target_vis;
+        }
+        let vis = state.bar_visibility;
 
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 210))
-                    .corner_radius(10.0)
-                    .inner_margin(egui::Margin::symmetric(14, 6))
-                    .show(ui, |ui| {
-                        ui.set_width(bar_w);
-                        // Row 1: seekable progress bar
-                        let frac = if total > 0.0 {
-                            (current / total) as f32
-                        } else {
-                            0.0
-                        };
-                        // Use a draggable slider for a smooth seek bar.
-                        let mut seek_frac = frac;
-                        let slider = egui::Slider::new(&mut seek_frac, 0.0..=1.0)
-                            .show_value(false)
-                            .step_by(0.001);
-                        let resp = ui.add(slider);
-                        if resp.dragged() {
-                            timeline.seek_request = Some(seek_frac as f64 * total);
-                        }
-                        // Row 2: controls
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(scene_name)
-                                    .color(egui::Color32::from_rgb(160, 200, 255))
-                                    .strong()
-                                    .small(),
-                            );
-                            ui.add_space(8.0);
-                            let sym = if timeline.is_playing { "⏸" } else { "▶" };
-                            if ui.button(egui::RichText::new(sym).size(16.0)).clicked() {
-                                timeline.is_playing = !timeline.is_playing;
-                            }
-                            ui.monospace(format!(
-                                "{} / {}",
-                                format_time(current),
-                                format_time(total),
-                            ));
-                            ui.add_space(4.0);
-                            let loop_on = timeline.loop_range.is_some();
-                            let lc = if loop_on {
-                                egui::Color32::from_rgb(100, 200, 140)
+        if vis > 0.01 {
+            let slide_offset = (1.0 - vis) * 30.0;
+            let alpha_mul = vis;
+
+            let area_resp = egui::Area::new("playback_overlay".into())
+                .anchor(
+                    egui::Align2::CENTER_BOTTOM,
+                    egui::vec2(0.0, -panel_h + slide_offset),
+                )
+                .order(egui::Order::Foreground)
+                .interactable(vis > 0.5)
+                .show(ctx, |ui| {
+                    let screen_w = vp.width();
+                    let bar_w = (screen_w * 0.70).min(900.0).max(400.0);
+
+                    let fill_alpha = (220.0 * alpha_mul) as u8;
+                    let stroke_alpha = (100.0 * alpha_mul) as u8;
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgba_premultiplied(12, 12, 18, fill_alpha))
+                        .corner_radius(12.0)
+                        .inner_margin(egui::Margin::symmetric(16, 8))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgba_premultiplied(60, 60, 80, stroke_alpha),
+                        ))
+                        .show(ui, |ui| {
+                            ui.set_width(bar_w);
+
+                            // Row 1: custom seek bar
+                            let frac = if total > 0.0 {
+                                (current / total) as f32
                             } else {
-                                egui::Color32::GRAY
+                                0.0
                             };
-                            if ui
-                                .button(egui::RichText::new("🔁").color(lc).size(14.0))
-                                .clicked()
-                            {
-                                if loop_on {
-                                    timeline.loop_range = None;
-                                } else {
-                                    timeline.loop_range =
-                                        Some((0.0, timeline.cached_duration));
-                                }
+                            let total_f32 = total.max(0.001) as f32;
+                            let loop_frac = timeline
+                                .loop_range
+                                .map(|(s, e)| (s as f32 / total_f32, e as f32 / total_f32));
+                            let bp_fracs: Vec<f32> = timeline
+                                .breakpoints
+                                .iter()
+                                .map(|&bp| bp as f32 / total_f32)
+                                .collect();
+
+                            let scene_segs: Vec<SceneSegment> = timeline
+                                .scene_index
+                                .iter()
+                                .filter_map(|(&_start_time, &scene_id)| {
+                                    let (s, e) = timeline.scene_bounds(scene_id)?;
+                                    let name = timeline.scenes.get(scene_id)?.name.clone();
+                                    Some(SceneSegment {
+                                        name,
+                                        start_frac: (s as f32 / total_f32).clamp(0.0, 1.0),
+                                        end_frac: (e as f32 / total_f32).clamp(0.0, 1.0),
+                                    })
+                                })
+                                .collect();
+
+                            let seek_resp =
+                                paint_seek_bar(ui, frac, loop_frac, &bp_fracs, &scene_segs, total);
+                            if let Some(new_frac) = seek_resp.seek_to {
+                                timeline.seek_request = Some(new_frac as f64 * total);
                             }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let lbl = if state.timeline_visible {
-                                        "✕ Close"
+                            state.seek_bar_hover = seek_resp.hover_time;
+
+                            // Row 2: controls
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                // Scene name
+                                if !scene_name.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(&scene_name)
+                                            .color(egui::Color32::from_rgb(160, 200, 255))
+                                            .strong()
+                                            .small(),
+                                    );
+                                    ui.add_space(8.0);
+                                }
+
+                                // Skip to start
+                                transport_button(ui, "⏮", || {
+                                    timeline.is_playing = false;
+                                    timeline.seek_request = Some(0.0);
+                                });
+
+                                // Play / Pause
+                                let play_sym = if timeline.is_playing { "⏸" } else { "▶" };
+                                let play_btn = egui::Button::new(
+                                    egui::RichText::new(play_sym).size(15.0).color(
+                                        if timeline.is_playing {
+                                            egui::Color32::from_rgb(120, 200, 255)
+                                        } else {
+                                            egui::Color32::from_rgb(200, 200, 210)
+                                        },
+                                    ),
+                                )
+                                .min_size(egui::vec2(30.0, 22.0))
+                                .corner_radius(6.0)
+                                .fill(egui::Color32::from_rgba_premultiplied(40, 40, 55, 180));
+                                if ui.add(play_btn).clicked() {
+                                    timeline.is_playing = !timeline.is_playing;
+                                }
+
+                                // Skip to end
+                                transport_button(ui, "⏭", || {
+                                    timeline.is_playing = false;
+                                    timeline.seek_request = Some(total);
+                                });
+
+                                // Prev / Next scene
+                                if !scene_segs.is_empty() {
+                                    ui.add_space(2.0);
+                                    let cur_scene_idx = scene_segs.iter().position(|s| {
+                                        frac >= s.start_frac && frac < s.end_frac + 0.005
+                                    });
+                                    let has_prev = cur_scene_idx.map_or(false, |i| i > 0);
+                                    let has_next =
+                                        cur_scene_idx.map_or(false, |i| i + 1 < scene_segs.len());
+                                    let before_first =
+                                        !scene_segs.is_empty() && frac < scene_segs[0].start_frac;
+                                    let after_last = !scene_segs.is_empty()
+                                        && frac >= scene_segs.last().unwrap().end_frac - 0.005;
+
+                                    // ◀ prev scene
+                                    let prev_color = if has_prev || after_last {
+                                        egui::Color32::from_rgb(170, 170, 180)
                                     } else {
-                                        "☰ Timeline"
+                                        egui::Color32::from_rgb(70, 70, 80)
                                     };
+                                    let prev_btn = egui::Button::new(
+                                        egui::RichText::new("◀").size(10.0).color(prev_color),
+                                    )
+                                    .min_size(egui::vec2(18.0, 20.0))
+                                    .corner_radius(4.0)
+                                    .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 140));
                                     if ui
-                                        .button(
-                                            egui::RichText::new(lbl)
-                                                .small()
-                                                .color(egui::Color32::LIGHT_GRAY),
-                                        )
+                                        .add(prev_btn)
+                                        .on_hover_text("Previous scene")
                                         .clicked()
                                     {
-                                        state.timeline_visible = !state.timeline_visible;
+                                        let target = if after_last {
+                                            scene_segs.last().map(|s| s.start_frac as f64 * total)
+                                        } else if let Some(idx) = cur_scene_idx {
+                                            if idx > 0 {
+                                                Some(scene_segs[idx - 1].start_frac as f64 * total)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(t) = target {
+                                            timeline.seek_request = Some(t);
+                                        }
                                     }
-                                },
-                            );
+
+                                    // ▶ next scene
+                                    let next_color = if has_next || before_first {
+                                        egui::Color32::from_rgb(170, 170, 180)
+                                    } else {
+                                        egui::Color32::from_rgb(70, 70, 80)
+                                    };
+                                    let next_btn = egui::Button::new(
+                                        egui::RichText::new("▶").size(10.0).color(next_color),
+                                    )
+                                    .min_size(egui::vec2(18.0, 20.0))
+                                    .corner_radius(4.0)
+                                    .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 140));
+                                    if ui
+                                        .add(next_btn)
+                                        .on_hover_text("Next scene")
+                                        .clicked()
+                                    {
+                                        let target = if before_first {
+                                            Some(scene_segs[0].start_frac as f64 * total)
+                                        } else if let Some(idx) = cur_scene_idx {
+                                            if idx + 1 < scene_segs.len() {
+                                                Some(scene_segs[idx + 1].start_frac as f64 * total)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(t) = target {
+                                            timeline.seek_request = Some(t);
+                                        }
+                                    }
+                                }
+
+                                ui.add_space(6.0);
+
+                                // Speed control
+                                let speed = timeline.playback_rate;
+                                let speed_label = if speed == 1.0 {
+                                    "1x".to_string()
+                                } else if speed < 1.0 {
+                                    format!("{:.2}x", speed)
+                                } else {
+                                    format!("{:.1}x", speed)
+                                };
+                                let speed_color = if (speed - 1.0).abs() < f64::EPSILON {
+                                    egui::Color32::from_rgb(170, 170, 180)
+                                } else {
+                                    egui::Color32::from_rgb(255, 200, 80)
+                                };
+                                let speed_btn = egui::Button::new(
+                                    egui::RichText::new(speed_label)
+                                        .size(11.0)
+                                        .color(speed_color),
+                                )
+                                .min_size(egui::vec2(36.0, 20.0))
+                                .corner_radius(4.0)
+                                .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 160));
+                                if ui
+                                    .add(speed_btn)
+                                    .on_hover_text("Playback speed (click to cycle)")
+                                    .clicked()
+                                {
+                                    timeline.playback_rate = match speed {
+                                        s if s < 0.4 => 0.5,
+                                        s if s < 0.7 => 1.0,
+                                        s if s < 1.2 => 1.5,
+                                        s if s < 1.7 => 2.0,
+                                        _ => 0.25,
+                                    };
+                                }
+
+                                ui.add_space(6.0);
+
+                                // Time display
+                                ui.monospace(
+                                    egui::RichText::new(format!(
+                                        "{} / {}",
+                                        format_time(current),
+                                        format_time(total),
+                                    ))
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 190)),
+                                );
+
+                                ui.add_space(4.0);
+
+                                // Loop toggle
+                                let loop_on = timeline.loop_range.is_some();
+                                let loop_color = if loop_on {
+                                    egui::Color32::from_rgb(100, 200, 140)
+                                } else {
+                                    egui::Color32::from_rgb(100, 100, 110)
+                                };
+                                let loop_btn = egui::Button::new(
+                                    egui::RichText::new("🔁").size(13.0).color(loop_color),
+                                )
+                                .min_size(egui::vec2(24.0, 20.0))
+                                .corner_radius(4.0)
+                                .fill(egui::Color32::TRANSPARENT);
+                                if ui.add(loop_btn).on_hover_text("Loop").clicked() {
+                                    if loop_on {
+                                        timeline.loop_range = None;
+                                    } else {
+                                        timeline.loop_range =
+                                            Some((0.0, timeline.cached_duration));
+                                    }
+                                }
+
+                                // Right-aligned timeline toggle
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let (lbl, icon) = if state.timeline_visible {
+                                            ("Close", "✕")
+                                        } else {
+                                            ("Timeline", "☰")
+                                        };
+                                        let tl_btn = egui::Button::new(
+                                            egui::RichText::new(format!("{} {}", icon, lbl))
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(150, 150, 165)),
+                                        )
+                                        .min_size(egui::vec2(70.0, 20.0))
+                                        .corner_radius(4.0)
+                                        .fill(egui::Color32::from_rgba_premultiplied(
+                                            30, 30, 45, 140,
+                                        ));
+                                        if ui.add(tl_btn).clicked() {
+                                            state.timeline_visible = !state.timeline_visible;
+                                        }
+                                    },
+                                );
+                            });
                         });
-                    });
-            });
+                });
+            // Keep bar visible while the pointer is inside the overlay area.
+            state.bar_hovered = area_resp
+                .response
+                .hover_pos()
+                .is_some_and(|p| area_resp.response.rect.contains(p));
+        }
     }
 
     if let Some(track_id) = state.timeline_widget.selected_track {
@@ -519,6 +754,219 @@ fn format_time(seconds: f64) -> String {
     let secs = (total_cs % 6000) / 100;
     let cs = total_cs % 100;
     format!("{}:{:02}.{:02}", mins, secs, cs)
+}
+
+/// A scene's time range, precomputed for the seek bar.
+struct SceneSegment {
+    name: String,
+    start_frac: f32,
+    end_frac: f32,
+}
+
+/// Result from painting the custom seek bar.
+struct SeekBarResponse {
+    /// If Some, the user wants to seek to this fraction (0.0..=1.0).
+    seek_to: Option<f32>,
+    /// The time at the hover position, for tooltip display.
+    hover_time: Option<f64>,
+}
+
+/// Paint a custom seek bar with progress fill, loop region, breakpoint markers,
+/// scene sections, playhead handle, and hover time tooltip.
+fn paint_seek_bar(
+    ui: &mut egui::Ui,
+    frac: f32,
+    loop_frac: Option<(f32, f32)>,
+    bp_fracs: &[f32],
+    scenes: &[SceneSegment],
+    total: f64,
+) -> SeekBarResponse {
+    let bar_h = 6.0_f32;
+    let handle_r = 6.0_f32;
+    let desired_h = 20.0_f32; // generous hit area
+
+    let (response, painter) = ui.allocate_painter(
+        egui::vec2(ui.available_width(), desired_h),
+        egui::Sense::click_and_drag(),
+    );
+    let rect = response.rect;
+    let bar_y = rect.center().y;
+    let bar_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, bar_y - bar_h / 2.0),
+        egui::pos2(rect.max.x, bar_y + bar_h / 2.0),
+    );
+
+    // Colors
+    let track_color = egui::Color32::from_rgba_premultiplied(50, 50, 60, 200);
+    let fill_color = egui::Color32::from_rgb(90, 150, 255);
+    let fill_color_light = egui::Color32::from_rgb(130, 180, 255);
+    let loop_color = egui::Color32::from_rgba_premultiplied(80, 180, 120, 50);
+    let bp_color = egui::Color32::from_rgb(255, 200, 60);
+    let handle_color = egui::Color32::from_rgb(220, 220, 230);
+    let handle_active = egui::Color32::from_rgb(120, 180, 255);
+
+    // Track background
+    painter.rect_filled(bar_rect, bar_h / 2.0, track_color);
+
+    // Scene sections: alternating tinted regions with labels and dividers
+    let scene_colors = [
+        egui::Color32::from_rgba_premultiplied(60, 80, 120, 40),
+        egui::Color32::from_rgba_premultiplied(80, 60, 120, 40),
+    ];
+    for (i, seg) in scenes.iter().enumerate() {
+        let sx = bar_rect.min.x + seg.start_frac * bar_rect.width();
+        let ex = bar_rect.min.x + seg.end_frac * bar_rect.width();
+        let scene_rect = egui::Rect::from_min_max(
+            egui::pos2(sx, bar_rect.min.y),
+            egui::pos2(ex, bar_rect.max.y),
+        );
+        // Tinted background
+        painter.rect_filled(scene_rect, 0.0, scene_colors[i % 2]);
+        // Right divider line (skip if at the very end)
+        if seg.end_frac < 0.99 {
+            painter.line_segment(
+                [
+                    egui::pos2(ex, bar_rect.min.y - 2.0),
+                    egui::pos2(ex, bar_rect.max.y + 2.0),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 130, 100)),
+            );
+        }
+        // Scene label above the bar (only if wide enough)
+        let seg_w = ex - sx;
+        if seg_w > 30.0 && !seg.name.is_empty() {
+            let label_x = (sx + ex) / 2.0;
+            let label_y = bar_rect.min.y - 2.0;
+            painter.text(
+                egui::pos2(label_x, label_y),
+                egui::Align2::CENTER_BOTTOM,
+                &seg.name,
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_rgba_premultiplied(160, 160, 180, 160),
+            );
+        }
+    }
+
+    // Loop region highlight
+    if let Some((ls, le)) = loop_frac {
+        let lx0 = bar_rect.min.x + ls * bar_rect.width();
+        let lx1 = bar_rect.min.x + le * bar_rect.width();
+        let loop_rect = egui::Rect::from_min_max(
+            egui::pos2(lx0, bar_rect.min.y),
+            egui::pos2(lx1, bar_rect.max.y),
+        );
+        painter.rect_filled(loop_rect, 0.0, loop_color);
+    }
+
+    // Progress fill
+    if frac > 0.0 {
+        let fill_w = frac * bar_rect.width();
+        let fill_rect = egui::Rect::from_min_max(
+            bar_rect.min,
+            egui::pos2(bar_rect.min.x + fill_w, bar_rect.max.y),
+        );
+        painter.rect_filled(fill_rect, bar_h / 2.0, fill_color);
+        // Subtle highlight on top half
+        let highlight_rect = egui::Rect::from_min_max(
+            fill_rect.min,
+            egui::pos2(fill_rect.max.x, fill_rect.center().y),
+        );
+        painter.rect_filled(highlight_rect, bar_h / 2.0, fill_color_light);
+    }
+
+    // Breakpoint markers
+    for &bp in bp_fracs {
+        let bx = bar_rect.min.x + bp * bar_rect.width();
+        let marker_size = 3.0;
+        let diamond = vec![
+            egui::pos2(bx, bar_rect.min.y - marker_size - 1.0),
+            egui::pos2(bx + marker_size, bar_rect.center().y - 1.0),
+            egui::pos2(bx, bar_rect.max.y + marker_size - 1.0),
+            egui::pos2(bx - marker_size, bar_rect.center().y - 1.0),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            diamond,
+            bp_color,
+            egui::Stroke::NONE,
+        ));
+    }
+
+    // Playhead handle
+    let handle_x = bar_rect.min.x + frac * bar_rect.width();
+    let handle_pos = egui::pos2(handle_x, bar_y);
+    let is_hovering = response.hovered();
+    let is_dragging = response.dragged();
+    let handle_fill = if is_dragging {
+        handle_active
+    } else if is_hovering {
+        handle_color
+    } else {
+        egui::Color32::from_rgb(180, 180, 190)
+    };
+    let stroke_color = if is_dragging || is_hovering {
+        egui::Color32::from_rgb(255, 255, 255)
+    } else {
+        egui::Color32::from_rgba_premultiplied(200, 200, 210, 120)
+    };
+    painter.circle(
+        handle_pos,
+        if is_hovering || is_dragging {
+            handle_r + 1.0
+        } else {
+            handle_r
+        },
+        handle_fill,
+        egui::Stroke::new(1.5, stroke_color),
+    );
+
+    // Hover time tooltip
+    let hover_time = if is_hovering || is_dragging {
+        let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+        if let Some(pos) = pointer_pos {
+            let hover_frac = ((pos.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+            let hover_secs = hover_frac as f64 * total;
+            // Paint tooltip above the handle
+            let tooltip_text = format_time(hover_secs);
+            let tooltip_pos = egui::pos2(pos.x, bar_rect.min.y - 18.0);
+            painter.text(
+                tooltip_pos,
+                egui::Align2::CENTER_BOTTOM,
+                tooltip_text,
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_rgb(230, 230, 240),
+            );
+            Some(hover_secs)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Interaction: click or drag to seek
+    let mut seek_to = None;
+    if response.clicked() || response.dragged() {
+        let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+        if let Some(pos) = pointer_pos {
+            let new_frac = ((pos.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+            seek_to = Some(new_frac);
+        }
+    }
+
+    SeekBarResponse { seek_to, hover_time }
+}
+
+/// Styled transport button (skip prev/next).
+fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
+    let btn = egui::Button::new(egui::RichText::new(label).size(13.0).color(
+        egui::Color32::from_rgb(170, 170, 180),
+    ))
+    .min_size(egui::vec2(24.0, 22.0))
+    .corner_radius(5.0)
+    .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 160));
+    if ui.add(btn).clicked() {
+        on_click();
+    }
 }
 
 fn editor_picking_system(

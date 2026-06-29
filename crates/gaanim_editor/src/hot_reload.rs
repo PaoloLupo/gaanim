@@ -2,12 +2,12 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use crossbeam_channel::Receiver;
+use gaanim_python::DeferredOp;
 use gaanim_python::host::ReloadPayload;
 use gaanim_python::runtime;
-use gaanim_python::DeferredOp;
 use gaanim_scene::MobjectId;
 use gaanim_timeline::timeline::Timeline;
-use crossbeam_channel::Receiver;
 
 /// Bevy resource holding the receiver end of the host channel.
 #[derive(Resource)]
@@ -66,7 +66,13 @@ pub fn reload_listener_system(world: &mut World) {
         (tl.current_time, tl.is_playing)
     };
 
-    reload_with(world, payload.ops, payload.width, payload.height, payload.background);
+    reload_with(
+        world,
+        payload.ops,
+        payload.width,
+        payload.height,
+        payload.background,
+    );
 
     // Restore playback position after rebuild.
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
@@ -97,10 +103,7 @@ pub fn reload_with(
 }
 
 /// egui panel showing the last reload status.
-pub fn reload_status_overlay_system(
-    mut ctx: bevy_egui::EguiContexts,
-    status: Res<ReloadStatus>,
-) {
+pub fn reload_status_overlay_system(mut ctx: bevy_egui::EguiContexts, status: Res<ReloadStatus>) {
     if status.last_message.is_empty() {
         return;
     }

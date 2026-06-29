@@ -837,7 +837,9 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
     let mut bundle = MobjectBundle::new(id, path, bounds);
     bundle.fill = FillBrush(None);
     bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: kurbo::Stroke::new(2.0),
     };
     bundle.tag = ObjectTag("OpenPath".into());
@@ -904,18 +906,27 @@ pub fn curved_arrow(
     }
 
     // Outer shoulder of the arrow head
-    let p_shoulder_outer = center + kurbo::Vec2::new((radius + head_half_width) * sa_shoulder.cos(), (radius + head_half_width) * sa_shoulder.sin());
+    let p_shoulder_outer = center
+        + kurbo::Vec2::new(
+            (radius + head_half_width) * sa_shoulder.cos(),
+            (radius + head_half_width) * sa_shoulder.sin(),
+        );
     path.line_to(p_shoulder_outer);
 
     // Tip
     path.line_to(end);
 
     // Inner shoulder of the arrow head
-    let p_shoulder_inner = center + kurbo::Vec2::new((radius - head_half_width) * sa_shoulder.cos(), (radius - head_half_width) * sa_shoulder.sin());
+    let p_shoulder_inner = center
+        + kurbo::Vec2::new(
+            (radius - head_half_width) * sa_shoulder.cos(),
+            (radius - head_half_width) * sa_shoulder.sin(),
+        );
     path.line_to(p_shoulder_inner);
 
     // Inner shaft shoulder
-    let p_shaft_shoulder_inner = center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin());
+    let p_shaft_shoulder_inner =
+        center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin());
     path.line_to(p_shaft_shoulder_inner);
 
     // Inner arc back to start
@@ -962,12 +973,7 @@ pub fn curved_arrow(
     bundle
 }
 
-pub fn brace(
-    id: ObjectId,
-    start: kurbo::Point,
-    end: kurbo::Point,
-    height: f64,
-) -> MobjectBundle {
+pub fn brace(id: ObjectId, start: kurbo::Point, end: kurbo::Point, height: f64) -> MobjectBundle {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
@@ -1018,7 +1024,9 @@ pub fn brace(
     let mut bundle = MobjectBundle::new(id, final_path, bounds);
     bundle.fill = FillBrush(None);
     bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+        brush: Some(gaanim_core::peniko::Brush::Solid(
+            gaanim_core::peniko::Color::WHITE,
+        )),
         style: kurbo::Stroke::new(2.0),
     };
     bundle.tag = ObjectTag("Brace".into());

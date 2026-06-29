@@ -7,10 +7,10 @@
 //! pushes the drained ops through the host channel instead of opening a window.
 
 use crossbeam_channel::{Receiver, Sender};
+use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use pyo3::prelude::*;
 
 use gaanim_python::host::{self, ReloadPayload};
 
