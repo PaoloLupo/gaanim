@@ -175,12 +175,26 @@ pub fn world_bounds_fallback_system(
 /// System: Propagate WorldBounds bottom-up for nested group hierarchies.
 pub fn hierarchical_bounds_system(
     root_query: Query<Entity, (With<bevy::prelude::Children>, Without<ChildOf>)>,
+    empty_root_group_query: Query<
+        Entity,
+        (With<GroupMarker>, Without<bevy::prelude::Children>, Without<ChildOf>),
+    >,
     children_query: Query<&bevy::prelude::Children>,
     mut bounds_query: Query<&mut WorldBounds>,
     is_group_query: Query<(), With<GroupMarker>>,
 ) {
     for root in &root_query {
         compute_bounds_recursive(root, &children_query, &mut bounds_query, &is_group_query);
+    }
+
+    // Reset bounds of empty root groups (GroupMarker without children).
+    // These are not reached by the recursive traversal, which only descends
+    // through Children. Resetting here mirrors the old cleanup pass and
+    // prevents stale bounds from persisting after all children are removed.
+    for entity in &empty_root_group_query {
+        if let Ok(mut b) = bounds_query.get_mut(entity) {
+            b.0 = gaanim_math::Bounds3D::default();
+        }
     }
 }
 
@@ -234,14 +248,16 @@ pub fn style_propagation_system(
         Query<(&mut FillBrush, &mut StrokeBrush)>,
     )>,
     children_query: Query<&bevy::prelude::Children>,
+    // Reuse the update buffer across frames to avoid per-call allocation.
+    mut updates: Local<Vec<(Entity, Option<FillBrush>, Option<StrokeBrush>)>>,
 ) {
-    let mut updates = Vec::new();
+    updates.clear();
     for (group_entity, fill_opt, stroke_opt) in param_set.p0().iter() {
         updates.push((group_entity, fill_opt.cloned(), stroke_opt.cloned()));
     }
 
     let mut style_query = param_set.p1();
-    for (group_entity, fill_opt, stroke_opt) in updates {
+    for (group_entity, fill_opt, stroke_opt) in updates.drain(..) {
         propagate_style_recursive(
             group_entity,
             fill_opt.as_ref(),
