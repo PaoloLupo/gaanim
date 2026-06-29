@@ -27,7 +27,7 @@ pub struct GaanimRenderCache {
     pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
 }
 
-struct ExtractedElement {
+pub struct ExtractedElement {
     transform: kurbo::Affine,
     opacity: f32,
     render_order: RenderOrder,
