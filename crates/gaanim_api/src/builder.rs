@@ -2348,6 +2348,214 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns an open path (polyline) primitive.
+    pub fn open_path(&mut self, points: &[kurbo::Point]) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::open_path(id, points);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a curved arrow primitive.
+    pub fn curved_arrow(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        angle: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::curved_arrow(id, start, end, angle);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns an arrow starting at the origin.
+    pub fn vector(&mut self, end: kurbo::Point) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        self.arrow(kurbo::Point::new(0.0, 0.0), end)
+    }
+
+    /// Spawns a decorative curly brace primitive.
+    pub fn brace(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        height: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::brace(id, start, end, height);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a horizontal or vertical number line with ticks and optional labels.
+    pub fn number_line(
+        &mut self,
+        x_range: (f64, f64, f64),
+        include_labels: bool,
+        vertical: bool,
+    ) -> MobjectRef {
+        let (min, max, step) = x_range;
+
+        let mut path = kurbo::BezPath::new();
+        let tick_len = 8.0;
+
+        if vertical {
+            path.move_to(kurbo::Point::new(0.0, min));
+            path.line_to(kurbo::Point::new(0.0, max));
+
+            let mut y = (min / step).ceil() * step;
+            while y <= max + 1e-9 {
+                path.move_to(kurbo::Point::new(-tick_len / 2.0, y));
+                path.line_to(kurbo::Point::new(tick_len / 2.0, y));
+                y += step;
+            }
+        } else {
+            path.move_to(kurbo::Point::new(min, 0.0));
+            path.line_to(kurbo::Point::new(max, 0.0));
+
+            let mut x = (min / step).ceil() * step;
+            while x <= max + 1e-9 {
+                path.move_to(kurbo::Point::new(x, -tick_len / 2.0));
+                path.line_to(kurbo::Point::new(x, tick_len / 2.0));
+                x += step;
+            }
+        }
+
+        let bounds = if vertical {
+            Bounds3D::new_2d(-tick_len / 2.0, min, tick_len / 2.0, max)
+        } else {
+            Bounds3D::new_2d(min, -tick_len / 2.0, max, tick_len / 2.0)
+        };
+
+        let line_id = self.next_id();
+        let mut line_bundle = MobjectBundle::new(line_id, path, bounds);
+        line_bundle.fill = FillBrush(None);
+        line_bundle.stroke = StrokeBrush {
+            brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            style: kurbo::Stroke::new(2.0),
+        };
+        line_bundle.tag = gaanim_scene::ObjectTag(if vertical { "VerticalNumberLineBase".into() } else { "NumberLineBase".into() });
+
+        let line_ref = MobjectSpawnBuilder {
+            builder: self,
+            id: line_id,
+            bundle: line_bundle,
+            parent_entity: None,
+        }.spawn();
+
+        let mut children = vec![line_ref];
+
+        if include_labels {
+            let mut val = (min / step).ceil() * step;
+            while val <= max + 1e-9 {
+                let display_val = if val.abs() < 1e-9 { 0.0 } else { val };
+                let label_str = format!("{}", display_val);
+                let label_ref = self.body(&label_str);
+
+                if let Some(state) = self.states.get_mut(label_ref.id) {
+                    if vertical {
+                        state.transform = state.transform.shift_2d(-18.0, val);
+                    } else {
+                        state.transform = state.transform.shift_2d(val, -18.0);
+                    }
+                    self.commands.entity(state.entity).insert(state.transform);
+                }
+
+                children.push(label_ref);
+                val += step;
+            }
+        }
+
+        self.group(&children)
+    }
+
+    /// Spawns a pair of coordinate axes: a horizontal x-axis and a vertical y-axis.
+    pub fn axes(
+        &mut self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        include_labels: bool,
+    ) -> MobjectRef {
+        let x_axis = self.number_line(x_range, include_labels, false);
+        let y_axis = self.number_line(y_range, include_labels, true);
+        self.group(&[x_axis, y_axis])
+    }
+
+    /// Spawns a parametric curve.
+    pub fn parametric_curve<F>(
+        &mut self,
+        t_range: (f64, f64),
+        steps: usize,
+        f: F,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a>
+    where
+        F: Fn(f64) -> kurbo::Point,
+    {
+        let (t_min, t_max) = t_range;
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let t = t_min + (t_max - t_min) * (i as f64 / steps as f64);
+            points.push(f(t));
+        }
+        self.open_path(&points)
+    }
+
+    /// Spawns a function graph y = f(x).
+    pub fn function_graph<F>(
+        &mut self,
+        x_range: (f64, f64),
+        steps: usize,
+        f: F,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a>
+    where
+        F: Fn(f64) -> f64,
+    {
+        self.parametric_curve(x_range, steps, |x| kurbo::Point::new(x, f(x)))
+    }
+
+    /// Spawns an arrow with a text label placed next to it.
+    pub fn labeled_arrow(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        label: &str,
+        spacing: f64,
+    ) -> MobjectRef {
+        let arrow_ref = self.arrow(start, end).spawn();
+
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        let len = (dx * dx + dy * dy).sqrt();
+
+        let mut label_pos = kurbo::Point::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+        if len > 1e-6 {
+            let nx = -dy / len;
+            let ny = dx / len;
+            label_pos.x += nx * spacing;
+            label_pos.y += ny * spacing;
+        }
+
+        let label_ref = self.body(label);
+        if let Some(state) = self.states.get_mut(label_ref.id) {
+            state.transform = state.transform.shift_2d(label_pos.x, label_pos.y);
+            self.commands.entity(state.entity).insert(state.transform);
+        }
+
+        self.group(&[arrow_ref, label_ref])
+    }
+
     /// Spawns a symmetric star primitive.
     pub fn star(
         &mut self,

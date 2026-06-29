@@ -20,9 +20,10 @@ peniko = { workspace = true }
 # Text shaping and parsing libraries
 ttf-parser = "0.25"
 rustybuzz = "0.20"
-typst = "0.14"
-typst-assets = { version = "0.14", features = ["fonts"] }
-typst-kit = { version = "0.14", features = ["embed-fonts"] }
+typst = "0.15.0-rc.1"
+typst-assets = { version = "0.15.0-rc.1", features = ["fonts"] }
+typst-kit = { version = "0.15.0-rc.1", features = ["embedded-fonts", "scan-fonts"] }
+typst-layout = "0.15.0-rc.1"
 fontdb = "0.23"
 thiserror = "2.0"
 

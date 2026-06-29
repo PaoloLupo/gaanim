@@ -8,15 +8,16 @@ use crate::font::{FontRegistry, OutlineCollector};
 
 // Typst imports
 use typst::{
-    Library, LibraryExt, World,
+    Library, LibraryExt, World, WorldExt,
     diag::FileError,
-    foundations::{Bytes, Datetime},
-    layout::{Frame, FrameItem, PagedDocument, Transform},
-    syntax::{FileId, Source, VirtualPath},
+    foundations::{Bytes, Datetime, Duration},
+    layout::{Frame, FrameItem, Transform},
+    syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
     text::{Font, FontBook},
     utils::LazyHash,
     visualize::{CurveItem as TypstCurveItem, FixedStroke, Geometry, LineCap, LineJoin, Paint},
 };
+use typst_layout::PagedDocument;
 
 use kurbo::{Cap, Join, Shape};
 
@@ -33,21 +34,23 @@ impl GaanimTypstWorld {
     /// Creates a new `GaanimTypstWorld` with the user source, Typst default fonts,
     /// system fonts, and any additional fonts registered in the `FontRegistry`.
     pub fn new(source_code: &str, font_registry: &FontRegistry) -> Self {
-        let main_id = FileId::new_fake(VirtualPath::new("/main.typ"));
+        let main_id = FileId::unique(RootedPath::new(
+            VirtualRoot::Project,
+            VirtualPath::new("/main.typ").unwrap(),
+        ));
         let source = Source::new(main_id, source_code.to_string());
 
         // 1. Load Typst embedded defaults + system fonts via typst-kit.
-        let mut searcher = typst_kit::fonts::FontSearcher::new();
-        searcher.include_system_fonts(true);
-        searcher.include_embedded_fonts(true);
-        let kit_fonts = searcher.search();
+        let mut font_store = typst_kit::fonts::FontStore::new();
+        font_store.extend(typst_kit::fonts::embedded());
+        font_store.extend(typst_kit::fonts::system());
 
-        let mut font_book = kit_fonts.book;
+        let mut font_book = font_store.book().clone();
         let mut fonts = Vec::new();
-        for slot in &kit_fonts.fonts {
-            if let Some(font) = slot.get() {
-                fonts.push(font);
-            }
+        let mut idx = 0;
+        while let Some(font) = font_store.font(idx) {
+            fonts.push(font);
+            idx += 1;
         }
 
         // 2. Append any extra fonts the user registered manually
@@ -66,7 +69,6 @@ impl GaanimTypstWorld {
             );
         }
 
-        let font_book = LazyHash::new(font_book);
         let library = LazyHash::new(Library::builder().build());
 
         Self {
@@ -96,19 +98,19 @@ impl World for GaanimTypstWorld {
         if id == self.main_id {
             Ok(self.source.clone())
         } else {
-            Err(FileError::NotFound(id.vpath().as_rooted_path().into()))
+            Err(FileError::NotFound(id.vpath().get_with_slash().into()))
         }
     }
 
     fn file(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
-        Err(FileError::NotFound(id.vpath().as_rooted_path().into()))
+        Err(FileError::NotFound(id.vpath().get_with_slash().into()))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
         self.fonts.get(index).cloned()
     }
 
-    fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
+    fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
         None
     }
 }
@@ -204,7 +206,7 @@ fn typst_stroke_to_kurbo(stroke: &FixedStroke) -> kurbo::Stroke {
         .with_start_cap(cap)
         .with_end_cap(cap)
         .with_join(join)
-        .with_miter_limit(stroke.miter_limit.into())
+        .with_miter_limit(stroke.miter_limit.get())
 }
 
 /// Recursively extract vector items from a Typst `Frame` into Gaanim Mobject entities.
@@ -217,7 +219,7 @@ fn extract_frame_items(
     total_bounds: &mut Option<Bounds3D>,
     default_fill: &Option<peniko::Brush>,
     default_stroke: &StrokeBrush,
-    source: &Source,
+    world: &dyn World,
     char_index_counter: &mut usize,
     child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
     spawned_children: &mut Vec<(Entity, Bounds3D)>,
@@ -241,7 +243,7 @@ fn extract_frame_items(
                     total_bounds,
                     default_fill,
                     default_stroke,
-                    source,
+                    world,
                     char_index_counter,
                     child_spans,
                     spawned_children,
@@ -298,7 +300,7 @@ fn extract_frame_items(
                             .and_then(|s| s.chars().next())
                             .unwrap_or('?');
 
-                        let span_range = source.range(glyph.span.0).unwrap_or(0..0);
+                        let span_range = world.range(glyph.span.0).unwrap_or(0..0);
                         let source_start = span_range.start + byte_offset;
                         let source_end = source_start + c.len_utf8();
 
@@ -357,7 +359,7 @@ fn extract_frame_items(
                 let child_entity = commands.spawn(bundle).id();
                 spawned_children.push((child_entity, local_bounds));
 
-                let span_range = source.range(*_span).unwrap_or(0..0);
+                let span_range = world.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {
                     character: '_', // Marker for drawing shapes
                     char_index: *char_index_counter,
@@ -476,14 +478,7 @@ pub fn compile_typst_to_hierarchy(
     let root_transform = kurbo::Affine::IDENTITY;
 
     // Process the first page only (formulas are typically single-page).
-    if let Some(page) = document.pages.first() {
-        let source_obj = match world.source(world.main()) {
-            Ok(s) => s,
-            Err(_) => {
-                bevy::prelude::error!("Failed to get main source from Typst world");
-                return (parent_entity, Bounds3D::default());
-            }
-        };
+    if let Some(page) = document.pages().first() {
         let mut char_index_counter = 0;
         let mut spawned_children = Vec::new();
         extract_frame_items(
@@ -495,7 +490,7 @@ pub fn compile_typst_to_hierarchy(
             &mut total_bounds,
             &fill,
             &stroke,
-            &source_obj,
+            &world,
             &mut char_index_counter,
             child_spans,
             &mut spawned_children,

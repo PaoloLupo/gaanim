@@ -44,6 +44,9 @@ pub fn run(
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
     .add_systems(Startup, move |world: &mut World| {
         replay_into(world, ops.clone(), width, height, background);
+        if let Some(mut timeline) = world.get_resource_mut::<Timeline>() {
+            timeline.is_playing = true;
+        }
     })
     .add_systems(Update, drive_timeline_clock);
 
@@ -166,6 +169,37 @@ struct ReplayResult {
     loop_range: Option<(f64, f64)>,
 }
 
+/// Replay ops into a throwaway Bevy World to extract the breakpoint times
+/// that `scene.slide()` recorded. This is used by `export_slides()` to know
+/// the time boundaries of each slide before doing per-segment exports.
+pub(crate) fn extract_breakpoints(
+    ops: Vec<DeferredOp>,
+    width: u32,
+    height: u32,
+    background: Option<peniko::Color>,
+) -> (Vec<f64>, f64) {
+    let mut app = App::new();
+    app.add_plugins(bevy::prelude::MinimalPlugins)
+        .add_plugins(gaanim_scene::GaanimScenePlugin)
+        .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+        .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+        .add_plugins(gaanim_text::GaanimTextPlugin);
+
+    let world = app.world_mut();
+    replay_into(world, ops, width, height, background);
+
+    let timeline = world.get_resource::<Timeline>();
+    let breakpoints = timeline
+        .map(|t| t.breakpoints.clone())
+        .unwrap_or_default();
+    let duration = timeline
+        .map(|t| t.cached_duration)
+        .unwrap_or(0.0);
+
+    (breakpoints, duration)
+}
+
+
 fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> ReplayResult {
     let mut py_to_bevy: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut selection_map: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
@@ -219,6 +253,9 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             }
             DeferredOp::Wait { duration } => {
                 scene.wait(duration);
+            }
+            DeferredOp::Slide => {
+                scene.slide();
             }
             DeferredOp::Ungroup { group } => {
                 if let Some(&bevy_group) = py_to_bevy.get(&group) {
@@ -737,6 +774,112 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
+        MobjectSpec::CurvedArrow { common, start, end, angle } => {
+            let b = scene.curved_arrow(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                angle,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::Brace { common, start, end, height } => {
+            let b = scene.brace(
+                gaanim_core::kurbo::Point::new(start.0, start.1),
+                gaanim_core::kurbo::Point::new(end.0, end.1),
+                height,
+            );
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::OpenPath { common, points } => {
+            let pts: Vec<gaanim_core::kurbo::Point> = points
+                .iter()
+                .map(|p| gaanim_core::kurbo::Point::new(p.0, p.1))
+                .collect();
+            let b = scene.open_path(&pts);
+            let b = apply_visual(b, common.fill, common.stroke);
+            let b = b.transform(common.transform).opacity(common.opacity);
+            apply_next_to(b, resolved_next_to).spawn().id
+        }
+        MobjectSpec::NumberLine { common, x_range, include_labels, vertical } => {
+            let group_ref = scene.number_line(x_range, include_labels, vertical);
+            if let Some(state) = scene.states.get_mut(group_ref.id) {
+                state.transform = common.transform;
+                state.opacity = common.opacity;
+                state.fill = common.fill.map(peniko::Brush::Solid);
+                if let Some(stroke) = common.stroke {
+                    state.stroke = StrokeBrush::new(stroke.0, stroke.1);
+                }
+                scene.commands.entity(state.entity)
+                    .insert(common.transform)
+                    .insert(Opacity(common.opacity))
+                    .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
+                if let Some(stroke) = common.stroke {
+                    scene.commands.entity(state.entity)
+                        .insert(StrokeBrush::new(stroke.0, stroke.1));
+                }
+            }
+            if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
+                if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                    let ref_bounds = ref_state.bounds;
+                    let ref_transform = ref_state.transform;
+                    if let Some(state) = scene.states.get_mut(group_ref.id) {
+                        let shift = gaanim_layout::compute_next_to(
+                            state.bounds,
+                            &state.transform,
+                            ref_bounds,
+                            &ref_transform,
+                            dir,
+                            spacing,
+                        );
+                        state.transform = state.transform.shift_3d(shift);
+                        scene.commands.entity(state.entity).insert(state.transform);
+                    }
+                }
+            }
+            group_ref.id
+        }
+        MobjectSpec::Axes { common, x_range, y_range, include_labels } => {
+            let group_ref = scene.axes(x_range, y_range, include_labels);
+            if let Some(state) = scene.states.get_mut(group_ref.id) {
+                state.transform = common.transform;
+                state.opacity = common.opacity;
+                state.fill = common.fill.map(peniko::Brush::Solid);
+                if let Some(stroke) = common.stroke {
+                    state.stroke = StrokeBrush::new(stroke.0, stroke.1);
+                }
+                scene.commands.entity(state.entity)
+                    .insert(common.transform)
+                    .insert(Opacity(common.opacity))
+                    .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
+                if let Some(stroke) = common.stroke {
+                    scene.commands.entity(state.entity)
+                        .insert(StrokeBrush::new(stroke.0, stroke.1));
+                }
+            }
+            if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
+                if let Some(ref_state) = scene.states.get(bevy_ref_id) {
+                    let ref_bounds = ref_state.bounds;
+                    let ref_transform = ref_state.transform;
+                    if let Some(state) = scene.states.get_mut(group_ref.id) {
+                        let shift = gaanim_layout::compute_next_to(
+                            state.bounds,
+                            &state.transform,
+                            ref_bounds,
+                            &ref_transform,
+                            dir,
+                            spacing,
+                        );
+                        state.transform = state.transform.shift_3d(shift);
+                        scene.commands.entity(state.entity).insert(state.transform);
+                    }
+                }
+            }
+            group_ref.id
+        }
         MobjectSpec::BooleanResult { common, contours } => {
             let rings: Vec<Vec<gaanim_core::kurbo::Point>> = contours
                 .iter()
@@ -1061,10 +1204,8 @@ fn apply_2d_transform(
 }
 
 fn drive_timeline_clock(
-    mut timeline: ResMut<Timeline>,
     time: Res<Time>,
     mut dt: ResMut<gaanim_animation::DeltaTime>,
 ) {
     dt.dt = time.delta_secs_f64();
-    timeline.is_playing = true;
 }

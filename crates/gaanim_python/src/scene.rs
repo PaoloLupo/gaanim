@@ -99,6 +99,8 @@ pub(crate) enum DeferredOp {
         min_distance: f64,
         max_points: Option<usize>,
     },
+    /// Insert a slide breakpoint at the current timeline cursor.
+    Slide,
 }
 
 #[derive(Debug, Clone)]
@@ -287,6 +289,163 @@ impl PyScene {
         let mut inner = lock_inner!(self.inner);
         inner.ops.push(DeferredOp::Ungroup { group: group.id });
         Ok(())
+    }
+
+    fn open_path(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::OpenPath {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            points,
+        })
+    }
+
+    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::CurvedArrow {
+            common: CommonSpec {
+                fill: Some(primary_color),
+                stroke: Some((primary_color, 2.5)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            angle,
+        })
+    }
+
+    fn vector(&self, x: f64, y: f64) -> PyResult<PyMobject> {
+        self.arrow(0.0, 0.0, x, y)
+    }
+
+    fn brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, height: f64) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Brace {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
+            height,
+        })
+    }
+
+    fn number_line(&self, x_range: (f64, f64, f64), include_labels: bool, vertical: bool) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::NumberLine {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            x_range,
+            include_labels,
+            vertical,
+        })
+    }
+
+    fn axes(&self, x_range: (f64, f64, f64), y_range: (f64, f64, f64), include_labels: bool) -> PyResult<PyMobject> {
+        let primary_color = lock_inner!(self.inner).theme.0.primary;
+        self.spawn_with(MobjectSpec::Axes {
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary_color, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None, positioning_ops: Vec::new(),
+            },
+            x_range,
+            y_range,
+            include_labels,
+        })
+    }
+
+    fn parametric_curve(&self, _py: Python<'_>, t_range: (f64, f64), steps: usize, f: &Bound<'_, PyAny>) -> PyResult<PyMobject> {
+        let (t_min, t_max) = t_range;
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let t = t_min + (t_max - t_min) * (i as f64 / steps as f64);
+            let res = f.call1((t,))?;
+            let point: (f64, f64) = res.extract()?;
+            points.push(point);
+        }
+        self.open_path(points)
+    }
+
+    fn function_graph(&self, _py: Python<'_>, x_range: (f64, f64), steps: usize, f: &Bound<'_, PyAny>) -> PyResult<PyMobject> {
+        let (x_min, x_max) = x_range;
+        let mut points = Vec::with_capacity(steps + 1);
+        for i in 0..=steps {
+            let x = x_min + (x_max - x_min) * (i as f64 / steps as f64);
+            let res = f.call1((x,))?;
+            let y: f64 = res.extract()?;
+            points.push((x, y));
+        }
+        self.open_path(points)
+    }
+
+    fn labeled_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, label: String, spacing: f64) -> PyResult<PyMobject> {
+        let arrow_obj = self.arrow(x1, y1, x2, y2)?;
+
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len = (dx * dx + dy * dy).sqrt();
+
+        let mut label_pos = ( (x1 + x2) * 0.5, (y1 + y2) * 0.5 );
+        if len > 1e-6 {
+            let nx = -dy / len;
+            let ny = dx / len;
+            label_pos.0 += nx * spacing;
+            label_pos.1 += ny * spacing;
+        }
+
+        let label_obj = self.text(&label, None)?;
+        if let Ok(mut spec_guard) = label_obj.spec.lock() {
+            spec_guard.common_mut().transform = spec_guard.common_mut().transform.shift_2d(label_pos.0, label_pos.1);
+        }
+
+        self.group(vec![arrow_obj, label_obj])
+    }
+
+    fn labeled_brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, label: String, height: f64, spacing: f64) -> PyResult<PyMobject> {
+        let brace_obj = self.brace(x1, y1, x2, y2, height)?;
+
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len = (dx * dx + dy * dy).sqrt();
+
+        let mut label_pos = ( (x1 + x2) * 0.5, (y1 + y2) * 0.5 );
+        if len > 1e-6 {
+            let nx = -dy / len;
+            let ny = dx / len;
+            label_pos.0 += nx * (height + spacing);
+            label_pos.1 += ny * (height + spacing);
+        }
+
+        let label_obj = self.text(&label, None)?;
+        if let Ok(mut spec_guard) = label_obj.spec.lock() {
+            spec_guard.common_mut().transform = spec_guard.common_mut().transform.shift_2d(label_pos.0, label_pos.1);
+        }
+
+        self.group(vec![brace_obj, label_obj])
     }
 
     // ====== spawn helpers ======
@@ -827,11 +986,9 @@ impl PyScene {
     }
 
     fn slide(&self) -> PyResult<()> {
-        // Slides are markers in the timeline; the runtime translates them
-        // into a Breakpoint clip on the default track.
         lock_inner!(self.inner)
             .ops
-            .push(DeferredOp::Play { specs: Vec::new() });
+            .push(DeferredOp::Slide);
         Ok(())
     }
 
@@ -1006,6 +1163,141 @@ impl PyScene {
                 bevy::prelude::error!("Export error: {}", e);
             }
         });
+
+        Ok(())
+    }
+
+    /// Export each slide as a separate file. Slide breakpoints are created by
+    /// calling `scene.slide()` during scene construction. Each segment between
+    /// consecutive breakpoints (and from 0 to the first, last to end) becomes
+    /// a separate output file.
+    ///
+    /// Output files are named `{base}_{index}.{ext}`, e.g. `animation_0.webp`,
+    /// `animation_1.webp`, etc.
+    #[pyo3(signature = (
+        output_path,
+        fps = 60,
+        width = None,
+        height = None,
+        transparent = None,
+        aspect_ratio = None,
+        quality = None,
+        headless = true,
+    ))]
+    fn export_slides(
+        &self,
+        py: Python<'_>,
+        output_path: String,
+        fps: u32,
+        width: Option<u32>,
+        height: Option<u32>,
+        transparent: Option<bool>,
+        aspect_ratio: Option<String>,
+        quality: Option<String>,
+        headless: bool,
+    ) -> PyResult<()> {
+        let mut inner = lock_inner!(self.inner);
+        let ops = std::mem::take(&mut inner.ops);
+        let w = width.unwrap_or(inner.width);
+        let h = height.unwrap_or(inner.height);
+        let background = inner.background;
+        drop(inner);
+
+        // Clone ops for breakpoint extraction (replay consumes them).
+        let ops_for_bp = ops.clone();
+        let bg_for_bp = background;
+        let (breakpoints, duration) = py.detach(move || {
+            runtime::extract_breakpoints(ops_for_bp, w, h, bg_for_bp)
+        });
+
+        if breakpoints.is_empty() {
+            return Err(PyValueError::new_err(
+                "No slide breakpoints found. Call scene.slide() at least once before export_slides()."
+            ));
+        }
+
+        // Build segment boundaries: [0, bp0], [bp0, bp1], ..., [bpN, None]
+        // Filter out empty or duplicate segments (duration <= 1e-5).
+        let mut segments: Vec<(f64, Option<f64>)> = Vec::new();
+        if breakpoints[0] > 1e-5 {
+            segments.push((0.0, Some(breakpoints[0])));
+        }
+        for i in 1..breakpoints.len() {
+            let start = breakpoints[i - 1];
+            let end = breakpoints[i];
+            if end - start > 1e-5 {
+                segments.push((start, Some(end)));
+            }
+        }
+        // Last segment runs from the last breakpoint to the end (None = no limit).
+        // Only add if the last breakpoint isn't already the end.
+        let last_bp = *breakpoints.last().unwrap();
+        if duration - last_bp > 1e-5 {
+            segments.push((last_bp, None));
+        }
+
+        // Derive output base name and extension.
+        let (base, ext) = match output_path.rfind('.') {
+            Some(dot_pos) => (&output_path[..dot_pos], &output_path[dot_pos + 1..]),
+            None => (output_path.as_str(), "webp"),
+        };
+
+        use gaanim_export::prelude::*;
+
+        for (i, (start, end)) in segments.iter().enumerate() {
+            let slide_path = format!("{}_{}.{}", base, i, ext);
+            let mut config = ExportConfig::new(&slide_path);
+            config.fps = fps;
+            config.width = w;
+            config.height = h;
+            config.headless = headless;
+            config.start_time = Some(*start);
+            config.end_time = *end;
+
+            if let Some(t) = transparent {
+                config.transparent = t;
+            }
+            if let Some(ref ar) = aspect_ratio {
+                let preset = match ar.to_lowercase().as_str() {
+                    "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
+                    "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
+                    "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
+                    _ => return Err(PyValueError::new_err(format!(
+                        "Invalid aspect ratio preset: {}", ar
+                    ))),
+                };
+                config = config.with_aspect_ratio(preset);
+            }
+            if let Some(ref q) = quality {
+                let preset = match q.to_lowercase().as_str() {
+                    "draft" => QualityPreset::Draft,
+                    "standard" => QualityPreset::Standard,
+                    "production" => QualityPreset::Production,
+                    _ => return Err(PyValueError::new_err(format!(
+                        "Invalid quality preset: {}", q
+                    ))),
+                };
+                config = config.with_quality(preset);
+            }
+
+            let ops_clone = ops.clone();
+            let bg = background;
+            let result = py.detach(move || {
+                let setup_world = move |world: &mut bevy::prelude::World| {
+                    runtime::replay_into(world, ops_clone, w, h, bg);
+                };
+                if headless {
+                    export_scene_direct(config, setup_world)
+                } else {
+                    export_scene(config, setup_world)
+                }
+            });
+            if let Err(e) = result {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Export error for slide {}: {}", i, e
+                )));
+            }
+        }
 
         Ok(())
     }
