@@ -16,6 +16,8 @@ pub struct FileWatcher {
 
 impl FileWatcher {
     pub fn spawn(script_path: PathBuf) -> Self {
+        // Canonicalize so event paths (always absolute) match.
+        let script_path = script_path.canonicalize().unwrap_or(script_path);
         let (changed_tx, changed_rx) = mpsc::channel::<()>();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();
@@ -45,10 +47,15 @@ fn watch_loop(
         }
     };
 
-    let _ = watcher.watch(&script_path, RecursiveMode::NonRecursive);
-    if let Some(parent) = script_path.parent() {
-        let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
+    if let Err(e) = watcher.watch(&script_path, RecursiveMode::NonRecursive) {
+        eprintln!("[gaanim] failed to watch {}: {e}", script_path.display());
     }
+    if let Some(parent) = script_path.parent() {
+        if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
+            eprintln!("[gaanim] failed to watch dir {}: {e}", parent.display());
+        }
+    }
+    eprintln!("[gaanim] watching for changes: {}", script_path.display());
 
     let debounce = Duration::from_millis(200);
     let mut last_fire = Instant::now() - debounce;
@@ -75,6 +82,7 @@ fn watch_loop(
                     continue;
                 }
                 last_fire = now;
+                eprintln!("[gaanim] file changed, reloading...");
                 let _ = changed_tx.send(());
             }
             Ok(Err(e)) => {

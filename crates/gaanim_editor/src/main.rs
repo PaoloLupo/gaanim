@@ -107,6 +107,7 @@ fn parse_args() -> PathBuf {
         eprintln!("gaanim: script not found: {}", path.display());
         std::process::exit(2);
     }
-    path
+    // Canonicalize so the file watcher can match absolute event paths.
+    path.canonicalize().unwrap_or(path)
 }
 

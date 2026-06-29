@@ -5,7 +5,6 @@ use bevy_egui::egui;
 use gaanim_python::host::ReloadPayload;
 use gaanim_python::runtime;
 use gaanim_python::DeferredOp;
-use gaanim_renderer::prelude::VelloView;
 use gaanim_scene::MobjectId;
 use gaanim_timeline::timeline::Timeline;
 use crossbeam_channel::Receiver;
@@ -29,8 +28,10 @@ pub fn clear_scene_entities(world: &mut World) {
         let mut q = world.query::<(Entity, &MobjectId)>();
         q.iter(world).map(|(e, _)| e).collect()
     };
+    // Despawn the old Camera2d (replay_into spawns a fresh one), but
+    // keep VelloView alive — it owns the window surface.
     {
-        let mut q = world.query_filtered::<Entity, Or<(With<Camera2d>, With<VelloView>)>>();
+        let mut q = world.query_filtered::<Entity, With<Camera2d>>();
         to_despawn.extend(q.iter(world));
     }
     for e in to_despawn {
