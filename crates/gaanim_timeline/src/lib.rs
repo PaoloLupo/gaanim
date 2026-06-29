@@ -10,6 +10,12 @@ pub mod transition;
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::Timeline;
 
+/// Marker resource: inserted by `reload_with` to signal that the t=0 keyframe
+/// snapshot should be captured on the next frame — after deferred Commands from
+/// `replay_into` have been flushed.
+#[derive(Resource)]
+pub struct NeedsKeyframeCapture;
+
 /// The Bevy plugin that registers the `Timeline` resource and its scheduling systems.
 pub struct GaanimTimelinePlugin;
 
@@ -24,6 +30,9 @@ impl Plugin for GaanimTimelinePlugin {
                     presentation_input_system
                         .in_set(SceneSet::Input)
                         .after(timeline_playback_system),
+                    deferred_keyframe_capture_system
+                        .in_set(SceneSet::Animation)
+                        .before(timeline_seek_system),
                     timeline_seek_system.in_set(SceneSet::Animation),
                 ),
             );
@@ -34,6 +43,25 @@ impl Plugin for GaanimTimelinePlugin {
 /// startup commands have run.
 pub fn capture_initial_keyframe_system(world: &mut World) {
     capture_initial_keyframe(world);
+}
+
+/// System: If [`NeedsKeyframeCapture`] was inserted by a hot-reload, capture
+/// the t=0 keyframe *now* so that deferred Commands have been flushed and the
+/// snapshot reflects the real entity state.
+///
+/// Unlike [`capture_initial_keyframe`], this does NOT seek to t=0 — doing so
+/// would clobber the playback position that `reload_listener_system` restored.
+fn deferred_keyframe_capture_system(world: &mut World) {
+    if world.remove_resource::<NeedsKeyframeCapture>().is_some() {
+        let timeline = world.remove_resource::<Timeline>();
+        if let Some(mut tl) = timeline {
+            if !tl.keyframes.contains_key(&ordered_float::OrderedFloat(0.0)) {
+                let snapshot = snapshot::WorldSnapshot::capture(world);
+                tl.add_keyframe(0.0, snapshot);
+            }
+            world.insert_resource(tl);
+        }
+    }
 }
 
 /// Captures the current world state at t=0.0 as a keyframe (if not already

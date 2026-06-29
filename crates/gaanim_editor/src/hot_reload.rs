@@ -80,8 +80,8 @@ pub fn reload_listener_system(world: &mut World) {
     }
 }
 
-/// Rebuild the scene in `world` from a fresh set of ops, then recapture the
-/// t=0 keyframe.
+/// Rebuild the scene in `world` from a fresh set of ops, then schedule the
+/// t=0 keyframe capture for the next frame (after deferred Commands flush).
 pub fn reload_with(
     world: &mut World,
     ops: Vec<DeferredOp>,
@@ -91,7 +91,9 @@ pub fn reload_with(
 ) {
     clear_scene_entities(world);
     runtime::replay_into(world, ops, width, height, background);
-    gaanim_timeline::capture_initial_keyframe(world);
+    // Defer keyframe capture to the next frame so that deferred Commands
+    // (entity spawns, SceneMember inserts, etc.) are flushed first.
+    world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);
 }
 
 /// egui panel showing the last reload status.
