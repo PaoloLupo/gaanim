@@ -80,6 +80,10 @@ impl Plugin for GaanimEditorPlugin {
 pub struct EditorState {
     pub selected: Option<Entity>,
     pub timeline_widget: timeline_widget::TimelineWidget,
+    /// Whether the full timeline panel is visible. Defaults to `false` so the
+    /// animation preview occupies the full window; the compact playback overlay
+    /// is shown instead.
+    pub timeline_visible: bool,
 }
 
 impl Default for EditorState {
@@ -87,6 +91,7 @@ impl Default for EditorState {
         Self {
             selected: None,
             timeline_widget: timeline_widget::TimelineWidget::new(),
+            timeline_visible: false,
         }
     }
 }
@@ -292,24 +297,135 @@ fn editor_ui_system(
         }
     }
 
-    let timeline_response = egui::TopBottomPanel::bottom("timeline")
-        .resizable(true)
-        .default_height(200.0)
-        .min_height(100.0)
-        .show(ctx, |ui| {
-            state.timeline_widget.show(
-                ui,
-                &mut timeline,
-                &property_values,
-                &group_children,
-                &signal_values,
-                &updater_entities,
-                &decimal_values,
-            );
-        });
+    // ── Full timeline panel (only when explicitly toggled on) ──────────────
+    let timeline_response = if state.timeline_visible {
+        Some(
+            egui::TopBottomPanel::bottom("timeline")
+                .resizable(true)
+                .default_height(200.0)
+                .min_height(100.0)
+                .show(ctx, |ui| {
+                    state.timeline_widget.show(
+                        ui,
+                        &mut timeline,
+                        &property_values,
+                        &group_children,
+                        &signal_values,
+                        &updater_entities,
+                        &decimal_values,
+                    );
+                }),
+        )
+    } else {
+        None
+    };
 
     // Publish the timeline panel height so the renderer can shrink the viewport.
-    inset.bottom = timeline_response.response.rect.height();
+    let panel_h = timeline_response
+        .as_ref()
+        .map(|r| r.response.rect.height())
+        .unwrap_or(0.0);
+    inset.bottom = panel_h;
+
+    // ── Compact playback overlay ──────────────────────────────────────────
+    {
+        let scene_name: String = timeline
+            .scene_at(timeline.current_time)
+            .and_then(|id| timeline.scenes.get(id))
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        let total = timeline.cached_duration.max(0.0);
+        let current = timeline.current_time.clamp(0.0, total);
+
+        egui::Area::new("playback_overlay".into())
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -panel_h))
+            .order(egui::Order::Foreground)
+            .interactable(true)
+            .show(ctx, |ui| {
+                let screen_w = ctx.viewport_rect().width();
+                let bar_w = (screen_w * 0.70).min(900.0).max(400.0);
+
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 210))
+                    .corner_radius(10.0)
+                    .inner_margin(egui::Margin::symmetric(14, 6))
+                    .show(ui, |ui| {
+                        ui.set_width(bar_w);
+                        // Row 1: seekable progress bar
+                        let frac = if total > 0.0 {
+                            (current / total) as f32
+                        } else {
+                            0.0
+                        };
+                        // Use a draggable slider for a smooth seek bar.
+                        let mut seek_frac = frac;
+                        let slider = egui::Slider::new(&mut seek_frac, 0.0..=1.0)
+                            .show_value(false)
+                            .step_by(0.001);
+                        let resp = ui.add(slider);
+                        if resp.dragged() {
+                            timeline.seek_request = Some(seek_frac as f64 * total);
+                        }
+                        // Row 2: controls
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(scene_name)
+                                    .color(egui::Color32::from_rgb(160, 200, 255))
+                                    .strong()
+                                    .small(),
+                            );
+                            ui.add_space(8.0);
+                            let sym = if timeline.is_playing { "⏸" } else { "▶" };
+                            if ui.button(egui::RichText::new(sym).size(16.0)).clicked() {
+                                timeline.is_playing = !timeline.is_playing;
+                            }
+                            ui.monospace(format!(
+                                "{} / {}",
+                                format_time(current),
+                                format_time(total),
+                            ));
+                            ui.add_space(4.0);
+                            let loop_on = timeline.loop_range.is_some();
+                            let lc = if loop_on {
+                                egui::Color32::from_rgb(100, 200, 140)
+                            } else {
+                                egui::Color32::GRAY
+                            };
+                            if ui
+                                .button(egui::RichText::new("🔁").color(lc).size(14.0))
+                                .clicked()
+                            {
+                                if loop_on {
+                                    timeline.loop_range = None;
+                                } else {
+                                    timeline.loop_range =
+                                        Some((0.0, timeline.cached_duration));
+                                }
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let lbl = if state.timeline_visible {
+                                        "✕ Close"
+                                    } else {
+                                        "☰ Timeline"
+                                    };
+                                    if ui
+                                        .button(
+                                            egui::RichText::new(lbl)
+                                                .small()
+                                                .color(egui::Color32::LIGHT_GRAY),
+                                        )
+                                        .clicked()
+                                    {
+                                        state.timeline_visible = !state.timeline_visible;
+                                    }
+                                },
+                            );
+                        });
+                    });
+            });
+    }
 
     if let Some(track_id) = state.timeline_widget.selected_track {
         if let Some(track) = timeline.tracks.get(track_id)
@@ -391,6 +507,18 @@ fn brush_string(brush: &Option<peniko::Brush>) -> String {
         Some(peniko::Brush::Image(_)) => "<image>".into(),
         None => "none".into(),
     }
+}
+
+/// Format seconds as `M:SS.ss` for the playback overlay.
+fn format_time(seconds: f64) -> String {
+    if seconds < 0.0 {
+        return "0:00.00".into();
+    }
+    let total_cs = (seconds * 100.0).round() as u64;
+    let mins = total_cs / 6000;
+    let secs = (total_cs % 6000) / 100;
+    let cs = total_cs % 100;
+    format!("{}:{:02}.{:02}", mins, secs, cs)
 }
 
 fn editor_picking_system(
