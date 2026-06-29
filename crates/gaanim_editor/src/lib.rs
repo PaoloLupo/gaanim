@@ -22,7 +22,8 @@ fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
     mut timeline: ResMut<Timeline>,
 ) {
-    timeline.ignore_input = egui_wants.wants_keyboard_input() || egui_wants.wants_any_pointer_input();
+    timeline.ignore_input =
+        egui_wants.wants_keyboard_input() || egui_wants.wants_any_pointer_input();
 }
 
 /// Pixel height of UI panels that the animation viewport must avoid.
@@ -349,9 +350,7 @@ fn editor_ui_system(
         // Auto-hide logic: show when cursor is near the bottom edge.
         let vp = ctx.viewport_rect();
         let pointer = ctx.input(|i| i.pointer.hover_pos());
-        let pointer_near_bottom = pointer
-            .map(|p| p.y > vp.height() - 90.0)
-            .unwrap_or(false);
+        let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 90.0).unwrap_or(false);
         let should_show = pointer_near_bottom || state.bar_hovered;
         let dt = ctx.input(|i| i.unstable_dt);
         let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
@@ -380,7 +379,9 @@ fn editor_ui_system(
                     let fill_alpha = (220.0 * alpha_mul) as u8;
                     let stroke_alpha = (100.0 * alpha_mul) as u8;
                     egui::Frame::new()
-                        .fill(egui::Color32::from_rgba_premultiplied(12, 12, 18, fill_alpha))
+                        .fill(egui::Color32::from_rgba_premultiplied(
+                            12, 12, 18, fill_alpha,
+                        ))
                         .corner_radius(12.0)
                         .inner_margin(egui::Margin::symmetric(16, 8))
                         .stroke(egui::Stroke::new(
@@ -497,11 +498,7 @@ fn editor_ui_system(
                                     .min_size(egui::vec2(18.0, 20.0))
                                     .corner_radius(4.0)
                                     .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 140));
-                                    if ui
-                                        .add(prev_btn)
-                                        .on_hover_text("Previous scene")
-                                        .clicked()
-                                    {
+                                    if ui.add(prev_btn).on_hover_text("Previous scene").clicked() {
                                         let target = if after_last {
                                             scene_segs.last().map(|s| s.start_frac as f64 * total)
                                         } else if let Some(idx) = cur_scene_idx {
@@ -530,11 +527,7 @@ fn editor_ui_system(
                                     .min_size(egui::vec2(18.0, 20.0))
                                     .corner_radius(4.0)
                                     .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 140));
-                                    if ui
-                                        .add(next_btn)
-                                        .on_hover_text("Next scene")
-                                        .clicked()
-                                    {
+                                    if ui.add(next_btn).on_hover_text("Next scene").clicked() {
                                         let target = if before_first {
                                             Some(scene_segs[0].start_frac as f64 * total)
                                         } else if let Some(idx) = cur_scene_idx {
@@ -622,8 +615,7 @@ fn editor_ui_system(
                                     if loop_on {
                                         timeline.loop_range = None;
                                     } else {
-                                        timeline.loop_range =
-                                            Some((0.0, timeline.cached_duration));
+                                        timeline.loop_range = Some((0.0, timeline.cached_duration));
                                     }
                                 }
 
@@ -829,7 +821,10 @@ fn paint_seek_bar(
                     egui::pos2(ex, bar_rect.min.y - 2.0),
                     egui::pos2(ex, bar_rect.max.y + 2.0),
                 ],
-                egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 130, 100)),
+                egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_premultiplied(100, 100, 130, 100),
+                ),
             );
         }
         // Scene label above the bar (only if wide enough)
@@ -953,14 +948,19 @@ fn paint_seek_bar(
         }
     }
 
-    SeekBarResponse { seek_to, hover_time }
+    SeekBarResponse {
+        seek_to,
+        hover_time,
+    }
 }
 
 /// Styled transport button (skip prev/next).
 fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
-    let btn = egui::Button::new(egui::RichText::new(label).size(13.0).color(
-        egui::Color32::from_rgb(170, 170, 180),
-    ))
+    let btn = egui::Button::new(
+        egui::RichText::new(label)
+            .size(13.0)
+            .color(egui::Color32::from_rgb(170, 170, 180)),
+    )
     .min_size(egui::vec2(24.0, 22.0))
     .corner_radius(5.0)
     .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 160));
