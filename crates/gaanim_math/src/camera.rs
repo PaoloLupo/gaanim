@@ -39,6 +39,12 @@ pub struct Camera {
     pub viewport_width: u32,
     /// Pixel height of the active rendering area.
     pub viewport_height: u32,
+    /// Additional vertical pixel offset applied to the Vello transform center.
+    /// Used by the editor to shift content above UI panels (positive = shift up).
+    pub viewport_offset_y: f64,
+    /// Additional scale factor applied to the Vello transform (on top of zoom).
+    /// Used by the editor to fit content in the available area below UI panels.
+    pub viewport_scale: f64,
 }
 
 impl Camera {
@@ -50,6 +56,8 @@ impl Camera {
             projection: Projection::Orthographic { zoom: 1.0 },
             viewport_width: width,
             viewport_height: height,
+            viewport_offset_y: 0.0,
+            viewport_scale: 1.0,
         }
     }
 
@@ -65,6 +73,8 @@ impl Camera {
             },
             viewport_width: width,
             viewport_height: height,
+            viewport_offset_y: 0.0,
+            viewport_scale: 1.0,
         }
     }
 
@@ -104,13 +114,14 @@ impl Camera {
             Projection::Orthographic { zoom } => zoom,
             _ => 1.0,
         };
+        let effective_zoom = zoom * self.viewport_scale;
         let z_angle = self.z_angle();
         let hw = (self.viewport_width as f64) / 2.0;
-        let hh = (self.viewport_height as f64) / 2.0;
+        let hh = (self.viewport_height as f64) / 2.0 + self.viewport_offset_y;
 
         Affine::translate((hw, hh))
             * Affine::rotate(-z_angle)
-            * Affine::scale(zoom)
+            * Affine::scale(effective_zoom)
             * Affine::translate((-self.position.x, -self.position.y))
     }
 

@@ -421,6 +421,24 @@ impl TimelineWidget {
 
         ui.separator();
 
+        // Loop toggle
+        let loop_active = timeline.loop_range.is_some();
+        let loop_text = if loop_active { "🔁" } else { "➡" };
+        if ui
+            .selectable_label(loop_active, loop_text)
+            .on_hover_text("Loop playback")
+            .clicked()
+        {
+            if loop_active {
+                timeline.loop_range = None;
+            } else {
+                let end = timeline.cached_duration.max(0.01);
+                timeline.loop_range = Some((0.0, end));
+            }
+        }
+
+        ui.separator();
+
         // Show clip info on hover, otherwise time label
         if let Some(info) = &self.hovered_clip_info {
             ui.label(info);

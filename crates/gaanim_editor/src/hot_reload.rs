@@ -21,19 +21,16 @@ pub struct ReloadStatus {
     pub last_message: String,
 }
 
-/// Despawn every mobject + camera/VelloView entity and reset the [`Timeline`]
+/// Despawn every mobject entity and reset the [`Timeline`]
 /// to a clean state. This is the "clear canvas" step before replaying fresh ops.
+///
+/// The Camera2d + VelloView entity is intentionally kept alive so the window
+/// surface and egui context remain valid across hot-reloads.
 pub fn clear_scene_entities(world: &mut World) {
-    let mut to_despawn: Vec<Entity> = {
+    let to_despawn: Vec<Entity> = {
         let mut q = world.query::<(Entity, &MobjectId)>();
         q.iter(world).map(|(e, _)| e).collect()
     };
-    // Despawn the old Camera2d (replay_into spawns a fresh one), but
-    // keep VelloView alive — it owns the window surface.
-    {
-        let mut q = world.query_filtered::<Entity, With<Camera2d>>();
-        to_despawn.extend(q.iter(world));
-    }
     for e in to_despawn {
         world.despawn(e);
     }
@@ -48,6 +45,9 @@ pub fn clear_scene_entities(world: &mut World) {
 }
 
 /// System: drains pending [`ReloadPayload`]s and rebuilds the scene.
+///
+/// If the timeline was playing, the current playback position is preserved
+/// across the reload so the user sees the same frame (with updated content).
 pub fn reload_listener_system(world: &mut World) {
     let payloads: Vec<ReloadPayload> = {
         let Some(rx_res) = world.get_resource::<ReloadReceiver>() else {
@@ -60,7 +60,20 @@ pub fn reload_listener_system(world: &mut World) {
     }
     let payload = payloads.last().expect("checked non-empty").clone();
 
+    // Snapshot playback state before tearing down entities.
+    let (saved_time, was_playing) = {
+        let tl = world.resource::<Timeline>();
+        (tl.current_time, tl.is_playing)
+    };
+
     reload_with(world, payload.ops, payload.width, payload.height, payload.background);
+
+    // Restore playback position after rebuild.
+    if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
+        let target = saved_time.min(tl.cached_duration.max(0.0));
+        tl.seek_request = Some(target);
+        tl.is_playing = was_playing;
+    }
 
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.last_message = format!("Reloaded scene ({}x{})", payload.width, payload.height);

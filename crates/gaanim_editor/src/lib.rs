@@ -25,6 +25,22 @@ fn sync_editor_input_ignore_system(
     timeline.ignore_input = egui_wants.wants_keyboard_input() || egui_wants.wants_any_pointer_input();
 }
 
+/// Pixel height of UI panels that the animation viewport must avoid.
+///
+/// Updated every frame by `editor_ui_system` and consumed by `viewport_adjust_system`
+/// to scale + offset the Camera so the preview renders in the remaining space.
+#[derive(Resource)]
+pub struct ViewportInset {
+    /// Space consumed by the bottom timeline panel (pixels).
+    pub bottom: f32,
+}
+
+impl Default for ViewportInset {
+    fn default() -> Self {
+        Self { bottom: 0.0 }
+    }
+}
+
 pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
@@ -39,6 +55,7 @@ impl Plugin for GaanimEditorPlugin {
         .insert_resource(export::StashedReplay(None))
         .init_resource::<fps_overlay::FpsOverlay>()
         .init_resource::<vsync::VsyncState>()
+        .init_resource::<ViewportInset>()
         .add_systems(
             Update,
             (
@@ -49,6 +66,10 @@ impl Plugin for GaanimEditorPlugin {
                 fps_overlay::fps_overlay_system,
                 vsync::vsync_toggle_system,
             ),
+        )
+        .add_systems(
+            Update,
+            viewport_adjust_system.after(gaanim_scene::hierarchy::SceneSet::Extraction),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
         .add_systems(EguiPrimaryContextPass, export::export_dialog_system);
@@ -75,6 +96,7 @@ fn editor_ui_system(
     mut state: ResMut<EditorState>,
     mut export_state: ResMut<export::ExportState>,
     mut timeline: ResMut<Timeline>,
+    mut inset: ResMut<ViewportInset>,
     camera: Option<Res<Camera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     entity_query: Query<(Entity, Option<&MobjectId>, Option<&ObjectTag>)>,
@@ -270,7 +292,7 @@ fn editor_ui_system(
         }
     }
 
-    egui::TopBottomPanel::bottom("timeline")
+    let timeline_response = egui::TopBottomPanel::bottom("timeline")
         .resizable(true)
         .default_height(200.0)
         .min_height(100.0)
@@ -285,6 +307,9 @@ fn editor_ui_system(
                 &decimal_values,
             );
         });
+
+    // Publish the timeline panel height so the renderer can shrink the viewport.
+    inset.bottom = timeline_response.response.rect.height();
 
     if let Some(track_id) = state.timeline_widget.selected_track {
         if let Some(track) = timeline.tracks.get(track_id)
@@ -412,4 +437,38 @@ fn editor_picking_system(
     }
 
     state.selected = best_entity;
+}
+
+/// System: adjusts the [`Camera`] resource so the animation preview fits in the
+/// area above UI panels (the timeline at the bottom).
+///
+/// Runs after the Vello extraction phase so the transform is ready before
+/// `bevy_vello` submits the scene to the GPU.
+fn viewport_adjust_system(
+    inset: Res<ViewportInset>,
+    mut camera: Option<ResMut<Camera>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let Some(ref mut cam) = camera else { return };
+    let Ok(window) = windows.single() else { return };
+
+    let window_h = window.height() as f64;
+    let window_w = window.width() as f64;
+    let available_h = window_h - inset.bottom as f64;
+
+    if inset.bottom < 1.0 || available_h < 1.0 {
+        cam.viewport_offset_y = 0.0;
+        cam.viewport_scale = 1.0;
+        return;
+    }
+
+    // Fit animation into the available area while preserving aspect ratio.
+    let anim_w = cam.viewport_width as f64;
+    let anim_h = cam.viewport_height as f64;
+    let scale_x = window_w / anim_w;
+    let scale_y = available_h / anim_h;
+    cam.viewport_scale = scale_x.min(scale_y);
+
+    // Shift the Vello centre upward so the animation sits above the timeline.
+    cam.viewport_offset_y = -(inset.bottom as f64) / 2.0;
 }

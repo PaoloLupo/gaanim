@@ -52,12 +52,23 @@ pub fn replay_into(
 
     // Scope the mut borrow on `world` so we can reinsert resources at the end.
     let result = {
+        // Check BEFORE taking commands to avoid double-borrow.
+        let has_camera = world
+            .query_filtered::<Entity, With<Camera2d>>()
+            .iter(world)
+            .next()
+            .is_some();
+
         let mut commands = world.commands();
 
-        // Spawn the orthographic camera + Vello view BEFORE building the scene,
-        // so the renderer has a target to draw to (matches crates/gaanim_api/examples/math_demo.rs).
+        // Always update the camera resource to match the script dimensions.
         commands.insert_resource(Camera::ortho_2d(width, height));
-        commands.spawn((Camera2d, VelloView));
+
+        // Only spawn Camera2d + VelloView if none exists yet (first run).
+        // On hot-reload the entity is kept alive by `clear_scene_entities`.
+        if !has_camera {
+            commands.spawn((Camera2d, VelloView));
+        }
 
         let mut scene =
             SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
