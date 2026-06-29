@@ -7,18 +7,16 @@ system_python := if os_family() == "windows" { "py.exe" } else { "python" }
 default:
     @just --choose
 
-# Create .venv and install maturin into it.
+# Create .venv (needed by PyO3 to locate Python at build time).
 [windows]
 bootstrap:
     if (-not (Test-Path .venv)) { {{ system_python }} -m venv .venv }
     {{ python }} -m pip install --upgrade pip
-    {{ python }} -m pip install maturin
 
 [unix]
 bootstrap:
     if test ! -e .venv; then {{ system_python }} -m venv .venv; fi
     {{ python }} -m pip install --upgrade pip
-    {{ python }} -m pip install maturin
 
 # Wipe the local .venv (forces a fresh `just bootstrap`).
 [windows]
@@ -43,28 +41,24 @@ check:
 clippy:
     cargo clippy --workspace
 
-# Build the Python extension in release mode and install it into the venv.
-
-# This is the recommended dev loop: edit Rust -> `just build` -> re-run example.
-[working-directory("./crates/gaanim_python")]
-build-release:
-    maturin develop --release
-
-# Build the Python extension in debug mode (faster compile, slower Python bridge).
-[working-directory("./crates/gaanim_python")]
+# Build the `gaanim` application binary (debug mode).
 build:
-    maturin develop
+    cargo build -p gaanim_editor
 
-# Produce a standalone .whl without installing it (output: target\wheels\).
-[working-directory("./crates/gaanim_python")]
-wheel:
-    maturin build --release
+# Build the `gaanim` application binary (release mode).
+build-release:
+    cargo build -p gaanim_editor --release
 
 # ---- Run --------------------------------------------------------------------
 
-# Run an example by name without rebuilding. Usage: just run my_example
+# Run an example script inside the Gaanim application. Usage: just run my_example
+[windows]
 run EX:
-    {{ python }} examples/{{ EX }}.py
+    $pyBase = & "{{ python }}" -c "import sys; print(sys.base_prefix)"; $env:PATH = "$pyBase;$env:PATH"; cargo run -p gaanim_editor -- examples/{{ EX }}.py
+
+[unix]
+run EX:
+    cargo run -p gaanim_editor -- examples/{{ EX }}.py
 
 # Build documentation site (one-shot).
 docs:
@@ -80,6 +74,13 @@ docs-watch:
 
 # ---- Doctor -----------------------------------------------------------------
 
-# Sanity check: the workspace compiles AND the compiled extension is importable.
+# Sanity check: the workspace compiles and the `gaanim` binary responds.
+[windows]
 doctor: check
-    {{ python }} -c "import gaanim.gaanim_core as g; print('import ok, attrs:', [a for a in dir(g) if not a.startswith('_')][:8])"
+    cargo build -p gaanim_editor 2>&1
+    $pyBase = & "{{ python }}" -c "import sys; print(sys.base_prefix)"; $env:PATH = "$pyBase;$env:PATH"; cargo run -p gaanim_editor -- --help
+
+[unix]
+doctor: check
+    cargo build -p gaanim_editor 2>&1
+    cargo run -p gaanim_editor -- --help

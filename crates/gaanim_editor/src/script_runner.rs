@@ -1,0 +1,128 @@
+//! Embedded-Python script runner.
+//!
+//! The host owns a dedicated OS thread that holds the GIL and executes the
+//! user's animation script. The script imports `gaanim` (which, because the
+//! host registered `gaanim_core` via `append_to_inittab!`, resolves to the
+//! in-process module) and builds a `Scene`/`Engine`; calling `.render()`
+//! pushes the drained ops through the host channel instead of opening a window.
+
+use crossbeam_channel::{Receiver, Sender};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use pyo3::prelude::*;
+
+use gaanim_python::host::{self, ReloadPayload};
+
+/// Handle to the script-running thread.
+pub struct ScriptRunner {
+    /// Send `true` here to ask the thread to re-run the script.
+    rerun_tx: Sender<bool>,
+    /// Set when the thread has exited (e.g. after a fatal error).
+    pub exited: Arc<AtomicBool>,
+}
+
+impl ScriptRunner {
+    /// Spawn the script-runner thread.
+    ///
+    /// * `script_path` — absolute path to the user's `.py` file.
+    /// * `payload_tx` — channel end that receives scene payloads from the
+    ///   embedded script (i.e. the host-side receiver of `host::send_to_host`).
+    pub fn spawn(script_path: PathBuf, payload_tx: Sender<ReloadPayload>) -> Self {
+        let (rerun_tx, rerun_rx) = crossbeam_channel::unbounded::<bool>();
+        let exited = Arc::new(AtomicBool::new(false));
+        let exited_clone = exited.clone();
+
+        std::thread::Builder::new()
+            .name("gaanim-script".into())
+            .spawn(move || {
+                run_script_thread(script_path, payload_tx, rerun_rx, exited_clone);
+            })
+            .expect("failed to spawn script thread");
+
+        Self { rerun_tx, exited }
+    }
+
+    /// Request a re-run of the script (used by the file watcher and the `R` key).
+    pub fn request_rerun(&self) {
+        let _ = self.rerun_tx.send(true);
+    }
+}
+
+fn run_script_thread(
+    script_path: PathBuf,
+    payload_tx: Sender<ReloadPayload>,
+    rerun_rx: Receiver<bool>,
+    exited: Arc<AtomicBool>,
+) {
+    // Install the host channel so `Scene.render()` inside the script can push
+    // payloads to us. This is done once; the channel persists across re-runs.
+    host::set_host_sender(Some(payload_tx));
+
+    // One-time bootstrap: the embedded interpreter has `gaanim_core` registered
+    // as a top-level builtin module (via `append_to_inittab!` in main). User
+    // scripts, however, do `from gaanim import Scene`. There is no pip-installed
+    // `gaanim` package in the embedded environment, so we synthesize one in
+    // memory that re-exports every public attribute of the builtin `gaanim_core`.
+    let bootstrap_err = Python::attach(|py| {
+        py.run(
+            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
+            None,
+            None,
+        )
+    });
+    if let Err(e) = bootstrap_err {
+        Python::attach(|py| {
+            e.print(py);
+        });
+        eprintln!("[gaanim] failed to bootstrap in-memory `gaanim` package");
+    }
+
+    // Run immediately on first iteration, then block for re-run signals.
+    loop {
+        if exited.load(Ordering::SeqCst) {
+            break;
+        }
+
+        let result = Python::attach(|py| run_script_file(py, &script_path));
+        if let Err(e) = result {
+            Python::attach(|py| {
+                e.print(py);
+            });
+            eprintln!("[gaanim] script error (waiting for next save to retry)");
+        }
+
+        // Block until the next re-run request (or channel closed).
+        match rerun_rx.recv() {
+            Ok(true) => continue,
+            _ => break,
+        }
+    }
+
+    host::set_host_sender(None);
+    exited.store(true, Ordering::SeqCst);
+}
+
+/// Python bootstrap that creates an in-memory `gaanim` package aliasing the
+/// builtin `gaanim_core` module, so `from gaanim import Scene` works without a
+/// pip-installed package.
+const BOOTSTRAP_GAANIM_PACKAGE: &str = "import sys, types\nimport gaanim_core\nif 'gaanim' not in sys.modules:\n    _pkg = types.ModuleType('gaanim')\n    _pkg.__path__ = []\n    for _n in dir(gaanim_core):\n        if not _n.startswith('_'):\n            setattr(_pkg, _n, getattr(gaanim_core, _n))\n    sys.modules['gaanim'] = _pkg\n";
+
+/// Execute a Python file by path inside the given interpreter, in a fresh
+/// `__main__` namespace so each re-run is isolated from the previous one.
+fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("script path is not UTF-8"))?;
+
+    // Build a tiny bootstrap that runs the file as __main__.
+    // Using runpy.run_path executes the file with a fresh __main__ module,
+    // which gives each reload a clean global namespace.
+    let code = format!(
+        "import runpy, sys\n\
+         sys.argv = [r'{path_str}']\n\
+         runpy.run_path(r'{path_str}', run_name='__main__')\n"
+    );
+    py.run(&std::ffi::CString::new(code).unwrap(), None, None)?;
+    Ok(())
+}

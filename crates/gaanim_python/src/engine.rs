@@ -182,20 +182,29 @@ impl PyEngine {
         Ok(())
     }
 
-    /// Render all scenes in the GPU window. Blocking.
-    fn render(&self, py: Python<'_>) -> PyResult<()> {
+    /// Submit all scenes to the Gaanim host application (see `Scene.render`).
+    fn render(&self) -> PyResult<()> {
         let mut inner = lock_engine!(self.inner);
         let all_ops = Self::drain_all_ops(&mut inner);
         let width = inner.width;
         let height = inner.height;
-        let title = inner.title.clone();
         let background = inner.background;
         drop(inner);
 
-        py.detach(|| {
-            runtime::run(all_ops, width, height, title, background);
-        });
-        Ok(())
+        let payload = crate::host::ReloadPayload {
+            ops: all_ops,
+            width,
+            height,
+            background,
+        };
+        if crate::host::send_to_host(payload) {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Gaanim scenes can only be rendered inside the Gaanim application. \
+                 Run your script with:  gaanim <script.py>",
+            ))
+        }
     }
 
     /// Export all scenes to a video file. Blocking.
@@ -289,22 +298,6 @@ impl PyEngine {
             }
         });
 
-        Ok(())
-    }
-
-    /// Open all scenes in the interactive editor. Blocking.
-    fn edit(&self, py: Python<'_>) -> PyResult<()> {
-        let mut inner = lock_engine!(self.inner);
-        let all_ops = Self::drain_all_ops(&mut inner);
-        let width = inner.width;
-        let height = inner.height;
-        let title = inner.title.clone();
-        let background = inner.background;
-        drop(inner);
-
-        py.detach(|| {
-            runtime::run_editor(all_ops, width, height, title, background);
-        });
         Ok(())
     }
 }

@@ -7,17 +7,32 @@ use ::gaanim_core as engine_core;
 mod animation;
 mod color;
 pub(crate) mod engine;
+pub mod host;
 mod id;
 mod mobject;
-mod runtime;
+pub mod runtime;
 mod scene;
 mod selection;
 mod theme;
 mod transition;
 
+pub use crate::scene::DeferredOp;
+
+/// Register the `gaanim_core` builtin module in the embedded interpreter's
+/// init table so that `import gaanim_core` works inside the host process.
+///
+/// This wraps PyO3's `append_to_inittab!` macro, which must be invoked from
+/// within the crate that owns the `#[pymodule]` (the generated hidden
+/// `mod gaanim_core` is only in scope here).
+///
+/// **Must be called before `Python::initialize()`.**
+pub fn register_inittab() {
+    pyo3::append_to_inittab!(gaanim_core);
+}
+
 /// Gaanim Python bindings — high-performance GPU-accelerated vector animation engine.
 #[pymodule]
-fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<scene::PyScene>()?;
     m.add_class::<engine::PyEngine>()?;
     m.add_class::<engine::PySceneBuilder>()?;

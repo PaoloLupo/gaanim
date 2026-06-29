@@ -17,7 +17,7 @@ use crate::theme::PyTheme;
 /// A single deferred operation. The runtime replays these in order during
 /// the Bevy `Startup` system.
 #[derive(Debug, Clone)]
-pub(crate) enum DeferredOp {
+pub enum DeferredOp {
     /// Spawn a mobject. `id` is the Python-side handle (used to map back to
     /// the actual Bevy `ObjectId` that the `SceneBuilder` allocates).
     /// The `spec` is shared (Arc<Mutex<>>) with the returned PyMobject so
@@ -1044,22 +1044,37 @@ impl PyScene {
 
     // ====== render ======
 
-    /// Drain the deferred op queue into a Bevy `App` and run the GPU window.
-    /// Blocking: returns when the window is closed.
-    fn render(&self, py: Python<'_>) -> PyResult<()> {
+    /// Submit the accumulated deferred-op queue to the Gaanim host application.
+    ///
+    /// When the script runs inside the `gaanim` program (embedded interpreter),
+    /// this packages the scene into a [`ReloadPayload`](crate::host::ReloadPayload)
+    /// and pushes it to the host's Bevy event loop, which (re)builds the scene
+    /// in the live window — enabling hot-reload on every save.
+    ///
+    /// Running the script with plain `python` (no host attached) raises an
+    /// error: scenes can only be visualized inside the Gaanim application.
+    fn render(&self) -> PyResult<()> {
         let mut inner = lock_inner!(self.inner);
         let ops = std::mem::take(&mut inner.ops);
         let width = inner.width;
         let height = inner.height;
-        let title = inner.title.clone();
         let background = inner.background;
         drop(inner);
 
-        // Release the GIL while we drive Bevy.
-        py.detach(|| {
-            runtime::run(ops, width, height, title, background);
-        });
-        Ok(())
+        let payload = crate::host::ReloadPayload {
+            ops,
+            width,
+            height,
+            background,
+        };
+        if crate::host::send_to_host(payload) {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Gaanim scenes can only be rendered inside the Gaanim application. \
+                 Run your script with:  gaanim <script.py>",
+            ))
+        }
     }
 
     /// Exposes a premium offline render and export engine for video, image sequence, and GIF.
@@ -1304,22 +1319,12 @@ impl PyScene {
 
     // ====== edit ======
 
-    /// Drain the deferred op queue into a Bevy `App` with the interactive
-    /// editor overlay (inspector, hierarchy, playback controls).
-    /// Blocking: returns when the window is closed.
-    fn edit(&self, py: Python<'_>) -> PyResult<()> {
-        let mut inner = lock_inner!(self.inner);
-        let ops = std::mem::take(&mut inner.ops);
-        let width = inner.width;
-        let height = inner.height;
-        let title = inner.title.clone();
-        let background = inner.background;
-        drop(inner);
-
-        py.detach(|| {
-            runtime::run_editor(ops, width, height, title, background);
-        });
-        Ok(())
+    /// Open the interactive Gaanim application.
+    ///
+    /// Alias for [`render`](Self::render): scenes can only be visualized
+    /// inside the Gaanim application. Run your script with:  `gaanim <script.py>`
+    fn edit(&self) -> PyResult<()> {
+        self.render()
     }
 }
 

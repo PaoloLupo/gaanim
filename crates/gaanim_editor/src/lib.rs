@@ -75,7 +75,7 @@ fn editor_ui_system(
     mut state: ResMut<EditorState>,
     mut export_state: ResMut<export::ExportState>,
     mut timeline: ResMut<Timeline>,
-    camera: Res<Camera>,
+    camera: Option<Res<Camera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     entity_query: Query<(Entity, Option<&MobjectId>, Option<&ObjectTag>)>,
     children_query: Query<&Children>,
@@ -303,6 +303,7 @@ fn editor_ui_system(
     }
 
     if let Some(selected) = state.selected
+        && let Some(camera) = camera.as_ref()
         && let Ok(bounds) = bounds_query.get(selected)
     {
         let corners = [
@@ -369,12 +370,13 @@ fn brush_string(brush: &Option<peniko::Brush>) -> String {
 
 fn editor_picking_system(
     egui_wants: Res<EguiWantsInput>,
-    camera: Res<Camera>,
+    camera: Option<Res<Camera>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     entities: Query<(Entity, &WorldBounds, Option<&RenderOrder>)>,
     mut state: ResMut<EditorState>,
 ) {
+    let Some(camera) = camera else { return };
     if egui_wants.wants_any_pointer_input() {
         return;
     }

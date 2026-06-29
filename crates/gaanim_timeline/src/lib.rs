@@ -30,12 +30,22 @@ impl Plugin for GaanimTimelinePlugin {
     }
 }
 
-/// System: Exclusive system to capture the initial world state at t=0.0 as a keyframe,
-/// running in the PostStartup stage so all startup commands have completed.
-///
-/// Also triggers an initial seek to t=0 so that scene visibility is applied
-/// immediately (hiding entities that belong to non-active scenes).
+/// System: PostStartup wrapper that captures the t=0 keyframe once, after all
+/// startup commands have run.
 pub fn capture_initial_keyframe_system(world: &mut World) {
+    capture_initial_keyframe(world);
+}
+
+/// Captures the current world state at t=0.0 as a keyframe (if not already
+/// present), restores scene visibility at t=0, and re-inserts the `Timeline`.
+///
+/// Re-running the initial-seek is required after a hot-reload replays the
+/// scene: the freshly spawned entities need to be registered as the t=0
+/// keyframe so that subsequent timeline seeks and play/pause toggles work.
+///
+/// Factored out of the `PostStartup` system so the host can call it again
+/// after rebuilding the world in place.
+pub fn capture_initial_keyframe(world: &mut World) {
     let timeline = world.remove_resource::<Timeline>();
     if let Some(mut tl) = timeline {
         if !tl.keyframes.contains_key(&ordered_float::OrderedFloat(0.0)) {

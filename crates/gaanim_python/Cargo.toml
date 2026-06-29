@@ -4,11 +4,11 @@ version = "0.2.0"
 edition = "2021"
 
 [lib]
-name = "gaanim_core"
-crate-type = ["cdylib"]
+name = "gaanim_python"
+crate-type = ["rlib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py312", "py-clone"] }
+pyo3 = { version = "0.28", features = ["abi3-py312", "py-clone"] }
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
@@ -19,6 +19,6 @@ gaanim_api = { path = "../gaanim_api" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_objects = { path = "../gaanim_objects" }
 gaanim_layout = { path = "../gaanim_layout" }
-gaanim_editor = { path = "../gaanim_editor" }
 gaanim_export = { path = "../gaanim_export" }
 bevy = { version = "0.18", default-features = false }
+crossbeam-channel = { workspace = true }

@@ -15,95 +15,11 @@ use gaanim_timeline::timeline::Timeline;
 use crate::mobject::{MobjectSpec, PythonGroupLayoutOp, PythonPositioningOp, TextRoleKind};
 use crate::scene::DeferredOp;
 
-/// Build a Bevy `App`, replay the deferred op queue, and run the window.
-pub fn run(
-    ops: Vec<DeferredOp>,
-    width: u32,
-    height: u32,
-    title: String,
-    background: Option<peniko::Color>,
-) {
-    let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: if title.trim().is_empty() || title == "Gaanim Scene" {
-                "Gaanim".to_string()
-            } else {
-                title
-            },
-            resolution: (width, height).into(),
-            ..default()
-        }),
-        ..default()
-    }))
-    .add_plugins(gaanim_scene::GaanimScenePlugin)
-    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
-    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
-    .add_plugins(gaanim_text::GaanimTextPlugin)
-    .add_plugins(gaanim_api::GaanimApiPlugin)
-    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
-    .add_systems(Startup, move |world: &mut World| {
-        replay_into(world, ops.clone(), width, height, background);
-        if let Some(mut timeline) = world.get_resource_mut::<Timeline>() {
-            timeline.is_playing = true;
-        }
-    })
-    .add_systems(Update, drive_timeline_clock);
 
-    app.run();
-}
 
-/// Build a Bevy `App` with the editor plugin, replay the deferred op queue,
-/// and run the interactive editor window.
-pub fn run_editor(
-    ops: Vec<DeferredOp>,
-    width: u32,
-    height: u32,
-    title: String,
-    background: Option<peniko::Color>,
-) {
-    let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: format!(
-                "{} [Editor]",
-                if title.trim().is_empty() || title == "Gaanim Scene" {
-                    "Gaanim".to_string()
-                } else {
-                    title
-                }
-            ),
-            resolution: (width, height).into(),
-            ..default()
-        }),
-        ..default()
-    }))
-    .add_plugins(gaanim_scene::GaanimScenePlugin)
-    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
-    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
-    .add_plugins(gaanim_text::GaanimTextPlugin)
-    .add_plugins(gaanim_api::GaanimApiPlugin)
-    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
-    .add_plugins(gaanim_editor::GaanimEditorPlugin);
-    let mut ops = Some(ops);
-    app.add_systems(Startup, move |world: &mut World| {
-        let ops_taken = ops.take().expect("Startup called twice");
-        let ops_clone = ops_taken.clone();
-        let replay_fn: std::sync::Arc<dyn Fn(&mut World) + Send + Sync> =
-            std::sync::Arc::new(move |w: &mut World| {
-                replay_into(w, ops_clone.clone(), width, height, background);
-            });
-        world.insert_resource(gaanim_editor::export::StashedReplay(Some(replay_fn)));
-        replay_into(world, ops_taken, width, height, background);
-        // Start paused in editor mode so the user can inspect first.
-        let mut timeline = world.resource_mut::<Timeline>();
-        timeline.is_playing = false;
-    });
 
-    app.run();
-}
 
-pub(crate) fn replay_into(
+pub fn replay_into(
     world: &mut World,
     ops: Vec<DeferredOp>,
     width: u32,
@@ -1200,12 +1116,5 @@ fn apply_2d_transform(
         state.transform = transform;
         scene.commands.entity(state.entity).insert(transform);
     }
-    mref
-}
-
-fn drive_timeline_clock(
-    time: Res<Time>,
-    mut dt: ResMut<gaanim_animation::DeltaTime>,
-) {
-    dt.dt = time.delta_secs_f64();
+        mref
 }

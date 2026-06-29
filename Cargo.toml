@@ -37,3 +37,5 @@ peniko = "0.6.1"
 kurbo = "0.13.1"
 glam = {version = "0.33.0", features = ["f64"]}
 i_overlay = "7"
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+crossbeam-channel = "0.5"
