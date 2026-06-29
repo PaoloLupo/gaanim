@@ -163,7 +163,11 @@ pub fn compile_code_cell(
     let span = raw.span();
 
     if lang.as_str() != "python" && lang.as_str() != "py" {
-        bail!(span, "Only Python is supported in gaanim docs, got: {}", lang);
+        bail!(
+            span,
+            "Only Python is supported in gaanim docs, got: {}",
+            lang
+        );
     }
 
     let mut cmd = "python".to_string();
@@ -440,7 +444,11 @@ pub fn compile_code_cell(
             Ok(Ok(output)) => {
                 stdout = strip_ansi_escape_codes(&String::from_utf8_lossy(&output.stdout));
                 let err_str = String::from_utf8_lossy(&output.stderr);
-                stderr = adjust_stderr_line_numbers(&err_str, &temp_file.to_string_lossy(), prelude_lines);
+                stderr = adjust_stderr_line_numbers(
+                    &err_str,
+                    &temp_file.to_string_lossy(),
+                    prelude_lines,
+                );
             }
             Ok(Err(e)) => {
                 bail!(span, "Error executing Python: {}", e);

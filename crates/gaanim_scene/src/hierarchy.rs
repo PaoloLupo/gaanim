@@ -66,7 +66,10 @@ impl Plugin for GaanimScenePlugin {
                 .in_set(SceneSet::Propagation),
         );
 
-        // Register bounds systems in the Bounds SystemSet
+        // Register bounds systems in the Bounds SystemSet.
+        // The entire set is guarded by `has_bounds_changes` so that on
+        // static frames (no transform/bounds mutations) all three systems
+        // are skipped without per-entity iteration.
         app.add_systems(
             Update,
             (
@@ -74,6 +77,7 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::world_bounds_fallback_system,
                 crate::systems::hierarchical_bounds_system,
             )
+                .run_if(crate::systems::has_bounds_changes)
                 .in_set(SceneSet::Bounds),
         );
     }

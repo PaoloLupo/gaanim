@@ -127,7 +127,10 @@ impl PyAnimationSpec {
                 n_lines,
                 radius,
             } => {
-                format!("flash(color={:?}, n_lines={}, radius={})", color, n_lines, radius)
+                format!(
+                    "flash(color={:?}, n_lines={}, radius={})",
+                    color, n_lines, radius
+                )
             }
             AnimationType::Circumscribe { color } => {
                 format!("circumscribe(color={:?})", color)
@@ -185,10 +188,7 @@ impl PyAnimationSpec {
     /// Discrete step interpolation. Clamps to `n` evenly-spaced levels.
     fn steps(&self, n: u32) -> Self {
         Self {
-            inner: self
-                .inner
-                .clone()
-                .rate_func(RateFunc::Steps(n)),
+            inner: self.inner.clone().rate_func(RateFunc::Steps(n)),
         }
     }
 
@@ -206,7 +206,10 @@ impl PyAnimationSpec {
     fn mirror(&self, inner_name: &str) -> PyResult<Self> {
         let inner = rate_func_from_name(inner_name)?;
         Ok(Self {
-            inner: self.inner.clone().rate_func(RateFunc::Mirror(Box::new(inner))),
+            inner: self
+                .inner
+                .clone()
+                .rate_func(RateFunc::Mirror(Box::new(inner))),
         })
     }
 
@@ -384,8 +387,7 @@ impl PyAnimationSpec {
     fn fade_transform(&self, target: &PyMobject) -> Self {
         let my_target = self.inner.target;
         Self {
-            inner: MobjectRef { id: my_target }
-                .fade_transform(target.id),
+            inner: MobjectRef { id: my_target }.fade_transform(target.id),
         }
     }
 
@@ -426,8 +428,7 @@ impl PyAnimationSpec {
     fn flash(&self, color: Option<&PyColor>, n_lines: u32, radius: f64) -> Self {
         let target = self.inner.target;
         Self {
-            inner: MobjectRef { id: target }
-                .flash(color.map(|c| c.0), n_lines, radius),
+            inner: MobjectRef { id: target }.flash(color.map(|c| c.0), n_lines, radius),
         }
     }
 
@@ -436,8 +437,7 @@ impl PyAnimationSpec {
     fn circumscribe(&self, color: Option<&PyColor>) -> Self {
         let target = self.inner.target;
         Self {
-            inner: MobjectRef { id: target }
-                .circumscribe(color.map(|c| c.0)),
+            inner: MobjectRef { id: target }.circumscribe(color.map(|c| c.0)),
         }
     }
 

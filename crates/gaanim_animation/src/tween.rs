@@ -204,7 +204,11 @@ impl std::fmt::Debug for PropertyLens {
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
-            Self::PathRange { from, to, time_width } => write!(f, "PathRange({} -> {} width {})", from, to, time_width),
+            Self::PathRange {
+                from,
+                to,
+                time_width,
+            } => write!(f, "PathRange({} -> {} width {})", from, to, time_width),
             Self::Custom(c) => write!(f, "Custom({:?})", c.type_name()),
         }
     }
@@ -244,6 +248,12 @@ pub fn evaluate_tweens_system(
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
+        // Custom lenses need exclusive World access; skip them entirely here.
+        // They are fully handled by evaluate_custom_tweens_system.
+        if matches!(lens, PropertyLens::Custom(_)) {
+            continue;
+        }
+
         if tween.state == TweenState::Completed {
             continue;
         }
@@ -348,19 +358,23 @@ pub fn evaluate_tweens_system(
                     signal.value = *from + (*to - *from) * t;
                 }
             }
-            PropertyLens::PathRange { from, to, time_width } => {
+            PropertyLens::PathRange {
+                from,
+                to,
+                time_width,
+            } => {
                 let p = *from + (*to - *from) * t;
                 let start = (p - *time_width).max(0.0);
                 let end = p.min(1.0);
                 if let Ok(source) = sources.get(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
-                    path.0 = std::sync::Arc::new(gaanim_math::get_subpath_range(&source.0, start, end));
+                    path.0 =
+                        std::sync::Arc::new(gaanim_math::get_subpath_range(&source.0, start, end));
                 }
             }
             PropertyLens::Custom(_) => {
-                // Custom lenses require exclusive World access.
-                // They are processed by evaluate_custom_tweens_system.
+                unreachable!("Custom lenses are skipped at the start of the system")
             }
         }
     }

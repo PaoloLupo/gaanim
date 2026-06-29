@@ -17,8 +17,8 @@ use crate::transition::PyTransitionType;
 /// Connection between two scenes with a transition.
 #[derive(Debug, Clone)]
 struct SceneConnection {
-    from: usize,  // index into scenes vec
-    to: usize,    // index into scenes vec
+    from: usize, // index into scenes vec
+    to: usize,   // index into scenes vec
     transition: PyTransitionType,
 }
 
@@ -248,7 +248,12 @@ impl PyEngine {
                 "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
                 "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
                 "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
-                _ => return Err(PyValueError::new_err(format!("Invalid aspect ratio preset: {}", ar))),
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "Invalid aspect ratio preset: {}",
+                        ar
+                    )))
+                }
             };
             config = config.with_aspect_ratio(preset);
         }
@@ -257,7 +262,12 @@ impl PyEngine {
                 "draft" => QualityPreset::Draft,
                 "standard" => QualityPreset::Standard,
                 "production" => QualityPreset::Production,
-                _ => return Err(PyValueError::new_err(format!("Invalid quality preset: {}", q))),
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "Invalid quality preset: {}",
+                        q
+                    )))
+                }
             };
             config = config.with_quality(preset);
         }
@@ -305,7 +315,9 @@ impl PyEngine {
     fn drain_all_ops(inner: &mut EngineInner) -> Vec<DeferredOp> {
         let mut all_ops = Vec::new();
         for scene in &mut inner.scenes {
-            all_ops.push(DeferredOp::SceneBegin { name: scene.name.clone() });
+            all_ops.push(DeferredOp::SceneBegin {
+                name: scene.name.clone(),
+            });
             all_ops.append(&mut scene.ops);
             all_ops.push(DeferredOp::SceneEnd);
         }
@@ -347,7 +359,11 @@ impl PySceneBuilder {
     fn __repr__(&self) -> PyResult<String> {
         let inner = lock_scene!(self);
         let scene = &inner.scenes[self.scene_index];
-        Ok(format!("SceneBuilder('{}', ops={})", scene.name, scene.ops.len()))
+        Ok(format!(
+            "SceneBuilder('{}', ops={})",
+            scene.name,
+            scene.ops.len()
+        ))
     }
 
     #[getter]
@@ -366,87 +382,163 @@ impl PySceneBuilder {
         let common = Self::default_common(primary);
         let spec = Arc::new(Mutex::new(MobjectSpec::Circle { common, radius }));
         let order = id.index() as u64;
-        scene.ops.push(DeferredOp::Spawn { id, spec: spec.clone(), creation_order: order });
-        Ok(PyMobject { id, spec, creation_order: order })
+        scene.ops.push(DeferredOp::Spawn {
+            id,
+            spec: spec.clone(),
+            creation_order: order,
+        });
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
     }
 
     fn rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Rectangle { common: Self::default_common(primary), width, height })
+        self.spawn_with(MobjectSpec::Rectangle {
+            common: Self::default_common(primary),
+            width,
+            height,
+        })
     }
 
     fn square(&self, side: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Square { common: Self::default_common(primary), side })
+        self.spawn_with(MobjectSpec::Square {
+            common: Self::default_common(primary),
+            side,
+        })
     }
 
     fn dot(&self, radius: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Dot { common: Self::default_common(primary), radius })
+        self.spawn_with(MobjectSpec::Dot {
+            common: Self::default_common(primary),
+            radius,
+        })
     }
 
     fn ellipse(&self, rx: f64, ry: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Ellipse { common: Self::default_common(primary), rx, ry })
+        self.spawn_with(MobjectSpec::Ellipse {
+            common: Self::default_common(primary),
+            rx,
+            ry,
+        })
     }
 
     fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::Line {
-            common: CommonSpec { fill: None, stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
-            start: (x1, y1), end: (x2, y2),
+            common: CommonSpec {
+                fill: None,
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+                positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
         })
     }
 
     fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::Arrow {
-            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
-            start: (x1, y1), end: (x2, y2),
+            common: CommonSpec {
+                fill: Some(primary),
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+                positioning_ops: Vec::new(),
+            },
+            start: (x1, y1),
+            end: (x2, y2),
         })
     }
 
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Polygon { common: Self::default_common(primary), points })
+        self.spawn_with(MobjectSpec::Polygon {
+            common: Self::default_common(primary),
+            points,
+        })
     }
 
     fn star(&self, n_points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Star { common: Self::default_common(primary), n_points, outer_radius, inner_radius })
+        self.spawn_with(MobjectSpec::Star {
+            common: Self::default_common(primary),
+            n_points,
+            outer_radius,
+            inner_radius,
+        })
     }
 
     fn text(&self, content: &str, role: Option<&str>) -> PyResult<PyMobject> {
         let role = TextRoleKind::from_str(role.unwrap_or("body"));
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Text { common: Self::default_common(primary), content: content.to_string(), role })
+        self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary),
+            content: content.to_string(),
+            role,
+        })
     }
 
     fn title(&self, content: &str) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Text { common: Self::default_common(primary), content: content.to_string(), role: TextRoleKind::Title })
+        self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary),
+            content: content.to_string(),
+            role: TextRoleKind::Title,
+        })
     }
 
     fn subtitle(&self, content: &str) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Text { common: Self::default_common(primary), content: content.to_string(), role: TextRoleKind::Subtitle })
+        self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary),
+            content: content.to_string(),
+            role: TextRoleKind::Subtitle,
+        })
     }
 
     fn body(&self, content: &str) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Text { common: Self::default_common(primary), content: content.to_string(), role: TextRoleKind::Body })
+        self.spawn_with(MobjectSpec::Text {
+            common: Self::default_common(primary),
+            content: content.to_string(),
+            role: TextRoleKind::Body,
+        })
     }
 
     fn equation(&self, formula: &str) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
-        self.spawn_with(MobjectSpec::Equation { common: Self::default_common(primary), formula: formula.to_string() })
+        self.spawn_with(MobjectSpec::Equation {
+            common: Self::default_common(primary),
+            formula: formula.to_string(),
+        })
     }
 
     fn background_rectangle(&self, width: f64, height: f64) -> PyResult<PyMobject> {
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::BackgroundRectangle {
-            common: CommonSpec { fill: Some(primary), stroke: None, z_index: -10, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
-            width, height,
+            common: CommonSpec {
+                fill: Some(primary),
+                stroke: None,
+                z_index: -10,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+                positioning_ops: Vec::new(),
+            },
+            width,
+            height,
         })
     }
 
@@ -456,16 +548,33 @@ impl PySceneBuilder {
         let scene = &mut inner.scenes[self.scene_index];
         let id = scene.next_id();
         let common = Self::default_common(primary);
-        let children_specs = children.iter().map(|c| (c.id, c.spec.clone(), c.creation_order)).collect();
-        let spec = Arc::new(Mutex::new(MobjectSpec::Group { common, children: children_specs, layout_op: None }));
+        let children_specs = children
+            .iter()
+            .map(|c| (c.id, c.spec.clone(), c.creation_order))
+            .collect();
+        let spec = Arc::new(Mutex::new(MobjectSpec::Group {
+            common,
+            children: children_specs,
+            layout_op: None,
+        }));
         let order = id.index() as u64;
-        scene.ops.push(DeferredOp::Spawn { id, spec: spec.clone(), creation_order: order });
-        Ok(PyMobject { id, spec, creation_order: order })
+        scene.ops.push(DeferredOp::Spawn {
+            id,
+            spec: spec.clone(),
+            creation_order: order,
+        });
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
     }
 
     fn ungroup(&self, group: &PyMobject) -> PyResult<()> {
         let mut inner = lock_scene!(self);
-        inner.scenes[self.scene_index].ops.push(DeferredOp::Ungroup { group: group.id });
+        inner.scenes[self.scene_index]
+            .ops
+            .push(DeferredOp::Ungroup { group: group.id });
         Ok(())
     }
 
@@ -474,7 +583,9 @@ impl PySceneBuilder {
     #[pyo3(signature = (*anims))]
     fn play(&self, py: Python<'_>, anims: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<()> {
         if anims.is_empty() {
-            return Err(PyValueError::new_err("play() requires at least one animation"));
+            return Err(PyValueError::new_err(
+                "play() requires at least one animation",
+            ));
         }
         let mut specs = Vec::with_capacity(anims.len());
         for item in anims.iter() {
@@ -492,14 +603,18 @@ impl PySceneBuilder {
         let _ = py;
         if !specs.is_empty() {
             let mut inner = lock_scene!(self);
-            inner.scenes[self.scene_index].ops.push(DeferredOp::Play { specs });
+            inner.scenes[self.scene_index]
+                .ops
+                .push(DeferredOp::Play { specs });
         }
         Ok(())
     }
 
     fn wait(&self, duration: f64) -> PyResult<()> {
         let mut inner = lock_scene!(self);
-        inner.scenes[self.scene_index].ops.push(DeferredOp::Wait { duration });
+        inner.scenes[self.scene_index]
+            .ops
+            .push(DeferredOp::Wait { duration });
         Ok(())
     }
 
@@ -509,19 +624,43 @@ impl PySceneBuilder {
         let mut inner = lock_scene!(self);
         let scene = &mut inner.scenes[self.scene_index];
         let selection_id = scene.next_id();
-        scene.ops.push(DeferredOp::Select { parent: parent.id, query: query.to_string(), selection: selection_id });
-        Ok(PySelection { parent: parent.id, query: query.to_string(), id: selection_id })
+        scene.ops.push(DeferredOp::Select {
+            parent: parent.id,
+            query: query.to_string(),
+            selection: selection_id,
+        });
+        Ok(PySelection {
+            parent: parent.id,
+            query: query.to_string(),
+            id: selection_id,
+        })
     }
 
     fn fill_selection(&self, selection: &PySelection, color: &PyColor) -> PyResult<()> {
         let mut inner = lock_scene!(self);
-        inner.scenes[self.scene_index].ops.push(DeferredOp::SelectionFill { selection: selection.id, color: color.0 });
+        inner.scenes[self.scene_index]
+            .ops
+            .push(DeferredOp::SelectionFill {
+                selection: selection.id,
+                color: color.0,
+            });
         Ok(())
     }
 
-    fn set_stroke_selection(&self, selection: &PySelection, color: &PyColor, width: f64) -> PyResult<()> {
+    fn set_stroke_selection(
+        &self,
+        selection: &PySelection,
+        color: &PyColor,
+        width: f64,
+    ) -> PyResult<()> {
         let mut inner = lock_scene!(self);
-        inner.scenes[self.scene_index].ops.push(DeferredOp::SelectionStroke { selection: selection.id, color: color.0, width });
+        inner.scenes[self.scene_index]
+            .ops
+            .push(DeferredOp::SelectionStroke {
+                selection: selection.id,
+                color: color.0,
+                width,
+            });
         Ok(())
     }
 
@@ -563,12 +702,25 @@ impl PySceneBuilder {
         let id = scene.next_id();
         let order = id.index() as u64;
         let spec = Arc::new(Mutex::new(spec));
-        scene.ops.push(DeferredOp::Spawn { id, spec: spec.clone(), creation_order: order });
-        Ok(PyMobject { id, spec, creation_order: order })
+        scene.ops.push(DeferredOp::Spawn {
+            id,
+            spec: spec.clone(),
+            creation_order: order,
+        });
+        Ok(PyMobject {
+            id,
+            spec,
+            creation_order: order,
+        })
     }
 
-    fn boolean_op(&self, a: &PyMobject, b: &PyMobject, op: gaanim_objects::boolean::BooleanOp) -> PyResult<PyMobject> {
-        use crate::scene::{contours_to_bezpath, bezpath_to_contours};
+    fn boolean_op(
+        &self,
+        a: &PyMobject,
+        b: &PyMobject,
+        op: gaanim_objects::boolean::BooleanOp,
+    ) -> PyResult<PyMobject> {
+        use crate::scene::{bezpath_to_contours, contours_to_bezpath};
         let path_a = contours_to_bezpath(&a.spec.lock().unwrap().to_contours());
         let path_b = contours_to_bezpath(&b.spec.lock().unwrap().to_contours());
         let result = gaanim_objects::boolean::apply(&path_a, &path_b, op);
@@ -580,7 +732,15 @@ impl PySceneBuilder {
         }
         let primary = lock_scene!(self).theme.0.primary;
         self.spawn_with(MobjectSpec::BooleanResult {
-            common: CommonSpec { fill: Some(primary), stroke: Some((primary, 2.0)), z_index: 0, opacity: 1.0, transform: gaanim_math::SpatialTransform::default(), next_to: None, positioning_ops: Vec::new() },
+            common: CommonSpec {
+                fill: Some(primary),
+                stroke: Some((primary, 2.0)),
+                z_index: 0,
+                opacity: 1.0,
+                transform: gaanim_math::SpatialTransform::default(),
+                next_to: None,
+                positioning_ops: Vec::new(),
+            },
             contours: combined,
         })
     }

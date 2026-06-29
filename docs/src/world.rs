@@ -13,9 +13,7 @@ use typst::{
         array, elem, func,
     },
     introspection::MetadataElem,
-    syntax::{
-        FileId, RootedPath, Source, VirtualPath, VirtualRoot,
-    },
+    syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
     text::{Font, FontBook},
     visualize::ImageElem,
 };
@@ -164,11 +162,9 @@ impl DocsFiles {
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
         match id.root() {
             VirtualRoot::Project => Ok(self.project.resolve(id.vpath())),
-            VirtualRoot::Package(spec) => {
-                Err(FileError::Other(Some(eco_format!(
-                    "packages not supported: {spec}"
-                ))))
-            }
+            VirtualRoot::Package(spec) => Err(FileError::Other(Some(eco_format!(
+                "packages not supported: {spec}"
+            )))),
         }
     }
 }
@@ -177,11 +173,9 @@ impl FileLoader for DocsFiles {
     fn load(&self, id: FileId) -> FileResult<Bytes> {
         match id.root() {
             VirtualRoot::Project => self.project.load(id.vpath()),
-            VirtualRoot::Package(spec) => {
-                Err(FileError::Other(Some(eco_format!(
-                    "packages not supported in gaanim docs: {spec}"
-                ))))
-            }
+            VirtualRoot::Package(spec) => Err(FileError::Other(Some(eco_format!(
+                "packages not supported in gaanim docs: {spec}"
+            )))),
         }
     }
 }

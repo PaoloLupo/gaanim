@@ -1,9 +1,9 @@
+use bevy_vello::vello::RendererOptions;
 use bevy_vello::vello::wgpu::{
     Backends, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, Instance,
     InstanceDescriptor, MapMode, PowerPreference, RequestAdapterOptions, TexelCopyBufferInfo,
     TexelCopyBufferLayout, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
-use bevy_vello::vello::RendererOptions;
 use std::sync::mpsc;
 
 pub struct GpuContext {
@@ -114,11 +114,11 @@ impl GpuContext {
             )
             .map_err(|e| format!("Vello render error: {e}"))?;
 
-        let mut encoder = self.device.create_command_encoder(
-            &CommandEncoderDescriptor {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("gaanim-export-copy"),
-            },
-        );
+            });
 
         encoder.copy_texture_to_buffer(
             self.texture.as_image_copy(),
@@ -146,9 +146,7 @@ impl GpuContext {
         });
 
         loop {
-            let _ = self
-                .device
-                .poll(bevy_vello::vello::wgpu::PollType::Poll);
+            let _ = self.device.poll(bevy_vello::vello::wgpu::PollType::Poll);
             match rx.try_recv() {
                 Ok(Ok(())) => break,
                 Ok(Err(e)) => return Err(e),

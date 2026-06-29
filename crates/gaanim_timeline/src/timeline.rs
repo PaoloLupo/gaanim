@@ -156,14 +156,21 @@ impl Timeline {
             .map(|(_, e)| e)
             .unwrap_or(self.current_time);
         let duration = transition.duration();
-        self.scene_connections
-            .push(SceneConnection { from, to, transition: transition.clone() });
+        self.scene_connections.push(SceneConnection {
+            from,
+            to,
+            transition: transition.clone(),
+        });
         let track = self.tracks.keys().next().unwrap();
         self.add_clip(
             track,
             from_end,
             duration,
-            ClipPayload::Transition { from, to, transition_type: transition },
+            ClipPayload::Transition {
+                from,
+                to,
+                transition_type: transition,
+            },
         );
     }
 
@@ -336,8 +343,8 @@ impl Timeline {
         let kf_start_time = if let Some((&kf_time, snapshot)) = keyframe {
             // Skip full restore when seeking forward within the same keyframe interval:
             // clip replay is deterministic and produces correct state from any baseline.
-            let same_kf_and_forward = self.last_restore_kf_time == Some(kf_time)
-                && clamped_target >= self.current_time;
+            let same_kf_and_forward =
+                self.last_restore_kf_time == Some(kf_time) && clamped_target >= self.current_time;
             if !same_kf_and_forward {
                 snapshot.restore(world);
                 self.last_restore_kf_time = Some(kf_time);
@@ -363,7 +370,12 @@ impl Timeline {
 
         // 3. Replay and interpolate clip properties up to target_time
         //    Also track active transitions for scene visibility.
-        let mut active_transition: Option<(&crate::transition::TransitionType, f64, SceneId, SceneId)> = None;
+        let mut active_transition: Option<(
+            &crate::transition::TransitionType,
+            f64,
+            SceneId,
+            SceneId,
+        )> = None;
 
         for clip in candidate_clips {
             match clip.payload {
@@ -373,7 +385,8 @@ impl Timeline {
                             // Animation finished before or at seek head: apply final state.
                             let final_t = anim.rate_func.evaluate(1.0);
                             apply_lens_spec(world, target_entity, &anim.lens, final_t);
-                        } else if clip.start <= self.current_time && clip.end() > self.current_time {
+                        } else if clip.start <= self.current_time && clip.end() > self.current_time
+                        {
                             // Animation is actively running at seek head: interpolate
                             let progress =
                                 ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
@@ -385,7 +398,11 @@ impl Timeline {
                 ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
                     // Scene boundary markers — visibility is handled in the post-pass below.
                 }
-                ClipPayload::Transition { ref transition_type, from, to } => {
+                ClipPayload::Transition {
+                    ref transition_type,
+                    from,
+                    to,
+                } => {
                     if clip.start <= self.current_time && clip.end() > self.current_time {
                         let progress = if clip.duration > 0.0 {
                             ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
@@ -395,7 +412,13 @@ impl Timeline {
                         active_transition = Some((transition_type, progress, from, to));
                     }
                 }
-                ClipPayload::Ungroup { group, ref children, group_parent, ref group_transform, ref children_world_transforms } => {
+                ClipPayload::Ungroup {
+                    group,
+                    ref children,
+                    group_parent,
+                    ref group_transform,
+                    ref children_world_transforms,
+                } => {
                     if clip.start <= self.current_time {
                         if let Some(&group_entity) = entity_map.get(&group) {
                             // Read the group's ACTUAL current transform (which includes
@@ -408,24 +431,26 @@ impl Timeline {
 
                             for child_id in children {
                                 if let Some(&child_entity) = entity_map.get(child_id)
-                                    && let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
-                                        let child_local_transform = child_mut
-                                            .get::<SpatialTransform>()
-                                            .copied()
-                                            .unwrap_or_default();
-                                        let child_world_affine = g_affine
-                                            * child_local_transform.to_affine_2d();
-                                        let child_world_transform =
-                                            SpatialTransform::from_affine_2d(&child_world_affine);
+                                    && let Ok(mut child_mut) = world.get_entity_mut(child_entity)
+                                {
+                                    let child_local_transform = child_mut
+                                        .get::<SpatialTransform>()
+                                        .copied()
+                                        .unwrap_or_default();
+                                    let child_world_affine =
+                                        g_affine * child_local_transform.to_affine_2d();
+                                    let child_world_transform =
+                                        SpatialTransform::from_affine_2d(&child_world_affine);
 
-                                        child_mut.remove_parent_in_place();
-                                        child_mut.insert(child_world_transform);
+                                    child_mut.remove_parent_in_place();
+                                    child_mut.insert(child_world_transform);
 
-                                        if let Some(gp) = group_parent
-                                            && let Some(&gp_entity) = entity_map.get(&gp) {
-                                                child_mut.set_parent_in_place(gp_entity);
-                                            }
+                                    if let Some(gp) = group_parent
+                                        && let Some(&gp_entity) = entity_map.get(&gp)
+                                    {
+                                        child_mut.set_parent_in_place(gp_entity);
                                     }
+                                }
                             }
 
                             if let Ok(group_mut) = world.get_entity_mut(group_entity) {
@@ -442,9 +467,10 @@ impl Timeline {
                                         child_mut.insert(world_transform);
 
                                         if let Some(gp) = group_parent
-                                            && let Some(&gp_entity) = entity_map.get(&gp) {
-                                                child_mut.set_parent_in_place(gp_entity);
-                                            }
+                                            && let Some(&gp_entity) = entity_map.get(&gp)
+                                        {
+                                            child_mut.set_parent_in_place(gp_entity);
+                                        }
                                     }
                                 }
                             }
@@ -460,7 +486,9 @@ impl Timeline {
                                     gaanim_scene::GroupMarker,
                                     gaanim_scene::MobjectId(group),
                                     *group_transform,
-                                    gaanim_math::GlobalSpatialTransform::from_local(group_transform),
+                                    gaanim_math::GlobalSpatialTransform::from_local(
+                                        group_transform,
+                                    ),
                                     Opacity(1.0),
                                     gaanim_scene::GlobalOpacity(1.0),
                                     gaanim_scene::RenderOrder::default(),
@@ -483,28 +511,29 @@ impl Timeline {
 
                         for child_id in children {
                             if let Some(&child_entity) = entity_map.get(child_id)
-                                && let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
-                                    let child_current = child_mut
-                                        .get::<SpatialTransform>()
-                                        .copied()
-                                        .unwrap_or_default();
-                                    let child_local_affine =
-                                        inv_g * child_current.to_affine_2d();
-                                    let child_local =
-                                        SpatialTransform::from_affine_2d(&child_local_affine);
+                                && let Ok(mut child_mut) = world.get_entity_mut(child_entity)
+                            {
+                                let child_current = child_mut
+                                    .get::<SpatialTransform>()
+                                    .copied()
+                                    .unwrap_or_default();
+                                let child_local_affine = inv_g * child_current.to_affine_2d();
+                                let child_local =
+                                    SpatialTransform::from_affine_2d(&child_local_affine);
 
-                                    child_mut.remove_parent_in_place();
-                                    child_mut.insert(child_local);
-                                    child_mut.set_parent_in_place(group_entity);
-                                }
+                                child_mut.remove_parent_in_place();
+                                child_mut.insert(child_local);
+                                child_mut.set_parent_in_place(group_entity);
+                            }
                         }
 
                         if let Some(gp) = group_parent
-                            && let Some(&gp_entity) = entity_map.get(&gp) {
-                                world
-                                    .entity_mut(group_entity)
-                                    .set_parent_in_place(gp_entity);
-                            }
+                            && let Some(&gp_entity) = entity_map.get(&gp)
+                        {
+                            world
+                                .entity_mut(group_entity)
+                                .set_parent_in_place(gp_entity);
+                        }
                     }
                 }
                 _ => {}
@@ -523,14 +552,15 @@ impl Timeline {
             };
 
             // Determine which scenes should be visible
-            let visible_scenes: std::collections::HashSet<SceneId> = if let Some((_, _, from, to)) = active_transition {
-                // During a transition, BOTH scenes are visible
-                [from, to].into_iter().collect()
-            } else if let Some(scene) = active_scene {
-                std::iter::once(scene).collect()
-            } else {
-                std::collections::HashSet::new()
-            };
+            let visible_scenes: std::collections::HashSet<SceneId> =
+                if let Some((_, _, from, to)) = active_transition {
+                    // During a transition, BOTH scenes are visible
+                    [from, to].into_iter().collect()
+                } else if let Some(scene) = active_scene {
+                    std::iter::once(scene).collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
 
             // Apply transition effects if active (before visibility toggle)
             if let Some((ref transition_type, t, from, to)) = active_transition {
@@ -668,11 +698,17 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
             }
         }
         PropertyLensSpec::SignalFloat { from, to } => {
-            if let Some(mut signal) = world.get_mut::<gaanim_animation::signals::FloatSignal>(target) {
+            if let Some(mut signal) =
+                world.get_mut::<gaanim_animation::signals::FloatSignal>(target)
+            {
                 signal.value = *from + (*to - *from) * t;
             }
         }
-        PropertyLensSpec::PathRange { from, to, time_width } => {
+        PropertyLensSpec::PathRange {
+            from,
+            to,
+            time_width,
+        } => {
             let p = *from + (*to - *from) * t;
             let start = (p - *time_width).max(0.0);
             let end = p.min(1.0);
@@ -768,10 +804,18 @@ fn apply_transition(
                     }
                 } else if *scene_id == to {
                     match direction {
-                        crate::transition::SlideDirection::Left => (viewport_width * (1.0 - t), 0.0),
-                        crate::transition::SlideDirection::Right => (-viewport_width * (1.0 - t), 0.0),
-                        crate::transition::SlideDirection::Up => (0.0, -viewport_height * (1.0 - t)),
-                        crate::transition::SlideDirection::Down => (0.0, viewport_height * (1.0 - t)),
+                        crate::transition::SlideDirection::Left => {
+                            (viewport_width * (1.0 - t), 0.0)
+                        }
+                        crate::transition::SlideDirection::Right => {
+                            (-viewport_width * (1.0 - t), 0.0)
+                        }
+                        crate::transition::SlideDirection::Up => {
+                            (0.0, -viewport_height * (1.0 - t))
+                        }
+                        crate::transition::SlideDirection::Down => {
+                            (0.0, viewport_height * (1.0 - t))
+                        }
                     }
                 } else {
                     continue;
@@ -782,7 +826,9 @@ fn apply_transition(
                 }
             }
         }
-        TransitionType::ZoomThrough { center, max_zoom, .. } => {
+        TransitionType::ZoomThrough {
+            center, max_zoom, ..
+        } => {
             let _ = (center, max_zoom);
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {

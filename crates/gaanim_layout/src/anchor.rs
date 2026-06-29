@@ -1,6 +1,6 @@
+use crate::LayoutAnchor;
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_math::Bounds3D;
-use crate::LayoutAnchor;
 
 /// 9-point anchor system inspired by Manim's critical points
 /// and Motion Canvas's offset concept.
@@ -13,14 +13,14 @@ use crate::LayoutAnchor;
 pub enum Anchor {
     #[default]
     Center,
-    Top,          // (0, 1)   — edge center top
-    Bottom,       // (0, -1)  — edge center bottom
-    Left,         // (-1, 0)  — edge center left
-    Right,        // (1, 0)   — edge center right
-    TopLeft,      // (-1, 1)
-    TopRight,     // (1, 1)
-    BottomLeft,   // (-1, -1)
-    BottomRight,  // (1, -1)
+    Top,         // (0, 1)   — edge center top
+    Bottom,      // (0, -1)  — edge center bottom
+    Left,        // (-1, 0)  — edge center left
+    Right,       // (1, 0)   — edge center right
+    TopLeft,     // (-1, 1)
+    TopRight,    // (1, 1)
+    BottomLeft,  // (-1, -1)
+    BottomRight, // (1, -1)
 }
 
 impl Anchor {
@@ -61,8 +61,20 @@ impl Anchor {
         let x = dir.x;
         let y = dir.y;
 
-        let dx = if x > th { 1 } else if x < -th { -1 } else { 0 };
-        let dy = if y > th { 1 } else if y < -th { -1 } else { 0 };
+        let dx = if x > th {
+            1
+        } else if x < -th {
+            -1
+        } else {
+            0
+        };
+        let dy = if y > th {
+            1
+        } else if y < -th {
+            -1
+        } else {
+            0
+        };
 
         match (dx, dy) {
             (0, 1) => Self::Top,

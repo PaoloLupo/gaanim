@@ -1,9 +1,9 @@
 use gaanim_api::prelude::LayoutDirection;
+use gaanim_core::kurbo;
 use gaanim_core::peniko;
 use gaanim_core::ObjectId;
-use gaanim_core::kurbo;
-use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_layout::Anchor;
+use gaanim_math::{Bounds3D, SpatialTransform};
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
@@ -13,19 +13,49 @@ use crate::id::PyObjectId;
 
 #[derive(Clone, Debug)]
 pub enum PythonPositioningOp {
-    At { target: gaanim_core::glam::DVec3, anchor: gaanim_layout::Anchor },
-    ToEdge { direction: gaanim_layout::Direction, buff: f64 },
-    ToCorner { corner: gaanim_layout::Anchor, buff: f64 },
-    AlignTo { reference: ObjectId, target_anchor: gaanim_layout::Anchor, ref_anchor: gaanim_layout::Anchor },
-    NextTo { reference: ObjectId, direction: gaanim_layout::Direction, spacing: f64, aligned_edge: gaanim_layout::Anchor },
+    At {
+        target: gaanim_core::glam::DVec3,
+        anchor: gaanim_layout::Anchor,
+    },
+    ToEdge {
+        direction: gaanim_layout::Direction,
+        buff: f64,
+    },
+    ToCorner {
+        corner: gaanim_layout::Anchor,
+        buff: f64,
+    },
+    AlignTo {
+        reference: ObjectId,
+        target_anchor: gaanim_layout::Anchor,
+        ref_anchor: gaanim_layout::Anchor,
+    },
+    NextTo {
+        reference: ObjectId,
+        direction: gaanim_layout::Direction,
+        spacing: f64,
+        aligned_edge: gaanim_layout::Anchor,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub enum PythonGroupLayoutOp {
-    Arrange { direction: gaanim_layout::Direction, spacing: f64 },
-    ArrangeInGrid { rows: Option<usize>, cols: Option<usize>, h_spacing: f64, v_spacing: f64 },
-    VStack { spacing: f64 },
-    HStack { spacing: f64 },
+    Arrange {
+        direction: gaanim_layout::Direction,
+        spacing: f64,
+    },
+    ArrangeInGrid {
+        rows: Option<usize>,
+        cols: Option<usize>,
+        h_spacing: f64,
+        v_spacing: f64,
+    },
+    VStack {
+        spacing: f64,
+    },
+    HStack {
+        spacing: f64,
+    },
 }
 
 /// Visual properties shared by all mobject kinds.
@@ -45,28 +75,122 @@ pub struct CommonSpec {
 /// replayed during the Bevy `Startup` system.
 #[derive(Clone, Debug)]
 pub enum MobjectSpec {
-    Circle { common: CommonSpec, radius: f64 },
-    Rectangle { common: CommonSpec, width: f64, height: f64 },
-    RoundedRect { common: CommonSpec, width: f64, height: f64, radius: f64 },
-    Line { common: CommonSpec, start: (f64, f64), end: (f64, f64) },
-    Polygon { common: CommonSpec, points: Vec<(f64, f64)> },
-    Star { common: CommonSpec, n_points: u32, outer_radius: f64, inner_radius: f64 },
-    Ellipse { common: CommonSpec, rx: f64, ry: f64 },
-    Dot { common: CommonSpec, radius: f64 },
-    Square { common: CommonSpec, side: f64 },
-    Checkmark { common: CommonSpec, size: f64 },
-    Arrow { common: CommonSpec, start: (f64, f64), end: (f64, f64) },
-    RegularPolygon { common: CommonSpec, n_sides: u32, radius: f64 },
-    DashedLine { common: CommonSpec, start: (f64, f64), end: (f64, f64), dash_length: f64, gap_length: f64 },
-    Arc { common: CommonSpec, center: (f64, f64), rx: f64, ry: f64, start_angle: f64, sweep_angle: f64 },
-    ArcBetweenPoints { common: CommonSpec, start: (f64, f64), end: (f64, f64), angle: f64 },
-    DoubleArrow { common: CommonSpec, start: (f64, f64), end: (f64, f64), head_len: Option<f64>, head_width: Option<f64> },
-    Sector { common: CommonSpec, center: (f64, f64), radius: f64, start_angle: f64, sweep_angle: f64 },
-    Annulus { common: CommonSpec, outer_radius: f64, inner_radius: f64 },
-    SurroundingRectangle { common: CommonSpec, width: f64, height: f64, corner_radius: f64 },
-    BackgroundRectangle { common: CommonSpec, width: f64, height: f64 },
-    Cross { common: CommonSpec, size: f64 },
-    RightAngle { common: CommonSpec, arm_length: f64 },
+    Circle {
+        common: CommonSpec,
+        radius: f64,
+    },
+    Rectangle {
+        common: CommonSpec,
+        width: f64,
+        height: f64,
+    },
+    RoundedRect {
+        common: CommonSpec,
+        width: f64,
+        height: f64,
+        radius: f64,
+    },
+    Line {
+        common: CommonSpec,
+        start: (f64, f64),
+        end: (f64, f64),
+    },
+    Polygon {
+        common: CommonSpec,
+        points: Vec<(f64, f64)>,
+    },
+    Star {
+        common: CommonSpec,
+        n_points: u32,
+        outer_radius: f64,
+        inner_radius: f64,
+    },
+    Ellipse {
+        common: CommonSpec,
+        rx: f64,
+        ry: f64,
+    },
+    Dot {
+        common: CommonSpec,
+        radius: f64,
+    },
+    Square {
+        common: CommonSpec,
+        side: f64,
+    },
+    Checkmark {
+        common: CommonSpec,
+        size: f64,
+    },
+    Arrow {
+        common: CommonSpec,
+        start: (f64, f64),
+        end: (f64, f64),
+    },
+    RegularPolygon {
+        common: CommonSpec,
+        n_sides: u32,
+        radius: f64,
+    },
+    DashedLine {
+        common: CommonSpec,
+        start: (f64, f64),
+        end: (f64, f64),
+        dash_length: f64,
+        gap_length: f64,
+    },
+    Arc {
+        common: CommonSpec,
+        center: (f64, f64),
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    ArcBetweenPoints {
+        common: CommonSpec,
+        start: (f64, f64),
+        end: (f64, f64),
+        angle: f64,
+    },
+    DoubleArrow {
+        common: CommonSpec,
+        start: (f64, f64),
+        end: (f64, f64),
+        head_len: Option<f64>,
+        head_width: Option<f64>,
+    },
+    Sector {
+        common: CommonSpec,
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    Annulus {
+        common: CommonSpec,
+        outer_radius: f64,
+        inner_radius: f64,
+    },
+    SurroundingRectangle {
+        common: CommonSpec,
+        width: f64,
+        height: f64,
+        corner_radius: f64,
+    },
+    BackgroundRectangle {
+        common: CommonSpec,
+        width: f64,
+        height: f64,
+    },
+    Cross {
+        common: CommonSpec,
+        size: f64,
+    },
+    RightAngle {
+        common: CommonSpec,
+        arm_length: f64,
+    },
     TangentLine {
         common: CommonSpec,
         curve: Vec<(f64, f64)>,
@@ -84,8 +208,15 @@ pub enum MobjectSpec {
         common: CommonSpec,
         contours: Vec<Vec<[f64; 2]>>,
     },
-    Text { common: CommonSpec, content: String, role: TextRoleKind },
-    Equation { common: CommonSpec, formula: String },
+    Text {
+        common: CommonSpec,
+        content: String,
+        role: TextRoleKind,
+    },
+    Equation {
+        common: CommonSpec,
+        formula: String,
+    },
     DecimalNumber {
         common: CommonSpec,
         signal_id: ObjectId,
@@ -236,18 +367,40 @@ impl MobjectSpec {
         }
     }
 
-    pub fn fill(&self) -> Option<peniko::Color> { self.common().fill }
-    pub fn stroke(&self) -> Option<(peniko::Color, f64)> { self.common().stroke }
-    pub fn opacity(&self) -> f32 { self.common().opacity }
-    pub fn z_index(&self) -> i32 { self.common().z_index }
-    pub fn transform(&self) -> SpatialTransform { self.common().transform }
-    pub fn next_to(&self) -> Option<(ObjectId, LayoutDirection, f64)> { self.common().next_to }
+    pub fn fill(&self) -> Option<peniko::Color> {
+        self.common().fill
+    }
+    pub fn stroke(&self) -> Option<(peniko::Color, f64)> {
+        self.common().stroke
+    }
+    pub fn opacity(&self) -> f32 {
+        self.common().opacity
+    }
+    pub fn z_index(&self) -> i32 {
+        self.common().z_index
+    }
+    pub fn transform(&self) -> SpatialTransform {
+        self.common().transform
+    }
+    pub fn next_to(&self) -> Option<(ObjectId, LayoutDirection, f64)> {
+        self.common().next_to
+    }
 
-    fn set_fill(&mut self, color: Option<peniko::Color>) { self.common_mut().fill = color; }
-    fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) { self.common_mut().stroke = stroke; }
-    fn set_opacity(&mut self, opacity: f32) { self.common_mut().opacity = opacity; }
-    fn set_z_index(&mut self, z: i32) { self.common_mut().z_index = z; }
-    fn transform_mut(&mut self) -> &mut SpatialTransform { &mut self.common_mut().transform }
+    fn set_fill(&mut self, color: Option<peniko::Color>) {
+        self.common_mut().fill = color;
+    }
+    fn set_stroke(&mut self, stroke: Option<(peniko::Color, f64)>) {
+        self.common_mut().stroke = stroke;
+    }
+    fn set_opacity(&mut self, opacity: f32) {
+        self.common_mut().opacity = opacity;
+    }
+    fn set_z_index(&mut self, z: i32) {
+        self.common_mut().z_index = z;
+    }
+    fn transform_mut(&mut self) -> &mut SpatialTransform {
+        &mut self.common_mut().transform
+    }
 }
 
 impl MobjectSpec {
@@ -295,15 +448,26 @@ impl MobjectSpec {
             Self::Circle { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
             Self::Square { side, .. } => push_rect(0.0, 0.0, *side, *side, &mut out),
             Self::Rectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
-            Self::RoundedRect { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::RoundedRect { width, height, .. } => {
+                push_rect(0.0, 0.0, *width, *height, &mut out)
+            }
             Self::Polygon { points, .. } => push_transformed_ring(points, &mut out),
             Self::Dot { radius, .. } => push_circle(0.0, 0.0, *radius, &mut out),
-            Self::Star { n_points, outer_radius, inner_radius, .. } => {
+            Self::Star {
+                n_points,
+                outer_radius,
+                inner_radius,
+                ..
+            } => {
                 let mut pts = Vec::new();
                 let total = (*n_points as usize) * 2;
                 for i in 0..total {
                     let a = i as f64 * std::f64::consts::PI / *n_points as f64;
-                    let r = if i % 2 == 0 { *outer_radius } else { *inner_radius };
+                    let r = if i % 2 == 0 {
+                        *outer_radius
+                    } else {
+                        *inner_radius
+                    };
                     pts.push((r * a.cos(), r * a.sin()));
                 }
                 push_transformed_ring(&pts, &mut out);
@@ -321,7 +485,9 @@ impl MobjectSpec {
                 let pts = [(0.0, 0.0), (*size * 0.5, *size * 0.5), (*size, 0.0)];
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::RegularPolygon { n_sides, radius, .. } => {
+            Self::RegularPolygon {
+                n_sides, radius, ..
+            } => {
                 let mut pts = Vec::new();
                 for i in 0..*n_sides {
                     let a = i as f64 * 2.0 * std::f64::consts::PI / *n_sides as f64;
@@ -367,7 +533,14 @@ impl MobjectSpec {
                 let pts = [(start.0, start.1), (end.0, end.1)];
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::Arc { center, rx, ry, start_angle, sweep_angle, .. } => {
+            Self::Arc {
+                center,
+                rx,
+                ry,
+                start_angle,
+                sweep_angle,
+                ..
+            } => {
                 let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
                 let mut pts = Vec::with_capacity(steps as usize + 1);
                 for i in 0..=steps {
@@ -377,13 +550,19 @@ impl MobjectSpec {
                 }
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::ArcBetweenPoints { start, end, angle, .. } => {
+            Self::ArcBetweenPoints {
+                start, end, angle, ..
+            } => {
                 let mid_x = (start.0 + end.0) * 0.5;
                 let mid_y = (start.1 + end.1) * 0.5;
                 let dx = end.0 - start.0;
                 let dy = end.1 - start.1;
                 let chord = (dx * dx + dy * dy).sqrt();
-                let radius = if angle.abs() < 1e-6 { chord * 0.5 } else { (chord * 0.5) / (angle * 0.5).sin().abs() };
+                let radius = if angle.abs() < 1e-6 {
+                    chord * 0.5
+                } else {
+                    (chord * 0.5) / (angle * 0.5).sin().abs()
+                };
                 let r_sign = if *angle >= 0.0 { 1.0 } else { -1.0 };
                 let h = (radius * radius - chord * chord * 0.25).sqrt();
                 let nx = -dy / chord;
@@ -393,8 +572,12 @@ impl MobjectSpec {
                 let sa = (start.1 - cy).atan2(start.0 - cx);
                 let ea = (end.1 - cy).atan2(end.0 - cx);
                 let mut sweep = ea - sa;
-                if *angle > 0.0 && sweep < 0.0 { sweep += 2.0 * std::f64::consts::PI; }
-                if *angle < 0.0 && sweep > 0.0 { sweep -= 2.0 * std::f64::consts::PI; }
+                if *angle > 0.0 && sweep < 0.0 {
+                    sweep += 2.0 * std::f64::consts::PI;
+                }
+                if *angle < 0.0 && sweep > 0.0 {
+                    sweep -= 2.0 * std::f64::consts::PI;
+                }
                 let steps = ((sweep.abs() * 30.0).ceil() as u32).max(8);
                 let mut pts = Vec::with_capacity(steps as usize + 1);
                 for i in 0..=steps {
@@ -404,7 +587,13 @@ impl MobjectSpec {
                 }
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::Sector { center, radius, start_angle, sweep_angle, .. } => {
+            Self::Sector {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+                ..
+            } => {
                 let mut pts = vec![(center.0, center.1)];
                 let steps = ((sweep_angle.abs() * 30.0).ceil() as u32).max(8);
                 for i in 0..=steps {
@@ -414,7 +603,11 @@ impl MobjectSpec {
                 }
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::Annulus { outer_radius, inner_radius, .. } => {
+            Self::Annulus {
+                outer_radius,
+                inner_radius,
+                ..
+            } => {
                 let steps = 64;
                 let mut outer = Vec::with_capacity(steps + 1);
                 for i in 0..=steps {
@@ -429,8 +622,12 @@ impl MobjectSpec {
                 }
                 push_transformed_ring(&inner, &mut out);
             }
-            Self::SurroundingRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
-            Self::BackgroundRectangle { width, height, .. } => push_rect(0.0, 0.0, *width, *height, &mut out),
+            Self::SurroundingRectangle { width, height, .. } => {
+                push_rect(0.0, 0.0, *width, *height, &mut out)
+            }
+            Self::BackgroundRectangle { width, height, .. } => {
+                push_rect(0.0, 0.0, *width, *height, &mut out)
+            }
             Self::Cross { size, .. } => {
                 let h = size * 0.5;
                 let d1 = [(-h, -h), (h, h)];
@@ -439,10 +636,17 @@ impl MobjectSpec {
                 push_transformed_ring(&d2, &mut out);
             }
             Self::RightAngle { arm_length, .. } => {
-                let pts = [(0.0, 0.0), (*arm_length, 0.0), (0.0, 0.0), (0.0, *arm_length)];
+                let pts = [
+                    (0.0, 0.0),
+                    (*arm_length, 0.0),
+                    (0.0, 0.0),
+                    (0.0, *arm_length),
+                ];
                 push_transformed_ring(&pts, &mut out);
             }
-            Self::TangentLine { curve, t, length, .. } => {
+            Self::TangentLine {
+                curve, t, length, ..
+            } => {
                 // Reconstruct the tangent line as a 2-point contour for
                 // boolean operations. Reuse the same arc-length
                 // sampling as the primitive.
@@ -451,9 +655,12 @@ impl MobjectSpec {
                         .iter()
                         .map(|(x, y)| kurbo::Point::new(*x, *y))
                         .collect();
-                    if let Some(bundle) =
-                        gaanim_objects::primitives::tangent_line(ObjectId::from_raw(0), &pts, *t, *length)
-                    {
+                    if let Some(bundle) = gaanim_objects::primitives::tangent_line(
+                        ObjectId::from_raw(0),
+                        &pts,
+                        *t,
+                        *length,
+                    ) {
                         // Extract the line's start/end from the bundle
                         let line_path = bundle.path.0;
                         let pts2: Vec<kurbo::Point> = line_path
@@ -464,8 +671,7 @@ impl MobjectSpec {
                                 _ => None,
                             })
                             .collect();
-                        let ring: Vec<(f64, f64)> =
-                            pts2.iter().map(|p| (p.x, p.y)).collect();
+                        let ring: Vec<(f64, f64)> = pts2.iter().map(|p| (p.x, p.y)).collect();
                         push_transformed_ring(&ring, &mut out);
                     }
                 }
@@ -480,7 +686,10 @@ impl MobjectSpec {
                     out.push(c.clone());
                 }
             }
-            Self::Text { .. } | Self::Equation { .. } | Self::DecimalNumber { .. } | Self::Group { .. } => {
+            Self::Text { .. }
+            | Self::Equation { .. }
+            | Self::DecimalNumber { .. }
+            | Self::Group { .. } => {
                 // Text/equation/decimal_number/group geometry cannot be reconstructed at build time
                 // because the actual layout is computed at replay time.
             }
@@ -490,9 +699,7 @@ impl MobjectSpec {
 
     pub fn get_local_bounds(&self) -> Bounds3D {
         match self {
-            Self::Circle { radius, .. } => {
-                Bounds3D::new_2d(-radius, -radius, *radius, *radius)
-            }
+            Self::Circle { radius, .. } => Bounds3D::new_2d(-radius, -radius, *radius, *radius),
             Self::Rectangle { width, height, .. } => {
                 Bounds3D::new_2d(-width * 0.5, -height * 0.5, *width * 0.5, *height * 0.5)
             }
@@ -516,7 +723,10 @@ impl MobjectSpec {
                 for (_, child_spec_mutex, _) in children {
                     if let Ok(child_spec) = child_spec_mutex.lock() {
                         let child_local_bounds = child_spec.get_local_bounds();
-                        let child_world_bounds = gaanim_layout::transform_bounds(child_local_bounds, &child_spec.common().transform);
+                        let child_world_bounds = gaanim_layout::transform_bounds(
+                            child_local_bounds,
+                            &child_spec.common().transform,
+                        );
                         if first {
                             union_bounds = child_world_bounds;
                             first = false;
@@ -589,10 +799,14 @@ impl PyMobject {
                     creation_order: *creation_order,
                 })
             } else {
-                Err(pyo3::exceptions::PyIndexError::new_err("Index out of range"))
+                Err(pyo3::exceptions::PyIndexError::new_err(
+                    "Index out of range",
+                ))
             }
         } else {
-            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Mobject is not a Group",
+            ))
         }
     }
 
@@ -651,10 +865,12 @@ impl PyMobject {
         })?;
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
-        s.common_mut().positioning_ops.push(PythonPositioningOp::At {
-            target: gaanim_core::glam::DVec3::new(x, y, 0.0),
-            anchor: anc,
-        });
+        s.common_mut()
+            .positioning_ops
+            .push(PythonPositioningOp::At {
+                target: gaanim_core::glam::DVec3::new(x, y, 0.0),
+                anchor: anc,
+            });
         drop(s);
         Ok(new)
     }
@@ -667,32 +883,45 @@ impl PyMobject {
         })?;
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
-        s.common_mut().positioning_ops.push(PythonPositioningOp::AlignTo {
-            reference: reference.id,
-            target_anchor: Anchor::Center,
-            ref_anchor: anc,
-        });
+        s.common_mut()
+            .positioning_ops
+            .push(PythonPositioningOp::AlignTo {
+                reference: reference.id,
+                target_anchor: Anchor::Center,
+                ref_anchor: anc,
+            });
         drop(s);
         Ok(new)
     }
 
     /// Place this mobject adjacent to a reference mobject in a layout direction.
     #[pyo3(signature = (reference, direction, spacing=10.0, aligned_edge="center"))]
-    fn next_to(&self, reference: &PyMobject, direction: &str, spacing: f64, aligned_edge: &str) -> PyResult<Self> {
+    fn next_to(
+        &self,
+        reference: &PyMobject,
+        direction: &str,
+        spacing: f64,
+        aligned_edge: &str,
+    ) -> PyResult<Self> {
         let dir = direction_from_str(direction).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!("unknown direction: {}", direction))
         })?;
         let align = anchor_from_str(aligned_edge).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(format!("unknown aligned_edge: {}", aligned_edge))
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown aligned_edge: {}",
+                aligned_edge
+            ))
         })?;
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
-        s.common_mut().positioning_ops.push(PythonPositioningOp::NextTo {
-            reference: reference.id,
-            direction: dir,
-            spacing,
-            aligned_edge: align,
-        });
+        s.common_mut()
+            .positioning_ops
+            .push(PythonPositioningOp::NextTo {
+                reference: reference.id,
+                direction: dir,
+                spacing,
+                aligned_edge: align,
+            });
         drop(s);
         Ok(new)
     }
@@ -705,10 +934,12 @@ impl PyMobject {
         })?;
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
-        s.common_mut().positioning_ops.push(PythonPositioningOp::ToEdge {
-            direction: dir,
-            buff,
-        });
+        s.common_mut()
+            .positioning_ops
+            .push(PythonPositioningOp::ToEdge {
+                direction: dir,
+                buff,
+            });
         drop(s);
         Ok(new)
     }
@@ -721,10 +952,9 @@ impl PyMobject {
         })?;
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
-        s.common_mut().positioning_ops.push(PythonPositioningOp::ToCorner {
-            corner: anc,
-            buff,
-        });
+        s.common_mut()
+            .positioning_ops
+            .push(PythonPositioningOp::ToCorner { corner: anc, buff });
         drop(s);
         Ok(new)
     }
@@ -738,27 +968,45 @@ impl PyMobject {
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
         if let MobjectSpec::Group { layout_op, .. } = &mut *s {
-            *layout_op = Some(PythonGroupLayoutOp::Arrange { direction: dir, spacing });
+            *layout_op = Some(PythonGroupLayoutOp::Arrange {
+                direction: dir,
+                spacing,
+            });
             drop(s);
             Ok(new)
         } else {
             drop(s);
-            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Mobject is not a Group",
+            ))
         }
     }
 
     /// Arrange group children in a grid.
     #[pyo3(signature = (rows=None, cols=None, h_spacing=10.0, v_spacing=10.0))]
-    fn arrange_in_grid(&self, rows: Option<usize>, cols: Option<usize>, h_spacing: f64, v_spacing: f64) -> PyResult<Self> {
+    fn arrange_in_grid(
+        &self,
+        rows: Option<usize>,
+        cols: Option<usize>,
+        h_spacing: f64,
+        v_spacing: f64,
+    ) -> PyResult<Self> {
         let new = self.clone();
         let mut s = lock_spec!(new.spec);
         if let MobjectSpec::Group { layout_op, .. } = &mut *s {
-            *layout_op = Some(PythonGroupLayoutOp::ArrangeInGrid { rows, cols, h_spacing, v_spacing });
+            *layout_op = Some(PythonGroupLayoutOp::ArrangeInGrid {
+                rows,
+                cols,
+                h_spacing,
+                v_spacing,
+            });
             drop(s);
             Ok(new)
         } else {
             drop(s);
-            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Mobject is not a Group",
+            ))
         }
     }
 
@@ -773,7 +1021,9 @@ impl PyMobject {
             Ok(new)
         } else {
             drop(s);
-            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Mobject is not a Group",
+            ))
         }
     }
 
@@ -788,7 +1038,9 @@ impl PyMobject {
             Ok(new)
         } else {
             drop(s);
-            Err(pyo3::exceptions::PyTypeError::new_err("Mobject is not a Group"))
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Mobject is not a Group",
+            ))
         }
     }
 
@@ -1045,8 +1297,7 @@ impl PyMobject {
     #[pyo3(signature = (color=None, n_lines=12, radius=100.0))]
     fn flash(&self, color: Option<&PyColor>, n_lines: u32, radius: f64) -> PyAnimationSpec {
         use gaanim_api::builder::MobjectRef;
-        let builder =
-            MobjectRef { id: self.id }.flash(color.map(|c| c.0), n_lines, radius);
+        let builder = MobjectRef { id: self.id }.flash(color.map(|c| c.0), n_lines, radius);
         PyAnimationSpec::from_builder(builder)
     }
 
@@ -1054,8 +1305,7 @@ impl PyMobject {
     #[pyo3(signature = (color=None))]
     fn circumscribe(&self, color: Option<&PyColor>) -> PyAnimationSpec {
         use gaanim_api::builder::MobjectRef;
-        let builder =
-            MobjectRef { id: self.id }.circumscribe(color.map(|c| c.0));
+        let builder = MobjectRef { id: self.id }.circumscribe(color.map(|c| c.0));
         PyAnimationSpec::from_builder(builder)
     }
 
@@ -1107,10 +1357,19 @@ impl PyMobject {
         PyAnimationSpec::from_builder(builder)
     }
 
-    fn add_bob_updater(&self, scene: &crate::scene::PyScene, amplitude: f64, frequency: f64) -> PyResult<()> {
+    fn add_bob_updater(
+        &self,
+        scene: &crate::scene::PyScene,
+        amplitude: f64,
+        frequency: f64,
+    ) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
         inner.ops.push(crate::scene::DeferredOp::AddUpdater {
             target: self.id,
@@ -1124,7 +1383,11 @@ impl PyMobject {
     fn add_rotate_updater(&self, scene: &crate::scene::PyScene, speed: f64) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
         inner.ops.push(crate::scene::DeferredOp::AddUpdater {
             target: self.id,
@@ -1135,10 +1398,21 @@ impl PyMobject {
         Ok(())
     }
 
-    fn add_orbit_updater(&self, scene: &crate::scene::PyScene, cx: f64, cy: f64, radius: f64, speed: f64) -> PyResult<()> {
+    fn add_orbit_updater(
+        &self,
+        scene: &crate::scene::PyScene,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        speed: f64,
+    ) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
         inner.ops.push(crate::scene::DeferredOp::AddUpdater {
             target: self.id,
@@ -1149,10 +1423,20 @@ impl PyMobject {
         Ok(())
     }
 
-    fn add_pulse_updater(&self, scene: &crate::scene::PyScene, min_scale: f64, max_scale: f64, frequency: f64) -> PyResult<()> {
+    fn add_pulse_updater(
+        &self,
+        scene: &crate::scene::PyScene,
+        min_scale: f64,
+        max_scale: f64,
+        frequency: f64,
+    ) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
         inner.ops.push(crate::scene::DeferredOp::AddUpdater {
             target: self.id,
@@ -1174,7 +1458,11 @@ impl PyMobject {
     ) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
         inner.ops.push(crate::scene::DeferredOp::AddUpdater {
             target: self.id,
@@ -1188,11 +1476,15 @@ impl PyMobject {
     fn remove_updater(&self, scene: &crate::scene::PyScene) -> PyResult<()> {
         let mut inner = match scene.inner.lock() {
             Ok(guard) => guard,
-            Err(_) => return Err(pyo3::exceptions::PyRuntimeError::new_err("Scene mutex is poisoned")),
+            Err(_) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Scene mutex is poisoned",
+                ))
+            }
         };
-        inner.ops.push(crate::scene::DeferredOp::RemoveUpdater {
-            target: self.id,
-        });
+        inner
+            .ops
+            .push(crate::scene::DeferredOp::RemoveUpdater { target: self.id });
         Ok(())
     }
 }
@@ -1226,8 +1518,6 @@ fn anchor_from_str(s: &str) -> Option<gaanim_layout::Anchor> {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1257,10 +1547,22 @@ mod tests {
         let spec = make_circle((0.0, 0.0));
         let contours = spec.to_contours();
         assert_eq!(contours.len(), 1);
-        let min_x = contours[0].iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
-        let max_x = contours[0].iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
-        let min_y = contours[0].iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
-        let max_y = contours[0].iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+        let min_x = contours[0]
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::INFINITY, f64::min);
+        let max_x = contours[0]
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = contours[0]
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::INFINITY, f64::min);
+        let max_y = contours[0]
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::NEG_INFINITY, f64::max);
         let cx = (min_x + max_x) * 0.5;
         let cy = (min_y + max_y) * 0.5;
         assert!(cx.abs() < 0.1, "expected center near 0, got {}", cx);
@@ -1272,13 +1574,29 @@ mod tests {
         let spec = make_circle((-40.0, 0.0));
         let contours = spec.to_contours();
         assert_eq!(contours.len(), 1);
-        let min_x = contours[0].iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
-        let max_x = contours[0].iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
-        let min_y = contours[0].iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
-        let max_y = contours[0].iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+        let min_x = contours[0]
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::INFINITY, f64::min);
+        let max_x = contours[0]
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = contours[0]
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::INFINITY, f64::min);
+        let max_y = contours[0]
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::NEG_INFINITY, f64::max);
         let cx = (min_x + max_x) * 0.5;
         let cy = (min_y + max_y) * 0.5;
-        assert!((cx - (-40.0)).abs() < 0.1, "expected center near -40, got {}", cx);
+        assert!(
+            (cx - (-40.0)).abs() < 0.1,
+            "expected center near -40, got {}",
+            cx
+        );
         assert!(cy.abs() < 0.1, "expected center near 0, got {}", cy);
     }
 }

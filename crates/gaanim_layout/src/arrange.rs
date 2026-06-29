@@ -1,7 +1,7 @@
+use crate::positioning::{compute_next_to, transform_bounds};
+use crate::{Anchor, Direction};
 use gaanim_core::glam::DVec3;
 use gaanim_math::{Bounds3D, SpatialTransform};
-use crate::{Anchor, Direction};
-use crate::positioning::{compute_next_to, transform_bounds};
 
 /// Arranges items linearly along a direction with uniform spacing.
 /// Returns the list of positions (translations) for each item.

@@ -266,7 +266,11 @@ impl PropertyLensSpec {
                 from: *from,
                 to: *to,
             },
-            Self::PathRange { from, to, time_width } => PropertyLens::PathRange {
+            Self::PathRange {
+                from,
+                to,
+                time_width,
+            } => PropertyLens::PathRange {
                 from: *from,
                 to: *to,
                 time_width: *time_width,

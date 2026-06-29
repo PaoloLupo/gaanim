@@ -1,6 +1,6 @@
-use gaanim_core::glam::DVec3;
 use crate::Anchor;
 use crate::LayoutDirection;
+use gaanim_core::glam::DVec3;
 use std::ops::Add;
 
 /// Combinable direction type. Supports UP + LEFT = TopLeft style composition.
@@ -140,9 +140,11 @@ impl From<Direction> for LayoutDirection {
             Direction::Down => Self::Down,
             Direction::Left => Self::Left,
             Direction::Right => Self::Right,
-            Direction::UpLeft | Direction::UpRight | Direction::DownLeft | Direction::DownRight | Direction::Custom(_) => {
-                Self::Custom(other.to_vector())
-            }
+            Direction::UpLeft
+            | Direction::UpRight
+            | Direction::DownLeft
+            | Direction::DownRight
+            | Direction::Custom(_) => Self::Custom(other.to_vector()),
         }
     }
 }

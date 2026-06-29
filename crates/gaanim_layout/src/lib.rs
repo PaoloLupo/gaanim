@@ -2,30 +2,19 @@ use gaanim_core::glam::DVec3;
 use gaanim_math::{Bounds3D, SpatialTransform};
 
 pub mod anchor;
+pub mod arrange;
 pub mod direction;
 pub mod positioning;
-pub mod arrange;
 pub mod query;
 
 pub use anchor::Anchor;
+pub use arrange::{arrange, arrange_in_grid, hstack, vstack};
 pub use direction::Direction;
 pub use positioning::{
-    transform_bounds,
-    compute_move_to,
-    compute_to_edge,
-    compute_to_corner,
-    compute_next_to as compute_next_to_new,
-    compute_align_to as compute_align_to_new,
+    compute_align_to as compute_align_to_new, compute_move_to,
+    compute_next_to as compute_next_to_new, compute_to_corner, compute_to_edge, transform_bounds,
 };
-pub use arrange::{arrange, arrange_in_grid, hstack, vstack};
-pub use query::{
-    get_anchor_point,
-    get_center,
-    get_corner,
-    get_edge_center,
-    get_width,
-    get_height,
-};
+pub use query::{get_anchor_point, get_center, get_corner, get_edge_center, get_height, get_width};
 
 /// Legacy layout anchors representing discrete alignment points on a bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

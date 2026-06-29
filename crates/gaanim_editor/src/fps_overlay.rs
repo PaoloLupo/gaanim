@@ -74,7 +74,11 @@ impl FpsOverlay {
                 } else {
                     0.0
                 };
-                let min = if self.min_fps < f32::MAX { self.min_fps } else { 0.0 };
+                let min = if self.min_fps < f32::MAX {
+                    self.min_fps
+                } else {
+                    0.0
+                };
                 let stats = format!(
                     "{:.0} FPS  |  {:.1} ms  |  Ø {:.0}  |  ↓ {:.0}  ↑ {:.0}",
                     self.current_fps, self.current_ms, avg, min, self.max_fps,
@@ -95,7 +99,11 @@ impl FpsOverlay {
                 let p = ui.painter_at(graph_rect);
 
                 // Background for graph
-                p.rect_filled(graph_rect, 2u8, Color32::from_rgba_premultiplied(0, 0, 0, 100));
+                p.rect_filled(
+                    graph_rect,
+                    2u8,
+                    Color32::from_rgba_premultiplied(0, 0, 0, 100),
+                );
 
                 let baseline = 30.0_f32; // 0 fps baseline in graph space
                 let scale = (graph_h - 4.0) / baseline; // pixels per fps

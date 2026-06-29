@@ -1,6 +1,6 @@
+use crate::{Anchor, Direction};
 use gaanim_core::glam::DVec3;
 use gaanim_math::{Bounds3D, SpatialTransform};
-use crate::{Anchor, Direction};
 
 /// Transforms a local bounding box into parent/world space by applying the spatial transform.
 pub fn transform_bounds(bounds: Bounds3D, transform: &SpatialTransform) -> Bounds3D {
@@ -32,11 +32,11 @@ pub fn compute_move_to(
 ) -> SpatialTransform {
     let mut new_transform = *transform;
     let anchor_local = anchor.get_point(&bounds);
-    
+
     // Find the world space offset of anchor_local relative to translation
     let pivot = transform.anchor;
     let offset_world = pivot + transform.rotation * (transform.scale * (anchor_local - pivot));
-    
+
     new_transform.translation = target - offset_world;
     new_transform
 }

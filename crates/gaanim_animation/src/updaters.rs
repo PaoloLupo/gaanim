@@ -1,10 +1,10 @@
+use crate::tween::DeltaTime;
 use bevy::prelude::{Component, Entity, World};
+use gaanim_core::glam::DVec3;
+use gaanim_math::SpatialTransform;
+use gaanim_scene::Path2D;
 use std::sync::Arc;
 use std::sync::Mutex;
-use gaanim_math::SpatialTransform;
-use gaanim_core::glam::DVec3;
-use gaanim_scene::Path2D;
-use crate::tween::DeltaTime;
 
 /// Componente que define una función de actualización continua para una entidad.
 /// Se ejecuta cada frame durante SceneSet::Updaters.
@@ -22,7 +22,9 @@ pub struct Updater {
 
 impl Updater {
     /// Crea una nueva instancia de Updater a partir de un closure.
-    pub fn new(func: impl Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync + 'static) -> Self {
+    pub fn new(
+        func: impl Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync + 'static,
+    ) -> Self {
         Self {
             func: Arc::new(func),
             elapsed: 0.0,
@@ -33,10 +35,13 @@ impl Updater {
 
 /// Sistema Bevy que ejecuta todos los updaters activos con acceso exclusivo al World.
 pub fn updater_system(world: &mut World) {
-    let dt = world.get_resource::<DeltaTime>().map(|d| d.dt).unwrap_or(0.0);
+    let dt = world
+        .get_resource::<DeltaTime>()
+        .map(|d| d.dt)
+        .unwrap_or(0.0);
 
     let mut updates = Vec::new();
-    
+
     // Consultamos los updaters para extraer sus Arcs y ejecutarlos sin colisiones de préstamos de Bevy.
     let mut query = world.query::<(Entity, &mut Updater)>();
     for (entity, mut updater) in query.iter_mut(world) {
@@ -73,7 +78,8 @@ pub fn bob_updater(amplitude: f64, frequency: f64) -> Updater {
         let y0 = match *y_cache {
             Some(val) => val,
             None => {
-                let current_y = world.get::<SpatialTransform>(entity)
+                let current_y = world
+                    .get::<SpatialTransform>(entity)
                     .map(|t| t.translation.y)
                     .unwrap_or(0.0);
                 *y_cache = Some(current_y);
@@ -121,7 +127,8 @@ pub fn pulse_updater(min_scale: f64, max_scale: f64, frequency: f64) -> Updater 
         let s0 = match *scale_cache {
             Some(val) => val,
             None => {
-                let current_scale = world.get::<SpatialTransform>(entity)
+                let current_scale = world
+                    .get::<SpatialTransform>(entity)
                     .map(|t| t.scale)
                     .unwrap_or(DVec3::ONE);
                 *scale_cache = Some(current_scale);
@@ -132,7 +139,8 @@ pub fn pulse_updater(min_scale: f64, max_scale: f64, frequency: f64) -> Updater 
         if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
             let half_diff = (max_scale - min_scale) / 2.0;
             let mid = min_scale + half_diff;
-            let multiplier = mid + half_diff * (elapsed * frequency * 2.0 * std::f64::consts::PI).sin();
+            let multiplier =
+                mid + half_diff * (elapsed * frequency * 2.0 * std::f64::consts::PI).sin();
             transform.scale = s0 * multiplier;
         }
         true
@@ -142,8 +150,7 @@ pub fn pulse_updater(min_scale: f64, max_scale: f64, frequency: f64) -> Updater 
 /// Hace que la entidad siga la posición de otra entidad con un desplazamiento y suavizado.
 pub fn follow_updater(target: Entity, offset: DVec3, smoothing: f64) -> Updater {
     Updater::new(move |dt, _elapsed, entity, world| {
-        let target_pos = world.get::<SpatialTransform>(target)
-            .map(|t| t.translation);
+        let target_pos = world.get::<SpatialTransform>(target).map(|t| t.translation);
 
         if let Some(pos) = target_pos {
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
@@ -194,14 +201,20 @@ pub fn traced_path_system(world: &mut World) {
     let mut trace_jobs = Vec::new();
     let mut query = world.query::<(Entity, &TracedPath)>();
     for (trace_entity, traced_path) in query.iter(world) {
-        trace_jobs.push((trace_entity, traced_path.source, traced_path.min_distance, traced_path.max_points));
+        trace_jobs.push((
+            trace_entity,
+            traced_path.source,
+            traced_path.min_distance,
+            traced_path.max_points,
+        ));
     }
 
     let mut trace_updates = Vec::new();
 
     // 2. Procesamos cada trace_job consultando el world de forma secuencial y limpia
     for (trace_entity, source_entity, min_distance, max_points) in trace_jobs {
-        let source_pos = world.get::<SpatialTransform>(source_entity)
+        let source_pos = world
+            .get::<SpatialTransform>(source_entity)
             .map(|t| t.translation);
 
         if let Some(pos) = source_pos {
@@ -223,7 +236,10 @@ pub fn traced_path_system(world: &mut World) {
                     // Regenerar el path
                     let mut path = gaanim_core::kurbo::BezPath::new();
                     if !traced_path.points.is_empty() {
-                        path.move_to(gaanim_core::kurbo::Point::new(traced_path.points[0].x, traced_path.points[0].y));
+                        path.move_to(gaanim_core::kurbo::Point::new(
+                            traced_path.points[0].x,
+                            traced_path.points[0].y,
+                        ));
                         for pt in &traced_path.points[1..] {
                             path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
                         }
@@ -241,4 +257,3 @@ pub fn traced_path_system(world: &mut World) {
         }
     }
 }
-

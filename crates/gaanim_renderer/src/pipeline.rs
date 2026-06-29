@@ -68,8 +68,14 @@ pub fn sync_gaanim_camera_to_bevy_system(
 /// Run this system before `gaanim_render_system` so the cache stays consistent.
 pub fn gaanim_render_cache_sweep_system(
     mut cache: ResMut<GaanimRenderCache>,
+    mut removed: RemovedComponents<MobjectId>,
     query_mobj_ids: Query<&MobjectId>,
 ) {
+    // Only sweep when entities with MobjectId were actually removed.
+    // On static frames this is a no-op (zero cost).
+    if removed.read().next().is_none() {
+        return;
+    }
     let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
     cache.fragment_cache.retain(|id, _| active.contains(id));
 }
@@ -130,8 +136,17 @@ pub fn compile_scene_from_world(
 
     let mut child_query = world.query::<&ChildOf>();
 
-    for (entity, _mobj_id, transform, global_opacity, render_order, render_layer, path_opt, fill_opt, stroke_opt) in
-        query_mobjects.iter(world)
+    for (
+        entity,
+        _mobj_id,
+        transform,
+        global_opacity,
+        render_order,
+        render_layer,
+        path_opt,
+        fill_opt,
+        stroke_opt,
+    ) in query_mobjects.iter(world)
     {
         if *render_layer != RenderLayer::Vello2D {
             continue;
@@ -165,10 +180,11 @@ pub fn compile_scene_from_world(
             }
 
             if let Some(w_bounds) = world_bounds_opt
-                && !bounds.intersects(&w_bounds.0) {
-                    culled_entities.insert(entity);
-                    continue;
-                }
+                && !bounds.intersects(&w_bounds.0)
+            {
+                culled_entities.insert(entity);
+                continue;
+            }
         }
 
         let fill_alpha = fill_progress_opt
@@ -220,8 +236,7 @@ pub fn compile_scene_from_world(
         if let Some(stroke_brush) = elem_stroke
             && let Some(style) = elem_stroke_style
         {
-            let has_closed_contour = elem_path
-                .elements().contains(&kurbo::PathEl::ClosePath);
+            let has_closed_contour = elem_path.elements().contains(&kurbo::PathEl::ClosePath);
             if has_closed_contour {
                 scene.push_layer(
                     peniko::Fill::NonZero,
@@ -230,10 +245,22 @@ pub fn compile_scene_from_world(
                     kurbo::Affine::IDENTITY,
                     elem_path,
                 );
-                scene.stroke(style, kurbo::Affine::IDENTITY, stroke_brush, None, elem_path);
+                scene.stroke(
+                    style,
+                    kurbo::Affine::IDENTITY,
+                    stroke_brush,
+                    None,
+                    elem_path,
+                );
                 scene.pop_layer();
             } else {
-                scene.stroke(style, kurbo::Affine::IDENTITY, stroke_brush, None, elem_path);
+                scene.stroke(
+                    style,
+                    kurbo::Affine::IDENTITY,
+                    stroke_brush,
+                    None,
+                    elem_path,
+                );
             }
         }
 
@@ -325,24 +352,24 @@ pub fn gaanim_render_system(
         ),
         With<Visible>,
     >,
-    query_effects: Query<
-        (
-            Option<Ref<DropShadow>>,
-            Option<Ref<Glow>>,
-            Option<Ref<GaussianBlur>>,
-            Option<Ref<ClipMask>>,
-            Option<Ref<FillDrawProgress>>,
-            Option<&WorldBounds>,
-            Option<&gaanim_scene::GroupMarker>,
-        ),
-    >,
+    query_effects: Query<(
+        Option<Ref<DropShadow>>,
+        Option<Ref<Glow>>,
+        Option<Ref<GaussianBlur>>,
+        Option<Ref<ClipMask>>,
+        Option<Ref<FillDrawProgress>>,
+        Option<&WorldBounds>,
+        Option<&gaanim_scene::GroupMarker>,
+    )>,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d), With<MainVelloScene>>,
+    mut local_extracted: Local<Vec<ExtractedElement>>,
+    mut local_culled: Local<std::collections::HashSet<Entity>>,
 ) {
-    let mut extracted = Vec::new();
+    local_extracted.clear();
     let mut scene_aabb_min = Vec3::splat(f32::INFINITY);
     let mut scene_aabb_max = Vec3::splat(f32::NEG_INFINITY);
 
-    let mut culled_entities = std::collections::HashSet::new();
+    local_culled.clear();
 
     // 1. Calculate orthographic camera bounds for culling
     let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
@@ -375,8 +402,17 @@ pub fn gaanim_render_system(
     ) in &query_mobjects
     {
         // Look up effects, bounds and group marker components on-demand to keep Query tuple size small
-        let (shadow_ref, glow_ref, blur_ref, clip_ref, fill_progress_ref, world_bounds_opt, is_group_opt) =
-            query_effects.get(entity).unwrap_or((None, None, None, None, None, None, None));
+        let (
+            shadow_ref,
+            glow_ref,
+            blur_ref,
+            clip_ref,
+            fill_progress_ref,
+            world_bounds_opt,
+            is_group_opt,
+        ) = query_effects
+            .get(entity)
+            .unwrap_or((None, None, None, None, None, None, None));
 
         // 2. Perform camera frustum culling and hierarchical culling propagation
         if let Some(bounds) = cam_bounds {
@@ -385,7 +421,7 @@ pub fn gaanim_render_system(
             let mut current = entity;
             while let Ok(child_of) = child_query.get(current) {
                 let parent = child_of.parent();
-                if culled_entities.contains(&parent) {
+                if local_culled.contains(&parent) {
                     is_ancestor_culled = true;
                     break;
                 }
@@ -393,16 +429,17 @@ pub fn gaanim_render_system(
             }
 
             if is_ancestor_culled {
-                culled_entities.insert(entity);
+                local_culled.insert(entity);
                 continue;
             }
 
             // Check if this entity's own bounds are out of camera bounds
             if let Some(w_bounds) = world_bounds_opt
-                && !bounds.intersects(&w_bounds.0) {
-                    culled_entities.insert(entity);
-                    continue;
-                }
+                && !bounds.intersects(&w_bounds.0)
+            {
+                local_culled.insert(entity);
+                continue;
+            }
         }
 
         // Only process visible Vello2D elements
@@ -514,8 +551,7 @@ pub fn gaanim_render_system(
             if let Some(stroke_brush) = elem_stroke
                 && let Some(style) = elem_stroke_style
             {
-                let has_closed_contour = elem_path
-                    .elements().contains(&kurbo::PathEl::ClosePath);
+                let has_closed_contour = elem_path.elements().contains(&kurbo::PathEl::ClosePath);
                 if has_closed_contour {
                     scene.push_layer(
                         peniko::Fill::NonZero,
@@ -551,7 +587,7 @@ pub fn gaanim_render_system(
             Arc::new(scene)
         });
 
-        extracted.push(ExtractedElement {
+        local_extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             render_order: *render_order,
@@ -578,7 +614,7 @@ pub fn gaanim_render_system(
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
-    extracted.sort_by(
+    local_extracted.sort_by(
         |a, b| match a.render_order.z_index.cmp(&b.render_order.z_index) {
             std::cmp::Ordering::Equal => a
                 .render_order
@@ -591,7 +627,7 @@ pub fn gaanim_render_system(
     // Assemble the global composited Scene in Bevy world coordinates
     let mut main_scene = vello::Scene::new();
 
-    for elem in extracted {
+    for elem in local_extracted.drain(..) {
         let mut layers_to_pop = 0;
 
         if let Some(clip) = &elem.clip_mask {

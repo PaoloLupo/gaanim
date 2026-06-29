@@ -209,24 +209,25 @@ impl PyScene {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
         let common = Self::default_common(inner.theme.0.primary);
-        
-        let children_specs = children.iter()
+
+        let children_specs = children
+            .iter()
             .map(|c| (c.id, c.spec.clone(), c.creation_order))
             .collect();
-            
+
         let spec = Arc::new(Mutex::new(MobjectSpec::Group {
             common,
             children: children_specs,
             layout_op: None,
         }));
-        
+
         let order = id.index() as u64;
         inner.ops.push(DeferredOp::Spawn {
             id,
             spec: spec.clone(),
             creation_order: order,
         });
-        
+
         Ok(PyMobject {
             id,
             spec,
@@ -237,7 +238,9 @@ impl PyScene {
     fn value_tracker(&self, initial: f64) -> PyResult<PyValueTracker> {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
-        inner.ops.push(DeferredOp::SpawnValueTracker { id, initial });
+        inner
+            .ops
+            .push(DeferredOp::SpawnValueTracker { id, initial });
         Ok(PyValueTracker { id })
     }
 
@@ -252,8 +255,10 @@ impl PyScene {
     ) -> PyResult<PyMobject> {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
-        let c = color.map(|c| c.0).unwrap_or(peniko::Color::from_rgb8(255, 215, 0));
-        
+        let c = color
+            .map(|c| c.0)
+            .unwrap_or(peniko::Color::from_rgb8(255, 215, 0));
+
         inner.ops.push(DeferredOp::SpawnTracedPath {
             id,
             source: source.id,
@@ -290,10 +295,7 @@ impl PyScene {
         let mut inner = lock_inner!(self.inner);
         let id = inner.next_id();
         let common = Self::default_common(inner.theme.0.primary);
-        let spec = Arc::new(Mutex::new(MobjectSpec::Circle {
-            common,
-            radius,
-        }));
+        let spec = Arc::new(Mutex::new(MobjectSpec::Circle { common, radius }));
         let order = id.index() as u64;
         inner.ops.push(DeferredOp::Spawn {
             id,
@@ -360,7 +362,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             start: (x1, y1),
             end: (x2, y2),
@@ -376,7 +379,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             start: (x1, y1),
             end: (x2, y2),
@@ -410,7 +414,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             size,
         })
@@ -518,7 +523,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             start: (x1, y1),
             end: (x2, y2),
@@ -544,7 +550,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             center: (cx, cy),
             rx,
@@ -570,7 +577,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             start: (x1, y1),
             end: (x2, y2),
@@ -595,7 +603,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             start: (x1, y1),
             end: (x2, y2),
@@ -645,7 +654,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             width,
             height,
@@ -662,7 +672,8 @@ impl PyScene {
                 z_index: -10,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             width,
             height,
@@ -678,7 +689,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             size,
         })
@@ -693,7 +705,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             arm_length,
         })
@@ -702,12 +715,7 @@ impl PyScene {
     /// Tangent line to a polyline curve at fractional position `t`.
     /// `curve` is a list of `(x, y)` waypoints; `length` is the
     /// half-length of the line on either side of the tangent point.
-    fn tangent_line(
-        &self,
-        curve: Vec<(f64, f64)>,
-        t: f64,
-        length: f64,
-    ) -> PyResult<PyMobject> {
+    fn tangent_line(&self, curve: Vec<(f64, f64)>, t: f64, length: f64) -> PyResult<PyMobject> {
         if curve.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "tangent_line requires at least 2 waypoints",
@@ -721,7 +729,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             curve,
             t,
@@ -746,7 +755,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             x_range,
             y_range,
@@ -943,12 +953,16 @@ impl PyScene {
         }
 
         if let Some(ar) = aspect_ratio {
-            let preset = match ar.to_lowercase().as_str() {
-                "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
-                "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
-                "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
-                _ => return Err(PyValueError::new_err(format!("Invalid aspect ratio preset: {}. Choose from: youtube, tiktok, instagram", ar))),
-            };
+            let preset =
+                match ar.to_lowercase().as_str() {
+                    "youtube" | "16:9" | "16_9" => AspectRatioPreset::Youtube,
+                    "tiktok" | "9:16" | "9_16" => AspectRatioPreset::TikTok,
+                    "instagram" | "1:1" | "1_1" => AspectRatioPreset::Instagram,
+                    _ => return Err(PyValueError::new_err(format!(
+                        "Invalid aspect ratio preset: {}. Choose from: youtube, tiktok, instagram",
+                        ar
+                    ))),
+                };
             config = config.with_aspect_ratio(preset);
         }
 
@@ -957,7 +971,12 @@ impl PyScene {
                 "draft" => QualityPreset::Draft,
                 "standard" => QualityPreset::Standard,
                 "production" => QualityPreset::Production,
-                _ => return Err(PyValueError::new_err(format!("Invalid quality preset: {}. Choose from: draft, standard, production", q))),
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "Invalid quality preset: {}. Choose from: draft, standard, production",
+                        q
+                    )))
+                }
             };
             config = config.with_quality(preset);
         }
@@ -1021,7 +1040,8 @@ impl PyScene {
             z_index: 0,
             opacity: 1.0,
             transform: gaanim_math::SpatialTransform::default(),
-            next_to: None, positioning_ops: Vec::new(),
+            next_to: None,
+            positioning_ops: Vec::new(),
         }
     }
     pub(crate) fn push_selection_fill(
@@ -1115,7 +1135,8 @@ impl PyScene {
                 z_index: 0,
                 opacity: 1.0,
                 transform: gaanim_math::SpatialTransform::default(),
-                next_to: None, positioning_ops: Vec::new(),
+                next_to: None,
+                positioning_ops: Vec::new(),
             },
             contours: combined,
         })

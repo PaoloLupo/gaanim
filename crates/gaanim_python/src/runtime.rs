@@ -12,7 +12,7 @@ use gaanim_text::font::FontRegistry;
 use gaanim_text::prelude::TextRole;
 use gaanim_timeline::timeline::Timeline;
 
-use crate::mobject::{MobjectSpec, TextRoleKind, PythonPositioningOp, PythonGroupLayoutOp};
+use crate::mobject::{MobjectSpec, PythonGroupLayoutOp, PythonPositioningOp, TextRoleKind};
 use crate::scene::DeferredOp;
 
 /// Build a Bevy `App`, replay the deferred op queue, and run the window.
@@ -86,11 +86,10 @@ pub fn run_editor(
     app.add_systems(Startup, move |world: &mut World| {
         let ops_taken = ops.take().expect("Startup called twice");
         let ops_clone = ops_taken.clone();
-        let replay_fn: std::sync::Arc<dyn Fn(&mut World) + Send + Sync> = std::sync::Arc::new(
-            move |w: &mut World| {
+        let replay_fn: std::sync::Arc<dyn Fn(&mut World) + Send + Sync> =
+            std::sync::Arc::new(move |w: &mut World| {
                 replay_into(w, ops_clone.clone(), width, height, background);
-            }
-        );
+            });
         world.insert_resource(gaanim_editor::export::StashedReplay(Some(replay_fn)));
         replay_into(world, ops_taken, width, height, background);
         // Start paused in editor mode so the user can inspect first.
@@ -312,9 +311,15 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             DeferredOp::SceneEnd => {
                 scene.end_scene();
             }
-            DeferredOp::SceneConnect { from_index, to_index, transition } => {
+            DeferredOp::SceneConnect {
+                from_index,
+                to_index,
+                transition,
+            } => {
                 if from_index < scene_ids.len() && to_index < scene_ids.len() {
-                    scene.timeline.connect(scene_ids[from_index], scene_ids[to_index], transition);
+                    scene
+                        .timeline
+                        .connect(scene_ids[from_index], scene_ids[to_index], transition);
                 }
             }
             DeferredOp::SpawnValueTracker { id, initial } => {
@@ -360,7 +365,8 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                                 let ox = params.get(0).copied().unwrap_or(0.0);
                                 let oy = params.get(1).copied().unwrap_or(0.0);
                                 let smoothing = params.get(2).copied().unwrap_or(0.0);
-                                let f_target = follow_target.and_then(|t| py_to_bevy.get(&t).copied());
+                                let f_target =
+                                    follow_target.and_then(|t| py_to_bevy.get(&t).copied());
                                 if let Some(bevy_ft) = f_target {
                                     if let Some(ft_state) = scene.states.get(bevy_ft) {
                                         gaanim_animation::updaters::follow_updater(
@@ -384,7 +390,10 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
             DeferredOp::RemoveUpdater { target } => {
                 if let Some(&bevy_target) = py_to_bevy.get(&target) {
                     if let Some(state) = scene.states.get(bevy_target) {
-                        scene.commands.entity(state.entity).remove::<gaanim_animation::Updater>();
+                        scene
+                            .commands
+                            .entity(state.entity)
+                            .remove::<gaanim_animation::Updater>();
                     }
                 }
             }
@@ -405,21 +414,24 @@ fn run_replay(scene: &mut SceneBuilder<'_, '_, '_>, ops: Vec<DeferredOp>) -> Rep
                             gaanim_core::kurbo::Point::new(0.0, 0.0),
                             gaanim_core::kurbo::Point::new(0.0, 0.0),
                         );
-                        let trace_entity = scene.commands.spawn((
-                            bundle,
-                            gaanim_animation::TracedPath::new(
-                                source_entity,
-                                min_distance,
-                                max_points,
-                            ),
-                        )).id();
+                        let trace_entity = scene
+                            .commands
+                            .spawn((
+                                bundle,
+                                gaanim_animation::TracedPath::new(
+                                    source_entity,
+                                    min_distance,
+                                    max_points,
+                                ),
+                            ))
+                            .id();
                         scene.tag_entity(trace_entity);
-                        
+
                         scene.commands.entity(trace_entity).insert((
                             gaanim_scene::StrokeBrush::new(color, width),
                             gaanim_scene::FillBrush(None),
                         ));
-                        
+
                         let state = gaanim_api::builder::MobjectState {
                             bounds: gaanim_math::Bounds3D::default(),
                             transform: gaanim_math::SpatialTransform::default(),
@@ -497,11 +509,7 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Line {
-            common,
-            start,
-            end,
-        } => {
+        MobjectSpec::Line { common, start, end } => {
             let b = scene.line(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
@@ -555,11 +563,7 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::Arrow {
-            common,
-            start,
-            end,
-        } => {
+        MobjectSpec::Arrow { common, start, end } => {
             let b = scene.arrow(
                 gaanim_core::kurbo::Point::new(start.0, start.1),
                 gaanim_core::kurbo::Point::new(end.0, end.1),
@@ -706,7 +710,12 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::TangentLine { common, curve, t, length } => {
+        MobjectSpec::TangentLine {
+            common,
+            curve,
+            t,
+            length,
+        } => {
             let pts: Vec<gaanim_core::kurbo::Point> = curve
                 .iter()
                 .map(|(x, y)| gaanim_core::kurbo::Point::new(*x, *y))
@@ -716,7 +725,13 @@ fn spawn_mobject(
             let b = b.transform(common.transform).opacity(common.opacity);
             apply_next_to(b, resolved_next_to).spawn().id
         }
-        MobjectSpec::NumberPlane { common, x_range, y_range, axis_stroke, grid_stroke } => {
+        MobjectSpec::NumberPlane {
+            common,
+            x_range,
+            y_range,
+            axis_stroke,
+            grid_stroke,
+        } => {
             let b = scene.number_plane(x_range, y_range, axis_stroke, grid_stroke);
             let b = apply_visual(b, common.fill, common.stroke);
             let b = b.transform(common.transform).opacity(common.opacity);
@@ -776,10 +791,7 @@ fn spawn_mobject(
             mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
-        MobjectSpec::Equation {
-            common,
-            formula,
-        } => {
+        MobjectSpec::Equation { common, formula } => {
             let mut mref = scene.equation(&formula);
             if let Some(c) = common.fill {
                 mref = paint_fill(scene, mref, c);
@@ -788,22 +800,33 @@ fn spawn_mobject(
             mref = apply_opacity(scene, mref, common.opacity);
             mref.id
         }
-        MobjectSpec::Group { common, children, layout_op: _ } => {
+        MobjectSpec::Group {
+            common,
+            children,
+            layout_op: _,
+        } => {
             // Translate python-side child IDs to Bevy-side ObjectIds
             let bevy_children: Vec<MobjectRef> = children
                 .iter()
-                .filter_map(|(py_id, _, _)| py_to_bevy.get(py_id).map(|&bid| MobjectRef { id: bid }))
+                .filter_map(|(py_id, _, _)| {
+                    py_to_bevy.get(py_id).map(|&bid| MobjectRef { id: bid })
+                })
                 .collect();
-            
+
             // Spawn the group natively in SceneBuilder
             let group_ref = scene.group(&bevy_children);
-            
+
             if let Some(op) = &layout_op {
                 match op {
                     PythonGroupLayoutOp::Arrange { direction, spacing } => {
                         scene.arrange(group_ref, *direction, *spacing);
                     }
-                    PythonGroupLayoutOp::ArrangeInGrid { rows, cols, h_spacing, v_spacing } => {
+                    PythonGroupLayoutOp::ArrangeInGrid {
+                        rows,
+                        cols,
+                        h_spacing,
+                        v_spacing,
+                    } => {
                         scene.arrange_in_grid(group_ref, *rows, *cols, *h_spacing, *v_spacing);
                     }
                     PythonGroupLayoutOp::VStack { spacing } => {
@@ -814,7 +837,7 @@ fn spawn_mobject(
                     }
                 }
             }
-            
+
             // Apply group-level visual styling/transform components:
             if let Some(state) = scene.states.get_mut(group_ref.id) {
                 state.transform = common.transform;
@@ -823,18 +846,22 @@ fn spawn_mobject(
                 if let Some(stroke) = common.stroke {
                     state.stroke = StrokeBrush::new(stroke.0, stroke.1);
                 }
-                
-                scene.commands.entity(state.entity)
+
+                scene
+                    .commands
+                    .entity(state.entity)
                     .insert(common.transform)
                     .insert(Opacity(common.opacity))
                     .insert(FillBrush(common.fill.map(peniko::Brush::Solid)));
-                
+
                 if let Some(stroke) = common.stroke {
-                    scene.commands.entity(state.entity)
+                    scene
+                        .commands
+                        .entity(state.entity)
                         .insert(StrokeBrush::new(stroke.0, stroke.1));
                 }
             }
-            
+
             // Resolve next_to positioning hint
             if let Some((bevy_ref_id, dir, spacing)) = resolved_next_to {
                 if let Some(ref_state) = scene.states.get(bevy_ref_id) {
@@ -852,11 +879,14 @@ fn spawn_mobject(
                         );
                         let new_transform = group_state.transform.shift_3d(shift);
                         group_state.transform = new_transform;
-                        scene.commands.entity(group_state.entity).insert(new_transform);
+                        scene
+                            .commands
+                            .entity(group_state.entity)
+                            .insert(new_transform);
                     }
                 }
             }
-            
+
             group_ref.id
         }
     };
@@ -900,7 +930,11 @@ fn spawn_mobject(
                         frame_bounds,
                     );
                 }
-                PythonPositioningOp::AlignTo { reference, target_anchor, ref_anchor } => {
+                PythonPositioningOp::AlignTo {
+                    reference,
+                    target_anchor,
+                    ref_anchor,
+                } => {
                     if let Some(bevy_ref_id) = py_to_bevy.get(&reference).copied() {
                         if let Some(ref_state) = scene.states.get(bevy_ref_id) {
                             let shift = gaanim_layout::compute_align_to_new(
@@ -915,7 +949,12 @@ fn spawn_mobject(
                         }
                     }
                 }
-                PythonPositioningOp::NextTo { reference, direction, spacing, aligned_edge } => {
+                PythonPositioningOp::NextTo {
+                    reference,
+                    direction,
+                    spacing,
+                    aligned_edge,
+                } => {
                     if let Some(bevy_ref_id) = py_to_bevy.get(&reference).copied() {
                         if let Some(ref_state) = scene.states.get(bevy_ref_id) {
                             let shift = gaanim_layout::compute_next_to_new(
@@ -934,7 +973,10 @@ fn spawn_mobject(
             }
             if let Some(state_mut) = scene.states.get_mut(id) {
                 state_mut.transform = new_transform;
-                scene.commands.entity(state_mut.entity).insert(new_transform);
+                scene
+                    .commands
+                    .entity(state_mut.entity)
+                    .insert(new_transform);
             }
         }
     }

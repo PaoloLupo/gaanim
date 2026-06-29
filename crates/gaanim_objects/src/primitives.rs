@@ -526,13 +526,19 @@ pub fn double_arrow(
         path.move_to(kurbo::Point::new(h1s_x, h1s_y));
         path.line_to(start);
         path.line_to(kurbo::Point::new(h2s_x, h2s_y));
-        path.line_to(kurbo::Point::new(shoulder_bot_start_x, shoulder_bot_start_y));
+        path.line_to(kurbo::Point::new(
+            shoulder_bot_start_x,
+            shoulder_bot_start_y,
+        ));
         path.line_to(kurbo::Point::new(shoulder_bot_end_x, shoulder_bot_end_y));
         path.line_to(kurbo::Point::new(h2e_x, h2e_y));
         path.line_to(end);
         path.line_to(kurbo::Point::new(h1e_x, h1e_y));
         path.line_to(kurbo::Point::new(shoulder_top_end_x, shoulder_top_end_y));
-        path.line_to(kurbo::Point::new(shoulder_top_start_x, shoulder_top_start_y));
+        path.line_to(kurbo::Point::new(
+            shoulder_top_start_x,
+            shoulder_top_start_y,
+        ));
         path.close_path();
     }
 
@@ -577,8 +583,10 @@ pub fn sector(
     }
     path.close_path();
     let bounds = Bounds3D::new_2d(
-        center.x - radius, center.y - radius,
-        center.x + radius, center.y + radius,
+        center.x - radius,
+        center.y - radius,
+        center.x + radius,
+        center.y + radius,
     );
     let mut bundle = MobjectBundle::new(id, path, bounds);
     bundle.tag = ObjectTag("Sector".into());

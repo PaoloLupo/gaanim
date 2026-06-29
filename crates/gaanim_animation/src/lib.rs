@@ -57,11 +57,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register standard signal binders and continuous updaters in the Updaters Phase
         app.add_systems(
             Update,
-            (
-                updater_system,
-                traced_path_system,
-            )
-                .in_set(SceneSet::Updaters)
+            (updater_system, traced_path_system).in_set(SceneSet::Updaters),
         );
         app.add_systems(
             Update,
@@ -74,4 +70,3 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         );
     }
 }
-

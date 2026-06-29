@@ -111,9 +111,18 @@ impl ExportConfig {
                 self.fps = 30;
                 self.crf = 24;
                 match self.aspect_ratio {
-                    AspectRatioPreset::Youtube => { self.width = 854; self.height = 480; }
-                    AspectRatioPreset::TikTok => { self.width = 480; self.height = 854; }
-                    AspectRatioPreset::Instagram => { self.width = 480; self.height = 480; }
+                    AspectRatioPreset::Youtube => {
+                        self.width = 854;
+                        self.height = 480;
+                    }
+                    AspectRatioPreset::TikTok => {
+                        self.width = 480;
+                        self.height = 854;
+                    }
+                    AspectRatioPreset::Instagram => {
+                        self.width = 480;
+                        self.height = 480;
+                    }
                     AspectRatioPreset::Custom => {}
                 }
             }
@@ -121,9 +130,18 @@ impl ExportConfig {
                 self.fps = 60;
                 self.crf = 18;
                 match self.aspect_ratio {
-                    AspectRatioPreset::Youtube => { self.width = 1920; self.height = 1080; }
-                    AspectRatioPreset::TikTok => { self.width = 1080; self.height = 1920; }
-                    AspectRatioPreset::Instagram => { self.width = 1080; self.height = 1080; }
+                    AspectRatioPreset::Youtube => {
+                        self.width = 1920;
+                        self.height = 1080;
+                    }
+                    AspectRatioPreset::TikTok => {
+                        self.width = 1080;
+                        self.height = 1920;
+                    }
+                    AspectRatioPreset::Instagram => {
+                        self.width = 1080;
+                        self.height = 1080;
+                    }
                     AspectRatioPreset::Custom => {}
                 }
             }
@@ -131,9 +149,18 @@ impl ExportConfig {
                 self.fps = 60;
                 self.crf = 14;
                 match self.aspect_ratio {
-                    AspectRatioPreset::Youtube => { self.width = 3840; self.height = 2160; }
-                    AspectRatioPreset::TikTok => { self.width = 2160; self.height = 3840; }
-                    AspectRatioPreset::Instagram => { self.width = 2160; self.height = 2160; }
+                    AspectRatioPreset::Youtube => {
+                        self.width = 3840;
+                        self.height = 2160;
+                    }
+                    AspectRatioPreset::TikTok => {
+                        self.width = 2160;
+                        self.height = 3840;
+                    }
+                    AspectRatioPreset::Instagram => {
+                        self.width = 2160;
+                        self.height = 2160;
+                    }
                     AspectRatioPreset::Custom => {}
                 }
             }

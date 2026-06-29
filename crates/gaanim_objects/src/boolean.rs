@@ -77,7 +77,11 @@ pub fn apply(a: &kurbo::BezPath, b: &kurbo::BezPath, op: BooleanOp) -> BooleanRe
 
     BooleanResult {
         paths,
-        bounds: if has_bounds { union_bounds } else { kurbo::Rect::ZERO },
+        bounds: if has_bounds {
+            union_bounds
+        } else {
+            kurbo::Rect::ZERO
+        },
     }
 }
 
@@ -89,10 +93,7 @@ pub fn apply(a: &kurbo::BezPath, b: &kurbo::BezPath, op: BooleanOp) -> BooleanRe
 /// fill rule).
 pub fn bezpath_to_shape(path: &kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
     let subpaths = collect_subpaths(path);
-    subpaths
-        .into_iter()
-        .filter(|c| c.len() >= 3)
-        .collect()
+    subpaths.into_iter().filter(|c| c.len() >= 3).collect()
 }
 
 /// Walk a `BezPath` and collect each closed subpath as a `Vec<[f64; 2]>`,
@@ -144,17 +145,19 @@ fn collect_subpaths(path: &kurbo::BezPath) -> Vec<Vec<[f64; 2]>> {
             }
             PathEl::ClosePath => {
                 if let Some(buf) = current.take()
-                    && buf.len() >= 3 {
-                        subpaths.push(buf);
-                    }
+                    && buf.len() >= 3
+                {
+                    subpaths.push(buf);
+                }
                 last_pt = None;
             }
         }
     }
     if let Some(buf) = current.take()
-        && buf.len() >= 3 {
-            subpaths.push(buf);
-        }
+        && buf.len() >= 3
+    {
+        subpaths.push(buf);
+    }
     subpaths
 }
 
@@ -170,9 +173,10 @@ fn extend_with_flattened<F: FnOnce(&mut dyn FnMut(PathEl))>(
     build(&mut sink);
     let mut iter = collected.into_iter();
     if let Some(first) = iter.next()
-        && let PathEl::MoveTo(p) = first {
-            buf.push([p.x, p.y]);
-        }
+        && let PathEl::MoveTo(p) = first
+    {
+        buf.push([p.x, p.y]);
+    }
     let mut cb = |el: PathEl| {
         if let PathEl::LineTo(p) = el {
             buf.push([p.x, p.y]);
@@ -271,6 +275,10 @@ mod tests {
         let circle = kurbo::Circle::new(kurbo::Point::new(5.0, 5.0), 3.0);
         b.extend(circle.path_elements(0.1));
         let r = apply(&a, &b, BooleanOp::Difference);
-        assert_eq!(r.paths.len(), 1, "rect minus a circle inside should be one path");
+        assert_eq!(
+            r.paths.len(),
+            1,
+            "rect minus a circle inside should be one path"
+        );
     }
 }

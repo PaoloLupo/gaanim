@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::JoinHandle;
 use thiserror::Error;
 
@@ -100,7 +100,12 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
 /// setup or proprietary drivers, e.g. AMF needs AMDGPU-PRO on Linux).
 pub fn detect_best_encoder() -> VideoEncoder {
     let available = detect_available_encoders();
-    for &candidate in &[VideoEncoder::H264Vaapi, VideoEncoder::H264Amf, VideoEncoder::H264Nvenc, VideoEncoder::H264Qsv] {
+    for &candidate in &[
+        VideoEncoder::H264Vaapi,
+        VideoEncoder::H264Amf,
+        VideoEncoder::H264Nvenc,
+        VideoEncoder::H264Qsv,
+    ] {
         if available.contains(&candidate) && probe_encoder(candidate) {
             return candidate;
         }
@@ -116,43 +121,59 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
         cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
     }
 
-    cmd.arg("-f").arg("rawvideo")
-       .arg("-pix_fmt").arg("rgba")
-       .arg("-s").arg("128x128")
-       .arg("-r").arg("1")
-       .arg("-i").arg("-")
-       .arg("-frames:v").arg("1");
+    cmd.arg("-f")
+        .arg("rawvideo")
+        .arg("-pix_fmt")
+        .arg("rgba")
+        .arg("-s")
+        .arg("128x128")
+        .arg("-r")
+        .arg("1")
+        .arg("-i")
+        .arg("-")
+        .arg("-frames:v")
+        .arg("1");
 
     match encoder {
         VideoEncoder::Libx264 => {
-            cmd.arg("-c:v").arg("libx264").arg("-preset").arg("ultrafast");
+            cmd.arg("-c:v")
+                .arg("libx264")
+                .arg("-preset")
+                .arg("ultrafast");
         }
         VideoEncoder::H264Nvenc => {
             cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg("p1");
         }
         VideoEncoder::H264Amf => {
-            cmd.arg("-vf").arg("format=yuv420p")
-               .arg("-c:v").arg("h264_amf")
-               .arg("-quality").arg("speed")
-               .arg("-rc").arg("vbr_latency");
+            cmd.arg("-vf")
+                .arg("format=yuv420p")
+                .arg("-c:v")
+                .arg("h264_amf")
+                .arg("-quality")
+                .arg("speed")
+                .arg("-rc")
+                .arg("vbr_latency");
         }
         VideoEncoder::H264Qsv => {
             cmd.arg("-c:v").arg("h264_qsv");
         }
         VideoEncoder::H264Vaapi => {
-            cmd.arg("-vf").arg("format=nv12,hwupload")
-               .arg("-c:v").arg("h264_vaapi");
+            cmd.arg("-vf")
+                .arg("format=nv12,hwupload")
+                .arg("-c:v")
+                .arg("h264_vaapi");
         }
     }
 
     if !matches!(encoder, VideoEncoder::H264Vaapi) {
         cmd.arg("-pix_fmt").arg("yuv420p");
     }
-    cmd.arg("-f").arg("null")
-       .arg("-")
-       .stdin(Stdio::piped())
-       .stdout(Stdio::null())
-       .stderr(Stdio::null());
+    cmd.arg("-f")
+        .arg("null")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 
     if let Ok(mut child) = cmd.spawn() {
         // Feed one empty RGBA frame (64x64x4 = 16384 zero bytes)
@@ -223,9 +244,7 @@ impl ParallelEncoder {
         let depth = adaptive_buffer_depth(config.width, config.height);
         let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
 
-        let thread_handle = std::thread::spawn(move || {
-            Self::encoder_worker(config, receiver)
-        });
+        let thread_handle = std::thread::spawn(move || Self::encoder_worker(config, receiver));
 
         Ok(Self {
             sender,
@@ -283,10 +302,16 @@ impl ParallelEncoder {
                 while let Ok(Some(frame)) = receiver.recv() {
                     let filename = format!(
                         "{}_{:05}.png",
-                        base_path.file_stem().and_then(|s| s.to_str()).unwrap_or("frame"),
+                        base_path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("frame"),
                         frame_idx
                     );
-                    let dest_path = base_path.parent().unwrap_or(std::path::Path::new("")).join(filename);
+                    let dest_path = base_path
+                        .parent()
+                        .unwrap_or(std::path::Path::new(""))
+                        .join(filename);
 
                     let width = config.width;
                     let height = config.height;
@@ -313,20 +338,29 @@ impl ParallelEncoder {
                     cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
                 }
 
-                cmd.arg("-f").arg("rawvideo")
-                   .arg("-pix_fmt").arg("rgba")
-                   .arg("-s").arg(format!("{}x{}", config.width, config.height))
-                   .arg("-r").arg(config.fps.to_string())
-                   .arg("-i").arg("-");
+                cmd.arg("-f")
+                    .arg("rawvideo")
+                    .arg("-pix_fmt")
+                    .arg("rgba")
+                    .arg("-s")
+                    .arg(format!("{}x{}", config.width, config.height))
+                    .arg("-r")
+                    .arg(config.fps.to_string())
+                    .arg("-i")
+                    .arg("-");
 
                 match config.format {
                     ExportFormat::Mp4 => {
                         match config.video_encoder {
                             VideoEncoder::Libx264 => {
-                                cmd.arg("-c:v").arg("libx264")
-                                   .arg("-crf").arg(config.crf.to_string())
-                                   .arg("-preset").arg(Self::x264_preset(config.encoding_speed))
-                                   .arg("-threads").arg("0");
+                                cmd.arg("-c:v")
+                                    .arg("libx264")
+                                    .arg("-crf")
+                                    .arg(config.crf.to_string())
+                                    .arg("-preset")
+                                    .arg(Self::x264_preset(config.encoding_speed))
+                                    .arg("-threads")
+                                    .arg("0");
                             }
                             VideoEncoder::H264Nvenc => {
                                 let p = match config.encoding_speed {
@@ -334,10 +368,14 @@ impl ParallelEncoder {
                                     EncodingSpeed::Balanced => "p4",
                                     EncodingSpeed::Best => "p7",
                                 };
-                                cmd.arg("-c:v").arg("h264_nvenc")
-                                   .arg("-preset").arg(p)
-                                   .arg("-rc").arg("vbr")
-                                   .arg("-cq").arg(config.crf.to_string());
+                                cmd.arg("-c:v")
+                                    .arg("h264_nvenc")
+                                    .arg("-preset")
+                                    .arg(p)
+                                    .arg("-rc")
+                                    .arg("vbr")
+                                    .arg("-cq")
+                                    .arg(config.crf.to_string());
                             }
                             VideoEncoder::H264Amf => {
                                 let quality = match config.encoding_speed {
@@ -345,18 +383,26 @@ impl ParallelEncoder {
                                     EncodingSpeed::Balanced => "balanced",
                                     EncodingSpeed::Best => "quality",
                                 };
-                                cmd.arg("-vf").arg("format=yuv420p")
-                                   .arg("-c:v").arg("h264_amf")
-                                   .arg("-quality").arg(quality)
-                                   .arg("-rc").arg("vbr_latency");
+                                cmd.arg("-vf")
+                                    .arg("format=yuv420p")
+                                    .arg("-c:v")
+                                    .arg("h264_amf")
+                                    .arg("-quality")
+                                    .arg(quality)
+                                    .arg("-rc")
+                                    .arg("vbr_latency");
                             }
                             VideoEncoder::H264Qsv => {
-                                cmd.arg("-c:v").arg("h264_qsv")
-                                   .arg("-global_quality").arg(config.crf.to_string());
+                                cmd.arg("-c:v")
+                                    .arg("h264_qsv")
+                                    .arg("-global_quality")
+                                    .arg(config.crf.to_string());
                             }
                             VideoEncoder::H264Vaapi => {
-                                cmd.arg("-vf").arg("format=nv12,hwupload")
-                                   .arg("-c:v").arg("h264_vaapi");
+                                cmd.arg("-vf")
+                                    .arg("format=nv12,hwupload")
+                                    .arg("-c:v")
+                                    .arg("h264_vaapi");
                             }
                         }
 
@@ -365,10 +411,14 @@ impl ParallelEncoder {
                         }
                     }
                     ExportFormat::Webm => {
-                        cmd.arg("-c:v").arg("libvpx-vp9")
-                           .arg("-crf").arg(config.crf.to_string())
-                           .arg("-b:v").arg("0")
-                           .arg("-threads").arg("0");
+                        cmd.arg("-c:v")
+                            .arg("libvpx-vp9")
+                            .arg("-crf")
+                            .arg(config.crf.to_string())
+                            .arg("-b:v")
+                            .arg("0")
+                            .arg("-threads")
+                            .arg("0");
 
                         if config.transparent {
                             cmd.arg("-pix_fmt").arg("yuva420p");
@@ -380,12 +430,18 @@ impl ParallelEncoder {
                         let quality = Self::webp_quality(config.crf);
                         let compression = Self::webp_compression(config.encoding_speed);
 
-                        cmd.arg("-c:v").arg("libwebp")
-                           .arg("-lossless").arg("0")
-                           .arg("-compression_level").arg(compression.to_string())
-                           .arg("-quality").arg(quality.to_string())
-                           .arg("-loop").arg("0")
-                           .arg("-threads").arg("0");
+                        cmd.arg("-c:v")
+                            .arg("libwebp")
+                            .arg("-lossless")
+                            .arg("0")
+                            .arg("-compression_level")
+                            .arg(compression.to_string())
+                            .arg("-quality")
+                            .arg(quality.to_string())
+                            .arg("-loop")
+                            .arg("0")
+                            .arg("-threads")
+                            .arg("0");
 
                         if config.transparent {
                             cmd.arg("-pix_fmt").arg("yuva420p");
@@ -403,8 +459,8 @@ impl ParallelEncoder {
                 cmd.arg(&config.output_path);
 
                 cmd.stdin(Stdio::piped())
-                   .stdout(Stdio::null())
-                   .stderr(Stdio::piped());
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped());
 
                 let mut child = cmd.spawn().map_err(|e| {
                     ExportError::FFmpeg(format!(

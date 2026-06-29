@@ -494,12 +494,7 @@ impl MobjectRef {
         }
     }
 
-    pub fn flash(
-        self,
-        color: Option<Color>,
-        n_lines: u32,
-        radius: f64,
-    ) -> AnimationBuilder {
+    pub fn flash(self, color: Option<Color>, n_lines: u32, radius: f64) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
             anim_type: AnimationType::Flash {

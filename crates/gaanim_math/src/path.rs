@@ -236,7 +236,7 @@ pub fn get_subpath_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezP
         }
         return result;
     }
-    
+
     let mut result = BezPath::new();
     let mut current_subpath: Vec<PathEl> = Vec::new();
 
@@ -284,8 +284,12 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
             _ => {
                 let segment = match *el {
                     PathEl::LineTo(p) => PathSeg::Line(kurbo::Line::new(current_pos, p)),
-                    PathEl::QuadTo(p1, p2) => PathSeg::Quad(kurbo::QuadBez::new(current_pos, p1, p2)),
-                    PathEl::CurveTo(p1, p2, p3) => PathSeg::Cubic(kurbo::CubicBez::new(current_pos, p1, p2, p3)),
+                    PathEl::QuadTo(p1, p2) => {
+                        PathSeg::Quad(kurbo::QuadBez::new(current_pos, p1, p2))
+                    }
+                    PathEl::CurveTo(p1, p2, p3) => {
+                        PathSeg::Cubic(kurbo::CubicBez::new(current_pos, p1, p2, p3))
+                    }
                     PathEl::ClosePath => PathSeg::Line(kurbo::Line::new(current_pos, current_pos)),
                     _ => unreachable!(),
                 };
@@ -310,7 +314,10 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
                         started = true;
                     }
                     push_segment_to_path(&mut result, &segment);
-                } else if current_length >= target_start && current_length <= target_end && next_length >= target_end {
+                } else if current_length >= target_start
+                    && current_length <= target_end
+                    && next_length >= target_end
+                {
                     let end_rem = target_end - current_length;
                     let t1 = segment.inv_arclen(end_rem, 0.1);
                     let trimmed = segment.subsegment(0.0..t1);
@@ -346,4 +353,3 @@ fn push_segment_to_path(path: &mut BezPath, seg: &PathSeg) {
         PathSeg::Cubic(c) => path.curve_to(c.p1, c.p2, c.p3),
     }
 }
-

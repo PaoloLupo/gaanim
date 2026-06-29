@@ -1,6 +1,6 @@
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
-use gaanim_core::{ObjectId, glam::DVec3};
 use gaanim_core::kurbo::{Affine, Shape};
+use gaanim_core::{ObjectId, glam::DVec3};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::ObjectTag;
@@ -172,8 +172,10 @@ pub fn compile_text_to_hierarchy(
             child_bundle.tag = ObjectTag(format!("Char('{}')", c));
 
             // Offset the child's local transform according to pen advances
-            let local_translation = gaanim_core::glam::DVec3::new(glyph_x * scale, glyph_y * scale, 0.0);
-            child_bundle.transform = SpatialTransform::new_2d(local_translation.x, local_translation.y);
+            let local_translation =
+                gaanim_core::glam::DVec3::new(glyph_x * scale, glyph_y * scale, 0.0);
+            child_bundle.transform =
+                SpatialTransform::new_2d(local_translation.x, local_translation.y);
 
             let child_entity = commands.spawn(child_bundle).id();
             spawned_children.push((child_entity, local_translation, glyph_local_bounds));

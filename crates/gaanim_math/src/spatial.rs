@@ -151,22 +151,22 @@ impl SpatialTransform {
         let coeffs = affine.as_coeffs();
         let tx = coeffs[4];
         let ty = coeffs[5];
-        
+
         let a = coeffs[0];
         let b = coeffs[1];
         let c = coeffs[2];
         let d = coeffs[3];
-        
+
         let sx = (a * a + b * b).sqrt();
         let sy = (c * c + d * d).sqrt();
-        
+
         // Extract rotation angle around Z axis
         let angle = b.atan2(a);
-        
+
         let mut transform = Self::new_2d(tx, ty);
         transform.scale = gaanim_core::glam::DVec3::new(sx, sy, 1.0);
         transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
-        
+
         transform
     }
 }

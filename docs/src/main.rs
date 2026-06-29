@@ -111,12 +111,14 @@ impl Config {
     fn new(args: &args::CompileArgs, watching: bool) -> Self {
         Self {
             input: args.input.clone(),
-            output: args
-                .output
-                .clone()
-                .or_else(|| if watching { None } else { Some(SITE_PATH.into()) }),
-            server: watching
-                .then(|| HttpServer::new("gaanim-docs", None, true).unwrap()),
+            output: args.output.clone().or_else(|| {
+                if watching {
+                    None
+                } else {
+                    Some(SITE_PATH.into())
+                }
+            }),
+            server: watching.then(|| HttpServer::new("gaanim-docs", None, true).unwrap()),
             open: args.open,
         }
     }

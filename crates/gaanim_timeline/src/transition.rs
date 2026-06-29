@@ -1,7 +1,7 @@
 //! Scene transition types for multi-scene timelines.
 
-use gaanim_core::glam::DVec2;
 use gaanim_core::ObjectId;
+use gaanim_core::glam::DVec2;
 use gaanim_core::peniko::Color;
 
 use crate::clip::SceneId;
@@ -17,11 +17,21 @@ pub enum TransitionType {
     /// Fade to a color, then fade in from that color.
     FadeThrough { duration: f64, fade_color: Color },
     /// Outgoing scene slides out, incoming scene slides in.
-    Slide { duration: f64, direction: SlideDirection },
+    Slide {
+        duration: f64,
+        direction: SlideDirection,
+    },
     /// Zoom into a point on the outgoing scene, revealing the incoming scene.
-    ZoomThrough { duration: f64, center: DVec2, max_zoom: f64 },
+    ZoomThrough {
+        duration: f64,
+        center: DVec2,
+        max_zoom: f64,
+    },
     /// Morph specific mobjects from the outgoing scene into the incoming scene.
-    Morph { duration: f64, mappings: Vec<MorphMapping> },
+    Morph {
+        duration: f64,
+        mappings: Vec<MorphMapping>,
+    },
 }
 
 impl TransitionType {
@@ -49,12 +59,18 @@ impl TransitionType {
 
     /// Creates a fade-through-color transition.
     pub fn fade_through(duration: f64, fade_color: Color) -> Self {
-        Self::FadeThrough { duration, fade_color }
+        Self::FadeThrough {
+            duration,
+            fade_color,
+        }
     }
 
     /// Creates a slide transition.
     pub fn slide(duration: f64, direction: SlideDirection) -> Self {
-        Self::Slide { duration, direction }
+        Self::Slide {
+            duration,
+            direction,
+        }
     }
 }
 

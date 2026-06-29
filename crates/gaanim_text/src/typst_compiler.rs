@@ -1,5 +1,5 @@
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
-use gaanim_core::{glam::DVec3, ObjectId, kurbo, peniko};
+use gaanim_core::{ObjectId, glam::DVec3, kurbo, peniko};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush};
@@ -123,10 +123,14 @@ fn typst_paint_to_brush(
             let [r, g, b, a] = color.to_vec4_u8();
             // Typst uses black (#000000) as its default document color.
             // In Gaanim, we want defaults to match the parent's default_fill (often white on a dark background).
-            if r == 0 && g == 0 && b == 0 && a == 255
-                && let Some(db) = default_brush {
-                    return Some(db.clone());
-                }
+            if r == 0
+                && g == 0
+                && b == 0
+                && a == 255
+                && let Some(db) = default_brush
+            {
+                return Some(db.clone());
+            }
             Some(peniko::Brush::Solid(peniko::Color::from_rgba8(r, g, b, a)))
         }
         _ => None,

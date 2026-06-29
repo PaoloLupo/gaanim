@@ -74,10 +74,27 @@ pub struct WorldSnapshot {
 /// This helper centralizes the heavy component-insertion logic that was previously
 /// duplicated across `restore`, `apply`, and entity spawning paths.
 fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &EntitySnapshot) {
-    entity_mut.insert(snap.transform);
-    entity_mut.insert(Opacity(snap.opacity));
-    entity_mut.insert(FillBrush(snap.fill.clone()));
+    // Batch insert always-present components in a single archetype move.
+    // This reduces up to ~15 individual inserts to 1 batch + conditional inserts.
+    let global_transform = snap
+        .global_transform
+        .unwrap_or_else(|| GlobalSpatialTransform::from_local(&snap.transform));
+    let global_opacity = snap.global_opacity.unwrap_or(GlobalOpacity(snap.opacity));
 
+    entity_mut.insert((
+        snap.transform,
+        Opacity(snap.opacity),
+        FillBrush(snap.fill.clone()),
+        RenderOrder {
+            z_index: snap.render_order,
+            creation_order: snap.creation_order,
+        },
+        snap.render_layer,
+        global_transform,
+        global_opacity,
+    ));
+
+    // Handle conditional components (insert or remove)
     if let Some(ref style) = snap.stroke_style {
         entity_mut.insert(StrokeBrush {
             brush: snap.stroke.clone(),
@@ -86,13 +103,6 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     } else {
         entity_mut.remove::<StrokeBrush>();
     }
-
-    entity_mut.insert(RenderOrder {
-        z_index: snap.render_order,
-        creation_order: snap.creation_order,
-    });
-
-    entity_mut.insert(snap.render_layer);
 
     if snap.visible {
         entity_mut.insert(Visible);
@@ -128,18 +138,6 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.remove::<gaanim_scene::GroupMarker>();
     }
 
-    if let Some(gt) = snap.global_transform {
-        entity_mut.insert(gt);
-    } else {
-        entity_mut.insert(GlobalSpatialTransform::from_local(&snap.transform));
-    }
-
-    if let Some(go) = snap.global_opacity {
-        entity_mut.insert(go);
-    } else {
-        entity_mut.insert(GlobalOpacity(snap.opacity));
-    }
-
     if let Some(lb) = snap.local_bounds {
         entity_mut.insert(lb);
     } else {
@@ -172,19 +170,29 @@ impl WorldSnapshot {
         for (entity, mobj_id) in query.iter(world) {
             let obj_id = mobj_id.0;
             // Find parent entity's ObjectId if parent is set
-            let parent_entity = world.get::<bevy::prelude::ChildOf>(entity).map(|c| c.parent());
+            let parent_entity = world
+                .get::<bevy::prelude::ChildOf>(entity)
+                .map(|c| c.parent());
             let parent_id =
                 parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
 
-            let transform = world.get::<SpatialTransform>(entity).copied().unwrap_or_default();
+            let transform = world
+                .get::<SpatialTransform>(entity)
+                .copied()
+                .unwrap_or_default();
             let opacity = world.get::<Opacity>(entity).map(|o| o.0).unwrap_or(1.0);
             let fill = world.get::<FillBrush>(entity).and_then(|f| f.0.clone());
-            let stroke = world.get::<StrokeBrush>(entity).and_then(|s| s.brush.clone());
+            let stroke = world
+                .get::<StrokeBrush>(entity)
+                .and_then(|s| s.brush.clone());
             let stroke_style = world.get::<StrokeBrush>(entity).map(|s| s.style.clone());
             let render_order_opt = world.get::<RenderOrder>(entity);
             let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
             let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
-            let render_layer = world.get::<RenderLayer>(entity).copied().unwrap_or(RenderLayer::Vello2D);
+            let render_layer = world
+                .get::<RenderLayer>(entity)
+                .copied()
+                .unwrap_or(RenderLayer::Vello2D);
             let visible = world.get::<Visible>(entity).is_some();
             let is_group = world.get::<gaanim_scene::GroupMarker>(entity).is_some();
 
@@ -210,7 +218,9 @@ impl WorldSnapshot {
                     tags,
                     path2d: world.get::<Path2D>(entity).map(|p| p.0.clone()),
                     path_source: world.get::<PathSource>(entity).map(|p| p.0.clone()),
-                    fill_draw_progress: world.get::<gaanim_animation::FillDrawProgress>(entity).map(|p| p.0),
+                    fill_draw_progress: world
+                        .get::<gaanim_animation::FillDrawProgress>(entity)
+                        .map(|p| p.0),
                     is_group,
                     global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
                     local_bounds: world.get::<LocalBounds>(entity).copied(),

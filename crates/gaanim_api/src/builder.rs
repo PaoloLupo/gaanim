@@ -1,11 +1,14 @@
+use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_layout::{LayoutAnchor, LayoutDirection, Anchor, Direction};
+use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
-use gaanim_scene::{FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds};
+use gaanim_scene::{
+    FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds,
+};
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_hierarchy;
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
@@ -15,7 +18,6 @@ use gaanim_timeline::{
     timeline::Timeline,
     transition::TransitionType,
 };
-use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use std::collections::HashMap;
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
@@ -412,7 +414,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Records a transition from the current scene to a target scene.
     pub fn transition_to(&mut self, target: SceneId, transition: TransitionType) {
-        let current = self.current_scene.expect("Must be inside a scene to call transition_to");
+        let current = self
+            .current_scene
+            .expect("Must be inside a scene to call transition_to");
         self.timeline.connect(current, target, transition);
     }
 
@@ -680,13 +684,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 self.float_signals.insert(anim.target, to);
                 PropertyLensSpec::SignalFloat { from, to }
             }
-            AnimationType::ShowPassingFlash { time_width } => {
-                PropertyLensSpec::PathRange {
-                    from: 0.0,
-                    to: 1.0 + time_width,
-                    time_width,
-                }
-            }
+            AnimationType::ShowPassingFlash { time_width } => PropertyLensSpec::PathRange {
+                from: 0.0,
+                to: 1.0 + time_width,
+                time_width,
+            },
         };
 
         // Add the resolved clip to the Timeline resource
@@ -773,17 +775,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // is visible during drawing/erasing.
         for item_id in &items {
             if let Some(state) = self.states.get_mut(*item_id)
-                && state.stroke.brush.is_none() {
-                    let color = state
-                        .fill
-                        .as_ref()
-                        .and_then(extract_brush_color)
-                        .unwrap_or(Color::WHITE);
-                    let width = stroke_width.unwrap_or(1.0);
-                    let new_stroke = StrokeBrush::new(color, width);
-                    state.stroke = new_stroke.clone();
-                    self.commands.entity(state.entity).insert(new_stroke);
-                }
+                && state.stroke.brush.is_none()
+            {
+                let color = state
+                    .fill
+                    .as_ref()
+                    .and_then(extract_brush_color)
+                    .unwrap_or(Color::WHITE);
+                let width = stroke_width.unwrap_or(1.0);
+                let new_stroke = StrokeBrush::new(color, width);
+                state.stroke = new_stroke.clone();
+                self.commands.entity(state.entity).insert(new_stroke);
+            }
         }
 
         // (B) Set initial value via deferred commands to avoid flicker
@@ -798,9 +801,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if !is_erase {
                     self.commands
                         .entity(state.entity)
-                        .insert(gaanim_scene::components::Path2D(
-                            std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
-                        ));
+                        .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
+                            gaanim_core::kurbo::BezPath::new(),
+                        )));
                 }
             }
         }
@@ -985,7 +988,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
-    fn play_spin_in_from_nothing_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+    fn play_spin_in_from_nothing_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        parent_track: TrackId,
+    ) {
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
@@ -1248,7 +1255,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target,
-                    lens: PropertyLensSpec::Opacity { from: 0.0, to: target_opacity },
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: target_opacity,
+                    },
                     rate_func: anim.rate_func.clone(),
                     label: self.current_label.clone(),
                 }),
@@ -1256,9 +1266,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(target_state) = self.states.get_mut(target) {
                 target_state.opacity = target_opacity;
             }
-            self.commands
-                .entity(target_entity)
-                .insert(Opacity(0.0));
+            self.commands.entity(target_entity).insert(Opacity(0.0));
         }
     }
 
@@ -1274,8 +1282,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         for i in 0..num_wiggles {
             let dir = if i % 2 == 0 { 1.0_f64 } else { -1.0_f64 };
-            let offset_x = if i == num_wiggles - 1 { 0.0 } else { dir * amplitude };
-            let from_x = if i == 0 { origin.x } else { origin.x - dir * amplitude };
+            let offset_x = if i == num_wiggles - 1 {
+                0.0
+            } else {
+                dir * amplitude
+            };
+            let from_x = if i == 0 {
+                origin.x
+            } else {
+                origin.x - dir * amplitude
+            };
             let to_x = origin.x + offset_x;
 
             self.timeline.add_clip(
@@ -1322,7 +1338,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from, to: target_scale },
+                lens: PropertyLensSpec::Scale {
+                    from,
+                    to: target_scale,
+                },
                 rate_func: anim.rate_func.clone(),
                 label: self.current_label.clone(),
             }),
@@ -1366,8 +1385,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             "right" => (bounds.max.x, 0.0),
             _ => (0.0, 0.0),
         };
-        let edge_world = target_pos
-            + gaanim_core::glam::DVec3::new(edge_lx, edge_ly, 0.0);
+        let edge_world = target_pos + gaanim_core::glam::DVec3::new(edge_lx, edge_ly, 0.0);
 
         let from = gaanim_core::glam::DVec3::ZERO;
         state.transform.scale = from;
@@ -1382,7 +1400,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from, to: target_scale },
+                lens: PropertyLensSpec::Scale {
+                    from,
+                    to: target_scale,
+                },
                 rate_func: anim.rate_func.clone(),
                 label: self.current_label.clone(),
             }),
@@ -1404,7 +1425,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
-    fn play_draw_border_then_fill_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+    fn play_draw_border_then_fill_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        parent_track: TrackId,
+    ) {
         let state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
@@ -1420,9 +1445,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         if state.stroke.brush.is_none() {
             let new_stroke = StrokeBrush::new(fill_color, stroke_width);
-            self.commands
-                .entity(entity)
-                .insert(new_stroke.clone());
+            self.commands.entity(entity).insert(new_stroke.clone());
             if let Some(s) = self.states.get_mut(anim.target) {
                 s.stroke = new_stroke;
             }
@@ -1458,9 +1481,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.commands
             .entity(entity)
             .insert(gaanim_animation::FillDrawProgress(0.0));
-        self.commands.entity(entity).insert(gaanim_scene::components::Path2D(
-            std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
-        ));
+        self.commands
+            .entity(entity)
+            .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
+                gaanim_core::kurbo::BezPath::new(),
+            )));
 
         self.timeline.add_clip(
             parent_track,
@@ -1513,7 +1538,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Opacity { from: original_opacity, to: 0.0 },
+                lens: PropertyLensSpec::Opacity {
+                    from: original_opacity,
+                    to: 0.0,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1524,7 +1552,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Opacity { from: 0.0, to: original_opacity },
+                lens: PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: original_opacity,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1540,7 +1571,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
+                lens: PropertyLensSpec::Scale {
+                    from: original_scale,
+                    to: scale_to,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1551,7 +1585,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
+                lens: PropertyLensSpec::Scale {
+                    from: scale_to,
+                    to: original_scale,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1587,7 +1624,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from: original_scale, to: scale_to },
+                lens: PropertyLensSpec::Scale {
+                    from: original_scale,
+                    to: scale_to,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1598,7 +1638,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             half,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale { from: scale_to, to: original_scale },
+                lens: PropertyLensSpec::Scale {
+                    from: scale_to,
+                    to: original_scale,
+                },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1606,30 +1649,37 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Optional fill color highlight (like Indicate but without scale_factor difference).
         if let Some(c) = color
-            && let Some(Brush::Solid(current)) = &state.fill {
-                self.timeline.add_clip(
-                    parent_track,
-                    self.current_time,
-                    half,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: anim.target,
-                        lens: PropertyLensSpec::FillColor { from: *current, to: c },
-                        rate_func: gaanim_math::RateFunc::Linear,
-                        label: self.current_label.clone(),
-                    }),
-                );
-                self.timeline.add_clip(
-                    parent_track,
-                    self.current_time + half,
-                    half,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: anim.target,
-                        lens: PropertyLensSpec::FillColor { from: c, to: *current },
-                        rate_func: gaanim_math::RateFunc::Linear,
-                        label: self.current_label.clone(),
-                    }),
-                );
-            }
+            && let Some(Brush::Solid(current)) = &state.fill
+        {
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time,
+                half,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::FillColor {
+                        from: *current,
+                        to: c,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    label: self.current_label.clone(),
+                }),
+            );
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + half,
+                half,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::FillColor {
+                        from: c,
+                        to: *current,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
 
         let _ = original_opacity; // reserved if we want to fade in/out later
 
@@ -1691,9 +1741,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .insert(gaanim_animation::FillDrawProgress(0.0));
             self.commands
                 .entity(state.entity)
-                .insert(gaanim_scene::components::Path2D(
-                    std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
-                ));
+                .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
+                    gaanim_core::kurbo::BezPath::new(),
+                )));
         }
 
         // Phase 1: 70% of duration draws the outline (PathCompletion
@@ -1711,10 +1761,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             draw_duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress {
-                    from: 0.0,
-                    to: 0.0,
-                },
+                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 label: self.current_label.clone(),
             }),
@@ -1727,10 +1774,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             draw_duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::PathCompletion {
-                    from: 0.0,
-                    to: 1.0,
-                },
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
                 label: self.current_label.clone(),
             }),
@@ -1744,10 +1788,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             fill_duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress {
-                    from: 0.0,
-                    to: 1.0,
-                },
+                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: gaanim_math::RateFunc::Smooth,
                 label: self.current_label.clone(),
             }),
@@ -1800,11 +1841,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// to avoid any spatial offset jumps.
     pub fn group(&mut self, children: &[MobjectRef]) -> MobjectRef {
         let id = self.next_id();
-        
+
         // 1. Calculate the collective bounds of the children in world space
         let mut union_bounds = Bounds3D::default();
         let mut has_bounds = false;
-        
+
         for child in children {
             if let Some(state) = self.states.get(child.id) {
                 // child world bounds = child local bounds transformed by its TRUE world transform
@@ -1818,38 +1859,45 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }
             }
         }
-        
+
         // 2. Set the group's transform translation to the center of the union bounds
-        let center = if has_bounds { union_bounds.center() } else { gaanim_core::glam::DVec3::ZERO };
+        let center = if has_bounds {
+            union_bounds.center()
+        } else {
+            gaanim_core::glam::DVec3::ZERO
+        };
         let group_transform = SpatialTransform::new_2d(center.x, center.y);
-        
+
         // 3. Spawn the group entity with GroupMarker, Opacity, WorldBounds etc.
-        let group_entity = self.commands.spawn((
-            GroupMarker,
-            MobjectId(id),
-            group_transform,
-            gaanim_math::GlobalSpatialTransform::from_local(&group_transform),
-            Opacity(1.0),
-            gaanim_scene::GlobalOpacity(1.0),
-            LocalBounds(Bounds3D::new_2d(
-                union_bounds.min.x - center.x,
-                union_bounds.min.y - center.y,
-                union_bounds.max.x - center.x,
-                union_bounds.max.y - center.y,
-            )),
-            WorldBounds(union_bounds),
-            gaanim_scene::RenderOrder::default(),
-            Visible,
-            FillBrush::transparent(),
-            StrokeBrush::transparent(),
-        )).id();
+        let group_entity = self
+            .commands
+            .spawn((
+                GroupMarker,
+                MobjectId(id),
+                group_transform,
+                gaanim_math::GlobalSpatialTransform::from_local(&group_transform),
+                Opacity(1.0),
+                gaanim_scene::GlobalOpacity(1.0),
+                LocalBounds(Bounds3D::new_2d(
+                    union_bounds.min.x - center.x,
+                    union_bounds.min.y - center.y,
+                    union_bounds.max.x - center.x,
+                    union_bounds.max.y - center.y,
+                )),
+                WorldBounds(union_bounds),
+                gaanim_scene::RenderOrder::default(),
+                Visible,
+                FillBrush::transparent(),
+                StrokeBrush::transparent(),
+            ))
+            .id();
 
         self.tag_entity(group_entity);
 
         // 4. Reparent children and adjust their local transforms
         let inv_group_affine = group_transform.to_affine_2d().inverse();
         let mut child_ids = Vec::new();
-        
+
         for child in children {
             child_ids.push(child.id);
             let child_world = self.get_world_transform(child.id);
@@ -1861,12 +1909,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.transform = child_local;
                 state.parent = Some(id); // Track parent for world transform calculation
 
-                self.commands.entity(state.entity)
+                self.commands
+                    .entity(state.entity)
                     .set_parent_in_place(group_entity)
                     .insert(child_local);
             }
         }
-        
+
         // 5. Ensure tracks exist for group and children so the timeline can
         //    display the group hierarchy (group → children).
         self.ensure_track(id);
@@ -1892,8 +1941,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent: None,
         };
         self.states.insert(id, group_state);
-        self.mobject_names.insert(id, format!("Group ({} children)", children.len()));
-        
+        self.mobject_names
+            .insert(id, format!("Group ({} children)", children.len()));
+
         MobjectRef { id }
     }
 
@@ -1913,7 +1963,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(child_state) = self.states.get_mut(child.id) {
             child_state.transform = child_local;
             child_state.parent = Some(group.id);
-            self.commands.entity(child_state.entity)
+            self.commands
+                .entity(child_state.entity)
                 .set_parent_in_place(group_entity)
                 .insert(child_local);
         }
@@ -1931,13 +1982,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         if let Some(group_ent) = group_entity {
             // Recompute union bounds
-            let mut union_min = gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-            let mut union_max = gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-            
+            let mut union_min =
+                gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+            let mut union_max = gaanim_core::glam::DVec3::new(
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            );
+
             // Let's compute union bounds in group's local space
             for &child_id in &children {
                 if let Some(state) = self.states.get(child_id) {
-                    let child_bounds_in_group = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                    let child_bounds_in_group =
+                        gaanim_layout::transform_bounds(state.bounds, &state.transform);
                     union_min = union_min.min(child_bounds_in_group.min);
                     union_max = union_max.max(child_bounds_in_group.max);
                 }
@@ -1948,22 +2005,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if let Some(group_state) = self.states.get_mut(group.id) {
                     group_state.bounds = new_bounds;
                 }
-                self.commands.entity(group_ent)
+                self.commands
+                    .entity(group_ent)
                     .insert(gaanim_scene::LocalBounds(new_bounds));
             }
         }
-        
+
         self.ensure_track(group.id);
         self.ensure_track(child.id);
     }
 
     /// Arranges the immediate children of a group linearly.
-    pub fn arrange(
-        &mut self,
-        group: MobjectRef,
-        direction: Direction,
-        spacing: f64,
-    ) {
+    pub fn arrange(&mut self, group: MobjectRef, direction: Direction, spacing: f64) {
         let children_ids = match self.states.get(group.id) {
             Some(state) => state.children.clone(),
             None => return,
@@ -1979,16 +2032,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        let new_translations = gaanim_layout::arrange(
-            &items,
-            direction,
-            spacing,
-            Anchor::Center,
-            true,
-        );
+        let new_translations =
+            gaanim_layout::arrange(&items, direction, spacing, Anchor::Center, true);
 
-        let mut union_min = gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-        let mut union_max = gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut union_min =
+            gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut union_max =
+            gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
 
         for (i, &child_id) in children_ids.iter().enumerate() {
             if let Some(state) = self.states.get_mut(child_id) {
@@ -1996,7 +2046,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let transform = state.transform;
                 self.commands.entity(state.entity).insert(transform);
 
-                let child_bounds_in_group = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                let child_bounds_in_group =
+                    gaanim_layout::transform_bounds(state.bounds, &state.transform);
                 union_min = union_min.min(child_bounds_in_group.min);
                 union_max = union_max.max(child_bounds_in_group.max);
             }
@@ -2006,7 +2057,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let new_group_bounds = Bounds3D::new(union_min, union_max);
             if let Some(group_state) = self.states.get_mut(group.id) {
                 group_state.bounds = new_group_bounds;
-                self.commands.entity(group_state.entity)
+                self.commands
+                    .entity(group_state.entity)
                     .insert(gaanim_scene::LocalBounds(new_group_bounds));
             }
         }
@@ -2046,8 +2098,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             true,
         );
 
-        let mut union_min = gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-        let mut union_max = gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut union_min =
+            gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut union_max =
+            gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
 
         for (i, &child_id) in children_ids.iter().enumerate() {
             if let Some(state) = self.states.get_mut(child_id) {
@@ -2055,7 +2109,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let transform = state.transform;
                 self.commands.entity(state.entity).insert(transform);
 
-                let child_bounds_in_group = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                let child_bounds_in_group =
+                    gaanim_layout::transform_bounds(state.bounds, &state.transform);
                 union_min = union_min.min(child_bounds_in_group.min);
                 union_max = union_max.max(child_bounds_in_group.max);
             }
@@ -2065,7 +2120,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let new_group_bounds = Bounds3D::new(union_min, union_max);
             if let Some(group_state) = self.states.get_mut(group.id) {
                 group_state.bounds = new_group_bounds;
-                self.commands.entity(group_state.entity)
+                self.commands
+                    .entity(group_state.entity)
                     .insert(gaanim_scene::LocalBounds(new_group_bounds));
             }
         }
@@ -2076,11 +2132,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// The children's local transforms are adjusted to world space so they remain in their
     /// absolute positions without any jumps.
     pub fn ungroup(&mut self, group: MobjectRef) {
-        let (children_ids, group_transform, group_parent) = if let Some(state) = self.states.get(group.id) {
-            (state.children.clone(), state.transform, state.parent)
-        } else {
-            return;
-        };
+        let (children_ids, group_transform, group_parent) =
+            if let Some(state) = self.states.get(group.id) {
+                (state.children.clone(), state.transform, state.parent)
+            } else {
+                return;
+            };
 
         // Capture group fill/stroke for MobjectState propagation to children
         let group_fill_clone = self.states.get(group.id).map(|s| s.fill.clone());
@@ -2148,10 +2205,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Spawns a ValueTracker (FloatSignal) with the given initial value.
     pub fn value_tracker(&mut self, initial: f64) -> ValueTrackerRef {
         let id = self.next_id();
-        let entity = self.commands.spawn((
-            gaanim_scene::MobjectId(id),
-            gaanim_animation::signals::FloatSignal::new(initial),
-        )).id();
+        let entity = self
+            .commands
+            .spawn((
+                gaanim_scene::MobjectId(id),
+                gaanim_animation::signals::FloatSignal::new(initial),
+            ))
+            .id();
         self.tag_entity(entity);
 
         let state = MobjectState {
@@ -2251,8 +2311,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         length: f64,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::tangent_line(id, curve, t, length)
-            .unwrap_or_else(|| gaanim_objects::primitives::line(id, kurbo::Point::ORIGIN, kurbo::Point::ORIGIN));
+        let bundle =
+            gaanim_objects::primitives::tangent_line(id, curve, t, length).unwrap_or_else(|| {
+                gaanim_objects::primitives::line(id, kurbo::Point::ORIGIN, kurbo::Point::ORIGIN)
+            });
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -2271,8 +2333,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         grid_stroke: f64,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle =
-            gaanim_objects::primitives::number_plane(id, x_range, y_range, axis_stroke, grid_stroke);
+        let bundle = gaanim_objects::primitives::number_plane(
+            id,
+            x_range,
+            y_range,
+            axis_stroke,
+            grid_stroke,
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -2407,7 +2474,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         x_rotation: f64,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::arc(id, center, radii, start_angle, sweep_angle, x_rotation);
+        let bundle = gaanim_objects::primitives::arc(
+            id,
+            center,
+            radii,
+            start_angle,
+            sweep_angle,
+            x_rotation,
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -2460,7 +2534,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         sweep_angle: f64,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::sector(id, center, radius, start_angle, sweep_angle);
+        let bundle =
+            gaanim_objects::primitives::sector(id, center, radius, start_angle, sweep_angle);
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -2532,10 +2607,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a right-angle indicator primitive.
-    pub fn right_angle(
-        &mut self,
-        arm_length: f64,
-    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+    pub fn right_angle(&mut self, arm_length: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::right_angle(id, arm_length);
         MobjectSpawnBuilder {
@@ -2829,7 +2901,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent: None,
         };
         self.states.insert(parent_id, state);
-        self.mobject_names.insert(parent_id, format!("Text('{}')", content));
+        self.mobject_names
+            .insert(parent_id, format!("Text('{}')", content));
 
         MobjectRef { id: parent_id }
     }
@@ -2854,14 +2927,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             Some(state) => state.entity,
             None => {
                 bevy::prelude::warn!("ValueTrackerRef id {:?} not found", signal_ref.id);
-                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), Bounds3D::default());
+                let bundle =
+                    MobjectBundle::new(parent_id, kurbo::BezPath::new(), Bounds3D::default());
                 self.commands.spawn(bundle);
                 return MobjectRef { id: parent_id };
             }
         };
 
-        let initial_val = self.float_signals.get(&signal_ref.id).cloned().unwrap_or(0.0);
-        let text = format!("{}{:.width$}{}", prefix, initial_val, suffix, width = num_decimals);
+        let initial_val = self
+            .float_signals
+            .get(&signal_ref.id)
+            .cloned()
+            .unwrap_or(0.0);
+        let text = format!(
+            "{}{:.width$}{}",
+            prefix,
+            initial_val,
+            suffix,
+            width = num_decimals
+        );
 
         let (path, bounds) = match gaanim_text::shaper::compile_text_to_path(
             self.font_registry,
@@ -2881,7 +2965,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         bundle.stroke = stroke.clone();
         bundle.tag = gaanim_scene::ObjectTag(format!("DecimalNumber({})", text));
 
-        let entity = self.commands.spawn(bundle)
+        let entity = self
+            .commands
+            .spawn(bundle)
             .insert(crate::DecimalNumber {
                 signal_entity: signal_entity_bevy,
                 num_decimals,
@@ -2907,7 +2993,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent: None,
         };
         self.states.insert(parent_id, state);
-        self.mobject_names.insert(parent_id, format!("DecimalNumber('{}')", text));
+        self.mobject_names
+            .insert(parent_id, format!("DecimalNumber('{}')", text));
 
         MobjectRef { id: parent_id }
     }
@@ -3003,7 +3090,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent: None,
         };
         self.states.insert(parent_id, state);
-        self.mobject_names.insert(parent_id, format!("Typst('{}')", formula));
+        self.mobject_names
+            .insert(parent_id, format!("Typst('{}')", formula));
 
         MobjectRef { id: parent_id }
     }
@@ -3110,25 +3198,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
             // 3. Match normalized query against normalized text
             if !normalized_query.is_empty()
-                && let Some(start_byte_idx) = normalized_text.find(&normalized_query) {
-                    let end_byte_idx = start_byte_idx + normalized_query.len();
+                && let Some(start_byte_idx) = normalized_text.find(&normalized_query)
+            {
+                let end_byte_idx = start_byte_idx + normalized_query.len();
 
-                    // We gather unique child_spans indices that fall within the matched byte range
-                    let mut matched_span_indices = Vec::new();
-                    for byte_idx in start_byte_idx..end_byte_idx {
-                        if let Some(&span_idx) = index_mapping.get(byte_idx)
-                            && !matched_span_indices.contains(&span_idx) {
-                                matched_span_indices.push(span_idx);
-                            }
-                    }
-
-                    // Add the child IDs
-                    for span_idx in matched_span_indices {
-                        if let Some((id, _, _)) = state.child_spans.get(span_idx) {
-                            child_ids.push(*id);
-                        }
+                // We gather unique child_spans indices that fall within the matched byte range
+                let mut matched_span_indices = Vec::new();
+                for byte_idx in start_byte_idx..end_byte_idx {
+                    if let Some(&span_idx) = index_mapping.get(byte_idx)
+                        && !matched_span_indices.contains(&span_idx)
+                    {
+                        matched_span_indices.push(span_idx);
                     }
                 }
+
+                // Add the child IDs
+                for span_idx in matched_span_indices {
+                    if let Some((id, _, _)) = state.child_spans.get(span_idx) {
+                        child_ids.push(*id);
+                    }
+                }
+            }
         }
 
         MobjectSelection {
@@ -3415,7 +3505,10 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
         // Tag entity with the current scene if inside a scene scope
         if let Some(scene_id) = self.builder.current_scene {
-            self.builder.commands.entity(entity).insert(SceneMember(scene_id));
+            self.builder
+                .commands
+                .entity(entity)
+                .insert(SceneMember(scene_id));
         }
 
         let state = MobjectState {
@@ -3430,7 +3523,9 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
             parent: None,
         };
         self.builder.states.insert(self.id, state);
-        self.builder.mobject_names.insert(self.id, self.bundle.tag.0.clone());
+        self.builder
+            .mobject_names
+            .insert(self.id, self.bundle.tag.0.clone());
 
         MobjectRef { id: self.id }
     }
