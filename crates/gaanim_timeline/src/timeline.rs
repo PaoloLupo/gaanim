@@ -345,14 +345,13 @@ impl Timeline {
             .next_back();
 
         let kf_start_time = if let Some((&kf_time, snapshot)) = keyframe {
-            // Skip full restore when seeking forward within the same keyframe interval:
-            // clip replay is deterministic and produces correct state from any baseline.
-            let same_kf_and_forward =
-                self.last_restore_kf_time == Some(kf_time) && clamped_target >= self.current_time;
-            if !same_kf_and_forward {
-                snapshot.restore(world);
-                self.last_restore_kf_time = Some(kf_time);
-            }
+            // Always restore the snapshot to guarantee correct entity state.
+            // Transitions (slide, crossfade, etc.) apply one-shot offsets that
+            // accumulate without a full restore, so skipping the restore on
+            // forward seeks produces incorrect results.
+            // TODO: optimise with intermediate keyframes to avoid per-frame restore.
+            snapshot.restore(world);
+            self.last_restore_kf_time = Some(kf_time);
             kf_time.0
         } else {
             self.last_restore_kf_time = None;

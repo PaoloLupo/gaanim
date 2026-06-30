@@ -199,6 +199,7 @@ impl DrawableHandle {
             anim_type: AnimationType::TranslateBy { delta: DVec3::ZERO },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 }

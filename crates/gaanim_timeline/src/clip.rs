@@ -121,6 +121,8 @@ pub struct AnimationSpec {
     pub lens: PropertyLensSpec,
     /// Easing curve or physical spring rate function.
     pub rate_func: RateFunc,
+    /// Initial delay in seconds before the animation starts.
+    pub delay: f64,
     /// High-level animation label (e.g. "Write", "Grow", "SpinIn").
     pub label: Option<String>,
 }

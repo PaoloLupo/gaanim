@@ -148,6 +148,7 @@ pub struct AnimationBuilder {
     pub target: ObjectId,
     pub anim_type: AnimationType,
     pub duration: f64,
+    pub delay: f64,
     pub rate_func: RateFunc,
 }
 
@@ -192,6 +193,7 @@ impl MobjectRef {
             anim_type: AnimationType::TranslateTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -205,6 +207,7 @@ impl MobjectRef {
             anim_type: AnimationType::TranslateBy { delta },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -218,6 +221,7 @@ impl MobjectRef {
             anim_type: AnimationType::RotateTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -231,6 +235,7 @@ impl MobjectRef {
             anim_type: AnimationType::RotateBy { angle_radians },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -240,6 +245,7 @@ impl MobjectRef {
             anim_type: AnimationType::ScaleTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -249,6 +255,7 @@ impl MobjectRef {
             anim_type: AnimationType::ScaleUniform { factor },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -258,6 +265,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -267,6 +275,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeIn,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -276,6 +285,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeOut,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -285,6 +295,7 @@ impl MobjectRef {
             anim_type: AnimationType::FillColorTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -294,6 +305,7 @@ impl MobjectRef {
             anim_type: AnimationType::StrokeColorTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -303,6 +315,7 @@ impl MobjectRef {
             anim_type: AnimationType::StrokeWidthTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -326,6 +339,7 @@ impl MobjectRef {
             anim_type: AnimationType::Write { stroke_width },
             duration,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -346,6 +360,7 @@ impl MobjectRef {
             anim_type: AnimationType::Create { stroke_width },
             duration,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -365,6 +380,7 @@ impl MobjectRef {
             anim_type: AnimationType::Uncreate { stroke_width },
             duration,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -384,6 +400,7 @@ impl MobjectRef {
             anim_type: AnimationType::Unwrite { stroke_width },
             duration,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -394,6 +411,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowFromCenter,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -404,6 +422,7 @@ impl MobjectRef {
             anim_type: AnimationType::ShrinkToCenter,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -414,6 +433,7 @@ impl MobjectRef {
             anim_type: AnimationType::SpinInFromNothing,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -427,6 +447,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -444,6 +465,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -453,6 +475,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeTransform { target },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -462,6 +485,7 @@ impl MobjectRef {
             anim_type: AnimationType::Wiggle,
             duration: 1.0,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 
@@ -471,6 +495,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowFromPoint { px, py },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -482,6 +507,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -491,6 +517,7 @@ impl MobjectRef {
             anim_type: AnimationType::DrawBorderThenFill,
             duration: 1.5,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -504,6 +531,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -513,6 +541,7 @@ impl MobjectRef {
             anim_type: AnimationType::Circumscribe { color },
             duration: 1.5,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -525,6 +554,7 @@ impl MobjectRef {
             anim_type: AnimationType::MoveAlongPath { path },
             duration: 2.0,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 
@@ -536,6 +566,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowArrow,
             duration: 1.5,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -547,6 +578,7 @@ impl MobjectRef {
             anim_type: AnimationType::ShowPassingFlash { time_width },
             duration,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 }
@@ -565,6 +597,7 @@ impl ValueTrackerRef {
             anim_type: AnimationType::SignalFloat { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 }

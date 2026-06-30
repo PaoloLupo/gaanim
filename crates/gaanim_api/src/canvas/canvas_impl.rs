@@ -196,6 +196,7 @@ impl Canvas {
                 anim_type: AnimationType::FadeOut,
                 duration: dur.max(0.0),
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
             })
             .collect();
         if !anims.is_empty() {

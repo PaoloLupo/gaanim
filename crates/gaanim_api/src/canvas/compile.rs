@@ -145,6 +145,7 @@ impl Canvas {
             target,
             anim_type,
             duration: anim.duration,
+            delay: anim.delay,
             rate_func: anim.rate_func.clone(),
         })
     }

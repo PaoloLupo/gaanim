@@ -105,9 +105,10 @@ pub fn gaanim_render_cache_sweep_system(
 /// making it suitable for headless export where every frame is different.
 ///
 /// # Coordinate System
-/// The returned `vello::Scene` is in **Bevy world space** (Y-up, origin at center).
-/// When rendering directly with `vello::Renderer::render_to_texture`, apply a
-/// camera transform that maps world coordinates to the output viewport.
+/// The returned `vello::Scene` is in **gaanim world space** (Y-up, origin at
+/// centre).  When rendering directly with `vello::Renderer::render_to_texture`,
+/// apply a camera transform that maps world coordinates to the output viewport.
+/// The export path in `gaanim_export` already handles this correctly.
 pub fn compile_scene_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
@@ -142,6 +143,7 @@ pub fn compile_scene_from_world(
         Option<&Path2D>,
         Option<&FillBrush>,
         Option<&StrokeBrush>,
+        Option<&gaanim_scene::ObjectTag>,
     ), With<Visible>>();
 
     let mut query_effects = world.query::<(
@@ -164,6 +166,7 @@ pub fn compile_scene_from_world(
         path_opt,
         fill_opt,
         stroke_opt,
+        tag,
     ) in query_mobjects.iter(world)
     {
         if *render_layer != RenderLayer::Vello2D {
@@ -282,8 +285,22 @@ pub fn compile_scene_from_world(
             }
         }
 
+        let is_text = tag.is_some_and(|t| {
+            t.0.starts_with("Text('")
+                || t.0.starts_with("Char('")
+                || t.0.starts_with("Typst('")
+                || t.0.starts_with("TypstGlyph")
+                || t.0.starts_with("TypstShape")
+                || t.0.starts_with("DecimalNumber(")
+        });
+        let entity_affine = if is_text {
+            transform.affine_2d
+        } else {
+            kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]) * transform.affine_2d
+        };
+
         extracted.push(ExtractedElement {
-            transform: transform.affine_2d,
+            transform: entity_affine,
             opacity: global_opacity.0,
             render_order: *render_order,
             scene: Arc::new(scene),
@@ -348,9 +365,13 @@ pub fn compile_scene_from_world(
 /// 6. Assigns/updates the single global `VelloScene2d` entity marked with `MainVelloScene`.
 ///
 /// # Coordinate System
-/// Coordinates inside the `vello::Scene` are in **Bevy world space** (Y-up, origin at the center
-/// of the viewport when using `Camera2d`). `bevy_vello` handles the conversion to Vello's native
-/// Y-down pixel space automatically during its render pass.
+/// gaanim uses a Y-up coordinate system (positive Y = up on screen).
+/// `bevy_vello` applies a single Y-flip via the view matrix to convert
+/// from Bevy's Y-up to Vello's Y-down native space.  To keep the final
+/// output Y-up, non-text entities receive an additional `scale(1, -1)`
+/// model flip so that the two flips cancel out.  Text glyphs are already
+/// pre-flipped in the shaper (`scale(s, -s)`) and must NOT get the extra
+/// flip — they rely on the single view-matrix flip alone.
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
@@ -367,6 +388,7 @@ pub fn gaanim_render_system(
             Option<Ref<Path2D>>,
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
+            Option<&gaanim_scene::ObjectTag>,
         ),
         With<Visible>,
     >,
@@ -418,6 +440,7 @@ pub fn gaanim_render_system(
         path_ref,
         fill_ref,
         stroke_ref,
+        tag,
     ) in &query_mobjects
     {
         // Look up effects, bounds and group marker components on-demand to keep Query tuple size small
@@ -606,8 +629,26 @@ pub fn gaanim_render_system(
             Arc::new(scene)
         });
 
+        // Apply Y-flip to non-text entities so that the gaanim Y-up
+        // coordinate system is preserved on screen.  Text glyphs are
+        // already pre-flipped (scale(s, -s)) in the shaper, so they
+        // must NOT receive this extra flip.
+        let is_text = tag.is_some_and(|t| {
+            t.0.starts_with("Text('")
+                || t.0.starts_with("Char('")
+                || t.0.starts_with("Typst('")
+                || t.0.starts_with("TypstGlyph")
+                || t.0.starts_with("TypstShape")
+                || t.0.starts_with("DecimalNumber(")
+        });
+        let entity_affine = if is_text {
+            transform.affine_2d
+        } else {
+            kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]) * transform.affine_2d
+        };
+
         local_extracted.push(ExtractedElement {
-            transform: transform.affine_2d,
+            transform: entity_affine,
             opacity: global_opacity.0,
             render_order: *render_order,
             scene: Arc::clone(fragment),

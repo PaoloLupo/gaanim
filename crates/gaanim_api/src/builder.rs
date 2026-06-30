@@ -691,15 +691,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             },
         };
 
-        // Add the resolved clip to the Timeline resource
+        // Add the resolved clip to the Timeline resource.
+        // The delay offsets the clip start within the segment but does not
+        // advance the cursor (cursor tracks segment duration, not delay).
+        let clip_start = self.current_time + anim.delay;
         self.timeline.add_clip(
             track,
-            self.current_time,
+            clip_start,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: lens_spec,
                 rate_func: anim.rate_func,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -844,6 +848,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: reset_fill_val,
                     },
                     rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -858,6 +863,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: reset_path_val,
                     },
                     rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -881,6 +887,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -894,6 +901,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -907,6 +915,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -923,6 +932,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -936,6 +946,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -949,6 +960,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -962,6 +974,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         target: *item_id,
                         lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -980,6 +993,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                             to: width,
                         },
                         rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -1034,6 +1048,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: initial_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1051,6 +1066,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: mid_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1067,6 +1083,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: end_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1127,6 +1144,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1141,6 +1159,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_from,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1161,6 +1180,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1175,6 +1195,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1191,6 +1212,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1205,6 +1227,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1234,6 +1257,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     target: anim.target,
                     lens: PropertyLensSpec::Opacity { from, to: 0.0 },
                     rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1260,6 +1284,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: target_opacity,
                     },
                     rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1305,6 +1330,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: gaanim_core::glam::DVec3::new(to_x, origin.y, origin.z),
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1343,6 +1369,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1358,6 +1385,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1405,6 +1433,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1420,6 +1449,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1463,6 +1493,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1474,6 +1505,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1495,6 +1527,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1508,6 +1541,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1543,6 +1577,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: 0.0,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1557,6 +1592,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_opacity,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1576,6 +1612,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1590,6 +1627,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1629,6 +1667,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1643,6 +1682,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1662,6 +1702,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: c,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1676,6 +1717,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: *current,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1715,6 +1757,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathFollow { path },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1763,6 +1806,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                            delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1776,6 +1820,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1790,6 +1835,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1814,6 +1860,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1828,6 +1875,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );

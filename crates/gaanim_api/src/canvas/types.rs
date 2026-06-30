@@ -88,6 +88,7 @@ impl Anim {
                 target,
                 anim_type,
                 duration: 1.0,
+                delay: 0.0,
                 rate_func: RateFunc::Smooth,
             },
             queued: None,
@@ -104,6 +105,8 @@ impl Anim {
         let mut guard = state.lock().expect("canvas state poisoned");
         let segment = &mut guard.segments[segment_idx];
         let op_idx = segment.ops.len();
+        // Only advance cursor by duration; delay is per-animation and does not
+        // occupy segment time (it shifts the clip start during compilation).
         segment.cursor += anim.inner.duration;
         segment.ops.push(Op::Animate {
             anim: anim.inner.clone(),
@@ -188,9 +191,21 @@ impl Anim {
         self.rate_func(RateFunc::Linear)
     }
 
-    pub fn delay(self, sec: f64) -> Self {
-        let duration = self.inner.duration + sec.max(0.0);
-        self.duration(duration)
+    pub fn delay(mut self, sec: f64) -> Self {
+        let delay = sec.max(0.0);
+        self.inner.delay = delay;
+        // Sync the delay into the queued Op so the compiler sees it.
+        // Do NOT adjust segment.cursor: delay is a per-animation offset,
+        // not segment time. The cursor only tracks cumulative duration.
+        if let Some(queue) = &self.queued {
+            let mut guard = queue.state.lock().expect("canvas state poisoned");
+            if let Some(segment) = guard.segments.get_mut(queue.segment_idx) {
+                if let Some(Op::Animate { anim, .. }) = segment.ops.get_mut(queue.op_idx) {
+                    anim.delay = delay;
+                }
+            }
+        }
+        self
     }
 
     pub fn steps(self, n: u32) -> Self {
