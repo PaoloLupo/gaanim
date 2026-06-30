@@ -33,8 +33,8 @@ c = Canvas(1920, 1080, background=BLACK)
 # ── Segment 1: Title ────────────────────────────────────────────
 c.segment("intro")
 
-title = c.title("Gaanim").fill(WHITE).at(0.0, 100.0)
-subtitle = c.subtitle("Animaciones").fill(GRAY).at(0.0, 20.0)
+title = c.title("Gaanim").fill(WHITE).at(0.0, 200.0)
+subtitle = c.subtitle("Animaciones").fill(GRAY).at(0.0, 100.0)
 
 title.write().duration(2.0).smooth()
 subtitle.fade_in().duration(1.0).delay(1.5).smooth()

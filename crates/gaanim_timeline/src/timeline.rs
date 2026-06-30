@@ -1,4 +1,4 @@
-use bevy::prelude::{BuildChildrenTransformExt, Entity, Resource, World};
+use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
 use std::collections::BTreeMap;
@@ -754,9 +754,13 @@ fn apply_transition(
             // Instant cut — no visual effect needed.
         }
         TransitionType::CrossFade { .. } => {
-            // Crossfade: from scene fades out (opacity 1→0), to scene fades in (opacity 0→1).
+            // Crossfade: multiplicatively modulate existing opacity.
+            // Only touch root entities — opacity_propagation_system cascades to children.
             for (entity, scene_id) in scene_entities {
-                let target_opacity = if *scene_id == from {
+                if world.get::<ChildOf>(*entity).is_some() {
+                    continue; // skip children, they inherit from root
+                }
+                let factor = if *scene_id == from {
                     1.0 - t as f32
                 } else if *scene_id == to {
                     t as f32
@@ -764,23 +768,27 @@ fn apply_transition(
                     continue;
                 };
                 if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
-                    opacity.0 = target_opacity;
+                    opacity.0 *= factor;
                 }
             }
         }
         TransitionType::FadeThrough { fade_color, .. } => {
-            // Fade-through: first half fades everything to fade_color, second half reveals to-scene.
+            // Fade-through: multiplicatively modulate existing opacity.
+            // Only touch root entities — opacity_propagation_system cascades to children.
             let _ = fade_color;
             for (entity, scene_id) in scene_entities {
-                let target_opacity = if t < 0.5 {
-                    // First half: fade out both scenes
+                if world.get::<ChildOf>(*entity).is_some() {
+                    continue; // skip children, they inherit from root
+                }
+                let factor = if t < 0.5 {
+                    // First half: fade out from-scene, keep to-scene hidden
                     if *scene_id == from {
                         1.0 - (t * 2.0) as f32
                     } else {
                         0.0
                     }
                 } else {
-                    // Second half: fade in to-scene
+                    // Second half: fade in to-scene, keep from-scene hidden
                     if *scene_id == to {
                         ((t - 0.5) * 2.0) as f32
                     } else {
@@ -788,7 +796,7 @@ fn apply_transition(
                     }
                 };
                 if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
-                    opacity.0 = target_opacity;
+                    opacity.0 *= factor;
                 }
             }
         }
