@@ -1,52 +1,24 @@
+use ::gaanim_core as engine_core;
 use pyo3::prelude::*;
 
-// Re-export peniko from the engine core crate under a different alias
-// to avoid the name clash with our own pymodule.
-use ::gaanim_core as engine_core;
-
-mod animation;
 mod color;
-pub(crate) mod engine;
-pub mod host;
-mod id;
-mod mobject;
-pub mod runtime;
-mod scene;
-mod selection;
-mod theme;
+mod pycanvas;
+mod pydrawable;
 mod transition;
 
-pub use crate::scene::DeferredOp;
-
-/// Register the `gaanim_core` builtin module in the embedded interpreter's
-/// init table so that `import gaanim_core` works inside the host process.
-///
-/// This wraps PyO3's `append_to_inittab!` macro, which must be invoked from
-/// within the crate that owns the `#[pymodule]` (the generated hidden
-/// `mod gaanim_core` is only in scope here).
-///
-/// **Must be called before `Python::initialize()`.**
+/// Register the `gaanim_core` builtin module.
 pub fn register_inittab() {
     pyo3::append_to_inittab!(gaanim_core);
 }
 
-/// Gaanim Python bindings — high-performance GPU-accelerated vector animation engine.
 #[pymodule]
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<scene::PyScene>()?;
-    m.add_class::<engine::PyEngine>()?;
-    m.add_class::<engine::PySceneBuilder>()?;
     m.add_class::<transition::PyTransitionType>()?;
-    m.add_class::<mobject::PyMobject>()?;
-    m.add_class::<selection::PySelection>()?;
-    m.add_class::<selection::PySelectionAnim>()?;
-    m.add_class::<animation::PyAnimationSpec>()?;
-    m.add_class::<animation::PyValueTracker>()?;
     m.add_class::<color::PyColor>()?;
-    m.add_class::<id::PyObjectId>()?;
-    m.add_class::<theme::PyTheme>()?;
+    m.add_class::<pycanvas::PyCanvas>()?;
+    m.add_class::<pydrawable::PyCanvasAnim>()?;
+    m.add_class::<pydrawable::PyDrawable>()?;
 
-    // Color palette — exposed as module-level constants.
     m.add(
         "GOLD",
         color::PyColor(engine_core::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00)),
@@ -101,6 +73,5 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "TEAL",
         color::PyColor(engine_core::peniko::Color::from_rgb8(0x2E, 0x86, 0xAB)),
     )?;
-
     Ok(())
 }

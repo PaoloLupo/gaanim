@@ -439,8 +439,7 @@ fn editor_ui_system(
                             ui.horizontal(|ui| {
                                 // Scene name (truncated to avoid pushing controls)
                                 if !scene_name.is_empty() {
-                                    let display =
-                                        truncate_with_ellipsis(&scene_name, 20);
+                                    let display = truncate_with_ellipsis(&scene_name, 20);
                                     ui.label(
                                         egui::RichText::new(display)
                                             .color(egui::Color32::from_rgb(160, 200, 255))
@@ -1032,10 +1031,9 @@ fn global_playback_keys_system(
             .collect();
 
         if !scene_segs.is_empty() {
-            let cur_scene_idx =
-                scene_segs
-                    .iter()
-                    .position(|(s, e)| frac >= *s && frac < *e + 0.005);
+            let cur_scene_idx = scene_segs
+                .iter()
+                .position(|(s, e)| frac >= *s && frac < *e + 0.005);
             let before_first = frac < scene_segs[0].0;
             let after_last = frac >= scene_segs.last().unwrap().1 - 0.005;
 

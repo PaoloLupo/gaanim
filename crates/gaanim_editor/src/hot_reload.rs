@@ -3,9 +3,8 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use crossbeam_channel::Receiver;
-use gaanim_python::DeferredOp;
-use gaanim_python::host::ReloadPayload;
-use gaanim_python::runtime;
+use gaanim_api::host::ReloadPayload;
+use gaanim_api::runtime;
 use gaanim_scene::MobjectId;
 use gaanim_timeline::timeline::Timeline;
 
@@ -77,13 +76,9 @@ pub fn reload_listener_system(world: &mut World) {
         (tl.current_time, tl.is_playing)
     };
 
-    reload_with(
-        world,
-        payload.ops,
-        payload.width,
-        payload.height,
-        payload.background,
-    );
+    let width = payload.canvas.width;
+    let height = payload.canvas.height;
+    reload_with(world, payload.canvas);
 
     // Restore playback position after rebuild.
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
@@ -94,22 +89,16 @@ pub fn reload_listener_system(world: &mut World) {
 
     let now = world.resource::<Time>().elapsed_secs_f64();
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
-        status.last_message = format!("Reloaded scene ({}x{})", payload.width, payload.height);
+        status.last_message = format!("Reloaded scene ({}x{})", width, height);
         status.shown_at = Some(now);
     }
 }
 
 /// Rebuild the scene in `world` from a fresh set of ops, then schedule the
 /// t=0 keyframe capture for the next frame (after deferred Commands flush).
-pub fn reload_with(
-    world: &mut World,
-    ops: Vec<DeferredOp>,
-    width: u32,
-    height: u32,
-    background: Option<gaanim_core::peniko::Color>,
-) {
+pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
     clear_scene_entities(world);
-    runtime::replay_into(world, ops, width, height, background);
+    runtime::replay_canvas_into(world, canvas);
     // Defer keyframe capture to the next frame so that deferred Commands
     // (entity spawns, SceneMember inserts, etc.) are flushed first.
     world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);

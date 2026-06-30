@@ -1,6 +1,11 @@
+//! Canvas demo: intro with fade_in, move, fade_out.
+//! Run: `cargo run --example fluent_demo -p gaanim_api`
+
 use bevy::prelude::*;
 use gaanim_animation::{DeltaTime, GaanimAnimationPlugin};
-use gaanim_api::prelude::*;
+use gaanim_api::GaanimApiPlugin;
+use gaanim_api::canvas::Canvas;
+use gaanim_core::peniko::Color;
 use gaanim_math::Camera;
 use gaanim_renderer::prelude::*;
 use gaanim_scene::GaanimScenePlugin;
@@ -10,56 +15,57 @@ use gaanim_timeline::{GaanimTimelinePlugin, timeline::Timeline};
 
 fn main() {
     App::new()
-        // Add Bevy's rendering and windowing defaults
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Gaanim v2 — Fluent SceneBuilder & Typst Demo".into(),
+                title: "Gaanim Canvas Demo".into(),
                 resolution: (1280, 720).into(),
                 ..default()
             }),
             ..default()
         }))
-        // Add our programmatic animation engine plugins
         .add_plugins(GaanimScenePlugin)
         .add_plugins(GaanimAnimationPlugin)
         .add_plugins(GaanimTimelinePlugin)
         .add_plugins(GaanimTextPlugin)
         .add_plugins(GaanimApiPlugin)
-        // Add the high-performance Vello GPU renderer plugin
         .add_plugins(GaanimRendererPlugin)
-        // Setup initial camera and scene graph using our premium builder API
         .add_systems(Startup, setup_scene)
-        // Simple timeline clock driver
         .add_systems(Update, drive_timeline_clock)
         .run();
 }
 
-/// Startup system: Demonstrates how the fluent SceneBuilder handles layout and animations automatically!
 fn setup_scene(
     mut commands: Commands,
     mut timeline: ResMut<Timeline>,
     font_registry: Res<FontRegistry>,
     text_config: Res<gaanim_text::prelude::TextConfig>,
 ) {
-    // 1. Spawn a default Orthographic camera resource and entity
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
-    // 2. Initialize the premium SceneBuilder!
-    let mut scene = SceneBuilder::new(&mut commands, &mut timeline, &font_registry, &text_config);
+    let mut canvas = Canvas::new(1280, 720).background(Color::from_rgb8(0x0f, 0x0f, 0x1a));
 
-    let _text_doc = scene.typst("Paolo", false, None, None, Some(64.0), None);
+    let logo = canvas
+        .circle(80.0)
+        .fill(Color::from_rgb8(0x19, 0x32, 0x64))
+        .at(0.0, 0.0);
+    let title = canvas.title("Gaanim").fill(Color::WHITE).at(0.0, 180.0);
 
-    // Loop duration marker setup
+    logo.fade_in().duration(1.0);
+    canvas.wait(0.5);
+    title.fade_in().duration(1.0);
+    canvas.wait(1.0);
+    logo.r#move(-300.0, 0.0).duration(1.5);
+    canvas.wait(0.5);
+    canvas.fade_out_all(1.0);
+    canvas.wait(0.5);
+
+    info!("Canvas: {:.1}s total", canvas.current_time());
+    canvas.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
     timeline.loop_range = Some((0.0, timeline.cached_duration + 0.5));
 }
 
-/// Simple clock system that advances the timeline frame-by-frame
-fn drive_timeline_clock(
-    mut timeline: ResMut<Timeline>,
-    time: Res<Time>,
-    mut dt: ResMut<DeltaTime>,
-) {
+fn drive_timeline_clock(mut tl: ResMut<Timeline>, time: Res<Time>, mut dt: ResMut<DeltaTime>) {
     dt.dt = time.delta_secs_f64();
-    timeline.is_playing = true;
+    tl.is_playing = true;
 }

@@ -1,6 +1,9 @@
 pub mod anim;
 pub mod builder;
+pub mod canvas;
+pub mod host;
 pub mod prelude;
+pub mod runtime;
 
 use bevy::prelude::*;
 use gaanim_animation::signals::FloatSignal;

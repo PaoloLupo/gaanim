@@ -1,47 +1,31 @@
-"""Example: Mobject Grouping and Styling.
+"""Example: Canvas grouping and simple timeline sequencing."""
 
-Demonstrates creating groups, styling the group dynamically,
-indexing child elements, and playing coordinated animations.
-"""
+from gaanim import BLACK, BLUE, GOLD, WHITE, Canvas
 
-from gaanim import GOLD, RED, Scene
+c = Canvas(1920, 1080, background=BLACK)
 
+logo = c.circle(80.0).fill(BLUE).at(0.0, 0.0)
+logo.fade_in().duration(1.0)
+c.wait(0.5)
 
-def main():
-    scene = Scene(
-        width=1280,
-        height=720,
-        title="Gaanim - Group Demo",
-    )
+title = c.title("Gaanim").fill(WHITE).at(0.0, 180.0)
+title.fade_in().duration(1.0).ease("spring")
+c.wait(1.0)
 
-    # 1. Create individual shapes
-    circle_left = scene.circle(radius=60.0).at(-100.0, 0.0)
-    circle_right = scene.circle(radius=60.0).at(100.0, 0.0)
-    square_top = scene.square(side=80.0).at(0.0, 100.0)
+logo.move(-300.0, 0.0).duration(1.0)
+c.wait(0.3)
 
-    # 2. Group them together
-    group = scene.group([circle_left, circle_right, square_top])
+dot = c.dot(20.0).fill(GOLD).at(-180.0, 0.0)
+dot.fade_in().duration(0.5)
 
-    # 3. Assert index access works
-    child_0 = group[0]
-    scene.play(child_0.animate().shift(100.0, 0.0))
-    # 4. Style the group (propagates to all children at runtime)
-    group.fill(GOLD)
+group = c.group([logo, dot])
+group.move(0.0, -80.0).duration(0.8)
+c.wait(1.0)
 
-    # 5. Play animations on the group as a single unit
-    scene.play(group.animate().shift(0.0, -100.0).duration(2.0).spring())
+logo.indicate().duration(0.5)
+c.wait(0.5)
 
-    # 6. Wait a bit
-    scene.wait(1.0)
+group.fade_out().duration(1.0)
+c.wait(0.5)
 
-    # 7. Ungroup them
-    scene.ungroup(group)
-
-    scene.play(square_top.animate().fill_color(RED))
-
-    # 8. Render
-    scene.edit()
-
-
-if __name__ == "__main__":
-    main()
+c.render()

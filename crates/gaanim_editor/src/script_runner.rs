@@ -3,8 +3,9 @@
 //! The host owns a dedicated OS thread that holds the GIL and executes the
 //! user's animation script. The script imports `gaanim` (which, because the
 //! host registered `gaanim_core` via `append_to_inittab!`, resolves to the
-//! in-process module) and builds a `Scene`/`Engine`; calling `.render()`
-//! pushes the drained ops through the host channel instead of opening a window.
+//! in-process module) and builds a `Canvas`; calling `.render()` pushes the
+//! canonical `gaanim_api` payload through the host channel instead of opening a
+//! window.
 
 use crossbeam_channel::{Receiver, Sender};
 use pyo3::prelude::*;
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use gaanim_python::host::{self, ReloadPayload};
+use gaanim_api::host::{self, ReloadPayload};
 
 /// Handle to the script-running thread.
 pub struct ScriptRunner {
@@ -40,7 +41,10 @@ impl ScriptRunner {
             })
             .expect("failed to spawn script thread");
 
-        Self { rerun_tx, _exited: exited }
+        Self {
+            rerun_tx,
+            _exited: exited,
+        }
     }
 
     /// Request a re-run of the script (used by the file watcher and the `R` key).
@@ -55,13 +59,13 @@ fn run_script_thread(
     rerun_rx: Receiver<bool>,
     exited: Arc<AtomicBool>,
 ) {
-    // Install the host channel so `Scene.render()` inside the script can push
+    // Install the host channel so `Canvas.render()` inside the script can push
     // payloads to us. This is done once; the channel persists across re-runs.
     host::set_host_sender(Some(payload_tx));
 
     // One-time bootstrap: the embedded interpreter has `gaanim_core` registered
     // as a top-level builtin module (via `append_to_inittab!` in main). User
-    // scripts, however, do `from gaanim import Scene`. There is no pip-installed
+    // scripts, however, do `from gaanim import Canvas`. There is no pip-installed
     // `gaanim` package in the embedded environment, so we synthesize one in
     // memory that re-exports every public attribute of the builtin `gaanim_core`.
     let bootstrap_err = Python::attach(|py| {
@@ -104,7 +108,7 @@ fn run_script_thread(
 }
 
 /// Python bootstrap that creates an in-memory `gaanim` package aliasing the
-/// builtin `gaanim_core` module, so `from gaanim import Scene` works without a
+/// builtin `gaanim_core` module, so `from gaanim import Canvas` works without a
 /// pip-installed package.
 const BOOTSTRAP_GAANIM_PACKAGE: &str = "import sys, types\nimport gaanim_core\nif 'gaanim' not in sys.modules:\n    _pkg = types.ModuleType('gaanim')\n    _pkg.__path__ = []\n    for _n in dir(gaanim_core):\n        if not _n.startswith('_'):\n            setattr(_pkg, _n, getattr(gaanim_core, _n))\n    sys.modules['gaanim'] = _pkg\n";
 

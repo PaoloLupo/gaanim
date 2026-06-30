@@ -14,12 +14,14 @@ gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_objects = { path = "../gaanim_objects" }
 gaanim_layout = { path = "../gaanim_layout" }
 gaanim_text = { path = "../gaanim_text" }
+gaanim_renderer = { path = "../gaanim_renderer" }
 
 # Third-party dependencies from workspace
 bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
+crossbeam-channel = { workspace = true }
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }
