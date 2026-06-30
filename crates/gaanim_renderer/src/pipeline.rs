@@ -45,9 +45,19 @@ pub fn sync_gaanim_camera_to_bevy_system(
 ) {
     let Some(cam) = gaanim_camera else { return };
     for (mut transform, mut projection) in &mut bevy_cameras {
-        // Position
+        // Position — incorporate viewport_offset_y so the scene shifts up
+        // when the timeline panel is visible (offset is in screen pixels).
+        let effective_zoom = match cam.projection {
+            gaanim_math::Projection::Orthographic { zoom } => zoom * cam.viewport_scale,
+            _ => 1.0,
+        };
+        let offset_world_y = if effective_zoom > 0.0 {
+            cam.viewport_offset_y / effective_zoom
+        } else {
+            0.0
+        };
         transform.translation.x = cam.position.x as f32;
-        transform.translation.y = cam.position.y as f32;
+        transform.translation.y = (cam.position.y - offset_world_y) as f32;
         // Rotation (2D Z-axis only) — compute directly from quaternion
         // to avoid the three-trig overhead of full Euler decomposition.
         let z_angle = 2.0 * f64::atan2(cam.rotation.z, cam.rotation.w);
@@ -55,7 +65,14 @@ pub fn sync_gaanim_camera_to_bevy_system(
 
         // Projection: only Orthographic is supported for 2D Vello
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let scale = 1.0 / zoom as f32;
+            // Apply viewport_scale so the scene maintains its aspect ratio
+            // when the window dimensions differ from the scene's native resolution.
+            let effective = zoom * cam.viewport_scale;
+            let scale = if effective > 0.0 {
+                1.0 / effective as f32
+            } else {
+                1.0
+            };
             if let Projection::Orthographic(ortho) = projection.as_mut() {
                 ortho.scale = scale;
             }
@@ -100,9 +117,10 @@ pub fn compile_scene_from_world(
 
     let cam_bounds = camera.and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let hw = (cam.viewport_width as f64) / (2.0 * zoom);
-            let hh = (cam.viewport_height as f64) / (2.0 * zoom);
-            let margin = 100.0 / zoom.max(0.1);
+            let effective = zoom * cam.viewport_scale;
+            let hw = (cam.viewport_width as f64) / (2.0 * effective);
+            let hh = (cam.viewport_height as f64) / (2.0 * effective);
+            let margin = 100.0 / effective.max(0.1);
             Some(gaanim_math::Bounds3D::new_2d(
                 cam.position.x - hw - margin,
                 cam.position.y - hh - margin,
@@ -374,10 +392,11 @@ pub fn gaanim_render_system(
     // 1. Calculate orthographic camera bounds for culling
     let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let hw = (cam.viewport_width as f64) / (2.0 * zoom);
-            let hh = (cam.viewport_height as f64) / (2.0 * zoom);
+            let effective = zoom * cam.viewport_scale;
+            let hw = (cam.viewport_width as f64) / (2.0 * effective);
+            let hh = (cam.viewport_height as f64) / (2.0 * effective);
             // Generous margin to avoid popping at boundaries
-            let margin = 100.0 / zoom.max(0.1);
+            let margin = 100.0 / effective.max(0.1);
             Some(gaanim_math::Bounds3D::new_2d(
                 cam.position.x - hw - margin,
                 cam.position.y - hh - margin,

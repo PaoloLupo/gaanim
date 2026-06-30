@@ -64,13 +64,14 @@ impl Plugin for GaanimEditorPlugin {
                     .in_set(gaanim_scene::hierarchy::SceneSet::Input)
                     .before(gaanim_timeline::timeline_playback_system),
                 editor_picking_system,
+                global_playback_keys_system,
                 fps_overlay::fps_overlay_system,
                 vsync::vsync_toggle_system,
             ),
         )
         .add_systems(
             Update,
-            viewport_adjust_system.after(gaanim_scene::hierarchy::SceneSet::Extraction),
+            viewport_adjust_system.before(gaanim_scene::hierarchy::SceneSet::Bounds),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
         .add_systems(EguiPrimaryContextPass, export::export_dialog_system);
@@ -383,7 +384,12 @@ fn editor_ui_system(
                             12, 12, 18, fill_alpha,
                         ))
                         .corner_radius(12.0)
-                        .inner_margin(egui::Margin::symmetric(16, 8))
+                        .inner_margin(egui::Margin {
+                            left: 16,
+                            right: 16,
+                            top: 20,
+                            bottom: 8,
+                        })
                         .stroke(egui::Stroke::new(
                             1.0,
                             egui::Color32::from_rgba_premultiplied(60, 60, 80, stroke_alpha),
@@ -431,10 +437,12 @@ fn editor_ui_system(
                             // Row 2: controls
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                // Scene name
+                                // Scene name (truncated to avoid pushing controls)
                                 if !scene_name.is_empty() {
+                                    let display =
+                                        truncate_with_ellipsis(&scene_name, 20);
                                     ui.label(
-                                        egui::RichText::new(&scene_name)
+                                        egui::RichText::new(display)
                                             .color(egui::Color32::from_rgb(160, 200, 255))
                                             .strong()
                                             .small(),
@@ -954,6 +962,15 @@ fn paint_seek_bar(
     }
 }
 
+/// Truncate text to `max_chars` characters, appending "…" if truncated.
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+    format!("{}…", chars[..max_chars].iter().collect::<String>())
+}
+
 /// Styled transport button (skip prev/next).
 fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
     let btn = egui::Button::new(
@@ -966,6 +983,93 @@ fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
     .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 160));
     if ui.add(btn).clicked() {
         on_click();
+    }
+}
+
+/// Global playback keybindings that work regardless of timeline panel visibility.
+fn global_playback_keys_system(
+    egui_wants: Res<EguiWantsInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut timeline: ResMut<Timeline>,
+) {
+    if egui_wants.wants_keyboard_input() {
+        return;
+    }
+
+    let total = timeline.cached_duration.max(0.0);
+
+    if keys.just_pressed(KeyCode::Space) {
+        timeline.is_playing = !timeline.is_playing;
+    }
+
+    if keys.just_pressed(KeyCode::Home) {
+        timeline.is_playing = false;
+        timeline.seek_request = Some(0.0);
+    }
+
+    if keys.just_pressed(KeyCode::End) {
+        timeline.is_playing = false;
+        timeline.seek_request = Some(total);
+    }
+
+    // Prev / Next scene via arrow keys
+    if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight) {
+        let go_next = keys.just_pressed(KeyCode::ArrowRight);
+        let current = timeline.current_time.clamp(0.0, total);
+        let total_f32 = total.max(0.001) as f32;
+        let frac = (current as f32 / total_f32).clamp(0.0, 1.0);
+
+        let scene_segs: Vec<(f32, f32)> = timeline
+            .scene_index
+            .iter()
+            .filter_map(|(&_start_time, &scene_id)| {
+                let (s, e) = timeline.scene_bounds(scene_id)?;
+                Some((
+                    (s as f32 / total_f32).clamp(0.0, 1.0),
+                    (e as f32 / total_f32).clamp(0.0, 1.0),
+                ))
+            })
+            .collect();
+
+        if !scene_segs.is_empty() {
+            let cur_scene_idx =
+                scene_segs
+                    .iter()
+                    .position(|(s, e)| frac >= *s && frac < *e + 0.005);
+            let before_first = frac < scene_segs[0].0;
+            let after_last = frac >= scene_segs.last().unwrap().1 - 0.005;
+
+            let target = if go_next {
+                if before_first {
+                    Some(scene_segs[0].0 as f64 * total)
+                } else if let Some(idx) = cur_scene_idx {
+                    if idx + 1 < scene_segs.len() {
+                        Some(scene_segs[idx + 1].0 as f64 * total)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // prev
+                if after_last {
+                    scene_segs.last().map(|(s, _)| *s as f64 * total)
+                } else if let Some(idx) = cur_scene_idx {
+                    if idx > 0 {
+                        Some(scene_segs[idx - 1].0 as f64 * total)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some(t) = target {
+                timeline.seek_request = Some(t);
+            }
+        }
     }
 }
 
@@ -1032,13 +1136,13 @@ fn viewport_adjust_system(
     let window_w = window.width() as f64;
     let available_h = window_h - inset.bottom as f64;
 
-    if inset.bottom < 1.0 || available_h < 1.0 {
+    if available_h < 1.0 {
         cam.viewport_offset_y = 0.0;
         cam.viewport_scale = 1.0;
         return;
     }
 
-    // Fit animation into the available area while preserving aspect ratio.
+    // Always fit animation into the available area while preserving aspect ratio.
     let anim_w = cam.viewport_width as f64;
     let anim_h = cam.viewport_height as f64;
     let scale_x = window_w / anim_w;
@@ -1046,5 +1150,6 @@ fn viewport_adjust_system(
     cam.viewport_scale = scale_x.min(scale_y);
 
     // Shift the Vello centre upward so the animation sits above the timeline.
+    // When there is no timeline panel (inset.bottom == 0) the offset is 0.
     cam.viewport_offset_y = -(inset.bottom as f64) / 2.0;
 }

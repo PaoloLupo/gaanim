@@ -16,9 +16,20 @@ pub struct ReloadReceiver {
 }
 
 /// Optional human-readable status line shown in the editor.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ReloadStatus {
     pub last_message: String,
+    /// `Some(seconds_since_startup)` when the message was set.
+    pub shown_at: Option<f64>,
+}
+
+impl Default for ReloadStatus {
+    fn default() -> Self {
+        Self {
+            last_message: String::new(),
+            shown_at: None,
+        }
+    }
 }
 
 /// Despawn every mobject entity and reset the [`Timeline`]
@@ -81,8 +92,10 @@ pub fn reload_listener_system(world: &mut World) {
         tl.is_playing = was_playing;
     }
 
+    let now = world.resource::<Time>().elapsed_secs_f64();
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.last_message = format!("Reloaded scene ({}x{})", payload.width, payload.height);
+        status.shown_at = Some(now);
     }
 }
 
@@ -102,24 +115,56 @@ pub fn reload_with(
     world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);
 }
 
-/// egui panel showing the last reload status.
-pub fn reload_status_overlay_system(mut ctx: bevy_egui::EguiContexts, status: Res<ReloadStatus>) {
-    if status.last_message.is_empty() {
+/// How long the reload badge stays fully visible (seconds).
+const RELOAD_BADGE_VISIBLE_SECS: f64 = 3.0;
+/// How long the badge fades out (seconds).
+const RELOAD_BADGE_FADE_SECS: f64 = 1.0;
+
+/// egui panel showing the last reload status, auto-hiding after a few seconds.
+pub fn reload_status_overlay_system(
+    mut ctx: bevy_egui::EguiContexts,
+    mut status: ResMut<ReloadStatus>,
+    time: Res<Time>,
+) {
+    let Some(shown_at) = status.shown_at else {
+        return;
+    };
+    let elapsed = time.elapsed_secs_f64() - shown_at;
+    let total_secs = RELOAD_BADGE_VISIBLE_SECS + RELOAD_BADGE_FADE_SECS;
+
+    if elapsed >= total_secs {
+        status.last_message.clear();
+        status.shown_at = None;
         return;
     }
+
+    let alpha_mul = if elapsed < RELOAD_BADGE_VISIBLE_SECS {
+        1.0_f32
+    } else {
+        1.0 - ((elapsed - RELOAD_BADGE_VISIBLE_SECS) / RELOAD_BADGE_FADE_SECS) as f32
+    };
+
+    if alpha_mul < 0.01 {
+        return;
+    }
+
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
     };
+    let bg_alpha = (200.0 * alpha_mul) as u8;
+    let text_alpha = (255.0 * alpha_mul) as u8;
     egui::Area::new("reload_status".into())
         .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-8.0, 30.0))
         .interactable(false)
         .show(&ctx, |ui| {
             egui::Frame::group(ui.style())
-                .fill(egui::Color32::from_rgba_premultiplied(20, 80, 40, 200))
+                .fill(egui::Color32::from_rgba_premultiplied(20, 80, 40, bg_alpha))
                 .show(ui, |ui| {
                     ui.label(
                         egui::RichText::new(&status.last_message)
-                            .color(egui::Color32::WHITE)
+                            .color(egui::Color32::from_rgba_premultiplied(
+                                255, 255, 255, text_alpha,
+                            ))
                             .small(),
                     );
                 });

@@ -19,7 +19,7 @@ pub struct ScriptRunner {
     /// Send `true` here to ask the thread to re-run the script.
     rerun_tx: Sender<bool>,
     /// Set when the thread has exited (e.g. after a fatal error).
-    pub exited: Arc<AtomicBool>,
+    _exited: Arc<AtomicBool>,
 }
 
 impl ScriptRunner {
@@ -40,7 +40,7 @@ impl ScriptRunner {
             })
             .expect("failed to spawn script thread");
 
-        Self { rerun_tx, exited }
+        Self { rerun_tx, _exited: exited }
     }
 
     /// Request a re-run of the script (used by the file watcher and the `R` key).
