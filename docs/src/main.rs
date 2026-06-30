@@ -196,7 +196,7 @@ fn export_website(bundle: Bundle, config: &Config) -> typst::diag::SourceResult<
 fn write_virtual_fs(root: &Path, fs: &VirtualFs) {
     std::fs::create_dir_all(root).unwrap();
     fs.par_iter().for_each(|(path, data)| {
-        let realized = path.realize(root);
+        let realized = path.realize(root).unwrap();
         if let Some(parent) = realized.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
