@@ -35,6 +35,19 @@ pub struct ExtractedElement {
     clip_mask: Option<ClipMask>,
 }
 
+const VELLO_LOCAL_Y_FLIP: kurbo::Affine =
+    kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+
+/// Converts a gaanim entity transform to Vello coordinates without changing
+/// its world-space translation. Text outlines are already flipped by shaping.
+fn entity_transform_for_vello(transform: kurbo::Affine, is_text: bool) -> kurbo::Affine {
+    if is_text {
+        transform
+    } else {
+        transform * VELLO_LOCAL_Y_FLIP
+    }
+}
+
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
 ///
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
@@ -293,11 +306,7 @@ pub fn compile_scene_from_world(
                 || t.0.starts_with("TypstShape")
                 || t.0.starts_with("DecimalNumber(")
         });
-        let entity_affine = if is_text {
-            transform.affine_2d
-        } else {
-            kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]) * transform.affine_2d
-        };
+        let entity_affine = entity_transform_for_vello(transform.affine_2d, is_text);
 
         extracted.push(ExtractedElement {
             transform: entity_affine,
@@ -368,8 +377,9 @@ pub fn compile_scene_from_world(
 /// gaanim uses a Y-up coordinate system (positive Y = up on screen).
 /// `bevy_vello` applies a single Y-flip via the view matrix to convert
 /// from Bevy's Y-up to Vello's Y-down native space.  To keep the final
-/// output Y-up, non-text entities receive an additional `scale(1, -1)`
-/// model flip so that the two flips cancel out.  Text glyphs are already
+/// output Y-up, non-text entities receive a local `scale(1, -1)` after
+/// their world transform. This keeps `.at(x, y)` translations in Y-up space
+/// while correcting the local geometry. Text glyphs are already
 /// pre-flipped in the shaper (`scale(s, -s)`) and must NOT get the extra
 /// flip — they rely on the single view-matrix flip alone.
 pub fn gaanim_render_system(
@@ -641,11 +651,7 @@ pub fn gaanim_render_system(
                 || t.0.starts_with("TypstShape")
                 || t.0.starts_with("DecimalNumber(")
         });
-        let entity_affine = if is_text {
-            transform.affine_2d
-        } else {
-            kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]) * transform.affine_2d
-        };
+        let entity_affine = entity_transform_for_vello(transform.affine_2d, is_text);
 
         local_extracted.push(ExtractedElement {
             transform: entity_affine,
@@ -755,6 +761,23 @@ pub fn gaanim_render_system(
             InheritedVisibility::default(),
             ViewVisibility::default(),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_y_flip_preserves_world_translation() {
+        let world = kurbo::Affine::translate((25.0, 40.0));
+        let converted = entity_transform_for_vello(world, false);
+
+        let origin = converted * kurbo::Point::ORIGIN;
+        let local_up = converted * kurbo::Point::new(0.0, 10.0);
+
+        assert_eq!(origin, kurbo::Point::new(25.0, 40.0));
+        assert_eq!(local_up, kurbo::Point::new(25.0, 30.0));
     }
 }
 

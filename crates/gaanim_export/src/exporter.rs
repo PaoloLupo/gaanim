@@ -396,8 +396,8 @@ where
             let mut scene = bevy_vello::vello::Scene::new();
             let camera_to_vello =
                 kurbo::Affine::translate((config.width as f64 / 2.0, config.height as f64 / 2.0))
-                    * kurbo::Affine::scale(zoom)
-                    * kurbo::Affine::translate((-cam_x, cam_y));
+                    * kurbo::Affine::scale_non_uniform(zoom, -zoom)
+                    * kurbo::Affine::translate((-cam_x, -cam_y));
             scene.append(&raw_scene, Some(camera_to_vello));
             scene
         };

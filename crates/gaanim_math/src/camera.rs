@@ -107,8 +107,7 @@ impl Camera {
 
     /// Computes the 2D affine transformation matrix for Vello (only when Orthographic projection is used).
     ///
-    /// Maps coordinates from world space into centered pixel coordinates:
-    /// `translate(hw, hh) * rotate(-z_angle) * scale(zoom) * translate(-cam_pos.x, -cam_pos.y)`
+    /// Maps Y-up world coordinates into Vello's Y-down pixel coordinates.
     pub fn to_vello_transform(&self) -> Affine {
         let zoom = match self.projection {
             Projection::Orthographic { zoom } => zoom,
@@ -120,8 +119,8 @@ impl Camera {
         let hh = (self.viewport_height as f64) / 2.0 + self.viewport_offset_y;
 
         Affine::translate((hw, hh))
+            * Affine::scale_non_uniform(effective_zoom, -effective_zoom)
             * Affine::rotate(-z_angle)
-            * Affine::scale(effective_zoom)
             * Affine::translate((-self.position.x, -self.position.y))
     }
 
@@ -190,11 +189,19 @@ mod tests {
         let mut cam = Camera::ortho_2d(100, 100);
         cam.position = DVec3::new(10.0, 20.0, 0.0);
         let affine = cam.to_vello_transform();
-        // World origin shifted by (-10, -20), then centered => (40, 30)
+        // World origin is left and below the camera => (40, 70) in Y-down pixels.
         let p = kurbo::Point::new(0.0, 0.0);
         let t = affine * p;
         assert!((t.x - 40.0).abs() < 1e-9);
-        assert!((t.y - 30.0).abs() < 1e-9);
+        assert!((t.y - 70.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn camera_to_vello_maps_positive_world_y_upward() {
+        let cam = Camera::ortho_2d(100, 100);
+        let screen = cam.to_vello_transform() * kurbo::Point::new(0.0, 10.0);
+
+        assert_eq!(screen, kurbo::Point::new(50.0, 40.0));
     }
 
     #[test]
