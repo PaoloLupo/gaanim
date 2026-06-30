@@ -11,7 +11,6 @@ gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
 
 # Third-party dependencies from workspace
-bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }

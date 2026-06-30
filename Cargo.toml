@@ -23,14 +23,18 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
 [workspace.dependencies]
 bevy = {version = "0.18", default-features = false, features = [
-  "2d",
-  "bevy_winit",
-  "bevy_render",
-  "bevy_camera",
-  "bevy_window",
-  "png"
+  "bevy_winit",       # windowing (not included by bevy_vello)
+  "multi_threaded",   # parallel execution
+  "keyboard",         # KeyCode input
+  "mouse",            # MouseButton input
+  "default_font",     # font for egui
 ]}
 thiserror = "2.0"
 peniko = "0.6.1"
