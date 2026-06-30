@@ -1,15 +1,15 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
+use gaanim_api::canvas::Canvas;
+use gaanim_api::export::export_canvas;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-pub type ReplayFn = Arc<dyn Fn(&mut World) + Send + Sync>;
-
 #[derive(Resource, Clone)]
-pub struct StashedReplay(pub Option<ReplayFn>);
+pub struct StashedReplay(pub Option<Canvas>);
 
 #[derive(Resource)]
 pub struct ExportState {
@@ -252,7 +252,7 @@ pub fn export_dialog_system(
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
-            let replay = replay_stash.0.clone().unwrap();
+            let canvas = replay_stash.0.clone().unwrap();
 
             state.active = true;
             state.dialog_open = false;
@@ -264,7 +264,6 @@ pub fn export_dialog_system(
             });
 
             let progress_clone = progress.clone();
-            let replay2 = replay.clone();
             std::thread::spawn(move || {
                 let mut config = ExportConfig::new(&out).with_quality(match qual {
                     ExportQuality::Draft => QualityPreset::Draft,
@@ -277,9 +276,7 @@ pub fn export_dialog_system(
                 config.format = fmt;
                 config.headless = true;
 
-                let _ = export_scene_direct(config, move |world| {
-                    replay2(world);
-                });
+                let _ = export_canvas(canvas, config);
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
                         p.current_frame = p.total_frames;

@@ -15,6 +15,7 @@ gaanim_objects = { path = "../gaanim_objects" }
 gaanim_layout = { path = "../gaanim_layout" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_export = { path = "../gaanim_export" }
 
 # Third-party dependencies from workspace
 bevy = { workspace = true }

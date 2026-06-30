@@ -247,13 +247,13 @@ impl Canvas {
         crate::host::send_to_host(self.clone())
     }
 
-    pub fn export(&self, path: &str, fps: Option<u32>, _enc: Option<&str>, _trans: Option<bool>) {
-        info!(
-            "Canvas export({}): {}x{} @{}fps",
-            path,
-            self.width,
-            self.height,
-            fps.unwrap_or(60)
-        );
+    pub fn export(
+        &self,
+        path: &str,
+        fps: Option<u32>,
+        _encoder: Option<&str>,
+        transparent: Option<bool>,
+    ) -> Result<(), gaanim_export::encoder::ExportError> {
+        crate::export::export_canvas_to_path(self.clone(), path, fps, transparent)
     }
 }

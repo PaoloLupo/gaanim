@@ -1,6 +1,7 @@
 pub mod anim;
 pub mod builder;
 pub mod canvas;
+pub mod export;
 pub mod host;
 pub mod prelude;
 pub mod runtime;

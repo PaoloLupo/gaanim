@@ -97,7 +97,9 @@ impl PyCanvas {
             ))
         }
     }
-    fn export(&self, path: &str, fps: Option<u32>) {
-        self.inner.export(path, fps, None, None);
+    fn export(&self, path: &str, fps: Option<u32>) -> PyResult<()> {
+        self.inner
+            .export(path, fps, None, None)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }
