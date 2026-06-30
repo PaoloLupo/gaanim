@@ -95,7 +95,7 @@ pub fn timeline_playback_system(
     mut timeline: ResMut<Timeline>,
     dt: Res<gaanim_animation::DeltaTime>,
 ) {
-    if timeline.is_playing {
+    if timeline.is_playing && timeline.seek_request.is_none() {
         let delta = dt.dt * timeline.playback_rate;
         let next_time = timeline.current_time + delta;
 

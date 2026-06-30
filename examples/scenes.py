@@ -3,7 +3,7 @@ from gaanim import Engine, Transition
 engine = Engine(width=1920, height=1080, title="Presentation")
 
 intro = engine.scene("intro")
-title = intro.title("ALba")
+title = intro.title("Bienvenidoa")
 intro.play(title.write())
 intro.wait(1.0)
 

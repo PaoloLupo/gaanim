@@ -1,4 +1,4 @@
-from typing import ClassVar, Literal, Optional, overload, Callable, List, Tuple
+from typing import Any, ClassVar, Literal, Optional, overload, Callable, List, Tuple
 
 _RateFuncName = Literal[
     "linear",
@@ -1971,6 +1971,177 @@ class Theme:
     @property
     def muted(self) -> Color:
         """Muted/inactive color."""
+
+# ---- Transition ----
+
+class Transition:
+    """Scene transition types for multi-scene engines."""
+
+    @staticmethod
+    def cut() -> Transition:
+        """Instant cut (no transition)."""
+
+    @staticmethod
+    def cross_fade(duration: float) -> Transition:
+        """Cross-fade: outgoing scene fades out, incoming scene fades in."""
+
+    @staticmethod
+    def fade_through(duration: float, color: Color) -> Transition:
+        """Fade to a color, then fade in from that color."""
+
+    @staticmethod
+    def slide(duration: float, direction: str) -> Transition:
+        """Slide transition in a given direction ("left", "right", "up", "down")."""
+
+# ---- ValueTracker ----
+
+class ValueTracker:
+    """An animatable float signal that can drive decimal numbers and other reactive values."""
+
+    @property
+    def id(self) -> ObjectId:
+        """The unique identifier of this value tracker."""
+
+    def animate_to(self, to: float, duration: float) -> AnimSpec:
+        """Animates this ValueTracker's float value to a target."""
+
+# ---- SceneBuilder ----
+
+class SceneBuilder:
+    """A scene-scoped builder that accumulates deferred ops for one scene in an Engine.
+
+    Returned by `Engine.scene(name)`. Mirrors the `Scene` API for shapes, text,
+    animations, and selections, but ops are scoped to the parent Engine.
+    """
+
+    @property
+    def name(self) -> str:
+        """The name of this scene."""
+
+    def circle(self, radius: float) -> Mobject: ...
+    def rectangle(self, width: float, height: float) -> Mobject: ...
+    def square(self, side: float) -> Mobject: ...
+    def dot(self, radius: float) -> Mobject: ...
+    def ellipse(self, rx: float, ry: float) -> Mobject: ...
+    def line(self, x1: float, y1: float, x2: float, y2: float) -> Mobject: ...
+    def arrow(self, x1: float, y1: float, x2: float, y2: float) -> Mobject: ...
+    def polygon(self, points: list[tuple[float, float]]) -> Mobject: ...
+    def star(self, n_points: int, outer_radius: float, inner_radius: float) -> Mobject: ...
+    def text(self, content: str, role: str | None = None) -> Mobject: ...
+    def title(self, content: str) -> Mobject: ...
+    def subtitle(self, content: str) -> Mobject: ...
+    def body(self, content: str) -> Mobject: ...
+    def equation(self, formula: str) -> Mobject: ...
+    def background_rectangle(self, width: float, height: float) -> Mobject: ...
+    def group(self, children: list[Mobject]) -> Mobject: ...
+    def ungroup(self, group: Mobject) -> None: ...
+    def open_path(self, points: list[tuple[float, float]]) -> Mobject: ...
+    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Mobject: ...
+    def vector(self, x: float, y: float) -> Mobject: ...
+    def brace(self, x1: float, y1: float, x2: float, y2: float, height: float) -> Mobject: ...
+    def number_line(self, x_range: tuple[float, float, float], include_labels: bool, vertical: bool) -> Mobject: ...
+    def axes(self, x_range: tuple[float, float, float], y_range: tuple[float, float, float], include_labels: bool) -> Mobject: ...
+    def parametric_curve(self, t_range: tuple[float, float], steps: int, f: Any) -> Mobject: ...
+    def function_graph(self, x_range: tuple[float, float], steps: int, f: Any) -> Mobject: ...
+    def labeled_arrow(self, x1: float, y1: float, x2: float, y2: float, label: str, spacing: float) -> Mobject: ...
+    def labeled_brace(self, x1: float, y1: float, x2: float, y2: float, label: str, height: float, spacing: float) -> Mobject: ...
+
+    def play(self, *anims: AnimSpec) -> None:
+        """Schedule one or more animations to play simultaneously."""
+
+    def wait(self, duration: float) -> None:
+        """Insert a pause of `duration` seconds."""
+
+    def slide(self) -> None:
+        """Insert a slide boundary (for slide-based export)."""
+
+    def select(self, parent: Mobject, query: str) -> Selection: ...
+    def fill_selection(self, selection: Selection, color: Color) -> None: ...
+    def set_stroke_selection(self, selection: Selection, color: Color, width: float) -> None: ...
+
+    def union(self, a: Mobject, b: Mobject) -> Mobject: ...
+    def intersection(self, a: Mobject, b: Mobject) -> Mobject: ...
+    def difference(self, a: Mobject, b: Mobject) -> Mobject: ...
+    def exclusion(self, a: Mobject, b: Mobject) -> Mobject: ...
+
+# ---- Engine ----
+
+class Engine:
+    """Multi-scene animation engine.
+
+    Create scenes, add mobjects and animations to each, connect them with
+    transitions, then call ``render()`` or ``export()``.
+
+    Example::
+
+        engine = Engine(width=1920, height=1080)
+        intro = engine.scene("intro")
+        intro.title("Welcome")
+        intro.play(...)
+
+        demo = engine.scene("demo")
+        demo.circle(1.0)
+        demo.play(...)
+
+        engine.sequence([intro, demo], Transition.cross_fade(0.5))
+        engine.render()
+    """
+
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        title: str | None = None,
+        theme: Theme | None = None,
+    ) -> None: ...
+
+    @property
+    def width(self) -> int:
+        """Viewport width in pixels."""
+
+    @property
+    def height(self) -> int:
+        """Viewport height in pixels."""
+
+    def scene(self, name: str) -> SceneBuilder:
+        """Create a new scene and return a SceneBuilder for it."""
+
+    def connect(
+        self,
+        from_: SceneBuilder,
+        to: SceneBuilder,
+        transition: Transition | None = None,
+    ) -> None:
+        """Connect two scenes with a transition.
+
+        Note: the first parameter is named ``from`` at runtime (call as
+        ``engine.connect(from=s1, to=s2)`` or positionally).
+        """
+
+    def sequence(
+        self,
+        scenes: list[SceneBuilder],
+        transition: Transition | None = None,
+    ) -> None:
+        """Connect a list of scenes sequentially with the same transition."""
+
+    def render(self) -> None:
+        """Submit all scenes to the Gaanim host application."""
+
+    def export(
+        self,
+        output_path: str,
+        fps: int = 60,
+        width: int | None = None,
+        height: int | None = None,
+        transparent: bool | None = None,
+        aspect_ratio: str | None = None,
+        quality: str | None = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        headless: bool = True,
+    ) -> None:
+        """Export all scenes to a video file. Blocking."""
 
 # ---- module-level color constants ----
 GOLD: Color
