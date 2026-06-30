@@ -66,6 +66,7 @@ impl PyCanvas {
         PyDrawable(self.inner.group(&refs))
     }
 
+    #[pyo3(signature = (name, transition=None))]
     fn segment(&mut self, name: &str, transition: Option<&PyTransitionType>) -> usize {
         self.inner.segment(name, transition.map(|t| t.0.clone()))
     }
