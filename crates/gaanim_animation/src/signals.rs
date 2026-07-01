@@ -1,5 +1,6 @@
 use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
 use gaanim_core::peniko::Color;
+use gaanim_math::SpatialTransform;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -112,6 +113,114 @@ impl AlwaysRedraw {
         Self {
             signals,
             builder: Arc::new(builder),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PositionBinding — copy position axes from source entity to target each frame
+// ---------------------------------------------------------------------------
+
+/// Which axes to copy in a `PositionBinding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisMask {
+    pub x: bool,
+    pub y: bool,
+    pub z: bool,
+}
+
+impl AxisMask {
+    pub const X: Self = Self { x: true, y: false, z: false };
+    pub const Y: Self = Self { x: false, y: true, z: false };
+    pub const Z: Self = Self { x: false, y: false, z: true };
+    pub const XY: Self = Self { x: true, y: true, z: false };
+    pub const XYZ: Self = Self { x: true, y: true, z: true };
+
+    pub fn contains(self, other: Self) -> bool {
+        (!other.x || self.x) && (!other.y || self.y) && (!other.z || self.z)
+    }
+}
+
+/// Component that copies specified position axes from a source entity each frame.
+///
+/// Runs in `SceneSet::Updaters` (after updater_system) so it sees the
+/// source's updated position from updaters like orbit/bob.
+#[derive(Component)]
+pub struct PositionBinding {
+    /// The entity whose position is read each frame.
+    pub source: Entity,
+    /// Which axes to copy (X, Y, Z, or any combination).
+    pub axes: AxisMask,
+}
+
+impl PositionBinding {
+    pub fn new(source: Entity, axes: AxisMask) -> Self {
+        Self { source, axes }
+    }
+}
+
+/// System that applies `PositionBinding` — copies source position axes to target.
+pub fn position_binding_system(world: &mut World) {
+    let mut updates = Vec::new();
+
+    // Collect all bindings and their source positions.
+    let mut query = world.query::<(Entity, &PositionBinding)>();
+    for (target, binding) in query.iter(world) {
+        if let Some(src_transform) = world.get::<SpatialTransform>(binding.source) {
+            updates.push((target, src_transform.translation, binding.axes));
+        }
+    }
+
+    // Apply the axis copies.
+    for (target, src_pos, axes) in updates {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+            if axes.contains(AxisMask::X) {
+                transform.translation.x = src_pos.x;
+            }
+            if axes.contains(AxisMask::Y) {
+                transform.translation.y = src_pos.y;
+            }
+            if axes.contains(AxisMask::Z) {
+                transform.translation.z = src_pos.z;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AlwaysRedrawRegen — rebuild Path2D each frame via a closure
+// ---------------------------------------------------------------------------
+
+/// Component that regenerates an entity's `Path2D` every frame by calling a closure
+/// with `&mut World` access. Unlike `AlwaysRedraw` (which returns a spec),
+/// this directly writes the new path.
+#[derive(Component)]
+pub struct AlwaysRedrawRegen {
+    /// Closure that reads world state and returns a new BezPath.
+    pub regen: Arc<dyn Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync>,
+}
+
+impl AlwaysRedrawRegen {
+    pub fn new(regen: impl Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync + 'static) -> Self {
+        Self {
+            regen: Arc::new(regen),
+        }
+    }
+}
+
+/// Exclusive system that executes `AlwaysRedrawRegen` closures and updates Path2D.
+pub fn always_redraw_regen_system(world: &mut World) {
+    let mut updates = Vec::new();
+
+    let mut query = world.query::<(Entity, &AlwaysRedrawRegen)>();
+    for (entity, regen) in query.iter(world) {
+        let path = (regen.regen)(world);
+        updates.push((entity, path));
+    }
+
+    for (entity, path) in updates {
+        if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
+            path_comp.0 = std::sync::Arc::new(path);
         }
     }
 }

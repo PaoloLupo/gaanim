@@ -3,6 +3,10 @@ use gaanim_core::{ObjectId, glam::DVec3, kurbo, peniko};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use crate::font::{FontRegistry, OutlineCollector};
 
@@ -20,6 +24,52 @@ use typst::{
 use typst_layout::PagedDocument;
 
 use kurbo::{Cap, Join, Shape};
+
+#[derive(Clone)]
+struct PendingTypstChild {
+    path: kurbo::BezPath,
+    bounds: Bounds3D,
+    fill: FillBrush,
+    stroke: StrokeBrush,
+    tag: ObjectTag,
+    span: gaanim_scene::components::TextSpan,
+}
+
+#[derive(Clone)]
+struct CachedTypstChild {
+    path: kurbo::BezPath,
+    bounds: Bounds3D,
+    transform: SpatialTransform,
+    fill: FillBrush,
+    stroke: StrokeBrush,
+    tag: ObjectTag,
+    span: gaanim_scene::components::TextSpan,
+}
+
+#[derive(Clone)]
+struct CachedTypstHierarchy {
+    parent_bounds: Bounds3D,
+    children: Vec<CachedTypstChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TypstCacheKey {
+    source: String,
+    is_math: bool,
+    text_font: Option<String>,
+    math_font: Option<String>,
+    text_size_bits: Option<u64>,
+    math_size_bits: Option<u64>,
+    fill_debug: String,
+    stroke_debug: String,
+}
+
+static TYPST_HIERARCHY_CACHE: OnceLock<Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>>> =
+    OnceLock::new();
+
+fn typst_hierarchy_cache() -> &'static Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>> {
+    TYPST_HIERARCHY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// A custom self-contained implementation of `typst::World` for math and document vector compilation.
 pub struct GaanimTypstWorld {
@@ -63,7 +113,7 @@ impl GaanimTypstWorld {
         }
 
         if fonts.is_empty() {
-            bevy::prelude::warn!(
+            eprintln!(
                 "GaanimTypstWorld: no fonts available. \
                  Typst compilation will fail with 'no font could be found'."
             );
@@ -211,18 +261,14 @@ fn typst_stroke_to_kurbo(stroke: &FixedStroke) -> kurbo::Stroke {
 
 /// Recursively extract vector items from a Typst `Frame` into Gaanim Mobject entities.
 fn extract_frame_items(
-    commands: &mut Commands,
     frame: &Frame,
-    parent_entity: Entity,
     current_transform: &kurbo::Affine,
-    next_id_fn: &mut impl FnMut() -> ObjectId,
     total_bounds: &mut Option<Bounds3D>,
     default_fill: &Option<peniko::Brush>,
     default_stroke: &StrokeBrush,
     world: &dyn World,
     char_index_counter: &mut usize,
-    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
-    spawned_children: &mut Vec<(Entity, Bounds3D)>,
+    extracted_children: &mut Vec<PendingTypstChild>,
 ) {
     for (pos, item) in frame.items() {
         // Typst frames use Y-down coordinate system, and we convert it to Y-up
@@ -235,18 +281,14 @@ fn extract_frame_items(
                 let group_affine = typst_transform_to_affine(&group.transform);
                 let new_transform = item_transform * group_affine;
                 extract_frame_items(
-                    commands,
                     &group.frame,
-                    parent_entity,
                     &new_transform,
-                    next_id_fn,
                     total_bounds,
                     default_fill,
                     default_stroke,
                     world,
                     char_index_counter,
-                    child_spans,
-                    spawned_children,
+                    extracted_children,
                 );
             }
             FrameItem::Text(text) => {
@@ -283,15 +325,6 @@ fn extract_frame_items(
                         let bbox = path.bounding_box();
                         let local_bounds = Bounds3D::new_2d(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
 
-                        let child_id = next_id_fn();
-                        let mut bundle = MobjectBundle::new(child_id, path, local_bounds);
-                        bundle.fill = FillBrush(fill_brush.clone());
-                        bundle.stroke = default_stroke.clone();
-                        bundle.tag = ObjectTag("TypstGlyph".into());
-
-                        let child_entity = commands.spawn(bundle).id();
-                        spawned_children.push((child_entity, local_bounds));
-
                         // Match glyph to corresponding source char and range
                         let byte_offset = glyph.span.1 as usize;
                         let c = text
@@ -313,14 +346,16 @@ fn extract_frame_items(
                             },
                         };
 
-                        commands.entity(child_entity).insert(span);
-                        child_spans.push((child_id, child_entity, span));
+                        extracted_children.push(PendingTypstChild {
+                            path,
+                            bounds: local_bounds,
+                            fill: FillBrush(fill_brush.clone()),
+                            stroke: default_stroke.clone(),
+                            tag: ObjectTag("TypstGlyph".into()),
+                            span,
+                        });
 
                         *char_index_counter += 1;
-
-                        commands
-                            .entity(child_entity)
-                            .set_parent_in_place(parent_entity);
 
                         if let Some(tb) = total_bounds {
                             *tb = tb.union(&local_bounds);
@@ -340,25 +375,6 @@ fn extract_frame_items(
                 let bbox = path.bounding_box();
                 let local_bounds = Bounds3D::new_2d(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
 
-                let child_id = next_id_fn();
-                let mut bundle = MobjectBundle::new(child_id, path, local_bounds);
-                bundle.fill = FillBrush(
-                    shape
-                        .fill
-                        .as_ref()
-                        .and_then(|p| typst_paint_to_brush(p, default_fill)),
-                );
-                if let Some(stroke) = &shape.stroke {
-                    bundle.stroke = StrokeBrush {
-                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
-                        style: typst_stroke_to_kurbo(stroke),
-                    };
-                }
-                bundle.tag = ObjectTag("TypstShape".into());
-
-                let child_entity = commands.spawn(bundle).id();
-                spawned_children.push((child_entity, local_bounds));
-
                 let span_range = world.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {
                     character: '_', // Marker for drawing shapes
@@ -368,13 +384,27 @@ fn extract_frame_items(
                         end: span_range.end,
                     },
                 };
-                commands.entity(child_entity).insert(span);
-                child_spans.push((child_id, child_entity, span));
+                extracted_children.push(PendingTypstChild {
+                    path,
+                    bounds: local_bounds,
+                    fill: FillBrush(
+                        shape
+                            .fill
+                            .as_ref()
+                            .and_then(|p| typst_paint_to_brush(p, default_fill)),
+                    ),
+                    stroke: shape
+                        .stroke
+                        .as_ref()
+                        .map(|stroke| StrokeBrush {
+                            brush: typst_paint_to_brush(&stroke.paint, default_fill),
+                            style: typst_stroke_to_kurbo(stroke),
+                        })
+                        .unwrap_or_else(StrokeBrush::transparent),
+                    tag: ObjectTag("TypstShape".into()),
+                    span,
+                });
                 *char_index_counter += 1;
-
-                commands
-                    .entity(child_entity)
-                    .set_parent_in_place(parent_entity);
 
                 if let Some(tb) = total_bounds {
                     *tb = tb.union(&local_bounds);
@@ -387,9 +417,29 @@ fn extract_frame_items(
     }
 }
 
-/// Compiles a LaTeX-style math formula or Typst markup into a structured hierarchy of visual Mobjects.
-pub fn compile_typst_to_hierarchy(
-    commands: &mut Commands,
+fn build_typst_cache_key(
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: &Option<peniko::Brush>,
+    stroke: &StrokeBrush,
+) -> TypstCacheKey {
+    TypstCacheKey {
+        source: source.to_string(),
+        is_math,
+        text_font: text_font.map(str::to_string),
+        math_font: math_font.map(str::to_string),
+        text_size_bits: text_size.map(f64::to_bits),
+        math_size_bits: math_size.map(f64::to_bits),
+        fill_debug: format!("{fill:?}"),
+        stroke_debug: format!("{stroke:?}"),
+    }
+}
+
+fn compile_typst_source(
     font_registry: &FontRegistry,
     source: &str,
     is_math: bool,
@@ -397,12 +447,9 @@ pub fn compile_typst_to_hierarchy(
     math_font: Option<&str>,
     text_size: Option<f64>,
     math_size: Option<f64>,
-    fill: Option<gaanim_core::peniko::Brush>,
-    stroke: gaanim_scene::StrokeBrush,
-    parent_id: ObjectId,
-    mut next_id_fn: impl FnMut() -> ObjectId,
-    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
-) -> (Entity, Bounds3D) {
+    fill: &Option<peniko::Brush>,
+    stroke: &StrokeBrush,
+) -> Result<CachedTypstHierarchy, Vec<String>> {
     // Build optional font directives.
     // Typst default fonts (LibertinusSerif / NewCMMath) are already loaded in the FontBook,
     // so if the user passes None we let Typst pick its own defaults.
@@ -433,7 +480,6 @@ pub fn compile_typst_to_hierarchy(
         }
     }
 
-    // Wrap math formulas in Typst math mode if requested.
     let full_source = if is_math {
         format!("{}$ {} $", directives, source)
     } else {
@@ -441,96 +487,153 @@ pub fn compile_typst_to_hierarchy(
     };
 
     let world = GaanimTypstWorld::new(&full_source, font_registry);
-
     let result = typst::compile::<PagedDocument>(&world);
 
-    // Log warnings if any.
     for warning in &result.warnings {
-        bevy::prelude::warn!("Typst warning: {}", warning.message);
+        eprintln!("Typst warning: {}", warning.message);
     }
 
     let document = match result.output {
         Ok(doc) => doc,
         Err(errors) => {
-            for error in &errors {
-                bevy::prelude::error!("Typst compilation error: {}", error.message);
-            }
-            // Fallback: spawn an empty Mobject bundle so the caller doesn't crash.
-            let bounds = Bounds3D::default();
-            let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
-            let entity = commands.spawn(bundle).id();
-            return (entity, bounds);
+            return Err(errors.iter().map(|error| error.message.to_string()).collect());
         }
     };
 
-    // Spawn parent container
-    let parent_path = kurbo::BezPath::new();
-    let parent_bounds = Bounds3D::default();
-    let mut parent_bundle = MobjectBundle::new(parent_id, parent_path, parent_bounds);
-    parent_bundle.tag = ObjectTag(format!("Typst('{}')", source));
-    parent_bundle.fill = FillBrush(None);
-
-    let parent_entity = commands.spawn(parent_bundle).id();
-
     let mut total_bounds: Option<Bounds3D> = None;
-    // Typst frames are Y-down; convert them once into gaanim's Y-up world space.
     let root_transform = kurbo::Affine::scale_non_uniform(1.0, -1.0);
+    let mut extracted_children = Vec::new();
 
-    // Process the first page only (formulas are typically single-page).
     if let Some(page) = document.pages().first() {
         let mut char_index_counter = 0;
-        let mut spawned_children = Vec::new();
         extract_frame_items(
-            commands,
             &page.frame,
-            parent_entity,
             &root_transform,
-            &mut next_id_fn,
             &mut total_bounds,
-            &fill,
-            &stroke,
+            fill,
+            stroke,
             &world,
             &mut char_index_counter,
-            child_spans,
-            &mut spawned_children,
+            &mut extracted_children,
         );
-
-        let mut total_bounds = total_bounds.unwrap_or_default();
-
-        // Centering visual adjustment: Shift all children relative to text center
-        let text_center = total_bounds.center();
-        for (child_entity, orig_bounds) in spawned_children {
-            commands
-                .entity(child_entity)
-                .insert(SpatialTransform::new_2d(-text_center.x, -text_center.y));
-
-            let mut new_bounds = orig_bounds;
-            new_bounds.min -= text_center;
-            new_bounds.max -= text_center;
-            commands
-                .entity(child_entity)
-                .insert(gaanim_scene::LocalBounds(new_bounds));
-        }
-
-        // Shift total_bounds to be centered at origin
-        let half_size = total_bounds.size() * 0.5;
-        total_bounds = Bounds3D::new(
-            DVec3::new(-half_size.x, -half_size.y, 0.0),
-            DVec3::new(half_size.x, half_size.y, 0.0),
-        );
-
-        commands
-            .entity(parent_entity)
-            .insert(gaanim_scene::LocalBounds(total_bounds));
-
-        return (parent_entity, total_bounds);
     }
 
-    commands
-        .entity(parent_entity)
-        .insert(gaanim_scene::LocalBounds(Bounds3D::default()));
+    let mut total_bounds = total_bounds.unwrap_or_default();
+    let text_center = total_bounds.center();
+    let mut centered_children = Vec::with_capacity(extracted_children.len());
+    for child in extracted_children {
+        let mut new_bounds = child.bounds;
+        new_bounds.min -= text_center;
+        new_bounds.max -= text_center;
+        centered_children.push(CachedTypstChild {
+            path: child.path,
+            bounds: new_bounds,
+            transform: SpatialTransform::new_2d(-text_center.x, -text_center.y),
+            fill: child.fill,
+            stroke: child.stroke,
+            tag: child.tag,
+            span: child.span,
+        });
+    }
 
-    (parent_entity, Bounds3D::default())
+    let half_size = total_bounds.size() * 0.5;
+    total_bounds = Bounds3D::new(
+        DVec3::new(-half_size.x, -half_size.y, 0.0),
+        DVec3::new(half_size.x, half_size.y, 0.0),
+    );
+
+    Ok(CachedTypstHierarchy {
+        parent_bounds: total_bounds,
+        children: centered_children,
+    })
+}
+
+fn spawn_cached_typst_hierarchy(
+    commands: &mut Commands,
+    source: &str,
+    parent_id: ObjectId,
+    mut next_id_fn: impl FnMut() -> ObjectId,
+    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    cached: &CachedTypstHierarchy,
+) -> (Entity, Bounds3D) {
+    let mut parent_bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), cached.parent_bounds);
+    parent_bundle.tag = ObjectTag(format!("Typst('{}')", source));
+    parent_bundle.fill = FillBrush(None);
+    let parent_entity = commands.spawn(parent_bundle).id();
+
+    for child in &cached.children {
+        let child_id = next_id_fn();
+        let mut bundle = MobjectBundle::new(child_id, child.path.clone(), child.bounds);
+        bundle.fill = child.fill.clone();
+        bundle.stroke = child.stroke.clone();
+        bundle.tag = child.tag.clone();
+        bundle.transform = child.transform;
+
+        let child_entity = commands.spawn(bundle).id();
+        commands.entity(child_entity).insert(child.span);
+        commands.entity(child_entity).set_parent_in_place(parent_entity);
+        child_spans.push((child_id, child_entity, child.span));
+    }
+
+    (parent_entity, cached.parent_bounds)
+}
+
+/// Compiles a LaTeX-style math formula or Typst markup into a structured hierarchy of visual Mobjects.
+pub fn compile_typst_to_hierarchy(
+    commands: &mut Commands,
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: Option<gaanim_core::peniko::Brush>,
+    stroke: gaanim_scene::StrokeBrush,
+    parent_id: ObjectId,
+    next_id_fn: impl FnMut() -> ObjectId,
+    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+) -> (Entity, Bounds3D) {
+    let cache_key = build_typst_cache_key(
+        source, is_math, text_font, math_font, text_size, math_size, &fill, &stroke,
+    );
+    let cached = {
+        let cache = typst_hierarchy_cache().lock().unwrap();
+        cache.get(&cache_key).cloned()
+    };
+
+    let cached = match cached {
+        Some(cached) => cached,
+        None => match compile_typst_source(
+            font_registry,
+            source,
+            is_math,
+            text_font,
+            math_font,
+            text_size,
+            math_size,
+            &fill,
+            &stroke,
+        ) {
+            Ok(compiled) => {
+                let compiled = Arc::new(compiled);
+                let mut cache = typst_hierarchy_cache().lock().unwrap();
+                cache.insert(cache_key, compiled.clone());
+                compiled
+            }
+            Err(errors) => {
+                for error in errors {
+                    eprintln!("Typst compilation error: {error}");
+                }
+                let bounds = Bounds3D::default();
+                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
+                let entity = commands.spawn(bundle).id();
+                return (entity, bounds);
+            }
+        },
+    };
+
+    spawn_cached_typst_hierarchy(commands, source, parent_id, next_id_fn, child_spans, &cached)
 }
 
 #[cfg(test)]

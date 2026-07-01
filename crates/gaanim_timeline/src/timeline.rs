@@ -1,7 +1,7 @@
 use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
 use crate::scene::{SceneMember, SceneMetadata};
@@ -9,6 +9,13 @@ use crate::snapshot::WorldSnapshot;
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
+
+#[derive(Debug, Clone, Default)]
+struct ReactiveEntityState {
+    updater_elapsed: Option<f64>,
+    updater_stop_at: Option<f64>,
+    traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
+}
 
 /// The primary Timeline manager, stored as a Bevy ECS resource.
 ///
@@ -337,6 +344,13 @@ impl Timeline {
             .map(|(_, end)| end)
             .unwrap_or(self.cached_duration);
         let clamped_target = target_time.clamp(0.0, max_time);
+        let previous_time = self.current_time;
+        let preserve_reactive_state = self.is_playing && clamped_target >= previous_time;
+        let reactive_state = if preserve_reactive_state {
+            capture_reactive_state(world)
+        } else {
+            HashMap::new()
+        };
 
         // 1. Locate the nearest recorded keyframe <= target_time
         let keyframe = self
@@ -400,6 +414,20 @@ impl Timeline {
                 }
                 ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
                     // Scene boundary markers — visibility is handled in the post-pass below.
+                }
+                ClipPayload::RemoveUpdater { target } => {
+                    if clip.start <= self.current_time
+                        && let Some(&target_entity) = entity_map.get(&target)
+                        && let Ok(mut entity_mut) = world.get_entity_mut(target_entity)
+                    {
+                        if let Some(mut updater) = entity_mut.get_mut::<gaanim_animation::Updater>()
+                        {
+                            updater.stop_at = Some(clip.start);
+                            if updater.elapsed > clip.start {
+                                updater.elapsed = clip.start;
+                            }
+                        }
+                    }
                 }
                 ClipPayload::Transition {
                     ref transition_type,
@@ -586,6 +614,179 @@ impl Timeline {
                     }
                 }
             }
+        }
+
+        if preserve_reactive_state {
+            restore_reactive_state(world, &reactive_state);
+        } else {
+            resync_updaters(world, self.current_time);
+            rebuild_traced_paths(world, self.current_time);
+        }
+    }
+}
+
+fn capture_reactive_state(world: &mut World) -> HashMap<gaanim_core::ObjectId, ReactiveEntityState> {
+    let mut state = HashMap::new();
+    let mut query = world.query::<(
+        Entity,
+        &gaanim_scene::MobjectId,
+        Option<&gaanim_animation::Updater>,
+        Option<&gaanim_animation::TracedPath>,
+    )>();
+    for (_entity, mobject_id, updater, traced_path) in query.iter(world) {
+        if updater.is_none() && traced_path.is_none() {
+            continue;
+        }
+        state.insert(
+            mobject_id.0,
+            ReactiveEntityState {
+                updater_elapsed: updater.map(|u| u.elapsed),
+                updater_stop_at: updater.and_then(|u| u.stop_at),
+                traced_path_points: traced_path.map(|t| t.points.clone()),
+            },
+        );
+    }
+    state
+}
+
+fn restore_reactive_state(
+    world: &mut World,
+    reactive_state: &HashMap<gaanim_core::ObjectId, ReactiveEntityState>,
+) {
+    let mut entity_map = HashMap::new();
+    let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
+    for (entity, mobject_id) in query.iter(world) {
+        entity_map.insert(mobject_id.0, entity);
+    }
+
+    for (object_id, state) in reactive_state {
+        let Some(&entity) = entity_map.get(object_id) else {
+            continue;
+        };
+
+        if let Some(mut updater) = world.get_mut::<gaanim_animation::Updater>(entity) {
+            if let Some(elapsed) = state.updater_elapsed {
+                updater.elapsed = updater.stop_at.map(|stop_at| elapsed.min(stop_at)).unwrap_or(elapsed);
+            }
+            if updater.stop_at.is_none() {
+                updater.stop_at = state.updater_stop_at;
+            }
+        }
+
+        if let Some(points) = &state.traced_path_points {
+            if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(entity) {
+                traced_path.points = points.clone();
+            }
+            if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
+                let mut path = gaanim_core::kurbo::BezPath::new();
+                if let Some(first) = points.first() {
+                    path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+                    for pt in &points[1..] {
+                        path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
+                    }
+                }
+                path_comp.0 = std::sync::Arc::new(path);
+            }
+        }
+    }
+}
+
+fn resync_updaters(world: &mut World, target_time: f64) {
+    let mut updater_jobs = Vec::new();
+    let mut updater_query = world.query::<(Entity, &mut gaanim_animation::Updater)>();
+    for (entity, mut updater) in updater_query.iter_mut(world) {
+        let elapsed = updater
+            .stop_at
+            .map(|stop_at| target_time.min(stop_at))
+            .unwrap_or(target_time);
+        updater.elapsed = elapsed;
+        updater_jobs.push((entity, updater.func.clone(), elapsed));
+    }
+    for (entity, func, elapsed) in updater_jobs {
+        let _ = func(0.0, elapsed, entity, world);
+    }
+}
+
+fn rebuild_traced_paths(world: &mut World, target_time: f64) {
+    let traces: Vec<(Entity, Entity, f64, Option<usize>)> = {
+        let mut query = world.query::<(Entity, &gaanim_animation::TracedPath)>();
+        query
+            .iter(world)
+            .map(|(entity, trace)| (entity, trace.source, trace.min_distance, trace.max_points))
+            .collect()
+    };
+
+    if traces.is_empty() {
+        return;
+    }
+
+    for (trace_entity, _, _, _) in &traces {
+        if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity) {
+            traced_path.points.clear();
+        }
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
+            path_comp.0 = std::sync::Arc::new(gaanim_core::kurbo::BezPath::new());
+        }
+    }
+
+    if target_time <= 0.0 {
+        return;
+    }
+
+    let mut sample_time = 0.0;
+    let step = 1.0 / 60.0;
+    let mut sample_times = Vec::new();
+    while sample_time < target_time {
+        sample_times.push(sample_time);
+        sample_time += step;
+    }
+    sample_times.push(target_time);
+
+    for sample_time in sample_times {
+        resync_updaters(world, sample_time);
+        gaanim_animation::position_binding_system(world);
+
+        for (trace_entity, source_entity, min_distance, max_points) in &traces {
+            let Some(source_pos) = world
+                .get::<SpatialTransform>(*source_entity)
+                .map(|t| t.translation)
+            else {
+                continue;
+            };
+
+            if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
+            {
+                let should_add = match traced_path.points.last() {
+                    Some(last_point) => last_point.distance(source_pos) >= *min_distance,
+                    None => true,
+                };
+
+                if should_add {
+                    traced_path.points.push(source_pos);
+                    if let Some(max) = max_points {
+                        if traced_path.points.len() > *max {
+                            traced_path.points.remove(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (trace_entity, _, _, _) in &traces {
+        let points = world
+            .get::<gaanim_animation::TracedPath>(*trace_entity)
+            .map(|trace| trace.points.clone())
+            .unwrap_or_default();
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
+            let mut path = gaanim_core::kurbo::BezPath::new();
+            if let Some(first) = points.first() {
+                path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+                for pt in &points[1..] {
+                    path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
+                }
+            }
+            path_comp.0 = std::sync::Arc::new(path);
         }
     }
 }
@@ -855,5 +1056,55 @@ fn apply_transition(
         TransitionType::Morph { mappings, .. } => {
             let _ = mappings;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clip::ClipPayload;
+    use crate::snapshot::WorldSnapshot;
+    use gaanim_core::ObjectId;
+    use gaanim_math::SpatialTransform;
+    use gaanim_scene::MobjectId;
+
+    #[test]
+    fn remove_updater_clip_removes_component_after_timestamp() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let entity = world.spawn((
+            MobjectId(object_id),
+            SpatialTransform::default(),
+            gaanim_animation::orbit_updater(gaanim_core::glam::DVec3::ZERO, 10.0, 1.0),
+        )).id();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let mut timeline = Timeline::default();
+        let track = timeline
+            .tracks
+            .insert_with_key(|id| crate::clip::Track {
+                id,
+                name: "Reactive".into(),
+                order: 0,
+                object_id: Some(object_id),
+                scene: None,
+            });
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::RemoveUpdater { target: object_id });
+
+        timeline.seek(&mut world, 0.5);
+        assert!(world.get::<gaanim_animation::Updater>(entity).is_some());
+        assert_eq!(
+            world.get::<gaanim_animation::Updater>(entity).and_then(|u| u.stop_at),
+            None
+        );
+
+        timeline.seek(&mut world, 1.5);
+        let updater = world
+            .get::<gaanim_animation::Updater>(entity)
+            .expect("updater should remain present but frozen");
+        assert_eq!(updater.stop_at, Some(1.0));
+        assert!((updater.elapsed - 1.0).abs() < 1e-9);
     }
 }

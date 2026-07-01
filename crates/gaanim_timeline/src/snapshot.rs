@@ -47,6 +47,8 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
+    pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Whether the entity is a group container.
     pub is_group: bool,
     /// Propagated global spatial transform.
@@ -130,6 +132,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
     } else {
         entity_mut.remove::<gaanim_animation::FillDrawProgress>();
+    }
+
+    if let Some(points) = &snap.traced_path_points
+        && let Some(mut traced_path) = entity_mut.get_mut::<gaanim_animation::TracedPath>()
+    {
+        traced_path.points = points.clone();
     }
 
     if snap.is_group {
@@ -221,6 +229,9 @@ impl WorldSnapshot {
                     fill_draw_progress: world
                         .get::<gaanim_animation::FillDrawProgress>(entity)
                         .map(|p| p.0),
+                    traced_path_points: world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .map(|t| t.points.clone()),
                     is_group,
                     global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
                     local_bounds: world.get::<LocalBounds>(entity).copied(),

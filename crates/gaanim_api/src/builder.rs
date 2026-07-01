@@ -483,6 +483,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_time += duration;
     }
 
+    /// Schedules removal of a continuous `Updater` component at the current
+    /// timeline time instead of applying it immediately during scene compile.
+    pub(crate) fn schedule_remove_updater(&mut self, target: ObjectId) {
+        let track = self.ensure_track(target);
+        self.timeline.add_clip(
+            track,
+            self.current_time,
+            0.0,
+            ClipPayload::RemoveUpdater { target },
+        );
+    }
+
     /// Registers an interactive breakpoint (slide transition) at the current timeline playhead.
     pub fn slide(&mut self) {
         self.timeline.add_clip(

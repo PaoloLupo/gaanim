@@ -23,6 +23,7 @@ from .gaanim_core import (
     Color,
     Drawable,
     Transition,
+    Updater,
 )
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "Color",
     "Anchor",
     "Direction",
+    "Updater",
     "GOLD",
     "CORAL",
     "BLUE",

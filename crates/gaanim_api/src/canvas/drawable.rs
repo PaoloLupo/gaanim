@@ -1,5 +1,6 @@
 //! DrawableHandle — ergonomic mobject handle with fluent configuration.
 
+use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::BezPath;
@@ -8,7 +9,7 @@ use gaanim_layout::{Anchor, Direction};
 use gaanim_math::RateFunc;
 
 use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
-use crate::canvas::ops::{SharedCanvasState, SharedObjectSpec};
+use crate::canvas::ops::{Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset};
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
 /// An ergonomic handle to a mobject on a Canvas.
@@ -55,19 +56,31 @@ impl DrawableHandle {
     // -- Instant setters (return Self) --
 
     pub fn fill(self, color: Color) -> Self {
-        self.update_spec(|spec| spec.fill = Some(Brush::Solid(color)))
+        self.update_spec(|spec| {
+            spec.fill = Some(Brush::Solid(color));
+            spec.fill_overridden = true;
+        })
     }
 
     pub fn no_fill(self) -> Self {
-        self.update_spec(|spec| spec.fill = None)
+        self.update_spec(|spec| {
+            spec.fill = None;
+            spec.fill_overridden = true;
+        })
     }
 
     pub fn stroke(self, color: Color, width: f64) -> Self {
-        self.update_spec(|spec| spec.stroke = Some((color, width)))
+        self.update_spec(|spec| {
+            spec.stroke = Some((color, width));
+            spec.stroke_overridden = true;
+        })
     }
 
     pub fn no_stroke(self) -> Self {
-        self.update_spec(|spec| spec.stroke = None)
+        self.update_spec(|spec| {
+            spec.stroke = None;
+            spec.stroke_overridden = true;
+        })
     }
 
     pub fn opacity(self, op: f32) -> Self {
@@ -284,6 +297,61 @@ impl DrawableHandle {
 
     pub fn fade_transform(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::FadeTransform { target: target.id })
+    }
+
+    // -- Reactive methods --
+
+    /// Attach a preset updater that runs every frame.
+    ///
+    /// Use `UpdaterPreset` variants: `Orbit`, `AdvanceX`, `Bob`, `Rotate`, `Pulse`.
+    pub fn add_updater(&self, preset: UpdaterPreset) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachUpdater {
+                target: self.id,
+                preset,
+            });
+    }
+
+    /// Remove any updater attached to this entity.
+    pub fn remove_updater(&self) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::RemoveUpdater(self.id));
+    }
+
+    /// Copy the source entity's Y position each frame (after updaters run).
+    pub fn bind_y_from(&self, source: &DrawableHandle) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPositionBinding {
+                target: self.id,
+                source: source.id,
+                axes: AxisMask::Y,
+            });
+    }
+
+    /// Copy the source entity's position on specified axes each frame.
+    pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPositionBinding {
+                target: self.id,
+                source: source.id,
+                axes,
+            });
     }
 
     /// Start the legacy `.animate()` compound builder. This intentionally does

@@ -2,7 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
+use gaanim_core::glam::DVec3;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
@@ -81,6 +83,92 @@ pub(crate) enum Op {
     Hide(ObjectId),
     /// Remove an object completely.
     Remove(ObjectId),
+
+    // -- Reactive ops (Phase 2) --
+    /// Attach a preset updater to an existing entity.
+    AttachUpdater {
+        target: ObjectId,
+        preset: UpdaterPreset,
+    },
+    /// Remove the updater from an entity.
+    RemoveUpdater(ObjectId),
+    /// Attach a TracedPath to an entity, tracking a source entity's movement.
+    AttachTracedPath {
+        target: ObjectId,
+        source: ObjectId,
+        min_distance: f64,
+        max_points: Option<usize>,
+    },
+    /// Attach a PositionBinding — copy source axes to target each frame.
+    AttachPositionBinding {
+        target: ObjectId,
+        source: ObjectId,
+        axes: AxisMask,
+    },
+    /// Attach a TrackingLine — reactive line between two endpoints.
+    AttachTrackingLine {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+    },
+}
+
+/// A tracking endpoint at the Canvas level (before entity resolution).
+#[derive(Debug, Clone)]
+pub enum CanvasEndpoint {
+    /// Fixed position in space.
+    Static(DVec3),
+    /// Position follows an entity (referenced by Canvas ObjectId).
+    Entity(ObjectId),
+}
+
+/// Preset updater types that can be attached to entities via the Canvas API.
+#[derive(Debug, Clone)]
+pub enum UpdaterPreset {
+    /// Orbit around a center point at a given radius and angular speed.
+    Orbit {
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        speed: f64,
+    },
+    /// Move X by `speed * dt` each frame.
+    AdvanceX { speed: f64 },
+    /// Sinusoidal Y oscillation.
+    Bob { amplitude: f64, frequency: f64 },
+    /// Continuous Z-axis rotation.
+    Rotate { speed: f64 },
+    /// Scale oscillation.
+    Pulse {
+        min_scale: f64,
+        max_scale: f64,
+        frequency: f64,
+    },
+}
+
+impl UpdaterPreset {
+    /// Convert this preset into a boxed `Updater` component.
+    pub fn into_updater(self) -> gaanim_animation::Updater {
+        match self {
+            UpdaterPreset::Orbit {
+                cx,
+                cy,
+                radius,
+                speed,
+            } => gaanim_animation::orbit_updater(DVec3::new(cx, cy, 0.0), radius, speed),
+            UpdaterPreset::AdvanceX { speed } => gaanim_animation::advance_x_updater(speed),
+            UpdaterPreset::Bob {
+                amplitude,
+                frequency,
+            } => gaanim_animation::bob_updater(amplitude, frequency),
+            UpdaterPreset::Rotate { speed } => gaanim_animation::rotate_updater(speed),
+            UpdaterPreset::Pulse {
+                min_scale,
+                max_scale,
+                frequency,
+            } => gaanim_animation::pulse_updater(min_scale, max_scale, frequency),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------

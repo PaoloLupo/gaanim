@@ -5,14 +5,19 @@ pub mod updaters;
 pub mod writing;
 
 pub use signals::{
-    AlwaysRedraw, ColorSignal, FloatSignal, MobjectSpec, Signal, SignalBinding, SpecValue,
-    Vec3Signal, signal_binding_system,
+    AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec,
+    PositionBinding, Signal, SignalBinding, SpecValue, Vec3Signal, always_redraw_regen_system,
+    position_binding_system, signal_binding_system,
 };
 pub use tween::{
     AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState, evaluate_custom_tweens_system,
     evaluate_tweens_system, sync_delta_time_system,
 };
-pub use updaters::{TracedPath, Updater, traced_path_system, updater_system};
+pub use updaters::{
+    PlaybackState, TracedPath, TrackingEndpoint, TrackingLine, Updater, advance_x_updater,
+    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
+    traced_path_system, tracking_line_system, updater_system,
+};
 pub use writing::{FillDrawProgress, PathSource, path_source_seed_added_system};
 
 use bevy::prelude::*;
@@ -25,6 +30,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
     fn build(&self, app: &mut App) {
         // Register DeltaTime resource
         app.init_resource::<DeltaTime>();
+        app.init_resource::<PlaybackState>();
 
         // Sync Bevy's Time -> DeltaTime before animation evaluation.
         app.add_systems(Update, sync_delta_time_system.in_set(SceneSet::Input));
@@ -54,10 +60,19 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 .in_set(SceneSet::Animation),
         );
 
-        // Register standard signal binders and continuous updaters in the Updaters Phase
+        // Register standard signal binders and continuous updaters in the Updaters Phase.
+        // Ordering: updaters run first (modify positions), then bindings copy positions,
+        // then tracking lines and traced paths read the final positions.
         app.add_systems(
             Update,
-            (updater_system, traced_path_system).in_set(SceneSet::Updaters),
+            (
+                updater_system,
+                always_redraw_regen_system,
+                position_binding_system.after(updater_system),
+                tracking_line_system.after(position_binding_system),
+                traced_path_system.after(tracking_line_system),
+            )
+                .in_set(SceneSet::Updaters),
         );
         app.add_systems(
             Update,

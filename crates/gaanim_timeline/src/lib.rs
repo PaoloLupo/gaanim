@@ -94,7 +94,11 @@ pub fn capture_initial_keyframe(world: &mut World) {
 pub fn timeline_playback_system(
     mut timeline: ResMut<Timeline>,
     dt: Res<gaanim_animation::DeltaTime>,
+    playback_state: Option<ResMut<gaanim_animation::PlaybackState>>,
 ) {
+    if let Some(mut playback_state) = playback_state {
+        playback_state.is_playing = timeline.is_playing;
+    }
     if timeline.is_playing && timeline.seek_request.is_none() {
         let delta = dt.dt * timeline.playback_rate;
         let next_time = timeline.current_time + delta;

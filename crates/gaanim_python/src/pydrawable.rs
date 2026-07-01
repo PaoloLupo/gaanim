@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 
 use crate::color::PyColor;
 use crate::pylayout::{PyAnchor, PyDirection};
+use crate::updater::PyUpdater;
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
@@ -251,5 +252,22 @@ impl PyDrawable {
         PyCanvasAnim {
             inner: self.0.wiggle(duration),
         }
+    }
+
+    // -- Reactive methods --
+
+    /// Attach a preset updater that runs every frame.
+    fn add_updater(&self, updater: &PyUpdater) {
+        self.0.add_updater(updater.0.clone());
+    }
+
+    /// Remove any updater attached to this entity.
+    fn remove_updater(&self) {
+        self.0.remove_updater();
+    }
+
+    /// Copy the source entity's Y position each frame.
+    fn bind_y_from(&self, source: &PyDrawable) {
+        self.0.bind_y_from(&source.0);
     }
 }

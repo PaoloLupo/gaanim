@@ -1635,6 +1635,7 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
         ClipPayload::Ungroup { .. } => Color32::from_rgb(230, 100, 50),
         ClipPayload::SceneStart(_) => Color32::from_rgb(50, 180, 100),
         ClipPayload::SceneEnd(_) => Color32::from_rgb(180, 50, 50),
+        ClipPayload::RemoveUpdater { .. } => Color32::from_rgb(120, 120, 220),
         ClipPayload::Transition { .. } => Color32::from_rgb(200, 200, 50),
     }
 }
@@ -1701,6 +1702,7 @@ fn clip_label(payload: &ClipPayload) -> String {
         ClipPayload::Ungroup { .. } => "Ungroup".into(),
         ClipPayload::SceneStart(_) => "Scene▶".into(),
         ClipPayload::SceneEnd(_) => "Scene◼".into(),
+        ClipPayload::RemoveUpdater { .. } => "StopUpdater".into(),
         ClipPayload::Transition { .. } => "Transition".into(),
     }
 }

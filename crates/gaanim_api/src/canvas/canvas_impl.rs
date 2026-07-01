@@ -8,7 +8,7 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
-use crate::canvas::ops::{CanvasState, Op, Segment, SharedCanvasState};
+use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
 use crate::canvas::types::{Anim, CoordinateSystem, SpawnKind};
 
 /// Top-level facade for building Gaanim animations.
@@ -254,6 +254,55 @@ impl Canvas {
             .active_mut()
             .mobject_ids
             .push(o.id);
+    }
+
+    // -- Reactive objects --
+
+    /// Spawn a value tracker — a reactive float signal that can be animated
+    /// with `.animate_to()` and referenced by other reactive components.
+    pub fn value_tracker(&mut self, initial: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::ValueTracker(initial))
+    }
+
+    /// Spawn a traced path that accumulates the trajectory of `source` as a
+    /// continuous line. The returned drawable's Path2D is regenerated every frame.
+    pub fn traced_path(&mut self, source: &DrawableHandle) -> DrawableHandle {
+        let handle = self.spawn(SpawnKind::TracedPathLine);
+        let source_id = source.id;
+        let id = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTracedPath {
+                target: id,
+                source: source_id,
+                min_distance: 1.0,
+                max_points: None,
+            });
+        handle
+    }
+
+    /// Spawn a tracking line — a reactive line whose endpoints follow entities
+    /// or remain at fixed positions. Updated every frame.
+    ///
+    /// Endpoints can be `DrawableHandle` references (their `.id` is used) or
+    /// static `(f64, f64)` positions passed as tuples.
+    pub fn tracking_line(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+    ) -> DrawableHandle {
+        let handle = self.spawn(SpawnKind::TrackingLine);
+        let id = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingLine { target: id, from, to });
+        handle
     }
 
     // -- Render / export --

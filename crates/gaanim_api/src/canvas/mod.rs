@@ -1,4 +1,5 @@
 mod ops;
+pub use ops::{CanvasEndpoint, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{Anim, CoordinateSystem, LayoutOp, ObjectSpec, OptDuration, SpawnKind};

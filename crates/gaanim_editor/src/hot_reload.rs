@@ -44,7 +44,9 @@ pub fn clear_scene_entities(world: &mut World) {
         q.iter(world).map(|(e, _)| e).collect()
     };
     for e in to_despawn {
-        world.despawn(e);
+        if world.get_entity(e).is_ok() {
+            world.despawn(e);
+        }
     }
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let playback_rate = tl.playback_rate;
@@ -73,9 +75,9 @@ pub fn reload_listener_system(world: &mut World) {
     let payload = payloads.last().expect("checked non-empty").clone();
 
     // Snapshot playback state before tearing down entities.
-    let (saved_time, was_playing) = {
+    let (saved_time, was_playing, had_previous_timeline) = {
         let tl = world.resource::<Timeline>();
-        (tl.current_time, tl.is_playing)
+        (tl.current_time, tl.is_playing, tl.cached_duration > 0.0)
     };
 
     let width = payload.canvas.width;
@@ -86,7 +88,7 @@ pub fn reload_listener_system(world: &mut World) {
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let target = saved_time.min(tl.cached_duration.max(0.0));
         tl.seek_request = Some(target);
-        tl.is_playing = was_playing;
+        tl.is_playing = if had_previous_timeline { was_playing } else { tl.cached_duration > 0.0 };
     }
 
     let now = world.resource::<Time>().elapsed_secs_f64();

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
+use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::Point;
 use gaanim_math::Bounds3D;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
@@ -11,10 +12,13 @@ use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::anim::{AnimationBuilder, AnimationType};
-use crate::builder::{MobjectRef, SceneBuilder};
+use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
-use crate::canvas::ops::{Op, Segment};
+use crate::canvas::ops::{CanvasEndpoint, Op, Segment};
 use crate::canvas::types::{LayoutOp, ObjectSpec, SpawnKind};
+
+use gaanim_animation::{PositionBinding, TracedPath, TrackingEndpoint, TrackingLine, Updater};
+use gaanim_math::SpatialTransform;
 
 impl Canvas {
     pub fn compile_into<'w, 's>(
@@ -127,6 +131,86 @@ impl Canvas {
                         builder.commands.entity(st.entity).despawn();
                     }
                 }
+
+                // -- Reactive ops --
+
+                Op::AttachUpdater { target, preset } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let updater: Updater = preset.clone().into_updater();
+                        builder.commands.entity(st.entity).insert(updater);
+                    }
+                }
+
+                Op::RemoveUpdater(target) => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                    {
+                        builder.schedule_remove_updater(target_id);
+                    }
+                }
+
+                Op::AttachTracedPath {
+                    target,
+                    source,
+                    min_distance,
+                    max_points,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(source_st) = builder.states.get(source_id)
+                    {
+                        let traced = TracedPath::new(source_st.entity, *min_distance, *max_points);
+                        builder.commands.entity(target_st.entity).insert(traced);
+                    }
+                }
+
+                Op::AttachPositionBinding {
+                    target,
+                    source,
+                    axes,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(source_st) = builder.states.get(source_id)
+                    {
+                        let binding = PositionBinding::new(source_st.entity, *axes);
+                        builder
+                            .commands
+                            .entity(target_st.entity)
+                            .insert(binding);
+                    }
+                }
+
+                Op::AttachTrackingLine { target, from, to } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
+                            match ep {
+                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
+                                CanvasEndpoint::Entity(oid) => {
+                                    if let Some(rid) = id_map.get(oid).copied() {
+                                        if let Some(s) = builder.states.get(rid) {
+                                            TrackingEndpoint::Entity(s.entity)
+                                        } else {
+                                            TrackingEndpoint::Static(DVec3::ZERO)
+                                        }
+                                    } else {
+                                        TrackingEndpoint::Static(DVec3::ZERO)
+                                    }
+                                }
+                            }
+                        };
+                        let line = TrackingLine::new(
+                            resolve_endpoint(from),
+                            resolve_endpoint(to),
+                        );
+                        builder.commands.entity(st.entity).insert(line);
+                    }
+                }
             }
         }
     }
@@ -235,6 +319,45 @@ impl Canvas {
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::ValueTracker(initial) => {
+                // Spawn a FloatSignal entity (no visual output).
+                let new_id = builder.next_id();
+                let entity = builder
+                    .commands
+                    .spawn((
+                        gaanim_scene::MobjectId(new_id),
+                        gaanim_animation::FloatSignal::new(*initial),
+                    ))
+                    .id();
+                builder.tag_entity(entity);
+                builder.states.insert(
+                    new_id,
+                    MobjectState {
+                        bounds: Bounds3D::default(),
+                        transform: SpatialTransform::default(),
+                        opacity: 1.0,
+                        fill: None,
+                        stroke: StrokeBrush::default(),
+                        entity,
+                        child_spans: Vec::new(),
+                        children: Vec::new(),
+                        parent: None,
+                    },
+                );
+                MobjectRef { id: new_id }
+            }
+            SpawnKind::TracedPathLine => {
+                // Spawn a minimal line (0,0)→(0,0). TracedPath will overwrite its Path2D.
+                let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
+                let mr = Self::finish_spawn_builder(b, spec);
+                mr
+            }
+            SpawnKind::TrackingLine => {
+                // Spawn a minimal line (0,0)→(0,0). TrackingLine will overwrite its Path2D.
+                let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
+                let mr = Self::finish_spawn_builder(b, spec);
+                mr
+            }
         }
     }
 
@@ -242,11 +365,19 @@ impl Canvas {
         mut b: crate::builder::MobjectSpawnBuilder<'b, 'w, 's, 'a>,
         spec: &ObjectSpec,
     ) -> MobjectRef {
-        if let Some((c, w)) = spec.stroke {
-            b = b.stroke(c, w);
+        if spec.stroke_overridden {
+            if let Some((c, w)) = spec.stroke {
+                b = b.stroke(c, w);
+            } else {
+                b = b.no_stroke();
+            }
         }
-        if let Some(ref f) = spec.fill {
-            b = b.fill_brush(f.clone());
+        if spec.fill_overridden {
+            if let Some(ref f) = spec.fill {
+                b = b.fill_brush(f.clone());
+            } else {
+                b = b.no_fill();
+            }
         }
         b = b.opacity(spec.opacity).z_index(spec.z_index);
         b.spawn()
@@ -262,17 +393,33 @@ impl Canvas {
         let mut child_spans = Vec::new();
         if let Some(st) = builder.states.get_mut(id) {
             child_spans = st.child_spans.clone();
-            if let Some((c, w)) = spec.stroke {
-                let sb = StrokeBrush::new(c, w);
-                st.stroke = sb.clone();
-                builder.commands.entity(st.entity).insert(sb);
+            if spec.stroke_overridden {
+                if let Some((c, w)) = spec.stroke {
+                    let sb = StrokeBrush::new(c, w);
+                    st.stroke = sb.clone();
+                    builder.commands.entity(st.entity).insert(sb);
+                } else {
+                    st.stroke = StrokeBrush::transparent();
+                    builder
+                        .commands
+                        .entity(st.entity)
+                        .insert(StrokeBrush::transparent());
+                }
             }
-            if let Some(ref f) = spec.fill {
-                st.fill = Some(f.clone());
-                builder
-                    .commands
-                    .entity(st.entity)
-                    .insert(FillBrush(Some(f.clone())));
+            if spec.fill_overridden {
+                if let Some(ref f) = spec.fill {
+                    st.fill = Some(f.clone());
+                    builder
+                        .commands
+                        .entity(st.entity)
+                        .insert(FillBrush(Some(f.clone())));
+                } else {
+                    st.fill = None;
+                    builder
+                        .commands
+                        .entity(st.entity)
+                        .insert(FillBrush::transparent());
+                }
             }
             if spec.opacity != 1.0 {
                 st.opacity = spec.opacity;
@@ -288,15 +435,16 @@ impl Canvas {
                 });
             }
         }
-        if let Some(ref f) = spec.fill {
+        if spec.fill_overridden {
             for (child_id, child_entity, _) in &child_spans {
                 if let Some(child_state) = builder.states.get_mut(*child_id) {
-                    child_state.fill = Some(f.clone());
+                    child_state.fill = spec.fill.clone();
                 }
-                builder
-                    .commands
-                    .entity(*child_entity)
-                    .insert(FillBrush(Some(f.clone())));
+                builder.commands.entity(*child_entity).insert(if let Some(ref f) = spec.fill {
+                    FillBrush(Some(f.clone()))
+                } else {
+                    FillBrush::transparent()
+                });
             }
         }
         if spec.opacity != 1.0 {
@@ -310,9 +458,13 @@ impl Canvas {
                     .insert(Opacity(spec.opacity));
             }
         }
-        if let Some((c, w)) = spec.stroke {
+        if spec.stroke_overridden {
             for (child_id, child_entity, _) in &child_spans {
-                let sb = StrokeBrush::new(c, w);
+                let sb = if let Some((c, w)) = spec.stroke {
+                    StrokeBrush::new(c, w)
+                } else {
+                    StrokeBrush::transparent()
+                };
                 if let Some(child_state) = builder.states.get_mut(*child_id) {
                     child_state.stroke = sb.clone();
                 }

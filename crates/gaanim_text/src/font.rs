@@ -197,7 +197,7 @@ impl FontRegistry {
         }
 
         if self.db.faces().count() == 0 {
-            bevy::prelude::warn!(
+            eprintln!(
                 "FontRegistry: no system fonts were found. Text rendering via rustybuzz may fail. \
                  Ensure standard font directories exist or register fonts manually."
             );

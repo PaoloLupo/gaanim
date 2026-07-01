@@ -100,6 +100,11 @@ pub enum ClipPayload {
     SceneStart(SceneId),
     /// Marks the end of a scene at this timestamp.
     SceneEnd(SceneId),
+    /// Removes a continuous updater from a mobject at a specific timestamp.
+    RemoveUpdater {
+        /// Target object whose `Updater` component should be removed.
+        target: ObjectId,
+    },
     /// A scene transition spanning the boundary between two scenes.
     Transition {
         /// The outgoing scene.

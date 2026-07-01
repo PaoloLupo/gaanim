@@ -56,6 +56,12 @@ pub enum SpawnKind {
     Subtitle(String),
     Equation(String),
     Group(Vec<ObjectId>),
+    /// Invisible value tracker entity (FloatSignal). No visual output.
+    ValueTracker(f64),
+    /// Placeholder line entity whose Path2D will be overwritten by TracedPath.
+    TracedPathLine,
+    /// Placeholder line entity whose Path2D will be overwritten by TrackingLine.
+    TrackingLine,
 }
 
 #[derive(Debug, Clone)]
@@ -91,7 +97,9 @@ pub struct ObjectSpec {
     pub id: ObjectId,
     pub kind: SpawnKind,
     pub fill: Option<Brush>,
+    pub fill_overridden: bool,
     pub stroke: Option<(Color, f64)>,
+    pub stroke_overridden: bool,
     pub opacity: f32,
     pub z_index: i32,
     pub layout_ops: Vec<LayoutOp>,
@@ -103,7 +111,9 @@ impl ObjectSpec {
             id,
             kind,
             fill: None,
+            fill_overridden: false,
             stroke: None,
+            stroke_overridden: false,
             opacity: 1.0,
             z_index: 0,
             layout_ops: Vec::new(),

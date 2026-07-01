@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 
-use gaanim_api::canvas::Canvas;
+use gaanim_api::canvas::{Canvas, CanvasEndpoint};
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
@@ -107,5 +107,48 @@ impl PyCanvas {
         self.inner
             .export(path, fps, None, None)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // -- Reactive objects --
+
+    /// Create a value tracker — a reactive float signal that can be animated.
+    fn value_tracker(&mut self, initial: f64) -> PyDrawable {
+        PyDrawable(self.inner.value_tracker(initial))
+    }
+
+    /// Create a traced path that accumulates the trajectory of `source`.
+    fn traced_path(&mut self, source: &PyDrawable) -> PyDrawable {
+        PyDrawable(self.inner.traced_path(&source.0))
+    }
+
+    /// Create a tracking line — a reactive line between two endpoints.
+    ///
+    /// Endpoints can be:
+    /// - A `Drawable` (tracks entity position)
+    /// - A tuple `(x, y)` (static position)
+    fn tracking_line(
+        &mut self,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+    ) -> PyResult<PyDrawable> {
+        let from_ep = resolve_endpoint(&from)?;
+        let to_ep = resolve_endpoint(&to)?;
+        Ok(PyDrawable(self.inner.tracking_line(from_ep, to_ep)))
+    }
+}
+
+/// Resolve a Python object into a CanvasEndpoint.
+/// Accepts a PyDrawable (entity) or a tuple (x, y) (static position).
+fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
+    if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
+        Ok(CanvasEndpoint::Entity(drawable.0.id))
+    } else if let Ok(tuple) = obj.extract::<(f64, f64)>() {
+        Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+            tuple.0, tuple.1, 0.0,
+        )))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Endpoint must be a Drawable or a (x, y) tuple",
+        ))
     }
 }
