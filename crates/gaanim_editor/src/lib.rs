@@ -558,26 +558,82 @@ fn editor_ui_system(
                                     egui::Color32::from_rgb(255, 200, 80)
                                 };
                                 let speed_btn = egui::Button::new(
-                                    egui::RichText::new(speed_label)
+                                    egui::RichText::new(format!("⚡ {}", speed_label))
                                         .size(11.0)
                                         .color(speed_color),
                                 )
-                                .min_size(egui::vec2(36.0, 20.0))
+                                .min_size(egui::vec2(50.0, 20.0))
                                 .corner_radius(4.0)
                                 .fill(egui::Color32::from_rgba_premultiplied(35, 35, 50, 160));
-                                if ui
-                                    .add(speed_btn)
-                                    .on_hover_text("Playback speed (click to cycle)")
-                                    .clicked()
-                                {
-                                    timeline.playback_rate = match speed {
-                                        s if s < 0.4 => 0.5,
-                                        s if s < 0.7 => 1.0,
-                                        s if s < 1.2 => 1.5,
-                                        s if s < 1.7 => 2.0,
-                                        _ => 0.25,
-                                    };
-                                }
+                                let speed_resp = ui.add(speed_btn);
+                                egui::Popup::from_toggle_button_response(&speed_resp)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .show(|ui| {
+                                        ui.set_min_width(200.0);
+                                        ui.label(
+                                            egui::RichText::new("Playback Speed")
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(160, 160, 175)),
+                                        );
+                                        ui.add_space(4.0);
+
+                                        // Preset buttons
+                                        let presets = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0];
+                                        ui.horizontal(|ui| {
+                                            for &p in &presets {
+                                                let is_active = (speed - p).abs() < f64::EPSILON;
+                                                let label = if p == p.floor() {
+                                                    format!("{}x", p as i32)
+                                                } else {
+                                                    format!("{}x", p)
+                                                };
+                                                let btn = egui::Button::new(
+                                                    egui::RichText::new(label)
+                                                        .size(11.0)
+                                                        .color(if is_active {
+                                                            egui::Color32::from_rgb(120, 200, 255)
+                                                        } else {
+                                                            egui::Color32::from_rgb(170, 170, 180)
+                                                        }),
+                                                )
+                                                .min_size(egui::vec2(32.0, 22.0))
+                                                .corner_radius(4.0)
+                                                .fill(if is_active {
+                                                    egui::Color32::from_rgba_premultiplied(
+                                                        50, 70, 120, 200,
+                                                    )
+                                                } else {
+                                                    egui::Color32::from_rgba_premultiplied(
+                                                        35, 35, 50, 160,
+                                                    )
+                                                });
+                                                if ui.add(btn).clicked() {
+                                                    timeline.playback_rate = p;
+                                                }
+                                            }
+                                        });
+
+                                        ui.add_space(6.0);
+
+                                        // Fine slider
+                                        let mut rate = speed as f32;
+                                        let slider = egui::Slider::new(&mut rate, 0.1..=5.0)
+                                            .step_by(0.05)
+                                            .text("x")
+                                            .show_value(true);
+                                        if ui.add(slider).changed() {
+                                            timeline.playback_rate = rate as f64;
+                                        }
+
+                                        ui.add_space(2.0);
+                                        if ui
+                                            .small_button("Reset")
+                                            .on_hover_text("Reset to 1x")
+                                            .clicked()
+                                        {
+                                            timeline.playback_rate = 1.0;
+                                        }
+                                    });
 
                                 ui.add_space(6.0);
 

@@ -10,11 +10,15 @@ use std::sync::Mutex;
 #[derive(bevy::prelude::Resource, Debug, Clone, Copy)]
 pub struct PlaybackState {
     pub is_playing: bool,
+    pub scaled_dt: f64,
 }
 
 impl Default for PlaybackState {
     fn default() -> Self {
-        Self { is_playing: true }
+        Self {
+            is_playing: true,
+            scaled_dt: 0.0,
+        }
     }
 }
 
@@ -51,8 +55,10 @@ impl Updater {
 /// Sistema Bevy que ejecuta todos los updaters activos con acceso exclusivo al World.
 pub fn updater_system(world: &mut World) {
     let dt = world
-        .get_resource::<DeltaTime>()
-        .map(|d| d.dt)
+        .get_resource::<PlaybackState>()
+        .map(|s| s.scaled_dt)
+        .filter(|dt| *dt > 0.0)
+        .or_else(|| world.get_resource::<DeltaTime>().map(|d| d.dt))
         .unwrap_or(0.0);
     let is_playing = world
         .get_resource::<PlaybackState>()

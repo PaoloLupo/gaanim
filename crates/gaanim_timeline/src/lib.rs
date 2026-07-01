@@ -96,11 +96,17 @@ pub fn timeline_playback_system(
     dt: Res<gaanim_animation::DeltaTime>,
     playback_state: Option<ResMut<gaanim_animation::PlaybackState>>,
 ) {
+    let scaled_dt = if timeline.is_playing && timeline.seek_request.is_none() {
+        dt.dt * timeline.playback_rate
+    } else {
+        0.0
+    };
     if let Some(mut playback_state) = playback_state {
         playback_state.is_playing = timeline.is_playing;
+        playback_state.scaled_dt = scaled_dt;
     }
     if timeline.is_playing && timeline.seek_request.is_none() {
-        let delta = dt.dt * timeline.playback_rate;
+        let delta = scaled_dt;
         let next_time = timeline.current_time + delta;
 
         // Check if we crossed a slide breakpoint.

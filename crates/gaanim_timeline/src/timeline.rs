@@ -345,7 +345,14 @@ impl Timeline {
             .unwrap_or(self.cached_duration);
         let clamped_target = target_time.clamp(0.0, max_time);
         let previous_time = self.current_time;
-        let preserve_reactive_state = self.is_playing && clamped_target >= previous_time;
+        let expected_forward_dt = world
+            .get_resource::<gaanim_animation::PlaybackState>()
+            .map(|s| s.scaled_dt)
+            .unwrap_or(0.0);
+        let forward_delta = (clamped_target - previous_time).max(0.0);
+        let preserve_reactive_state = self.is_playing
+            && clamped_target >= previous_time
+            && forward_delta <= (expected_forward_dt * 1.5).max(1.0 / 120.0);
         let reactive_state = if preserve_reactive_state {
             capture_reactive_state(world)
         } else {
