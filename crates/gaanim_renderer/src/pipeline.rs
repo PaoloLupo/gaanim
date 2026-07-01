@@ -35,19 +35,6 @@ pub struct ExtractedElement {
     clip_mask: Option<ClipMask>,
 }
 
-const VELLO_LOCAL_Y_FLIP: kurbo::Affine =
-    kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
-
-/// Converts a gaanim entity transform to Vello coordinates without changing
-/// its world-space translation. Text outlines are already flipped by shaping.
-fn entity_transform_for_vello(transform: kurbo::Affine, is_text: bool) -> kurbo::Affine {
-    if is_text {
-        transform
-    } else {
-        transform * VELLO_LOCAL_Y_FLIP
-    }
-}
-
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
 ///
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
@@ -179,7 +166,7 @@ pub fn compile_scene_from_world(
         path_opt,
         fill_opt,
         stroke_opt,
-        tag,
+        _tag,
     ) in query_mobjects.iter(world)
     {
         if *render_layer != RenderLayer::Vello2D {
@@ -298,18 +285,8 @@ pub fn compile_scene_from_world(
             }
         }
 
-        let is_text = tag.is_some_and(|t| {
-            t.0.starts_with("Text('")
-                || t.0.starts_with("Char('")
-                || t.0.starts_with("Typst('")
-                || t.0.starts_with("TypstGlyph")
-                || t.0.starts_with("TypstShape")
-                || t.0.starts_with("DecimalNumber(")
-        });
-        let entity_affine = entity_transform_for_vello(transform.affine_2d, is_text);
-
         extracted.push(ExtractedElement {
-            transform: entity_affine,
+            transform: transform.affine_2d,
             opacity: global_opacity.0,
             render_order: *render_order,
             scene: Arc::new(scene),
@@ -375,13 +352,10 @@ pub fn compile_scene_from_world(
 ///
 /// # Coordinate System
 /// gaanim uses a Y-up coordinate system (positive Y = up on screen).
-/// `bevy_vello` applies a single Y-flip via the view matrix to convert
-/// from Bevy's Y-up to Vello's Y-down native space.  To keep the final
-/// output Y-up, non-text entities receive a local `scale(1, -1)` after
-/// their world transform. This keeps `.at(x, y)` translations in Y-up space
-/// while correcting the local geometry. Text glyphs are already
-/// pre-flipped in the shaper (`scale(s, -s)`) and must NOT get the extra
-/// flip — they rely on the single view-matrix flip alone.
+/// Scene elements remain entirely in gaanim's Y-up world space. The single
+/// global `MainVelloScene` entity has a negative Y scale that converts the
+/// completed scene to Vello's Y-down pixel space without changing the meaning
+/// of `.at(x, y)` or requiring per-object coordinate workarounds.
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
@@ -411,7 +385,10 @@ pub fn gaanim_render_system(
         Option<&WorldBounds>,
         Option<&gaanim_scene::GroupMarker>,
     )>,
-    mut query_vello_scene: Query<(Entity, &mut VelloScene2d), With<MainVelloScene>>,
+    mut query_vello_scene: Query<
+        (Entity, &mut VelloScene2d, &mut Transform),
+        With<MainVelloScene>,
+    >,
     mut local_extracted: Local<Vec<ExtractedElement>>,
     mut local_culled: Local<std::collections::HashSet<Entity>>,
 ) {
@@ -450,7 +427,7 @@ pub fn gaanim_render_system(
         path_ref,
         fill_ref,
         stroke_ref,
-        tag,
+        _tag,
     ) in &query_mobjects
     {
         // Look up effects, bounds and group marker components on-demand to keep Query tuple size small
@@ -639,22 +616,8 @@ pub fn gaanim_render_system(
             Arc::new(scene)
         });
 
-        // Apply Y-flip to non-text entities so that the gaanim Y-up
-        // coordinate system is preserved on screen.  Text glyphs are
-        // already pre-flipped (scale(s, -s)) in the shaper, so they
-        // must NOT receive this extra flip.
-        let is_text = tag.is_some_and(|t| {
-            t.0.starts_with("Text('")
-                || t.0.starts_with("Char('")
-                || t.0.starts_with("Typst('")
-                || t.0.starts_with("TypstGlyph")
-                || t.0.starts_with("TypstShape")
-                || t.0.starts_with("DecimalNumber(")
-        });
-        let entity_affine = entity_transform_for_vello(transform.affine_2d, is_text);
-
         local_extracted.push(ExtractedElement {
-            transform: entity_affine,
+            transform: transform.affine_2d,
             opacity: global_opacity.0,
             render_order: *render_order,
             scene: Arc::clone(fragment),
@@ -737,9 +700,10 @@ pub fn gaanim_render_system(
 
     // Update the single global VelloScene2d or spawn it on demand
     let mut scene_entity_found = false;
-    for (entity, mut scene) in &mut query_vello_scene {
+    for (entity, mut scene, mut scene_transform) in &mut query_vello_scene {
         scene.reset();
         scene.append(&main_scene, None);
+        scene_transform.scale = Vec3::new(1.0, -1.0, 1.0);
         scene_entity_found = true;
 
         // Update AABB to match current scene bounds
@@ -755,29 +719,12 @@ pub fn gaanim_render_system(
             MainVelloScene,
             VelloScene2d::from(main_scene),
             bevy::camera::primitives::Aabb::from_min_max(aabb_min, aabb_max),
-            Transform::default(),
+            Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)),
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
         ));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_y_flip_preserves_world_translation() {
-        let world = kurbo::Affine::translate((25.0, 40.0));
-        let converted = entity_transform_for_vello(world, false);
-
-        let origin = converted * kurbo::Point::ORIGIN;
-        let local_up = converted * kurbo::Point::new(0.0, 10.0);
-
-        assert_eq!(origin, kurbo::Point::new(25.0, 40.0));
-        assert_eq!(local_up, kurbo::Point::new(25.0, 30.0));
     }
 }
 

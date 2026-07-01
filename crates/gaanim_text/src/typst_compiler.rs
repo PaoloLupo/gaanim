@@ -473,9 +473,8 @@ pub fn compile_typst_to_hierarchy(
     let parent_entity = commands.spawn(parent_bundle).id();
 
     let mut total_bounds: Option<Bounds3D> = None;
-    // The root transform remains IDENTITY because Bevy's world coordinate space
-    // inside the Vello canvas is natively Y-down.
-    let root_transform = kurbo::Affine::IDENTITY;
+    // Typst frames are Y-down; convert them once into gaanim's Y-up world space.
+    let root_transform = kurbo::Affine::scale_non_uniform(1.0, -1.0);
 
     // Process the first page only (formulas are typically single-page).
     if let Some(page) = document.pages().first() {

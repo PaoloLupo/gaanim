@@ -126,8 +126,8 @@ pub fn compile_text_to_hierarchy(
             let glyph_x = pen_x + glyph.x_offset;
             let glyph_y = pen_y + glyph.y_offset;
 
-            // Transform path: scale it and vertically flip the outline to correct Y-down space
-            path.apply_affine(Affine::scale_non_uniform(scale, -scale));
+            // Font outlines and gaanim world coordinates are both Y-up.
+            path.apply_affine(Affine::scale(scale));
 
             let path_bounding_rect = path.bounding_box();
             let mut glyph_local_bounds = Bounds3D::new_2d(
@@ -137,7 +137,7 @@ pub fn compile_text_to_hierarchy(
                 path_bounding_rect.y1,
             );
 
-            // Shift bounds by pen position (with positive Y to align with Bevy's Y-down space)
+            // Shift bounds by the Y-up pen position.
             glyph_local_bounds.min.x += glyph_x * scale;
             glyph_local_bounds.max.x += glyph_x * scale;
             glyph_local_bounds.min.y += glyph_y * scale;

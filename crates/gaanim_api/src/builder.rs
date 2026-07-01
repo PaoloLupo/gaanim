@@ -4,7 +4,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
-use gaanim_math::{Bounds3D, SpatialTransform};
+use gaanim_math::{Bounds3D, EasingCurve, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
     FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds,
@@ -19,6 +19,27 @@ use gaanim_timeline::{
     transition::TransitionType,
 };
 use std::collections::HashMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DrawMode {
+    Grow,
+    BorderThenFill,
+}
+
+#[derive(Clone, Debug)]
+struct DrawSchedule {
+    mode: DrawMode,
+    reversed: bool,
+    staggered: bool,
+    lag_ratio: f64,
+    stroke_width: Option<f64>,
+    auto_stroke_width: f64,
+    fill_rate_func: gaanim_math::RateFunc,
+}
+
+fn adaptive_lag_ratio(item_count: usize) -> f64 {
+    (4.0 / item_count.max(1) as f64).min(0.2)
+}
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
 /// stroke color in the `Write` animation's auto-stroke fallback.
@@ -440,7 +461,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeTransform { .. } => "Morph",
             AnimationType::Wiggle => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
-            AnimationType::DrawBorderThenFill => "DrawFill",
+            AnimationType::DrawBorderThenFill { .. } => "DrawFill",
             AnimationType::Flash { .. } => "Flash",
             AnimationType::Circumscribe { .. } => "Circum",
             AnimationType::MoveAlongPath { .. } => "Follow",
@@ -502,20 +523,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // multiple staggered or parallel sub-clips, so they have their own branches
         // that access the timeline multiple times. All other variants collapse to a
         // single clip below.
-        if matches!(anim.anim_type, AnimationType::Write { .. }) {
-            self.play_draw_erase_internal(anim, false, true, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Create { .. }) {
-            self.play_draw_erase_internal(anim, false, false, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Unwrite { .. }) {
-            self.play_draw_erase_internal(anim, true, true, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Uncreate { .. }) {
-            self.play_draw_erase_internal(anim, true, false, track);
+        if matches!(
+            anim.anim_type,
+            AnimationType::Write { .. }
+                | AnimationType::Create { .. }
+                | AnimationType::Unwrite { .. }
+                | AnimationType::Uncreate { .. }
+                | AnimationType::DrawBorderThenFill { .. }
+        ) {
+            self.play_draw_animation_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::SpinInFromNothing) {
@@ -540,10 +556,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::GrowFromEdge { .. }) {
             self.play_grow_from_edge_internal(anim, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::DrawBorderThenFill) {
-            self.play_draw_border_then_fill_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Flash { .. }) {
@@ -672,7 +684,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Wiggle
             | AnimationType::GrowFromPoint { .. }
             | AnimationType::GrowFromEdge { .. }
-            | AnimationType::DrawBorderThenFill
+            | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
             | AnimationType::MoveAlongPath { .. }
@@ -730,22 +742,61 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// will render an empty/invisible fill, so the user only ever sees
     /// Internal: generalize a draw/erase animation (Write, Create, Unwrite, Uncreate)
     /// as one or more staggered or parallel sub-clip sequences.
-    fn play_draw_erase_internal(
-        &mut self,
-        anim: AnimationBuilder,
-        is_erase: bool,
-        staggered: bool,
-        parent_track: TrackId,
-    ) {
-        let stroke_width = match anim.anim_type {
-            AnimationType::Write { stroke_width } => stroke_width,
-            AnimationType::Create { stroke_width } => stroke_width,
-            AnimationType::Unwrite { stroke_width } => stroke_width,
-            AnimationType::Uncreate { stroke_width } => stroke_width,
+    fn draw_schedule_for(&self, anim: &AnimationBuilder, item_count: usize) -> Option<DrawSchedule> {
+        let adaptive_lag = adaptive_lag_ratio(item_count);
+        match &anim.anim_type {
+            AnimationType::Write { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Create { config } => Some(DrawSchedule {
+                mode: DrawMode::Grow,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(1.0),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Unwrite { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: true,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Uncreate { config } => Some(DrawSchedule {
+                mode: DrawMode::Grow,
+                reversed: true,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(1.0),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::DrawBorderThenFill { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 2.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
             _ => None,
-        };
+        }
+    }
 
-        // Collect target ids: the target's own id plus all child spans.
+    fn play_draw_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        const DRAW_RATIO: f64 = 0.5;
+
         let mut items: Vec<ObjectId> = {
             let state = match self.states.get(anim.target) {
                 Some(s) => s,
@@ -769,14 +820,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
-        // If staggered and is_erase, we reverse the items so sequential erasure happens in reverse (right-to-left)
-        if staggered && is_erase {
+        let Some(schedule) = self.draw_schedule_for(&anim, n) else {
+            return;
+        };
+
+        if schedule.staggered && schedule.reversed {
             items.reverse();
         }
 
-        // (A) Auto-stroke: entities that have no stroke brush yet get a stroke synthesized
-        // from the fill color and the user-supplied stroke_width (or 1.0) so the outline
-        // is visible during drawing/erasing.
         for item_id in &items {
             if let Some(state) = self.states.get_mut(*item_id)
                 && state.stroke.brush.is_none()
@@ -786,23 +837,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .as_ref()
                     .and_then(extract_brush_color)
                     .unwrap_or(Color::WHITE);
-                let width = stroke_width.unwrap_or(1.0);
+                let width = schedule.stroke_width.unwrap_or(schedule.auto_stroke_width);
                 let new_stroke = StrokeBrush::new(color, width);
                 state.stroke = new_stroke.clone();
                 self.commands.entity(state.entity).insert(new_stroke);
             }
         }
 
-        // (B) Set initial value via deferred commands to avoid flicker
         for item_id in &items {
             if let Some(state) = self.states.get(*item_id) {
-                let initial_val = if is_erase { 1.0 } else { 0.0 };
-                self.commands
-                    .entity(state.entity)
-                    .insert(gaanim_animation::FillDrawProgress(initial_val));
+                if matches!(schedule.mode, DrawMode::BorderThenFill) {
+                    let initial_fill = if schedule.reversed { 1.0 } else { 0.0 };
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_animation::FillDrawProgress(initial_fill));
+                }
 
-                // If drawing, immediately insert an empty Path2D to guarantee no first-frame flash!
-                if !is_erase {
+                if !schedule.reversed {
                     self.commands
                         .entity(state.entity)
                         .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
@@ -812,29 +863,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        /// Lag ratio between consecutive items.
-        const LAG_RATIO: f64 = 0.25;
-        /// Fraction of item_duration spent drawing/erasing the outline vs fill fade.
-        const DRAW_RATIO: f64 = 0.7;
-
-        let item_duration = if staggered {
-            anim.duration / (1.0 + (n as f64 - 1.0) * LAG_RATIO)
-        } else {
-            anim.duration
-        };
-        let lag_step = if staggered {
-            item_duration * LAG_RATIO
+        let lag_ratio = if schedule.staggered {
+            schedule.lag_ratio
         } else {
             0.0
         };
+        let item_duration = if schedule.staggered {
+            anim.duration / (1.0 + (n as f64 - 1.0) * lag_ratio)
+        } else {
+            anim.duration
+        };
+        let lag_step = item_duration * lag_ratio;
         let min_step = 1e-6_f64.max(item_duration * 0.01);
-
         let draw_duration = (item_duration * DRAW_RATIO).max(min_step);
-        let fade_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
-
-        // (C) Global resets at self.current_time to ensure determinism during seek/rewind.
-        let reset_fill_val = if is_erase { 1.0 } else { 0.0 };
-        let reset_path_val = if is_erase { 1.0 } else { 0.0 };
+        let fill_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
 
         for item_id in &items {
             self.timeline.add_clip(
@@ -843,145 +885,160 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress {
-                        from: reset_fill_val,
-                        to: reset_fill_val,
-                    },
-                    rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-            self.timeline.add_clip(
-                parent_track,
-                self.current_time,
-                min_step,
-                ClipPayload::Animation(AnimationSpec {
-                    target: *item_id,
                     lens: PropertyLensSpec::PathCompletion {
-                        from: reset_path_val,
-                        to: reset_path_val,
+                        from: if schedule.reversed { 1.0 } else { 0.0 },
+                        to: if schedule.reversed { 1.0 } else { 0.0 },
                     },
                     rate_func: anim.rate_func.clone(),
-                delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
-        }
 
-        // (D) Schedule per-item sequence
-        for (i, item_id) in items.iter().enumerate() {
-            let item_delay = (i as f64 * lag_step).max(0.0);
-            let item_start = self.current_time + item_delay;
-
-            if !is_erase {
-                // DRAW FLOW: outline draws first, then fill fades in
-                let fade_start = item_start + draw_duration;
-
-                // 1. Fill hold at 0.0 during draw phase
+            if matches!(schedule.mode, DrawMode::BorderThenFill) {
                 self.timeline.add_clip(
                     parent_track,
-                    item_start,
-                    draw_duration,
+                    self.current_time,
+                    min_step,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                        lens: PropertyLensSpec::FillDrawProgress {
+                            from: if schedule.reversed { 1.0 } else { 0.0 },
+                            to: if schedule.reversed { 1.0 } else { 0.0 },
+                        },
                         rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 2. Outline draw: PathCompletion 0.0 -> 1.0
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 3. Fill fade-in: FillDrawProgress 0.0 -> 1.0
-                self.timeline.add_clip(
-                    parent_track,
-                    fade_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-            } else {
-                // ERASE FLOW: fill fades out first, then outline erases
-                let draw_start = item_start + fade_duration;
-
-                // 1. Fill fade-out: FillDrawProgress 1.0 -> 0.0
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 2. Outline hold at 1.0 during fade phase
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 3. Outline erase: PathCompletion 1.0 -> 0.0
-                self.timeline.add_clip(
-                    parent_track,
-                    draw_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 4. Fill hold at 0.0 during erase phase
-                self.timeline.add_clip(
-                    parent_track,
-                    draw_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
-                delay: 0.0,
+                        delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
             }
+        }
 
-            // Stroke width override if requested
-            if let Some(width) = stroke_width {
+        for (i, item_id) in items.iter().enumerate() {
+            let item_start = self.current_time + i as f64 * lag_step;
+
+            match (schedule.mode, schedule.reversed) {
+                (DrawMode::Grow, false) => {
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        item_duration.max(min_step),
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::Grow, true) => {
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        item_duration.max(min_step),
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::BorderThenFill, false) => {
+                    let fill_start = item_start + draw_duration;
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        fill_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
+                            rate_func: schedule.fill_rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::BorderThenFill, true) => {
+                    let draw_start = item_start + fill_duration;
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
+                            rate_func: schedule.fill_rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        draw_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        draw_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+            }
+
+            if let Some(width) = schedule.stroke_width {
                 self.timeline.add_clip(
                     parent_track,
                     item_start,
@@ -993,7 +1050,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                             to: width,
                         },
                         rate_func: anim.rate_func.clone(),
-                delay: 0.0,
+                        delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -1448,98 +1505,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     from: edge_world,
                     to: target_pos,
                 },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-    }
-
-    fn play_draw_border_then_fill_internal(
-        &mut self,
-        anim: AnimationBuilder,
-        parent_track: TrackId,
-    ) {
-        let state = match self.states.get(anim.target) {
-            Some(s) => s,
-            None => return,
-        };
-        let entity = state.entity;
-
-        let fill_color = state
-            .fill
-            .as_ref()
-            .and_then(extract_brush_color)
-            .unwrap_or(Color::WHITE);
-        let stroke_width = 2.0;
-
-        if state.stroke.brush.is_none() {
-            let new_stroke = StrokeBrush::new(fill_color, stroke_width);
-            self.commands.entity(entity).insert(new_stroke.clone());
-            if let Some(s) = self.states.get_mut(anim.target) {
-                s.stroke = new_stroke;
-            }
-        }
-
-        let draw_duration = anim.duration * 0.6;
-        let fill_duration = anim.duration * 0.4;
-        let min_step = 1e-6_f64;
-
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            min_step,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            min_step,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        self.commands
-            .entity(entity)
-            .insert(gaanim_animation::FillDrawProgress(0.0));
-        self.commands
-            .entity(entity)
-            .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
-                gaanim_core::kurbo::BezPath::new(),
-            )));
-
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            draw_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        let fill_start = self.current_time + draw_duration;
-        self.timeline.add_clip(
-            parent_track,
-            fill_start,
-            fill_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
                 label: self.current_label.clone(),
@@ -3536,6 +3501,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id: target.id,
             child_ids,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::adaptive_lag_ratio;
+
+    #[test]
+    fn adaptive_lag_ratio_matches_manim_formula() {
+        assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
+        assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
+        assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
     }
 }
 

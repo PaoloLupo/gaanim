@@ -1,25 +1,31 @@
-"""Minimal Write smoke test.
+"""Visual smoke test for Create, Write, and DrawBorderThenFill parity."""
 
-A single circle outline is written from arc-length 0 to 1 over 2 seconds.
-If the bug were still present, the circle would appear complete from frame 0.
-"""
+from gaanim import BLACK, BLUE, GOLD, RED, Canvas
 
-from gaanim import BLUE, GOLD, RED, Engine, Scene
+c = Canvas(1920, 1080, background=BLACK)
 
-engine = Engine(width=1920, height=1080, title="Write Smoke")
+c.segment("intro")
 
-intro = engine.scene("intro")
+# Single leaf: should reveal the trimmed path without a first-frame flash.
+circle = c.circle(80).stroke(RED, 4).no_fill().at(-420, 120)
+circle.write().duration(2.0).linear()
 
-# Single leaf: should write the outline once.
-circle = intro.circle(80).stroke(RED, 4).no_fill().at(0, 0)
+# Create should now grow fill + outline together, one glyph at a time.
+create_label = c.text("Create").fill(GOLD).at(-420, -20)
+create_title = c.title("Hola!").fill(BLUE).at(-420, -140)
+create_label.write().duration(0.8).linear()
+create_title.create().duration(2.8).linear()
 
-intro.play(circle.write(2.0).linear())
+# Write should keep the border-first split, but stagger glyphs with a
+# typewriter cadence. The lag_ratio override makes the difference obvious.
+write_label = c.text("Write").fill(GOLD).at(0, -20)
+write_formula = c.equation("x^2 + y^2 = z^2").at(0, -140)
+write_label.write().duration(0.8).linear()
+write_formula.write().duration(3.0).lag_ratio(0.12)
 
-# Filled text: should write the outline of each glyph in sequence.
-title = intro.title("Hola!").at(100, 10)
-intro.play(title.write(3).smooth())
-
-# Filled equation: should write outline of each glyph.
-equation = intro.equation("x^2 + y^2 = z^2").at(200, -100)
-intro.play(equation.write(3.0).linear())
-engine.render()
+# DrawBorderThenFill should also stagger child glyphs now instead of only animating the root.
+dbtf_label = c.text("DrawBorderThenFill").fill(GOLD).at(420, -20)
+dbtf_text = c.text("Borde y relleno").fill(BLUE).at(420, -140)
+dbtf_label.write().duration(0.8).linear()
+dbtf_text.draw_border_then_fill().duration(3.0)
+c.render()

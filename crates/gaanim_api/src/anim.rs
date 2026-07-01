@@ -3,6 +3,13 @@ use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_math::RateFunc;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrawAnimationConfig {
+    pub stroke_width: Option<f64>,
+    pub lag_ratio: Option<f64>,
+    pub pen_tip: bool,
+}
+
 /// High-level, developer-friendly animation types that do not require explicitly defining
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
@@ -74,18 +81,16 @@ pub enum AnimationType {
     /// - The `stroke_width` controls the outline thickness used during the
     ///   draw phase (defaults to the target's existing stroke width).
     Write {
-        /// Optional override for the outline stroke width used during the
-        /// draw phase. `None` means "use the target's existing stroke width".
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Create {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Uncreate {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Unwrite {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     GrowFromCenter,
     ShrinkToCenter,
@@ -110,7 +115,9 @@ pub enum AnimationType {
         direction: String,
     },
     /// Draw the outline first (like Write) then fill in.
-    DrawBorderThenFill,
+    DrawBorderThenFill {
+        config: DrawAnimationConfig,
+    },
     /// Lines radiating outward from a point (flash of insight effect).
     Flash {
         color: Option<Color>,
@@ -181,6 +188,68 @@ impl AnimationBuilder {
     /// Sets pacing to flat Linear.
     pub fn linear(self) -> Self {
         self.rate_func(RateFunc::Linear)
+    }
+
+    pub fn lag_ratio(mut self, lag_ratio: f64) -> Self {
+        let lag_ratio = lag_ratio.max(0.0);
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.lag_ratio = Some(lag_ratio);
+            }
+            _ => {}
+        }
+        self
+    }
+
+    pub fn stroke_width(mut self, stroke_width: f64) -> Self {
+        let stroke_width = stroke_width.max(0.0);
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.stroke_width = Some(stroke_width);
+            }
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_pen_tip(mut self) -> Self {
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.pen_tip = true;
+            }
+            _ => {}
+        }
+        self
+    }
+}
+
+impl AnimationType {
+    pub fn default_rate_func(&self) -> RateFunc {
+        match self {
+            Self::Write { .. }
+            | Self::Create { .. }
+            | Self::Unwrite { .. }
+            | Self::Uncreate { .. }
+            | Self::ShowPassingFlash { .. }
+            | Self::Wiggle => RateFunc::Linear,
+            Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
+            Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {
+                RateFunc::ThereAndBack
+            }
+            _ => RateFunc::Smooth,
+        }
     }
 }
 
@@ -336,9 +405,17 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Write { stroke_width },
+            anim_type: AnimationType::Write {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Write {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
             delay: 0.0,
         }
     }
@@ -357,9 +434,17 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Create { stroke_width },
+            anim_type: AnimationType::Create {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Create {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
             delay: 0.0,
         }
     }
@@ -377,9 +462,17 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Uncreate { stroke_width },
+            anim_type: AnimationType::Uncreate {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Uncreate {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
             delay: 0.0,
         }
     }
@@ -397,9 +490,17 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Unwrite { stroke_width },
+            anim_type: AnimationType::Unwrite {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Unwrite {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
             delay: 0.0,
         }
     }
@@ -514,9 +615,14 @@ impl MobjectRef {
     pub fn draw_border_then_fill(self) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::DrawBorderThenFill,
+            anim_type: AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default(),
+            },
             duration: 1.5,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
             delay: 0.0,
         }
     }
@@ -599,5 +705,58 @@ impl ValueTrackerRef {
             rate_func: RateFunc::Smooth,
             delay: 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_animation_defaults_match_manim_style_rate_funcs() {
+        assert!(matches!(
+            AnimationType::Write {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::Linear
+        ));
+        assert!(matches!(
+            AnimationType::Create {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::Linear
+        ));
+        assert!(matches!(
+            AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::DoubleSmooth
+        ));
+    }
+
+    #[test]
+    fn animation_builder_updates_draw_config_fields() {
+        let builder = AnimationBuilder {
+            target: ObjectId::from_parts(1, 1),
+            anim_type: AnimationType::Write {
+                config: DrawAnimationConfig::default(),
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: RateFunc::Linear,
+        }
+        .lag_ratio(0.15)
+        .stroke_width(3.5)
+        .with_pen_tip();
+
+        let AnimationType::Write { config } = builder.anim_type else {
+            panic!("expected write animation");
+        };
+        assert_eq!(config.lag_ratio, Some(0.15));
+        assert_eq!(config.stroke_width, Some(3.5));
+        assert!(config.pen_tip);
     }
 }

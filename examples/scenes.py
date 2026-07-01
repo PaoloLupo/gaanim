@@ -36,7 +36,7 @@ c.segment("intro")
 title = c.title("Gaanim").fill(WHITE).at(0.0, 200.0)
 subtitle = c.subtitle("Animaciones").fill(GRAY).at(0.0, 100.0)
 
-title.write().duration(2.0).smooth()
+title.write().duration(2.0).linear()
 subtitle.fade_in().duration(1.0).delay(1.5).smooth()
 
 c.wait(2.0)
@@ -45,7 +45,7 @@ c.wait(2.0)
 c.segment("shapes", Transition.cross_fade(0.8))
 
 heading = c.text("Formas Geometricas").fill(GOLD).at(0.0, 250.0)
-heading.write().duration(1.0)
+heading.write().duration(1.0).linear()
 
 circle = c.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).at(-300.0, 0.0)
 rect = c.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).at(0.0, 0.0)
@@ -76,13 +76,13 @@ c.wait(0.5)
 c.segment("typography", Transition.fade_through(0.6, BLACK))
 
 label = c.text("Texto y Flechas").fill(YELLOW).at(0.0, 250.0)
-label.write().duration(1.0)
+label.write().duration(1.0).linear()
 
 hello = c.text("Hola Mundo!").fill(WHITE).at(-200.0, 0.0)
-hello.write().duration(1.5).smooth()
+hello.draw_border_then_fill().duration(1.5).stroke_width(2.0)
 
 arrow = c.arrow(-50.0, 0.0, 150.0, 0.0).stroke(ORANGE, 4.0)
-arrow.create().duration(0.8).delay(1.0)
+arrow.create().duration(0.8).delay(1.0).linear()
 
 world = c.text("Gaanim").fill(PURPLE).at(300.0, 0.0)
 world.fade_in().duration(0.8).delay(1.5).ease("bounce")

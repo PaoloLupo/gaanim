@@ -6,7 +6,7 @@ use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::RateFunc;
 
-use crate::anim::{AnimationBuilder, AnimationType};
+use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
 use crate::canvas::ops::{SharedCanvasState, SharedObjectSpec};
 use crate::canvas::types::{Anim, ObjectSpec, SpawnKind};
 
@@ -118,19 +118,27 @@ impl DrawableHandle {
     }
 
     pub fn write(&self) -> Anim {
-        self.anim(AnimationType::Write { stroke_width: None })
+        self.anim(AnimationType::Write {
+            config: DrawAnimationConfig::default(),
+        })
     }
 
     pub fn create(&self) -> Anim {
-        self.anim(AnimationType::Create { stroke_width: None })
+        self.anim(AnimationType::Create {
+            config: DrawAnimationConfig::default(),
+        })
     }
 
     pub fn unwrite(&self) -> Anim {
-        self.anim(AnimationType::Unwrite { stroke_width: None })
+        self.anim(AnimationType::Unwrite {
+            config: DrawAnimationConfig::default(),
+        })
     }
 
     pub fn uncreate(&self) -> Anim {
-        self.anim(AnimationType::Uncreate { stroke_width: None })
+        self.anim(AnimationType::Uncreate {
+            config: DrawAnimationConfig::default(),
+        })
     }
 
     pub fn grow_from_center(&self) -> Anim {
@@ -156,7 +164,9 @@ impl DrawableHandle {
     }
 
     pub fn draw_border_then_fill(&self) -> Anim {
-        self.anim(AnimationType::DrawBorderThenFill)
+        self.anim(AnimationType::DrawBorderThenFill {
+            config: DrawAnimationConfig::default(),
+        })
     }
 
     pub fn indicate(&self) -> Anim {

@@ -86,10 +86,10 @@ impl Anim {
         Self {
             inner: AnimationBuilder {
                 target,
+                rate_func: anim_type.default_rate_func(),
                 anim_type,
                 duration: 1.0,
                 delay: 0.0,
-                rate_func: RateFunc::Smooth,
             },
             queued: None,
         }
@@ -189,6 +189,24 @@ impl Anim {
 
     pub fn linear(self) -> Self {
         self.rate_func(RateFunc::Linear)
+    }
+
+    pub fn lag_ratio(mut self, lag_ratio: f64) -> Self {
+        self.inner = self.inner.lag_ratio(lag_ratio);
+        self.sync_queued(None);
+        self
+    }
+
+    pub fn stroke_width(mut self, stroke_width: f64) -> Self {
+        self.inner = self.inner.stroke_width(stroke_width);
+        self.sync_queued(None);
+        self
+    }
+
+    pub fn with_pen_tip(mut self) -> Self {
+        self.inner = self.inner.with_pen_tip();
+        self.sync_queued(None);
+        self
     }
 
     pub fn delay(mut self, sec: f64) -> Self {

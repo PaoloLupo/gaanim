@@ -57,6 +57,24 @@ impl PyCanvasAnim {
             inner: self.inner.clone().linear(),
         }
     }
+
+    fn lag_ratio(&self, value: f64) -> Self {
+        Self {
+            inner: self.inner.clone().lag_ratio(value),
+        }
+    }
+
+    fn stroke_width(&self, value: f64) -> Self {
+        Self {
+            inner: self.inner.clone().stroke_width(value),
+        }
+    }
+
+    fn with_pen_tip(&self) -> Self {
+        Self {
+            inner: self.inner.clone().with_pen_tip(),
+        }
+    }
 }
 
 #[pyclass(name = "Drawable", module = "gaanim_core", from_py_object)]
