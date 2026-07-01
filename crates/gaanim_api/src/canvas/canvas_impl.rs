@@ -9,7 +9,7 @@ use gaanim_timeline::transition::TransitionType;
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
-use crate::canvas::types::{Anim, CoordinateSystem, SpawnKind};
+use crate::canvas::types::{Anim, CoordinateSystem, Margin, SpawnKind};
 
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
@@ -19,6 +19,7 @@ pub struct Canvas {
     pub background: Option<Color>,
     pub units: CoordinateSystem,
     pub theme: Option<String>,
+    pub margin: Margin,
     pub(crate) state: SharedCanvasState,
 }
 
@@ -30,6 +31,7 @@ impl Canvas {
             background: None,
             theme: None,
             units: CoordinateSystem::Pixels,
+            margin: Margin::default(),
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
     }
@@ -41,6 +43,19 @@ impl Canvas {
 
     pub fn with_units(mut self, u: CoordinateSystem) -> Self {
         self.units = u;
+        self
+    }
+
+    /// Set uniform margin on all four sides.
+    /// Layout operations (`to_edge`, `to_corner`) will respect this inset.
+    pub fn margin_all(mut self, v: f64) -> Self {
+        self.margin = Margin::all(v);
+        self
+    }
+
+    /// Set per-side margins.
+    pub fn margin(mut self, m: Margin) -> Self {
+        self.margin = m;
         self
     }
 

@@ -16,13 +16,21 @@ pub struct PyCanvas {
 #[pymethods]
 impl PyCanvas {
     #[new]
-    #[pyo3(signature = (width=1280, height=720, background=None))]
-    fn new(width: u32, height: u32, background: Option<&PyColor>) -> Self {
+    #[pyo3(signature = (width=1280, height=720, background=None, margin=None))]
+    fn new(width: u32, height: u32, background: Option<&PyColor>, margin: Option<f64>) -> Self {
         let mut c = Canvas::new(width, height);
         if let Some(bg) = background {
             c.background = Some(bg.0);
         }
+        if let Some(m) = margin {
+            c.margin = gaanim_api::canvas::Margin::all(m);
+        }
         Self { inner: c }
+    }
+
+    /// Set uniform margin on all four sides (affects to_edge / to_corner).
+    fn set_margin(&mut self, v: f64) {
+        self.inner.margin = gaanim_api::canvas::Margin::all(v);
     }
     fn circle(&mut self, r: f64) -> PyDrawable {
         PyDrawable(self.inner.circle(r))

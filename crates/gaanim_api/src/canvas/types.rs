@@ -41,6 +41,54 @@ impl CoordinateSystem {
     }
 }
 
+/// Per-side canvas margin (in the same unit as the coordinate system).
+///
+/// Layout operations like `to_edge` and `to_corner` respect these margins
+/// as an automatic inset from the frame bounds, so individual `buff`
+/// values stack on top of the margin.
+#[derive(Debug, Clone, Copy)]
+pub struct Margin {
+    pub left: f64,
+    pub right: f64,
+    pub top: f64,
+    pub bottom: f64,
+}
+
+impl Margin {
+    pub const ZERO: Self = Self {
+        left: 0.0,
+        right: 0.0,
+        top: 0.0,
+        bottom: 0.0,
+    };
+
+    /// Uniform margin on all four sides.
+    pub fn all(v: f64) -> Self {
+        Self {
+            left: v,
+            right: v,
+            top: v,
+            bottom: v,
+        }
+    }
+
+    /// Horizontal (left+right) and vertical (top+bottom) margins.
+    pub fn hv(h: f64, v: f64) -> Self {
+        Self {
+            left: h,
+            right: h,
+            top: v,
+            bottom: v,
+        }
+    }
+}
+
+impl Default for Margin {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SpawnKind {
     Circle(f64),

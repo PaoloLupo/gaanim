@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::ecs::system::SystemParam;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_core::id::ObjectId;
 use gaanim_core::peniko;
@@ -86,6 +87,8 @@ pub struct EditorState {
     /// animation preview occupies the full window; the compact playback overlay
     /// is shown instead.
     pub timeline_visible: bool,
+    /// Whether the window is pinned always-on-top.
+    pub pinned_on_top: bool,
     /// Hover time on the seek bar (in seconds), used for tooltip display.
     seek_bar_hover: Option<f64>,
     /// Auto-hide animation progress (0.0 = hidden, 1.0 = fully visible).
@@ -100,11 +103,37 @@ impl Default for EditorState {
             selected: None,
             timeline_widget: timeline_widget::TimelineWidget::new(),
             timeline_visible: false,
+            pinned_on_top: false,
             seek_bar_hover: None,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
         }
     }
+}
+
+/// Bundle of read-only queries used by the editor UI, kept separate to avoid
+/// exceeding Bevy's 16-parameter system limit.
+#[derive(SystemParam)]
+struct EditorQueries<'w, 's> {
+    entity: Query<'w, 's, (Entity, Option<&'static MobjectId>, Option<&'static ObjectTag>)>,
+    children: Query<'w, 's, &'static Children>,
+    group: Query<'w, 's, &'static GroupMarker>,
+    transform: Query<'w, 's, &'static gaanim_math::SpatialTransform>,
+    fill: Query<'w, 's, &'static FillBrush>,
+    stroke: Query<'w, 's, &'static StrokeBrush>,
+    opacity: Query<'w, 's, &'static Opacity>,
+    bounds: Query<'w, 's, &'static WorldBounds>,
+    extra: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static MobjectId>,
+            Option<&'static FloatSignal>,
+            Option<&'static Updater>,
+            Option<&'static DecimalNumber>,
+        ),
+    >,
 }
 
 fn editor_ui_system(
@@ -113,23 +142,10 @@ fn editor_ui_system(
     mut export_state: ResMut<export::ExportState>,
     mut timeline: ResMut<Timeline>,
     mut inset: ResMut<ViewportInset>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     camera: Option<Res<Camera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
-    entity_query: Query<(Entity, Option<&MobjectId>, Option<&ObjectTag>)>,
-    children_query: Query<&Children>,
-    group_query: Query<&GroupMarker>,
-    transform_query: Query<&gaanim_math::SpatialTransform>,
-    fill_query: Query<&FillBrush>,
-    stroke_query: Query<&StrokeBrush>,
-    opacity_query: Query<&Opacity>,
-    bounds_query: Query<&WorldBounds>,
-    extra_query: Query<(
-        Entity,
-        Option<&MobjectId>,
-        Option<&FloatSignal>,
-        Option<&Updater>,
-        Option<&DecimalNumber>,
-    )>,
+    q: EditorQueries,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
@@ -156,46 +172,46 @@ fn editor_ui_system(
     };
 
     let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
-    for (entity, mobj_id, _) in &entity_query {
+    for (entity, mobj_id, _) in &q.entity {
         let Some(oid) = mobj_id else {
             continue;
         };
 
-        let pos = if let Ok(t) = transform_query.get(entity) {
+        let pos = if let Ok(t) = q.transform.get(entity) {
             t.translation
         } else {
             glam::DVec3::ZERO
         };
-        let scale = if let Ok(t) = transform_query.get(entity) {
+        let scale = if let Ok(t) = q.transform.get(entity) {
             t.scale
         } else {
             glam::DVec3::ONE
         };
-        let rotation_deg = if let Ok(t) = transform_query.get(entity) {
+        let rotation_deg = if let Ok(t) = q.transform.get(entity) {
             2.0 * f64::atan2(t.rotation.z, t.rotation.w).to_degrees()
         } else {
             0.0
         };
 
-        let fill_label = if let Ok(fb) = fill_query.get(entity) {
+        let fill_label = if let Ok(fb) = q.fill.get(entity) {
             brush_string(&fb.0)
         } else {
             "none".into()
         };
 
-        let stroke_label = if let Ok(sb) = stroke_query.get(entity) {
+        let stroke_label = if let Ok(sb) = q.stroke.get(entity) {
             brush_string(&sb.brush)
         } else {
             "none".into()
         };
 
-        let stroke_width = if let Ok(sb) = stroke_query.get(entity) {
+        let stroke_width = if let Ok(sb) = q.stroke.get(entity) {
             sb.style.width
         } else {
             0.0
         };
 
-        let opacity = if let Ok(o) = opacity_query.get(entity) {
+        let opacity = if let Ok(o) = q.opacity.get(entity) {
             o.0
         } else {
             1.0
@@ -229,19 +245,19 @@ fn editor_ui_system(
         gaanim_timeline::clip::TrackId,
         Vec<gaanim_timeline::clip::TrackId>,
     > = HashMap::new();
-    for (entity, mobj_id, _) in &entity_query {
-        if !group_query.contains(entity) {
+    for (entity, mobj_id, _) in &q.entity {
+        if !q.group.contains(entity) {
             continue;
         }
         let Some(group_oid) = mobj_id else { continue };
         let Some(&group_tid) = mobject_to_track.get(&group_oid.0) else {
             continue;
         };
-        if let Ok(children) = children_query.get(entity) {
+        if let Ok(children) = q.children.get(entity) {
             let child_tids: Vec<gaanim_timeline::clip::TrackId> = children
                 .iter()
                 .filter_map(|child| {
-                    entity_query
+                    q.entity
                         .get(child)
                         .ok()
                         .and_then(|(_, mid, _)| mid)
@@ -255,40 +271,13 @@ fn editor_ui_system(
         }
     }
 
-    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Export...").clicked() {
-                    export_state.dialog_open = true;
-                    ui.close();
-                }
-            });
-
-            if is_exporting {
-                ui.add(
-                    egui::ProgressBar::new(export_progress_pct)
-                        .desired_width(140.0)
-                        .text(format!("{:.0}%", export_progress_pct * 100.0)),
-                );
-                ui.label(format!("Frame {}/{}", export_current, export_total));
-            } else if let Some(selected) = state.selected {
-                let name = entity_query
-                    .get(selected)
-                    .ok()
-                    .and_then(|(_, _, tag)| tag.map(|t| t.0.as_str()))
-                    .unwrap_or("???");
-                ui.label(format!("Selected: {name}"));
-            } else {
-                ui.label("Gaanim Editor");
-            }
-        });
-    });
+    // Top bar removed — export button lives in the playback controls now.
 
     let mut signal_values: HashMap<ObjectId, f64> = HashMap::new();
     let mut updater_entities: HashSet<ObjectId> = HashSet::new();
     let mut signal_by_entity: HashMap<Entity, f64> = HashMap::new();
     let mut decimal_values: HashMap<ObjectId, f64> = HashMap::new();
-    for (entity, mobj_id, signal, updater, decimal) in &extra_query {
+    for (entity, mobj_id, signal, updater, decimal) in &q.extra {
         let Some(mobj_id) = mobj_id else { continue };
         let oid = mobj_id.0;
         if let Some(signal) = signal {
@@ -626,10 +615,11 @@ fn editor_ui_system(
                                     }
                                 }
 
-                                // Right-aligned timeline toggle
+                                // Right-aligned controls: timeline toggle + export + pin
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
+                                        // Timeline toggle
                                         let (lbl, icon) = if state.timeline_visible {
                                             ("Close", "✕")
                                         } else {
@@ -648,6 +638,77 @@ fn editor_ui_system(
                                         if ui.add(tl_btn).clicked() {
                                             state.timeline_visible = !state.timeline_visible;
                                         }
+
+                                        // Export button / progress
+                                        if is_exporting {
+                                            let pct_text =
+                                                format!("{:.0}%", export_progress_pct * 100.0);
+                                            ui.add(
+                                                egui::ProgressBar::new(export_progress_pct)
+                                                    .desired_width(80.0)
+                                                    .text(pct_text),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{}/{}",
+                                                    export_current, export_total
+                                                ))
+                                                .size(10.0)
+                                                .color(egui::Color32::from_rgb(160, 160, 170)),
+                                            );
+                                        } else {
+                                            let export_btn = egui::Button::new(
+                                                egui::RichText::new("⬇ Export")
+                                                    .size(11.0)
+                                                    .color(egui::Color32::from_rgb(
+                                                        150, 200, 255,
+                                                    )),
+                                            )
+                                            .min_size(egui::vec2(60.0, 20.0))
+                                            .corner_radius(4.0)
+                                            .fill(egui::Color32::from_rgba_premultiplied(
+                                                30, 30, 55, 140,
+                                            ));
+                                            if ui
+                                                .add(export_btn)
+                                                .on_hover_text("Export animation")
+                                                .clicked()
+                                            {
+                                                export_state.dialog_open = true;
+                                            }
+                                        }
+
+                                        // Always-on-top pin toggle
+                                        let pin_icon = if state.pinned_on_top { "📌" } else { "📍" };
+                                        let pin_color = if state.pinned_on_top {
+                                            egui::Color32::from_rgb(255, 200, 80)
+                                        } else {
+                                            egui::Color32::from_rgb(120, 120, 130)
+                                        };
+                                        let pin_btn = egui::Button::new(
+                                            egui::RichText::new(pin_icon).size(13.0).color(pin_color),
+                                        )
+                                        .min_size(egui::vec2(24.0, 20.0))
+                                        .corner_radius(4.0)
+                                        .fill(egui::Color32::TRANSPARENT);
+                                        if ui
+                                            .add(pin_btn)
+                                            .on_hover_text(if state.pinned_on_top {
+                                                "Unpin window"
+                                            } else {
+                                                "Pin window on top"
+                                            })
+                                            .clicked()
+                                        {
+                                            state.pinned_on_top = !state.pinned_on_top;
+                                            if let Ok(mut window) = windows.single_mut() {
+                                                window.window_level = if state.pinned_on_top {
+                                                    bevy::window::WindowLevel::AlwaysOnTop
+                                                } else {
+                                                    bevy::window::WindowLevel::Normal
+                                                };
+                                            }
+                                        }
                                     },
                                 );
                             });
@@ -665,7 +726,7 @@ fn editor_ui_system(
         if let Some(track) = timeline.tracks.get(track_id)
             && let Some(obj_id) = track.object_id
         {
-            for (entity, mobj_id, _) in &entity_query {
+            for (entity, mobj_id, _) in &q.entity {
                 if let Some(mid) = mobj_id
                     && mid.0 == obj_id
                 {
@@ -679,7 +740,7 @@ fn editor_ui_system(
 
     if let Some(selected) = state.selected
         && let Some(camera) = camera.as_ref()
-        && let Ok(bounds) = bounds_query.get(selected)
+        && let Ok(bounds) = q.bounds.get(selected)
     {
         let corners = [
             glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),

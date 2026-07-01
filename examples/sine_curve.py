@@ -8,18 +8,18 @@ Run: gaanim examples/sine_curve.py
 
 from gaanim import BLUE, WHITE, Canvas, Color, Direction, Updater
 
-canvas = Canvas(1280, 720, background=Color(15, 15, 26))
+canvas = Canvas(1280, 720, background=Color(15, 15, 26), margin=50)
 
 # --- Axes ---
 canvas.line(-400, 0, 300, 0).stroke(WHITE, 2.0)
 canvas.line(-400, -200, -400, 200).stroke(WHITE, 2.0)
-title = canvas.title("Sine Curve Unit Circle").to_edge(Direction.UP, 30)
+title = canvas.title("Ejemplo de updaters").to_edge(Direction.UP)
 
 title.write()
 
 # --- Pi labels ---
 for i, label in enumerate(["pi", "2 pi", "3 pi", "5 pi"]):
-    canvas.equation(label).fill(WHITE).at(-200 + 150 * i, -50)
+    canvas.equation(label).at(-200 + 120 * i, -30)
 
 # --- Circle ---
 origin_x, origin_y = -400.0, 0.0

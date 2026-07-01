@@ -37,7 +37,16 @@ impl Canvas {
         let mut builder = SceneBuilder::new(commands, timeline, font_registry, text_config);
         let mut scene_ids: Vec<SceneId> = Vec::new();
         let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
-        let frame_bounds = self.units.frame_bounds(self.width, self.height);
+        // Raw bounds for the canvas background (visual, no margin).
+        let raw_bounds = self.units.frame_bounds(self.width, self.height);
+        // Inset bounds for layout operations (to_edge, to_corner respect margin).
+        let m = &self.margin;
+        let frame_bounds = Bounds3D::new_2d(
+            raw_bounds.min.x + m.left,
+            raw_bounds.min.y + m.bottom,
+            raw_bounds.max.x - m.right,
+            raw_bounds.max.y - m.top,
+        );
 
         for seg in &segments {
             scene_ids.push(builder.begin_scene(&seg.name));
@@ -60,13 +69,13 @@ impl Canvas {
 
         // Insert canvas background resource so the renderer draws a visible
         // canvas boundary, distinguishing the canvas area from the window.
+        // Uses raw_bounds (no margin) — the visual background covers the full canvas.
         let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
-        let frame_bounds = self.units.frame_bounds(self.width, self.height);
         builder
             .commands
             .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
                 color: bg_color,
-                bounds: frame_bounds,
+                bounds: raw_bounds,
             });
 
         // Use a neutral dark gray for the area outside the canvas.

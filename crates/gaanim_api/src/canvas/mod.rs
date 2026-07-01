@@ -2,7 +2,7 @@ mod ops;
 pub use ops::{CanvasEndpoint, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
-pub use types::{Anim, CoordinateSystem, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
+pub use types::{Anim, CoordinateSystem, LayoutOp, Margin, ObjectSpec, OptDuration, SpawnKind};
 mod drawable;
 pub use drawable::DrawableHandle;
 mod canvas_impl;
