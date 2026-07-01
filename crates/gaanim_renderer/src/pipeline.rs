@@ -5,7 +5,7 @@ use gaanim_core::ObjectId;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
     FillBrush, GlobalOpacity, MobjectId, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible,
-    WorldBounds,
+    WorldBounds, PathSource,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,6 +33,17 @@ pub struct ExtractedElement {
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
+}
+
+fn stroke_clip_path<'a>(
+    visible_path: &'a kurbo::BezPath,
+    source_path: Option<&'a kurbo::BezPath>,
+) -> Option<&'a kurbo::BezPath> {
+    let clip_path = source_path.unwrap_or(visible_path);
+    clip_path
+        .elements()
+        .contains(&kurbo::PathEl::ClosePath)
+        .then_some(clip_path)
 }
 
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
@@ -141,6 +152,7 @@ pub fn compile_scene_from_world(
         &RenderOrder,
         &RenderLayer,
         Option<&Path2D>,
+        Option<&PathSource>,
         Option<&FillBrush>,
         Option<&StrokeBrush>,
         Option<&gaanim_scene::ObjectTag>,
@@ -164,6 +176,7 @@ pub fn compile_scene_from_world(
         render_order,
         render_layer,
         path_opt,
+        path_source_opt,
         fill_opt,
         stroke_opt,
         _tag,
@@ -215,6 +228,7 @@ pub fn compile_scene_from_world(
         let mut scene = vello::Scene::new();
         let empty_bez = kurbo::BezPath::new();
         let elem_path = path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez);
+        let source_path = path_source_opt.map(|p| p.0.as_ref());
         let elem_fill = fill_opt.and_then(|f| f.0.as_ref());
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
@@ -257,14 +271,13 @@ pub fn compile_scene_from_world(
         if let Some(stroke_brush) = elem_stroke
             && let Some(style) = elem_stroke_style
         {
-            let has_closed_contour = elem_path.elements().contains(&kurbo::PathEl::ClosePath);
-            if has_closed_contour {
+            if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
                 scene.push_layer(
                     peniko::Fill::NonZero,
                     peniko::BlendMode::default(),
                     1.0,
                     kurbo::Affine::IDENTITY,
-                    elem_path,
+                    clip_path,
                 );
                 scene.stroke(
                     style,
@@ -370,6 +383,7 @@ pub fn gaanim_render_system(
             Ref<RenderOrder>,
             Ref<RenderLayer>,
             Option<Ref<Path2D>>,
+            Option<Ref<PathSource>>,
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
             Option<&gaanim_scene::ObjectTag>,
@@ -425,6 +439,7 @@ pub fn gaanim_render_system(
         render_order,
         render_layer,
         path_ref,
+        path_source_ref,
         fill_ref,
         stroke_ref,
         _tag,
@@ -484,6 +499,7 @@ pub fn gaanim_render_system(
         // Fragment Invalidation Check: Only visual components trigger rebuild.
         let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
         let changed = path_changed
+            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -515,6 +531,7 @@ pub fn gaanim_render_system(
                 .as_ref()
                 .map(|p| p.0.as_ref())
                 .unwrap_or(&empty_bez);
+            let source_path = path_source_ref.as_ref().map(|p| p.0.as_ref());
             let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
             let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
             let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
@@ -580,14 +597,13 @@ pub fn gaanim_render_system(
             if let Some(stroke_brush) = elem_stroke
                 && let Some(style) = elem_stroke_style
             {
-                let has_closed_contour = elem_path.elements().contains(&kurbo::PathEl::ClosePath);
-                if has_closed_contour {
+                if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
                     scene.push_layer(
                         peniko::Fill::NonZero,
                         peniko::BlendMode::default(),
                         1.0,
                         kurbo::Affine::IDENTITY,
-                        elem_path,
+                        clip_path,
                     );
                     scene.stroke(
                         style,
