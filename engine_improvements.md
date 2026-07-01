@@ -4,7 +4,7 @@ Este documento compara Gaanim contra **Manim CE** y **Motion Canvas**, identific
 reales y propone un roadmap para alcanzar (y superar) el estado del arte.
 
 > [!NOTE]
-> Última auditoría del codebase: **2026-06-10**. Se actualizó el documento removiendo
+> Última auditoría del codebase: **2026-07-01**. Se actualizó el documento removiendo
 > todo lo que ya fue implementado. Solo queda lo que falta.
 
 ---
@@ -35,6 +35,7 @@ Composición: `parallel` y `sequence` en la línea de tiempo.
 ### Posicionamiento y Layout
 `at()`, `shift()`, `scale()`, `rotate()`, `next_to()`, `align_to()`.
 Grupos: `arrange()`, `arrange_in_grid()`, `vstack()`, `hstack()`.
+Canvas margins: `canvas.margin_all(50)` — inset automático para `to_edge`/`to_corner`.
 
 ### Efectos Visuales
 Gradientes (Linear, Radial, Conic) via `peniko::Brush`.
@@ -72,6 +73,21 @@ para `CameraPosition`, `CameraRotation`, `CameraZoom` via timeline seek.
 ### Otros
 Theming, text roles (Title, Subtitle, Body, Caption, Code), color palette,
 snapshot/seek interactivo, `@Scene("name")` segments, editor con timeline widget.
+
+### Color API
+Constructor `Color(r, g, b, a?)` + `from_hex()` + `from_rgb()` + constantes nombradas
+(`RED`, `BLUE`, `GOLD`, etc.). Acepta strings CSS directamente donde se espera un Color:
+`"#FF0000"`, `"#F00"`, `"red"`, `"rgb(255,0,0)"`, `"hsl(0,100%,50%)"`, tuplas `(r,g,b)`.
+
+### Canvas Background
+Rectángulo visual del canvas en el renderer (Vello) con color de fondo configurable.
+`ClearColor` gris oscuro fuera del canvas para distinguir el área real.
+
+### Editor
+- Sin top bar — export y controles en la barra de reproducción
+- Pin `📌` para always-on-top
+- Speed popup con presets (0.25x–3x) + slider fino + reset
+- Canvas background visible (gris oscuro fuera del canvas)
 
 ---
 
@@ -306,21 +322,220 @@ rect = scene.rectangle(200, 100).gradient(
 
 ---
 
+## 🟠 Editor & UX — Alto Impacto
+
+### 14. Canvas Zoom/Pan Interactivo
+
+El canvas es estático. Poder hacer scroll wheel para zoom y drag para panear sería
+enorme para escenas complejas. El `Camera` ya soporta posición y zoom, solo falta
+el input handling en el editor.
+
+- Scroll wheel → zoom in/out centrado en el cursor
+- Middle-click drag (o Ctrl+drag) → pan
+- `F` → fit canvas en la ventana
+- `R` → reset zoom a 1x
+
+**Esfuerzo:** 🟡 ~6h (input handling + Camera transform)
+
+---
+
+### 15. Property Panel en el Editor
+
+Seleccionar un mobject y ver/editar propiedades en tiempo real sin tocar el código.
+El picking system ya existe (`editor_picking_system`), falta el panel egui.
+
+- Posición (x, y), escala, rotación
+- Fill color, stroke color, stroke width
+- Opacidad, z-index
+- Edición inline con cambios en tiempo real
+
+**Esfuerzo:** 🟡 ~10h (egui panel + write-back al ECS)
+
+---
+
+### 16. Snap & Alignment Guides
+
+Cuando se arrastra un objeto, mostrar líneas guía cuando se alinea con otros
+objetos (centro, bordes). Estilo Figma/PowerPoint. El `WorldBounds` ya está
+calculado para todos los mobjects.
+
+- Snap to center (horizontal/vertical)
+- Snap to edges (left, right, top, bottom)
+- Líneas guía visuales (dashed, color configurable)
+- Snap distance configurable
+
+**Esfuerzo:** 🔴 ~12h (spatial queries + overlay rendering + drag interaction)
+
+---
+
+### 17. Hot-reload Inteligente (Incremental)
+
+Ahora re-ejecuta todo el script en cada save. Podría hacer diff incremental —
+si solo cambió una posición, no recompilar toda la escena.
+
+- Hash de cada op en el segmento
+- Solo re-compilar ops que cambiaron
+- Preservar estado ECS entre re-loads
+- Reducir latencia de hot-reload de ~200ms a ~20ms
+
+**Esfuerzo:** 🔴 ~16h (sistema de dependencias + diff engine)
+
+---
+
+### 18. Animation Preview sin Recompilar
+
+Mostrar una preview de la animación actual sin re-ejecutar el script.
+El timeline ya tiene los clips, solo falta poder reproducir desde el estado
+actual del ECS.
+
+- Play/pause sin re-ejecutar script
+- Seek a cualquier punto del timeline
+- Preview de transiciones entre escenas
+
+**Esfuerzo:** 🟡 ~8h (desacoplar playback de script execution)
+
+---
+
+### 19. Object Tree / Scene Graph Panel
+
+Panel lateral que muestre la jerarquía de mobjects (grupos, hijos).
+Click para seleccionar, drag para reordenar z-index.
+
+- Árbol expandible con indentación
+- Click → seleccionar mobject
+- Drag → reordenar z-index
+- Iconos por tipo (circle, rect, text, group)
+- Hide/lock por objeto
+
+**Esfuerzo:** 🟡 ~8h (egui tree widget + ECS query)
+
+---
+
+### 20. Error Recovery Visual
+
+Cuando el script falla, mostrar el error inline en el canvas (overlay rojo
+con el traceback) en vez de solo en la consola. Que el editor no se cierre.
+
+- Overlay semi-transparente con el traceback
+- Click para dismiss
+- Auto-dismiss al re-ejecutar exitosamente
+- Preservar la última escena válida como fondo
+
+**Esfuerzo:** 🟢 ~4h (overlay egui + error channel)
+
+---
+
+### 21. Template/Preset System
+
+Templates reutilizables que generan animaciones completas con un solo call.
+
+```python
+from gaanim.templates import title_card, bullet_list, code_block
+
+scene.play(title_card("Mi tema", subtitle="Subtítulo"))
+scene.play(bullet_list(["Punto 1", "Punto 2", "Punto 3"]))
+```
+
+**Esfuerzo:** 🟡 ~12h (library de templates + API de composición)
+
+---
+
+### 22. Screen Recording Integrado
+
+Un botón en el editor que grabe la pantalla del canvas como GIF/MP4
+directamente, sin pasar por el export formal. Útil para iterar rápido
+y compartir previews.
+
+- Grabar desde el frame actual
+- Stop → genera archivo temporal
+- Copy to clipboard / save as file
+- Configurable: fps, resolution, format
+
+**Esfuerzo:** 🟡 ~8h (capture pipeline + encoding)
+
+---
+
+### 23. Clipboard de Animaciones
+
+Copiar una animación de un objeto y pegarla en otro.
+
+```python
+circle.copy_animation_from(rect)  # copia fade_in, stroke, etc.
+```
+
+**Esfuerzo:** 🟢 ~4h (serialización de AnimationBuilder)
+
+---
+
+## 🟢 Quick Wins (< 2h cada uno)
+
+### 24. Keyboard Shortcuts en el Editor
+
+| Shortcut | Acción |
+|----------|--------|
+| `F` | Fit/fill canvas en la ventana |
+| `G` | Toggle grid overlay |
+| `R` | Reset zoom a 1x |
+| `Ctrl+E` | Export rápido (settings por defecto) |
+| `I` | Toggle info overlay (dimensiones, zoom, fps) |
+| `H` | Toggle help overlay con shortcuts |
+
+**Esfuerzo:** 🟢 ~2h (input handling en `global_playback_keys_system`)
+
+---
+
+### 25. Grid Overlay Opcional
+
+Mostrar una grilla de referencia sobre el canvas (toggle con `G`).
+Ayuda al posicionamiento manual.
+
+- Grid cada 50px o configurable
+- Color sutil (no interferir con el contenido)
+- Toggle con shortcut `G`
+
+**Esfuerzo:** 🟢 ~2h (Vello scene overlay)
+
+---
+
+### 26. Canvas Info Overlay
+
+Mostrar en una esquina las dimensiones del canvas, zoom actual, y fps.
+Toggle con `I`.
+
+- Canvas: 1280×720
+- Zoom: 1.0x
+- FPS: 60
+- Scene: "intro"
+
+**Esfuerzo:** 🟢 ~1h (egui overlay, similar al fps_overlay existente)
+
+---
+
+### 27. Export Rápido (One-Click)
+
+Un botón `⬇` que exporte con settings por defecto (MP4, 60fps, production
+quality) sin abrir el diálogo. Ya existe el botón de export, agregar
+shift+click para export rápido.
+
+**Esfuerzo:** 🟢 ~1h (shortcut en el export button)
+
+---
+
 ## 🟢 Nice to Have — Diferenciadores
 
-### 14. Plugin System
+### 28. Plugin System
 Custom mobjects, animations, rate functions, temas/paletas desde la comunidad.
 
-### 15. WASM Export
+### 29. WASM Export
 Compilar animaciones a WebAssembly para reproducción en el browser sin video.
 
-### 16. SVG/Lottie Export
+### 30. SVG/Lottie Export
 Exportar animaciones como SVG animado o Lottie JSON para uso en web/mobile.
 
-### 17. AI-Assisted Animation
+### 31. AI-Assisted Animation
 Integración con LLMs para generar animaciones desde descripción en lenguaje natural.
 
-### 18. Transición Wipe
+### 32. Transición Wipe
 Falta la transición `Wipe(direction)` (ya existen Cut, CrossFade, FadeThrough,
 Slide, ZoomThrough, Morph).
 
@@ -333,11 +548,13 @@ Slide, ZoomThrough, Morph).
 | Rate Functions | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ✅ Superado |
 | Animaciones | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | 🟡 Faltan Transform/Morph |
 | Mobjects | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | 🔴 Faltan ~17 |
-| Posicionamiento | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Casi par |
+| Posicionamiento | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Casi par (+ margins) |
 | Cámara | ⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | 🟡 Faltan anims de alto nivel |
 | Efectos | ⭐⭐ | ⭐⭐ | ⭐⭐ | 🟡 Componentes sin render |
+| Color API | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ✅ Hex/RGB/CSS strings |
 | Exportación | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐⭐ | ✅ Superado |
 | Updaters/Signals | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Falta `always_redraw` Python |
+| Editor | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Casi par |
 | 3D | ⭐⭐⭐⭐ | ❌ | ❌ | 🔴 No hay |
 | Code Highlight | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ❌ | 🔴 No hay |
 | Graph Theory | ⭐⭐⭐⭐ | ❌ | ❌ | 🔴 No hay |
@@ -358,10 +575,28 @@ Slide, ZoomThrough, Morph).
 - [x] `ParametricCurve`
 - [x] `Brace` + `LabeledArrow`
 
+### Sprint 1.5 — Editor & API Polish [Completado ✅ 2026-07-01]
+- [x] Canvas background visual (rectángulo Vello + ClearColor gris oscuro)
+- [x] Canvas margins (`margin_all()`, `margin(Margin::hv())`)
+- [x] Color API: hex strings, CSS colors, tuplas via `FromPyObject`
+- [x] Editor: top bar eliminada, controles en playback bar
+- [x] Editor: pin always-on-top (`📌`)
+- [x] Editor: speed popup con presets + slider fino
+- [x] Editor: export button en playback controls
+- [x] `EditorQueries` SystemParam bundle (Bevy 16-param limit)
+
 ### Sprint 2 — Transform/Morph (1 semana)
 - [ ] `Transform` (interpolación de paths entre dos mobjects)
 - [ ] `ReplacementTransform`
 - [ ] Cámara de alto nivel: `CameraShake`, `CameraPulse`, `CameraFollow`, `CameraFrameTo`
+
+### Sprint 2.5 — Editor & UX (1 semana)
+- [ ] Canvas zoom/pan interactivo (scroll + drag + shortcuts F/R)
+- [ ] Grid overlay opcional (shortcut `G`)
+- [ ] Canvas info overlay (shortcut `I`)
+- [ ] Keyboard shortcuts (`Ctrl+E` export rápido, `H` help)
+- [ ] Error recovery visual (overlay con traceback)
+- [ ] Export rápido one-click (shift+click)
 
 ### Sprint 3 — Contenido Educativo (1-2 semanas)
 - [ ] `Table` y `Matrix` (visualización estructurada)
@@ -389,6 +624,16 @@ Slide, ZoomThrough, Morph).
 - [ ] Presenter notes (dual screen)
 - [ ] Transición `Wipe`
 
+### Futuro — Editor Avanzado
+- [ ] Property panel en editor (editar propiedades en tiempo real)
+- [ ] Object tree / scene graph panel
+- [ ] Snap & alignment guides (estilo Figma)
+- [ ] Hot-reload inteligente (incremental, solo re-compilar lo que cambió)
+- [ ] Animation preview sin recompilar
+- [ ] Template/preset system
+- [ ] Screen recording integrado
+- [ ] Clipboard de animaciones
+
 ### Futuro — Diferenciadores
 - [ ] 3D support (proyecto mayor, ~2-3 meses)
 - [ ] WASM export para web
@@ -412,3 +657,6 @@ Slide, ZoomThrough, Morph).
 10. **Typst math** — Rendering de fórmulas sin instalar LaTeX
 11. **ValueTracker + updaters** — Sistema reactivo completo con señales, bob, orbit, pulse, follow
 12. **`.animate` fluent API** — Encadenamiento ergonómico estilo Manim
+13. **Color API ergonómica** — Hex strings, CSS colors, tuplas directamente en cualquier método
+14. **Canvas margins** — Layout operations respetan insets configurables del canvas
+15. **Canvas background visual** — Área del canvas distinguible del fondo de ventana en el editor
