@@ -78,9 +78,14 @@ impl PyCanvas {
     fn wait(&mut self, d: f64) {
         self.inner.wait(d);
     }
-    fn play(&mut self, anims: Vec<PyCanvasAnim>) {
+    #[pyo3(signature = (anims, *, lag=None))]
+    fn play(&mut self, anims: Vec<PyCanvasAnim>, lag: Option<f64>) {
         let a = anims.into_iter().map(|a| a.inner).collect();
-        self.inner.play(a);
+        if let Some(lag) = lag {
+            self.inner.play_with_lag(a, lag);
+        } else {
+            self.inner.play(a);
+        }
     }
     fn slide(&mut self) {
         self.inner.slide();

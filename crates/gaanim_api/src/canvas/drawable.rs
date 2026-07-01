@@ -4,17 +4,22 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
+use gaanim_layout::{Anchor, Direction};
 use gaanim_math::RateFunc;
 
 use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
 use crate::canvas::ops::{SharedCanvasState, SharedObjectSpec};
-use crate::canvas::types::{Anim, ObjectSpec, SpawnKind};
+use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
 /// An ergonomic handle to a mobject on a Canvas.
 ///
 /// - Instant setters return `Self` (fluent): `obj.fill(RED).at(0,0)`.
-/// - Animation methods return `Anim`: `obj.fade_in().duration(1.0)` and
-///   auto-enqueue the animation on the active segment's sequential track.
+/// - Animation methods return `Anim` and auto-enqueue the animation on the
+///   active segment's sequential track. They accept an optional duration:
+///     - `obj.fade_in()`       — default 1.0s
+///     - `obj.fade_in(2.0)`    — 2.0s
+///     - `obj.fade_in(None)`   — default 1.0s (explicit)
+///   You can still chain `.duration()` or any other `Anim` method after.
 #[derive(Debug, Clone)]
 pub struct DrawableHandle {
     pub id: ObjectId,
@@ -41,6 +46,10 @@ impl DrawableHandle {
     fn update_spec(&self, f: impl FnOnce(&mut ObjectSpec)) -> Self {
         f(&mut self.spec.lock().expect("object spec poisoned"));
         self.clone()
+    }
+
+    fn push_layout(&self, op: LayoutOp) -> Self {
+        self.update_spec(|spec| spec.layout_ops.push(op))
     }
 
     // -- Instant setters (return Self) --
@@ -70,16 +79,72 @@ impl DrawableHandle {
     }
 
     pub fn at(self, x: f64, y: f64) -> Self {
-        self.update_spec(|spec| spec.position = DVec3::new(x, y, 0.0))
+        self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
     }
 
-    // -- Internal helper --
+    pub fn at_anchor(self, x: f64, y: f64, anchor: Anchor) -> Self {
+        self.push_layout(LayoutOp::MoveAnchorTo {
+            target: DVec3::new(x, y, 0.0),
+            anchor,
+        })
+    }
+
+    pub fn next_to(self, reference: &DrawableHandle, direction: Direction, spacing: f64) -> Self {
+        self.next_to_aligned(reference, direction, spacing, Anchor::Center)
+    }
+
+    pub fn next_to_aligned(
+        self,
+        reference: &DrawableHandle,
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
+    ) -> Self {
+        self.push_layout(LayoutOp::NextTo {
+            reference: reference.id,
+            direction,
+            spacing,
+            aligned_edge,
+        })
+    }
+
+    pub fn align_to(
+        self,
+        reference: &DrawableHandle,
+        target_anchor: Anchor,
+        reference_anchor: Anchor,
+    ) -> Self {
+        self.push_layout(LayoutOp::AlignTo {
+            reference: reference.id,
+            target_anchor,
+            reference_anchor,
+        })
+    }
+
+    pub fn to_edge(self, direction: Direction, buff: f64) -> Self {
+        self.push_layout(LayoutOp::ToEdge { direction, buff })
+    }
+
+    pub fn to_corner(self, corner: Anchor, buff: f64) -> Self {
+        self.push_layout(LayoutOp::ToCorner { corner, buff })
+    }
+
+    // -- Internal helpers --
 
     fn anim(&self, ty: AnimationType) -> Anim {
         Anim::queued(self.id, ty, self.state.clone(), self.segment_idx)
     }
 
+    fn anim_dur(&self, ty: AnimationType, dur: Option<f64>) -> Anim {
+        Anim::queued(self.id, ty, self.state.clone(), self.segment_idx).with_duration(dur)
+    }
+
     // -- Animation methods (return Anim, auto-enqueued) --
+    //
+    // Every method accepts an optional duration via `impl OptDuration`:
+    //   obj.fade_in()        — default 1.0s
+    //   obj.fade_in(2.0)     — 2.0s
+    //   obj.fade_in(None)    — default 1.0s
 
     pub fn r#move(&self, dx: f64, dy: f64) -> Anim {
         self.anim(AnimationType::TranslateBy {
@@ -105,52 +170,64 @@ impl DrawableHandle {
         self.anim(AnimationType::RotateBy { angle_radians: rad })
     }
 
-    pub fn fade_in(&self) -> Anim {
-        self.anim(AnimationType::FadeIn)
+    pub fn fade_in(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::FadeIn, dur.into_opt())
     }
 
-    pub fn fade_out(&self) -> Anim {
-        self.anim(AnimationType::FadeOut)
+    pub fn fade_out(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::FadeOut, dur.into_opt())
     }
 
     pub fn fade_to(&self, alpha: f32) -> Anim {
         self.anim(AnimationType::FadeTo { to: alpha })
     }
 
-    pub fn write(&self) -> Anim {
-        self.anim(AnimationType::Write {
-            config: DrawAnimationConfig::default(),
-        })
+    pub fn write(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Write {
+                config: DrawAnimationConfig::default(),
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn create(&self) -> Anim {
-        self.anim(AnimationType::Create {
-            config: DrawAnimationConfig::default(),
-        })
+    pub fn create(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Create {
+                config: DrawAnimationConfig::default(),
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn unwrite(&self) -> Anim {
-        self.anim(AnimationType::Unwrite {
-            config: DrawAnimationConfig::default(),
-        })
+    pub fn unwrite(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Unwrite {
+                config: DrawAnimationConfig::default(),
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn uncreate(&self) -> Anim {
-        self.anim(AnimationType::Uncreate {
-            config: DrawAnimationConfig::default(),
-        })
+    pub fn uncreate(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Uncreate {
+                config: DrawAnimationConfig::default(),
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn grow_from_center(&self) -> Anim {
-        self.anim(AnimationType::GrowFromCenter)
+    pub fn grow_from_center(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::GrowFromCenter, dur.into_opt())
     }
 
-    pub fn shrink_to_center(&self) -> Anim {
-        self.anim(AnimationType::ShrinkToCenter)
+    pub fn shrink_to_center(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::ShrinkToCenter, dur.into_opt())
     }
 
-    pub fn spin_in_from_nothing(&self) -> Anim {
-        self.anim(AnimationType::SpinInFromNothing)
+    pub fn spin_in_from_nothing(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::SpinInFromNothing, dur.into_opt())
     }
 
     pub fn grow_from_point(&self, px: f64, py: f64) -> Anim {
@@ -163,33 +240,42 @@ impl DrawableHandle {
         })
     }
 
-    pub fn draw_border_then_fill(&self) -> Anim {
-        self.anim(AnimationType::DrawBorderThenFill {
-            config: DrawAnimationConfig::default(),
-        })
+    pub fn draw_border_then_fill(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default(),
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn indicate(&self) -> Anim {
-        self.anim(AnimationType::Indicate {
-            color: None,
-            scale_factor: 1.3,
-        })
+    pub fn indicate(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Indicate {
+                color: None,
+                scale_factor: 1.3,
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn circumscribe(&self) -> Anim {
-        self.anim(AnimationType::Circumscribe { color: None })
+    pub fn circumscribe(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::Circumscribe { color: None }, dur.into_opt())
     }
 
-    pub fn flash(&self) -> Anim {
-        self.anim(AnimationType::Flash {
-            color: None,
-            n_lines: 16,
-            radius: 100.0,
-        })
+    pub fn flash(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::Flash {
+                color: None,
+                n_lines: 16,
+                radius: 100.0,
+            },
+            dur.into_opt(),
+        )
     }
 
-    pub fn wiggle(&self) -> Anim {
-        self.anim(AnimationType::Wiggle)
+    pub fn wiggle(&self, dur: impl OptDuration) -> Anim {
+        self.anim_dur(AnimationType::Wiggle, dur.into_opt())
     }
 
     pub fn move_along_path(&self, path: BezPath) -> Anim {

@@ -4,9 +4,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
-use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::Point;
-use gaanim_math::SpatialTransform;
+use gaanim_math::Bounds3D;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
 use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::Timeline;
@@ -15,7 +14,7 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{Op, Segment};
-use crate::canvas::types::{ObjectSpec, SpawnKind};
+use crate::canvas::types::{LayoutOp, ObjectSpec, SpawnKind};
 
 impl Canvas {
     pub fn compile_into<'w, 's>(
@@ -34,10 +33,11 @@ impl Canvas {
         let mut builder = SceneBuilder::new(commands, timeline, font_registry, text_config);
         let mut scene_ids: Vec<SceneId> = Vec::new();
         let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
+        let frame_bounds = self.units.frame_bounds(self.width, self.height);
 
         for seg in &segments {
             scene_ids.push(builder.begin_scene(&seg.name));
-            Self::replay_seg(&mut builder, seg, &mut id_map);
+            Self::replay_seg(&mut builder, seg, &mut id_map, frame_bounds);
             builder.end_scene();
         }
 
@@ -83,12 +83,13 @@ impl Canvas {
         builder: &mut SceneBuilder,
         seg: &Segment,
         id_map: &mut HashMap<ObjectId, ObjectId>,
+        frame_bounds: Bounds3D,
     ) {
         for op in &seg.ops {
             match op {
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
-                    let actual = Self::spawn_one(builder, &spec, id_map);
+                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds);
                     id_map.insert(spec.id, actual.id);
                 }
                 Op::Animate { anim, active } => {
@@ -154,58 +155,75 @@ impl Canvas {
         builder: &mut SceneBuilder,
         spec: &ObjectSpec,
         id_map: &HashMap<ObjectId, ObjectId>,
+        frame_bounds: Bounds3D,
     ) -> MobjectRef {
         match &spec.kind {
             SpawnKind::Circle(r) => {
                 let b = builder.circle(*r);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Rect(w, h) => {
                 let b = builder.rectangle(*w, *h);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::RoundedRect(w, h, r) => {
                 let b = builder.rounded_rect(*w, *h, *r);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Square(sz) => {
                 let b = builder.square(*sz);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Dot(r) => {
                 let b = builder.dot(*r);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Ellipse(rx, ry) => {
                 let b = builder.ellipse(*rx, *ry);
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Line(x1, y1, x2, y2) => {
                 let b = builder.line(Point::new(*x1, *y1), Point::new(*x2, *y2));
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Arrow(x1, y1, x2, y2) => {
                 let b = builder.arrow(Point::new(*x1, *y1), Point::new(*x2, *y2));
-                Self::finish_spawn_builder(b, spec)
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Text(t) => {
                 let mr = builder.text(t, "Inter", 48.0);
-                Self::post_apply(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Title(t) => {
                 let mr = builder.text(t, "Inter", 64.0);
-                Self::post_apply(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Subtitle(t) => {
                 let mr = builder.text(t, "Inter", 36.0);
-                Self::post_apply(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Equation(f) => {
                 let mr = builder.equation(f);
-                Self::post_apply(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Group(ids) => {
@@ -214,7 +232,7 @@ impl Canvas {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group(&refs);
-                Self::post_apply(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
         }
@@ -231,14 +249,19 @@ impl Canvas {
             b = b.fill_brush(f.clone());
         }
         b = b.opacity(spec.opacity).z_index(spec.z_index);
-        if spec.position != DVec3::ZERO {
-            b = b.translate(spec.position.x, spec.position.y);
-        }
         b.spawn()
     }
 
-    fn post_apply(builder: &mut SceneBuilder, id: ObjectId, spec: &ObjectSpec) {
+    fn post_apply(
+        builder: &mut SceneBuilder,
+        id: ObjectId,
+        spec: &ObjectSpec,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        frame_bounds: Bounds3D,
+    ) {
+        let mut child_spans = Vec::new();
         if let Some(st) = builder.states.get_mut(id) {
+            child_spans = st.child_spans.clone();
             if let Some((c, w)) = spec.stroke {
                 let sb = StrokeBrush::new(c, w);
                 st.stroke = sb.clone();
@@ -258,20 +281,165 @@ impl Canvas {
                     .entity(st.entity)
                     .insert(Opacity(spec.opacity));
             }
-            if spec.position != DVec3::ZERO {
-                let transform = SpatialTransform {
-                    translation: spec.position,
-                    ..Default::default()
-                };
-                st.transform = transform;
-                builder.commands.entity(st.entity).insert(transform);
-            }
             if spec.z_index != 0 {
                 builder.commands.entity(st.entity).insert(RenderOrder {
                     z_index: spec.z_index,
                     ..Default::default()
                 });
             }
+        }
+        if let Some(ref f) = spec.fill {
+            for (child_id, child_entity, _) in &child_spans {
+                if let Some(child_state) = builder.states.get_mut(*child_id) {
+                    child_state.fill = Some(f.clone());
+                }
+                builder
+                    .commands
+                    .entity(*child_entity)
+                    .insert(FillBrush(Some(f.clone())));
+            }
+        }
+        if spec.opacity != 1.0 {
+            for (child_id, child_entity, _) in &child_spans {
+                if let Some(child_state) = builder.states.get_mut(*child_id) {
+                    child_state.opacity = spec.opacity;
+                }
+                builder
+                    .commands
+                    .entity(*child_entity)
+                    .insert(Opacity(spec.opacity));
+            }
+        }
+        if let Some((c, w)) = spec.stroke {
+            for (child_id, child_entity, _) in &child_spans {
+                let sb = StrokeBrush::new(c, w);
+                if let Some(child_state) = builder.states.get_mut(*child_id) {
+                    child_state.stroke = sb.clone();
+                }
+                builder.commands.entity(*child_entity).insert(sb);
+            }
+        }
+        Self::apply_layout(builder, id, spec, id_map, frame_bounds);
+    }
+
+    fn apply_layout(
+        builder: &mut SceneBuilder,
+        id: ObjectId,
+        spec: &ObjectSpec,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        frame_bounds: Bounds3D,
+    ) {
+        if spec.layout_ops.is_empty() {
+            return;
+        }
+
+        let Some(state) = builder.states.get(id) else {
+            return;
+        };
+        let bounds = state.bounds;
+        let original_transform = state.transform;
+        let entity = state.entity;
+        let mut transform = original_transform;
+
+        for op in &spec.layout_ops {
+            match op {
+                LayoutOp::SetTranslation(translation) => {
+                    transform.translation = *translation;
+                }
+                LayoutOp::MoveAnchorTo { target, anchor } => {
+                    transform =
+                        gaanim_layout::compute_move_to(bounds, &transform, *target, *anchor);
+                }
+                LayoutOp::NextTo {
+                    reference,
+                    direction,
+                    spacing,
+                    aligned_edge,
+                } => {
+                    let Some(reference_id) = id_map.get(reference).copied() else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
+                            reference,
+                            spec.id
+                        );
+                        continue;
+                    };
+                    let Some(reference_state) = builder.states.get(reference_id) else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: missing state for reference object {:?}",
+                            reference_id
+                        );
+                        continue;
+                    };
+                    let reference_transform = builder.get_world_transform(reference_id);
+                    let shift = gaanim_layout::compute_next_to_new(
+                        bounds,
+                        &transform,
+                        reference_state.bounds,
+                        &reference_transform,
+                        *direction,
+                        *spacing,
+                        *aligned_edge,
+                    );
+                    transform = transform.shift_3d(shift);
+                }
+                LayoutOp::AlignTo {
+                    reference,
+                    target_anchor,
+                    reference_anchor,
+                } => {
+                    let Some(reference_id) = id_map.get(reference).copied() else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
+                            reference,
+                            spec.id
+                        );
+                        continue;
+                    };
+                    let Some(reference_state) = builder.states.get(reference_id) else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: missing state for reference object {:?}",
+                            reference_id
+                        );
+                        continue;
+                    };
+                    let reference_transform = builder.get_world_transform(reference_id);
+                    let shift = gaanim_layout::compute_align_to_new(
+                        bounds,
+                        &transform,
+                        reference_state.bounds,
+                        &reference_transform,
+                        *target_anchor,
+                        *reference_anchor,
+                    );
+                    transform = transform.shift_3d(shift);
+                }
+                LayoutOp::ToEdge { direction, buff } => {
+                    transform = gaanim_layout::compute_to_edge(
+                        bounds,
+                        &transform,
+                        *direction,
+                        *buff,
+                        frame_bounds,
+                    );
+                }
+                LayoutOp::ToCorner { corner, buff } => {
+                    transform = gaanim_layout::compute_to_corner(
+                        bounds,
+                        &transform,
+                        *corner,
+                        *buff,
+                        frame_bounds,
+                    );
+                }
+            }
+        }
+
+        if transform != original_transform {
+            if let Some(state) = builder.states.get_mut(id) {
+                state.transform = transform;
+            }
+            builder.commands.entity(entity).insert(transform);
         }
     }
 }

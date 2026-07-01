@@ -3,7 +3,8 @@
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_math::{EasingCurve, RateFunc};
+use gaanim_layout::{Anchor, Direction};
+use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::ops::{Op, SharedCanvasState};
@@ -17,6 +18,26 @@ pub enum CoordinateSystem {
 impl Default for CoordinateSystem {
     fn default() -> Self {
         Self::Pixels
+    }
+}
+
+impl CoordinateSystem {
+    pub fn frame_bounds(&self, canvas_width: u32, canvas_height: u32) -> Bounds3D {
+        match self {
+            Self::Pixels => {
+                let half_width = canvas_width as f64 * 0.5;
+                let half_height = canvas_height as f64 * 0.5;
+                Bounds3D::new_2d(-half_width, -half_height, half_width, half_height)
+            }
+            Self::Scene {
+                frame_width,
+                frame_height,
+            } => {
+                let half_width = *frame_width * 0.5;
+                let half_height = *frame_height * 0.5;
+                Bounds3D::new_2d(-half_width, -half_height, half_width, half_height)
+            }
+        }
     }
 }
 
@@ -38,6 +59,34 @@ pub enum SpawnKind {
 }
 
 #[derive(Debug, Clone)]
+pub enum LayoutOp {
+    SetTranslation(DVec3),
+    MoveAnchorTo {
+        target: DVec3,
+        anchor: Anchor,
+    },
+    NextTo {
+        reference: ObjectId,
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
+    },
+    AlignTo {
+        reference: ObjectId,
+        target_anchor: Anchor,
+        reference_anchor: Anchor,
+    },
+    ToEdge {
+        direction: Direction,
+        buff: f64,
+    },
+    ToCorner {
+        corner: Anchor,
+        buff: f64,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct ObjectSpec {
     pub id: ObjectId,
     pub kind: SpawnKind,
@@ -45,7 +94,7 @@ pub struct ObjectSpec {
     pub stroke: Option<(Color, f64)>,
     pub opacity: f32,
     pub z_index: i32,
-    pub position: DVec3,
+    pub layout_ops: Vec<LayoutOp>,
 }
 
 impl ObjectSpec {
@@ -57,7 +106,7 @@ impl ObjectSpec {
             stroke: None,
             opacity: 1.0,
             z_index: 0,
-            position: DVec3::ZERO,
+            layout_ops: Vec::new(),
         }
     }
 }
@@ -66,7 +115,7 @@ impl ObjectSpec {
 ///
 /// Methods like `DrawableHandle::fade_in()` create one of these and immediately
 /// append an active `Op::Animate` to the owning segment. Fluent configuration
-/// methods update both this value and the queued op, so `obj.fade_in().duration(2.0)`
+/// methods update both this value and the queued op, so `obj.fade_in(2.0)` or
 /// keeps the deferred timeline consistent.
 #[derive(Debug, Clone)]
 pub struct Anim {
@@ -123,6 +172,18 @@ impl Anim {
 
     pub fn into_builder(self) -> AnimationBuilder {
         self.inner
+    }
+
+    /// Set the duration if `sec` is `Some`, otherwise leave the default.
+    /// Used internally by animation methods that accept an optional duration
+    /// parameter (e.g. `obj.fade_in(2.0)`).
+    pub(crate) fn with_duration(mut self, sec: Option<f64>) -> Self {
+        if let Some(sec) = sec {
+            let old = self.inner.duration;
+            self.inner.duration = sec.max(0.0);
+            self.sync_queued(Some(old));
+        }
+        self
     }
 
     pub(crate) fn deactivate_auto_queue(&self) -> bool {
@@ -262,5 +323,37 @@ impl Anim {
 impl From<Anim> for AnimationBuilder {
     fn from(anim: Anim) -> Self {
         anim.inner
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OptDuration — allow animation methods to accept an optional duration
+// ---------------------------------------------------------------------------
+
+/// Trait that converts `()`, `f64`, or `Option<f64>` into an optional duration.
+///
+/// This lets animation methods accept all three forms:
+/// - `obj.fade_in()`          — uses the default duration (1.0s)
+/// - `obj.fade_in(2.0)`       — uses 2.0s
+/// - `obj.fade_in(None)`      — uses the default duration (explicit)
+pub trait OptDuration {
+    fn into_opt(self) -> Option<f64>;
+}
+
+impl OptDuration for () {
+    fn into_opt(self) -> Option<f64> {
+        None
+    }
+}
+
+impl OptDuration for f64 {
+    fn into_opt(self) -> Option<f64> {
+        Some(self)
+    }
+}
+
+impl OptDuration for Option<f64> {
+    fn into_opt(self) -> Option<f64> {
+        self
     }
 }

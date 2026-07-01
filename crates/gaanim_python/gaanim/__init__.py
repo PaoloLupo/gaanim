@@ -1,6 +1,8 @@
 """Gaanim — GPU-accelerated vector animation engine."""
 
 from .gaanim_core import (
+    Anchor,
+    Direction,
     BLACK,
     BLUE,
     CORAL,
@@ -29,6 +31,8 @@ __all__ = [
     "Anim",
     "Transition",
     "Color",
+    "Anchor",
+    "Direction",
     "GOLD",
     "CORAL",
     "BLUE",

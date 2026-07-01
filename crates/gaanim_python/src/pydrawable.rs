@@ -3,6 +3,7 @@
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
+use crate::pylayout::{PyAnchor, PyDirection};
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
@@ -104,6 +105,50 @@ impl PyDrawable {
     fn at(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().at(x, y))
     }
+    fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> Self {
+        Self(self.0.clone().at_anchor(x, y, anchor.0))
+    }
+    #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
+    fn next_to(
+        &self,
+        reference: &PyDrawable,
+        direction: &PyDirection,
+        spacing: f64,
+        aligned_edge: Option<&PyAnchor>,
+    ) -> Self {
+        let aligned_edge = aligned_edge
+            .map(|anchor| anchor.0)
+            .unwrap_or(gaanim_api::canvas::Anchor::Center);
+        Self(
+            self.0
+                .clone()
+                .next_to_aligned(&reference.0, direction.0, spacing, aligned_edge),
+        )
+    }
+    #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
+    fn align_to(
+        &self,
+        reference: &PyDrawable,
+        target_anchor: &PyAnchor,
+        reference_anchor: Option<&PyAnchor>,
+    ) -> Self {
+        let reference_anchor = reference_anchor
+            .map(|anchor| anchor.0)
+            .unwrap_or(target_anchor.0);
+        Self(
+            self.0
+                .clone()
+                .align_to(&reference.0, target_anchor.0, reference_anchor),
+        )
+    }
+    #[pyo3(signature = (direction, buff=24.0))]
+    fn to_edge(&self, direction: &PyDirection, buff: f64) -> Self {
+        Self(self.0.clone().to_edge(direction.0, buff))
+    }
+    #[pyo3(signature = (corner, buff=24.0))]
+    fn to_corner(&self, corner: &PyAnchor, buff: f64) -> Self {
+        Self(self.0.clone().to_corner(corner.0, buff))
+    }
 
     fn r#move(&self, dx: f64, dy: f64) -> PyCanvasAnim {
         PyCanvasAnim {
@@ -130,14 +175,16 @@ impl PyDrawable {
             inner: self.0.rotate(rad),
         }
     }
-    fn fade_in(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.fade_in(),
+            inner: self.0.fade_in(duration),
         }
     }
-    fn fade_out(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.fade_out(),
+            inner: self.0.fade_out(duration),
         }
     }
     fn fade_to(&self, alpha: f32) -> PyCanvasAnim {
@@ -145,54 +192,64 @@ impl PyDrawable {
             inner: self.0.fade_to(alpha),
         }
     }
-    fn write(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.write(),
+            inner: self.0.write(duration),
         }
     }
-    fn create(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.create(),
+            inner: self.0.create(duration),
         }
     }
-    fn unwrite(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.unwrite(),
+            inner: self.0.unwrite(duration),
         }
     }
-    fn uncreate(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.uncreate(),
+            inner: self.0.uncreate(duration),
         }
     }
-    fn grow_from_center(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.grow_from_center(),
+            inner: self.0.grow_from_center(duration),
         }
     }
-    fn shrink_to_center(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.shrink_to_center(),
+            inner: self.0.shrink_to_center(duration),
         }
     }
-    fn spin_in_from_nothing(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn spin_in_from_nothing(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.spin_in_from_nothing(),
+            inner: self.0.spin_in_from_nothing(duration),
         }
     }
-    fn draw_border_then_fill(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn draw_border_then_fill(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.draw_border_then_fill(),
+            inner: self.0.draw_border_then_fill(duration),
         }
     }
-    fn indicate(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.indicate(),
+            inner: self.0.indicate(duration),
         }
     }
-    fn wiggle(&self) -> PyCanvasAnim {
+    #[pyo3(signature = (duration=None))]
+    fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.0.wiggle(),
+            inner: self.0.wiggle(duration),
         }
     }
 }

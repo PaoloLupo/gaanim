@@ -52,9 +52,9 @@ fn setup_scene(
         .title("Multi-Segment Demo")
         .fill(Color::WHITE)
         .at(0.0, 0.0);
-    title.fade_in().duration(1.0);
+    title.fade_in(1.0);
     canvas.wait(1.5);
-    title.fade_out().duration(0.8); // manual exit (Patron B)
+    title.fade_out(0.8); // manual exit (Patron B)
     canvas.wait(0.3);
 
     // Segment 2: Content with auto cross-fade
@@ -63,9 +63,9 @@ fn setup_scene(
         .circle(60.0)
         .fill(Color::from_rgb8(0xE5, 0x4B, 0x4B))
         .at(-200.0, 0.0);
-    circle.create().duration(1.5);
+    circle.create(1.5);
     canvas.wait(0.5);
-    circle.grow_from_center().duration(1.0);
+    circle.grow_from_center(1.0);
     canvas.wait(1.0);
     canvas.fade_out_all(0.8);
     canvas.wait(0.3);
@@ -79,7 +79,7 @@ fn setup_scene(
         }),
     );
     let thanks = canvas.title("Thank You!").fill(Color::WHITE).at(0.0, 0.0);
-    thanks.fade_in().duration(1.0);
+    thanks.fade_in(1.0);
     canvas.wait(2.0);
 
     info!(

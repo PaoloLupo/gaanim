@@ -154,11 +154,22 @@ impl Canvas {
     /// cursor. Each `Anim` passed here is deactivated from its original
     /// sequential position before the batch is inserted.
     pub fn play(&mut self, anims: Vec<Anim>) {
+        self.play_with_lag(anims, 0.0);
+    }
+
+    /// Parallel playback with a uniform stagger between each animation's
+    /// start time. Existing per-animation delays are preserved and the lag is
+    /// added on top.
+    pub fn play_with_lag(&mut self, anims: Vec<Anim>, lag: f64) {
+        let lag = lag.max(0.0);
         let builders: Vec<AnimationBuilder> = anims
             .into_iter()
-            .map(|anim| {
+            .enumerate()
+            .map(|(idx, anim)| {
                 anim.deactivate_auto_queue();
-                anim.into_builder()
+                let mut anim = anim.into_builder();
+                anim.delay += idx as f64 * lag;
+                anim
             })
             .collect();
         self.play_builders(builders);
@@ -166,7 +177,10 @@ impl Canvas {
 
     /// Low-level parallel playback for legacy `AnimationBuilder` values.
     pub fn play_builders(&mut self, anims: Vec<AnimationBuilder>) {
-        let max_dur = anims.iter().map(|a| a.duration).fold(0.0, f64::max);
+        let max_dur = anims
+            .iter()
+            .map(|a| a.delay.max(0.0) + a.duration.max(0.0))
+            .fold(0.0, f64::max);
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.active_mut().cursor += max_dur;
         guard.active_mut().ops.push(Op::Play(anims));
@@ -256,5 +270,47 @@ impl Canvas {
         transparent: Option<bool>,
     ) -> Result<(), gaanim_export::encoder::ExportError> {
         crate::export::export_canvas_to_path(self.clone(), path, fps, transparent)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::ops::Op;
+
+    #[test]
+    fn play_with_lag_offsets_delays_and_cursor() {
+        let mut canvas = Canvas::new(1280, 720);
+        let first = canvas.circle(20.0);
+        let second = canvas.circle(20.0);
+
+        canvas.play_with_lag(vec![first.fade_in(1.0), second.fade_in(1.0)], 0.25);
+
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        let segment = guard.active();
+        assert!((segment.cursor - 1.25).abs() < 1e-9);
+
+        let Some(Op::Play(anims)) = segment.ops.last() else {
+            panic!("expected parallel play op");
+        };
+        assert_eq!(anims.len(), 2);
+        assert!((anims[0].delay - 0.0).abs() < 1e-9);
+        assert!((anims[1].delay - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn play_builders_counts_existing_delays_in_cursor() {
+        let mut canvas = Canvas::new(1280, 720);
+        let first = canvas.circle(20.0);
+        let second = canvas.circle(20.0);
+
+        canvas.play(vec![
+            first.fade_in(1.0).delay(0.1),
+            second.fade_in(1.0).delay(0.4),
+        ]);
+
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        let segment = guard.active();
+        assert!((segment.cursor - 1.4).abs() < 1e-9);
     }
 }

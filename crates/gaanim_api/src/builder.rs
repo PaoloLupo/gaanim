@@ -496,7 +496,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Sequences a single animation clip on the timeline and advances the playhead.
     pub fn play(&mut self, anim: AnimationBuilder) {
-        let duration = anim.duration;
+        let duration = anim.delay.max(0.0) + anim.duration;
         self.play_internal(anim);
         self.current_time += duration;
     }
@@ -506,8 +506,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub fn play_parallel(&mut self, anims: Vec<AnimationBuilder>) {
         let mut max_duration = 0.0;
         for anim in anims {
-            if anim.duration > max_duration {
-                max_duration = anim.duration;
+            let total_duration = anim.delay.max(0.0) + anim.duration;
+            if total_duration > max_duration {
+                max_duration = total_duration;
             }
             self.play_internal(anim);
         }
@@ -630,6 +631,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let from = 0.0;
                 let to = 1.0;
                 state.opacity = 1.0;
+                self.commands.entity(state.entity).insert(Opacity(from));
                 PropertyLensSpec::Opacity { from, to }
             }
             AnimationType::FadeOut => {
@@ -742,7 +744,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// will render an empty/invisible fill, so the user only ever sees
     /// Internal: generalize a draw/erase animation (Write, Create, Unwrite, Uncreate)
     /// as one or more staggered or parallel sub-clip sequences.
-    fn draw_schedule_for(&self, anim: &AnimationBuilder, item_count: usize) -> Option<DrawSchedule> {
+    fn draw_schedule_for(
+        &self,
+        anim: &AnimationBuilder,
+        item_count: usize,
+    ) -> Option<DrawSchedule> {
         let adaptive_lag = adaptive_lag_ratio(item_count);
         match &anim.anim_type {
             AnimationType::Write { config } => Some(DrawSchedule {
@@ -796,6 +802,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn play_draw_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         const DRAW_RATIO: f64 = 0.5;
+        let start_time = self.current_time + anim.delay.max(0.0);
 
         let mut items: Vec<ObjectId> = {
             let state = match self.states.get(anim.target) {
@@ -881,7 +888,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         for item_id in &items {
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                start_time,
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
@@ -898,7 +905,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if matches!(schedule.mode, DrawMode::BorderThenFill) {
                 self.timeline.add_clip(
                     parent_track,
-                    self.current_time,
+                    start_time,
                     min_step,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
@@ -915,7 +922,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         for (i, item_id) in items.iter().enumerate() {
-            let item_start = self.current_time + i as f64 * lag_step;
+            let item_start = start_time + i as f64 * lag_step;
 
             match (schedule.mode, schedule.reversed) {
                 (DrawMode::Grow, false) => {
@@ -1201,7 +1208,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1216,7 +1223,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_from,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1237,7 +1244,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1252,7 +1259,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1269,7 +1276,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1284,7 +1291,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1314,7 +1321,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     target: anim.target,
                     lens: PropertyLensSpec::Opacity { from, to: 0.0 },
                     rate_func: anim.rate_func.clone(),
-                delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1341,7 +1348,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: target_opacity,
                     },
                     rate_func: anim.rate_func.clone(),
-                delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1387,7 +1394,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: gaanim_core::glam::DVec3::new(to_x, origin.y, origin.z),
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1667,7 +1674,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: c,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1682,7 +1689,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: *current,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1771,7 +1778,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: gaanim_math::RateFunc::Linear,
-                            delay: 0.0,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );

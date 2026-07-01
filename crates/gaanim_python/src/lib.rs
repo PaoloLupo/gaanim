@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 mod color;
 mod pycanvas;
 mod pydrawable;
+mod pylayout;
 mod transition;
 
 /// Register the `gaanim_core` builtin module.
@@ -15,6 +16,8 @@ pub fn register_inittab() {
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<transition::PyTransitionType>()?;
     m.add_class::<color::PyColor>()?;
+    m.add_class::<pylayout::PyAnchor>()?;
+    m.add_class::<pylayout::PyDirection>()?;
     m.add_class::<pycanvas::PyCanvas>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;

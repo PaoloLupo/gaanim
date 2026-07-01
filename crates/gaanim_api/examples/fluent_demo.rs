@@ -51,9 +51,9 @@ fn setup_scene(
         .at(0.0, 0.0);
     let title = canvas.title("Gaanim").fill(Color::WHITE).at(0.0, 180.0);
 
-    logo.fade_in().duration(1.0);
+    logo.fade_in(1.0);
     canvas.wait(0.5);
-    title.fade_in().duration(1.0);
+    title.fade_in(1.0);
     canvas.wait(1.0);
     logo.r#move(-300.0, 0.0).duration(1.5);
     canvas.wait(0.5);

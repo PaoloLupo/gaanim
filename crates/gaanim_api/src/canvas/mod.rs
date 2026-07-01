@@ -1,6 +1,7 @@
 mod ops;
 mod types;
-pub use types::{Anim, CoordinateSystem, ObjectSpec, SpawnKind};
+pub use gaanim_layout::{Anchor, Direction};
+pub use types::{Anim, CoordinateSystem, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 mod drawable;
 pub use drawable::DrawableHandle;
 mod canvas_impl;

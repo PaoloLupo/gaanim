@@ -4,8 +4,8 @@ use gaanim_animation::FillDrawProgress;
 use gaanim_core::ObjectId;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, MobjectId, Path2D, RenderLayer, RenderOrder, StrokeBrush, Visible,
-    WorldBounds, PathSource,
+    FillBrush, GlobalOpacity, MobjectId, Path2D, PathSource, RenderLayer, RenderOrder, StrokeBrush,
+    Visible, WorldBounds,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -399,10 +399,7 @@ pub fn gaanim_render_system(
         Option<&WorldBounds>,
         Option<&gaanim_scene::GroupMarker>,
     )>,
-    mut query_vello_scene: Query<
-        (Entity, &mut VelloScene2d, &mut Transform),
-        With<MainVelloScene>,
-    >,
+    mut query_vello_scene: Query<(Entity, &mut VelloScene2d, &mut Transform), With<MainVelloScene>>,
     mut local_extracted: Local<Vec<ExtractedElement>>,
     mut local_culled: Local<std::collections::HashSet<Entity>>,
 ) {
