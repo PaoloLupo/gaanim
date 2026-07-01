@@ -2,6 +2,7 @@ use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
 use bevy::prelude::*;
 use gaanim_animation::FillDrawProgress;
 use gaanim_core::ObjectId;
+use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
     FillBrush, GlobalOpacity, MobjectId, Path2D, PathSource, RenderLayer, RenderOrder, StrokeBrush,
@@ -12,6 +13,19 @@ use std::sync::Arc;
 
 // Explicit imports from bevy_vello instead of glob for clarity
 use bevy_vello::integrations::scene::VelloScene2d;
+
+/// Resource: stores the canvas background color and logical frame bounds.
+///
+/// Inserted by `Canvas::compile_into` and consumed by the render systems to
+/// draw a visible canvas boundary that distinguishes the canvas area from
+/// the surrounding window background.
+#[derive(Resource, Clone, Debug)]
+pub struct CanvasBackground {
+    /// Background color of the canvas.
+    pub color: peniko::Color,
+    /// Frame bounds in world coordinates (Y-up, center-origin).
+    pub bounds: gaanim_math::Bounds3D,
+}
 
 /// Marker component identifying the single global Vello compositing entity.
 #[derive(Component, Debug, Clone, Copy, Default)]
@@ -319,6 +333,20 @@ pub fn compile_scene_from_world(
 
     let mut main_scene = vello::Scene::new();
 
+    // Draw canvas background as a filled rectangle at the frame bounds,
+    // so the canvas area is visually distinct from the window background.
+    if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
+        let b = &canvas_bg.bounds;
+        let rect = kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y);
+        main_scene.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            &canvas_bg.color,
+            None,
+            &rect,
+        );
+    }
+
     for elem in extracted {
         let mut layers_to_pop = 0;
 
@@ -373,6 +401,7 @@ pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
     gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    canvas_bg: Option<Res<CanvasBackground>>,
     child_query: Query<&ChildOf>,
     query_mobjects: Query<
         (
@@ -668,6 +697,20 @@ pub fn gaanim_render_system(
 
     // Assemble the global composited Scene in Bevy world coordinates
     let mut main_scene = vello::Scene::new();
+
+    // Draw canvas background as a filled rectangle at the frame bounds,
+    // so the canvas area is visually distinct from the window background.
+    if let Some(ref canvas_bg) = canvas_bg {
+        let b = &canvas_bg.bounds;
+        let rect = kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y);
+        main_scene.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            &canvas_bg.color,
+            None,
+            &rect,
+        );
+    }
 
     for elem in local_extracted.drain(..) {
         let mut layers_to_pop = 0;

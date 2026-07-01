@@ -58,12 +58,21 @@ impl Canvas {
             }
         }
 
-        if let Some(bg) = self.background {
-            let r = bg.to_rgba8();
-            builder
-                .commands
-                .insert_resource(ClearColor(Color::srgb_u8(r.r, r.g, r.b)));
-        }
+        // Insert canvas background resource so the renderer draws a visible
+        // canvas boundary, distinguishing the canvas area from the window.
+        let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let frame_bounds = self.units.frame_bounds(self.width, self.height);
+        builder
+            .commands
+            .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
+                color: bg_color,
+                bounds: frame_bounds,
+            });
+
+        // Use a neutral dark gray for the area outside the canvas.
+        builder
+            .commands
+            .insert_resource(ClearColor(Color::srgb_u8(40, 40, 40)));
     }
 
     pub fn compile(&self, world: &mut World) {
