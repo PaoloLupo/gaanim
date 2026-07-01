@@ -1,14 +1,49 @@
 use gaanim_core::peniko;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use std::str::FromStr;
 
 /// Native color type backed by `peniko::Color` (RGBA8 internally).
 ///
 /// Construct via `Color(r, g, b, a?)`, `Color.from_hex("#RRGGBB")`, `Color.from_rgb(r, g, b)`,
 /// or use one of the named module-level constants (`GOLD`, `CORAL`, `BLUE`, …).
-#[pyclass(name = "Color", module = "gaanim_core", from_py_object)]
+///
+/// Anywhere a `Color` is accepted you can also pass:
+/// - A hex string: `"#FF0000"`, `"#F00"`, `"#FF000080"`
+/// - A CSS color: `"red"`, `"rgb(255, 0, 0)"`, `"hsl(0, 100%, 50%)"`, …
+/// - An `(r, g, b)` or `(r, g, b, a)` tuple of u8 values
+#[pyclass(name = "Color", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyColor(pub peniko::Color);
+
+/// Accept `Color` objects, hex/CSS strings, and `(r, g, b)` / `(r, g, b, a)` tuples.
+impl<'a, 'py> FromPyObject<'a, 'py> for PyColor {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        // 1. Already a PyColor instance — downcast to avoid recursive FromPyObject.
+        if let Ok(bound) = obj.cast::<PyColor>() {
+            let inner = bound.borrow().0;
+            return Ok(PyColor(inner));
+        }
+        // 2. String → parse with the color crate's CSS Color 4 parser
+        if let Ok(s) = obj.extract::<&str>() {
+            let c = peniko::Color::from_str(s)
+                .map_err(|e| PyValueError::new_err(format!("invalid color '{s}': {e}")))?;
+            return Ok(PyColor(c));
+        }
+        // 3. Tuple (r, g, b) or (r, g, b, a)
+        if let Ok((r, g, b)) = obj.extract::<(u8, u8, u8)>() {
+            return Ok(PyColor(peniko::Color::from_rgb8(r, g, b)));
+        }
+        if let Ok((r, g, b, a)) = obj.extract::<(u8, u8, u8, u8)>() {
+            return Ok(PyColor(peniko::Color::from_rgba8(r, g, b, a)));
+        }
+        Err(PyValueError::new_err(
+            "expected a Color, hex string ('#FF0000', 'red'), or (r, g, b) tuple",
+        ))
+    }
+}
 
 #[pymethods]
 impl PyColor {

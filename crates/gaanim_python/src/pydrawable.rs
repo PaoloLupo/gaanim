@@ -85,13 +85,13 @@ pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
 
 #[pymethods]
 impl PyDrawable {
-    fn fill(&self, color: &PyColor) -> Self {
+    fn fill(&self, color: PyColor) -> Self {
         Self(self.0.clone().fill(color.0))
     }
     fn no_fill(&self) -> Self {
         Self(self.0.clone().no_fill())
     }
-    fn stroke(&self, color: &PyColor, width: f64) -> Self {
+    fn stroke(&self, color: PyColor, width: f64) -> Self {
         Self(self.0.clone().stroke(color.0, width))
     }
     fn no_stroke(&self) -> Self {

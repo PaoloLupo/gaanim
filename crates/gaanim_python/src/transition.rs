@@ -29,7 +29,7 @@ impl PyTransitionType {
 
     /// Fade to a color, then fade in from that color.
     #[staticmethod]
-    fn fade_through(duration: f64, color: &super::color::PyColor) -> Self {
+    fn fade_through(duration: f64, color: super::color::PyColor) -> Self {
         Self(TransitionType::FadeThrough {
             duration,
             fade_color: color.0,

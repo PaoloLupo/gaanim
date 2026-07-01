@@ -17,7 +17,7 @@ pub struct PyCanvas {
 impl PyCanvas {
     #[new]
     #[pyo3(signature = (width=1280, height=720, background=None, margin=None))]
-    fn new(width: u32, height: u32, background: Option<&PyColor>, margin: Option<f64>) -> Self {
+    fn new(width: u32, height: u32, background: Option<PyColor>, margin: Option<f64>) -> Self {
         let mut c = Canvas::new(width, height);
         if let Some(bg) = background {
             c.background = Some(bg.0);

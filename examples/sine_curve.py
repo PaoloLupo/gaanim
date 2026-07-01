@@ -29,7 +29,7 @@ circle = (
 )
 
 # --- Orbiting dot ---
-dot = canvas.dot(8).fill(Color(245, 208, 75)).at(origin_x + circle_radius, origin_y)
+dot = canvas.dot(8).fill("lightgoldenrodyellow").at(origin_x + circle_radius, origin_y)
 dot.add_updater(
     Updater.orbit(
         cx=origin_x,
