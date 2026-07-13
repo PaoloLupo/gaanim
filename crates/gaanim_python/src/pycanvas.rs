@@ -1,147 +1,272 @@
-//! Thin PyCanvas wrapper over ganim_api Canvas.
+//! Python scene facade and its visual canvas configuration.
+
+use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 
-use gaanim_api::canvas::{Canvas, CanvasEndpoint};
+use gaanim_api::canvas::{Canvas as ApiCanvas, CanvasEndpoint};
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 use crate::transition::PyTransitionType;
 
+/// Visual configuration owned by a [`PyScene`].
+///
+/// A canvas deliberately has no timeline or mobject factories.  Those belong to
+/// `Scene`; this object only controls the viewport shared by that scene.
 #[pyclass(name = "Canvas", module = "gaanim_core")]
 pub struct PyCanvas {
-    pub inner: Canvas,
+    inner: Arc<Mutex<ApiCanvas>>,
 }
 
 #[pymethods]
 impl PyCanvas {
+    #[getter]
+    fn width(&self) -> u32 {
+        self.inner.lock().expect("scene canvas poisoned").width
+    }
+
+    #[setter]
+    fn set_width(&self, width: u32) {
+        self.inner.lock().expect("scene canvas poisoned").width = width;
+    }
+
+    #[getter]
+    fn height(&self) -> u32 {
+        self.inner.lock().expect("scene canvas poisoned").height
+    }
+
+    #[setter]
+    fn set_height(&self, height: u32) {
+        self.inner.lock().expect("scene canvas poisoned").height = height;
+    }
+
+    #[getter]
+    fn background(&self) -> Option<PyColor> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .background
+            .map(PyColor)
+    }
+
+    #[setter]
+    fn set_background(&self, background: Option<PyColor>) {
+        self.inner.lock().expect("scene canvas poisoned").background = background.map(|c| c.0);
+    }
+
+    /// Set a uniform margin on all four sides. It affects `to_edge` and
+    /// `to_corner` layout operations.
+    fn set_margin(&self, margin: f64) {
+        self.inner.lock().expect("scene canvas poisoned").margin =
+            gaanim_api::canvas::Margin::all(margin);
+    }
+}
+
+/// Top-level public facade for building a Gaanim animation.
+#[pyclass(name = "Scene", module = "gaanim_core")]
+pub struct PyScene {
+    inner: Arc<Mutex<ApiCanvas>>,
+}
+
+#[pymethods]
+impl PyScene {
     #[new]
     #[pyo3(signature = (width=1280, height=720, background=None, margin=None))]
     fn new(width: u32, height: u32, background: Option<PyColor>, margin: Option<f64>) -> Self {
-        let mut c = Canvas::new(width, height);
-        if let Some(bg) = background {
-            c.background = Some(bg.0);
+        let mut canvas = ApiCanvas::new(width, height);
+        if let Some(background) = background {
+            canvas.background = Some(background.0);
         }
-        if let Some(m) = margin {
-            c.margin = gaanim_api::canvas::Margin::all(m);
+        if let Some(margin) = margin {
+            canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
-        Self { inner: c }
+        Self {
+            inner: Arc::new(Mutex::new(canvas)),
+        }
     }
 
-    /// Set uniform margin on all four sides (affects to_edge / to_corner).
-    fn set_margin(&mut self, v: f64) {
-        self.inner.margin = gaanim_api::canvas::Margin::all(v);
-    }
-    fn circle(&mut self, r: f64) -> PyDrawable {
-        PyDrawable(self.inner.circle(r))
-    }
-    fn rect(&mut self, w: f64, h: f64) -> PyDrawable {
-        PyDrawable(self.inner.rect(w, h))
-    }
-    fn rounded_rect(&mut self, w: f64, h: f64, r: f64) -> PyDrawable {
-        PyDrawable(self.inner.rounded_rect(w, h, r))
-    }
-    fn square(&mut self, s: f64) -> PyDrawable {
-        PyDrawable(self.inner.square(s))
-    }
-    fn dot(&mut self, r: f64) -> PyDrawable {
-        PyDrawable(self.inner.dot(r))
-    }
-    fn ellipse(&mut self, rx: f64, ry: f64) -> PyDrawable {
-        PyDrawable(self.inner.ellipse(rx, ry))
-    }
-    fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
-        PyDrawable(self.inner.line(x1, y1, x2, y2))
-    }
-    fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
-        PyDrawable(self.inner.arrow(x1, y1, x2, y2))
-    }
-    fn text(&mut self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.text(s))
-    }
-    fn title(&mut self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.title(s))
-    }
-    fn subtitle(&mut self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.subtitle(s))
-    }
-    fn equation(&mut self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.equation(s))
+    /// The scene viewport and visual configuration.
+    #[getter]
+    fn canvas(&self) -> PyCanvas {
+        PyCanvas {
+            inner: self.inner.clone(),
+        }
     }
 
-    fn group(&mut self, members: Vec<PyDrawable>) -> PyDrawable {
+    fn circle(&self, r: f64) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").circle(r))
+    }
+    fn rect(&self, w: f64, h: f64) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").rect(w, h))
+    }
+    fn rounded_rect(&self, w: f64, h: f64, r: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .rounded_rect(w, h, r),
+        )
+    }
+    fn square(&self, s: f64) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").square(s))
+    }
+    fn dot(&self, r: f64) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").dot(r))
+    }
+    fn ellipse(&self, rx: f64, ry: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .ellipse(rx, ry),
+        )
+    }
+    fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .line(x1, y1, x2, y2),
+        )
+    }
+    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .arrow(x1, y1, x2, y2),
+        )
+    }
+    fn text(&self, s: &str) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
+    }
+    fn title(&self, s: &str) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").title(s))
+    }
+    fn subtitle(&self, s: &str) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .subtitle(s),
+        )
+    }
+    fn equation(&self, s: &str) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .equation(s),
+        )
+    }
+
+    fn group(&self, members: Vec<PyDrawable>) -> PyDrawable {
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();
-        PyDrawable(self.inner.group(&refs))
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .group(&refs),
+        )
     }
 
     #[pyo3(signature = (name, transition=None))]
-    fn segment(&mut self, name: &str, transition: Option<&PyTransitionType>) -> usize {
-        self.inner.segment(name, transition.map(|t| t.0.clone()))
+    fn segment(&self, name: &str, transition: Option<&PyTransitionType>) -> usize {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .segment(name, transition.map(|t| t.0.clone()))
     }
 
-    fn link(&mut self, from: usize, to: usize, transition: &PyTransitionType) {
-        self.inner.link(from, to, transition.0.clone());
+    fn link(&self, from: usize, to: usize, transition: &PyTransitionType) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .link(from, to, transition.0.clone());
     }
 
-    fn wait(&mut self, d: f64) {
-        self.inner.wait(d);
+    fn wait(&self, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .wait(duration);
     }
+
     #[pyo3(signature = (anims, *, lag=None))]
-    fn play(&mut self, anims: Vec<PyCanvasAnim>, lag: Option<f64>) {
-        let a = anims.into_iter().map(|a| a.inner).collect();
+    fn play(&self, anims: Vec<PyCanvasAnim>, lag: Option<f64>) {
+        let anims = anims.into_iter().map(|anim| anim.inner).collect();
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if let Some(lag) = lag {
-            self.inner.play_with_lag(a, lag);
+            scene.play_with_lag(anims, lag);
         } else {
-            self.inner.play(a);
+            scene.play(anims);
         }
     }
-    fn slide(&mut self) {
-        self.inner.slide();
+
+    fn slide(&self) {
+        self.inner.lock().expect("scene canvas poisoned").slide();
     }
-    fn fade_out_all(&mut self, d: f64) {
-        self.inner.fade_out_all(d);
+    fn fade_out_all(&self, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .fade_out_all(duration);
     }
     fn render(&self) -> PyResult<()> {
-        if self.inner.render() {
+        if self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .clone()
+            .render()
+        {
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "Gaanim canvases can only be rendered inside the Gaanim application. \
+                "Gaanim scenes can only be rendered inside the Gaanim application. \
                  Run your script with:  gaanim <script.py>",
             ))
         }
     }
     fn export(&self, path: &str, fps: Option<u32>) -> PyResult<()> {
         self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .clone()
             .export(path, fps, None, None)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
     // -- Reactive objects --
 
-    /// Create a value tracker — a reactive float signal that can be animated.
-    fn value_tracker(&mut self, initial: f64) -> PyDrawable {
-        PyDrawable(self.inner.value_tracker(initial))
+    fn value_tracker(&self, initial: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .value_tracker(initial),
+        )
     }
 
-    /// Create a traced path that accumulates the trajectory of `source`.
-    fn traced_path(&mut self, source: &PyDrawable) -> PyDrawable {
-        PyDrawable(self.inner.traced_path(&source.0))
+    fn traced_path(&self, source: &PyDrawable) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .traced_path(&source.0),
+        )
     }
 
-    /// Create a tracking line — a reactive line between two endpoints.
-    ///
-    /// Endpoints can be:
-    /// - A `Drawable` (tracks entity position)
-    /// - A tuple `(x, y)` (static position)
-    fn tracking_line(
-        &mut self,
-        from: Bound<'_, PyAny>,
-        to: Bound<'_, PyAny>,
-    ) -> PyResult<PyDrawable> {
-        let from_ep = resolve_endpoint(&from)?;
-        let to_ep = resolve_endpoint(&to)?;
-        Ok(PyDrawable(self.inner.tracking_line(from_ep, to_ep)))
+    fn tracking_line(&self, from: Bound<'_, PyAny>, to: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        let from = resolve_endpoint(&from)?;
+        let to = resolve_endpoint(&to)?;
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .tracking_line(from, to),
+        ))
     }
 }
 
