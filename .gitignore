@@ -36,3 +36,7 @@ tests/visual/**/report/
 !tests/visual/**/
 !tests/visual/**/baseline/
 !tests/visual/**/baseline/**/*.png
+
+# These must come after the parent-directory exceptions above.
+tests/visual/**/current/
+tests/visual/**/report/
