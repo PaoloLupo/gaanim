@@ -31,6 +31,10 @@ clean-venv:
 clean: clean-venv
     cargo clean
 
+[working-directory("crates/gaanim_python")]
+maturin:
+    maturin develop
+
 # ---- Build ------------------------------------------------------------------
 
 # Type-check the entire workspace (no codegen, fastest feedback).
