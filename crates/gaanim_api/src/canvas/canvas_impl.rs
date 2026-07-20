@@ -299,6 +299,29 @@ impl Canvas {
             .push(Op::CameraRotation { to, duration });
     }
 
+    /// Keep the camera centered on `target` while its updaters run.
+    pub fn camera_follow(&mut self, target: &DrawableHandle, duration: f64) {
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraFollow {
+            target: target.id,
+            duration,
+        });
+    }
+
+    /// Apply a deterministic camera shake that settles back at its start position.
+    pub fn camera_shake(&mut self, amplitude: f64, frequency: f64, duration: f64) {
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraShake {
+            amplitude: amplitude.max(0.0),
+            frequency: frequency.max(0.0),
+            duration,
+        });
+    }
+
     // -- Time controls --
 
     pub fn wait(&mut self, dur: f64) {

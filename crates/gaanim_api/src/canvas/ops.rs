@@ -92,6 +92,15 @@ pub(crate) enum Op {
         margin: f64,
         duration: f64,
     },
+    CameraFollow {
+        target: ObjectId,
+        duration: f64,
+    },
+    CameraShake {
+        amplitude: f64,
+        frequency: f64,
+        duration: f64,
+    },
     /// Insert a slide breakpoint.
     Slide,
     /// Set an object visible (instant).

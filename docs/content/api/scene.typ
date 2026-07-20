@@ -88,10 +88,14 @@ scene.camera_pan_to(-160, 40, duration=0.8)
 scene.camera_zoom_to(1.5, duration=0.6)
 scene.camera_frame_to(circle, margin=48, duration=0.9)
 scene.camera_rotate_to(0.15, duration=0.5)
+scene.camera_follow(circle, duration=2.0)
+scene.camera_shake(amplitude=12, frequency=8, duration=0.4)
 ```
 
 `camera_frame_to` derives a pan and orthographic zoom from the target's current
 bounds, keeping it inside the viewport with the requested margin.
+`camera_follow` follows a mobject while reactive updaters are active, and
+`camera_shake` is deterministic so previews, seeks, and exports match.
 
 == Output
 

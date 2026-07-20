@@ -259,6 +259,57 @@ impl Canvas {
                     *camera_zoom = zoom;
                     builder.wait(*duration);
                 }
+                Op::CameraFollow { target, duration } => {
+                    let Some(actual) = id_map.get(target).copied() else {
+                        continue;
+                    };
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraFollow {
+                                    target: actual,
+                                },
+                                rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    if let Some(state) = builder.states.get(actual) {
+                        camera_position.x = state.transform.translation.x;
+                        camera_position.y = state.transform.translation.y;
+                    }
+                    builder.wait(*duration);
+                }
+                Op::CameraShake {
+                    amplitude,
+                    frequency,
+                    duration,
+                } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraShake {
+                                    origin: *camera_position,
+                                    amplitude: *amplitude,
+                                    frequency: *frequency,
+                                },
+                                rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    builder.wait(*duration);
+                }
                 Op::Slide => builder.slide(),
                 Op::Show(id) => {
                     if let Some(id) = id_map.get(id).copied()

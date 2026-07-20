@@ -8,7 +8,7 @@ use crate::scene::{SceneMember, SceneMetadata};
 use crate::snapshot::WorldSnapshot;
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
+use gaanim_scene::{FillBrush, MobjectId, Opacity, Path2D, StrokeBrush};
 
 #[derive(Debug, Clone, Default)]
 struct ReactiveEntityState {
@@ -653,6 +653,108 @@ impl Timeline {
             resync_updaters(world, self.current_time);
             rebuild_traced_paths(world, self.current_time);
         }
+
+        self.restore_followed_shake_origin(world);
+    }
+
+    /// A shake immediately after a follow must be based on the target's position
+    /// at the end of the follow, not the compile-time camera position. Snapshot
+    /// seeking skips intermediate frames, so resolve that anchor explicitly and
+    /// restore reactive updaters to the requested time afterwards.
+    fn restore_followed_shake_origin(&self, world: &mut World) {
+        let Some((shake_start, shake_end, shake_t, amplitude, frequency)) = self
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(anim) => match &anim.lens {
+                    PropertyLensSpec::CameraShake {
+                        amplitude,
+                        frequency,
+                        ..
+                    } if clip.start <= self.current_time => {
+                        let progress = if clip.duration > 0.0 {
+                            ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        Some((
+                            clip.start,
+                            clip.end(),
+                            anim.rate_func.evaluate(progress),
+                            *amplitude,
+                            *frequency,
+                        ))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .max_by(|(left, ..), (right, ..)| left.total_cmp(right))
+        else {
+            return;
+        };
+
+        // A later pan/frame/follow owns the camera position instead.
+        let has_later_position_control = self.clips.values().any(|clip| {
+            clip.start > shake_start
+                && clip.start <= self.current_time
+                && matches!(
+                    &clip.payload,
+                    ClipPayload::Animation(anim)
+                        if matches!(
+                            anim.lens,
+                            PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraFollow { .. }
+                        )
+                )
+        });
+        if has_later_position_control {
+            return;
+        }
+
+        let Some((follow_end, target)) = self
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(anim) => match anim.lens {
+                    PropertyLensSpec::CameraFollow { target } if clip.end() <= shake_start => {
+                        Some((clip.end(), target))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .max_by(|(left, _), (right, _)| left.total_cmp(right))
+        else {
+            return;
+        };
+
+        resync_updaters(world, follow_end);
+        let anchor = {
+            let mut query = world.query::<(&MobjectId, &SpatialTransform)>();
+            query
+                .iter(world)
+                .find_map(|(id, transform)| (id.0 == target).then_some(transform.translation))
+        };
+        resync_updaters(world, self.current_time);
+
+        let Some(anchor) = anchor else {
+            return;
+        };
+        let phase = shake_t * frequency * std::f64::consts::TAU;
+        let envelope = if self.current_time <= shake_end {
+            (1.0 - shake_t).max(0.0)
+        } else {
+            0.0
+        };
+        let offset = gaanim_core::glam::DVec3::new(
+            phase.sin() * amplitude * envelope,
+            (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
+            0.0,
+        );
+        if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+            camera.position = anchor + offset;
+        }
     }
 }
 
@@ -951,6 +1053,36 @@ fn apply_lens_spec(
                 && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
             {
                 *zoom = *from + (*to - *from) * t;
+            }
+        }
+        PropertyLensSpec::CameraFollow { target: followed } => {
+            let position = {
+                let mut query = world.query::<(&MobjectId, &SpatialTransform)>();
+                query.iter(world).find_map(|(id, transform)| {
+                    (id.0 == *followed).then_some(transform.translation)
+                })
+            };
+            if let Some(position) = position
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = position.x;
+                camera.position.y = position.y;
+            }
+        }
+        PropertyLensSpec::CameraShake {
+            origin,
+            amplitude,
+            frequency,
+        } => {
+            let phase = t * frequency * std::f64::consts::TAU;
+            let envelope = (1.0 - t).max(0.0);
+            let offset = gaanim_core::glam::DVec3::new(
+                phase.sin() * amplitude * envelope,
+                (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
+                0.0,
+            );
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = *origin + offset;
             }
         }
         PropertyLensSpec::PathFollow { path } => {

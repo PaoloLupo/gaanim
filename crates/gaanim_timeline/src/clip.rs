@@ -201,6 +201,16 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Center the camera on a moving mobject for the lifetime of the clip.
+    CameraFollow {
+        target: ObjectId,
+    },
+    /// A deterministic damped shake around `origin`.
+    CameraShake {
+        origin: gaanim_core::glam::DVec3,
+        amplitude: f64,
+        frequency: f64,
+    },
     /// Move the entity's translation along a Bézier path. Sampled at
     /// the rate-function-eased `t` and applied as the entity's
     /// world-space translation.
@@ -280,6 +290,16 @@ impl PropertyLensSpec {
             Self::CameraZoom { from, to } => PropertyLens::CameraZoom {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraFollow { target } => PropertyLens::CameraFollow { target: *target },
+            Self::CameraShake {
+                origin,
+                amplitude,
+                frequency,
+            } => PropertyLens::CameraShake {
+                origin: *origin,
+                amplitude: *amplitude,
+                frequency: *frequency,
             },
             Self::PathFollow { path } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),

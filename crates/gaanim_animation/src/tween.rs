@@ -150,6 +150,14 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    CameraFollow {
+        target: gaanim_core::ObjectId,
+    },
+    CameraShake {
+        origin: gaanim_core::glam::DVec3,
+        amplitude: f64,
+        frequency: f64,
+    },
 
     // === Path Following ===
     /// Move the entity's translation along a Bézier path. The path is
@@ -202,6 +210,15 @@ impl std::fmt::Debug for PropertyLens {
                 write!(f, "CameraRotation({:?} -> {:?})", from, to)
             }
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
+            Self::CameraFollow { target } => write!(f, "CameraFollow({target:?})"),
+            Self::CameraShake {
+                amplitude,
+                frequency,
+                ..
+            } => write!(
+                f,
+                "CameraShake(amplitude {amplitude}, frequency {frequency})"
+            ),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
             Self::PathRange {
@@ -344,6 +361,8 @@ pub fn evaluate_tweens_system(
             }
             PropertyLens::CameraRotation { from: _, to: _ } => {}
             PropertyLens::CameraZoom { from: _, to: _ } => {}
+            PropertyLens::CameraFollow { .. } => {}
+            PropertyLens::CameraShake { .. } => {}
             PropertyLens::PathMorph { from, to, table: _ } => {
                 let completed = tween.state == TweenState::Completed;
                 let morphed = if completed {

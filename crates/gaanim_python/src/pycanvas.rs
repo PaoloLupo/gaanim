@@ -257,6 +257,22 @@ impl PyScene {
             .camera_rotate_to(angle, duration);
     }
 
+    #[pyo3(signature = (target, duration=1.0))]
+    fn camera_follow(&self, target: &PyDrawable, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_follow(&target.0, duration);
+    }
+
+    #[pyo3(signature = (amplitude=12.0, frequency=8.0, duration=0.5))]
+    fn camera_shake(&self, amplitude: f64, frequency: f64, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_shake(amplitude, frequency, duration);
+    }
+
     #[pyo3(signature = (name, transition=None))]
     fn segment(&self, name: &str, transition: Option<&PyTransitionType>) -> usize {
         self.inner

@@ -34,6 +34,7 @@ impl Plugin for GaanimTimelinePlugin {
                         .in_set(SceneSet::Animation)
                         .before(timeline_seek_system),
                     timeline_seek_system.in_set(SceneSet::Animation),
+                    camera_follow_system.in_set(SceneSet::Layout),
                 ),
             );
     }
@@ -231,6 +232,37 @@ pub fn timeline_seek_system(world: &mut World) {
             // Re-insert the Timeline resource back into the world
             world.insert_resource(timeline);
         }
+    }
+}
+
+/// Updates active camera-follow clips after reactive updaters have moved their targets.
+pub fn camera_follow_system(
+    timeline: Res<Timeline>,
+    targets: Query<(&gaanim_scene::MobjectId, &gaanim_math::SpatialTransform)>,
+    camera: Option<ResMut<gaanim_math::Camera>>,
+) {
+    let Some(mut camera) = camera else {
+        return;
+    };
+    let target_id = timeline
+        .clips
+        .values()
+        .filter(|clip| clip.start <= timeline.current_time && timeline.current_time < clip.end())
+        .filter_map(|clip| match &clip.payload {
+            clip::ClipPayload::Animation(anim) => match anim.lens {
+                clip::PropertyLensSpec::CameraFollow { target } => Some((clip.start, target)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .max_by(|(left, _), (right, _)| left.total_cmp(right))
+        .map(|(_, target)| target);
+    let Some(target_id) = target_id else {
+        return;
+    };
+    if let Some((_, transform)) = targets.iter().find(|(id, _)| id.0 == target_id) {
+        camera.position.x = transform.translation.x;
+        camera.position.y = transform.translation.y;
     }
 }
 
