@@ -115,8 +115,10 @@ impl Canvas {
                     id_map.insert(spec.id, actual.id);
                 }
                 Op::Animate { anim, active } => {
-                    if *active && let Some(anim) = Self::remap_anim(anim, id_map) {
-                        builder.play(anim);
+                    if *active {
+                        if let Some(anim) = Self::remap_anim(anim, id_map) {
+                            builder.play(anim);
+                        }
                     }
                 }
                 Op::Play(anims) => {
@@ -151,7 +153,6 @@ impl Canvas {
                 }
 
                 // -- Reactive ops --
-
                 Op::AttachUpdater { target, preset } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -162,8 +163,7 @@ impl Canvas {
                 }
 
                 Op::RemoveUpdater(target) => {
-                    if let Some(target_id) = id_map.get(target).copied()
-                    {
+                    if let Some(target_id) = id_map.get(target).copied() {
                         builder.schedule_remove_updater(target_id);
                     }
                 }
@@ -195,10 +195,7 @@ impl Canvas {
                         && let Some(source_st) = builder.states.get(source_id)
                     {
                         let binding = PositionBinding::new(source_st.entity, *axes);
-                        builder
-                            .commands
-                            .entity(target_st.entity)
-                            .insert(binding);
+                        builder.commands.entity(target_st.entity).insert(binding);
                     }
                 }
 
@@ -222,10 +219,7 @@ impl Canvas {
                                 }
                             }
                         };
-                        let line = TrackingLine::new(
-                            resolve_endpoint(from),
-                            resolve_endpoint(to),
-                        );
+                        let line = TrackingLine::new(resolve_endpoint(from), resolve_endpoint(to));
                         builder.commands.entity(st.entity).insert(line);
                     }
                 }
@@ -240,6 +234,12 @@ impl Canvas {
         let target = *id_map.get(&anim.target)?;
         let anim_type = match &anim.anim_type {
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
+                target: *id_map.get(target)?,
+            },
+            AnimationType::Transform { target } => AnimationType::Transform {
+                target: *id_map.get(target)?,
+            },
+            AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
             },
             other => other.clone(),
@@ -351,6 +351,7 @@ impl Canvas {
                 builder.states.insert(
                     new_id,
                     MobjectState {
+                        path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
                         bounds: Bounds3D::default(),
                         transform: SpatialTransform::default(),
                         opacity: 1.0,
@@ -411,32 +412,41 @@ impl Canvas {
         let mut child_spans = Vec::new();
         if let Some(st) = builder.states.get_mut(id) {
             child_spans = st.child_spans.clone();
+            let is_textual_hierarchy = !child_spans.is_empty();
             if spec.stroke_overridden {
                 if let Some((c, w)) = spec.stroke {
                     let sb = StrokeBrush::new(c, w);
                     st.stroke = sb.clone();
-                    builder.commands.entity(st.entity).insert(sb);
+                    if !is_textual_hierarchy {
+                        builder.commands.entity(st.entity).insert(sb);
+                    }
                 } else {
                     st.stroke = StrokeBrush::transparent();
-                    builder
-                        .commands
-                        .entity(st.entity)
-                        .insert(StrokeBrush::transparent());
+                    if !is_textual_hierarchy {
+                        builder
+                            .commands
+                            .entity(st.entity)
+                            .insert(StrokeBrush::transparent());
+                    }
                 }
             }
             if spec.fill_overridden {
                 if let Some(ref f) = spec.fill {
                     st.fill = Some(f.clone());
-                    builder
-                        .commands
-                        .entity(st.entity)
-                        .insert(FillBrush(Some(f.clone())));
+                    if !is_textual_hierarchy {
+                        builder
+                            .commands
+                            .entity(st.entity)
+                            .insert(FillBrush(Some(f.clone())));
+                    }
                 } else {
                     st.fill = None;
-                    builder
-                        .commands
-                        .entity(st.entity)
-                        .insert(FillBrush::transparent());
+                    if !is_textual_hierarchy {
+                        builder
+                            .commands
+                            .entity(st.entity)
+                            .insert(FillBrush::transparent());
+                    }
                 }
             }
             if spec.opacity != 1.0 {
@@ -454,39 +464,42 @@ impl Canvas {
             }
         }
         if spec.fill_overridden {
-            for (child_id, child_entity, _) in &child_spans {
-                if let Some(child_state) = builder.states.get_mut(*child_id) {
+            for child in &child_spans {
+                if let Some(child_state) = builder.states.get_mut(child.id) {
                     child_state.fill = spec.fill.clone();
                 }
-                builder.commands.entity(*child_entity).insert(if let Some(ref f) = spec.fill {
-                    FillBrush(Some(f.clone()))
-                } else {
-                    FillBrush::transparent()
-                });
+                builder
+                    .commands
+                    .entity(child.entity)
+                    .insert(if let Some(ref f) = spec.fill {
+                        FillBrush(Some(f.clone()))
+                    } else {
+                        FillBrush::transparent()
+                    });
             }
         }
         if spec.opacity != 1.0 {
-            for (child_id, child_entity, _) in &child_spans {
-                if let Some(child_state) = builder.states.get_mut(*child_id) {
+            for child in &child_spans {
+                if let Some(child_state) = builder.states.get_mut(child.id) {
                     child_state.opacity = spec.opacity;
                 }
                 builder
                     .commands
-                    .entity(*child_entity)
+                    .entity(child.entity)
                     .insert(Opacity(spec.opacity));
             }
         }
         if spec.stroke_overridden {
-            for (child_id, child_entity, _) in &child_spans {
+            for child in &child_spans {
                 let sb = if let Some((c, w)) = spec.stroke {
                     StrokeBrush::new(c, w)
                 } else {
                     StrokeBrush::transparent()
                 };
-                if let Some(child_state) = builder.states.get_mut(*child_id) {
+                if let Some(child_state) = builder.states.get_mut(child.id) {
                     child_state.stroke = sb.clone();
                 }
-                builder.commands.entity(*child_entity).insert(sb);
+                builder.commands.entity(child.entity).insert(sb);
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
@@ -515,6 +528,12 @@ impl Canvas {
             match op {
                 LayoutOp::SetTranslation(translation) => {
                     transform.translation = *translation;
+                }
+                LayoutOp::SetScale(factor) => {
+                    transform.scale = original_transform.scale * *factor;
+                }
+                LayoutOp::SetRotation(radians) => {
+                    transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(*radians);
                 }
                 LayoutOp::MoveAnchorTo { target, anchor } => {
                     transform =

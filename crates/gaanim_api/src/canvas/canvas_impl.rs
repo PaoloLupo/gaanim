@@ -304,11 +304,7 @@ impl Canvas {
     ///
     /// Endpoints can be `DrawableHandle` references (their `.id` is used) or
     /// static `(f64, f64)` positions passed as tuples.
-    pub fn tracking_line(
-        &mut self,
-        from: CanvasEndpoint,
-        to: CanvasEndpoint,
-    ) -> DrawableHandle {
+    pub fn tracking_line(&mut self, from: CanvasEndpoint, to: CanvasEndpoint) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
         let id = handle.id;
         self.state
@@ -316,7 +312,11 @@ impl Canvas {
             .expect("canvas state poisoned")
             .active_mut()
             .ops
-            .push(Op::AttachTrackingLine { target: id, from, to });
+            .push(Op::AttachTrackingLine {
+                target: id,
+                from,
+                to,
+            });
         handle
     }
 
@@ -341,6 +341,10 @@ impl Canvas {
 mod tests {
     use super::*;
     use crate::canvas::ops::Op;
+    use bevy::prelude::World;
+    use gaanim_scene::MobjectId;
+    use gaanim_timeline::scene::SceneMember;
+    use gaanim_timeline::timeline::Timeline;
 
     #[test]
     fn play_with_lag_offsets_delays_and_cursor() {
@@ -376,5 +380,48 @@ mod tests {
         let guard = canvas.state.lock().expect("canvas state poisoned");
         let segment = guard.active();
         assert!((segment.cursor - 1.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cross_segment_transform_does_not_retag_source_in_initial_snapshot() {
+        let mut canvas = Canvas::new(1280, 720);
+        canvas.segment("first", None);
+        let circle = canvas.circle(40.0);
+        let diamond = canvas.rect(80.0, 80.0);
+        circle.transform(&diamond).duration(1.0);
+
+        canvas.segment(
+            "second",
+            Some(gaanim_timeline::transition::TransitionType::CrossFade { duration: 0.2 }),
+        );
+        let replacement = canvas.rect(120.0, 40.0);
+        circle.replacement_transform(&replacement).duration(1.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let timeline = world.resource::<Timeline>();
+        let first_scene = timeline
+            .scenes
+            .values()
+            .find(|scene| scene.name == "first")
+            .map(|scene| scene.id)
+            .expect("first scene");
+        let mut query = world.query::<(bevy::prelude::Entity, &MobjectId)>();
+        let circle_entity = query
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == circle.id).then_some(entity))
+            .expect("circle entity");
+
+        assert_eq!(
+            world
+                .get::<SceneMember>(circle_entity)
+                .map(|member| member.0),
+            Some(first_scene)
+        );
     }
 }

@@ -10,13 +10,13 @@ pub use signals::{
     position_binding_system, signal_binding_system,
 };
 pub use tween::{
-    AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState, evaluate_custom_tweens_system,
-    evaluate_tweens_system, sync_delta_time_system,
+    AnimatableLens, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
+    evaluate_custom_tweens_system, evaluate_tweens_system, sync_delta_time_system,
 };
 pub use updaters::{
     PlaybackState, TracedPath, TrackingEndpoint, TrackingLine, Updater, advance_x_updater,
-    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
-    traced_path_system, tracking_line_system, updater_system,
+    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater, traced_path_system,
+    tracking_line_system, updater_system,
 };
 pub use writing::{FillDrawProgress, PathSource, path_source_seed_added_system};
 

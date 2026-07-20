@@ -103,6 +103,16 @@ pub enum AnimationType {
     FadeTransform {
         target: ObjectId,
     },
+    /// Morph the source into the target's visual state while preserving the
+    /// source ObjectId, so later animations continue from the morphed result.
+    Transform {
+        target: ObjectId,
+    },
+    /// Morph the source into the target, then hide the source and reveal the
+    /// actual target object at the end of the animation.
+    ReplacementTransform {
+        target: ObjectId,
+    },
     /// Oscillating wiggle vibration (horizontal).
     Wiggle,
     /// Scale from 0 at a specific anchor point, growing to full size.

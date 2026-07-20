@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::font::{FontRegistry, OutlineCollector};
+use crate::shaper::HierarchyChild;
 
 // Typst imports
 use typst::{
@@ -496,7 +497,10 @@ fn compile_typst_source(
     let document = match result.output {
         Ok(doc) => doc,
         Err(errors) => {
-            return Err(errors.iter().map(|error| error.message.to_string()).collect());
+            return Err(errors
+                .iter()
+                .map(|error| error.message.to_string())
+                .collect());
         }
     };
 
@@ -553,10 +557,11 @@ fn spawn_cached_typst_hierarchy(
     source: &str,
     parent_id: ObjectId,
     mut next_id_fn: impl FnMut() -> ObjectId,
-    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    child_spans: &mut Vec<HierarchyChild>,
     cached: &CachedTypstHierarchy,
 ) -> (Entity, Bounds3D) {
-    let mut parent_bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), cached.parent_bounds);
+    let mut parent_bundle =
+        MobjectBundle::new(parent_id, kurbo::BezPath::new(), cached.parent_bounds);
     parent_bundle.tag = ObjectTag(format!("Typst('{}')", source));
     parent_bundle.fill = FillBrush(None);
     let parent_entity = commands.spawn(parent_bundle).id();
@@ -571,8 +576,19 @@ fn spawn_cached_typst_hierarchy(
 
         let child_entity = commands.spawn(bundle).id();
         commands.entity(child_entity).insert(child.span);
-        commands.entity(child_entity).set_parent_in_place(parent_entity);
-        child_spans.push((child_id, child_entity, child.span));
+        commands
+            .entity(child_entity)
+            .set_parent_in_place(parent_entity);
+        child_spans.push(HierarchyChild {
+            id: child_id,
+            entity: child_entity,
+            span: child.span,
+            path: Arc::new(child.path.clone()),
+            bounds: child.bounds,
+            transform: child.transform,
+            fill: child.fill.0.clone(),
+            stroke: child.stroke.clone(),
+        });
     }
 
     (parent_entity, cached.parent_bounds)
@@ -592,7 +608,7 @@ pub fn compile_typst_to_hierarchy(
     stroke: gaanim_scene::StrokeBrush,
     parent_id: ObjectId,
     next_id_fn: impl FnMut() -> ObjectId,
-    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    child_spans: &mut Vec<HierarchyChild>,
 ) -> (Entity, Bounds3D) {
     let cache_key = build_typst_cache_key(
         source, is_math, text_font, math_font, text_size, math_size, &fill, &stroke,
@@ -633,7 +649,14 @@ pub fn compile_typst_to_hierarchy(
         },
     };
 
-    spawn_cached_typst_hierarchy(commands, source, parent_id, next_id_fn, child_spans, &cached)
+    spawn_cached_typst_hierarchy(
+        commands,
+        source,
+        parent_id,
+        next_id_fn,
+        child_spans,
+        &cached,
+    )
 }
 
 #[cfg(test)]

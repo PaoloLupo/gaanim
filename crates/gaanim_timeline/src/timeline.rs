@@ -293,14 +293,15 @@ impl Timeline {
         let mut result = Vec::new();
         let time_key = OrderedFloat(time);
 
-        // A clip is active if: clip.start <= time && clip.start + clip.duration > time
+        // A clip is active if: clip.start <= time && clip.start + clip.duration >= time
         // Therefore, clip.start must be in the range [time - max_clip_duration, time]
+        // Note: uses >= to include zero-duration clips at their exact start time.
         let lower_bound = OrderedFloat((time - self.max_clip_duration).max(0.0));
 
         for (_, ids) in self.clip_index.range(lower_bound..=time_key) {
             for &id in ids {
                 if let Some(clip) = self.clips.get(id)
-                    && clip.end() > time
+                    && clip.end() >= time
                 {
                     result.push(clip);
                 }
@@ -408,14 +409,14 @@ impl Timeline {
                         if clip.end() <= self.current_time {
                             // Animation finished before or at seek head: apply final state.
                             let final_t = anim.rate_func.evaluate(1.0);
-                            apply_lens_spec(world, target_entity, &anim.lens, final_t);
+                            apply_lens_spec(world, target_entity, &anim.lens, final_t, true);
                         } else if clip.start <= self.current_time && clip.end() > self.current_time
                         {
                             // Animation is actively running at seek head: interpolate
                             let progress =
                                 ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
                             let t = anim.rate_func.evaluate(progress);
-                            apply_lens_spec(world, target_entity, &anim.lens, t);
+                            apply_lens_spec(world, target_entity, &anim.lens, t, false);
                         }
                     }
                 }
@@ -433,6 +434,18 @@ impl Timeline {
                             if updater.elapsed > clip.start {
                                 updater.elapsed = clip.start;
                             }
+                        }
+                    }
+                }
+                ClipPayload::SetSceneMember { target, scene } => {
+                    if clip.start <= self.current_time
+                        && let Some(&target_entity) = entity_map.get(&target)
+                        && let Ok(mut entity_mut) = world.get_entity_mut(target_entity)
+                    {
+                        if let Some(scene) = scene {
+                            entity_mut.insert(SceneMember(scene));
+                        } else {
+                            entity_mut.remove::<SceneMember>();
                         }
                     }
                 }
@@ -632,7 +645,9 @@ impl Timeline {
     }
 }
 
-fn capture_reactive_state(world: &mut World) -> HashMap<gaanim_core::ObjectId, ReactiveEntityState> {
+fn capture_reactive_state(
+    world: &mut World,
+) -> HashMap<gaanim_core::ObjectId, ReactiveEntityState> {
     let mut state = HashMap::new();
     let mut query = world.query::<(
         Entity,
@@ -673,7 +688,10 @@ fn restore_reactive_state(
 
         if let Some(mut updater) = world.get_mut::<gaanim_animation::Updater>(entity) {
             if let Some(elapsed) = state.updater_elapsed {
-                updater.elapsed = updater.stop_at.map(|stop_at| elapsed.min(stop_at)).unwrap_or(elapsed);
+                updater.elapsed = updater
+                    .stop_at
+                    .map(|stop_at| elapsed.min(stop_at))
+                    .unwrap_or(elapsed);
             }
             if updater.stop_at.is_none() {
                 updater.stop_at = state.updater_stop_at;
@@ -728,7 +746,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
     }
 
     for (trace_entity, _, _, _) in &traces {
-        if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity) {
+        if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
+        {
             traced_path.points.clear();
         }
         if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
@@ -761,7 +780,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
                 continue;
             };
 
-            if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
+            if let Some(mut traced_path) =
+                world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
             {
                 let should_add = match traced_path.points.last() {
                     Some(last_point) => last_point.distance(source_pos) >= *min_distance,
@@ -799,7 +819,13 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
 }
 
 /// Helper function to evaluate and apply a PropertyLensSpec to an entity.
-fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t: f64) {
+fn apply_lens_spec(
+    world: &mut World,
+    target: Entity,
+    lens: &PropertyLensSpec,
+    t: f64,
+    completed: bool,
+) {
     match lens {
         PropertyLensSpec::Translation { from, to } => {
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
@@ -871,6 +897,22 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
                     path.0 = std::sync::Arc::new(trimmed);
                 }
+            }
+        }
+        PropertyLensSpec::PathMorph { from, to } => {
+            let morphed = if completed {
+                to.clone()
+            } else {
+                gaanim_math::interpolate_paths_continuous(from, to, t)
+            };
+            if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                path.0 = std::sync::Arc::new(morphed.clone());
+            }
+            // Keep the stroke clipping source in lockstep with `Path2D`.
+            // A stale source geometry otherwise leaks the previous outline
+            // (notably the circle around a morphing diamond) during seeks.
+            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target) {
+                source.0 = std::sync::Arc::new(morphed);
             }
         }
         PropertyLensSpec::FillDrawProgress { from, to } => {
@@ -1069,41 +1111,50 @@ fn apply_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clip::ClipPayload;
+    use crate::clip::{AnimationSpec, ClipPayload};
     use crate::snapshot::WorldSnapshot;
     use gaanim_core::ObjectId;
-    use gaanim_math::SpatialTransform;
-    use gaanim_scene::MobjectId;
+    use gaanim_core::kurbo::BezPath;
+    use gaanim_math::{RateFunc, SpatialTransform};
+    use gaanim_scene::{MobjectId, PathSource};
+    use std::sync::Arc;
 
     #[test]
     fn remove_updater_clip_removes_component_after_timestamp() {
         let mut world = World::new();
         let object_id = ObjectId::from_raw(0);
-        let entity = world.spawn((
-            MobjectId(object_id),
-            SpatialTransform::default(),
-            gaanim_animation::orbit_updater(gaanim_core::glam::DVec3::ZERO, 10.0, 1.0),
-        )).id();
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                gaanim_animation::orbit_updater(gaanim_core::glam::DVec3::ZERO, 10.0, 1.0),
+            ))
+            .id();
 
         let snapshot = WorldSnapshot::capture(&mut world);
 
         let mut timeline = Timeline::default();
-        let track = timeline
-            .tracks
-            .insert_with_key(|id| crate::clip::Track {
-                id,
-                name: "Reactive".into(),
-                order: 0,
-                object_id: Some(object_id),
-                scene: None,
-            });
+        let track = timeline.tracks.insert_with_key(|id| crate::clip::Track {
+            id,
+            name: "Reactive".into(),
+            order: 0,
+            object_id: Some(object_id),
+            scene: None,
+        });
         timeline.add_keyframe(0.0, snapshot);
-        timeline.add_clip(track, 1.0, 0.0, ClipPayload::RemoveUpdater { target: object_id });
+        timeline.add_clip(
+            track,
+            1.0,
+            0.0,
+            ClipPayload::RemoveUpdater { target: object_id },
+        );
 
         timeline.seek(&mut world, 0.5);
         assert!(world.get::<gaanim_animation::Updater>(entity).is_some());
         assert_eq!(
-            world.get::<gaanim_animation::Updater>(entity).and_then(|u| u.stop_at),
+            world
+                .get::<gaanim_animation::Updater>(entity)
+                .and_then(|u| u.stop_at),
             None
         );
 
@@ -1113,5 +1164,109 @@ mod tests {
             .expect("updater should remain present but frozen");
         assert_eq!(updater.stop_at, Some(1.0));
         assert!((updater.elapsed - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scene_membership_event_is_applied_at_its_timestamp_and_reversible() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let mut timeline = Timeline::default();
+        let first_scene = timeline.add_scene("first");
+        let second_scene = timeline.add_scene("second");
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                SceneMember(first_scene),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let track = timeline.add_track("Scene membership", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            1.0,
+            0.0,
+            ClipPayload::SetSceneMember {
+                target: object_id,
+                scene: Some(second_scene),
+            },
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(first_scene)
+        );
+
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(second_scene)
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(first_scene)
+        );
+    }
+
+    #[test]
+    fn completed_spring_morph_commits_exact_target_path() {
+        let mut from = BezPath::new();
+        from.move_to((0.0, 0.0));
+        from.line_to((10.0, 0.0));
+        from.line_to((5.0, 10.0));
+        from.close_path();
+
+        let mut to = BezPath::new();
+        to.move_to((0.0, 0.0));
+        to.curve_to((0.0, 8.0), (10.0, 8.0), (10.0, 0.0));
+        to.close_path();
+
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                Path2D(Arc::new(from.clone())),
+                PathSource(Arc::new(from.clone())),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Morph", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::PathMorph {
+                    from,
+                    to: to.clone(),
+                },
+                rate_func: RateFunc::Spring {
+                    stiffness: 90.0,
+                    damping: 12.0,
+                },
+                delay: 0.0,
+                label: Some("Transform".into()),
+            }),
+        );
+
+        timeline.seek(&mut world, 0.5);
+        let active_path = world.get::<Path2D>(entity).unwrap().0.clone();
+        assert_eq!(world.get::<PathSource>(entity).unwrap().0, active_path);
+        assert_ne!(active_path.as_ref(), &to);
+
+        timeline.seek(&mut world, 1.0);
+
+        assert_eq!(world.get::<Path2D>(entity).unwrap().0.as_ref(), &to);
+        assert_eq!(world.get::<PathSource>(entity).unwrap().0.as_ref(), &to);
     }
 }

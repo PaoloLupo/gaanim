@@ -95,6 +95,14 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
     }
 
+    pub fn scaled(self, factor: f64) -> Self {
+        self.push_layout(LayoutOp::SetScale(factor))
+    }
+
+    pub fn rotated(self, radians: f64) -> Self {
+        self.push_layout(LayoutOp::SetRotation(radians))
+    }
+
     pub fn at_anchor(self, x: f64, y: f64, anchor: Anchor) -> Self {
         self.push_layout(LayoutOp::MoveAnchorTo {
             target: DVec3::new(x, y, 0.0),
@@ -145,11 +153,13 @@ impl DrawableHandle {
     // -- Internal helpers --
 
     fn anim(&self, ty: AnimationType) -> Anim {
-        Anim::queued(self.id, ty, self.state.clone(), self.segment_idx)
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::queued(self.id, ty, self.state.clone(), active_idx)
     }
 
     fn anim_dur(&self, ty: AnimationType, dur: Option<f64>) -> Anim {
-        Anim::queued(self.id, ty, self.state.clone(), self.segment_idx).with_duration(dur)
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::queued(self.id, ty, self.state.clone(), active_idx).with_duration(dur)
     }
 
     // -- Animation methods (return Anim, auto-enqueued) --
@@ -297,6 +307,14 @@ impl DrawableHandle {
 
     pub fn fade_transform(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::FadeTransform { target: target.id })
+    }
+
+    pub fn transform(&self, target: &DrawableHandle) -> Anim {
+        self.anim(AnimationType::Transform { target: target.id })
+    }
+
+    pub fn replacement_transform(&self, target: &DrawableHandle) -> Anim {
+        self.anim(AnimationType::ReplacementTransform { target: target.id })
     }
 
     // -- Reactive methods --

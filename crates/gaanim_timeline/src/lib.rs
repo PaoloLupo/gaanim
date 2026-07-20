@@ -144,8 +144,8 @@ pub fn timeline_playback_system(
 
 /// System: Handles user input (keyboard, mouse) to navigate slide breakpoints in presentation mode.
 pub fn presentation_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    mouse: Option<Res<ButtonInput<MouseButton>>>,
     mut timeline: ResMut<Timeline>,
 ) {
     if timeline.breakpoints.is_empty() || timeline.ignore_input {
@@ -153,16 +153,27 @@ pub fn presentation_input_system(
     }
 
     let mut should_advance = false;
-    if keyboard.just_pressed(KeyCode::Space)
-        || keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::ArrowRight)
-        || mouse.just_pressed(MouseButton::Left)
+    let key_pressed = |key| {
+        keyboard
+            .as_ref()
+            .is_some_and(|keyboard| keyboard.just_pressed(key))
+    };
+    let mouse_pressed = |button| {
+        mouse
+            .as_ref()
+            .is_some_and(|mouse| mouse.just_pressed(button))
+    };
+
+    if key_pressed(KeyCode::Space)
+        || key_pressed(KeyCode::Enter)
+        || key_pressed(KeyCode::ArrowRight)
+        || mouse_pressed(MouseButton::Left)
     {
         should_advance = true;
     }
 
     let mut should_go_back = false;
-    if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::Backspace) {
+    if key_pressed(KeyCode::ArrowLeft) || key_pressed(KeyCode::Backspace) {
         should_go_back = true;
     }
 
@@ -220,5 +231,21 @@ pub fn timeline_seek_system(world: &mut World) {
             // Re-insert the Timeline resource back into the world
             world.insert_resource(timeline);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presentation_controls_are_optional_in_headless_apps() {
+        let mut app = App::new();
+        app.init_resource::<Timeline>()
+            .add_systems(Update, presentation_input_system);
+
+        assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
+        assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
+        app.update();
     }
 }

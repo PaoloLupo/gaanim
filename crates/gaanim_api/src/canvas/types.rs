@@ -115,6 +115,8 @@ pub enum SpawnKind {
 #[derive(Debug, Clone)]
 pub enum LayoutOp {
     SetTranslation(DVec3),
+    SetScale(f64),
+    SetRotation(f64),
     MoveAnchorTo {
         target: DVec3,
         anchor: Anchor,

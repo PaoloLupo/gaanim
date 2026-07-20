@@ -1636,6 +1636,7 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
         ClipPayload::SceneStart(_) => Color32::from_rgb(50, 180, 100),
         ClipPayload::SceneEnd(_) => Color32::from_rgb(180, 50, 50),
         ClipPayload::RemoveUpdater { .. } => Color32::from_rgb(120, 120, 220),
+        ClipPayload::SetSceneMember { .. } => Color32::from_rgb(80, 160, 180),
         ClipPayload::Transition { .. } => Color32::from_rgb(200, 200, 50),
     }
 }
@@ -1657,6 +1658,7 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
         PropertyLensSpec::PathFollow { .. } => Color32::from_rgb(26, 188, 156),
         PropertyLensSpec::SignalFloat { .. } => Color32::from_rgb(180, 180, 50),
         PropertyLensSpec::PathRange { .. } => Color32::from_rgb(255, 105, 180),
+        PropertyLensSpec::PathMorph { .. } => Color32::from_rgb(100, 149, 237),
         PropertyLensSpec::Custom { .. } => Color32::from_rgb(200, 200, 200),
     }
 }
@@ -1684,6 +1686,7 @@ fn clip_label(payload: &ClipPayload) -> String {
                 PropertyLensSpec::PathFollow { .. } => "Follow",
                 PropertyLensSpec::SignalFloat { .. } => "Signal",
                 PropertyLensSpec::PathRange { .. } => "Flash",
+                PropertyLensSpec::PathMorph { .. } => "Morph",
                 PropertyLensSpec::Custom { type_name, .. } => type_name.as_str(),
             };
             n.to_string()
@@ -1703,6 +1706,7 @@ fn clip_label(payload: &ClipPayload) -> String {
         ClipPayload::SceneStart(_) => "Scene▶".into(),
         ClipPayload::SceneEnd(_) => "Scene◼".into(),
         ClipPayload::RemoveUpdater { .. } => "StopUpdater".into(),
+        ClipPayload::SetSceneMember { .. } => "SceneMember".into(),
         ClipPayload::Transition { .. } => "Transition".into(),
     }
 }

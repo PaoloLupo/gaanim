@@ -106,6 +106,12 @@ impl PyDrawable {
     fn at(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().at(x, y))
     }
+    fn scaled(&self, factor: f64) -> Self {
+        Self(self.0.clone().scaled(factor))
+    }
+    fn rotated(&self, radians: f64) -> Self {
+        Self(self.0.clone().rotated(radians))
+    }
     fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> Self {
         Self(self.0.clone().at_anchor(x, y, anchor.0))
     }
@@ -251,6 +257,21 @@ impl PyDrawable {
     fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.wiggle(duration),
+        }
+    }
+    fn fade_transform(&self, target: &PyDrawable) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.fade_transform(&target.0),
+        }
+    }
+    fn transform(&self, target: &PyDrawable) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.transform(&target.0),
+        }
+    }
+    fn replacement_transform(&self, target: &PyDrawable) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.replacement_transform(&target.0),
         }
     }
 

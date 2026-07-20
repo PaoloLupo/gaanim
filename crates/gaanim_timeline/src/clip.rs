@@ -105,6 +105,12 @@ pub enum ClipPayload {
         /// Target object whose `Updater` component should be removed.
         target: ObjectId,
     },
+    /// Changes an object's scene membership at this exact timeline position.
+    /// Snapshot restore makes the event reversible when scrubbing backwards.
+    SetSceneMember {
+        target: ObjectId,
+        scene: Option<SceneId>,
+    },
     /// A scene transition spanning the boundary between two scenes.
     Transition {
         /// The outgoing scene.
@@ -170,6 +176,10 @@ pub enum PropertyLensSpec {
     PathCompletion {
         from: f64,
         to: f64,
+    },
+    PathMorph {
+        from: BezPath,
+        to: BezPath,
     },
     /// Cross-fade the fill alpha from `from` to `to` (both in `[0, 1]`).
     /// Used by the Write animation to reveal the fill after the path
@@ -249,6 +259,11 @@ impl PropertyLensSpec {
             Self::PathCompletion { from, to } => PropertyLens::PathCompletion {
                 from: *from,
                 to: *to,
+            },
+            Self::PathMorph { from, to } => PropertyLens::PathMorph {
+                from: from.clone(),
+                to: to.clone(),
+                table: gaanim_animation::MorphTable,
             },
             Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
                 from: *from,
