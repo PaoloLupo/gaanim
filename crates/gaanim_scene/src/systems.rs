@@ -1,7 +1,9 @@
 use crate::components::{
     FillBrush, GlobalOpacity, GroupMarker, LocalBounds, Opacity, StrokeBrush, WorldBounds,
 };
-use bevy::prelude::{Added, Changed, ChildOf, Entity, Local, Or, ParamSet, Query, With, Without};
+use bevy::prelude::{
+    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, With, Without,
+};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 
 /// Run condition: skip transform propagation when no local transform has changed.
@@ -25,54 +27,43 @@ pub fn has_transform_changes(
 /// Under Bevy 0.18, standard `Parent`/`Children` components are replaced with the highly
 /// efficient relationship-based `ChildOf` system, which we target here directly.
 ///
-/// # Performance
-/// The root pass only processes entities whose `SpatialTransform` actually changed
-/// or were newly added. The child pass still iterates all children to handle parent
-/// chain changes, but the entire system is skipped via `run_if(has_transform_changes)`
-/// when no entity's local transform was modified.
-#[allow(clippy::type_complexity)]
+/// Descendants are updated recursively in parent-before-child order. This prevents
+/// grandchildren (for example text glyphs inside a grouped text object) from using
+/// their parent's transform from the previous frame.
 pub fn transform_propagation_system(
-    mut param_set: ParamSet<(
-        // P0: Root entities whose local transform changed
-        Query<
-            (&SpatialTransform, &mut GlobalSpatialTransform),
-            (
-                Without<ChildOf>,
-                Or<(Changed<SpatialTransform>, Added<SpatialTransform>)>,
-            ),
-        >,
-        // P1: Child entities parent lookup query
-        Query<(Entity, &ChildOf), With<SpatialTransform>>,
-        // P2: General transform query for hierarchy resolution
-        Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
-    )>,
-    mut children_to_update: Local<Vec<(Entity, Entity)>>,
+    roots: Query<Entity, (Without<ChildOf>, With<SpatialTransform>)>,
+    children_query: Query<&Children>,
+    mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
 ) {
-    // 1. Root pass: Only process roots whose local transform changed or were added
-    for (local, mut global) in param_set.p0().iter_mut() {
-        *global = GlobalSpatialTransform::from_local(local);
+    for root in &roots {
+        propagate_transforms_recursive(root, None, &children_query, &mut transforms);
     }
+}
 
-    // 2. Child collection: Fetch child-parent entity pairs
-    children_to_update.clear();
-    children_to_update.extend(param_set.p1().iter().map(|(e, c)| (e, c.parent())));
+fn propagate_transforms_recursive(
+    entity: Entity,
+    parent_global: Option<GlobalSpatialTransform>,
+    children_query: &Query<&Children>,
+    transforms: &mut Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+) {
+    let Ok((local, mut global)) = transforms.get_mut(entity) else {
+        return;
+    };
+    *global = parent_global
+        .as_ref()
+        .map(|parent| GlobalSpatialTransform::from_parent_and_local(parent, local))
+        .unwrap_or_else(|| GlobalSpatialTransform::from_local(local));
+    let current_global = *global;
+    drop(global);
 
-    // 3. Child propagation pass: Multiply parent global transforms down the tree
-    let mut transforms = param_set.p2();
-    for &(child_entity, parent_entity) in children_to_update.iter() {
-        if let Ok([child_data, parent_data]) =
-            transforms.get_many_mut([child_entity, parent_entity])
-        {
-            let (child_local, mut child_global) = child_data;
-            let (_, parent_global) = parent_data;
-
-            *child_global =
-                GlobalSpatialTransform::from_parent_and_local(&parent_global, child_local);
-        } else {
-            // Fallback: If parent's global transform cannot be read, treat child as root
-            if let Ok((local, mut global)) = transforms.get_mut(child_entity) {
-                *global = GlobalSpatialTransform::from_local(local);
-            }
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            propagate_transforms_recursive(
+                *child,
+                Some(current_global),
+                children_query,
+                transforms,
+            );
         }
     }
 }
@@ -83,44 +74,32 @@ pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Op
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.18's `ChildOf` relation.
-#[allow(clippy::type_complexity)]
 pub fn opacity_propagation_system(
-    mut param_set: ParamSet<(
-        // P0: Root entities whose local opacity changed
-        Query<
-            (&Opacity, &mut GlobalOpacity),
-            (Without<ChildOf>, Or<(Changed<Opacity>, Added<Opacity>)>),
-        >,
-        // P1: Child entities parent lookup query
-        Query<(Entity, &ChildOf), With<Opacity>>,
-        // P2: General opacity query for hierarchy resolution
-        Query<(&Opacity, &mut GlobalOpacity)>,
-    )>,
-    mut children_to_update: Local<Vec<(Entity, Entity)>>,
+    roots: Query<Entity, (Without<ChildOf>, With<Opacity>)>,
+    children_query: Query<&Children>,
+    mut opacities: Query<(&Opacity, &mut GlobalOpacity)>,
 ) {
-    // 1. Root pass: Only process roots whose opacity changed or were added
-    for (local, mut global) in param_set.p0().iter_mut() {
-        global.0 = local.0;
+    for root in &roots {
+        propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities);
     }
+}
 
-    // 2. Child collection: Fetch child-parent entity pairs
-    children_to_update.clear();
-    children_to_update.extend(param_set.p1().iter().map(|(e, c)| (e, c.parent())));
+fn propagate_opacities_recursive(
+    entity: Entity,
+    parent_opacity: f32,
+    children_query: &Query<&Children>,
+    opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
+) {
+    let Ok((local, mut global)) = opacities.get_mut(entity) else {
+        return;
+    };
+    global.0 = local.0 * parent_opacity;
+    let current_opacity = global.0;
+    drop(global);
 
-    // 3. Child propagation pass: Multiply parent opacity down the tree
-    let mut opacities = param_set.p2();
-    for &(child_entity, parent_entity) in children_to_update.iter() {
-        if let Ok([child_data, parent_data]) = opacities.get_many_mut([child_entity, parent_entity])
-        {
-            let (child_local, mut child_global) = child_data;
-            let (_, parent_global) = parent_data;
-
-            child_global.0 = child_local.0 * parent_global.0;
-        } else {
-            // Fallback: If parent is un-configured or missing, treat child as root
-            if let Ok((local, mut global)) = opacities.get_mut(child_entity) {
-                global.0 = local.0;
-            }
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            propagate_opacities_recursive(*child, current_opacity, children_query, opacities);
         }
     }
 }
@@ -294,5 +273,54 @@ fn propagate_style_recursive(
         }
         // Recurse into children of children
         propagate_style_recursive(child, fill_val, stroke_val, children_query, style_query);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::{BuildChildrenTransformExt, Schedule, World};
+
+    #[test]
+    fn nested_descendants_receive_current_transform_and_opacity() {
+        let mut world = World::new();
+        let group = world
+            .spawn((
+                SpatialTransform::new_2d(10.0, 0.0),
+                GlobalSpatialTransform::default(),
+                Opacity(0.5),
+                GlobalOpacity::default(),
+            ))
+            .id();
+        let text = world
+            .spawn((
+                SpatialTransform::new_2d(2.0, 0.0),
+                GlobalSpatialTransform::default(),
+                Opacity(0.4),
+                GlobalOpacity::default(),
+            ))
+            .id();
+        let glyph = world
+            .spawn((
+                SpatialTransform::new_2d(3.0, 0.0),
+                GlobalSpatialTransform::default(),
+                Opacity(0.25),
+                GlobalOpacity::default(),
+            ))
+            .id();
+        world.entity_mut(text).set_parent_in_place(group);
+        world.entity_mut(glyph).set_parent_in_place(text);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((transform_propagation_system, opacity_propagation_system));
+        schedule.run(&mut world);
+
+        let tx = world
+            .get::<GlobalSpatialTransform>(glyph)
+            .unwrap()
+            .affine_2d
+            .as_coeffs()[4];
+        assert!((tx - 15.0).abs() < f64::EPSILON);
+        assert!((world.get::<GlobalOpacity>(glyph).unwrap().0 - 0.05).abs() < f32::EPSILON);
     }
 }
