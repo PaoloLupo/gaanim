@@ -81,6 +81,18 @@ scene.play([rect.fade_out().duration(0.5)])
 Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
 connect them, and `scene.slide()` to add a presentation breakpoint.
 
+== Camera
+
+```python
+scene.camera_pan_to(-160, 40, duration=0.8)
+scene.camera_zoom_to(1.5, duration=0.6)
+scene.camera_frame_to(circle, margin=48, duration=0.9)
+scene.camera_rotate_to(0.15, duration=0.5)
+```
+
+`camera_frame_to` derives a pan and orthographic zoom from the target's current
+bounds, keeping it inside the viewport with the requested margin.
+
 == Output
 
 ```python

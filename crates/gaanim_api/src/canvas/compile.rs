@@ -37,6 +37,9 @@ impl Canvas {
         let mut builder = SceneBuilder::new(commands, timeline, font_registry, text_config);
         let mut scene_ids: Vec<SceneId> = Vec::new();
         let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
+        let mut camera_position = DVec3::ZERO;
+        let mut camera_zoom = 1.0;
+        let mut camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.units.frame_bounds(self.width, self.height);
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
@@ -50,7 +53,15 @@ impl Canvas {
 
         for seg in &segments {
             scene_ids.push(builder.begin_scene(&seg.name));
-            Self::replay_seg(&mut builder, seg, &mut id_map, frame_bounds);
+            Self::replay_seg(
+                &mut builder,
+                seg,
+                &mut id_map,
+                frame_bounds,
+                &mut camera_position,
+                &mut camera_zoom,
+                &mut camera_rotation,
+            );
             builder.end_scene();
         }
 
@@ -110,6 +121,9 @@ impl Canvas {
         seg: &Segment,
         id_map: &mut HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
+        camera_position: &mut DVec3,
+        camera_zoom: &mut f64,
+        camera_rotation: &mut gaanim_core::glam::DQuat,
     ) {
         for op in &seg.ops {
             match op {
@@ -133,7 +147,7 @@ impl Canvas {
                     builder.play_parallel(remapped);
                 }
                 Op::Wait(d) => builder.wait(*d),
-                Op::CameraPosition { from, to, duration } => {
+                Op::CameraPosition { to, duration, .. } => {
                     builder.timeline.add_clip(
                         builder.default_track,
                         builder.current_time,
@@ -142,7 +156,7 @@ impl Canvas {
                             gaanim_timeline::clip::AnimationSpec {
                                 target: gaanim_core::ObjectId::from_parts(0, 1),
                                 lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
-                                    from: *from,
+                                    from: *camera_position,
                                     to: *to,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
@@ -151,9 +165,10 @@ impl Canvas {
                             },
                         ),
                     );
+                    *camera_position = *to;
                     builder.wait(*duration);
                 }
-                Op::CameraZoom { from, to, duration } => {
+                Op::CameraZoom { to, duration, .. } => {
                     builder.timeline.add_clip(
                         builder.default_track,
                         builder.current_time,
@@ -162,7 +177,7 @@ impl Canvas {
                             gaanim_timeline::clip::AnimationSpec {
                                 target: gaanim_core::ObjectId::from_parts(0, 1),
                                 lens: gaanim_timeline::clip::PropertyLensSpec::CameraZoom {
-                                    from: *from,
+                                    from: *camera_zoom,
                                     to: *to,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
@@ -171,6 +186,77 @@ impl Canvas {
                             },
                         ),
                     );
+                    *camera_zoom = *to;
+                    builder.wait(*duration);
+                }
+                Op::CameraRotation { to, duration } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraRotation {
+                                    from: *camera_rotation,
+                                    to: *to,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    *camera_rotation = *to;
+                    builder.wait(*duration);
+                }
+                Op::CameraFrame {
+                    target,
+                    margin,
+                    duration,
+                } => {
+                    let Some(actual) = id_map.get(target).copied() else {
+                        continue;
+                    };
+                    let Some(state) = builder.states.get(actual) else {
+                        continue;
+                    };
+                    let bounds = state
+                        .bounds
+                        .transform_2d(&builder.get_world_transform(actual).to_affine_2d());
+                    let width = (bounds.width() + margin * 2.0).max(1.0);
+                    let height = (bounds.height() + margin * 2.0).max(1.0);
+                    let zoom = (frame_bounds.width() / width)
+                        .min(frame_bounds.height() / height)
+                        .max(0.01);
+                    let center = bounds.center();
+                    for lens in [
+                        gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
+                            from: *camera_position,
+                            to: center,
+                        },
+                        gaanim_timeline::clip::PropertyLensSpec::CameraZoom {
+                            from: *camera_zoom,
+                            to: zoom,
+                        },
+                    ] {
+                        builder.timeline.add_clip(
+                            builder.default_track,
+                            builder.current_time,
+                            *duration,
+                            gaanim_timeline::clip::ClipPayload::Animation(
+                                gaanim_timeline::clip::AnimationSpec {
+                                    target: gaanim_core::ObjectId::from_parts(0, 1),
+                                    lens,
+                                    rate_func: gaanim_math::RateFunc::Smooth,
+                                    delay: 0.0,
+                                    label: None,
+                                },
+                            ),
+                        );
+                    }
+                    *camera_position = center;
+                    *camera_zoom = zoom;
                     builder.wait(*duration);
                 }
                 Op::Slide => builder.slide(),

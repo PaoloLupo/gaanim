@@ -78,6 +78,7 @@ pub struct Canvas {
     pub margin: Margin,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
+    pub(crate) camera_rotation: gaanim_core::glam::DQuat,
     pub(crate) state: SharedCanvasState,
 }
 
@@ -92,6 +93,7 @@ impl Canvas {
             margin: Margin::default(),
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
+            camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
     }
@@ -251,8 +253,7 @@ impl Canvas {
 
     /// Pan the orthographic camera to a world-space point.
     pub fn camera_pan_to(&mut self, x: f64, y: f64, duration: f64) {
-        let from = self.camera_position;
-        let to = gaanim_core::glam::DVec3::new(x, y, from.z);
+        let to = gaanim_core::glam::DVec3::new(x, y, self.camera_position.z);
         self.camera_position = to;
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let duration = duration.max(0.0);
@@ -260,21 +261,42 @@ impl Canvas {
         guard
             .active_mut()
             .ops
-            .push(Op::CameraPosition { from, to, duration });
+            .push(Op::CameraPosition { to, duration });
     }
 
     /// Animate orthographic zoom. Values above one zoom in.
     pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) {
-        let from = self.camera_zoom;
         let to = zoom.max(0.01);
         self.camera_zoom = to;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraZoom { to, duration });
+    }
+
+    /// Pan and zoom to keep `target` inside the viewport with a uniform margin.
+    pub fn camera_frame_to(&mut self, target: &DrawableHandle, margin: f64, duration: f64) {
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraFrame {
+            target: target.id,
+            margin: margin.max(0.0),
+            duration,
+        });
+    }
+
+    /// Rotate the 2D camera around the viewport center, in radians.
+    pub fn camera_rotate_to(&mut self, angle: f64, duration: f64) {
+        let to = gaanim_core::glam::DQuat::from_rotation_z(angle);
+        self.camera_rotation = to;
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let duration = duration.max(0.0);
         guard.active_mut().cursor += duration;
         guard
             .active_mut()
             .ops
-            .push(Op::CameraZoom { from, to, duration });
+            .push(Op::CameraRotation { to, duration });
     }
 
     // -- Time controls --

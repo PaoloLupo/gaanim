@@ -241,6 +241,22 @@ impl PyScene {
             .camera_zoom_to(zoom, duration);
     }
 
+    #[pyo3(signature = (target, margin=40.0, duration=1.0))]
+    fn camera_frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_frame_to(&target.0, margin, duration);
+    }
+
+    #[pyo3(signature = (angle, duration=1.0))]
+    fn camera_rotate_to(&self, angle: f64, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_rotate_to(angle, duration);
+    }
+
     #[pyo3(signature = (name, transition=None))]
     fn segment(&self, name: &str, transition: Option<&PyTransitionType>) -> usize {
         self.inner

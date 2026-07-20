@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
@@ -76,13 +76,20 @@ pub(crate) enum Op {
     /// Advance the cursor by a duration (no animation).
     Wait(f64),
     CameraPosition {
-        from: DVec3,
         to: DVec3,
         duration: f64,
     },
     CameraZoom {
-        from: f64,
         to: f64,
+        duration: f64,
+    },
+    CameraRotation {
+        to: DQuat,
+        duration: f64,
+    },
+    CameraFrame {
+        target: ObjectId,
+        margin: f64,
         duration: f64,
     },
     /// Insert a slide breakpoint.
