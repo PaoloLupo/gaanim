@@ -139,6 +139,10 @@ dot = scene.point_on_curve(curve, t).fill(GOLD)
 scene.play([t.animate_to(1.0).duration(2.0)])
 ```
 
+`tangent_on_curve(curve, tracker, length=80)` returns a line centered on that
+same position and rotated to the current polyline segment. It uses the same
+native arc-length sampling as `point_on_curve`.
+
 Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
 object without covering it. `dimension_between(from, to, offset)` similarly
 keeps a technical measurement synchronized with moving endpoints.

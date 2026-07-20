@@ -252,6 +252,19 @@ impl PointOnCurve {
     }
 }
 
+/// Keeps a line centered on a sampled curve and aligned with its tangent.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TangentOnCurve {
+    pub curve: Entity,
+    pub tracker: Entity,
+}
+
+impl TangentOnCurve {
+    pub fn new(curve: Entity, tracker: Entity) -> Self {
+        Self { curve, tracker }
+    }
+}
+
 /// Updates `PointOnCurve` bindings after reactive curve regenerators.
 pub fn point_on_curve_system(world: &mut World) {
     let mut updates = Vec::new();
@@ -280,7 +293,44 @@ pub fn point_on_curve_system(world: &mut World) {
     }
 }
 
+/// Updates tangent bindings after the curve and tracker have been updated.
+pub fn tangent_on_curve_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &TangentOnCurve)>();
+    for (target, binding) in query.iter(world) {
+        let Some(signal) = world.get::<FloatSignal>(binding.tracker) else {
+            continue;
+        };
+        let Some(path) = world.get::<gaanim_scene::Path2D>(binding.curve) else {
+            continue;
+        };
+        let Some((point, tangent)) = sample_polyline(path.0.as_ref(), signal.value) else {
+            continue;
+        };
+        let z = world
+            .get::<SpatialTransform>(target)
+            .map(|transform| transform.translation.z)
+            .unwrap_or(0.0);
+        updates.push((
+            target,
+            DVec3::new(point.x, point.y, z),
+            gaanim_core::glam::DQuat::from_rotation_z(tangent.y.atan2(tangent.x)),
+        ));
+    }
+
+    for (target, translation, rotation) in updates {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+            transform.translation = translation;
+            transform.rotation = rotation;
+        }
+    }
+}
+
 fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
+    sample_polyline(path, fraction).map(|(point, _)| point)
+}
+
+fn sample_polyline(path: &BezPath, fraction: f64) -> Option<(Point, gaanim_core::kurbo::Vec2)> {
     let mut segments = Vec::new();
     let mut current = None;
     for element in path.elements() {
@@ -307,11 +357,14 @@ fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
     let mut traversed = 0.0;
     for (start, end, length) in &segments {
         if distance <= traversed + length {
-            return Some(start.lerp(*end, (distance - traversed) / length));
+            return Some((
+                start.lerp(*end, (distance - traversed) / length),
+                *end - *start,
+            ));
         }
         traversed += length;
     }
-    segments.last().map(|(_, end, _)| *end)
+    segments.last().map(|(start, end, _)| (*end, *end - *start))
 }
 
 #[cfg(test)]
@@ -341,6 +394,19 @@ mod tests {
             world.get::<SpatialTransform>(target).unwrap().translation,
             DVec3::new(100.0, 100.0, 0.0),
         );
+
+        world.get_mut::<FloatSignal>(tracker).unwrap().value = 0.5;
+        let tangent = world
+            .spawn((
+                SpatialTransform::default(),
+                TangentOnCurve::new(curve, tracker),
+            ))
+            .id();
+        tangent_on_curve_system(&mut world);
+        let transform = world.get::<SpatialTransform>(tangent).unwrap();
+        assert_eq!(transform.translation, DVec3::new(100.0, 100.0, 0.0));
+        let direction = transform.rotation * DVec3::X;
+        assert!(direction.x.abs() < 1e-9 && (direction.y - 1.0).abs() < 1e-9);
 
         world.get_mut::<FloatSignal>(tracker).unwrap().value = 2.0;
         point_on_curve_system(&mut world);

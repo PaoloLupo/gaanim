@@ -174,6 +174,12 @@ pub(crate) enum Op {
         curve: ObjectId,
         tracker: ObjectId,
     },
+    /// Keep a line centered and tangent to a sampled curve.
+    AttachTangentOnCurve {
+        target: ObjectId,
+        curve: ObjectId,
+        tracker: ObjectId,
+    },
 }
 
 /// A tracking endpoint at the Canvas level (before entity resolution).
