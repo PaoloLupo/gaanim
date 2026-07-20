@@ -112,6 +112,33 @@ fn run_script_thread(
 /// pip-installed package.
 const BOOTSTRAP_GAANIM_PACKAGE: &str = "import sys, types\nimport gaanim_core\nif 'gaanim' not in sys.modules:\n    _pkg = types.ModuleType('gaanim')\n    _pkg.__path__ = []\n    for _n in dir(gaanim_core):\n        if not _n.startswith('_'):\n            setattr(_pkg, _n, getattr(gaanim_core, _n))\n    sys.modules['gaanim'] = _pkg\n";
 
+/// Execute one script solely to produce `Scene.snapshots()` artifacts.
+///
+/// A host channel is installed so a trailing `scene.render()` remains valid,
+/// but its payload is intentionally discarded: this command is headless.
+pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Result<(), String> {
+    let snapshot_dir = snapshot_dir
+        .to_str()
+        .ok_or_else(|| "snapshot directory is not UTF-8".to_string())?;
+    let (sender, _receiver) = crossbeam_channel::unbounded::<ReloadPayload>();
+    host::set_host_sender(Some(sender));
+
+    let result = Python::attach(|py| -> PyResult<()> {
+        py.run(
+            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
+            None,
+            None,
+        )?;
+        let os = py.import("os")?;
+        os.getattr("environ")?
+            .set_item("GAANIM_SNAPSHOTS", snapshot_dir)?;
+        run_script_file(py, script_path)
+    });
+
+    host::set_host_sender(None);
+    result.map_err(|error| error.to_string())
+}
+
 /// Execute a Python file by path inside the given interpreter, in a fresh
 /// `__main__` namespace so each re-run is isolated from the previous one.
 fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {

@@ -1,0 +1,23 @@
+[package]
+name = "gaanim_diff"
+version = "0.1.0"
+edition = "2024"
+description = "Sparse seek snapshots and portable visual regression reports for gaanim"
+
+[[bin]]
+name = "gaanim-diff"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe"]
+
+[dependencies]
+gaanim_api = { path = "../gaanim_api" }
+gaanim_export = { path = "../gaanim_export" }
+eframe = { version = "0.33.3", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = { workspace = true }

@@ -11,4 +11,5 @@ crate-type = ["rlib"]
 pyo3 = { version = "0.28", features = ["abi3-py312", "py-clone"] }
 gaanim_core = { path = "../gaanim_core" }
 gaanim_api = { path = "../gaanim_api" }
+gaanim_diff = { path = "../gaanim_diff", default-features = false }
 gaanim_timeline = { path = "../gaanim_timeline" }

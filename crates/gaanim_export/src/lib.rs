@@ -9,6 +9,8 @@ pub mod prelude {
         EncodingSpeed, ExportError, ExportFormat, VideoEncoder, detect_available_encoders,
         detect_best_encoder,
     };
-    pub use crate::exporter::{export_scene, export_scene_direct};
+    pub use crate::exporter::{
+        CapturedFrame, capture_scene_direct, export_scene, export_scene_direct,
+    };
     pub use crate::gpu::GpuContext;
 }

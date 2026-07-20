@@ -238,6 +238,14 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
+    /// Render exact timeline seeks into PNG snapshots and a comparison manifest.
+    fn snapshots(&self, directory: &str, times: Vec<f64>) -> PyResult<usize> {
+        let scene = self.inner.lock().expect("scene canvas poisoned").clone();
+        gaanim_diff::capture_canvas(scene, directory, &times)
+            .map(|manifest| manifest.snapshots.len())
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+    }
+
     // -- Reactive objects --
 
     fn value_tracker(&self, initial: f64) -> PyDrawable {

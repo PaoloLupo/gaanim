@@ -13,6 +13,15 @@ use crate::config::ExportConfig;
 use crate::encoder::{EncoderConfig, ExportError, ParallelEncoder, Result};
 use crate::gpu::GpuContext;
 
+/// An exact timeline seek rendered into an RGBA8 pixel buffer.
+#[derive(Debug)]
+pub struct CapturedFrame {
+    pub time: f64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 fn create_progress_bar(total_frames: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_frames);
     pb.set_style(
@@ -450,4 +459,105 @@ where
     println!("------------------------------------------------------------");
 
     Ok(())
+}
+
+/// Render a sparse set of exact timeline seeks with a single headless GPU context.
+///
+/// Unlike a PNG-sequence export, this does not advance at a fixed frame rate:
+/// every requested timestamp is applied directly through `Timeline::seek_request`.
+/// The returned buffers are ordered exactly like `times`.
+pub fn capture_scene_direct<F>(
+    config: ExportConfig,
+    times: &[f64],
+    setup_world_fn: F,
+) -> Result<Vec<CapturedFrame>>
+where
+    F: FnOnce(&mut World) + Send + Sync + 'static,
+{
+    if times.is_empty() {
+        return Err(ExportError::Capture(
+            "at least one snapshot timestamp is required".to_string(),
+        ));
+    }
+    if let Some(time) = times.iter().find(|time| !time.is_finite() || **time < 0.0) {
+        return Err(ExportError::Capture(format!(
+            "snapshot timestamp must be finite and non-negative: {time}"
+        )));
+    }
+
+    let mut gpu = GpuContext::new(config.width, config.height).map_err(ExportError::General)?;
+
+    let mut app = App::new();
+    app.add_plugins(bevy::prelude::MinimalPlugins)
+        .add_plugins(gaanim_scene::GaanimScenePlugin)
+        .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+        .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+        .add_plugins(gaanim_text::GaanimTextPlugin);
+
+    app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
+    app.add_systems(Startup, setup_scene_system);
+    app.finish();
+    app.cleanup();
+    app.update();
+
+    let duration = app.world().resource::<Timeline>().cached_duration;
+    if let Some(time) = times.iter().find(|time| **time > duration) {
+        return Err(ExportError::Capture(format!(
+            "snapshot timestamp {time:.6}s exceeds scene duration {duration:.6}s"
+        )));
+    }
+
+    let mut frames = Vec::with_capacity(times.len());
+    for &time in times {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+        app.update();
+
+        let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
+        let raw_scene =
+            gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref());
+
+        let (zoom, cam_x, cam_y) = camera
+            .as_ref()
+            .map(|camera| {
+                let zoom = match camera.projection {
+                    gaanim_math::Projection::Orthographic { zoom } => zoom,
+                    _ => 1.0,
+                };
+                (zoom, camera.position.x, camera.position.y)
+            })
+            .unwrap_or((1.0, 0.0, 0.0));
+
+        let mut scene = bevy_vello::vello::Scene::new();
+        let camera_to_vello =
+            kurbo::Affine::translate((config.width as f64 / 2.0, config.height as f64 / 2.0))
+                * kurbo::Affine::scale_non_uniform(zoom, -zoom)
+                * kurbo::Affine::translate((-cam_x, -cam_y));
+        scene.append(&raw_scene, Some(camera_to_vello));
+
+        let background = app
+            .world()
+            .get_resource::<ClearColor>()
+            .map(|clear| {
+                let rgba = clear.0.to_srgba();
+                bevy_vello::vello::peniko::Color::from_rgba8(
+                    (rgba.red * 255.0) as u8,
+                    (rgba.green * 255.0) as u8,
+                    (rgba.blue * 255.0) as u8,
+                    (rgba.alpha * 255.0) as u8,
+                )
+            })
+            .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
+
+        let rgba = gpu
+            .render_frame(&scene, background)
+            .map_err(ExportError::General)?;
+        frames.push(CapturedFrame {
+            time,
+            width: config.width,
+            height: config.height,
+            rgba,
+        });
+    }
+
+    Ok(frames)
 }

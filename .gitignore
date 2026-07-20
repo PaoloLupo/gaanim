@@ -20,3 +20,19 @@ __pycache__/
 /docs/assets/generated/
 /docs/target/
 /dist/
+
+# Visual regression baselines are intentional PNG fixtures. Candidate captures
+# and generated reports stay local.
+visual-tests/current/
+visual-tests/report/
+!visual-tests/baseline/
+!visual-tests/baseline/**/*.png
+
+# Per-example visual baselines. `current` and `report` are regenerated locally.
+tests/visual/**/current/
+tests/visual/**/report/
+!tests/
+!tests/visual/
+!tests/visual/**/
+!tests/visual/**/baseline/
+!tests/visual/**/baseline/**/*.png
