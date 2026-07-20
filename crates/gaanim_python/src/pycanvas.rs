@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 
-use gaanim_api::canvas::{Canvas as ApiCanvas, CanvasEndpoint, ImageCrop, ImageFit, ImageOptions};
+use gaanim_api::canvas::{
+    AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, ImageCrop, ImageFit, ImageOptions,
+};
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
@@ -187,19 +189,64 @@ impl PyScene {
                 .polyline(&points),
         )
     }
-    #[pyo3(signature = (x_range, y_range, grid=true, labels=true))]
+
+    #[pyo3(signature = (function, x, samples=160))]
+    fn function_graph(
+        &self,
+        function: Bound<'_, PyAny>,
+        x: (f64, f64),
+        samples: usize,
+    ) -> PyResult<PyDrawable> {
+        if samples < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "samples must be at least 2",
+            ));
+        }
+        let mut points = Vec::with_capacity(samples);
+        for index in 0..samples {
+            let t = index as f64 / (samples - 1) as f64;
+            let x_value = x.0 + (x.1 - x.0) * t;
+            let y_value: f64 = function.call1((x_value,))?.extract()?;
+            points.push((x_value, y_value));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline(&points),
+        ))
+    }
+    #[pyo3(signature = (x, y, *, grid=true, ticks=true, numbers=true, axis_color=None, grid_color=None, axis_width=3.0, grid_width=1.0))]
     fn axes(
         &self,
-        x_range: (f64, f64, f64),
-        y_range: (f64, f64, f64),
+        x: (f64, f64, f64),
+        y: (f64, f64, f64),
         grid: bool,
-        labels: bool,
+        ticks: bool,
+        numbers: bool,
+        axis_color: Option<PyColor>,
+        grid_color: Option<PyColor>,
+        axis_width: f64,
+        grid_width: f64,
     ) -> PyDrawable {
+        let config = AxesConfig {
+            grid,
+            ticks,
+            numbers,
+            axis_color: axis_color
+                .map(|color| color.0)
+                .unwrap_or_else(|| AxesConfig::default().axis_color),
+            grid_color: grid_color
+                .map(|color| color.0)
+                .unwrap_or_else(|| AxesConfig::default().grid_color),
+            axis_width: axis_width.max(0.0),
+            grid_width: grid_width.max(0.0),
+        };
         PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .axes(x_range, y_range, grid, labels),
+                .axes(x, y, config),
         )
     }
     fn text(&self, s: &str) -> PyDrawable {

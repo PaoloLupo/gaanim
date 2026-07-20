@@ -42,6 +42,32 @@ impl CoordinateSystem {
     }
 }
 
+/// Display and styling options for Cartesian axes.
+#[derive(Debug, Clone)]
+pub struct AxesConfig {
+    pub grid: bool,
+    pub ticks: bool,
+    pub numbers: bool,
+    pub axis_color: Color,
+    pub grid_color: Color,
+    pub axis_width: f64,
+    pub grid_width: f64,
+}
+
+impl Default for AxesConfig {
+    fn default() -> Self {
+        Self {
+            grid: true,
+            ticks: true,
+            numbers: true,
+            axis_color: Color::from_rgb8(0x20, 0x20, 0x20),
+            grid_color: Color::from_rgb8(0xC0, 0xC0, 0xC0),
+            axis_width: 3.0,
+            grid_width: 1.0,
+        }
+    }
+}
+
 /// Per-side canvas margin (in the same unit as the coordinate system).
 ///
 /// Layout operations like `to_edge` and `to_corner` respect these margins
@@ -236,8 +262,7 @@ pub enum SpawnKind {
     Axes {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
-        grid: bool,
-        labels: bool,
+        config: AxesConfig,
     },
     Text(String),
     Title(String),

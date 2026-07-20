@@ -48,7 +48,10 @@ rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
 rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
 measure = scene.dimension(-80, 80, 80, 80, 24)
 spring = scene.polyline([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
-axes = scene.axes((-5, 5, 1), (-3, 3, 1), grid=True, labels=True)
+axes = scene.axes(
+    x=(-5, 5, 1), y=(-3, 3, 1), grid=True, ticks=True, numbers=True,
+    axis_color=WHITE, grid_color="#6B7280", axis_width=3, grid_width=1,
+)
 logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
 icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```

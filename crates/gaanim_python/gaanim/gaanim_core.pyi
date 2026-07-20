@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import ClassVar, Optional, Sequence
+from typing import Callable, ClassVar, Optional, Sequence
 
 class Color:
     def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
@@ -158,12 +158,19 @@ class Scene:
     def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable: ...
     def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable: ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable: ...
+    def function_graph(self, function: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable: ...
     def axes(
         self,
-        x_range: tuple[float, float, float],
-        y_range: tuple[float, float, float],
+        x: tuple[float, float, float],
+        y: tuple[float, float, float],
+        *,
         grid: bool = True,
-        labels: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        axis_color: Optional[Color] = None,
+        grid_color: Optional[Color] = None,
+        axis_width: float = 3.0,
+        grid_width: float = 1.0,
     ) -> Drawable: ...
     def text(self, s: str) -> Drawable: ...
     def title(self, s: str) -> Drawable: ...

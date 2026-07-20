@@ -726,13 +726,19 @@ impl Canvas {
             SpawnKind::Axes {
                 x_range,
                 y_range,
-                grid,
-                labels,
+                config,
             } => {
-                let axes = builder.axes(*x_range, *y_range, *labels);
-                if *grid {
+                let axes = builder.axes(*x_range, *y_range, config.numbers, config.ticks);
+                if let Some(axis_state) = builder.states.get_mut(axes.id) {
+                    let stroke = StrokeBrush::new(config.axis_color, config.axis_width);
+                    axis_state.stroke = stroke.clone();
+                    builder.commands.entity(axis_state.entity).insert(stroke);
+                }
+                if config.grid {
                     let grid = Self::finish_spawn_builder(
-                        builder.number_plane(*x_range, *y_range, 3.0, 1.0),
+                        builder
+                            .number_plane(*x_range, *y_range, config.axis_width, config.grid_width)
+                            .stroke(config.grid_color, config.grid_width),
                         spec,
                     );
                     let group = builder.group(&[grid, axes]);

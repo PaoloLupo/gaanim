@@ -3044,6 +3044,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         &mut self,
         x_range: (f64, f64, f64),
         include_labels: bool,
+        include_ticks: bool,
         vertical: bool,
     ) -> MobjectRef {
         let (min, max, step) = x_range;
@@ -3055,21 +3056,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path.move_to(kurbo::Point::new(0.0, min));
             path.line_to(kurbo::Point::new(0.0, max));
 
-            let mut y = (min / step).ceil() * step;
-            while y <= max + 1e-9 {
-                path.move_to(kurbo::Point::new(-tick_len / 2.0, y));
-                path.line_to(kurbo::Point::new(tick_len / 2.0, y));
-                y += step;
+            if include_ticks {
+                let mut y = (min / step).ceil() * step;
+                while y <= max + 1e-9 {
+                    path.move_to(kurbo::Point::new(-tick_len / 2.0, y));
+                    path.line_to(kurbo::Point::new(tick_len / 2.0, y));
+                    y += step;
+                }
             }
         } else {
             path.move_to(kurbo::Point::new(min, 0.0));
             path.line_to(kurbo::Point::new(max, 0.0));
 
-            let mut x = (min / step).ceil() * step;
-            while x <= max + 1e-9 {
-                path.move_to(kurbo::Point::new(x, -tick_len / 2.0));
-                path.line_to(kurbo::Point::new(x, tick_len / 2.0));
-                x += step;
+            if include_ticks {
+                let mut x = (min / step).ceil() * step;
+                while x <= max + 1e-9 {
+                    path.move_to(kurbo::Point::new(x, -tick_len / 2.0));
+                    path.line_to(kurbo::Point::new(x, tick_len / 2.0));
+                    x += step;
+                }
             }
         }
 
@@ -3113,7 +3118,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
                 if let Some(state) = self.states.get_mut(label_ref.id) {
                     if vertical {
-                        state.transform = state.transform.shift_2d(-18.0, val);
+                        // Number labels are centered on their local origin. Place the
+                        // whole bounding box to the left of the tick, rather than
+                        // applying a fixed shift that lets wide values cross the axis.
+                        let x = -tick_len * 0.5 - 8.0 - state.bounds.width() * 0.5;
+                        state.transform = state.transform.shift_2d(x, val);
                     } else {
                         state.transform = state.transform.shift_2d(val, -18.0);
                     }
@@ -3134,9 +3143,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
         include_labels: bool,
+        include_ticks: bool,
     ) -> MobjectRef {
-        let x_axis = self.number_line(x_range, include_labels, false);
-        let y_axis = self.number_line(y_range, include_labels, true);
+        let x_axis = self.number_line(x_range, include_labels, include_ticks, false);
+        let y_axis = self.number_line(y_range, include_labels, include_ticks, true);
         self.group(&[x_axis, y_axis])
     }
 

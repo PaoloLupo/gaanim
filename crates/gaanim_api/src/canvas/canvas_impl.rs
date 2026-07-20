@@ -265,14 +265,12 @@ impl Canvas {
         &mut self,
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
-        grid: bool,
-        labels: bool,
+        config: crate::canvas::AxesConfig,
     ) -> DrawableHandle {
         self.spawn(SpawnKind::Axes {
             x_range,
             y_range,
-            grid,
-            labels,
+            config,
         })
     }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
