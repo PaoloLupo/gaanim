@@ -88,7 +88,11 @@ pub fn reload_listener_system(world: &mut World) {
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let target = saved_time.min(tl.cached_duration.max(0.0));
         tl.seek_request = Some(target);
-        tl.is_playing = if had_previous_timeline { was_playing } else { tl.cached_duration > 0.0 };
+        tl.is_playing = if had_previous_timeline {
+            was_playing
+        } else {
+            tl.cached_duration > 0.0
+        };
     }
 
     let now = world.resource::<Time>().elapsed_secs_f64();

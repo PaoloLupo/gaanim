@@ -378,8 +378,8 @@ pub fn tracking_line_system(world: &mut World) {
 fn resolve_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
     match ep {
         TrackingEndpoint::Static(pos) => Some(*pos),
-        TrackingEndpoint::Entity(entity) => {
-            world.get::<SpatialTransform>(*entity).map(|t| t.translation)
-        }
+        TrackingEndpoint::Entity(entity) => world
+            .get::<SpatialTransform>(*entity)
+            .map(|t| t.translation),
     }
 }

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_core::id::ObjectId;
 use gaanim_core::peniko;
@@ -115,7 +115,15 @@ impl Default for EditorState {
 /// exceeding Bevy's 16-parameter system limit.
 #[derive(SystemParam)]
 struct EditorQueries<'w, 's> {
-    entity: Query<'w, 's, (Entity, Option<&'static MobjectId>, Option<&'static ObjectTag>)>,
+    entity: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static MobjectId>,
+            Option<&'static ObjectTag>,
+        ),
+    >,
     children: Query<'w, 's, &'static Children>,
     group: Query<'w, 's, &'static GroupMarker>,
     transform: Query<'w, 's, &'static gaanim_math::SpatialTransform>,
@@ -588,13 +596,13 @@ fn editor_ui_system(
                                                     format!("{}x", p)
                                                 };
                                                 let btn = egui::Button::new(
-                                                    egui::RichText::new(label)
-                                                        .size(11.0)
-                                                        .color(if is_active {
+                                                    egui::RichText::new(label).size(11.0).color(
+                                                        if is_active {
                                                             egui::Color32::from_rgb(120, 200, 255)
                                                         } else {
                                                             egui::Color32::from_rgb(170, 170, 180)
-                                                        }),
+                                                        },
+                                                    ),
                                                 )
                                                 .min_size(egui::vec2(32.0, 22.0))
                                                 .corner_radius(4.0)
@@ -716,9 +724,7 @@ fn editor_ui_system(
                                             let export_btn = egui::Button::new(
                                                 egui::RichText::new("⬇ Export")
                                                     .size(11.0)
-                                                    .color(egui::Color32::from_rgb(
-                                                        150, 200, 255,
-                                                    )),
+                                                    .color(egui::Color32::from_rgb(150, 200, 255)),
                                             )
                                             .min_size(egui::vec2(60.0, 20.0))
                                             .corner_radius(4.0)
@@ -735,14 +741,17 @@ fn editor_ui_system(
                                         }
 
                                         // Always-on-top pin toggle
-                                        let pin_icon = if state.pinned_on_top { "📌" } else { "📍" };
+                                        let pin_icon =
+                                            if state.pinned_on_top { "📌" } else { "📍" };
                                         let pin_color = if state.pinned_on_top {
                                             egui::Color32::from_rgb(255, 200, 80)
                                         } else {
                                             egui::Color32::from_rgb(120, 120, 130)
                                         };
                                         let pin_btn = egui::Button::new(
-                                            egui::RichText::new(pin_icon).size(13.0).color(pin_color),
+                                            egui::RichText::new(pin_icon)
+                                                .size(13.0)
+                                                .color(pin_color),
                                         )
                                         .min_size(egui::vec2(24.0, 20.0))
                                         .corner_radius(4.0)

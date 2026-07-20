@@ -130,11 +130,31 @@ pub struct AxisMask {
 }
 
 impl AxisMask {
-    pub const X: Self = Self { x: true, y: false, z: false };
-    pub const Y: Self = Self { x: false, y: true, z: false };
-    pub const Z: Self = Self { x: false, y: false, z: true };
-    pub const XY: Self = Self { x: true, y: true, z: false };
-    pub const XYZ: Self = Self { x: true, y: true, z: true };
+    pub const X: Self = Self {
+        x: true,
+        y: false,
+        z: false,
+    };
+    pub const Y: Self = Self {
+        x: false,
+        y: true,
+        z: false,
+    };
+    pub const Z: Self = Self {
+        x: false,
+        y: false,
+        z: true,
+    };
+    pub const XY: Self = Self {
+        x: true,
+        y: true,
+        z: false,
+    };
+    pub const XYZ: Self = Self {
+        x: true,
+        y: true,
+        z: true,
+    };
 
     pub fn contains(self, other: Self) -> bool {
         (!other.x || self.x) && (!other.y || self.y) && (!other.z || self.z)
@@ -201,7 +221,9 @@ pub struct AlwaysRedrawRegen {
 }
 
 impl AlwaysRedrawRegen {
-    pub fn new(regen: impl Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync + 'static) -> Self {
+    pub fn new(
+        regen: impl Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync + 'static,
+    ) -> Self {
         Self {
             regen: Arc::new(regen),
         }
