@@ -264,6 +264,8 @@ pub enum LayoutOp {
     SetTranslation(DVec3),
     SetScale(f64),
     SetRotation(f64),
+    /// Scene-space point around which rotation and scaling are performed.
+    SetPivot(DVec3),
     MoveAnchorTo {
         target: DVec3,
         anchor: Anchor,

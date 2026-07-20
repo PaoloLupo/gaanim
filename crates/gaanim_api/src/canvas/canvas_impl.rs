@@ -752,4 +752,32 @@ mod tests {
             "the regenerated arrow path must reflect the signal value"
         );
     }
+
+    #[test]
+    fn group_pivot_is_preserved_in_the_compiled_transform() {
+        let mut canvas = Canvas::new(1280, 720);
+        let rail = canvas.line(40.0, 0.0, 140.0, 0.0);
+        let _mechanism = canvas.group(&[&rail]).with_pivot(100.0, -18.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut query = world.query::<(&MobjectId, &gaanim_math::SpatialTransform)>();
+        let transform = query
+            .iter(&world)
+            .find_map(|(_, transform)| {
+                (transform.anchor == gaanim_core::glam::DVec3::new(10.0, -18.0, 0.0))
+                    .then_some(transform)
+            })
+            .expect("group transform");
+
+        assert_eq!(
+            transform.anchor,
+            gaanim_core::glam::DVec3::new(10.0, -18.0, 0.0)
+        );
+    }
 }

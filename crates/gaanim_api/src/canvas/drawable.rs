@@ -113,6 +113,20 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetRotation(radians))
     }
 
+    /// Set the scene-space pivot used by rotations and uniform scaling.
+    ///
+    /// This is the natural way to rotate a mechanism around a known hinge or
+    /// disk center. The engine converts the point to the group's local anchor
+    /// after all initial layout has been resolved.
+    pub fn with_pivot(self, x: f64, y: f64) -> Self {
+        self.push_layout(LayoutOp::SetPivot(DVec3::new(x, y, 0.0)))
+    }
+
+    /// Alias for [`Self::with_pivot`].
+    pub fn pivot(self, x: f64, y: f64) -> Self {
+        self.with_pivot(x, y)
+    }
+
     pub fn at_anchor(self, x: f64, y: f64, anchor: Anchor) -> Self {
         self.push_layout(LayoutOp::MoveAnchorTo {
             target: DVec3::new(x, y, 0.0),

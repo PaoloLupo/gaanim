@@ -866,6 +866,7 @@ impl Canvas {
         let original_transform = state.transform;
         let entity = state.entity;
         let mut transform = original_transform;
+        let mut pivot_in_scene = None;
 
         for op in &spec.layout_ops {
             match op {
@@ -877,6 +878,9 @@ impl Canvas {
                 }
                 LayoutOp::SetRotation(radians) => {
                     transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(*radians);
+                }
+                LayoutOp::SetPivot(pivot) => {
+                    pivot_in_scene = Some(*pivot);
                 }
                 LayoutOp::MoveAnchorTo { target, anchor } => {
                     transform =
@@ -965,6 +969,12 @@ impl Canvas {
                     );
                 }
             }
+        }
+
+        if let Some(pivot) = pivot_in_scene {
+            // SpatialTransform stores anchors in local coordinates, while the
+            // public API accepts the stable scene-space point users see.
+            transform.anchor = pivot - transform.translation;
         }
 
         if transform != original_transform {

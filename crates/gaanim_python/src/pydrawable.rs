@@ -113,6 +113,12 @@ impl PyDrawable {
     fn rotated(&self, radians: f64) -> Self {
         Self(self.0.clone().rotated(radians))
     }
+    fn with_pivot(&self, x: f64, y: f64) -> Self {
+        Self(self.0.clone().with_pivot(x, y))
+    }
+    fn pivot(&self, x: f64, y: f64) -> Self {
+        Self(self.0.clone().pivot(x, y))
+    }
     fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> Self {
         Self(self.0.clone().at_anchor(x, y, anchor.0))
     }

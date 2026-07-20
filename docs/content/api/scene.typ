@@ -99,6 +99,15 @@ label = scene.text("moving label").attach_to(marker)
 marker.add_updater(Updater.orbit(0, 0, 120, 1.2))
 ```
 
+Groups and drawables can rotate or scale around a scene-space point through
+`with_pivot(x, y)` (also available as `pivot`). This is useful for a mechanism
+with a physical hinge:
+
+```python
+mechanism = scene.group([rail, spring, mass]).with_pivot(0, 0)
+scene.play([mechanism.rotate(PI / 3).duration(1.0)])
+```
+
 == Timeline
 
 `play` receives a list of animations; calls are sequential and animations in a
