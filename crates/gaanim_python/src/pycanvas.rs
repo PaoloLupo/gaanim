@@ -216,6 +216,33 @@ impl PyScene {
                 .polyline(&points),
         ))
     }
+
+    #[pyo3(signature = (function, t, samples=240))]
+    fn parametric_curve(
+        &self,
+        function: Bound<'_, PyAny>,
+        t: (f64, f64),
+        samples: usize,
+    ) -> PyResult<PyDrawable> {
+        if samples < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "samples must be at least 2",
+            ));
+        }
+        let mut points = Vec::with_capacity(samples);
+        for index in 0..samples {
+            let progress = index as f64 / (samples - 1) as f64;
+            let parameter = t.0 + (t.1 - t.0) * progress;
+            let point: (f64, f64) = function.call1((parameter,))?.extract()?;
+            points.push(point);
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline(&points),
+        ))
+    }
     #[pyo3(signature = (x, y, *, grid=true, ticks=true, numbers=true, axis_color=None, grid_color=None, axis_width=3.0, grid_width=1.0))]
     fn axes(
         &self,
@@ -468,6 +495,16 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .value_tracker(initial);
         PyValueTracker::new(handle, initial)
+    }
+
+    /// Create a dot positioned at the normalized arc-length of a sampled curve.
+    fn point_on_curve(&self, curve: &PyDrawable, tracker: &PyValueTracker) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .point_on_curve(&curve.0, &tracker.inner),
+        )
     }
 
     #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]

@@ -168,6 +168,12 @@ pub(crate) enum Op {
         sweep_scale: f64,
         sweep_offset: f64,
     },
+    /// Keep a point drawable at a normalized arc-length along a sampled curve.
+    AttachPointOnCurve {
+        target: ObjectId,
+        curve: ObjectId,
+        tracker: ObjectId,
+    },
 }
 
 /// A tracking endpoint at the Canvas level (before entity resolution).

@@ -514,6 +514,29 @@ impl Canvas {
         self.spawn(SpawnKind::ValueTracker(initial))
     }
 
+    /// Spawn a dot that follows `curve` at the normalized value of `tracker`.
+    ///
+    /// The tracker is clamped to `[0, 1]` and sampled by native arc length, so
+    /// `0` is the first polyline point and `1` is the last one.
+    pub fn point_on_curve(
+        &mut self,
+        curve: &DrawableHandle,
+        tracker: &DrawableHandle,
+    ) -> DrawableHandle {
+        let handle = self.dot(8.0);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPointOnCurve {
+                target: handle.id,
+                curve: curve.id,
+                tracker: tracker.id,
+            });
+        handle
+    }
+
     /// Creates a curved arrow whose sweep is regenerated from `tracker` on
     /// every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
     pub fn always_redraw_arc(

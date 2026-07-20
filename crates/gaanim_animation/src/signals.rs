@@ -1,5 +1,6 @@
 use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
 use gaanim_core::glam::DVec3;
+use gaanim_core::kurbo::{BezPath, PathEl, Point};
 use gaanim_core::peniko::Color;
 use gaanim_math::{Bounds3D, SpatialTransform};
 use std::collections::HashMap;
@@ -224,6 +225,129 @@ pub fn position_binding_system(world: &mut World) {
                 transform.translation.z = src_pos.z + offset.z;
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PointOnCurve — place a drawable at a normalized arc-length along a polyline
+// ---------------------------------------------------------------------------
+
+/// Keeps an entity positioned on a sampled curve using a normalized `FloatSignal`.
+///
+/// The curve is read as a `Path2D` and only its `MoveTo`/`LineTo` elements are
+/// considered. This deliberately keeps the binding native and suitable for
+/// polylines, function graphs, and parametric curves without calling Python per
+/// frame.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PointOnCurve {
+    /// Entity that owns the source `Path2D`.
+    pub curve: Entity,
+    /// Entity that owns the source `FloatSignal`.
+    pub tracker: Entity,
+}
+
+impl PointOnCurve {
+    pub fn new(curve: Entity, tracker: Entity) -> Self {
+        Self { curve, tracker }
+    }
+}
+
+/// Updates `PointOnCurve` bindings after reactive curve regenerators.
+pub fn point_on_curve_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &PointOnCurve)>();
+    for (target, binding) in query.iter(world) {
+        let Some(signal) = world.get::<FloatSignal>(binding.tracker) else {
+            continue;
+        };
+        let Some(path) = world.get::<gaanim_scene::Path2D>(binding.curve) else {
+            continue;
+        };
+        let Some(point) = point_at_polyline_fraction(path.0.as_ref(), signal.value) else {
+            continue;
+        };
+        let z = world
+            .get::<SpatialTransform>(target)
+            .map(|transform| transform.translation.z)
+            .unwrap_or(0.0);
+        updates.push((target, DVec3::new(point.x, point.y, z)));
+    }
+
+    for (target, translation) in updates {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+            transform.translation = translation;
+        }
+    }
+}
+
+fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
+    let mut segments = Vec::new();
+    let mut current = None;
+    for element in path.elements() {
+        match *element {
+            PathEl::MoveTo(point) => current = Some(point),
+            PathEl::LineTo(point) => {
+                if let Some(start) = current {
+                    let length = (point - start).hypot();
+                    if length > f64::EPSILON {
+                        segments.push((start, point, length));
+                    }
+                }
+                current = Some(point);
+            }
+            _ => {}
+        }
+    }
+
+    let total_length: f64 = segments.iter().map(|(_, _, length)| length).sum();
+    if total_length <= f64::EPSILON {
+        return None;
+    }
+    let distance = fraction.clamp(0.0, 1.0) * total_length;
+    let mut traversed = 0.0;
+    for (start, end, length) in &segments {
+        if distance <= traversed + length {
+            return Some(start.lerp(*end, (distance - traversed) / length));
+        }
+        traversed += length;
+    }
+    segments.last().map(|(_, end, _)| *end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn point_on_curve_uses_normalized_arc_length_and_clamps_tracker() {
+        let mut path = BezPath::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(100.0, 0.0));
+        path.line_to(Point::new(100.0, 300.0));
+
+        let mut world = World::new();
+        let curve = world.spawn(gaanim_scene::Path2D(Arc::new(path))).id();
+        let tracker = world.spawn(FloatSignal::new(0.5)).id();
+        let target = world
+            .spawn((
+                SpatialTransform::default(),
+                PointOnCurve::new(curve, tracker),
+            ))
+            .id();
+
+        point_on_curve_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(target).unwrap().translation,
+            DVec3::new(100.0, 100.0, 0.0),
+        );
+
+        world.get_mut::<FloatSignal>(tracker).unwrap().value = 2.0;
+        point_on_curve_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(target).unwrap().translation,
+            DVec3::new(100.0, 300.0, 0.0),
+        );
     }
 }
 

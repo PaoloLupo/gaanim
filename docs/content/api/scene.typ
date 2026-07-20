@@ -73,8 +73,20 @@ paths and basic shapes, solid fills/strokes, CSS,
 patterns, filters, masks, and individual source-group handles are not yet
 preserved.
 
-`axes(x_range, y_range, grid=True, labels=True)` creates Cartesian axes with
-optional grid lines and numeric labels. Ranges are `(minimum, maximum, step)`.
+`axes(x=..., y=..., *, grid=True, ticks=True, numbers=True, axis_color=...,
+grid_color=..., axis_width=3, grid_width=1)` creates Cartesian axes with
+independently configurable grid, tick marks, numeric labels, colors, and stroke
+widths. Ranges are `(minimum, maximum, step)`.
+
+`function_graph(function, x=(minimum, maximum), samples=160)` samples `y =
+function(x)` once while the scene is built and returns a regular vector path.
+`parametric_curve(function, t=(minimum, maximum), samples=240)` does the same
+for a function returning `(x, y)`, which is useful for orbits and phase curves.
+
+```python
+parabola = scene.function_graph(lambda x: 0.008 * x * x - 60, x=(-250, 150))
+orbit = scene.parametric_curve(lambda t: (180 * cos(t), 120 * sin(t)), t=(0, 2 * PI))
+```
 
 `arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`
 connects two points with an angular deflection; `curved_arrow_arc` follows an
@@ -114,6 +126,18 @@ scene.play([mechanism.rotate(PI / 3).duration(1.0)])
 `spring_between(from, to, coils=8, amplitude=12)` creates a native reactive
 spring. Each endpoint can be a drawable or an `(x, y)` tuple, so it follows a
 moving mass without a Python callback every frame.
+
+`point_on_curve(curve, tracker)` creates a dot whose position follows the
+normalized value of a `ValueTracker` along a sampled `polyline`,
+`function_graph`, or `parametric_curve`. The value is clamped to `[0, 1]` and
+measured by arc length, with no Python callback during playback.
+
+```python
+t = scene.value_tracker(0.0)
+curve = scene.parametric_curve(lambda u: (180 * cos(u), 100 * sin(2 * u)), t=(0, 2 * PI))
+dot = scene.point_on_curve(curve, t).fill(GOLD)
+scene.play([t.animate_to(1.0).duration(2.0)])
+```
 
 Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
 object without covering it. `dimension_between(from, to, offset)` similarly
