@@ -1,5 +1,6 @@
 //! Thin PyDrawable wrapper over gaanim_api DrawableHandle.
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
@@ -290,5 +291,34 @@ impl PyDrawable {
     /// Copy the source entity's Y position each frame.
     fn bind_y_from(&self, source: &PyDrawable) {
         self.0.bind_y_from(&source.0);
+    }
+
+    /// Copy the source entity's X position each frame.
+    fn bind_x_from(&self, source: &PyDrawable) {
+        self.0.bind_x_from(&source.0);
+    }
+
+    /// Keep this drawable centered on ``source`` each frame.
+    fn attach_to(&self, source: &PyDrawable) {
+        self.0.attach_to(&source.0);
+    }
+
+    /// Copy selected source axes each frame. ``axes`` accepts ``"x"``,
+    /// ``"y"``, ``"xy"`` (the default), or ``"xyz"``.
+    #[pyo3(signature = (source, axes="xy"))]
+    fn bind_position_from(&self, source: &PyDrawable, axes: &str) -> PyResult<()> {
+        let axes = match axes {
+            "x" => gaanim_api::canvas::AxisMask::X,
+            "y" => gaanim_api::canvas::AxisMask::Y,
+            "xy" => gaanim_api::canvas::AxisMask::XY,
+            "xyz" => gaanim_api::canvas::AxisMask::XYZ,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "axes must be one of: 'x', 'y', 'xy', or 'xyz'",
+                ));
+            }
+        };
+        self.0.bind_position_from(&source.0, axes);
+        Ok(())
     }
 }

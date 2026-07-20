@@ -1,4 +1,5 @@
 mod ops;
+pub use gaanim_animation::AxisMask;
 pub use ops::{CanvasEndpoint, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};

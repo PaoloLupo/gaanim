@@ -373,6 +373,19 @@ impl DrawableHandle {
             });
     }
 
+    /// Copy the source entity's X position each frame (after updaters run).
+    pub fn bind_x_from(&self, source: &DrawableHandle) {
+        self.bind_position_from(source, AxisMask::X);
+    }
+
+    /// Keep this drawable centered on `source` each frame.
+    ///
+    /// This is an exact XY position binding. It is useful for labels, markers,
+    /// and accents that should travel with an independently animated object.
+    pub fn attach_to(&self, source: &DrawableHandle) {
+        self.bind_position_from(source, AxisMask::XY);
+    }
+
     /// Copy the source entity's position on specified axes each frame.
     pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
         self.state
