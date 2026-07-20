@@ -7,7 +7,8 @@ use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
 use gaanim_math::{Bounds3D, EasingCurve, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
-    FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds,
+    FillBrush, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, StrokeBrush, Visible,
+    WorldBounds,
 };
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
@@ -2500,6 +2501,31 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         MobjectRef { id }
     }
 
+    /// Creates an SVG container before its child paths are spawned.
+    ///
+    /// Unlike retroactive grouping, children are parented at spawn time. This
+    /// matches text hierarchies and keeps the imported vector paths visible
+    /// while allowing the returned container to be transformed as one object.
+    pub fn svg_group(&mut self, paths: &[gaanim_objects::prelude::SvgPath]) -> MobjectRef {
+        let mut paths = paths.iter();
+        let Some(first) = paths.next() else {
+            return self
+                .svg_path(&gaanim_objects::prelude::SvgPath {
+                    id: String::new(),
+                    path: kurbo::BezPath::new(),
+                    bounds: Bounds3D::default(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                })
+                .spawn();
+        };
+        let root = self.svg_path(first).spawn();
+        for path in paths {
+            self.svg_path(path).spawn();
+        }
+        root
+    }
+
     /// Adds a child mobject to an existing group, adjusting its local transform.
     pub fn add_to_group(&mut self, group: MobjectRef, child: MobjectRef) {
         let (group_entity, group_transform) = match self.states.get(group.id) {
@@ -2563,9 +2589,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .insert(gaanim_scene::LocalBounds(new_bounds));
             }
         }
-
-        self.ensure_track(group.id);
-        self.ensure_track(child.id);
     }
 
     /// Arranges the immediate children of a group linearly.
@@ -2813,9 +2836,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub fn image(
         &mut self,
         image: gaanim_core::peniko::ImageData,
+        view: gaanim_objects::prelude::ImageView,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::image(id, image);
+        let bundle = gaanim_objects::primitives::image(id, image, view);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns one resolved vector path from an imported SVG document.
+    pub fn svg_path(
+        &mut self,
+        path: &gaanim_objects::prelude::SvgPath,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let mut bundle = MobjectBundle::new(id, path.path.clone(), path.bounds);
+        bundle.fill = FillBrush(path.fill.clone());
+        bundle.stroke = path.stroke.clone();
+        bundle.tag = ObjectTag(if path.id.is_empty() {
+            "SvgPath".into()
+        } else {
+            format!("SvgPath#{}", path.id)
+        });
         MobjectSpawnBuilder {
             builder: self,
             id,

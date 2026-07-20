@@ -6,12 +6,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
 use gaanim_core::peniko::Color;
+use gaanim_objects::prelude::SvgLoadError;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
-use crate::canvas::types::{Anim, CoordinateSystem, Margin, SpawnKind};
+use crate::canvas::types::{
+    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, SpawnKind,
+};
 
 /// Failures while decoding a raster image requested by `Canvas::image`.
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +25,8 @@ pub enum ImageLoadError {
         #[source]
         source: image::ImageError,
     },
+    #[error(transparent)]
+    Options(#[from] ImageOptionsError),
 }
 
 /// Process-local decoded texture cache. Each canvas still receives its own
@@ -71,6 +76,8 @@ pub struct Canvas {
     pub units: CoordinateSystem,
     pub theme: Option<String>,
     pub margin: Margin,
+    pub(crate) camera_position: gaanim_core::glam::DVec3,
+    pub(crate) camera_zoom: f64,
     pub(crate) state: SharedCanvasState,
 }
 
@@ -83,6 +90,8 @@ impl Canvas {
             theme: None,
             units: CoordinateSystem::Pixels,
             margin: Margin::default(),
+            camera_position: gaanim_core::glam::DVec3::ZERO,
+            camera_zoom: 1.0,
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
     }
@@ -209,10 +218,63 @@ impl Canvas {
     /// Source pixels are decoded once per canonical path and are displayed at
     /// their native pixel dimensions before `.scaled()` is applied.
     pub fn image(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, ImageLoadError> {
-        Ok(self.spawn(SpawnKind::Image(load_image(path)?)))
+        self.image_with_options(path, ImageOptions::default())
     }
+
+    /// Load an image with an optional target size, fit mode, and source crop.
+    pub fn image_with_options(
+        &mut self,
+        path: impl AsRef<Path>,
+        options: ImageOptions,
+    ) -> Result<DrawableHandle, ImageLoadError> {
+        let image = load_image(path)?;
+        let view = options.resolve(image.width, image.height)?;
+        Ok(self.spawn(SpawnKind::Image { image, view }))
+    }
+
+    /// Load an SVG as an animatable group of resolved vector paths.
+    ///
+    /// Basic shapes, paths, solid fills/strokes, transforms, CSS, `<use>`, and
+    /// `viewBox` are imported. Raster images and advanced SVG paint effects are
+    /// omitted by this vector-only importer.
+    pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
+        Ok(
+            self.spawn(SpawnKind::Svg(gaanim_objects::prelude::SvgDocument::load(
+                path,
+            )?)),
+        )
+    }
+
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
         self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+    }
+
+    /// Pan the orthographic camera to a world-space point.
+    pub fn camera_pan_to(&mut self, x: f64, y: f64, duration: f64) {
+        let from = self.camera_position;
+        let to = gaanim_core::glam::DVec3::new(x, y, from.z);
+        self.camera_position = to;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard
+            .active_mut()
+            .ops
+            .push(Op::CameraPosition { from, to, duration });
+    }
+
+    /// Animate orthographic zoom. Values above one zoom in.
+    pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) {
+        let from = self.camera_zoom;
+        let to = zoom.max(0.01);
+        self.camera_zoom = to;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let duration = duration.max(0.0);
+        guard.active_mut().cursor += duration;
+        guard
+            .active_mut()
+            .ops
+            .push(Op::CameraZoom { from, to, duration });
     }
 
     // -- Time controls --

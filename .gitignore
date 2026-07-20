@@ -37,6 +37,10 @@ tests/visual/**/report/
 !tests/visual/**/baseline/
 !tests/visual/**/baseline/**/*.png
 
+# Source assets for self-contained visual examples. Generated SVG renders remain ignored.
+!tests/assets/
+!tests/assets/**/*.svg
+
 # These must come after the parent-directory exceptions above.
 tests/visual/**/current/
 tests/visual/**/report/

@@ -7,6 +7,23 @@ use gaanim_scene::{
     RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible,
 };
 
+/// The source pixels and destination geometry for an image mobject.
+///
+/// Source coordinates use the conventional top-left/Y-down pixel space. The
+/// destination is expressed in gaanim scene units and remains centred on the
+/// mobject origin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageView {
+    pub source_x: f64,
+    pub source_y: f64,
+    pub source_width: f64,
+    pub source_height: f64,
+    pub display_width: f64,
+    pub display_height: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+}
+
 /// A standard, complete Bevy Bundle representing a 2D vector Mobject.
 ///
 /// This groups all essential visual, spatial, and layering components together,
@@ -68,11 +85,13 @@ impl MobjectBundle {
 /// The decoded pixels are held in `RasterImage`, so the renderer can issue a
 /// native Vello image draw rather than approximating the texture as a vector
 /// fill.
-pub fn image(id: ObjectId, image: gaanim_core::peniko::ImageData) -> MobjectBundle {
-    let width = f64::from(image.width);
-    let height = f64::from(image.height);
-    let w2 = width * 0.5;
-    let h2 = height * 0.5;
+pub fn image(
+    id: ObjectId,
+    image: gaanim_core::peniko::ImageData,
+    view: ImageView,
+) -> MobjectBundle {
+    let w2 = view.display_width * 0.5;
+    let h2 = view.display_height * 0.5;
     let path = kurbo::Rect::new(-w2, -h2, w2, h2).to_path(0.1);
     let bounds = Bounds3D::new_2d(-w2, -h2, w2, h2);
     let mut bundle = MobjectBundle::new(id, path, bounds);
@@ -81,7 +100,14 @@ pub fn image(id: ObjectId, image: gaanim_core::peniko::ImageData) -> MobjectBund
     bundle.raster_image = RasterImage::new(
         gaanim_core::peniko::ImageBrush::new(image),
         // Image pixels are top-left/Y-down; gaanim mobjects are centred/Y-up.
-        kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, -w2, h2]),
+        kurbo::Affine::new([
+            view.scale_x,
+            0.0,
+            0.0,
+            -view.scale_y,
+            -view.source_x * view.scale_x - w2,
+            view.source_y * view.scale_y + h2,
+        ]),
     );
     bundle
 }

@@ -42,14 +42,25 @@ label = scene.title("Gaanim").at(0, 220)
 formula = scene.equation("E = m c^2").at(0, -180)
 arrow = scene.arrow(-80, 0, 80, 0)
 logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
+icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
 `ellipse`, `line`, `arrow`, `text`, `title`, `subtitle`, `equation`, and
-`group`. `image(path)` loads PNG, JPEG, and WebP files at their native pixel
-dimensions; use the regular `Drawable` methods such as `scaled`, `rotated`,
-`opacity`, and `at` to compose them. Reusing the same path shares its decoded
+`group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
+and WebP files. `contain` preserves aspect ratio inside the target, `cover`
+fills and clips it, and `stretch` fills it without preserving aspect ratio.
+Pass `crop=(x, y, width, height)` in source pixels (top-left origin) to select
+a source rectangle. The regular `Drawable` methods such as `scaled`, `rotated`,
+`opacity`, and `at` remain available. Reusing the same path shares its decoded
 texture for the process.
+
+`svg(path)` imports SVG geometry as a group of regular vector paths, so the
+imported vector paths can be styled individually by their SVG source. It resolves
+paths and basic shapes, solid fills/strokes, CSS,
+`viewBox`, transforms, and `<use>`. Raster SVG images, text, gradients,
+patterns, filters, masks, and individual source-group handles are not yet
+preserved.
 
 == Timeline
 

@@ -247,8 +247,9 @@ Este es un **modo de presentación básico**, no una solución completa de slide
 El renderer usa Vello/wgpu, mantiene orden por `z_index` y `creation_order`, y conserva
 fragmentos renderizables en cache. Admite fill/stroke vectorial y `peniko::Brush` en la
 capa Rust. `Scene.image(path)` decodifica PNG/JPEG/WebP a RGBA, conserva la transparencia,
-participa en las transformaciones y opacidad normales, y reutiliza por proceso la textura
-decodificada para rutas repetidas.
+participa en las transformaciones y opacidad normales, admite tamaño objetivo con `contain`,
+`cover` o `stretch`, crop en píxeles de fuente y reutiliza por proceso la textura decodificada
+para rutas repetidas.
 
 Estado de efectos:
 
@@ -342,10 +343,9 @@ siendo correctos, no solo que el workspace compila.
 
 Orden recomendado:
 
-1. completar `ImageMobject` con crop, fit y un asset manager con rutas relativas;
-2. importación SVG preservando paths y grupos;
-3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg;
-4. precarga y recarga de assets para evitar jitter durante preview y exportación.
+1. asset manager con rutas relativas, precarga y recarga de assets;
+2. ampliar SVG: preservar grupos origen, clipping, gradientes y texto;
+3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg.
 
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
 parte de las piezas de contenido comercial o social.
@@ -416,7 +416,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 ### 0.4 — Producción de contenido vectorial
 
 - [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
-- [ ] SVG con paths y grupos preservados.
+- [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
+  transforms, `viewBox` y `<use>`.
+- [ ] SVG avanzado: grupos origen direccionables, clipping, gradientes, filtros y texto.
 - [ ] Audio con muxing en exportación.
 - [ ] API de fuentes, gradientes y cámara.
 - [ ] Componentes editoriales: listas, callouts, captions y title cards.

@@ -1,4 +1,4 @@
-"""Raster image mobjects: native size, transforms, alpha, and texture reuse."""
+"""Raster image mobjects: fitting, cropping, transforms, and texture reuse."""
 
 import os
 from pathlib import Path
@@ -17,13 +17,25 @@ source = (
 )
 
 title = scene.title("ImageMobject").fill(WHITE).at(0, 220)
-# Loading the same path twice reuses the process-local decoded texture cache.
-left = scene.image(str(source)).scaled(0.24).at(-235, -20)
-right = scene.image(str(source)).scaled(0.14).at(235, -20).opacity(0.72).rotated(-0.15)
-caption = scene.text("PNG texture • scale • opacity • rotation").fill(GOLD).at(0, -225)
+# Loading the same path repeatedly reuses the process-local decoded texture cache.
+contain = scene.image(str(source), width=250, height=150, fit="contain").at(-300, 20)
+cover = scene.image(str(source), width=250, height=150, fit="cover").at(0, 20)
+crop = (
+    scene.image(
+        str(source),
+        width=250,
+        height=150,
+        fit="stretch",
+        crop=(360, 190, 960, 540),
+    )
+    .at(300, 20)
+    .opacity(0.78)
+    .rotated(-0.08)
+)
+caption = scene.text("contain • cover • crop + stretch").fill(GOLD).at(0, -205)
 
-scene.play([title.write(0.6), left.fade_in(0.8), right.fade_in(0.8)])
-scene.play([left.move(40, 0).duration(0.7), right.rotate(0.3).duration(0.7)])
+scene.play([title.write(0.6), contain.fade_in(0.8), cover.fade_in(0.8), crop.fade_in(0.8)])
+scene.play([contain.move(20, 0).duration(0.7), crop.rotate(0.16).duration(0.7)])
 scene.play([caption.write(0.5)])
 scene.wait(0.4)
 

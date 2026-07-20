@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 
-use gaanim_api::canvas::{Canvas as ApiCanvas, CanvasEndpoint};
+use gaanim_api::canvas::{Canvas as ApiCanvas, CanvasEndpoint, ImageCrop, ImageFit, ImageOptions};
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
@@ -160,12 +160,57 @@ impl PyScene {
                 .equation(s),
         )
     }
-    /// Load a PNG, JPEG, or WebP image as an animatable image mobject.
-    fn image(&self, path: &str) -> PyResult<PyDrawable> {
+    /// Load a PNG, JPEG, or WebP image with optional size, fit mode, and crop.
+    /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
+    #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None))]
+    fn image(
+        &self,
+        path: &str,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        crop: Option<(f64, f64, f64, f64)>,
+    ) -> PyResult<PyDrawable> {
+        let fit = match fit {
+            "contain" => ImageFit::Contain,
+            "cover" => ImageFit::Cover,
+            "stretch" => ImageFit::Stretch,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "fit must be 'contain', 'cover', or 'stretch'",
+                ));
+            }
+        };
+        let options = ImageOptions {
+            width,
+            height,
+            fit,
+            crop: crop.map(|(x, y, width, height)| ImageCrop {
+                x,
+                y,
+                width,
+                height,
+            }),
+        };
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .image(path)
+            .image_with_options(path, options)
+            .map(PyDrawable)
+            .map_err(|error| match error {
+                gaanim_api::canvas::ImageLoadError::Options(error) => {
+                    pyo3::exceptions::PyValueError::new_err(error.to_string())
+                }
+                error => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+            })
+    }
+
+    /// Load an SVG as an animatable group of vector paths.
+    fn svg(&self, path: &str) -> PyResult<PyDrawable> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .svg(path)
             .map(PyDrawable)
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
@@ -178,6 +223,22 @@ impl PyScene {
                 .expect("scene canvas poisoned")
                 .group(&refs),
         )
+    }
+
+    #[pyo3(signature = (x, y, duration=1.0))]
+    fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_pan_to(x, y, duration);
+    }
+
+    #[pyo3(signature = (zoom, duration=1.0))]
+    fn camera_zoom_to(&self, zoom: f64, duration: f64) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_zoom_to(zoom, duration);
     }
 
     #[pyo3(signature = (name, transition=None))]

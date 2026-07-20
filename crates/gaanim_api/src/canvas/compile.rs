@@ -129,6 +129,46 @@ impl Canvas {
                     builder.play_parallel(remapped);
                 }
                 Op::Wait(d) => builder.wait(*d),
+                Op::CameraPosition { from, to, duration } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
+                                    from: *from,
+                                    to: *to,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    builder.wait(*duration);
+                }
+                Op::CameraZoom { from, to, duration } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraZoom {
+                                    from: *from,
+                                    to: *to,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    builder.wait(*duration);
+                }
                 Op::Slide => builder.slide(),
                 Op::Show(id) => {
                     if let Some(id) = id_map.get(id).copied()
@@ -328,10 +368,15 @@ impl Canvas {
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
-            SpawnKind::Image(image) => {
-                let b = builder.image(image.clone());
+            SpawnKind::Image { image, view } => {
+                let b = builder.image(image.clone(), *view);
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Svg(document) => {
+                let mr = builder.svg_group(&document.paths);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Group(ids) => {

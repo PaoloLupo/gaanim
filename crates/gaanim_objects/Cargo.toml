@@ -17,6 +17,7 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
 i_overlay = { workspace = true }
+usvg = { version = "0.47", default-features = false }
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }

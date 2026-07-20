@@ -264,7 +264,9 @@ pub fn compile_scene_from_world(
         if let Some(raster_image) = raster_image_opt
             && let Some(image) = raster_image.image.as_ref()
         {
+            scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
             scene.draw_image(image.as_ref(), raster_image.local_transform);
+            scene.pop_layer();
         } else if fill_alpha < 1.0 {
             if let Some(fill_brush) = elem_fill {
                 let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
@@ -525,7 +527,7 @@ pub fn gaanim_render_system(
             continue;
         }
 
-        // Groups do not draw visual geometry directly, they only act as spatial nodes
+        // Groups do not draw visual geometry directly, they only act as spatial nodes.
         if is_group_opt.is_some() {
             continue;
         }
@@ -597,7 +599,9 @@ pub fn gaanim_render_system(
             if let Some(raster_image) = elem_raster_image
                 && let Some(image) = raster_image.image.as_ref()
             {
+                scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
                 scene.draw_image(image.as_ref(), raster_image.local_transform);
+                scene.pop_layer();
             } else if fill_alpha < 1.0 {
                 if let Some(fill_brush) = elem_fill {
                     let modulated = modulate_brush_alpha(fill_brush, fill_alpha);

@@ -75,6 +75,16 @@ pub(crate) enum Op {
     Play(Vec<AnimationBuilder>),
     /// Advance the cursor by a duration (no animation).
     Wait(f64),
+    CameraPosition {
+        from: DVec3,
+        to: DVec3,
+        duration: f64,
+    },
+    CameraZoom {
+        from: f64,
+        to: f64,
+        duration: f64,
+    },
     /// Insert a slide breakpoint.
     Slide,
     /// Set an object visible (instant).

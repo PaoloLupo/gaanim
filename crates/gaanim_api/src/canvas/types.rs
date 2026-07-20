@@ -5,6 +5,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
+use gaanim_objects::prelude::{ImageView, SvgDocument};
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::ops::{Op, SharedCanvasState};
@@ -89,6 +90,115 @@ impl Default for Margin {
     }
 }
 
+/// How an image should use a requested target size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImageFit {
+    /// Preserve aspect ratio inside the target rectangle.
+    #[default]
+    Contain,
+    /// Preserve aspect ratio while filling the target rectangle, clipping excess pixels.
+    Cover,
+    /// Fill the target rectangle even when that distorts the source aspect ratio.
+    Stretch,
+}
+
+/// A rectangle in source image pixel coordinates (top-left origin).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageCrop {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Optional destination sizing and source crop for `Canvas::image_with_options`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ImageOptions {
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub fit: ImageFit,
+    pub crop: Option<ImageCrop>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImageOptionsError {
+    #[error("image width and height must be finite positive values")]
+    InvalidTargetSize,
+    #[error("crop must be finite, positive in size, and contained within the source image")]
+    InvalidCrop,
+}
+
+impl ImageOptions {
+    /// Resolve options into the exact source-to-destination mapping used by the renderer.
+    pub fn resolve(
+        self,
+        source_width: u32,
+        source_height: u32,
+    ) -> Result<ImageView, ImageOptionsError> {
+        let source_width = f64::from(source_width);
+        let source_height = f64::from(source_height);
+        let crop = self.crop.unwrap_or(ImageCrop {
+            x: 0.0,
+            y: 0.0,
+            width: source_width,
+            height: source_height,
+        });
+        if !crop.x.is_finite()
+            || !crop.y.is_finite()
+            || !crop.width.is_finite()
+            || !crop.height.is_finite()
+            || crop.x < 0.0
+            || crop.y < 0.0
+            || crop.width <= 0.0
+            || crop.height <= 0.0
+            || crop.x + crop.width > source_width
+            || crop.y + crop.height > source_height
+        {
+            return Err(ImageOptionsError::InvalidCrop);
+        }
+
+        for value in [self.width, self.height].into_iter().flatten() {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(ImageOptionsError::InvalidTargetSize);
+            }
+        }
+
+        let (display_width, display_height, scale_x, scale_y) = match (self.width, self.height) {
+            (None, None) => (crop.width, crop.height, 1.0, 1.0),
+            (Some(width), None) => {
+                let scale = width / crop.width;
+                (width, crop.height * scale, scale, scale)
+            }
+            (None, Some(height)) => {
+                let scale = height / crop.height;
+                (crop.width * scale, height, scale, scale)
+            }
+            (Some(width), Some(height)) => match self.fit {
+                ImageFit::Contain => {
+                    let scale = (width / crop.width).min(height / crop.height);
+                    (crop.width * scale, crop.height * scale, scale, scale)
+                }
+                ImageFit::Cover => {
+                    let scale = (width / crop.width).max(height / crop.height);
+                    (width, height, scale, scale)
+                }
+                ImageFit::Stretch => (width, height, width / crop.width, height / crop.height),
+            },
+        };
+
+        Ok(ImageView {
+            source_x: crop.x,
+            source_y: crop.y,
+            source_width: crop.width,
+            source_height: crop.height,
+            display_width,
+            display_height,
+            scale_x,
+            scale_y,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SpawnKind {
     Circle(f64),
@@ -103,8 +213,13 @@ pub enum SpawnKind {
     Title(String),
     Subtitle(String),
     Equation(String),
-    /// Decoded RGBA texture for an `ImageMobject`.
-    Image(ImageData),
+    /// Decoded RGBA texture plus its source and destination mapping.
+    Image {
+        image: ImageData,
+        view: ImageView,
+    },
+    /// Resolved vector paths imported from an SVG document.
+    Svg(SvgDocument),
     Group(Vec<ObjectId>),
     /// Invisible value tracker entity (FloatSignal). No visual output.
     ValueTracker(f64),
@@ -417,5 +532,54 @@ impl OptDuration for f64 {
 impl OptDuration for Option<f64> {
     fn into_opt(self) -> Option<f64> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImageCrop, ImageFit, ImageOptions};
+
+    #[test]
+    fn image_fit_resolves_contain_cover_and_crop() {
+        let contain = ImageOptions {
+            width: Some(200.0),
+            height: Some(100.0),
+            fit: ImageFit::Contain,
+            crop: None,
+        }
+        .resolve(400, 100)
+        .unwrap();
+        assert_eq!(
+            (contain.display_width, contain.display_height),
+            (200.0, 50.0)
+        );
+        assert_eq!((contain.scale_x, contain.scale_y), (0.5, 0.5));
+
+        let cover = ImageOptions {
+            width: Some(200.0),
+            height: Some(100.0),
+            fit: ImageFit::Cover,
+            crop: None,
+        }
+        .resolve(400, 100)
+        .unwrap();
+        assert_eq!((cover.display_width, cover.display_height), (200.0, 100.0));
+        assert_eq!((cover.scale_x, cover.scale_y), (1.0, 1.0));
+
+        let crop = ImageOptions {
+            width: None,
+            height: None,
+            fit: ImageFit::Contain,
+            crop: Some(ImageCrop {
+                x: 50.0,
+                y: 20.0,
+                width: 120.0,
+                height: 60.0,
+            }),
+        }
+        .resolve(400, 100)
+        .unwrap();
+        assert_eq!((crop.source_x, crop.source_y), (50.0, 20.0));
+        assert_eq!((crop.display_width, crop.display_height), (120.0, 60.0));
     }
 }

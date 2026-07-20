@@ -78,6 +78,12 @@ jobs:
       - name: Compare image snapshots
         run: .\target\debug\gaanim.exe --diff --example examples\image_demo.py --no-gui
 
+      - name: Compare SVG snapshots
+        run: .\target\debug\gaanim.exe --diff --example examples\svg_demo.py --no-gui
+
+      - name: Compare camera snapshots
+        run: .\target\debug\gaanim.exe --diff --example examples\camera_demo.py --no-gui
+
       - name: Upload visual diff report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -88,5 +94,9 @@ jobs:
             tests/visual/transform_demo/report
             tests/visual/image_demo/current
             tests/visual/image_demo/report
+            tests/visual/svg_demo/current
+            tests/visual/svg_demo/report
+            tests/visual/camera_demo/current
+            tests/visual/camera_demo/report
           if-no-files-found: warn
           retention-days: 14
