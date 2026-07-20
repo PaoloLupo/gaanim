@@ -88,6 +88,14 @@ parabola = scene.function_graph(lambda x: 0.008 * x * x - 60, x=(-250, 150))
 orbit = scene.parametric_curve(lambda t: (180 * cos(t), 120 * sin(t)), t=(0, 2 * PI))
 ```
 
+`bezier(start, controls, end)` creates a native quadratic Bézier with one
+control point or a cubic Bézier with two. It remains a real Bézier path, so it
+can drive the reactive curve bindings directly.
+
+```python
+curve = scene.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
+```
+
 `arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`
 connects two points with an angular deflection; `curved_arrow_arc` follows an
 explicit center/radius arc. Both use radians, while
@@ -129,8 +137,8 @@ moving mass without a Python callback every frame.
 
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
-`function_graph`, or `parametric_curve`. The value is clamped to `[0, 1]` and
-measured by arc length, with no Python callback during playback.
+`function_graph`, `parametric_curve`, or Bézier path. The value is clamped to
+`[0, 1]` and measured by arc length, with no Python callback during playback.
 
 ```python
 t = scene.value_tracker(0.0)

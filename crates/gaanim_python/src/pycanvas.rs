@@ -190,6 +190,25 @@ impl PyScene {
         )
     }
 
+    fn bezier(
+        &self,
+        start: (f64, f64),
+        controls: Vec<(f64, f64)>,
+        end: (f64, f64),
+    ) -> PyResult<PyDrawable> {
+        if !(1..=2).contains(&controls.len()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "controls must contain one point (quadratic) or two points (cubic)",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .bezier(start, controls, end),
+        ))
+    }
+
     #[pyo3(signature = (function, x, samples=160))]
     fn function_graph(
         &self,

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::{Point, Vec2};
+use gaanim_core::kurbo::{Point, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::Bounds3D;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
@@ -799,6 +799,37 @@ impl Canvas {
             SpawnKind::Polyline(points) => {
                 let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
                 let b = builder.open_path(&points);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Bezier {
+                start,
+                controls,
+                end,
+            } => {
+                let mut path = gaanim_core::kurbo::BezPath::new();
+                path.move_to(Point::new(start.0, start.1));
+                match controls.as_slice() {
+                    [control] => {
+                        path.quad_to(Point::new(control.0, control.1), Point::new(end.0, end.1))
+                    }
+                    [control1, control2] => path.curve_to(
+                        Point::new(control1.0, control1.1),
+                        Point::new(control2.0, control2.1),
+                        Point::new(end.0, end.1),
+                    ),
+                    _ => path.line_to(Point::new(end.0, end.1)),
+                }
+                let rect = path.bounding_box();
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "Bezier".to_string(),
+                    path,
+                    bounds: Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr

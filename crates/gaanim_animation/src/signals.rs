@@ -429,19 +429,67 @@ fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
 fn sample_polyline(path: &BezPath, fraction: f64) -> Option<(Point, gaanim_core::kurbo::Vec2)> {
     let mut segments = Vec::new();
     let mut current = None;
+    let mut subpath_start = None;
     for element in path.elements() {
         match *element {
-            PathEl::MoveTo(point) => current = Some(point),
+            PathEl::MoveTo(point) => {
+                current = Some(point);
+                subpath_start = Some(point);
+            }
             PathEl::LineTo(point) => {
                 if let Some(start) = current {
-                    let length = (point - start).hypot();
-                    if length > f64::EPSILON {
-                        segments.push((start, point, length));
+                    push_line_segment(&mut segments, start, point);
+                }
+                current = Some(point);
+            }
+            PathEl::QuadTo(control, point) => {
+                if let Some(start) = current {
+                    let mut previous = start;
+                    for index in 1..=24 {
+                        let t = index as f64 / 24.0;
+                        let inverse = 1.0 - t;
+                        let next = Point::new(
+                            inverse * inverse * start.x
+                                + 2.0 * inverse * t * control.x
+                                + t * t * point.x,
+                            inverse * inverse * start.y
+                                + 2.0 * inverse * t * control.y
+                                + t * t * point.y,
+                        );
+                        push_line_segment(&mut segments, previous, next);
+                        previous = next;
                     }
                 }
                 current = Some(point);
             }
-            _ => {}
+            PathEl::CurveTo(control1, control2, point) => {
+                if let Some(start) = current {
+                    let mut previous = start;
+                    for index in 1..=32 {
+                        let t = index as f64 / 32.0;
+                        let inverse = 1.0 - t;
+                        let next = Point::new(
+                            inverse.powi(3) * start.x
+                                + 3.0 * inverse * inverse * t * control1.x
+                                + 3.0 * inverse * t * t * control2.x
+                                + t.powi(3) * point.x,
+                            inverse.powi(3) * start.y
+                                + 3.0 * inverse * inverse * t * control1.y
+                                + 3.0 * inverse * t * t * control2.y
+                                + t.powi(3) * point.y,
+                        );
+                        push_line_segment(&mut segments, previous, next);
+                        previous = next;
+                    }
+                }
+                current = Some(point);
+            }
+            PathEl::ClosePath => {
+                if let (Some(start), Some(end)) = (current, subpath_start) {
+                    push_line_segment(&mut segments, start, end);
+                    current = Some(end);
+                }
+            }
         }
     }
 
@@ -461,6 +509,13 @@ fn sample_polyline(path: &BezPath, fraction: f64) -> Option<(Point, gaanim_core:
         traversed += length;
     }
     segments.last().map(|(start, end, _)| (*end, *end - *start))
+}
+
+fn push_line_segment(segments: &mut Vec<(Point, Point, f64)>, start: Point, end: Point) {
+    let length = (end - start).hypot();
+    if length > f64::EPSILON {
+        segments.push((start, end, length));
+    }
 }
 
 fn osculating_circle(path: &BezPath, fraction: f64, window: f64) -> Option<(Point, f64)> {
@@ -539,6 +594,20 @@ mod tests {
         normal_on_curve_system(&mut world);
         let direction = world.get::<SpatialTransform>(normal).unwrap().rotation * DVec3::X;
         assert!((direction.x + 1.0).abs() < 1e-9 && direction.y.abs() < 1e-9);
+
+        let mut cubic = BezPath::new();
+        cubic.move_to(Point::new(0.0, 0.0));
+        cubic.curve_to(
+            Point::new(0.0, 120.0),
+            Point::new(120.0, 120.0),
+            Point::new(120.0, 0.0),
+        );
+        assert_eq!(
+            point_at_polyline_fraction(&cubic, 0.0),
+            Some(Point::new(0.0, 0.0))
+        );
+        let end = point_at_polyline_fraction(&cubic, 1.0).expect("cubic endpoint");
+        assert!((end.x - 120.0).abs() < 1e-9 && end.y.abs() < 1e-9);
 
         world.get_mut::<FloatSignal>(tracker).unwrap().value = 2.0;
         point_on_curve_system(&mut world);

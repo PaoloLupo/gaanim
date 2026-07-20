@@ -260,6 +260,20 @@ impl Canvas {
     pub fn polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
         self.spawn(SpawnKind::Polyline(points.to_vec()))
     }
+
+    /// Create a native quadratic or cubic Bézier path.
+    pub fn bezier(
+        &mut self,
+        start: (f64, f64),
+        controls: Vec<(f64, f64)>,
+        end: (f64, f64),
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Bezier {
+            start,
+            controls,
+            end,
+        })
+    }
     /// Creates configurable Cartesian axes, optionally with a grid and numeric labels.
     pub fn axes(
         &mut self,

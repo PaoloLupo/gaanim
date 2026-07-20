@@ -259,6 +259,12 @@ pub enum SpawnKind {
     },
     /// Open sequence of straight segments. Useful for springs, rails, and paths.
     Polyline(Vec<(f64, f64)>),
+    /// Native quadratic (one control) or cubic (two controls) Bézier path.
+    Bezier {
+        start: (f64, f64),
+        controls: Vec<(f64, f64)>,
+        end: (f64, f64),
+    },
     Axes {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
