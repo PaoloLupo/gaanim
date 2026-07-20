@@ -5,8 +5,8 @@ use gaanim_core::ObjectId;
 use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, MobjectId, Path2D, PathSource, RenderLayer, RenderOrder, StrokeBrush,
-    Visible, WorldBounds,
+    FillBrush, GlobalOpacity, MobjectId, Path2D, PathSource, RasterImage, RenderLayer, RenderOrder,
+    StrokeBrush, Visible, WorldBounds,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -169,6 +169,7 @@ pub fn compile_scene_from_world(
         Option<&PathSource>,
         Option<&FillBrush>,
         Option<&StrokeBrush>,
+        Option<&RasterImage>,
         Option<&gaanim_scene::ObjectTag>,
     ), With<Visible>>();
 
@@ -193,6 +194,7 @@ pub fn compile_scene_from_world(
         path_source_opt,
         fill_opt,
         stroke_opt,
+        raster_image_opt,
         _tag,
     ) in query_mobjects.iter(world)
     {
@@ -259,7 +261,11 @@ pub fn compile_scene_from_world(
             );
         }
 
-        if fill_alpha < 1.0 {
+        if let Some(raster_image) = raster_image_opt
+            && let Some(image) = raster_image.image.as_ref()
+        {
+            scene.draw_image(image.as_ref(), raster_image.local_transform);
+        } else if fill_alpha < 1.0 {
             if let Some(fill_brush) = elem_fill {
                 let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                 if let Some(ref brush) = modulated {
@@ -415,6 +421,7 @@ pub fn gaanim_render_system(
             Option<Ref<PathSource>>,
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
+            Option<Ref<RasterImage>>,
             Option<&gaanim_scene::ObjectTag>,
         ),
         With<Visible>,
@@ -468,6 +475,7 @@ pub fn gaanim_render_system(
         path_source_ref,
         fill_ref,
         stroke_ref,
+        raster_image_ref,
         _tag,
     ) in &query_mobjects
     {
@@ -528,6 +536,7 @@ pub fn gaanim_render_system(
             || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
+            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -561,6 +570,7 @@ pub fn gaanim_render_system(
             let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
             let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
             let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
+            let elem_raster_image = raster_image_ref.as_deref();
             let elem_shadow = shadow_ref.as_deref();
 
             // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
@@ -584,7 +594,11 @@ pub fn gaanim_render_system(
             // brushes we still draw at full alpha (a small visual quirk
             // during the cross-fade, but the user-visible effect is
             // preserved: outline first, then fill).
-            if fill_alpha < 1.0 {
+            if let Some(raster_image) = elem_raster_image
+                && let Some(image) = raster_image.image.as_ref()
+            {
+                scene.draw_image(image.as_ref(), raster_image.local_transform);
+            } else if fill_alpha < 1.0 {
                 if let Some(fill_brush) = elem_fill {
                     let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                     if let Some(ref brush) = modulated {

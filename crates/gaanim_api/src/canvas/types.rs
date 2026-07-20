@@ -2,7 +2,7 @@
 
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
-use gaanim_core::peniko::{Brush, Color};
+use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 
@@ -103,6 +103,8 @@ pub enum SpawnKind {
     Title(String),
     Subtitle(String),
     Equation(String),
+    /// Decoded RGBA texture for an `ImageMobject`.
+    Image(ImageData),
     Group(Vec<ObjectId>),
     /// Invisible value tracker entity (FloatSignal). No visual output.
     ValueTracker(f64),

@@ -23,6 +23,8 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 crossbeam-channel = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+thiserror = { workspace = true }
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }

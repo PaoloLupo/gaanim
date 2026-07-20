@@ -160,6 +160,15 @@ impl PyScene {
                 .equation(s),
         )
     }
+    /// Load a PNG, JPEG, or WebP image as an animatable image mobject.
+    fn image(&self, path: &str) -> PyResult<PyDrawable> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .image(path)
+            .map(PyDrawable)
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+    }
 
     fn group(&self, members: Vec<PyDrawable>) -> PyDrawable {
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();

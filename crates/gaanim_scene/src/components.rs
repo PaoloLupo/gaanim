@@ -1,6 +1,6 @@
 use bevy::prelude::Component;
-use gaanim_core::kurbo::{BezPath, Stroke};
-use gaanim_core::peniko::Brush;
+use gaanim_core::kurbo::{Affine, BezPath, Stroke};
+use gaanim_core::peniko::{Brush, ImageBrush};
 use gaanim_math::Bounds3D;
 use std::sync::Arc;
 
@@ -27,6 +27,36 @@ impl FillBrush {
     /// Creates a transparent/no-fill style.
     pub fn transparent() -> Self {
         Self(None)
+    }
+}
+
+/// A decoded raster image drawn by the Vello backend.
+///
+/// The image owns a reference-counted pixel blob, so cloned mobjects and
+/// renderer fragments share the same decoded texture data. `local_transform`
+/// positions the image relative to the mobject origin before the regular
+/// spatial transform hierarchy is applied.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct RasterImage {
+    pub image: Option<ImageBrush>,
+    pub local_transform: Affine,
+}
+
+impl RasterImage {
+    /// A vector mobject without raster content.
+    pub fn none() -> Self {
+        Self {
+            image: None,
+            local_transform: Affine::IDENTITY,
+        }
+    }
+
+    /// Raster content positioned in the mobject's local coordinates.
+    pub fn new(image: ImageBrush, local_transform: Affine) -> Self {
+        Self {
+            image: Some(image),
+            local_transform,
+        }
     }
 }
 

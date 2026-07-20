@@ -328,6 +328,12 @@ impl Canvas {
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Image(image) => {
+                let b = builder.image(image.clone());
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Group(ids) => {
                 let refs: Vec<MobjectRef> = ids
                     .iter()

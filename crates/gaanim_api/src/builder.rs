@@ -2809,6 +2809,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns a decoded raster image using its native pixel dimensions.
+    pub fn image(
+        &mut self,
+        image: gaanim_core::peniko::ImageData,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::image(id, image);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Spawns a rounded rectangle primitive.
     pub fn rounded_rect(
         &mut self,

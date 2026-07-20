@@ -6,5 +6,5 @@ pub use types::{Anim, CoordinateSystem, LayoutOp, Margin, ObjectSpec, OptDuratio
 mod drawable;
 pub use drawable::DrawableHandle;
 mod canvas_impl;
-pub use canvas_impl::Canvas;
+pub use canvas_impl::{Canvas, ImageLoadError};
 mod compile;

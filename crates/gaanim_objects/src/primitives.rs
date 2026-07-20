@@ -4,7 +4,7 @@ use gaanim_core::kurbo::{self, Shape};
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
     FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
-    RenderLayer, RenderOrder, StrokeBrush, Visible,
+    RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible,
 };
 
 /// A standard, complete Bevy Bundle representing a 2D vector Mobject.
@@ -27,6 +27,7 @@ pub struct MobjectBundle {
     pub render_layer: RenderLayer,
     pub visible: Visible,
     pub tag: ObjectTag,
+    pub raster_image: RasterImage,
 }
 
 impl MobjectBundle {
@@ -56,8 +57,33 @@ impl MobjectBundle {
             render_layer: RenderLayer::Vello2D,
             visible: Visible,
             tag: ObjectTag("Mobject".into()),
+            raster_image: RasterImage::none(),
         }
     }
+}
+
+/// Creates a raster image mobject with its visual center at the local origin.
+///
+/// One scene unit maps to one source pixel before a caller applies `.scaled()`.
+/// The decoded pixels are held in `RasterImage`, so the renderer can issue a
+/// native Vello image draw rather than approximating the texture as a vector
+/// fill.
+pub fn image(id: ObjectId, image: gaanim_core::peniko::ImageData) -> MobjectBundle {
+    let width = f64::from(image.width);
+    let height = f64::from(image.height);
+    let w2 = width * 0.5;
+    let h2 = height * 0.5;
+    let path = kurbo::Rect::new(-w2, -h2, w2, h2).to_path(0.1);
+    let bounds = Bounds3D::new_2d(-w2, -h2, w2, h2);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush::transparent();
+    bundle.tag = ObjectTag("ImageMobject".into());
+    bundle.raster_image = RasterImage::new(
+        gaanim_core::peniko::ImageBrush::new(image),
+        // Image pixels are top-left/Y-down; gaanim mobjects are centred/Y-up.
+        kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, -w2, h2]),
+    );
+    bundle
 }
 
 /// Creates a circle Mobject bundle.

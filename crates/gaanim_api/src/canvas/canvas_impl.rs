@@ -1,6 +1,8 @@
 //! Canvas — the top-level facade for building Gaanim animations.
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
 use gaanim_core::peniko::Color;
@@ -10,6 +12,55 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
 use crate::canvas::types::{Anim, CoordinateSystem, Margin, SpawnKind};
+
+/// Failures while decoding a raster image requested by `Canvas::image`.
+#[derive(Debug, thiserror::Error)]
+pub enum ImageLoadError {
+    #[error("could not load image '{path}': {source}")]
+    Load {
+        path: PathBuf,
+        #[source]
+        source: image::ImageError,
+    },
+}
+
+/// Process-local decoded texture cache. Each canvas still receives its own
+/// mobject, while repeated references to the same canonical path share the
+/// immutable RGBA data used by Vello.
+static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, gaanim_core::peniko::ImageData>>> =
+    OnceLock::new();
+
+fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, ImageLoadError> {
+    let requested = path.as_ref();
+    let cache_key = requested
+        .canonicalize()
+        .unwrap_or_else(|_| requested.to_path_buf());
+    let cache = IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(image) = cache
+        .lock()
+        .expect("image cache poisoned")
+        .get(&cache_key)
+        .cloned()
+    {
+        return Ok(image);
+    }
+
+    let decoded = image::open(&cache_key).map_err(|source| ImageLoadError::Load {
+        path: requested.to_path_buf(),
+        source,
+    })?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let image = gaanim_core::peniko::ImageData {
+        data: gaanim_core::peniko::Blob::from(rgba.into_raw()),
+        format: gaanim_core::peniko::ImageFormat::Rgba8,
+        alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+        width,
+        height,
+    };
+    let mut cache = cache.lock().expect("image cache poisoned");
+    Ok(cache.entry(cache_key).or_insert(image).clone())
+}
 
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
@@ -152,6 +203,13 @@ impl Canvas {
     }
     pub fn equation(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Equation(s.to_string()))
+    }
+    /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
+    ///
+    /// Source pixels are decoded once per canonical path and are displayed at
+    /// their native pixel dimensions before `.scaled()` is applied.
+    pub fn image(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, ImageLoadError> {
+        Ok(self.spawn(SpawnKind::Image(load_image(path)?)))
     }
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
         self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
