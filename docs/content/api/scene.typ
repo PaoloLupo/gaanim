@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Scene API",
-  description: "The Scene class — core of gaanim",
+  description: "The canonical public API for Gaanim animations",
   route: "/api/scene/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -10,94 +10,76 @@
 
 = Scene
 
-The `Scene` class is the main entry point for creating animations. It manages the timeline, spawns mobjects, and handles rendering/export.
+`Scene` is the public entry point for an animation. It owns mobjects, the
+timeline, rendering, export, and named segments. Create a `Scene` for every
+animation; `Canvas` is retained only as a deprecated compatibility constructor.
 
-== Constructor
+== Constructor and viewport
 
 ```python
-Scene(
-    width: int = 1920,
-    height: int = 1080,
-    title: str = "Gaanim",
-    theme: Theme = Theme.DARK,
-)
+from gaanim import BLACK, Scene
+
+scene = Scene(width=1920, height=1080, background=BLACK, margin=48)
+
+# Viewport configuration remains available from the scene.
+scene.canvas.width = 1280
+scene.canvas.height = 720
+scene.canvas.set_margin(32)
 ```
 
-Creates a new scene with the given dimensions and theme.
+== Spawning mobjects
 
-== Spawning Mobjects
-
-All mobject-spawning methods return a `Mobject` handle that supports fluent chaining:
+Every factory returns a `Drawable` handle with fluent style and layout methods.
 
 ```python
+from gaanim import BLUE, GOLD, WHITE, Scene
+
 scene = Scene(1280, 720)
 
-# Shapes
-circle = scene.circle(80)
-rect = scene.rectangle(200, 120)
-square = scene.square(100)
-dot = scene.dot(12)
-ellipse = scene.ellipse(100, 60)
-
-# Lines
-line = scene.line(-200, 0, 200, 0)
-arrow = scene.arrow(0, 0, 100, 100)
-dashed = scene.dashed_line(-100, 0, 100, 0)
-
-# Polygons
-triangle = scene.regular_polygon(3, 80)
-star = scene.star(5, 80, 40)
-polygon = scene.polygon([(0,0), (100,0), (50,86)])
-
-# Text
-title = scene.title("My Title")
-body = scene.body("Some body text")
-text = scene.text("Custom text")
-
-# Math
-eq = scene.equation("E = m c^2")
+circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-160, 0)
+rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
+label = scene.title("Gaanim").at(0, 220)
+formula = scene.equation("E = m c^2").at(0, -180)
+arrow = scene.arrow(-80, 0, 80, 0)
+logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
 ```
 
-See #link("/api/mobjects/", "Mobjects") for the full list.
+Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
+`ellipse`, `line`, `arrow`, `text`, `title`, `subtitle`, `equation`, and
+`group`. `image(path)` loads PNG, JPEG, and WebP files at their native pixel
+dimensions; use the regular `Drawable` methods such as `scaled`, `rotated`,
+`opacity`, and `at` to compose them. Reusing the same path shares its decoded
+texture for the process.
 
-== Timeline Control
+== Timeline
+
+`play` receives a list of animations; calls are sequential and animations in a
+single list run in parallel.
 
 ```python
-# Play animations (parallel if multiple args)
-scene.play(
-    circle.animate().write(duration=2.0),
-    rect.animate().fade_in_anim().duration(1.0),
-)
-
-# Wait
-scene.wait(1.0)
-
-# Sequential: each play() call is sequential
-scene.play(circle.animate().shift(100, 0).duration(1.0))
-scene.play(circle.animate().fade_out_anim().duration(0.5))
+scene.play([
+    circle.create().duration(1.0).smooth(),
+    rect.grow_from_center().duration(1.0).spring(),
+    label.write().duration(0.8),
+])
+scene.wait(0.5)
+scene.play([circle.move(200, 0).duration(1.0)])
+scene.play([rect.fade_out().duration(0.5)])
 ```
 
-== Terminal Methods
+Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
+connect them, and `scene.slide()` to add a presentation breakpoint.
+
+== Output
 
 ```python
-scene.render()   # Open Vulkan GPU preview (blocking)
-scene.edit()     # Open interactive editor (blocking)
-scene.export(    # Headless offline render (blocking)
-    "output.mp4",
-    fps=60,
-    width=None,
-    height=None,
-    transparent=None,
-    aspect_ratio=None,  # "youtube", "tiktok", "instagram"
-    quality=None,       # "draft", "standard", "production"
-)
+scene.render()                         # Interactive Gaanim viewer
+scene.export("output.webp", fps=30)   # Format follows the file extension
+scene.snapshots("snapshots", [0.0, 1.0])
 ```
 
-== Theme
+Run a script through the Gaanim application:
 
-```python
-scene = Scene(theme=Theme.DRACULA)
-scene.set_theme(Theme.GRUVBOX)  # Switch mid-scene
+```bash
+gaanim my_animation.py
 ```
-
-See #link("/api/themes/", "Themes") for available themes.

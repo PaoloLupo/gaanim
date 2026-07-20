@@ -50,7 +50,7 @@
           "Scene": "api/scene/",
           "Mobjects": "api/mobjects/",
           "Animations": "api/animations/",
-          "Themes": "api/themes/",
+          "Colors": "api/themes/",
         ),
         "Examples": (
           "Basic": "examples/basic/",

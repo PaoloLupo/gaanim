@@ -19,7 +19,7 @@ GPU-accelerated 2D vector animation engine, Manim-style. Built in Rust with Bevy
 - *30+ animation types*: write, create, fade, shift, scale, rotate, indicate, circumscribe, and more
 - *Rate functions*: linear, smooth, spring, bounce, elastic, cubic bezier
 - *Glyph-level selection* for text and equations
-- *Themes*: Dark (Catppuccin Mocha), Light (Catppuccin Latte), Dracula, Gruvbox
+- *Colors*: exported color constants and custom RGBA colors
 - *Export*: MP4, WebM, WebP, GIF, PNG sequences
 - *Multi-scene engine* with transitions for presentations
 

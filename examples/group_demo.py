@@ -1,8 +1,8 @@
-"""Example: Canvas grouping and simple timeline sequencing."""
+"""Example: Scene grouping and simple timeline sequencing."""
 
-from gaanim import BLACK, BLUE, GOLD, WHITE, Canvas
+from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
-c = Canvas(1920, 1080, background=BLACK)
+c = Scene(1920, 1080, background=BLACK)
 
 logo = c.circle(80.0).fill(BLUE).at(0.0, 0.0)
 logo.fade_in().duration(1.0)

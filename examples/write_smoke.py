@@ -1,8 +1,8 @@
 """Visual smoke test for Create, Write, and DrawBorderThenFill parity."""
 
-from gaanim import BLACK, BLUE, GOLD, RED, Canvas
+from gaanim import BLACK, BLUE, GOLD, RED, Scene
 
-c = Canvas(1920, 1080, background=BLACK)
+c = Scene(1920, 1080, background=BLACK)
 
 c.segment("intro")
 

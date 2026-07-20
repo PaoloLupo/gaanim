@@ -52,54 +52,51 @@ This compiles the workspace and verifies the Python extension is importable.
 Create a file `my_animation.py`:
 
 ```python
-# output: first_animation.webp
-# show-code: true
-# caption: First animation — circle and title
-from gaanim import BLUE, GOLD, Scene
+from gaanim import BLACK, BLUE, GOLD, Scene
 
-scene = Scene(1280, 720, title="My First Animation")
+scene = Scene(1280, 720, background=BLACK)
 
 circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.title("Hello World")
 
-scene.play(
-    circle.animate().grow_from_center().duration(2.0).spring(),
-    text.animate().write(duration=2.0).smooth(),
-)
+scene.play([
+    circle.grow_from_center().duration(2.0).spring(),
+    text.write().duration(2.0).smooth(),
+])
 
 scene.wait(1.0)
-scene.play(
-    circle.animate().shift(200, 0).duration(1.5).smooth(),
-    text.animate().fade_out().duration(0.5),
-)
+scene.play([
+    circle.move(200, 0).duration(1.5).smooth(),
+    text.fade_out().duration(0.5),
+])
 
-scene.export("first_animation.webp", fps=30, quality="draft")
+# Run with: gaanim my_animation.py
 ```
 
 Run it:
 
 ```bash
-python my_animation.py
+gaanim my_animation.py
 ```
 
-This opens a Vulkan GPU preview window. Press `Escape` to close.
+This opens the Gaanim preview window. Press `Escape` to close.
 
 = Exporting
 
 To export instead of previewing:
 
 ```python
-<<< # MP4 (YouTube standard)
-<<< scene.export("output.mp4", fps=60, aspect_ratio="youtube", quality="standard")
+<<< # MP4
+<<< scene.export("output.mp4", fps=60)
 <<<
-<<< # Transparent WebM
-<<< scene.export("overlay.webm", fps=30, transparent=True)
+<<< # WebM
+<<< scene.export("overlay.webm", fps=30)
 <<<
 <<< # Animated WebP
-<<< scene.export("preview.webp", fps=30, quality="draft")
+<<< scene.export("preview.webp", fps=30)
 <<<
-<<< # TikTok vertical
-<<< scene.export("tiktok.mp4", fps=30, aspect_ratio="tiktok")
+<<< # Any supported video extension
+<<< scene.export("tiktok.mp4", fps=30)
 ```
 
 = Next Steps

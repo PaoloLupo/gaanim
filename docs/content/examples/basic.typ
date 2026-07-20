@@ -1,116 +1,70 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Basic Examples",
-  description: "Simple gaanim animations to get started",
+  title: "Basic examples",
+  description: "Small runnable scenes using the public API",
   route: "/examples/basic/",
   updated: datetime.today().display(),
 )
 
-= Basic Examples
+= Basic examples
 
-Simple animations demonstrating the core gaanim API.
+Each example starts with `Scene`; animations are built on drawables and passed to
+`scene.play` as a list.
 
-== Circle with Write Animation
-
-A circle drawn with a pen-stroke effect, then shifted.
+== Circle and rectangle
 
 ```python
-# output: basic_circle.webp
-# show-code: true
-# caption: Circle with write animation
-from gaanim import BLUE, GOLD, Scene
+from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, title="Basic Circle")
+scene = Scene(1280, 720, background=BLACK)
+circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-120, 0)
+rect = scene.rect(160, 100).fill(GOLD).at(120, 0)
 
-circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4).at(-100, 0)
-rect = scene.rectangle(160, 100).fill(GOLD).at(100, 0)
-
-scene.play(
-    circle.animate().write(duration=2.0).smooth(),
-    rect.animate().create(duration=1.5).linear(),
-)
-
+scene.play([
+    circle.create().duration(1.0).smooth(),
+    rect.grow_from_center().duration(1.0).spring(),
+])
 scene.wait(0.5)
-scene.play(
-    circle.animate().shift(200, 0).duration(1.0).spring(),
-    rect.animate().fade_out().duration(0.5),
-)
-
-scene.export("basic_circle.webp", fps=30, quality="draft")
+scene.play([circle.move(180, 0).duration(1.0), rect.fade_out().duration(0.5)])
+# Run this file with: gaanim basic_circle.py
 ```
 
-== Text and Equations
-
-Writing text and mathematical equations with animation.
+== Text and math
 
 ```python
-# output: text_demo.webp
-# show-code: true
-# caption: Text and equation animations
-from gaanim import BLUE, CORAL, Scene, Theme
+from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, theme=Theme.DARK)
+scene = Scene(1280, 720, background=BLACK)
+title = scene.title("Mass-energy equivalence").fill(WHITE).at(0, 180)
+equation = scene.equation("E = m c^2").fill(GOLD).at(0, 0)
+caption = scene.subtitle("Energy and mass are related").fill(BLUE).at(0, -150)
 
-title = scene.title("Gaanim Demo").at(0, 200)
-eq = scene.equation("E = m c^2").at(0, 0).scale(1.5)
-body = scene.body("Mass-energy equivalence").at(0, -120)
-
-scene.play(
-    title.animate().write(duration=1.5).smooth(),
-    eq.animate().write(duration=2.5).linear(),
-)
-
-scene.wait(0.5)
-scene.play(body.animate().fade_in().duration(1.0))
-
+scene.play([title.write().duration(1.0), equation.write().duration(1.5)])
+scene.play([caption.fade_in().duration(0.8)])
 scene.wait(1.0)
-scene.play(
-    title.animate().unwrite(duration=1.0),
-    eq.animate().fade_out().duration(0.5),
-    body.animate().fade_out().duration(0.5),
-)
-
-scene.export("text_demo.webp", fps=30, quality="draft")
+# Run this file with: gaanim text_and_math.py
 ```
 
-== Shapes Gallery
-
-A showcase of available primitive shapes.
+== Shapes gallery
 
 ```python
-# output: shapes_gallery.webp
-# show-code: true
-# caption: Gallery of primitive shapes
-from gaanim import BLUE, CORAL, GOLD, GREEN, PURPLE, RED, Scene, Theme
+from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 
-scene = Scene(1280, 720, theme=Theme.DARK)
+scene = Scene(1280, 720, background=BLACK)
+circle = scene.circle(60).fill(BLUE).at(-240, 80)
+rect = scene.rect(130, 80).fill(RED).at(0, 80)
+square = scene.square(90).fill(GREEN).at(240, 80)
+ellipse = scene.ellipse(90, 55).fill(GOLD).at(-120, -120)
+arrow = scene.arrow(0, -120, 220, -120).stroke(WHITE, 4)
 
-circle = scene.circle(60).fill(BLUE).at(-300, 100)
-rect = scene.rectangle(120, 80).fill(RED).at(-100, 100)
-square = scene.square(90).fill(GREEN).at(100, 100)
-ellipse = scene.ellipse(80, 50).fill(GOLD).at(300, 100)
-star = scene.star(5, 60, 30).fill(CORAL).at(-200, -100)
-triangle = scene.regular_polygon(3, 60).fill(PURPLE).at(0, -100)
-hexagon = scene.regular_polygon(6, 60).fill(BLUE).at(200, -100)
-
-scene.play(
-    circle.animate().grow_from_center().duration(0.8).spring(),
-    rect.animate().grow_from_center().duration(0.8).spring(),
-    square.animate().grow_from_center().duration(0.8).spring(),
-    ellipse.animate().grow_from_center().duration(0.8).spring(),
-    star.animate().spin_in_from_nothing().duration(1.0).spring(),
-    triangle.animate().grow_from_center().duration(0.8).spring(),
-    hexagon.animate().grow_from_center().duration(0.8).spring(),
-)
-
+scene.play([
+    circle.grow_from_center().duration(0.8),
+    rect.grow_from_center().duration(0.8),
+    square.grow_from_center().duration(0.8),
+    ellipse.create().duration(0.8),
+    arrow.create().duration(0.8),
+], lag=0.1)
 scene.wait(1.0)
-scene.play(
-    circle.animate().indicate(color=GOLD, scale_factor=1.3).duration(0.5),
-    rect.animate().indicate(color=CORAL, scale_factor=1.3).duration(0.5),
-    square.animate().indicate(color=RED, scale_factor=1.3).duration(0.5),
-)
-
-scene.wait(0.5)
-scene.export("shapes_gallery.webp", fps=30, quality="draft")
+# Run this file with: gaanim shapes_gallery.py
 ```

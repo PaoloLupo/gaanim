@@ -1,4 +1,4 @@
-"""Example: Multi-scene Canvas with transitions and rich animations.
+"""Example: Multi-scene Scene with transitions and rich animations.
 
 Demonstrates:
   - Named segments with transitions (cross_fade, fade_through, slide)
@@ -24,11 +24,11 @@ from gaanim import (
     TEAL,
     WHITE,
     YELLOW,
-    Canvas,
+    Scene,
     Transition,
 )
 
-c = Canvas(1920, 1080, background=BLACK)
+c = Scene(1920, 1080, background=BLACK)
 
 # ── Segment 1: Title ────────────────────────────────────────────
 c.segment("intro")

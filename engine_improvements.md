@@ -6,13 +6,11 @@ contenido educativo, piezas para redes y presentaciones animadas mediante una AP
 programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 > [!NOTE]
-> Última auditoría del repositorio: **2026-07-13**.
-> Este documento describe el código presente en el workspace. La API pública todavía
-> está basada en `Canvas`, pero se ha decidido deprecar esa fachada y recuperar `Scene`
-> como API canónica antes de estabilizar 0.3.x. No se asume que una capacidad interna de
-> Rust esté disponible desde Python. El trabajo local de `Transform` y
-> `ReplacementTransform` se considera
-> **en desarrollo** hasta que tenga pruebas y validación visual.
+> Última auditoría del repositorio: **2026-07-19**.
+> `Scene` es la fachada pública de Python; `scene.canvas` contiene la configuración del
+> viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. No se
+> asume que una capacidad interna de Rust esté disponible desde Python. `Transform` y
+> `ReplacementTransform` tienen pruebas y regresión visual.
 
 ---
 
@@ -27,12 +25,12 @@ separa correctamente escena, animación, timeline, renderer, texto, layout, expo
 editor, API y bindings.
 
 La base técnica es más madura que la experiencia de librería. La API de Python actual
-expone solo una parte de lo que existe en Rust. La mayoría de la documentación y 13 de
-los 18 ejemplos todavía usan `Scene`; ese nombre se conservará y volverá a ser la
-fachada pública porque representa correctamente al objeto que posee mobjects, timeline,
-reproducción y exportación. El flujo principal también está orientado a ejecutar scripts
-dentro de la aplicación `gaanim`, no a instalar y usar el módulo como un paquete Python
-autónomo.
+expone solo una parte de lo que existe en Rust, pero `Scene` ya es la fachada pública que
+posee mobjects, timeline, reproducción y exportación. La documentación y los ejemplos
+usan `Scene`; `Canvas` queda limitado a la configuración accesible como `scene.canvas` y
+a un constructor de compatibilidad deprecado. El flujo principal también está orientado a
+ejecutar scripts dentro de la aplicación `gaanim`, no a instalar y usar el módulo como un
+paquete Python autónomo.
 
 En términos prácticos:
 
@@ -41,7 +39,7 @@ En términos prácticos:
 - **Es experimental** para presentaciones interactivas: existen breakpoints y navegación,
   pero faltan las herramientas propias de una solución de slides.
 - **Todavía no está listo** como pipeline general de producción de contenido: faltan
-  audio, imágenes/SVG, gráficos de datos, código, plantillas y una distribución coherente.
+  audio, SVG, gráficos de datos, código, plantillas y una distribución coherente.
 - **Todavía no está listo** como librería pública estable: API, documentación, ejemplos,
   stubs, versionado, pruebas de integración y empaquetado deben converger.
 
@@ -54,7 +52,7 @@ En términos prácticos:
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
 | Presentaciones animadas en vivo | 🟡 | Breakpoints básicos; faltan overview, notas y exportación por slide |
 | Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
-| Motion graphics con multimedia | 🔴 | No hay imágenes, SVG, video ni audio en la API pública |
+| Motion graphics con multimedia | 🟡 | PNG/JPEG/WebP disponibles; faltan SVG, video y audio |
 | Pipeline audiovisual de producción | 🔴 | Faltan assets, audio, pruebas E2E, empaquetado y estabilidad de API |
 
 ---
@@ -64,16 +62,15 @@ En términos prácticos:
 - `cargo check --workspace` finaliza correctamente.
 - El workspace contiene 13 crates de gaanim más el crate de documentación.
 - El paquete declara versión Python `0.3.0`; varios crates Rust siguen en `0.1.0`.
-- La API pública de Python exporta `Canvas`, `Drawable`, `Anim`, `Transition`, `Color`,
-  `Anchor`, `Direction` y `Updater`.
-- De 18 ejemplos Python, 6 mencionan `Canvas` y 13 todavía mencionan `Scene`; un ejemplo
-  usa ambas superficies.
-- La documentación Typst continúa enseñando `Scene`, `.animate()` y métodos que no
-  corresponden a la superficie Python actual.
-- No hay configuración de CI en el repositorio.
-- `cargo test --workspace` se intentó con ventanas de 60 y 180 segundos; ambas terminaron
-  mientras todavía compilaban dependencias gráficas. No se emitieron fallos de tests,
-  pero la suite completa tampoco quedó validada.
+- La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
+  `Anchor`, `Direction` y `Updater`. `Canvas(...)` emite una deprecación y devuelve un
+  `Scene`; la configuración visual vive en `scene.canvas`.
+- Los ejemplos Python no importan `Canvas` como fachada de animación.
+- La documentación Typst usa `Scene`, listas en `scene.play([...])` y métodos expuestos
+  por los bindings actuales.
+- CI ejecuta formato, check, tests y Clippy en Windows y Linux, además de la regresión
+  visual de `transform_demo` en Windows.
+- `cargo test --workspace --jobs 2` finaliza correctamente.
 
 ---
 
@@ -155,7 +152,7 @@ La API pública actual permite:
 
 - crear un `Canvas` con tamaño, fondo y margen uniforme;
 - crear `circle`, `rect`, `rounded_rect`, `square`, `dot`, `ellipse`, `line` y `arrow`;
-- crear `text`, `title`, `subtitle` y `equation`;
+- crear `text`, `title`, `subtitle`, `equation` e `image` (PNG/JPEG/WebP);
 - agrupar objetos;
 - configurar fill, stroke, opacidad y z-index;
 - posicionar con `at`, `at_anchor`, `next_to`, `align_to`, `to_edge` y `to_corner`;
@@ -249,7 +246,9 @@ Este es un **modo de presentación básico**, no una solución completa de slide
 
 El renderer usa Vello/wgpu, mantiene orden por `z_index` y `creation_order`, y conserva
 fragmentos renderizables en cache. Admite fill/stroke vectorial y `peniko::Brush` en la
-capa Rust.
+capa Rust. `Scene.image(path)` decodifica PNG/JPEG/WebP a RGBA, conserva la transparencia,
+participa en las transformaciones y opacidad normales, y reutiliza por proceso la textura
+decodificada para rutas repetidas.
 
 Estado de efectos:
 
@@ -343,11 +342,10 @@ siendo correctos, no solo que el workspace compila.
 
 Orden recomendado:
 
-1. `ImageMobject` con PNG/JPEG/WebP, alpha, crop y fit;
+1. completar `ImageMobject` con crop, fit y un asset manager con rutas relativas;
 2. importación SVG preservando paths y grupos;
 3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg;
-4. asset manager con rutas relativas al proyecto y mensajes de error claros;
-5. precarga/cache para evitar jitter durante preview y exportación.
+4. precarga y recarga de assets para evitar jitter durante preview y exportación.
 
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
 parte de las piezas de contenido comercial o social.
@@ -406,18 +404,19 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 ### 0.3.x — Convergencia y confiabilidad
 
-- [ ] Terminar y probar el morph en desarrollo.
-- [ ] Recuperar `Scene` como fachada pública y deprecar `Canvas` como punto de entrada.
-- [ ] Separar el viewport/configuración visual en `scene.canvas`.
-- [ ] Migrar toda la documentación y los ejemplos a la nueva API `Scene`.
+- [x] Terminar y probar el morph con regresión visual.
+- [x] Recuperar `Scene` como fachada pública y deprecar `Canvas` como punto de entrada.
+- [x] Separar el viewport/configuración visual en `scene.canvas`.
+- [x] Migrar la documentación y los ejemplos que usaban la fachada `Canvas` a `Scene`.
 - [ ] Completar la cobertura Python de las capacidades que ya son estables en Rust.
 - [ ] Corregir stubs, versiones y estrategia de empaquetado.
-- [ ] Añadir CI y smoke tests de exportación.
+- [x] Añadir CI y regresión visual headless.
 - [ ] Publicar un quickstart reproducible.
 
 ### 0.4 — Producción de contenido vectorial
 
-- [ ] Imágenes raster y SVG.
+- [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
+- [ ] SVG con paths y grupos preservados.
 - [ ] Audio con muxing en exportación.
 - [ ] API de fuentes, gradientes y cámara.
 - [ ] Componentes editoriales: listas, callouts, captions y title cards.
