@@ -143,6 +143,13 @@ scene.play([t.animate_to(1.0).duration(2.0)])
 same position and rotated to the current polyline segment. It uses the same
 native arc-length sampling as `point_on_curve`.
 
+`normal_on_curve(curve, tracker, length=80)` is the perpendicular companion,
+rotated 90 degrees counter-clockwise from the tangent.
+
+`curvature_on_curve(curve, tracker, window=0.02)` returns the local osculating
+circle estimated from neighboring arc-length samples. Style it as a regular
+circle, usually with `no_fill().stroke(...)`.
+
 Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
 object without covering it. `dimension_between(from, to, offset)` similarly
 keeps a technical measurement synchronized with moving endpoints.

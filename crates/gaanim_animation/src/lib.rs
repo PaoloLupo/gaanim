@@ -5,10 +5,11 @@ pub mod updaters;
 pub mod writing;
 
 pub use signals::{
-    AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec, PointOnCurve,
-    PositionBinding, Signal, SignalBinding, SpecValue, TangentOnCurve, Vec3Signal,
-    always_redraw_regen_system, point_on_curve_system, position_binding_system,
-    signal_binding_system, tangent_on_curve_system,
+    AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, CurvatureOnCurve, FloatSignal,
+    MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, Signal, SignalBinding, SpecValue,
+    TangentOnCurve, Vec3Signal, always_redraw_regen_system, curvature_on_curve_system,
+    normal_on_curve_system, point_on_curve_system, position_binding_system, signal_binding_system,
+    tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
@@ -74,6 +75,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 traced_path_system.after(tracking_line_system),
                 point_on_curve_system.after(traced_path_system),
                 tangent_on_curve_system.after(point_on_curve_system),
+                normal_on_curve_system.after(tangent_on_curve_system),
+                curvature_on_curve_system.after(normal_on_curve_system),
             )
                 .in_set(SceneSet::Updaters),
         );

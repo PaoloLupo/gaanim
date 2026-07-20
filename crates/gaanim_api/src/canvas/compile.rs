@@ -19,8 +19,8 @@ use crate::canvas::ops::{CanvasEndpoint, Op, Segment};
 use crate::canvas::types::{LayoutOp, ObjectSpec, SpawnKind};
 
 use gaanim_animation::{
-    PointOnCurve, PositionBinding, TangentOnCurve, TracedPath, TrackingEndpoint, TrackingLine,
-    Updater,
+    CurvatureOnCurve, NormalOnCurve, PointOnCurve, PositionBinding, TangentOnCurve, TracedPath,
+    TrackingEndpoint, TrackingLine, Updater,
 };
 use gaanim_math::SpatialTransform;
 
@@ -592,6 +592,47 @@ impl Canvas {
                             .commands
                             .entity(target_st.entity)
                             .insert(TangentOnCurve::new(curve_st.entity, tracker_st.entity));
+                    }
+                }
+                Op::AttachNormalOnCurve {
+                    target,
+                    curve,
+                    tracker,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(curve_id) = id_map.get(curve).copied()
+                        && let Some(tracker_id) = id_map.get(tracker).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(curve_st) = builder.states.get(curve_id)
+                        && let Some(tracker_st) = builder.states.get(tracker_id)
+                    {
+                        builder
+                            .commands
+                            .entity(target_st.entity)
+                            .insert(NormalOnCurve::new(curve_st.entity, tracker_st.entity));
+                    }
+                }
+                Op::AttachCurvatureOnCurve {
+                    target,
+                    curve,
+                    tracker,
+                    window,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(curve_id) = id_map.get(curve).copied()
+                        && let Some(tracker_id) = id_map.get(tracker).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(curve_st) = builder.states.get(curve_id)
+                        && let Some(tracker_st) = builder.states.get(tracker_id)
+                    {
+                        builder
+                            .commands
+                            .entity(target_st.entity)
+                            .insert(CurvatureOnCurve::new(
+                                curve_st.entity,
+                                tracker_st.entity,
+                                *window,
+                            ));
                     }
                 }
             }

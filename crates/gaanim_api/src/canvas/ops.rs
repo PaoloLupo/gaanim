@@ -180,6 +180,18 @@ pub(crate) enum Op {
         curve: ObjectId,
         tracker: ObjectId,
     },
+    /// Keep a line centered and normal to a sampled curve.
+    AttachNormalOnCurve {
+        target: ObjectId,
+        curve: ObjectId,
+        tracker: ObjectId,
+    },
+    AttachCurvatureOnCurve {
+        target: ObjectId,
+        curve: ObjectId,
+        tracker: ObjectId,
+        window: f64,
+    },
 }
 
 /// A tracking endpoint at the Canvas level (before entity resolution).

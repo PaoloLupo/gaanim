@@ -559,6 +559,50 @@ impl Canvas {
         handle
     }
 
+    /// Spawn a line centered and perpendicular to the tangent of `curve`.
+    pub fn normal_on_curve(
+        &mut self,
+        curve: &DrawableHandle,
+        tracker: &DrawableHandle,
+        length: f64,
+    ) -> DrawableHandle {
+        let half_length = length.max(0.0) / 2.0;
+        let handle = self.line(-half_length, 0.0, half_length, 0.0);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachNormalOnCurve {
+                target: handle.id,
+                curve: curve.id,
+                tracker: tracker.id,
+            });
+        handle
+    }
+
+    /// Spawn a unit circle scaled to the local osculating circle of `curve`.
+    pub fn curvature_on_curve(
+        &mut self,
+        curve: &DrawableHandle,
+        tracker: &DrawableHandle,
+        window: f64,
+    ) -> DrawableHandle {
+        let handle = self.circle(1.0);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachCurvatureOnCurve {
+                target: handle.id,
+                curve: curve.id,
+                tracker: tracker.id,
+                window,
+            });
+        handle
+    }
+
     /// Creates a curved arrow whose sweep is regenerated from `tracker` on
     /// every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
     pub fn always_redraw_arc(

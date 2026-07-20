@@ -265,6 +265,37 @@ impl TangentOnCurve {
     }
 }
 
+/// Keeps a line centered on a sampled curve and aligned with its normal.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct NormalOnCurve {
+    pub curve: Entity,
+    pub tracker: Entity,
+}
+
+impl NormalOnCurve {
+    pub fn new(curve: Entity, tracker: Entity) -> Self {
+        Self { curve, tracker }
+    }
+}
+
+/// Keeps a unit circle scaled to the local osculating circle of a sampled curve.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CurvatureOnCurve {
+    pub curve: Entity,
+    pub tracker: Entity,
+    pub window: f64,
+}
+
+impl CurvatureOnCurve {
+    pub fn new(curve: Entity, tracker: Entity, window: f64) -> Self {
+        Self {
+            curve,
+            tracker,
+            window,
+        }
+    }
+}
+
 /// Updates `PointOnCurve` bindings after reactive curve regenerators.
 pub fn point_on_curve_system(world: &mut World) {
     let mut updates = Vec::new();
@@ -326,6 +357,71 @@ pub fn tangent_on_curve_system(world: &mut World) {
     }
 }
 
+/// Updates normal bindings after their source curve and tracker have changed.
+pub fn normal_on_curve_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &NormalOnCurve)>();
+    for (target, binding) in query.iter(world) {
+        let Some(signal) = world.get::<FloatSignal>(binding.tracker) else {
+            continue;
+        };
+        let Some(path) = world.get::<gaanim_scene::Path2D>(binding.curve) else {
+            continue;
+        };
+        let Some((point, tangent)) = sample_polyline(path.0.as_ref(), signal.value) else {
+            continue;
+        };
+        let z = world
+            .get::<SpatialTransform>(target)
+            .map(|transform| transform.translation.z)
+            .unwrap_or(0.0);
+        updates.push((
+            target,
+            DVec3::new(point.x, point.y, z),
+            gaanim_core::glam::DQuat::from_rotation_z(
+                tangent.y.atan2(tangent.x) + std::f64::consts::FRAC_PI_2,
+            ),
+        ));
+    }
+
+    for (target, translation, rotation) in updates {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+            transform.translation = translation;
+            transform.rotation = rotation;
+        }
+    }
+}
+
+/// Updates osculating-circle bindings from three nearby arc-length samples.
+pub fn curvature_on_curve_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &CurvatureOnCurve)>();
+    for (target, binding) in query.iter(world) {
+        let Some(signal) = world.get::<FloatSignal>(binding.tracker) else {
+            continue;
+        };
+        let Some(path) = world.get::<gaanim_scene::Path2D>(binding.curve) else {
+            continue;
+        };
+        let Some((center, radius)) =
+            osculating_circle(path.0.as_ref(), signal.value, binding.window)
+        else {
+            continue;
+        };
+        let z = world
+            .get::<SpatialTransform>(target)
+            .map(|transform| transform.translation.z)
+            .unwrap_or(0.0);
+        updates.push((target, DVec3::new(center.x, center.y, z), radius));
+    }
+    for (target, translation, radius) in updates {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+            transform.translation = translation;
+            transform.scale = DVec3::splat(radius);
+        }
+    }
+}
+
 fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
     sample_polyline(path, fraction).map(|(point, _)| point)
 }
@@ -365,6 +461,32 @@ fn sample_polyline(path: &BezPath, fraction: f64) -> Option<(Point, gaanim_core:
         traversed += length;
     }
     segments.last().map(|(start, end, _)| (*end, *end - *start))
+}
+
+fn osculating_circle(path: &BezPath, fraction: f64, window: f64) -> Option<(Point, f64)> {
+    let fraction = fraction.clamp(0.0, 1.0);
+    let window = window.clamp(1e-4, 0.5);
+    let left = (fraction - window).max(0.0);
+    let right = (fraction + window).min(1.0);
+    if fraction - left <= f64::EPSILON || right - fraction <= f64::EPSILON {
+        return None;
+    }
+    let a = point_at_polyline_fraction(path, left)?;
+    let b = point_at_polyline_fraction(path, fraction)?;
+    let c = point_at_polyline_fraction(path, right)?;
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if d.abs() <= 1e-9 {
+        return None;
+    }
+    let a2 = a.x * a.x + a.y * a.y;
+    let b2 = b.x * b.x + b.y * b.y;
+    let c2 = c.x * c.x + c.y * c.y;
+    let center = Point::new(
+        (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+        (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
+    );
+    let radius = (a - center).hypot();
+    (radius.is_finite() && radius > f64::EPSILON).then_some((center, radius))
 }
 
 #[cfg(test)]
@@ -407,6 +529,16 @@ mod tests {
         assert_eq!(transform.translation, DVec3::new(100.0, 100.0, 0.0));
         let direction = transform.rotation * DVec3::X;
         assert!(direction.x.abs() < 1e-9 && (direction.y - 1.0).abs() < 1e-9);
+
+        let normal = world
+            .spawn((
+                SpatialTransform::default(),
+                NormalOnCurve::new(curve, tracker),
+            ))
+            .id();
+        normal_on_curve_system(&mut world);
+        let direction = world.get::<SpatialTransform>(normal).unwrap().rotation * DVec3::X;
+        assert!((direction.x + 1.0).abs() < 1e-9 && direction.y.abs() < 1e-9);
 
         world.get_mut::<FloatSignal>(tracker).unwrap().value = 2.0;
         point_on_curve_system(&mut world);

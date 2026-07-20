@@ -522,6 +522,36 @@ impl PyScene {
         )
     }
 
+    #[pyo3(signature = (curve, tracker, length=80.0))]
+    fn normal_on_curve(
+        &self,
+        curve: &PyDrawable,
+        tracker: &PyValueTracker,
+        length: f64,
+    ) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .normal_on_curve(&curve.0, &tracker.inner, length),
+        )
+    }
+
+    #[pyo3(signature = (curve, tracker, window=0.02))]
+    fn curvature_on_curve(
+        &self,
+        curve: &PyDrawable,
+        tracker: &PyValueTracker,
+        window: f64,
+    ) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .curvature_on_curve(&curve.0, &tracker.inner, window),
+        )
+    }
+
     #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]
     fn always_redraw_arc(
         &self,
