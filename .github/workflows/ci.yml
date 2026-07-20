@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      # Typst, Bevy and Vello make a full workspace test build memory-intensive.
+      # Keep hosted Windows runners below their paging-file limit.
+      CARGO_BUILD_JOBS: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
+
+      - name: Type-check workspace
+        run: cargo check --workspace
+
+      - name: Run unit tests
+        run: cargo test --workspace
+
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets
+
+  visual-regression:
+    name: Visual regression (Windows)
+    runs-on: windows-latest
+    env:
+      CARGO_BUILD_JOBS: 2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Expose the embedded Python runtime
+        shell: pwsh
+        run: |
+          $pythonHome = python -c "import sys; print(sys.base_prefix)"
+          $pythonHome | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build headless snapshot runner
+        run: cargo build -p gaanim_editor --bin gaanim
+
+      - name: Validate public Scene examples
+        shell: pwsh
+        run: .\tests\validate_scene_examples.ps1
+
+      - name: Compare transform snapshots
+        run: .\target\debug\gaanim.exe --diff --example examples\transform_demo.py --no-gui
+
+      - name: Compare image snapshots
+        run: .\target\debug\gaanim.exe --diff --example examples\image_demo.py --no-gui
+
+      - name: Upload visual diff report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: transform-demo-visual-diff
+          path: |
+            tests/visual/transform_demo/current
+            tests/visual/transform_demo/report
+            tests/visual/image_demo/current
+            tests/visual/image_demo/report
+          if-no-files-found: warn
+          retention-days: 14

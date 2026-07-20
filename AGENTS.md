@@ -57,6 +57,24 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 - Run per-crate tests: `cargo test -p <crate>`
 - The `just doctor` command is the fastest verification that the Rust→Python bridge is intact.
 
+## Visual regression diffs
+
+- `gaanim_diff` provides exact timeline-seek snapshots, PNG comparison, JSON/HTML reports, and a native egui viewer. The main `gaanim` binary exposes it through `--diff`.
+- Snapshot fixtures are organized globally per example: `tests/visual/<example-relative-path-without-.py>/{baseline,current,report}`. For example, `examples/visual_diff_demo.py` maps to `tests/visual/visual_diff_demo/`.
+  - `baseline/` is the approved fixture and should be versioned when intentionally changed.
+  - `current/` and `report/` are generated local artifacts and are gitignored.
+- Examples intended for visual regression must conditionally call `scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], seeks)` when `GAANIM_SNAPSHOTS` is set. The diff CLI injects that environment variable and runs this capture headlessly.
+- Windows workflow (activate `.venv` first so the editor binary can load Python):
+
+  ```powershell
+  . .\.venv\Scripts\Activate.ps1
+  target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py --bless
+  target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
+  ```
+
+  `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and opens egui. Add `--no-gui` for CI; use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.
+- Legacy/manual comparison remains available with `--baseline`, `--current`, and `--output`, but prefer `--example` so paths stay deterministic.
+
 ## Code conventions
 
 - **No wrapper types** for graphics primitives: use `peniko::Color`, `peniko::Brush`, `kurbo::BezPath`, `kurbo::Affine` directly in ECS components.
