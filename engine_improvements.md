@@ -159,10 +159,10 @@ La API pública actual permite:
 - dividir el contenido en segmentos y enlazarlos con transiciones;
 - ejecutar la escena en la aplicación o exportarla por extensión de archivo.
 
-El núcleo Rust contiene más primitivas y helpers —polígonos, estrellas, arcos, flechas
-curvas, ejes, gráficas, braces, operaciones booleanas y layouts de grupo—, pero esas
-capacidades no forman parte de la API `Canvas` de Python actual. No deben anunciarse
-como funciones de usuario hasta que estén enlazadas, documentadas y probadas.
+El núcleo Rust contiene más primitivas y helpers —polígonos, estrellas, gráficas,
+braces, operaciones booleanas y layouts de grupo—. La API Python ya expone
+`polyline`, `arc`, `curved_arrow`, `dimension` y ejes; el resto no debe anunciarse
+como función de usuario hasta que esté enlazado, documentado y probado.
 
 ### 2. Animación y composición temporal
 
@@ -350,6 +350,39 @@ Orden recomendado:
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
 parte de las piezas de contenido comercial o social.
 
+### P1 — Diagramas técnicos y mecanismos dinámicos (prioridad inmediata)
+
+Las figuras de física, ingeniería y matemáticas deben poder construirse como
+geometría animable, no como una imagen plana. Este bloque pasa por delante de
+los componentes editoriales generales porque también desbloquea gráficas,
+diagramas de procesos y explicaciones educativas.
+
+Orden de implementación:
+
+1. `polyline`/`path` públicos para rieles, resortes, trayectorias y contornos abiertos;
+2. arcos, flechas curvas, ángulos y cotas (`arc`, `curved_arrow`, `dimension`);
+3. `ValueTracker` completo desde Python, con animación de valor y bindings;
+4. geometría reactiva/`always_redraw` para que resortes, etiquetas y cotas respondan a un tracker;
+5. grupos con pivote de transformación para mecanismos rotatorios.
+
+**Criterio de salida:** una escena Python puede animar un mecanismo como un
+disco con resorte y masa: el conjunto rota, la masa se desplaza, el resorte se
+deforma y las cotas o ecuaciones siguen el estado sin depender de SVG externo.
+
+### P1 — Tema científico y coordenadas configurables
+
+La escena debe tener una identidad técnica coherente por defecto y no depender
+de que cada ejemplo configure tipografías o ejes manualmente.
+
+1. tema `Scientific` con New Computer Modern para texto técnico y New Computer Modern Math para ecuaciones;
+2. fuentes empaquetadas y registradas por el motor para resultados idénticos en todas las plataformas;
+3. `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
+4. estilos separados para ejes, grilla, ticks y rótulos, además de una API para ocultar elementos individuales.
+
+**Criterio de salida:** un diagrama científico puede crear ejes numerados y una
+grilla legible con una sola llamada, y texto/equaciones mantienen una familia
+tipográfica consistente en preview y export.
+
 ### P1 — Componentes de contenido reutilizables
 
 Priorizar objetos de alto impacto editorial:
@@ -421,6 +454,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] SVG avanzado: grupos origen direccionables, clipping, gradientes, filtros y texto.
 - [ ] Audio con muxing en exportación.
 - [ ] API de fuentes, gradientes y cámara.
+- [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
 - [ ] Componentes editoriales: listas, callouts, captions y title cards.
 - [ ] Presets 16:9, 9:16 y 1:1 con safe areas.
 - [ ] Perfil de exportación completamente accesible desde Python.

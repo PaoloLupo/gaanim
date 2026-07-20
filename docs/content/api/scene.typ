@@ -30,6 +30,8 @@ scene.canvas.set_margin(32)
 == Spawning mobjects
 
 Every factory returns a `Drawable` handle with fluent style and layout methods.
+Plain text uses the bundled New Computer Modern scientific theme by default;
+equations use the matching New Computer Modern Math face.
 
 ```python
 from gaanim import BLUE, GOLD, WHITE, Scene
@@ -41,12 +43,18 @@ rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
 label = scene.title("Gaanim").at(0, 220)
 formula = scene.equation("E = m c^2").at(0, -180)
 arrow = scene.arrow(-80, 0, 80, 0)
+angle = scene.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
+rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
+rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
+measure = scene.dimension(-80, 80, 80, 80, 24)
+spring = scene.polyline([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
+axes = scene.axes((-5, 5, 1), (-3, 3, 1), grid=True, labels=True)
 logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
 icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `text`, `title`, `subtitle`, `equation`, and
+`ellipse`, `line`, `arrow`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
 `group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.
@@ -61,6 +69,26 @@ paths and basic shapes, solid fills/strokes, CSS,
 `viewBox`, transforms, and `<use>`. Raster SVG images, text, gradients,
 patterns, filters, masks, and individual source-group handles are not yet
 preserved.
+
+`axes(x_range, y_range, grid=True, labels=True)` creates Cartesian axes with
+optional grid lines and numeric labels. Ranges are `(minimum, maximum, step)`.
+
+`arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`
+connects two points with an angular deflection; `curved_arrow_arc` follows an
+explicit center/radius arc. Both use radians, while
+`dimension(x1, y1, x2, y2, offset)` draws extension lines and a perpendicular
+double-headed measurement arrow.
+
+== Reactive geometry
+
+`ValueTracker` animates a scalar independently of visible mobjects. Use
+`always_redraw_arc` to regenerate a curved arrow from that value each frame.
+
+```python
+theta = scene.value_tracker(0.2)
+rotation = scene.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
+scene.play([theta.animate_to(4.5).duration(2.0)])
+```
 
 == Timeline
 

@@ -203,6 +203,78 @@ impl Canvas {
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
     }
+    /// Creates an open circular arc. Angles are expressed in radians.
+    pub fn arc(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Arc {
+            center: (cx, cy),
+            radius,
+            start_angle,
+            sweep_angle,
+        })
+    }
+    /// Creates a curved arrow between two points.
+    pub fn curved_arrow(
+        &mut self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::CurvedArrow(x1, y1, x2, y2, angle))
+    }
+    /// Creates a curved arrow along an explicit circular arc. Angles are in radians.
+    pub fn curved_arrow_arc(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::CurvedArrowArc {
+            center: (cx, cy),
+            radius,
+            start_angle,
+            sweep_angle,
+        })
+    }
+    /// Creates a dimension line offset perpendicularly from the measured segment.
+    pub fn dimension(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Dimension {
+            start: (x1, y1),
+            end: (x2, y2),
+            offset,
+        })
+    }
+    /// Creates an open path connecting the given points in order.
+    ///
+    /// Use this for technical geometry such as springs, rails, or trajectories.
+    pub fn polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
+        self.spawn(SpawnKind::Polyline(points.to_vec()))
+    }
+    /// Creates configurable Cartesian axes, optionally with a grid and numeric labels.
+    pub fn axes(
+        &mut self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        grid: bool,
+        labels: bool,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Axes {
+            x_range,
+            y_range,
+            grid,
+            labels,
+        })
+    }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Text(s.to_string()))
     }
@@ -444,6 +516,44 @@ impl Canvas {
         self.spawn(SpawnKind::ValueTracker(initial))
     }
 
+    /// Creates a curved arrow whose sweep is regenerated from `tracker` on
+    /// every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
+    pub fn always_redraw_arc(
+        &mut self,
+        tracker: &DrawableHandle,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        initial_value: f64,
+        sweep_scale: f64,
+        sweep_offset: f64,
+    ) -> DrawableHandle {
+        let handle = self.curved_arrow_arc(
+            cx,
+            cy,
+            radius,
+            start_angle,
+            initial_value * sweep_scale + sweep_offset,
+        );
+        let target = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackerArc {
+                target,
+                tracker: tracker.id,
+                center: (cx, cy),
+                radius,
+                start_angle,
+                sweep_scale,
+                sweep_offset,
+            });
+        handle
+    }
+
     /// Spawn a traced path that accumulates the trajectory of `source` as a
     /// continuous line. The returned drawable's Path2D is regenerated every frame.
     pub fn traced_path(&mut self, source: &DrawableHandle) -> DrawableHandle {
@@ -587,6 +697,59 @@ mod tests {
                 .get::<SceneMember>(circle_entity)
                 .map(|member| member.0),
             Some(first_scene)
+        );
+    }
+
+    #[test]
+    fn tracker_arc_compiles_with_signal_and_regenerator() {
+        let mut canvas = Canvas::new(1280, 720);
+        let tracker = canvas.value_tracker(0.4);
+        let _arrow = canvas.always_redraw_arc(&tracker, 0.0, 0.0, 120.0, 0.0, 0.4, 1.0, 0.0);
+        canvas.play(vec![tracker.animate_value_to(1.2).duration(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let tracker_entity = world
+            .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::FloatSignal>>()
+            .iter(&world)
+            .next()
+            .expect("tracker entity");
+        let arrow_entity = world
+            .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::AlwaysRedrawRegen>>()
+            .iter(&world)
+            .next()
+            .expect("arrow entity");
+
+        assert_eq!(
+            world
+                .get::<gaanim_animation::FloatSignal>(tracker_entity)
+                .map(|signal| signal.value),
+            Some(0.4)
+        );
+        assert!(
+            world
+                .get::<gaanim_animation::AlwaysRedrawRegen>(arrow_entity)
+                .is_some()
+        );
+
+        world
+            .get_mut::<gaanim_animation::FloatSignal>(tracker_entity)
+            .expect("tracker signal")
+            .value = 1.2;
+        gaanim_animation::always_redraw_regen_system(&mut world);
+        assert!(
+            !world
+                .get::<gaanim_scene::Path2D>(arrow_entity)
+                .expect("reactive path")
+                .0
+                .elements()
+                .is_empty(),
+            "the regenerated arrow path must reflect the signal value"
         );
     }
 }

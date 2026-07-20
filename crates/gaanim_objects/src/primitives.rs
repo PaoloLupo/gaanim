@@ -898,32 +898,31 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
     bundle
 }
 
+/// Creates a curved arrow between two points using a signed angular deflection.
+/// Its fill is kept inside a narrow, closed shaft silhouette.
 pub fn curved_arrow(
     id: ObjectId,
     start: kurbo::Point,
     end: kurbo::Point,
     angle: f64,
 ) -> MobjectBundle {
-    let mid_x = (start.x + end.x) * 0.5;
-    let mid_y = (start.y + end.y) * 0.5;
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let chord = (dx * dx + dy * dy).sqrt();
-    let radius = if angle.abs() < 1e-6 {
-        chord * 0.5
-    } else {
-        (chord * 0.5) / (angle * 0.5).sin().abs()
-    };
-    let r_sign = if angle >= 0.0 { 1.0 } else { -1.0 };
-    let h = (radius * radius - chord * chord * 0.25).sqrt();
-    let nx = -dy / chord;
-    let ny = dx / chord;
-    let cx = mid_x + nx * h * r_sign;
-    let cy = mid_y + ny * h * r_sign;
-    let center = kurbo::Point::new(cx, cy);
+    if chord <= f64::EPSILON || angle.abs() <= 1e-6 {
+        return arrow(id, start, end);
+    }
 
-    let sa = (start.y - cy).atan2(start.x - cx);
-    let ea = (end.y - cy).atan2(end.x - cx);
+    let radius = (chord * 0.5) / (angle * 0.5).sin().abs();
+    let r_sign = angle.signum();
+    let h = (radius * radius - chord * chord * 0.25).max(0.0).sqrt();
+    let center = kurbo::Point::new(
+        (start.x + end.x) * 0.5 + (-dy / chord) * h * r_sign,
+        (start.y + end.y) * 0.5 + (dx / chord) * h * r_sign,
+    );
+
+    let sa = (start.y - center.y).atan2(start.x - center.x);
+    let ea = (end.y - center.y).atan2(end.x - center.x);
     let mut sweep = ea - sa;
     if angle > 0.0 && sweep < 0.0 {
         sweep += 2.0 * std::f64::consts::PI;
@@ -931,33 +930,68 @@ pub fn curved_arrow(
         sweep -= 2.0 * std::f64::consts::PI;
     }
 
-    let head_len: f64 = 18.0;
-    let head_half_width: f64 = 9.0;
-    let body_half_t: f64 = 3.0;
+    curved_arrow_arc(id, center, radius, sa, sweep)
+}
 
+/// Creates a curved arrow from an explicit circular arc.
+///
+/// `start_angle` and `sweep_angle` are expressed in radians. The arrow tip is
+/// placed at the end of the sweep, so the center and radius can be shared with
+/// another object (for example, a rotating disk or a tracked point).
+pub fn curved_arrow_arc(
+    id: ObjectId,
+    center: kurbo::Point,
+    radius: f64,
+    start_angle: f64,
+    sweep_angle: f64,
+) -> MobjectBundle {
+    let radius = radius.abs();
+    let sa = start_angle;
+    let start = center + kurbo::Vec2::new(radius * start_angle.cos(), radius * start_angle.sin());
+    let end_angle = start_angle + sweep_angle;
+    let end = center + kurbo::Vec2::new(radius * end_angle.cos(), radius * end_angle.sin());
+
+    if radius <= f64::EPSILON || sweep_angle.abs() <= f64::EPSILON {
+        let mut bundle = MobjectBundle::new(
+            id,
+            kurbo::BezPath::new(),
+            Bounds3D::new_2d(start.x, start.y, start.x, start.y),
+        );
+        bundle.tag = ObjectTag("CurvedArrow".into());
+        return bundle;
+    }
+
+    let head_len: f64 = 18.0;
+    // Match the default 2.5px stroke so applying a fill does not make the
+    // shaft visibly wider than its outline.
+    let body_half_t: f64 = 1.25;
+    // Keep the inner shoulder on the same side of the center as the shaft;
+    // this avoids an oversized/inverted fill for small-radius arcs.
+    let head_half_width: f64 = 9.0_f64.min((radius * 0.45).max(body_half_t));
+
+    let sweep = sweep_angle;
     let sweep_sign = sweep.signum();
     let sweep_abs = sweep.abs();
     let head_angle = (head_len / radius).min(sweep_abs * 0.5);
-    let shaft_sweep = sweep_abs - head_angle;
-    let sa_shoulder = ea - sweep_sign * head_angle;
-
-    let r_outer = radius + body_half_t;
-    let r_inner = radius - body_half_t;
+    let shaft_sweep = (sweep_abs - head_angle).max(0.0);
+    let sa_shoulder = end_angle - sweep_sign * head_angle;
 
     let mut path = kurbo::BezPath::new();
 
-    // Outer arc start
-    let p_start_outer = center + kurbo::Vec2::new(r_outer * sa.cos(), r_outer * sa.sin());
-    path.move_to(p_start_outer);
+    // The shaft is a thin closed ribbon. Vector renderers implicitly close
+    // open subpaths for filling, which would otherwise turn a large arc into
+    // a filled circular sector.
+    let r_outer = radius + body_half_t;
+    let r_inner = (radius - body_half_t).max(0.0);
+    path.move_to(center + kurbo::Vec2::new(r_outer * sa.cos(), r_outer * sa.sin()));
 
     let steps = ((radius * shaft_sweep / 4.0).ceil() as u32).max(8);
     for i in 0..=steps {
         let a = sa + sweep_sign * shaft_sweep * (i as f64 / steps as f64);
-        let p = center + kurbo::Vec2::new(r_outer * a.cos(), r_outer * a.sin());
-        path.line_to(p);
+        path.line_to(center + kurbo::Vec2::new(r_outer * a.cos(), r_outer * a.sin()));
     }
 
-    // Outer shoulder of the arrow head
+    // The arrowhead tip lies exactly on the requested arc.
     let p_shoulder_outer = center
         + kurbo::Vec2::new(
             (radius + head_half_width) * sa_shoulder.cos(),
@@ -975,40 +1009,22 @@ pub fn curved_arrow(
             (radius - head_half_width) * sa_shoulder.sin(),
         );
     path.line_to(p_shoulder_inner);
+    path.line_to(
+        center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin()),
+    );
 
-    // Inner shaft shoulder
-    let p_shaft_shoulder_inner =
-        center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin());
-    path.line_to(p_shaft_shoulder_inner);
-
-    // Inner arc back to start
     for i in 0..=steps {
         let a = sa_shoulder - sweep_sign * shaft_sweep * (i as f64 / steps as f64);
-        let p = center + kurbo::Vec2::new(r_inner * a.cos(), r_inner * a.sin());
-        path.line_to(p);
+        path.line_to(center + kurbo::Vec2::new(r_inner * a.cos(), r_inner * a.sin()));
     }
-
     path.close_path();
 
-    let mut min_x = start.x.min(end.x);
-    let mut max_x = start.x.max(end.x);
-    let mut min_y = start.y.min(end.y);
-    let mut max_y = start.y.max(end.y);
-
-    for el in path.elements() {
-        if let kurbo::PathEl::LineTo(p) | kurbo::PathEl::MoveTo(p) = el {
-            min_x = min_x.min(p.x);
-            max_x = max_x.max(p.x);
-            min_y = min_y.min(p.y);
-            max_y = max_y.max(p.y);
-        }
-    }
-
+    let bounds_rect = path.bounding_box();
     let bounds = Bounds3D::new_2d(
-        min_x - body_half_t.max(head_half_width),
-        min_y - body_half_t.max(head_half_width),
-        max_x + body_half_t.max(head_half_width),
-        max_y + body_half_t.max(head_half_width),
+        bounds_rect.x0 - body_half_t,
+        bounds_rect.y0 - body_half_t,
+        bounds_rect.x1 + body_half_t,
+        bounds_rect.y1 + body_half_t,
     );
 
     let mut bundle = MobjectBundle::new(id, path, bounds);
@@ -1160,5 +1176,43 @@ mod arrow_tests {
             Some(20.0),
         );
         assert_eq!(count_subpaths(&b.path.0), 1);
+    }
+
+    #[test]
+    fn curved_arrow_arc_fill_stays_inside_narrow_silhouette() {
+        let b = curved_arrow_arc(
+            ObjectId::from_raw(0),
+            kurbo::Point::new(0.0, 0.0),
+            100.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        assert_eq!(
+            count_subpaths(&b.path.0),
+            1,
+            "the arrow must be a single closed silhouette, never an open arc that fills as a sector"
+        );
+        assert_eq!(
+            b.path.0.winding(kurbo::Point::new(0.0, 0.0)),
+            0,
+            "the circle center must stay outside the filled arrow body"
+        );
+    }
+
+    #[test]
+    fn curved_arrow_arc_tip_stays_on_requested_radius() {
+        let center = kurbo::Point::new(10.0, -4.0);
+        let radius = 80.0;
+        let start_angle = 0.2;
+        let sweep = 1.1;
+        let b = curved_arrow_arc(ObjectId::from_raw(0), center, radius, start_angle, sweep);
+        let expected = center
+            + kurbo::Vec2::new(
+                radius * (start_angle + sweep).cos(),
+                radius * (start_angle + sweep).sin(),
+            );
+        assert!(b.path.0.elements().iter().any(|element| {
+            matches!(element, kurbo::PathEl::LineTo(point) if point.distance(expected) < 1e-6)
+        }));
     }
 }

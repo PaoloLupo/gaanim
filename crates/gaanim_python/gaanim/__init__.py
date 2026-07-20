@@ -25,6 +25,7 @@ from .gaanim_core import (
     Drawable,
     Transition,
     Updater,
+    ValueTracker,
     Scene,
 )
 
@@ -49,6 +50,7 @@ __all__ = [
     "Anchor",
     "Direction",
     "Updater",
+    "ValueTracker",
     "GOLD",
     "CORAL",
     "BLUE",

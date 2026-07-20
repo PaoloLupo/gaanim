@@ -452,8 +452,8 @@ fn compile_typst_source(
     stroke: &StrokeBrush,
 ) -> Result<CachedTypstHierarchy, Vec<String>> {
     // Build optional font directives.
-    // Typst default fonts (LibertinusSerif / NewCMMath) are already loaded in the FontBook,
-    // so if the user passes None we let Typst pick its own defaults.
+    // Gaanim supplies New Computer Modern for plain text by default; math uses
+    // the dedicated New Computer Modern Math face when configured.
     let mut directives = String::new();
     if let Some(family) = text_font {
         directives.push_str(&format!("#set text(font: \"{}\")\n", family));

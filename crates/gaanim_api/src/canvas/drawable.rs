@@ -83,6 +83,16 @@ impl DrawableHandle {
         })
     }
 
+    /// Sets the initial value of a `ValueTracker` before the scene is compiled.
+    /// Calling this on a regular drawable has no effect.
+    pub fn set_value(self, value: f64) -> Self {
+        self.update_spec(|spec| {
+            if let SpawnKind::ValueTracker(current) = &mut spec.kind {
+                *current = value;
+            }
+        })
+    }
+
     pub fn opacity(self, op: f32) -> Self {
         self.update_spec(|spec| spec.opacity = op)
     }
@@ -160,6 +170,11 @@ impl DrawableHandle {
     fn anim_dur(&self, ty: AnimationType, dur: Option<f64>) -> Anim {
         let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
         Anim::queued(self.id, ty, self.state.clone(), active_idx).with_duration(dur)
+    }
+
+    /// Animates a `ValueTracker` to `to`. Regular drawables ignore this lens.
+    pub fn animate_value_to(&self, to: f64) -> Anim {
+        self.anim(AnimationType::SignalFloat { to })
     }
 
     // -- Animation methods (return Anim, auto-enqueued) --

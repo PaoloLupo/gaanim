@@ -9,6 +9,7 @@ use gaanim_api::canvas::{Canvas as ApiCanvas, CanvasEndpoint, ImageCrop, ImageFi
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 use crate::transition::PyTransitionType;
+use crate::value_tracker::PyValueTracker;
 
 /// Visual configuration owned by a [`PyScene`].
 ///
@@ -136,6 +137,69 @@ impl PyScene {
                 .lock()
                 .expect("scene canvas poisoned")
                 .arrow(x1, y1, x2, y2),
+        )
+    }
+    fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
+        PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
+            cx,
+            cy,
+            radius,
+            start_angle,
+            sweep_angle,
+        ))
+    }
+    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .curved_arrow(x1, y1, x2, y2, angle),
+        )
+    }
+    fn curved_arrow_arc(
+        &self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
+        )
+    }
+    fn dimension(&self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .dimension(x1, y1, x2, y2, offset),
+        )
+    }
+    fn polyline(&self, points: Vec<(f64, f64)>) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline(&points),
+        )
+    }
+    #[pyo3(signature = (x_range, y_range, grid=true, labels=true))]
+    fn axes(
+        &self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        grid: bool,
+        labels: bool,
+    ) -> PyDrawable {
+        PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .axes(x_range, y_range, grid, labels),
         )
     }
     fn text(&self, s: &str) -> PyDrawable {
@@ -350,12 +414,40 @@ impl PyScene {
 
     // -- Reactive objects --
 
-    fn value_tracker(&self, initial: f64) -> PyDrawable {
+    fn value_tracker(&self, initial: f64) -> PyValueTracker {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .value_tracker(initial);
+        PyValueTracker::new(handle, initial)
+    }
+
+    #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]
+    fn always_redraw_arc(
+        &self,
+        tracker: &PyValueTracker,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_scale: f64,
+        sweep_offset: f64,
+    ) -> PyDrawable {
         PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .value_tracker(initial),
+                .always_redraw_arc(
+                    &tracker.inner,
+                    cx,
+                    cy,
+                    radius,
+                    start_angle,
+                    tracker.current_value(),
+                    sweep_scale,
+                    sweep_offset,
+                ),
         )
     }
 

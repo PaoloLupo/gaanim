@@ -209,6 +209,36 @@ pub enum SpawnKind {
     Ellipse(f64, f64),
     Line(f64, f64, f64, f64),
     Arrow(f64, f64, f64, f64),
+    /// Circular arc centered at `(cx, cy)`, in radians.
+    Arc {
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    /// Curved arrow connecting two points with an angular deflection.
+    CurvedArrow(f64, f64, f64, f64, f64),
+    /// Curved arrow following an explicit circular arc.
+    CurvedArrowArc {
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    /// Technical measurement: extension lines plus a double-headed arrow.
+    Dimension {
+        start: (f64, f64),
+        end: (f64, f64),
+        offset: f64,
+    },
+    /// Open sequence of straight segments. Useful for springs, rails, and paths.
+    Polyline(Vec<(f64, f64)>),
+    Axes {
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        grid: bool,
+        labels: bool,
+    },
     Text(String),
     Title(String),
     Subtitle(String),

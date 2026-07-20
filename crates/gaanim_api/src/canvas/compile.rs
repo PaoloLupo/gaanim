@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::Point;
+use gaanim_core::kurbo::{Point, Vec2};
+use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::Bounds3D;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
 use gaanim_timeline::clip::SceneId;
@@ -58,6 +59,7 @@ impl Canvas {
                 seg,
                 &mut id_map,
                 frame_bounds,
+                text_config,
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
@@ -121,6 +123,7 @@ impl Canvas {
         seg: &Segment,
         id_map: &mut HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
+        text_config: &gaanim_text::prelude::TextConfig,
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
@@ -129,7 +132,7 @@ impl Canvas {
             match op {
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
-                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds);
+                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds, text_config);
                     id_map.insert(spec.id, actual.id);
                 }
                 Op::Animate { anim, active } => {
@@ -404,6 +407,47 @@ impl Canvas {
                         builder.commands.entity(st.entity).insert(line);
                     }
                 }
+
+                Op::AttachTrackerArc {
+                    target,
+                    tracker,
+                    center,
+                    radius,
+                    start_angle,
+                    sweep_scale,
+                    sweep_offset,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(tracker_id) = id_map.get(tracker).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(tracker_st) = builder.states.get(tracker_id)
+                    {
+                        let tracker_entity = tracker_st.entity;
+                        let center = Point::new(center.0, center.1);
+                        let radius = *radius;
+                        let start_angle = *start_angle;
+                        let sweep_scale = *sweep_scale;
+                        let sweep_offset = *sweep_offset;
+                        let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                            let value = world
+                                .get::<gaanim_animation::FloatSignal>(tracker_entity)
+                                .map(|signal| signal.value)
+                                .unwrap_or(0.0);
+                            gaanim_objects::primitives::curved_arrow_arc(
+                                gaanim_core::ObjectId::from_raw(0),
+                                center,
+                                radius,
+                                start_angle,
+                                value * sweep_scale + sweep_offset,
+                            )
+                            .path
+                            .0
+                            .as_ref()
+                            .clone()
+                        });
+                        builder.commands.entity(target_st.entity).insert(redraw);
+                    }
+                }
             }
         }
     }
@@ -439,6 +483,7 @@ impl Canvas {
         spec: &ObjectSpec,
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
+        text_config: &gaanim_text::prelude::TextConfig,
     ) -> MobjectRef {
         match &spec.kind {
             SpawnKind::Circle(r) => {
@@ -489,18 +534,123 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                let b = builder.arc(
+                    Point::new(center.0, center.1),
+                    Vec2::new(*radius, *radius),
+                    *start_angle,
+                    *sweep_angle,
+                    0.0,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::CurvedArrow(x1, y1, x2, y2, angle) => {
+                let b = builder.curved_arrow(Point::new(*x1, *y1), Point::new(*x2, *y2), *angle);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::CurvedArrowArc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                let b = builder.curved_arrow_arc(
+                    Point::new(center.0, center.1),
+                    *radius,
+                    *start_angle,
+                    *sweep_angle,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Dimension { start, end, offset } => {
+                let dx = end.0 - start.0;
+                let dy = end.1 - start.1;
+                let length = dx.hypot(dy);
+                if length <= f64::EPSILON {
+                    let b = builder.line(Point::new(start.0, start.1), Point::new(end.0, end.1));
+                    let mr = Self::finish_spawn_builder(b, spec);
+                    Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                    mr
+                } else {
+                    let normal = (-dy / length, dx / length);
+                    let dimension_start =
+                        Point::new(start.0 + normal.0 * *offset, start.1 + normal.1 * *offset);
+                    let dimension_end =
+                        Point::new(end.0 + normal.0 * *offset, end.1 + normal.1 * *offset);
+                    let color = PenikoColor::from_rgb8(0x80, 0x80, 0x80);
+                    let extension_a = builder
+                        .line(Point::new(start.0, start.1), dimension_start)
+                        .no_fill()
+                        .stroke(color, 2.0)
+                        .spawn();
+                    let extension_b = builder
+                        .line(Point::new(end.0, end.1), dimension_end)
+                        .no_fill()
+                        .stroke(color, 2.0)
+                        .spawn();
+                    let measurement = builder
+                        .double_arrow(dimension_start, dimension_end, Some(12.0), Some(10.0))
+                        .fill(color)
+                        .no_stroke()
+                        .spawn();
+                    let group = builder.group(&[extension_a, extension_b, measurement]);
+                    Self::post_apply(builder, group.id, spec, id_map, frame_bounds);
+                    group
+                }
+            }
+            SpawnKind::Polyline(points) => {
+                let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
+                let b = builder.open_path(&points);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Axes {
+                x_range,
+                y_range,
+                grid,
+                labels,
+            } => {
+                let axes = builder.axes(*x_range, *y_range, *labels);
+                if *grid {
+                    let grid = Self::finish_spawn_builder(
+                        builder.number_plane(*x_range, *y_range, 3.0, 1.0),
+                        spec,
+                    );
+                    let group = builder.group(&[grid, axes]);
+                    Self::post_apply(builder, group.id, spec, id_map, frame_bounds);
+                    group
+                } else {
+                    Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
+                    axes
+                }
+            }
             SpawnKind::Text(t) => {
-                let mr = builder.text(t, "Inter", 48.0);
+                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Title(t) => {
-                let mr = builder.text(t, "Inter", 64.0);
+                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Title];
+                let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Subtitle(t) => {
-                let mr = builder.text(t, "Inter", 36.0);
+                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Subtitle];
+                let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
@@ -555,6 +705,7 @@ impl Canvas {
                         parent: None,
                     },
                 );
+                builder.float_signals.insert(new_id, *initial);
                 MobjectRef { id: new_id }
             }
             SpawnKind::TracedPathLine => {

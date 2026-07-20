@@ -32,53 +32,57 @@ pub struct TextConfig {
 impl Default for TextConfig {
     fn default() -> Self {
         let mut roles = HashMap::new();
+        // Body copy and inline/display equations share one scientific scale.
+        // Titles and captions remain distinct semantic roles.
+        let body_size = 32.0;
 
-        // Standard Title role (Arial / sans-serif, large scale)
+        // Scientific default text face, bundled through FontRegistry.
         roles.insert(
             TextRole::Title,
             RoleStyle {
-                font_family: "Arial".to_string(),
+                font_family: "New Computer Modern".to_string(),
                 size: 64.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
 
-        // Subtitle role (Arial / sans-serif, medium scale)
+        // Subtitle role
         roles.insert(
             TextRole::Subtitle,
             RoleStyle {
-                font_family: "Arial".to_string(),
+                font_family: "New Computer Modern".to_string(),
                 size: 48.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
 
-        // Body text role (Arial / sans-serif, standard scale)
+        // Body text role
         roles.insert(
             TextRole::Body,
             RoleStyle {
-                font_family: "Arial".to_string(),
-                size: 32.0,
+                font_family: "New Computer Modern".to_string(),
+                size: body_size,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
 
-        // Caption text role (Arial / sans-serif, small scale)
+        // Caption role
         roles.insert(
             TextRole::Caption,
             RoleStyle {
-                font_family: "Arial".to_string(),
+                font_family: "New Computer Modern".to_string(),
                 size: 24.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
 
-        // Mathematical / Equation role (Typst default math font)
+        // Mathematical / Equation role. Match Body so text labels and
+        // equations compose on the same baseline scale by default.
         roles.insert(
             TextRole::Math,
             RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
-                size: 48.0,
+                size: body_size,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );

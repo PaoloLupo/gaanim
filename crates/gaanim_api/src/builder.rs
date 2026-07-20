@@ -2440,8 +2440,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 WorldBounds(union_bounds),
                 gaanim_scene::RenderOrder::default(),
                 Visible,
-                FillBrush::transparent(),
-                StrokeBrush::transparent(),
             ))
             .id();
 
@@ -2992,6 +2990,33 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns a curved arrow from an explicit circular arc.
+    ///
+    /// The arrow tip is placed at `start_angle + sweep_angle`, allowing the
+    /// same center/radius parameters to be shared with a circle or tracker.
+    pub fn curved_arrow_arc(
+        &mut self,
+        center: kurbo::Point,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::curved_arrow_arc(
+            id,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        );
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Spawns an arrow starting at the origin.
     pub fn vector(&mut self, end: kurbo::Point) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         self.arrow(kurbo::Point::new(0.0, 0.0), end)
@@ -3482,6 +3507,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         text_size: Option<f64>,
         math_size: Option<f64>,
     ) -> MobjectRef {
+        let text_font = text_font.or_else(|| (!is_math).then_some("New Computer Modern"));
         let parent_id = self.next_id();
         let fill = Some(gaanim_core::peniko::Brush::Solid(
             gaanim_core::peniko::Color::BLACK,
@@ -3545,7 +3571,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Compiles a plain text string into a hierarchy of vector character Mobjects.
     ///
     /// Shapes the text using HarfBuzz (`rustybuzz`) and extracts outlines via `ttf-parser`.
-    /// `font_family` is the font name (e.g. "Arial", "sans-serif").
+    /// `font_family` is the font name (e.g. "New Computer Modern", "sans-serif").
     /// `font_size` is the text size in pixels/points.
     ///
     /// Returns a reference to the parent container of the text.
@@ -3610,7 +3636,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .get(&role)
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
-                font_family: "Arial".to_string(),
+                font_family: "New Computer Modern".to_string(),
                 size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
@@ -3783,7 +3809,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
-                size: 48.0,
+                size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
 
@@ -4205,6 +4231,37 @@ mod tests {
                 }) if *target == id && *to == 0.0
             )
         }));
+    }
+
+    #[test]
+    fn unstyled_group_preserves_child_fill_after_style_propagation() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let gold = Color::from_rgb8(0xff, 0xd7, 0x00);
+        let child = builder.rectangle(40.0, 30.0).fill(gold).spawn();
+        let child_entity = builder.states.get(child.id).unwrap().entity;
+        let group = builder.group(&[child]);
+        let group_entity = builder.states.get(group.id).unwrap().entity;
+
+        drop(builder);
+        drop(commands);
+        queue.apply(&mut world);
+
+        let expected = FillBrush::color(gold);
+        assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
+        assert!(world.get::<FillBrush>(group_entity).is_none());
+
+        let mut schedule = bevy::prelude::Schedule::default();
+        schedule.add_systems(gaanim_scene::systems::style_propagation_system);
+        schedule.run(&mut world);
+
+        assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
     }
 }
 

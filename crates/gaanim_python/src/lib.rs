@@ -7,6 +7,7 @@ mod pydrawable;
 mod pylayout;
 mod transition;
 mod updater;
+mod value_tracker;
 
 /// Register the `gaanim_core` builtin module.
 pub fn register_inittab() {
@@ -24,6 +25,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
     m.add_class::<updater::PyUpdater>()?;
+    m.add_class::<value_tracker::PyValueTracker>()?;
 
     m.add(
         "GOLD",

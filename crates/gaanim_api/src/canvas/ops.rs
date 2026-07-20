@@ -137,6 +137,16 @@ pub(crate) enum Op {
         from: CanvasEndpoint,
         to: CanvasEndpoint,
     },
+    /// Regenerate a curved arrow arc from a float signal every frame.
+    AttachTrackerArc {
+        target: ObjectId,
+        tracker: ObjectId,
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_scale: f64,
+        sweep_offset: f64,
+    },
 }
 
 /// A tracking endpoint at the Canvas level (before entity resolution).

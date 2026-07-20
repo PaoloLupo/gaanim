@@ -1,6 +1,6 @@
 use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
 use gaanim_core::peniko::Color;
-use gaanim_math::SpatialTransform;
+use gaanim_math::{Bounds3D, SpatialTransform};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -237,12 +237,29 @@ pub fn always_redraw_regen_system(world: &mut World) {
     let mut query = world.query::<(Entity, &AlwaysRedrawRegen)>();
     for (entity, regen) in query.iter(world) {
         let path = (regen.regen)(world);
-        updates.push((entity, path));
+        let bounds = if path.elements().is_empty() {
+            Bounds3D::default()
+        } else {
+            let rect = gaanim_core::kurbo::Shape::bounding_box(&path);
+            Bounds3D::new_2d(
+                rect.x0 - 12.0,
+                rect.y0 - 12.0,
+                rect.x1 + 12.0,
+                rect.y1 + 12.0,
+            )
+        };
+        updates.push((entity, path, bounds));
     }
 
-    for (entity, path) in updates {
+    for (entity, path, bounds) in updates {
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
-            path_comp.0 = std::sync::Arc::new(path);
+            path_comp.0 = std::sync::Arc::new(path.clone());
+        }
+        if let Some(mut path_source) = world.get_mut::<gaanim_scene::PathSource>(entity) {
+            path_source.0 = std::sync::Arc::new(path);
+        }
+        if let Some(mut local_bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
+            local_bounds.0 = bounds;
         }
     }
 }

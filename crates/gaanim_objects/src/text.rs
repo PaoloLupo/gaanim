@@ -16,7 +16,7 @@ impl Default for TextContent {
     fn default() -> Self {
         Self {
             text: String::new(),
-            font_family: "Inter".into(),
+            font_family: "New Computer Modern".into(),
             font_size: 24.0,
         }
     }
