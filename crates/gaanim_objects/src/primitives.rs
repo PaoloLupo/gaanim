@@ -898,6 +898,94 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
     bundle
 }
 
+/// Builds an open zig-zag spring between two points.
+///
+/// The endpoints remain exact even when the spring is rotated or compressed.
+/// `coils` controls the number of zig-zag pairs and `amplitude` is measured
+/// perpendicular to the spring axis.
+pub fn spring_path(
+    start: kurbo::Point,
+    end: kurbo::Point,
+    coils: usize,
+    amplitude: f64,
+) -> kurbo::BezPath {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length = dx.hypot(dy);
+    let mut path = kurbo::BezPath::new();
+    path.move_to(start);
+
+    if length <= f64::EPSILON {
+        path.line_to(end);
+        return path;
+    }
+
+    let direction = (dx / length, dy / length);
+    let normal = (-direction.1, direction.0);
+    let segments = coils.max(1) * 2;
+    for index in 1..=segments {
+        let t = index as f64 / (segments + 1) as f64;
+        let offset = if index % 2 == 0 {
+            -amplitude
+        } else {
+            amplitude
+        };
+        path.line_to(kurbo::Point::new(
+            start.x + dx * t + normal.0 * offset,
+            start.y + dy * t + normal.1 * offset,
+        ));
+    }
+    path.line_to(end);
+    path
+}
+
+/// Builds an open technical dimension line with extension lines and arrowheads.
+pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length = dx.hypot(dy);
+    let mut path = kurbo::BezPath::new();
+    if length <= f64::EPSILON {
+        path.move_to(start);
+        path.line_to(end);
+        return path;
+    }
+
+    let direction = (dx / length, dy / length);
+    let normal = (-direction.1, direction.0);
+    let dimension_start =
+        kurbo::Point::new(start.x + normal.0 * offset, start.y + normal.1 * offset);
+    let dimension_end = kurbo::Point::new(end.x + normal.0 * offset, end.y + normal.1 * offset);
+    path.move_to(start);
+    path.line_to(dimension_start);
+    path.move_to(end);
+    path.line_to(dimension_end);
+    path.move_to(dimension_start);
+    path.line_to(dimension_end);
+
+    let head = (length * 0.12).clamp(6.0, 12.0);
+    let wing = head * 0.55;
+    let add_head = |path: &mut kurbo::BezPath, tip: kurbo::Point, sign: f64| {
+        let back = kurbo::Point::new(
+            tip.x + direction.0 * head * sign,
+            tip.y + direction.1 * head * sign,
+        );
+        path.move_to(tip);
+        path.line_to(kurbo::Point::new(
+            back.x + normal.0 * wing,
+            back.y + normal.1 * wing,
+        ));
+        path.move_to(tip);
+        path.line_to(kurbo::Point::new(
+            back.x - normal.0 * wing,
+            back.y - normal.1 * wing,
+        ));
+    };
+    add_head(&mut path, dimension_start, 1.0);
+    add_head(&mut path, dimension_end, -1.0);
+    path
+}
+
 /// Creates a curved arrow between two points using a signed angular deflection.
 /// Its fill is kept inside a narrow, closed shaft silhouette.
 pub fn curved_arrow(
@@ -1213,6 +1301,39 @@ mod arrow_tests {
             );
         assert!(b.path.0.elements().iter().any(|element| {
             matches!(element, kurbo::PathEl::LineTo(point) if point.distance(expected) < 1e-6)
+        }));
+    }
+
+    #[test]
+    fn spring_path_keeps_its_endpoints_and_creates_zig_zags() {
+        let start = kurbo::Point::new(-80.0, 10.0);
+        let end = kurbo::Point::new(120.0, 10.0);
+        let path = spring_path(start, end, 4, 15.0);
+        let elements = path.elements();
+
+        assert!(matches!(elements.first(), Some(kurbo::PathEl::MoveTo(p)) if *p == start));
+        assert!(matches!(elements.last(), Some(kurbo::PathEl::LineTo(p)) if *p == end));
+        assert!(
+            elements.iter().any(|element| {
+                matches!(element, kurbo::PathEl::LineTo(point) if (point.y - start.y).abs() > 1e-6)
+            }),
+            "a spring with amplitude must deviate from its axis"
+        );
+    }
+
+    #[test]
+    fn dimension_path_contains_extensions_and_arrowheads() {
+        let path = dimension_path(
+            kurbo::Point::new(-60.0, 0.0),
+            kurbo::Point::new(60.0, 0.0),
+            30.0,
+        );
+        assert!(
+            path.elements().len() >= 11,
+            "extensions, dimension baseline, and two arrowheads must be present"
+        );
+        assert!(path.elements().iter().any(|element| {
+            matches!(element, kurbo::PathEl::LineTo(point) if (point.y - 30.0).abs() < 1e-6)
         }));
     }
 }

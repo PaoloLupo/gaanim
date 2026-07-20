@@ -67,9 +67,9 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             Update,
             (
                 updater_system,
-                always_redraw_regen_system,
                 position_binding_system.after(updater_system),
-                tracking_line_system.after(position_binding_system),
+                always_redraw_regen_system.after(position_binding_system),
+                tracking_line_system.after(always_redraw_regen_system),
                 traced_path_system.after(tracking_line_system),
             )
                 .in_set(SceneSet::Updaters),

@@ -595,6 +595,57 @@ impl Canvas {
         handle
     }
 
+    /// Spawn a reactive zig-zag spring between two endpoints.
+    ///
+    /// Each endpoint can be static or follow a drawable. The path is rebuilt
+    /// natively after updaters and position bindings have run.
+    pub fn spring_between(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        coils: usize,
+        amplitude: f64,
+    ) -> DrawableHandle {
+        let handle = self.spawn(SpawnKind::TrackingLine);
+        let id = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingSpring {
+                target: id,
+                from,
+                to,
+                coils,
+                amplitude,
+            });
+        handle
+    }
+
+    /// Spawn a reactive dimension line between two endpoints.
+    pub fn dimension_between(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        offset: f64,
+    ) -> DrawableHandle {
+        let handle = self.spawn(SpawnKind::TrackingLine);
+        let id = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingDimension {
+                target: id,
+                from,
+                to,
+                offset,
+            });
+        handle
+    }
+
     // -- Render / export --
 
     pub fn render(&self) -> bool {
@@ -778,6 +829,38 @@ mod tests {
         assert_eq!(
             transform.anchor,
             gaanim_core::glam::DVec3::new(10.0, -18.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn reactive_spring_regenerates_a_zig_zag_path() {
+        let mut canvas = Canvas::new(1280, 720);
+        let _spring = canvas.spring_between(
+            crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(-80.0, 0.0, 0.0)),
+            crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(80.0, 0.0, 0.0)),
+            5,
+            14.0,
+        );
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let spring = world
+            .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::AlwaysRedrawRegen>>()
+            .iter(&world)
+            .next()
+            .expect("reactive spring entity");
+        gaanim_animation::always_redraw_regen_system(&mut world);
+        let path = world
+            .get::<gaanim_scene::Path2D>(spring)
+            .expect("spring path");
+        assert!(
+            path.0.elements().len() > 4,
+            "spring must have zig-zag segments"
         );
     }
 }

@@ -1,4 +1,5 @@
 use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
+use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::Color;
 use gaanim_math::{Bounds3D, SpatialTransform};
 use std::collections::HashMap;
@@ -171,11 +172,25 @@ pub struct PositionBinding {
     pub source: Entity,
     /// Which axes to copy (X, Y, Z, or any combination).
     pub axes: AxisMask,
+    /// Offset applied after copying the selected source axes.
+    pub offset: DVec3,
 }
 
 impl PositionBinding {
     pub fn new(source: Entity, axes: AxisMask) -> Self {
-        Self { source, axes }
+        Self {
+            source,
+            axes,
+            offset: DVec3::ZERO,
+        }
+    }
+
+    pub fn with_offset(source: Entity, axes: AxisMask, offset: DVec3) -> Self {
+        Self {
+            source,
+            axes,
+            offset,
+        }
     }
 }
 
@@ -187,21 +202,26 @@ pub fn position_binding_system(world: &mut World) {
     let mut query = world.query::<(Entity, &PositionBinding)>();
     for (target, binding) in query.iter(world) {
         if let Some(src_transform) = world.get::<SpatialTransform>(binding.source) {
-            updates.push((target, src_transform.translation, binding.axes));
+            updates.push((
+                target,
+                src_transform.translation,
+                binding.axes,
+                binding.offset,
+            ));
         }
     }
 
     // Apply the axis copies.
-    for (target, src_pos, axes) in updates {
+    for (target, src_pos, axes, offset) in updates {
         if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
             if axes.contains(AxisMask::X) {
-                transform.translation.x = src_pos.x;
+                transform.translation.x = src_pos.x + offset.x;
             }
             if axes.contains(AxisMask::Y) {
-                transform.translation.y = src_pos.y;
+                transform.translation.y = src_pos.y + offset.y;
             }
             if axes.contains(AxisMask::Z) {
-                transform.translation.z = src_pos.z;
+                transform.translation.z = src_pos.z + offset.z;
             }
         }
     }

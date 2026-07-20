@@ -108,6 +108,14 @@ mechanism = scene.group([rail, spring, mass]).with_pivot(0, 0)
 scene.play([mechanism.rotate(PI / 3).duration(1.0)])
 ```
 
+`spring_between(from, to, coils=8, amplitude=12)` creates a native reactive
+spring. Each endpoint can be a drawable or an `(x, y)` tuple, so it follows a
+moving mass without a Python callback every frame.
+
+Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
+object without covering it. `dimension_between(from, to, offset)` similarly
+keeps a technical measurement synchronized with moving endpoints.
+
 == Timeline
 
 `play` receives a list of animations; calls are sequential and animations in a

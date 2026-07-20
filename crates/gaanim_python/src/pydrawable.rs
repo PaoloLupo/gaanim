@@ -309,6 +309,11 @@ impl PyDrawable {
         self.0.attach_to(&source.0);
     }
 
+    /// Follow ``source`` while keeping an ``(x, y)`` scene-space offset.
+    fn follow_to(&self, source: &PyDrawable, offset: (f64, f64)) {
+        self.0.follow_to(&source.0, offset.0, offset.1);
+    }
+
     /// Copy selected source axes each frame. ``axes`` accepts ``"x"``,
     /// ``"y"``, ``"xy"`` (the default), or ``"xyz"``.
     #[pyo3(signature = (source, axes="xy"))]

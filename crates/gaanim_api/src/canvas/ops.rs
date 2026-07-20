@@ -131,11 +131,32 @@ pub(crate) enum Op {
         source: ObjectId,
         axes: AxisMask,
     },
+    /// Follow a source entity while retaining a scene-space offset.
+    AttachPositionFollow {
+        target: ObjectId,
+        source: ObjectId,
+        offset: DVec3,
+    },
     /// Attach a TrackingLine — reactive line between two endpoints.
     AttachTrackingLine {
         target: ObjectId,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
+    },
+    /// Attach a spring whose endpoints follow entities or fixed positions.
+    AttachTrackingSpring {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        coils: usize,
+        amplitude: f64,
+    },
+    /// Attach a dynamic dimension line between two endpoints.
+    AttachTrackingDimension {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        offset: f64,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {

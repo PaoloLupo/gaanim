@@ -470,6 +470,40 @@ impl PyScene {
                 .tracking_line(from, to),
         ))
     }
+
+    #[pyo3(signature = (from, to, coils=8, amplitude=12.0))]
+    fn spring_between(
+        &self,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        coils: usize,
+        amplitude: f64,
+    ) -> PyResult<PyDrawable> {
+        let from = resolve_endpoint(&from)?;
+        let to = resolve_endpoint(&to)?;
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .spring_between(from, to, coils, amplitude),
+        ))
+    }
+
+    fn dimension_between(
+        &self,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        offset: f64,
+    ) -> PyResult<PyDrawable> {
+        let from = resolve_endpoint(&from)?;
+        let to = resolve_endpoint(&to)?;
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .dimension_between(from, to, offset),
+        ))
+    }
 }
 
 /// Resolve a Python object into a CanvasEndpoint.

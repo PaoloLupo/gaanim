@@ -119,6 +119,7 @@ class Drawable:
     def bind_y_from(self, source: Drawable) -> None: ...
     def bind_x_from(self, source: Drawable) -> None: ...
     def attach_to(self, source: Drawable) -> None: ...
+    def follow_to(self, source: Drawable, offset: tuple[float, float]) -> None: ...
     def bind_position_from(self, source: Drawable, axes: str = "xy") -> None: ...
 
 class ValueTracker:
@@ -211,6 +212,19 @@ class Scene:
         self,
         from_: Drawable | tuple[float, float],
         to: Drawable | tuple[float, float],
+    ) -> Drawable: ...
+    def spring_between(
+        self,
+        from_: Drawable | tuple[float, float],
+        to: Drawable | tuple[float, float],
+        coils: int = 8,
+        amplitude: float = 12.0,
+    ) -> Drawable: ...
+    def dimension_between(
+        self,
+        from_: Drawable | tuple[float, float],
+        to: Drawable | tuple[float, float],
+        offset: float,
     ) -> Drawable: ...
 
 GOLD: Color

@@ -383,6 +383,26 @@ impl Canvas {
                     }
                 }
 
+                Op::AttachPositionFollow {
+                    target,
+                    source,
+                    offset,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(source_st) = builder.states.get(source_id)
+                    {
+                        builder.commands.entity(target_st.entity).insert(
+                            PositionBinding::with_offset(
+                                source_st.entity,
+                                gaanim_animation::AxisMask::XY,
+                                *offset,
+                            ),
+                        );
+                    }
+                }
+
                 Op::AttachTrackingLine { target, from, to } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -405,6 +425,93 @@ impl Canvas {
                         };
                         let line = TrackingLine::new(resolve_endpoint(from), resolve_endpoint(to));
                         builder.commands.entity(st.entity).insert(line);
+                    }
+                }
+
+                Op::AttachTrackingSpring {
+                    target,
+                    from,
+                    to,
+                    coils,
+                    amplitude,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
+                            match ep {
+                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
+                                CanvasEndpoint::Entity(oid) => id_map
+                                    .get(oid)
+                                    .and_then(|rid| builder.states.get(*rid))
+                                    .map(|state| TrackingEndpoint::Entity(state.entity))
+                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                            }
+                        };
+                        let from = resolve_endpoint(from);
+                        let to = resolve_endpoint(to);
+                        let coils = *coils;
+                        let amplitude = *amplitude;
+                        let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                            let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
+                                TrackingEndpoint::Static(position) => *position,
+                                TrackingEndpoint::Entity(entity) => world
+                                    .get::<SpatialTransform>(*entity)
+                                    .map(|transform| transform.translation)
+                                    .unwrap_or(DVec3::ZERO),
+                            };
+                            let from = endpoint_position(&from);
+                            let to = endpoint_position(&to);
+                            gaanim_objects::primitives::spring_path(
+                                Point::new(from.x, from.y),
+                                Point::new(to.x, to.y),
+                                coils,
+                                amplitude,
+                            )
+                        });
+                        builder.commands.entity(st.entity).insert(redraw);
+                    }
+                }
+
+                Op::AttachTrackingDimension {
+                    target,
+                    from,
+                    to,
+                    offset,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
+                            match ep {
+                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
+                                CanvasEndpoint::Entity(oid) => id_map
+                                    .get(oid)
+                                    .and_then(|rid| builder.states.get(*rid))
+                                    .map(|state| TrackingEndpoint::Entity(state.entity))
+                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                            }
+                        };
+                        let from = resolve_endpoint(from);
+                        let to = resolve_endpoint(to);
+                        let offset = *offset;
+                        let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                            let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
+                                TrackingEndpoint::Static(position) => *position,
+                                TrackingEndpoint::Entity(entity) => world
+                                    .get::<SpatialTransform>(*entity)
+                                    .map(|transform| transform.translation)
+                                    .unwrap_or(DVec3::ZERO),
+                            };
+                            let from = endpoint_position(&from);
+                            let to = endpoint_position(&to);
+                            gaanim_objects::primitives::dimension_path(
+                                Point::new(from.x, from.y),
+                                Point::new(to.x, to.y),
+                                offset,
+                            )
+                        });
+                        builder.commands.entity(st.entity).insert(redraw);
                     }
                 }
 

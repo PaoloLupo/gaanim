@@ -400,6 +400,20 @@ impl DrawableHandle {
         self.bind_position_from(source, AxisMask::XY);
     }
 
+    /// Follow `source` while preserving a scene-space `(x, y)` offset.
+    pub fn follow_to(&self, source: &DrawableHandle, offset_x: f64, offset_y: f64) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPositionFollow {
+                target: self.id,
+                source: source.id,
+                offset: DVec3::new(offset_x, offset_y, 0.0),
+            });
+    }
+
     /// Copy the source entity's position on specified axes each frame.
     pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
         self.state
