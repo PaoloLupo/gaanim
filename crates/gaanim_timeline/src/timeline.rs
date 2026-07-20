@@ -381,6 +381,17 @@ impl Timeline {
             0.0
         };
 
+        // Snapshots contain entity state but not resources. Reset the camera
+        // before replaying explicit camera clips so random seeks cannot retain
+        // pan, zoom, or rotation from a later frame.
+        if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+            camera.position = gaanim_core::glam::DVec3::ZERO;
+            camera.rotation = gaanim_core::glam::DQuat::IDENTITY;
+            if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
+                *zoom = 1.0;
+            }
+        }
+
         self.current_time = clamped_target;
 
         // 2. Fetch all clips starting within [kf_start_time, target_time]
