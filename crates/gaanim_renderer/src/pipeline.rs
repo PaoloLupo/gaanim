@@ -49,6 +49,33 @@ pub struct ExtractedElement {
     clip_mask: Option<ClipMask>,
 }
 
+fn canvas_background_geometry(
+    background: &CanvasBackground,
+    camera: Option<&gaanim_math::Camera>,
+) -> (kurbo::Rect, kurbo::Affine) {
+    let Some(camera) = camera else {
+        let b = &background.bounds;
+        return (
+            kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y),
+            kurbo::Affine::IDENTITY,
+        );
+    };
+    let zoom = match camera.projection {
+        gaanim_math::Projection::Orthographic { zoom } => zoom * camera.viewport_scale,
+        _ => 1.0,
+    }
+    .max(0.01);
+    let half_width = camera.viewport_width as f64 / (2.0 * zoom);
+    let half_height = camera.viewport_height as f64 / (2.0 * zoom);
+    // A rotated viewport exposes the corners outside its unrotated rectangle.
+    // Cover its circumscribed square so the background remains edge-to-edge.
+    let half_extent = half_width.hypot(half_height);
+    let local = kurbo::Rect::new(-half_extent, -half_extent, half_extent, half_extent);
+    let transform = kurbo::Affine::translate((camera.position.x, camera.position.y))
+        * kurbo::Affine::rotate(camera.z_angle());
+    (local, transform)
+}
+
 fn stroke_clip_path<'a>(
     visible_path: &'a kurbo::BezPath,
     source_path: Option<&'a kurbo::BezPath>,
@@ -344,11 +371,10 @@ pub fn compile_scene_from_world(
     // Draw canvas background as a filled rectangle at the frame bounds,
     // so the canvas area is visually distinct from the window background.
     if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-        let b = &canvas_bg.bounds;
-        let rect = kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y);
+        let (rect, transform) = canvas_background_geometry(canvas_bg, camera);
         main_scene.fill(
             peniko::Fill::NonZero,
-            kurbo::Affine::IDENTITY,
+            transform,
             &canvas_bg.color,
             None,
             &rect,
@@ -719,11 +745,10 @@ pub fn gaanim_render_system(
     // Draw canvas background as a filled rectangle at the frame bounds,
     // so the canvas area is visually distinct from the window background.
     if let Some(ref canvas_bg) = canvas_bg {
-        let b = &canvas_bg.bounds;
-        let rect = kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y);
+        let (rect, transform) = canvas_background_geometry(canvas_bg, gaanim_camera.as_deref());
         main_scene.fill(
             peniko::Fill::NonZero,
-            kurbo::Affine::IDENTITY,
+            transform,
             &canvas_bg.color,
             None,
             &rect,

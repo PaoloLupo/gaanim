@@ -78,10 +78,14 @@ impl Canvas {
                 bounds: raw_bounds,
             });
 
-        // Use a neutral dark gray for the area outside the canvas.
+        // Clear with the canvas color as well. The drawable background is
+        // world-space geometry and can be rotated by the camera; using the
+        // same clear color prevents Bevy's window clear color from showing
+        // through at the viewport edges during that rotation.
+        let rgba = bg_color.to_rgba8();
         builder
             .commands
-            .insert_resource(ClearColor(Color::srgb_u8(40, 40, 40)));
+            .insert_resource(ClearColor(Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)));
     }
 
     pub fn compile(&self, world: &mut World) {
