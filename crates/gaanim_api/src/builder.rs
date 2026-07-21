@@ -3883,6 +3883,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         target: MobjectRef,
         substring: &str,
     ) -> MobjectSelection<'q, 'w, 's, 'a> {
+        self.select_occurrence(target, substring, None)
+    }
+
+    /// Selects the zero-based occurrence of a substring. Passing `None`
+    /// selects every non-overlapping occurrence.
+    pub fn select_occurrence<'q>(
+        &'q mut self,
+        target: MobjectRef,
+        substring: &str,
+        occurrence: Option<usize>,
+    ) -> MobjectSelection<'q, 'w, 's, 'a> {
         // Helper function to normalize mathematical italic/bold alphanumeric characters back to standard Latin/numeric equivalents.
         fn to_standard_char(c: char) -> char {
             let cp = c as u32;
@@ -3976,26 +3987,38 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
 
             // 3. Match normalized query against normalized text
-            if !normalized_query.is_empty()
-                && let Some(start_byte_idx) = normalized_text.find(&normalized_query)
-            {
-                let end_byte_idx = start_byte_idx + normalized_query.len();
-
-                // We gather unique child_spans indices that fall within the matched byte range
-                let mut matched_span_indices = Vec::new();
-                for byte_idx in start_byte_idx..end_byte_idx {
-                    if let Some(&span_idx) = index_mapping.get(byte_idx)
-                        && !matched_span_indices.contains(&span_idx)
-                    {
-                        matched_span_indices.push(span_idx);
+            if !normalized_query.is_empty() {
+                let mut search_from = 0;
+                let mut match_index = 0;
+                while search_from < normalized_text.len() {
+                    let Some(relative_start) =
+                        normalized_text[search_from..].find(&normalized_query)
+                    else {
+                        break;
+                    };
+                    let start_byte_idx = search_from + relative_start;
+                    let end_byte_idx = start_byte_idx + normalized_query.len();
+                    if occurrence.is_none_or(|index| index == match_index) {
+                        // Gather unique child spans that fall within this matched range.
+                        let mut matched_span_indices = Vec::new();
+                        for byte_idx in start_byte_idx..end_byte_idx {
+                            if let Some(&span_idx) = index_mapping.get(byte_idx)
+                                && !matched_span_indices.contains(&span_idx)
+                            {
+                                matched_span_indices.push(span_idx);
+                            }
+                        }
+                        for span_idx in matched_span_indices {
+                            if let Some(child) = state.child_spans.get(span_idx) {
+                                child_ids.push(child.id);
+                            }
+                        }
+                        if occurrence.is_some() {
+                            break;
+                        }
                     }
-                }
-
-                // Add the child IDs
-                for span_idx in matched_span_indices {
-                    if let Some(child) = state.child_spans.get(span_idx) {
-                        child_ids.push(child.id);
-                    }
+                    match_index += 1;
+                    search_from = end_byte_idx;
                 }
             }
         }

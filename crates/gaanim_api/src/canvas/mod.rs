@@ -6,12 +6,12 @@ pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
     Anim, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop, ImageFit,
     ImageOptions, ImageOptionsError, LayoutOp, Margin, ObjectSpec, OptDuration, ParagraphOptions,
-    SpawnKind, TextAlign,
+    ParagraphOverflow, SpawnKind, TextAlign,
 };
 mod layout;
-pub use layout::{FrameLayout, GridLayout, LayoutRegion};
+pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};
 mod drawable;
-pub use drawable::DrawableHandle;
+pub use drawable::{DrawableHandle, FragmentSelection};
 mod canvas_impl;
 pub use canvas_impl::{Canvas, ImageLoadError};
 pub use gaanim_objects::prelude::SvgLoadError;

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
+use gaanim_core::peniko::Color;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
@@ -73,6 +74,39 @@ pub(crate) enum Op {
     },
     /// Play several animations in parallel.
     Play(Vec<AnimationBuilder>),
+    /// Set the fill of selected glyphs after their textual hierarchy exists.
+    FragmentFill {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        color: Color,
+    },
+    /// Emphasize selected glyphs as a parallel animation.
+    FragmentIndicate {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        color: Option<Color>,
+        duration: f64,
+    },
+    /// Tween selected glyph fills to a color in parallel.
+    FragmentFillTo {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        color: Color,
+        duration: f64,
+    },
+    /// Morph selected source glyphs into selected target glyphs pairwise.
+    FragmentTransform {
+        source: ObjectId,
+        source_fragment: String,
+        source_occurrence: Option<usize>,
+        target: ObjectId,
+        target_fragment: String,
+        target_occurrence: Option<usize>,
+        duration: f64,
+    },
     /// Advance the cursor by a duration (no animation).
     Wait(f64),
     CameraPosition {

@@ -10,12 +10,12 @@ use gaanim_objects::prelude::SvgLoadError;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
-use crate::canvas::FrameLayout;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
 use crate::canvas::types::{
     Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, ParagraphOptions, SpawnKind,
 };
+use crate::canvas::{FrameLayout, LayoutPreset};
 
 /// Failures while decoding a raster image requested by `Canvas::image`.
 #[derive(Debug, thiserror::Error)]
@@ -125,14 +125,22 @@ impl Canvas {
     /// Creates reusable regions for a conventional title/content/footer video.
     /// Heights, gap, and margins are expressed in the canvas coordinate system.
     pub fn layout(&self, header_height: f64, footer_height: f64, gap: f64) -> FrameLayout {
+        FrameLayout::new(self.safe_frame(), header_height, footer_height, gap)
+    }
+
+    /// Creates one of the built-in editorial compositions.
+    pub fn layout_preset(&self, preset: LayoutPreset) -> FrameLayout {
+        FrameLayout::preset(self.safe_frame(), preset)
+    }
+
+    fn safe_frame(&self) -> gaanim_math::Bounds3D {
         let raw = self.units.frame_bounds(self.width, self.height);
-        let frame = gaanim_math::Bounds3D::new_2d(
+        gaanim_math::Bounds3D::new_2d(
             raw.min.x + self.margin.left,
             raw.min.y + self.margin.bottom,
             raw.max.x - self.margin.right,
             raw.max.y - self.margin.top,
-        );
-        FrameLayout::new(frame, header_height, footer_height, gap)
+        )
     }
 
     pub fn current_time(&self) -> f64 {

@@ -28,6 +28,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyScene>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
+    m.add_class::<pydrawable::PyFragmentSelection>()?;
     m.add_class::<updater::PyUpdater>()?;
     m.add_class::<value_tracker::PyValueTracker>()?;
 

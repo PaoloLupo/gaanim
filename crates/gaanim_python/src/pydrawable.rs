@@ -84,6 +84,36 @@ impl PyCanvasAnim {
 #[derive(Clone)]
 pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
 
+#[pyclass(name = "FragmentSelection", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyFragmentSelection(pub gaanim_api::canvas::FragmentSelection);
+
+#[pymethods]
+impl PyFragmentSelection {
+    /// Instantly colors the selected glyphs.
+    fn fill(&self, color: PyColor) -> Self {
+        Self(self.0.clone().fill(color.0))
+    }
+
+    /// Emphasizes only the selected glyphs.
+    #[pyo3(signature = (duration=None))]
+    fn indicate(&self, duration: Option<f64>) -> Self {
+        Self(self.0.clone().indicate(duration))
+    }
+
+    /// Animates the selected glyphs to `color`.
+    #[pyo3(signature = (color, duration=None))]
+    fn color_to(&self, color: PyColor, duration: Option<f64>) -> Self {
+        Self(self.0.clone().color_to(color.0, duration))
+    }
+
+    /// Morphs this fragment into another selected fragment.
+    #[pyo3(signature = (target, duration=None))]
+    fn transform_to(&self, target: &PyFragmentSelection, duration: Option<f64>) -> Self {
+        Self(self.0.clone().transform_to(&target.0, duration))
+    }
+}
+
 #[pymethods]
 impl PyDrawable {
     fn fill(&self, color: PyColor) -> Self {
@@ -97,6 +127,28 @@ impl PyDrawable {
     }
     fn no_stroke(&self) -> Self {
         Self(self.0.clone().no_stroke())
+    }
+    /// Colors every matching fragment of a text or equation drawable.
+    ///
+    /// Matching is case-insensitive and ignores mathematical spacing and
+    /// sub/superscript markers. Later calls take precedence on overlaps.
+    fn color_by(&self, fragment: &str, color: PyColor) -> PyResult<Self> {
+        if fragment.trim().is_empty() {
+            return Err(PyValueError::new_err("fragment must not be empty"));
+        }
+        Ok(Self(self.0.clone().color_by(fragment, color.0)))
+    }
+    /// Select matching glyphs for styling or an isolated animation.
+    #[pyo3(signature = (fragment, occurrence=None))]
+    fn select(&self, fragment: &str, occurrence: Option<usize>) -> PyResult<PyFragmentSelection> {
+        if fragment.trim().is_empty() {
+            return Err(PyValueError::new_err("fragment must not be empty"));
+        }
+        let selection = match occurrence {
+            Some(occurrence) => self.0.select_nth(fragment, occurrence),
+            None => self.0.select(fragment),
+        };
+        Ok(PyFragmentSelection(selection))
     }
     fn opacity(&self, op: f32) -> Self {
         Self(self.0.clone().opacity(op))

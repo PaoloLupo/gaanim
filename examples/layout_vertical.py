@@ -5,7 +5,7 @@ import os
 from gaanim import Anchor, BLUE, GRAY, WHITE, Scene
 
 scene = Scene(720, 1280, background=BLUE, margin=48)
-layout = scene.layout(header=180, footer=64, gap=28)
+layout = scene.layout_preset("vertical_short")
 
 title = layout.header.place(scene.title("Layout vertical"), Anchor.TOP_LEFT)
 subtitle = layout.header.place(

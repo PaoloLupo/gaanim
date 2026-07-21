@@ -29,6 +29,16 @@ pub struct DrawableHandle {
     pub(crate) segment_idx: usize,
 }
 
+/// A deferred glyph selection inside a text-like [`DrawableHandle`].
+#[derive(Debug, Clone)]
+pub struct FragmentSelection {
+    target: ObjectId,
+    fragment: String,
+    occurrence: Option<usize>,
+    state: SharedCanvasState,
+    segment_idx: usize,
+}
+
 impl DrawableHandle {
     pub(crate) fn new(
         id: ObjectId,
@@ -81,6 +91,42 @@ impl DrawableHandle {
             spec.stroke = None;
             spec.stroke_overridden = true;
         })
+    }
+
+    /// Colors every matching text or equation fragment in this drawable.
+    ///
+    /// Matching is case-insensitive and tolerant of math formatting, so a
+    /// query such as `"mc"` can target `m c` in a Typst equation. Later calls
+    /// take precedence when selections overlap.
+    pub fn color_by(self, fragment: impl Into<String>, color: Color) -> Self {
+        let fragment = fragment.into();
+        self.update_spec(|spec| {
+            if !fragment.is_empty() {
+                spec.fragment_fills.push((fragment, color));
+            }
+        })
+    }
+
+    /// Creates a deferred selection for glyph-level styling and emphasis.
+    pub fn select(&self, fragment: impl Into<String>) -> FragmentSelection {
+        FragmentSelection {
+            target: self.id,
+            fragment: fragment.into(),
+            occurrence: None,
+            state: self.state.clone(),
+            segment_idx: self.segment_idx,
+        }
+    }
+
+    /// Creates a deferred selection for one zero-based occurrence of a fragment.
+    pub fn select_nth(&self, fragment: impl Into<String>, occurrence: usize) -> FragmentSelection {
+        FragmentSelection {
+            target: self.id,
+            fragment: fragment.into(),
+            occurrence: Some(occurrence),
+            state: self.state.clone(),
+            segment_idx: self.segment_idx,
+        }
     }
 
     /// Sets the initial value of a `ValueTracker` before the scene is compiled.
@@ -458,5 +504,72 @@ impl DrawableHandle {
             rate_func: RateFunc::Smooth,
             delay: 0.0,
         }
+    }
+}
+
+impl FragmentSelection {
+    fn push(&self, op: Op) {
+        self.state.lock().expect("canvas state poisoned").segments[self.segment_idx]
+            .ops
+            .push(op);
+    }
+
+    /// Instantly colors this selected fragment.
+    pub fn fill(self, color: Color) -> Self {
+        if !self.fragment.trim().is_empty() {
+            self.push(Op::FragmentFill {
+                target: self.target,
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                color,
+            });
+        }
+        self
+    }
+
+    /// Emphasizes this fragment without affecting the surrounding text.
+    pub fn indicate(self, duration: impl OptDuration) -> Self {
+        if !self.fragment.trim().is_empty() {
+            self.push(Op::FragmentIndicate {
+                target: self.target,
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                color: None,
+                duration: duration.into_opt().unwrap_or(1.0),
+            });
+        }
+        self
+    }
+
+    /// Animates this fragment's fill to `color`.
+    pub fn color_to(self, color: Color, duration: impl OptDuration) -> Self {
+        if !self.fragment.trim().is_empty() {
+            self.push(Op::FragmentFillTo {
+                target: self.target,
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                color,
+                duration: duration.into_opt().unwrap_or(1.0),
+            });
+        }
+        self
+    }
+
+    /// Morphs this selection into `target`, pairing matching glyphs in order.
+    /// Unpaired glyphs remain unchanged; use equal-sized fragments for the
+    /// clearest equation derivations.
+    pub fn transform_to(self, target: &FragmentSelection, duration: impl OptDuration) -> Self {
+        if !self.fragment.trim().is_empty() && !target.fragment.trim().is_empty() {
+            self.push(Op::FragmentTransform {
+                source: self.target,
+                source_fragment: self.fragment.clone(),
+                source_occurrence: self.occurrence,
+                target: target.target,
+                target_fragment: target.fragment.clone(),
+                target_occurrence: target.occurrence,
+                duration: duration.into_opt().unwrap_or(1.0),
+            });
+        }
+        self
     }
 }

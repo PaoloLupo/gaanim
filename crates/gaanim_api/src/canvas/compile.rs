@@ -16,13 +16,15 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, Op, Segment};
-use crate::canvas::types::{LayoutOp, ObjectSpec, ParagraphOptions, SpawnKind, TextAlign};
+use crate::canvas::types::{
+    LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
+};
 
 use gaanim_animation::{
     CurvatureOnCurve, NormalOnCurve, PointOnCurve, PositionBinding, TangentOnCurve, TracedPath,
     TrackingEndpoint, TrackingLine, Updater,
 };
-use gaanim_math::SpatialTransform;
+use gaanim_math::{RateFunc, SpatialTransform};
 
 fn escape_typst_string(text: &str) -> String {
     text.replace('\\', "\\\\")
@@ -40,11 +42,21 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
         TextAlign::Right => ("right", false),
         TextAlign::Justify => ("left", true),
     };
+    let content = format!(
+        "#align({alignment})[#text(\"{}\")]",
+        escape_typst_string(text)
+    );
+    let content = if let Some(max_lines) = options.max_lines.filter(|lines| *lines > 0) {
+        let height = font_size * options.line_spacing.max(1.0) * max_lines as f64;
+        let clip = matches!(options.overflow, ParagraphOverflow::Clip);
+        format!("#block(width: 100%, height: {height}pt, clip: {clip})[{content}]")
+    } else {
+        content
+    };
     format!(
         "#set page(width: {width}pt, height: auto, margin: 0pt)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
-         #align({alignment})[#text(\"{}\")]",
-        escape_typst_string(text)
+         {content}",
     )
 }
 
@@ -175,6 +187,101 @@ impl Canvas {
                         .filter_map(|anim| Self::remap_anim(anim, id_map))
                         .collect();
                     builder.play_parallel(remapped);
+                }
+                Op::FragmentFill {
+                    target,
+                    fragment,
+                    occurrence,
+                    color,
+                } => {
+                    if let Some(&target) = id_map.get(target) {
+                        builder
+                            .select_occurrence(MobjectRef { id: target }, fragment, *occurrence)
+                            .set_fill(*color);
+                    }
+                }
+                Op::FragmentIndicate {
+                    target,
+                    fragment,
+                    occurrence,
+                    color,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let anims = children
+                        .into_iter()
+                        .map(|target| AnimationBuilder {
+                            target,
+                            anim_type: AnimationType::Indicate {
+                                color: *color,
+                                scale_factor: 1.3,
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::ThereAndBack,
+                            delay: 0.0,
+                        })
+                        .collect();
+                    builder.play_parallel(anims);
+                }
+                Op::FragmentFillTo {
+                    target,
+                    fragment,
+                    occurrence,
+                    color,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let anims = children
+                        .into_iter()
+                        .map(|target| AnimationBuilder {
+                            target,
+                            anim_type: AnimationType::FillColorTo { to: *color },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        })
+                        .collect();
+                    builder.play_parallel(anims);
+                }
+                Op::FragmentTransform {
+                    source,
+                    source_fragment,
+                    source_occurrence,
+                    target,
+                    target_fragment,
+                    target_occurrence,
+                    duration,
+                } => {
+                    let sources = Self::fragment_child_ids(
+                        builder,
+                        id_map,
+                        *source,
+                        source_fragment,
+                        *source_occurrence,
+                    );
+                    let targets = Self::fragment_child_ids(
+                        builder,
+                        id_map,
+                        *target,
+                        target_fragment,
+                        *target_occurrence,
+                    );
+                    let anims = sources
+                        .into_iter()
+                        .zip(targets)
+                        .map(|(target, morph_target)| AnimationBuilder {
+                            target,
+                            anim_type: AnimationType::Transform {
+                                target: morph_target,
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        })
+                        .collect();
+                    builder.play_parallel(anims);
                 }
                 Op::Wait(d) => builder.wait(*d),
                 Op::CameraPosition { to, duration, .. } => {
@@ -689,6 +796,21 @@ impl Canvas {
         })
     }
 
+    fn fragment_child_ids(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        target: ObjectId,
+        fragment: &str,
+        occurrence: Option<usize>,
+    ) -> Vec<ObjectId> {
+        let Some(&target) = id_map.get(&target) else {
+            return Vec::new();
+        };
+        builder
+            .select_occurrence(MobjectRef { id: target }, fragment, occurrence)
+            .child_ids
+    }
+
     fn spawn_one(
         builder: &mut SceneBuilder,
         spec: &ObjectSpec,
@@ -999,6 +1121,7 @@ impl Canvas {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, spec);
                 mr
             }
             SpawnKind::Paragraph { text, options } => {
@@ -1020,23 +1143,27 @@ impl Canvas {
                     paragraph_spec.fill_overridden = true;
                 }
                 Self::post_apply(builder, mr.id, &paragraph_spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, &paragraph_spec);
                 mr
             }
             SpawnKind::Title(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Title];
                 let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, spec);
                 mr
             }
             SpawnKind::Subtitle(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Subtitle];
                 let mr = builder.text(t, &style.font_family, style.size);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, spec);
                 mr
             }
             SpawnKind::Equation(f) => {
                 let mr = builder.equation(f);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, spec);
                 mr
             }
             SpawnKind::Image { image, view } => {
@@ -1124,6 +1251,14 @@ impl Canvas {
         }
         b = b.opacity(spec.opacity).z_index(spec.z_index);
         b.spawn()
+    }
+
+    /// Applies deferred glyph-level color overrides after the normal object
+    /// style has been propagated to the compiled text hierarchy.
+    fn apply_fragment_fills(builder: &mut SceneBuilder, target: MobjectRef, spec: &ObjectSpec) {
+        for (fragment, color) in &spec.fragment_fills {
+            builder.select(target, fragment).set_fill(*color);
+        }
     }
 
     fn post_apply(
@@ -1402,6 +1537,8 @@ mod tests {
                 line_spacing: 1.25,
                 font_size: Some(28.0),
                 font_family: None,
+                max_lines: None,
+                overflow: ParagraphOverflow::Clip,
             },
         );
 
@@ -1422,6 +1559,108 @@ mod tests {
             .filter(|bounds| bounds.0.width() > 0.0 && bounds.0.height() > 0.0)
             .count();
         assert!(visible_bounds > 5, "paragraph should produce vector glyphs");
+    }
+
+    #[test]
+    fn paragraph_max_lines_emits_a_clipped_text_box() {
+        let source = paragraph_typst_source(
+            "A bounded paragraph",
+            &ParagraphOptions {
+                width: 240.0,
+                align: TextAlign::Left,
+                line_spacing: 1.2,
+                font_size: Some(30.0),
+                font_family: None,
+                max_lines: Some(2),
+                overflow: ParagraphOverflow::Clip,
+            },
+            30.0,
+        );
+
+        assert!(source.contains("height: 72pt"));
+        assert!(source.contains("clip: true"));
+    }
+
+    #[test]
+    fn equation_fragment_fill_overrides_matching_vector_glyphs() {
+        let highlight = gaanim_core::peniko::Color::from_rgb8(255, 180, 0);
+        let mut canvas = Canvas::new(640, 360);
+        canvas.equation("E = m c^2").color_by("m", highlight);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&gaanim_scene::FillBrush>();
+        assert!(query.iter(&world).any(|fill| {
+            matches!(
+                &fill.0,
+                Some(gaanim_core::peniko::Brush::Solid(color)) if *color == highlight
+            )
+        }));
+    }
+
+    #[test]
+    fn text_fragment_fill_overrides_matching_vector_glyphs() {
+        let highlight = gaanim_core::peniko::Color::from_rgb8(64, 180, 255);
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .text("Energy depends on mass")
+            .color_by("mass", highlight);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&gaanim_scene::FillBrush>();
+        assert!(query.iter(&world).any(|fill| {
+            matches!(
+                &fill.0,
+                Some(gaanim_core::peniko::Brush::Solid(color)) if *color == highlight
+            )
+        }));
+    }
+
+    #[test]
+    fn fragment_transform_schedules_vector_path_morphs() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.equation("E = m c^2");
+        let target = canvas.equation("p = m v");
+        source.select("m").transform_to(&target.select("m"), 0.8);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::PathMorph { .. },
+                        ..
+                    }
+                )
+            )
+        }));
     }
 
     #[test]

@@ -64,6 +64,16 @@ pub enum TextAlign {
     Justify,
 }
 
+/// How a paragraph behaves when a maximum line count constrains its height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParagraphOverflow {
+    /// Keep all lines visible even if they extend beyond the nominal text box.
+    Visible,
+    /// Clip lines outside the text box. This is the safe default for video layouts.
+    #[default]
+    Clip,
+}
+
 /// Vector paragraph layout options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphOptions {
@@ -76,6 +86,9 @@ pub struct ParagraphOptions {
     pub font_size: Option<f64>,
     /// Overrides the configured Body role when present.
     pub font_family: Option<String>,
+    /// Optional maximum number of visible lines.
+    pub max_lines: Option<usize>,
+    pub overflow: ParagraphOverflow,
 }
 
 impl ParagraphOptions {
@@ -95,6 +108,8 @@ impl Default for ParagraphOptions {
             line_spacing: 1.2,
             font_size: None,
             font_family: None,
+            max_lines: None,
+            overflow: ParagraphOverflow::Clip,
         }
     }
 }
@@ -424,6 +439,9 @@ pub struct ObjectSpec {
     pub stroke_overridden: bool,
     pub opacity: f32,
     pub z_index: i32,
+    /// Fill overrides applied to matching glyph fragments after textual objects
+    /// have been compiled into their vector hierarchy.
+    pub fragment_fills: Vec<(String, Color)>,
     pub layout_ops: Vec<LayoutOp>,
 }
 
@@ -438,6 +456,7 @@ impl ObjectSpec {
             stroke_overridden: false,
             opacity: 1.0,
             z_index: 0,
+            fragment_fills: Vec::new(),
             layout_ops: Vec::new(),
         }
     }

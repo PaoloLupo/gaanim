@@ -30,6 +30,15 @@ Scene
 
 `FrameLayout` es un preset editorial. `LayoutRegion` y `GridLayout` son las primitivas generales. Esto permite añadir otros presets más adelante —por ejemplo, comparación, lower third o presentación— sin crear otro motor de layout.
 
+Los presets actuales escalan sus bandas respecto al safe frame:
+
+```python
+lecture = scene.layout_preset("lecture")
+comparison = scene.layout_preset("comparison")
+vertical = scene.layout_preset("vertical_short")
+minimal = scene.layout_preset("minimal")
+```
+
 ## API Python actual
 
 ```python
@@ -85,6 +94,18 @@ sidebar = grid.area(0, 8, row_span=3, column_span=4)
 ```
 
 Las filas se numeran de arriba hacia abajo y las columnas de izquierda a derecha. Un área fuera del grid genera `IndexError` en Python y `None` en Rust.
+
+Para combinar tracks fijos con el espacio disponible, usa `grid_tracks`. Un número representa unidades fijas de escena; `"fr"` reparte el espacio restante en proporción al peso.
+
+```python
+grid = region.grid_tracks(
+    rows=["1fr"],
+    columns=[260, "1fr", "2fr"],
+    column_gap=24,
+)
+```
+
+En este ejemplo la primera columna ocupa 260 unidades; las dos restantes se reparten el ancho disponible en proporción 1:2. Esta primera versión no implementa `auto`.
 
 ### Párrafos
 
@@ -165,18 +186,18 @@ El layout inicial se resuelve al compilar la escena. Una animación posterior pa
 
 ## Evolución propuesta
 
-### Fase 2: tracks y tamaños flexibles
+### Fase 2: tracks `auto` y tamaños intrínsecos
 
 ```python
-grid = region.grid(
+grid = region.grid_tracks(
     columns=["2fr", "3fr", 280],
     rows=["auto", "1fr"],
     gap=24,
 )
 ```
 
-- número: tamaño fijo;
-- `fr`: reparto del espacio restante;
+- número: tamaño fijo (implementado);
+- `fr`: reparto del espacio restante (implementado);
 - `auto`: máximo tamaño intrínseco de los objetos de esa pista.
 
 Esto requiere una fase de medición antes de resolver posiciones. No debe incorporarse hasta tener límites claros para grupos, imágenes y texto.

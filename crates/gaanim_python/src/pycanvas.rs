@@ -111,6 +111,27 @@ impl PyScene {
         )
     }
 
+    /// Creates an editorial layout preset that scales with the safe frame.
+    fn layout_preset(&self, name: &str) -> PyResult<PyFrameLayout> {
+        let preset = match name {
+            "lecture" => gaanim_api::canvas::LayoutPreset::Lecture,
+            "comparison" => gaanim_api::canvas::LayoutPreset::Comparison,
+            "vertical_short" => gaanim_api::canvas::LayoutPreset::VerticalShort,
+            "minimal" => gaanim_api::canvas::LayoutPreset::Minimal,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "preset must be 'lecture', 'comparison', 'vertical_short', or 'minimal'",
+                ))
+            }
+        };
+        Ok(PyFrameLayout(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .layout_preset(preset),
+        ))
+    }
+
     /// Starts a deferred vertical or horizontal sequence of drawables.
     #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
     fn flow(
@@ -431,7 +452,7 @@ impl PyScene {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
     }
     /// Multi-line vector text constrained to a width.
-    #[pyo3(signature = (s, width, *, align="left", line_spacing=1.2, font_size=None, font_family=None))]
+    #[pyo3(signature = (s, width, *, align="left", line_spacing=1.2, font_size=None, font_family=None, max_lines=None, overflow="clip"))]
     fn paragraph(
         &self,
         s: &str,
@@ -440,6 +461,8 @@ impl PyScene {
         line_spacing: f64,
         font_size: Option<f64>,
         font_family: Option<String>,
+        max_lines: Option<usize>,
+        overflow: &str,
     ) -> PyResult<PyDrawable> {
         let align = match align {
             "left" => TextAlign::Left,
@@ -467,12 +490,28 @@ impl PyScene {
                 "font_size must be a finite positive number",
             ));
         }
+        if max_lines == Some(0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_lines must be at least 1 when provided",
+            ));
+        }
+        let overflow = match overflow {
+            "visible" => gaanim_api::canvas::ParagraphOverflow::Visible,
+            "clip" => gaanim_api::canvas::ParagraphOverflow::Clip,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "overflow must be 'visible' or 'clip'",
+                ))
+            }
+        };
         let options = ParagraphOptions {
             width,
             align,
             line_spacing,
             font_size,
             font_family,
+            max_lines,
+            overflow,
         };
         Ok(PyDrawable(
             self.inner

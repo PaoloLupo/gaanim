@@ -1,12 +1,49 @@
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, LayoutRegion,
+    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, GridTrack, LayoutRegion,
 };
 use gaanim_core::glam::DVec3;
 use pyo3::prelude::*;
 
 use crate::pydrawable::PyDrawable;
+
+fn parse_tracks(values: &Bound<'_, PyAny>, axis: &str) -> PyResult<Vec<GridTrack>> {
+    let mut tracks = Vec::new();
+    for value in values.try_iter()? {
+        let value = value?;
+        if let Ok(size) = value.extract::<f64>() {
+            if !size.is_finite() || size < 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{axis} fixed tracks must be finite non-negative numbers"
+                )));
+            }
+            tracks.push(GridTrack::Fixed(size));
+            continue;
+        }
+        let spec = value.extract::<String>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "{axis} tracks must be numbers or strings such as '1fr'"
+            ))
+        })?;
+        let fraction = spec
+            .strip_suffix("fr")
+            .and_then(|weight| weight.trim().parse::<f64>().ok())
+            .filter(|weight| weight.is_finite() && *weight >= 0.0)
+            .ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "invalid {axis} track {spec:?}; expected a non-negative number or '<weight>fr'"
+                ))
+            })?;
+        tracks.push(GridTrack::Fraction(fraction));
+    }
+    if tracks.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{axis} tracks cannot be empty"
+        )));
+    }
+    Ok(tracks)
+}
 
 /// Deferred sequence of drawables that becomes one arranged group on `build`.
 #[pyclass(name = "Flow", module = "gaanim_core", skip_from_py_object)]
@@ -129,6 +166,23 @@ impl PyLayoutRegion {
     fn grid(&self, rows: usize, columns: usize, row_gap: f64, column_gap: f64) -> PyGridLayout {
         PyGridLayout(self.0.grid(rows, columns, row_gap, column_gap))
     }
+
+    /// Creates a grid with fixed numeric tracks and fractional strings (`"1fr"`).
+    #[pyo3(signature = (rows, columns, row_gap=0.0, column_gap=0.0))]
+    fn grid_tracks(
+        &self,
+        rows: Bound<'_, PyAny>,
+        columns: Bound<'_, PyAny>,
+        row_gap: f64,
+        column_gap: f64,
+    ) -> PyResult<PyGridLayout> {
+        Ok(PyGridLayout(self.0.grid_with_tracks(
+            parse_tracks(&rows, "row")?,
+            parse_tracks(&columns, "column")?,
+            row_gap,
+            column_gap,
+        )))
+    }
 }
 
 #[pyclass(
@@ -137,7 +191,7 @@ impl PyLayoutRegion {
     frozen,
     skip_from_py_object
 )]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct PyGridLayout(pub GridLayout);
 
 #[pymethods]

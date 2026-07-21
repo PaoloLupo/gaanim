@@ -58,6 +58,44 @@ equation = scene.equation("E = m c^2")
 
 Equations are compiled through Typst. Use Typst math syntax in the string.
 
+=== Color equation fragments
+
+`color_by` works on `text`, `title`, `subtitle`, `paragraph`, and `equation`.
+It changes all matching glyph fragments while preserving vector paths, including
+during `write` and transform animations. Matching is case-insensitive and
+ignores math spacing and sub/superscript markers. If calls overlap, the last
+color wins.
+
+```python
+from gaanim import BLUE, GOLD
+
+energy = (
+    scene.equation("E = m c^2")
+    .color_by("m", GOLD)
+    .color_by("c", BLUE)
+)
+label = scene.text("Energy depends on mass").color_by("mass", GOLD)
+```
+
+For a step-by-step explanation, `select` acts on every occurrence by default.
+Pass `occurrence=0` (zero-based) to isolate one repeated fragment. Its actions
+are queued in the normal scene timeline.
+
+```python
+formula = scene.equation("x + x = 2x")
+formula.select("x", occurrence=1).fill(BLUE).indicate(duration=0.8)
+formula.select("2x").color_to(GOLD, duration=0.6)
+```
+
+`transform_to` morphs one selected fragment into another, pairing their glyphs
+in order. It works best when both selections contain the same number of glyphs.
+
+```python
+source = scene.equation("E = m c^2")
+target = scene.equation("p = m v").at(0, -120)
+source.select("m").transform_to(target.select("m"), duration=0.8)
+```
+
 == Groups
 
 ```python
