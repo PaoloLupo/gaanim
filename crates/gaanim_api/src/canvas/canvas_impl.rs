@@ -337,6 +337,208 @@ impl Canvas {
     pub fn equation(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Equation(s.to_string()))
     }
+
+    /// Morphs all shared semantic tags from one equation into another in
+    /// parallel. Tags are registered through `DrawableHandle::define_tag`.
+    pub fn transform_equation_tags(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        tags: Option<Vec<String>>,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &source.state) || !Arc::ptr_eq(&self.state, &target.state) {
+            return;
+        }
+        let source_tags = source
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .clone();
+        let target_tags = target
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .clone();
+        let requested = tags.unwrap_or_else(|| {
+            source_tags
+                .iter()
+                .filter_map(|(name, _, _)| {
+                    target_tags
+                        .iter()
+                        .any(|(target_name, _, _)| target_name == name)
+                        .then_some(name.clone())
+                })
+                .collect()
+        });
+        let pairs = requested
+            .into_iter()
+            .filter_map(|name| {
+                let (_, source_fragment, source_occurrence) =
+                    source_tags.iter().rev().find(|(tag, _, _)| tag == &name)?;
+                let (_, target_fragment, target_occurrence) =
+                    target_tags.iter().rev().find(|(tag, _, _)| tag == &name)?;
+                Some((
+                    source_fragment.clone(),
+                    *source_occurrence,
+                    target_fragment.clone(),
+                    *target_occurrence,
+                ))
+            })
+            .collect::<Vec<_>>();
+        if !pairs.is_empty() && duration.is_finite() && duration > 0.0 {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::TaggedTransform {
+                    source: source.id,
+                    target: target.id,
+                    pairs,
+                    duration,
+                });
+        }
+    }
+
+    /// Replaces `source` with `target`, keeping the named tag as the moving
+    /// anchor. This is useful when a term grows into a longer expression: the
+    /// anchor moves while the added glyphs fade in with the new equation.
+    pub fn expand_equation_tag(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        tag: &str,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &source.state)
+            || !Arc::ptr_eq(&self.state, &target.state)
+            || tag.trim().is_empty()
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return;
+        }
+        let source_tag = source
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .iter()
+            .rev()
+            .find(|(name, _, _)| name == tag)
+            .cloned();
+        let target_tag = target
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .iter()
+            .rev()
+            .find(|(name, _, _)| name == tag)
+            .cloned();
+        let (
+            Some((_, source_fragment, source_occurrence)),
+            Some((_, target_fragment, target_occurrence)),
+        ) = (source_tag, target_tag)
+        else {
+            return;
+        };
+
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::ExpandEquation {
+                source: source.id,
+                target: target.id,
+                source_fragment,
+                source_occurrence,
+                target_fragment,
+                target_occurrence,
+                duration,
+            });
+    }
+
+    /// Transitions from one equation step to another. Shared glyphs move to
+    /// their new positions; removed and introduced glyphs fade out and in.
+    pub fn step_equation(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &source.state)
+            || !Arc::ptr_eq(&self.state, &target.state)
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return;
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::StepEquation {
+                source: source.id,
+                target: target.id,
+                duration,
+            });
+    }
+
+    /// Dims all equation glyphs except the requested semantic tags and pulses
+    /// the surviving terms. This is tag-based rather than glyph-index based,
+    /// so it stays stable when equation layout changes.
+    pub fn focus_equation(
+        &mut self,
+        equation: &DrawableHandle,
+        tags: Vec<String>,
+        dim_opacity: f32,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &equation.state)
+            || tags.is_empty()
+            || !dim_opacity.is_finite()
+            || !(0.0..=1.0).contains(&dim_opacity)
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return;
+        }
+        let declared = equation
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .clone();
+        let terms = tags
+            .into_iter()
+            .filter_map(|name| {
+                declared
+                    .iter()
+                    .rev()
+                    .find(|(tag, _, _)| tag == &name)
+                    .map(|(_, fragment, occurrence)| (fragment.clone(), *occurrence))
+            })
+            .collect::<Vec<_>>();
+        if !terms.is_empty() {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::FocusEquation {
+                    target: equation.id,
+                    terms,
+                    dim_opacity,
+                    duration,
+                });
+        }
+    }
     /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
     ///
     /// Source pixels are decoded once per canonical path and are displayed at

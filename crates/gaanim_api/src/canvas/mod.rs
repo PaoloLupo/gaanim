@@ -1,6 +1,6 @@
 mod ops;
 pub use gaanim_animation::AxisMask;
-pub use ops::{CanvasEndpoint, UpdaterPreset};
+pub use ops::{CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{

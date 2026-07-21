@@ -89,6 +89,29 @@ pub(crate) enum Op {
         color: Option<Color>,
         duration: f64,
     },
+    /// Reveal a selected fragment with a presentation-oriented preset.
+    FragmentReveal {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        style: FragmentRevealStyle,
+        duration: f64,
+    },
+    /// Write semantic equation terms one after another. Each tuple is one
+    /// term, even when it resolves to several glyphs.
+    WriteTerms {
+        target: ObjectId,
+        terms: Vec<(String, Option<usize>)>,
+        duration: f64,
+    },
+    /// Dim every equation glyph except the selected semantic terms, then
+    /// pulse the selected terms.
+    FocusEquation {
+        target: ObjectId,
+        terms: Vec<(String, Option<usize>)>,
+        dim_opacity: f32,
+        duration: f64,
+    },
     /// Tween selected glyph fills to a color in parallel.
     FragmentFillTo {
         target: ObjectId,
@@ -105,6 +128,31 @@ pub(crate) enum Op {
         target: ObjectId,
         target_fragment: String,
         target_occurrence: Option<usize>,
+        duration: f64,
+    },
+    /// Morph every explicitly paired semantic equation tag in parallel.
+    TaggedTransform {
+        source: ObjectId,
+        target: ObjectId,
+        pairs: Vec<(String, Option<usize>, String, Option<usize>)>,
+        duration: f64,
+    },
+    /// Replace one equation state with another while using a semantic tag as
+    /// the moving anchor. Remaining target glyphs fade in as the source fades
+    /// out, which makes single terms naturally expand into longer expressions.
+    ExpandEquation {
+        source: ObjectId,
+        target: ObjectId,
+        source_fragment: String,
+        source_occurrence: Option<usize>,
+        target_fragment: String,
+        target_occurrence: Option<usize>,
+        duration: f64,
+    },
+    /// Transition between equation steps by matching their common glyphs.
+    StepEquation {
+        source: ObjectId,
+        target: ObjectId,
         duration: f64,
     },
     /// Advance the cursor by a duration (no animation).
@@ -226,6 +274,14 @@ pub(crate) enum Op {
         tracker: ObjectId,
         window: f64,
     },
+}
+
+/// Visual preset used by [`Op::FragmentReveal`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FragmentRevealStyle {
+    Fade,
+    Wipe,
+    FromBelow,
 }
 
 /// A tracking endpoint at the Canvas level (before entity resolution).

@@ -37,6 +37,10 @@ pub enum AnimationType {
     },
     FadeIn,
     FadeOut,
+    /// Fade in while translating from an offset to the drawable's position.
+    FadeInFrom {
+        offset: DVec3,
+    },
     FillColorTo {
         to: Color,
     },

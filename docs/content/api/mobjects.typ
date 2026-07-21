@@ -58,6 +58,18 @@ equation = scene.equation("E = m c^2")
 
 Equations are compiled through Typst. Use Typst math syntax in the string.
 
+=== Fade in from a direction
+
+Use `fade_in_from` for the common Manim-style entrance: it starts invisible at
+an offset and fades in while moving into its final position.
+
+```python
+from gaanim import Direction
+
+caption = scene.text("Una idea aparece desde abajo").at(0, -180)
+scene.play([caption.fade_in_from(Direction.DOWN, distance=64, duration=0.8)])
+```
+
 === Color equation fragments
 
 `color_by` works on `text`, `title`, `subtitle`, `paragraph`, and `equation`.
@@ -94,6 +106,77 @@ in order. It works best when both selections contain the same number of glyphs.
 source = scene.equation("E = m c^2")
 target = scene.equation("p = m v").at(0, -120)
 source.select("m").transform_to(target.select("m"), duration=0.8)
+```
+
+=== Named equation tags
+
+For formulas used repeatedly in a derivation, attach short semantic names at
+construction time. This keeps the Typst source clean and avoids repeating raw
+substring queries in the animation code.
+
+```python
+formula = scene.equation(
+    "E = m c^2",
+    tags={"mass": "m", "light_speed": "c^2"},
+)
+
+formula.tag("mass").fill(GOLD).indicate(duration=0.8)
+formula.tag("light_speed").color_to(BLUE, duration=0.6)
+```
+
+`write_by_term` writes each declared tag as one semantic unit, while
+`reveal_fragment` supports a fade, a vector-path wipe, or an entrance from
+below. `indicate_tag` is the short form for pulsing a named term.
+
+```python
+formula = scene.equation(
+    "E = m c^2",
+    tags={"energy": "E", "equals": "=", "mass": "m", "speed": "c^2"},
+)
+formula.write_by_term(duration=1.6)
+formula.indicate_tag("mass", duration=0.5)
+formula.reveal_fragment("c^2", style="from_below", duration=0.5)
+```
+
+`focus_equation` keeps the selected terms bright and attenuates the remainder.
+
+```python
+scene.focus_equation(formula, ["mass", "speed"], duration=0.6, dim_opacity=0.2)
+```
+
+Use `transform_equation` to animate every shared tag at once while preserving
+the source equation. Provide `tags` to restrict the transition; without it,
+all shared names move in parallel.
+
+```python
+source = scene.equation("E = m c^2", tags={"mass": "m"})
+target = scene.equation("p = m v", tags={"mass": "m"}).at(0, -120)
+scene.transform_equation(source, target, duration=0.8)
+```
+
+For an equation state where a tagged term becomes longer, use
+`expand_equation`. The shared tag marks the glyph that moves; the rest of the
+new expression fades in while matching glyphs glide into their new positions.
+
+```python
+compact = scene.equation("E = m c^2", tags={"mass": "m"}).at(0, 0)
+expanded = scene.equation(
+    "E = (m_1 + m_2) c^2",
+    tags={"mass": "m"},
+).at(0, 0)
+
+scene.play(compact.write())
+scene.expand_equation(compact, expanded, tag="mass", duration=0.8)
+```
+
+For a general derivation step, `step_equation` matches common glyphs
+automatically and fades only the terms that change.
+
+```python
+before = scene.equation("x + 3 = 7").at(0, 0)
+after = scene.equation("x = 4").at(0, 0)
+scene.play(before.write())
+scene.step_equation(before, after, duration=0.8)
 ```
 
 == Groups

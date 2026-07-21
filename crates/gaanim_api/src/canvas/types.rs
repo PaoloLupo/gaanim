@@ -442,6 +442,8 @@ pub struct ObjectSpec {
     /// Fill overrides applied to matching glyph fragments after textual objects
     /// have been compiled into their vector hierarchy.
     pub fragment_fills: Vec<(String, Color)>,
+    /// Named fragment queries attached by the high-level equation API.
+    pub fragment_tags: Vec<(String, String, Option<usize>)>,
     pub layout_ops: Vec<LayoutOp>,
 }
 
@@ -457,6 +459,7 @@ impl ObjectSpec {
             opacity: 1.0,
             z_index: 0,
             fragment_fills: Vec::new(),
+            fragment_tags: Vec::new(),
             layout_ops: Vec::new(),
         }
     }

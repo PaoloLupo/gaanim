@@ -101,6 +101,22 @@ impl PyFragmentSelection {
         Self(self.0.clone().indicate(duration))
     }
 
+    /// Reveal the selected fragment with ``fade``, ``wipe``, or ``from_below``.
+    #[pyo3(signature = (style="fade", duration=None))]
+    fn reveal(&self, style: &str, duration: Option<f64>) -> PyResult<Self> {
+        let style = match style {
+            "fade" => gaanim_api::canvas::FragmentRevealStyle::Fade,
+            "wipe" => gaanim_api::canvas::FragmentRevealStyle::Wipe,
+            "from_below" => gaanim_api::canvas::FragmentRevealStyle::FromBelow,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "style must be 'fade', 'wipe', or 'from_below'",
+                ))
+            }
+        };
+        Ok(Self(self.0.clone().reveal(style, duration)))
+    }
+
     /// Animates the selected glyphs to `color`.
     #[pyo3(signature = (color, duration=None))]
     fn color_to(&self, color: PyColor, duration: Option<f64>) -> Self {
@@ -149,6 +165,52 @@ impl PyDrawable {
             None => self.0.select(fragment),
         };
         Ok(PyFragmentSelection(selection))
+    }
+    /// Select a named fragment supplied through ``Scene.equation(tags=...)``.
+    fn tag(&self, name: &str) -> PyResult<PyFragmentSelection> {
+        self.0
+            .tag(name)
+            .map(PyFragmentSelection)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))
+    }
+    /// Pulse a named equation term without selecting its source fragment again.
+    #[pyo3(signature = (name, duration=None))]
+    fn indicate_tag(&self, name: &str, duration: Option<f64>) -> PyResult<Self> {
+        let tag = self
+            .0
+            .tag(name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))?;
+        tag.indicate(duration);
+        Ok(Self(self.0.clone()))
+    }
+    /// Reveal a raw equation fragment with ``fade``, ``wipe``, or ``from_below``.
+    #[pyo3(signature = (fragment, *, style="fade", duration=None, occurrence=None))]
+    fn reveal_fragment(
+        &self,
+        fragment: &str,
+        style: &str,
+        duration: Option<f64>,
+        occurrence: Option<usize>,
+    ) -> PyResult<Self> {
+        if fragment.trim().is_empty() {
+            return Err(PyValueError::new_err("fragment must not be empty"));
+        }
+        let style = match style {
+            "fade" => gaanim_api::canvas::FragmentRevealStyle::Fade,
+            "wipe" => gaanim_api::canvas::FragmentRevealStyle::Wipe,
+            "from_below" => gaanim_api::canvas::FragmentRevealStyle::FromBelow,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "style must be 'fade', 'wipe', or 'from_below'",
+                ))
+            }
+        };
+        let selection = match occurrence {
+            Some(occurrence) => self.0.select_nth(fragment, occurrence),
+            None => self.0.select(fragment),
+        };
+        selection.reveal(style, duration);
+        Ok(Self(self.0.clone()))
     }
     fn opacity(&self, op: f32) -> Self {
         Self(self.0.clone().opacity(op))
@@ -269,6 +331,23 @@ impl PyDrawable {
             inner: self.0.fade_in(duration),
         }
     }
+    /// Fade in while moving from ``direction`` (for example ``Direction.DOWN``).
+    #[pyo3(signature = (direction, distance=48.0, duration=None))]
+    fn fade_in_from(
+        &self,
+        direction: &PyDirection,
+        distance: f64,
+        duration: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        if !distance.is_finite() || distance < 0.0 {
+            return Err(PyValueError::new_err(
+                "distance must be a finite non-negative number",
+            ));
+        }
+        Ok(PyCanvasAnim {
+            inner: self.0.fade_in_from(direction.0.clone(), distance, duration),
+        })
+    }
     #[pyo3(signature = (duration=None))]
     fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
@@ -285,6 +364,16 @@ impl PyDrawable {
         PyCanvasAnim {
             inner: self.0.write(duration),
         }
+    }
+    /// Write declared equation tags one term at a time, rather than glyph by glyph.
+    #[pyo3(signature = (*, tags=None, duration=1.0))]
+    fn write_by_term(&self, tags: Option<Vec<String>>, duration: f64) -> PyResult<Self> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        Ok(Self(self.0.write_by_terms(tags, duration)))
     }
     #[pyo3(signature = (duration=None))]
     fn create(&self, duration: Option<f64>) -> PyCanvasAnim {

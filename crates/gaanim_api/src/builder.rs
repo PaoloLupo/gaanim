@@ -568,7 +568,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
             AnimationType::RotateTo { .. } | AnimationType::RotateBy { .. } => "Rotate",
             AnimationType::ScaleTo { .. } | AnimationType::ScaleUniform { .. } => "Scale",
-            AnimationType::FadeTo { .. } | AnimationType::FadeIn | AnimationType::FadeOut => "Fade",
+            AnimationType::FadeTo { .. }
+            | AnimationType::FadeIn
+            | AnimationType::FadeOut
+            | AnimationType::FadeInFrom { .. } => "Fade",
             AnimationType::FillColorTo { .. } => "Fill",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -647,6 +650,151 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_time += max_duration;
     }
 
+    /// Schedule a glyph-copy transition while accounting for the transforms of
+    /// the two textual parent containers. Text glyph transforms are local to
+    /// their equation, so a plain child translation cannot move between
+    /// separately positioned equations by itself.
+    pub(crate) fn play_fragment_transform(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        duration: f64,
+    ) {
+        let Some((source_translation, source_center)) = self
+            .states
+            .get(source)
+            .map(|state| (state.transform.translation, state.bounds.center()))
+        else {
+            return;
+        };
+        let Some(source_parent_translation) = self
+            .states
+            .get(source_parent)
+            .map(|state| state.transform.translation)
+        else {
+            return;
+        };
+        let Some(target_parent_translation) = self
+            .states
+            .get(target_parent)
+            .map(|state| state.transform.translation)
+        else {
+            return;
+        };
+        let Some((destination, target_center)) = self
+            .states
+            .get(target)
+            .map(|state| (state.transform.translation, state.bounds.center()))
+        else {
+            return;
+        };
+        let source_position_in_target = source_translation + source_parent_translation
+            - target_parent_translation
+            + source_center
+            - target_center;
+        let Some(target_state) = self.states.get_mut(target) else {
+            return;
+        };
+        target_state.transform.translation = source_position_in_target;
+        let _ = target_state;
+
+        // A shared semantic tag represents a term that exists in both
+        // equations. Keep the source equation intact and animate the target
+        // glyph from the source's global position to its own local position.
+        // Bounds compensate for lines whose optical centers differ because of
+        // surrounding superscripts or descenders.
+        self.play_internal(AnimationBuilder {
+            target,
+            anim_type: AnimationType::TranslateTo { to: destination },
+            duration,
+            rate_func: gaanim_math::RateFunc::Smooth,
+            delay: 0.0,
+        });
+    }
+
+    /// Cross-fades two textual hierarchies, while moving the matched semantic
+    /// glyphs from the source equation into the target equation.
+    pub(crate) fn play_equation_expansion(
+        &mut self,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        duration: f64,
+    ) {
+        let source_state = self.states.get(source_parent).cloned();
+        let target_state = self.states.get(target_parent).cloned();
+        let (Some(source_state), Some(target_state)) = (source_state, target_state) else {
+            return;
+        };
+        if source_state.children.is_empty() || target_state.children.is_empty() {
+            return;
+        }
+
+        // Match the unchanged parts too. They move with the equation's new
+        // centering instead of ghosting through a cross-fade, while unmatched
+        // target glyphs (the expansion) simply fade in.
+        let source_chars: Vec<_> = source_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character))
+            .collect();
+        let target_chars: Vec<_> = target_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character))
+            .collect();
+        let mut table = vec![vec![0usize; target_chars.len() + 1]; source_chars.len() + 1];
+        for source_index in (0..source_chars.len()).rev() {
+            for target_index in (0..target_chars.len()).rev() {
+                table[source_index][target_index] = if source_chars[source_index].1
+                    == target_chars[target_index].1
+                {
+                    1 + table[source_index + 1][target_index + 1]
+                } else {
+                    table[source_index + 1][target_index].max(table[source_index][target_index + 1])
+                };
+            }
+        }
+        let mut matched_pairs = Vec::new();
+        let (mut source_index, mut target_index) = (0, 0);
+        while source_index < source_chars.len() && target_index < target_chars.len() {
+            if source_chars[source_index].1 == target_chars[target_index].1 {
+                matched_pairs.push((source_chars[source_index].0, target_chars[target_index].0));
+                source_index += 1;
+                target_index += 1;
+            } else if table[source_index + 1][target_index] >= table[source_index][target_index + 1]
+            {
+                source_index += 1;
+            } else {
+                target_index += 1;
+            }
+        }
+
+        for child in source_state.children {
+            self.play_internal(AnimationBuilder {
+                target: child,
+                anim_type: AnimationType::FadeOut,
+                duration,
+                rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+        for child in target_state.children {
+            self.play_internal(AnimationBuilder {
+                target: child,
+                anim_type: AnimationType::FadeIn,
+                duration,
+                rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+        for (source, target) in matched_pairs {
+            self.play_fragment_transform(source, target, source_parent, target_parent, duration);
+        }
+        self.current_time += duration;
+    }
+
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
@@ -669,6 +817,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::SpinInFromNothing) {
             self.play_spin_in_from_nothing_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::FadeInFrom { .. }) {
+            self.play_fade_in_from_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Indicate { .. }) {
@@ -772,6 +924,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.opacity = 1.0;
                 self.commands.entity(state.entity).insert(Opacity(from));
                 PropertyLensSpec::Opacity { from, to }
+            }
+            AnimationType::FadeInFrom { .. } => {
+                unreachable!("FadeInFrom expands into fade and translation clips")
             }
             AnimationType::FadeOut => {
                 let from = state.opacity;
@@ -1233,6 +1388,36 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
+    fn play_fade_in_from_internal(&mut self, anim: AnimationBuilder, _track: TrackId) {
+        let offset = match anim.anim_type {
+            AnimationType::FadeInFrom { offset } => offset,
+            _ => return,
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let final_position = state.transform.translation;
+        state.transform.translation = final_position + offset;
+        self.commands.entity(state.entity).insert(state.transform);
+
+        // Reuse the well-tested opacity and translation paths. Both are
+        // scheduled at the same cursor, so they run in parallel.
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::FadeIn,
+            duration: anim.duration,
+            rate_func: anim.rate_func.clone(),
+            delay: anim.delay,
+        });
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::TranslateTo { to: final_position },
+            duration: anim.duration,
+            rate_func: anim.rate_func,
+            delay: anim.delay,
+        });
+    }
+
     fn play_spin_in_from_nothing_internal(
         &mut self,
         anim: AnimationBuilder,

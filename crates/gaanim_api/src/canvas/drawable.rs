@@ -9,7 +9,9 @@ use gaanim_layout::{Anchor, Direction};
 use gaanim_math::RateFunc;
 
 use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
-use crate::canvas::ops::{Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset};
+use crate::canvas::ops::{
+    FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
+};
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
 /// An ergonomic handle to a mobject on a Canvas.
@@ -37,6 +39,32 @@ pub struct FragmentSelection {
     occurrence: Option<usize>,
     state: SharedCanvasState,
     segment_idx: usize,
+}
+
+/// Split ordinary mathematical source into display terms when an equation has
+/// not declared semantic tags. Operators stand alone; adjacent non-operator
+/// characters (for example `c^2` or `2x`) remain one term.
+fn math_source_terms(source: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut current = String::new();
+    for ch in source.chars() {
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                terms.push(std::mem::take(&mut current));
+            }
+        } else if matches!(ch, '=' | '+' | '-' | '*' | '/' | '(' | ')' | '[' | ']') {
+            if !current.is_empty() {
+                terms.push(std::mem::take(&mut current));
+            }
+            terms.push(ch.to_string());
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        terms.push(current);
+    }
+    terms
 }
 
 impl DrawableHandle {
@@ -127,6 +155,86 @@ impl DrawableHandle {
             state: self.state.clone(),
             segment_idx: self.segment_idx,
         }
+    }
+
+    /// Registers a semantic name for a text or equation fragment.
+    pub fn define_tag(
+        self,
+        name: impl Into<String>,
+        fragment: impl Into<String>,
+        occurrence: Option<usize>,
+    ) -> Self {
+        let name = name.into();
+        let fragment = fragment.into();
+        self.update_spec(|spec| {
+            if !name.trim().is_empty() && !fragment.trim().is_empty() {
+                spec.fragment_tags.push((name, fragment, occurrence));
+            }
+        })
+    }
+
+    /// Selects a previously registered semantic tag.
+    pub fn tag(&self, name: &str) -> Option<FragmentSelection> {
+        let (fragment, occurrence) = self
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .iter()
+            .rev()
+            .find(|(tag, _, _)| tag == name)
+            .map(|(_, fragment, occurrence)| (fragment.clone(), *occurrence))?;
+        Some(FragmentSelection {
+            target: self.id,
+            fragment,
+            occurrence,
+            state: self.state.clone(),
+            segment_idx: self.segment_idx,
+        })
+    }
+
+    /// Writes semantic terms in tag order instead of staggering individual
+    /// glyphs. If `tags` is omitted, all declared tags are used in declaration
+    /// order.
+    pub fn write_by_terms(&self, tags: Option<Vec<String>>, duration: f64) -> Self {
+        if !duration.is_finite() || duration <= 0.0 {
+            return self.clone();
+        }
+        let spec = self.spec.lock().expect("object spec poisoned").clone();
+        let declared = spec.fragment_tags;
+        let terms: Vec<(String, Option<usize>)> = match tags {
+            Some(names) => names
+                .into_iter()
+                .filter_map(|name| {
+                    declared
+                        .iter()
+                        .rev()
+                        .find(|(tag, _, _)| tag == &name)
+                        .map(|(_, fragment, occurrence)| (fragment.clone(), *occurrence))
+                })
+                .collect(),
+            None if !declared.is_empty() => declared
+                .into_iter()
+                .map(|(_, fragment, occurrence)| (fragment, occurrence))
+                .collect(),
+            None => match spec.kind {
+                SpawnKind::Equation(source) | SpawnKind::Text(source) => math_source_terms(&source)
+                    .into_iter()
+                    .map(|fragment| (fragment, None))
+                    .collect(),
+                _ => Vec::new(),
+            },
+        };
+        if !terms.is_empty() {
+            self.state.lock().expect("canvas state poisoned").segments[self.segment_idx]
+                .ops
+                .push(Op::WriteTerms {
+                    target: self.id,
+                    terms,
+                    duration,
+                });
+        }
+        self.clone()
     }
 
     /// Sets the initial value of a `ValueTracker` before the scene is compiled.
@@ -289,6 +397,16 @@ impl DrawableHandle {
 
     pub fn fade_in(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::FadeIn, dur.into_opt())
+    }
+
+    /// Appears while moving from `direction` toward its final position.
+    pub fn fade_in_from(&self, direction: Direction, distance: f64, dur: impl OptDuration) -> Anim {
+        self.anim_dur(
+            AnimationType::FadeInFrom {
+                offset: direction.to_vector() * distance.max(0.0),
+            },
+            dur.into_opt(),
+        )
     }
 
     pub fn fade_out(&self, dur: impl OptDuration) -> Anim {
@@ -535,6 +653,20 @@ impl FragmentSelection {
                 fragment: self.fragment.clone(),
                 occurrence: self.occurrence,
                 color: None,
+                duration: duration.into_opt().unwrap_or(1.0),
+            });
+        }
+        self
+    }
+
+    /// Reveals this fragment with `Fade`, `Wipe`, or `FromBelow`.
+    pub fn reveal(self, style: FragmentRevealStyle, duration: impl OptDuration) -> Self {
+        if !self.fragment.trim().is_empty() {
+            self.push(Op::FragmentReveal {
+                target: self.target,
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                style,
                 duration: duration.into_opt().unwrap_or(1.0),
             });
         }

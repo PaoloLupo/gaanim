@@ -1,5 +1,6 @@
 //! Python scene facade and its visual canvas configuration.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
@@ -531,13 +532,116 @@ impl PyScene {
                 .subtitle(s),
         )
     }
-    fn equation(&self, s: &str) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .equation(s),
-        )
+    #[pyo3(signature = (s, *, tags=None))]
+    fn equation(&self, s: &str, tags: Option<HashMap<String, String>>) -> PyResult<PyDrawable> {
+        let mut equation = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .equation(s);
+        for (name, fragment) in tags.unwrap_or_default() {
+            if name.trim().is_empty() || fragment.trim().is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "tag names and fragments must not be empty",
+                ));
+            }
+            equation = equation.define_tag(name, fragment, None);
+        }
+        Ok(PyDrawable(equation))
+    }
+    /// Morph the semantic tags shared by two equations in parallel.
+    #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
+    fn transform_equation(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        tags: Option<Vec<String>>,
+        duration: f64,
+    ) -> PyResult<()> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .transform_equation_tags(&source.0, &target.0, tags, duration);
+        Ok(())
+    }
+    /// Replace an equation while expanding around one persistent semantic tag.
+    #[pyo3(signature = (source, target, *, tag, duration=1.0))]
+    fn expand_equation(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        tag: String,
+        duration: f64,
+    ) -> PyResult<()> {
+        if tag.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tag must not be empty",
+            ));
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .expand_equation_tag(&source.0, &target.0, &tag, duration);
+        Ok(())
+    }
+    /// Transition between two equation steps by moving their common glyphs.
+    #[pyo3(signature = (source, target, *, duration=1.0))]
+    fn step_equation(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        duration: f64,
+    ) -> PyResult<()> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .step_equation(&source.0, &target.0, duration);
+        Ok(())
+    }
+    /// Dim an equation except for the requested semantic tags, then pulse them.
+    #[pyo3(signature = (equation, tags, *, duration=1.0, dim_opacity=0.25))]
+    fn focus_equation(
+        &self,
+        equation: &PyDrawable,
+        tags: Vec<String>,
+        duration: f64,
+        dim_opacity: f32,
+    ) -> PyResult<()> {
+        if tags.is_empty() || tags.iter().any(|tag| tag.trim().is_empty()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tags must contain at least one non-empty tag",
+            ));
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        if !dim_opacity.is_finite() || !(0.0..=1.0).contains(&dim_opacity) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dim_opacity must be between 0 and 1",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .focus_equation(&equation.0, tags, dim_opacity, duration);
+        Ok(())
     }
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, and crop.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.

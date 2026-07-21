@@ -15,7 +15,7 @@ use gaanim_timeline::timeline::Timeline;
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
-use crate::canvas::ops::{CanvasEndpoint, Op, Segment};
+use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
     LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
 };
@@ -224,6 +224,111 @@ impl Canvas {
                         .collect();
                     builder.play_parallel(anims);
                 }
+                Op::FragmentReveal {
+                    target,
+                    fragment,
+                    occurrence,
+                    style,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let anims = children
+                        .into_iter()
+                        .map(|target| AnimationBuilder {
+                            target,
+                            anim_type: match style {
+                                FragmentRevealStyle::Fade => AnimationType::FadeIn,
+                                FragmentRevealStyle::Wipe => AnimationType::Write {
+                                    config: Default::default(),
+                                },
+                                FragmentRevealStyle::FromBelow => AnimationType::FadeInFrom {
+                                    offset: DVec3::new(0.0, -24.0, 0.0),
+                                },
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        })
+                        .collect();
+                    builder.play_parallel(anims);
+                }
+                Op::WriteTerms {
+                    target,
+                    terms,
+                    duration,
+                } => {
+                    let term_duration = *duration / terms.len() as f64;
+                    for (fragment, occurrence) in terms {
+                        let anims = Self::fragment_child_ids(
+                            builder,
+                            id_map,
+                            *target,
+                            fragment,
+                            *occurrence,
+                        )
+                        .into_iter()
+                        .map(|target| AnimationBuilder {
+                            target,
+                            anim_type: AnimationType::Write {
+                                config: Default::default(),
+                            },
+                            duration: term_duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        })
+                        .collect();
+                        builder.play_parallel(anims);
+                    }
+                }
+                Op::FocusEquation {
+                    target,
+                    terms,
+                    dim_opacity,
+                    duration,
+                } => {
+                    let focused = terms
+                        .iter()
+                        .flat_map(|(fragment, occurrence)| {
+                            Self::fragment_child_ids(
+                                builder,
+                                id_map,
+                                *target,
+                                fragment,
+                                *occurrence,
+                            )
+                        })
+                        .collect::<std::collections::HashSet<_>>();
+                    let all = id_map
+                        .get(target)
+                        .and_then(|target| builder.states.get(*target))
+                        .map(|state| state.children.clone())
+                        .unwrap_or_default();
+                    let mut anims = Vec::with_capacity(all.len() + focused.len());
+                    for child in all {
+                        if focused.contains(&child) {
+                            anims.push(AnimationBuilder {
+                                target: child,
+                                anim_type: AnimationType::Indicate {
+                                    color: None,
+                                    scale_factor: 1.12,
+                                },
+                                duration: *duration,
+                                rate_func: RateFunc::ThereAndBack,
+                                delay: 0.0,
+                            });
+                        } else {
+                            anims.push(AnimationBuilder {
+                                target: child,
+                                anim_type: AnimationType::FadeTo { to: *dim_opacity },
+                                duration: *duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            });
+                        }
+                    }
+                    builder.play_parallel(anims);
+                }
                 Op::FragmentFillTo {
                     target,
                     fragment,
@@ -268,20 +373,117 @@ impl Canvas {
                         target_fragment,
                         *target_occurrence,
                     );
-                    let anims = sources
-                        .into_iter()
-                        .zip(targets)
-                        .map(|(target, morph_target)| AnimationBuilder {
-                            target,
-                            anim_type: AnimationType::Transform {
-                                target: morph_target,
-                            },
-                            duration: *duration,
-                            rate_func: RateFunc::Smooth,
-                            delay: 0.0,
-                        })
-                        .collect();
-                    builder.play_parallel(anims);
+                    let source_parent = id_map.get(source).copied();
+                    let target_parent = id_map.get(target).copied();
+                    let mut transformed = false;
+                    if let (Some(source_parent), Some(target_parent)) =
+                        (source_parent, target_parent)
+                    {
+                        for (source, target) in sources.into_iter().zip(targets) {
+                            builder.play_fragment_transform(
+                                source,
+                                target,
+                                source_parent,
+                                target_parent,
+                                *duration,
+                            );
+                            transformed = true;
+                        }
+                    }
+                    if transformed {
+                        builder.current_time += *duration;
+                    }
+                }
+                Op::TaggedTransform {
+                    source,
+                    target,
+                    pairs,
+                    duration,
+                } => {
+                    let source_parent = id_map.get(source).copied();
+                    let target_parent = id_map.get(target).copied();
+                    let mut transformed = false;
+                    for (source_fragment, source_occurrence, target_fragment, target_occurrence) in
+                        pairs
+                    {
+                        let sources = Self::fragment_child_ids(
+                            builder,
+                            id_map,
+                            *source,
+                            source_fragment,
+                            *source_occurrence,
+                        );
+                        let targets = Self::fragment_child_ids(
+                            builder,
+                            id_map,
+                            *target,
+                            target_fragment,
+                            *target_occurrence,
+                        );
+                        if let (Some(source_parent), Some(target_parent)) =
+                            (source_parent, target_parent)
+                        {
+                            for (source, target) in sources.into_iter().zip(targets) {
+                                builder.play_fragment_transform(
+                                    source,
+                                    target,
+                                    source_parent,
+                                    target_parent,
+                                    *duration,
+                                );
+                                transformed = true;
+                            }
+                        }
+                    }
+                    if transformed {
+                        builder.current_time += *duration;
+                    }
+                }
+                Op::ExpandEquation {
+                    source,
+                    target,
+                    source_fragment,
+                    source_occurrence,
+                    target_fragment,
+                    target_occurrence,
+                    duration,
+                } => {
+                    let sources = Self::fragment_child_ids(
+                        builder,
+                        id_map,
+                        *source,
+                        source_fragment,
+                        *source_occurrence,
+                    );
+                    let targets = Self::fragment_child_ids(
+                        builder,
+                        id_map,
+                        *target,
+                        target_fragment,
+                        *target_occurrence,
+                    );
+                    if let (Some(&source_parent), Some(&target_parent)) =
+                        (id_map.get(source), id_map.get(target))
+                    {
+                        if !sources.is_empty() && !targets.is_empty() {
+                            builder.play_equation_expansion(
+                                source_parent,
+                                target_parent,
+                                *duration,
+                            );
+                        }
+                    }
+                }
+                Op::StepEquation {
+                    source,
+                    target,
+                    duration,
+                } => {
+                    if let (Some(&source_parent), Some(&target_parent)) =
+                        (id_map.get(source), id_map.get(target))
+                    {
+                        builder.play_equation_expansion(source_parent, target_parent, *duration);
+                    }
                 }
                 Op::Wait(d) => builder.wait(*d),
                 Op::CameraPosition { to, duration, .. } => {
@@ -1659,6 +1861,182 @@ mod tests {
                         ..
                     }
                 )
+            )
+        }));
+    }
+
+    #[test]
+    fn named_fragment_tag_resolves_to_a_vector_selection() {
+        let highlight = gaanim_core::peniko::Color::from_rgb8(64, 180, 255);
+        let mut canvas = Canvas::new(640, 360);
+        let formula = canvas.equation("E = m c^2").define_tag("mass", "m", None);
+        formula
+            .tag("mass")
+            .expect("registered tag should resolve")
+            .fill(highlight);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&gaanim_scene::FillBrush>();
+        assert!(query.iter(&world).any(|fill| {
+            matches!(
+                &fill.0,
+                Some(gaanim_core::peniko::Brush::Solid(color)) if *color == highlight
+            )
+        }));
+    }
+
+    #[test]
+    fn tagged_equation_transform_moves_shared_tags() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas
+            .equation("E = m c^2")
+            .define_tag("mass", "m", None)
+            .at(0.0, 70.0);
+        let target = canvas
+            .equation("p = m v")
+            .define_tag("mass", "m", None)
+            .at(0.0, -90.0);
+        canvas.transform_equation_tags(&source, &target, None, 0.8);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { from, to },
+                        ..
+                    }
+                ) if from.y > to.y
+            )
+        }));
+    }
+
+    #[test]
+    fn equation_expansion_cross_fades_equations_around_tag() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.equation("E = m c^2").define_tag("mass", "m", None);
+        let target = canvas
+            .equation("E = (m_1 + m_2) c^2")
+            .define_tag("mass", "m", None);
+        canvas.expand_equation_tag(&source, &target, "mass", 0.8);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let opacity_clips = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                            ..
+                        }
+                    )
+                )
+            })
+            .count();
+        assert!(opacity_clips > 2, "every equation glyph should cross-fade");
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
+                        ..
+                    }
+                )
+            )
+        }));
+    }
+
+    #[test]
+    fn equation_step_matches_common_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.equation("x + 3 = 7");
+        let target = canvas.equation("x = 4");
+        canvas.step_equation(&source, &target, 0.8);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
+                        ..
+                    }
+                )
+            )
+        }));
+    }
+
+    #[test]
+    fn fade_in_from_down_schedules_opacity_and_upward_translation() {
+        let mut canvas = Canvas::new(640, 360);
+        let label = canvas.text("Aparece desde abajo");
+        label.fade_in_from(crate::canvas::Direction::Down, 72.0, 0.8);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { from, to },
+                        ..
+                    }
+                ) if *from == 0.0 && *to == 1.0
+            )
+        }));
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { from, to },
+                        ..
+                    }
+                ) if from.y < to.y
             )
         }));
     }
