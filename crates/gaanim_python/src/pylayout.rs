@@ -1,8 +1,81 @@
-use gaanim_api::canvas::{Anchor, Direction, FrameLayout, GridLayout, LayoutRegion};
+use std::sync::{Arc, Mutex};
+
+use gaanim_api::canvas::{
+    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, LayoutRegion,
+};
 use gaanim_core::glam::DVec3;
 use pyo3::prelude::*;
 
 use crate::pydrawable::PyDrawable;
+
+/// Deferred sequence of drawables that becomes one arranged group on `build`.
+#[pyclass(name = "Flow", module = "gaanim_core", skip_from_py_object)]
+pub struct PyFlow {
+    canvas: Arc<Mutex<ApiCanvas>>,
+    members: Vec<gaanim_api::canvas::DrawableHandle>,
+    direction: Direction,
+    gap: f64,
+    align: Anchor,
+    built: Option<gaanim_api::canvas::DrawableHandle>,
+}
+
+impl PyFlow {
+    pub fn new(
+        canvas: Arc<Mutex<ApiCanvas>>,
+        direction: Direction,
+        gap: f64,
+        align: Anchor,
+    ) -> Self {
+        Self {
+            canvas,
+            members: Vec::new(),
+            direction,
+            gap: gap.max(0.0),
+            align,
+            built: None,
+        }
+    }
+}
+
+#[pymethods]
+impl PyFlow {
+    /// Appends a drawable. A flow cannot be changed after it has been built.
+    fn add(&mut self, drawable: &PyDrawable) -> PyResult<()> {
+        if self.built.is_some() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "a Flow cannot be changed after build(); create a new flow",
+            ));
+        }
+        self.members.push(drawable.0.clone());
+        Ok(())
+    }
+
+    #[getter]
+    fn count(&self) -> usize {
+        self.members.len()
+    }
+
+    /// Creates the arranged group. Repeated calls return the same drawable.
+    fn build(&mut self) -> PyResult<PyDrawable> {
+        if let Some(built) = &self.built {
+            return Ok(PyDrawable(built.clone()));
+        }
+        if self.members.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "a Flow needs at least one drawable before build()",
+            ));
+        }
+        let refs: Vec<_> = self.members.iter().collect();
+        let group = self
+            .canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .group(&refs)
+            .arrange(self.direction, self.gap, self.align);
+        self.built = Some(group.clone());
+        Ok(PyDrawable(group))
+    }
+}
 
 /// A rectangular safe area produced by [`PyVideoLayout`].
 #[pyclass(

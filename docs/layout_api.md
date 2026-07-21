@@ -138,6 +138,25 @@ legend = scene.group([dot, scene.text("Dato")]).hstack(gap=12, align=Anchor.CENT
 Los stacks conservan los `Drawable` originales; se pueden animar como grupo o
 animar cada hijo por separado.
 
+### Flow
+
+`Scene.flow` elimina el grupo explícito cuando los elementos se conocen de
+forma secuencial. La construcción se cierra con `build()` y el resultado se
+coloca como cualquier `Drawable`.
+
+```python
+flow = scene.flow(direction="vertical", gap=20, align=Anchor.LEFT)
+flow.add(scene.text("Introducción").scaled(1.25))
+flow.add(scene.paragraph(texto, width=480))
+flow.add(scene.equation("E = m c^2"))
+
+content = layout.content.place(flow.build(), Anchor.TOP_LEFT)
+```
+
+Un `Flow` no acepta nuevos elementos tras `build()`, para evitar crear grupos
+duplicados de forma accidental. El flow actual es una comodidad sobre stacks;
+todavía no mide contenido para decidir tracks o hacer wrapping automático.
+
 ## Separación entre layout y contenido
 
 El grid calcula espacios; no crea rectángulos visibles ni es propietario de los objetos. `place` solo agrega una operación de layout al `Drawable`. Esta separación permite reutilizar regiones entre segmentos, conservar toda la API de animación y evitar entidades ECS auxiliares.
@@ -162,7 +181,7 @@ grid = region.grid(
 
 Esto requiere una fase de medición antes de resolver posiciones. No debe incorporarse hasta tener límites claros para grupos, imágenes y texto.
 
-### Fase 3: flow y wrapping automático
+### Fase 3: flow con medición y wrapping automático
 
 ```python
 flow = region.flow(direction="vertical", gap=20, align="left")
@@ -171,7 +190,7 @@ flow.add(paragraph)
 flow.add(equation)
 ```
 
-`vstack` y `hstack` ya resuelven la secuencia explícita de hijos. El siguiente nivel es un flow que acepte elementos añadidos incrementalmente y ofrezca `start`, `center`, `end`, `space_between` y wrapping horizontal. Necesita medir objetos diferidos antes de compilar.
+`Flow` ya resuelve la secuencia explícita de elementos añadidos incrementalmente. El siguiente nivel ofrece `start`, `center`, `end`, `space_between`, wrapping horizontal y tamaños `auto`; necesita medir objetos diferidos antes de compilar.
 
 ### Fase 4: constraints y ajuste
 

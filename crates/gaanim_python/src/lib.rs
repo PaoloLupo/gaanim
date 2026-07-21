@@ -21,6 +21,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;
     m.add_class::<pylayout::PyLayoutRegion>()?;
+    m.add_class::<pylayout::PyFlow>()?;
     m.add_class::<pylayout::PyGridLayout>()?;
     m.add_class::<pylayout::PyFrameLayout>()?;
     m.add_class::<pycanvas::PyCanvas>()?;

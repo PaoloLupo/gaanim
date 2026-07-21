@@ -11,7 +11,7 @@ use gaanim_api::canvas::{
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
-use crate::pylayout::PyFrameLayout;
+use crate::pylayout::{PyFlow, PyFrameLayout};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -109,6 +109,35 @@ impl PyScene {
                 .expect("scene canvas poisoned")
                 .layout(header, footer, gap),
         )
+    }
+
+    /// Starts a deferred vertical or horizontal sequence of drawables.
+    #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
+    fn flow(
+        &self,
+        direction: &str,
+        gap: f64,
+        align: Option<&crate::pylayout::PyAnchor>,
+    ) -> PyResult<PyFlow> {
+        let direction = match direction {
+            "vertical" => gaanim_api::canvas::Direction::Down,
+            "horizontal" => gaanim_api::canvas::Direction::Right,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "direction must be 'vertical' or 'horizontal'",
+                ))
+            }
+        };
+        let default_align = match direction {
+            gaanim_api::canvas::Direction::Down => gaanim_api::canvas::Anchor::Left,
+            _ => gaanim_api::canvas::Anchor::Bottom,
+        };
+        Ok(PyFlow::new(
+            self.inner.clone(),
+            direction,
+            gap,
+            align.map(|anchor| anchor.0).unwrap_or(default_align),
+        ))
     }
 
     fn circle(&self, r: f64) -> PyDrawable {
