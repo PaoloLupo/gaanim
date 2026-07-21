@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from typing import Callable, ClassVar, Optional, Sequence
+from typing import Callable, ClassVar, Literal, Optional, Sequence, TypeAlias
+
+CurvePoint: TypeAlias = tuple[float, float]
+"""A coordinate pair used by :meth:`Scene.curve`."""
+
+CurveControl: TypeAlias = CurvePoint | Literal["auto"] | None
+"""A Bézier control point, an automatically reflected handle, or a collapsed handle."""
+
+CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
+"""A ``Scene.curve`` command and its arguments."""
 
 class Color:
     def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
@@ -159,6 +168,13 @@ class Scene:
     def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable: ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable: ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable: ...
+    def curve(self, commands: Sequence[CurveCommand]) -> Drawable:
+        """Create a composed curve from ``move``, ``line``, ``quad``, ``cubic``, and close commands.
+
+        Append ``_rel`` to a drawing command to use cursor-relative points.
+        Quadratic and cubic controls accept a point, ``None``, or ``"auto"``.
+        Use ``close`` or ``close_smooth`` with an empty argument sequence.
+        """ ...
     def function_graph(self, function: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable: ...
     def parametric_curve(self, function: Callable[[float], tuple[float, float]], t: tuple[float, float], samples: int = 240) -> Drawable: ...
     def axes(

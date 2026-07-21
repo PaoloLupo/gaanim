@@ -4,8 +4,8 @@ pub use ops::{CanvasEndpoint, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
-    Anim, AxesConfig, CoordinateSystem, ImageCrop, ImageFit, ImageOptions, ImageOptionsError,
-    LayoutOp, Margin, ObjectSpec, OptDuration, SpawnKind,
+    Anim, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop, ImageFit,
+    ImageOptions, ImageOptionsError, LayoutOp, Margin, ObjectSpec, OptDuration, SpawnKind,
 };
 mod drawable;
 pub use drawable::DrawableHandle;

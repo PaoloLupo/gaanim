@@ -265,6 +265,8 @@ pub enum SpawnKind {
         controls: Vec<(f64, f64)>,
         end: (f64, f64),
     },
+    /// A native path with Typst-style cursor commands.
+    Curve(Vec<CurveElement>),
     Axes {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
@@ -288,6 +290,41 @@ pub enum SpawnKind {
     TracedPathLine,
     /// Placeholder line entity whose Path2D will be overwritten by TrackingLine.
     TrackingLine,
+}
+
+/// A control point for a curve segment.
+#[derive(Debug, Clone, Copy)]
+pub enum CurveControl {
+    None,
+    Auto,
+    Point((f64, f64)),
+}
+
+/// One cursor command in a native composed curve.
+#[derive(Debug, Clone)]
+pub enum CurveElement {
+    Move {
+        to: (f64, f64),
+        relative: bool,
+    },
+    Line {
+        to: (f64, f64),
+        relative: bool,
+    },
+    Quad {
+        control: CurveControl,
+        to: (f64, f64),
+        relative: bool,
+    },
+    Cubic {
+        control_start: CurveControl,
+        control_end: CurveControl,
+        to: (f64, f64),
+        relative: bool,
+    },
+    Close {
+        smooth: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

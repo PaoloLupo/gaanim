@@ -834,6 +834,117 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Curve(elements) => {
+                let mut path = gaanim_core::kurbo::BezPath::new();
+                let mut cursor = Point::ORIGIN;
+                let mut subpath_start = Point::ORIGIN;
+                let mut last_quad = None;
+                let mut last_cubic = None;
+                let resolve = |point: (f64, f64), relative: bool, cursor: Point| {
+                    if relative {
+                        Point::new(cursor.x + point.0, cursor.y + point.1)
+                    } else {
+                        Point::new(point.0, point.1)
+                    }
+                };
+                for element in elements {
+                    match element {
+                        crate::canvas::CurveElement::Move { to, relative } => {
+                            cursor = resolve(*to, *relative, cursor);
+                            subpath_start = cursor;
+                            path.move_to(cursor);
+                            last_quad = None;
+                            last_cubic = None;
+                        }
+                        crate::canvas::CurveElement::Line { to, relative } => {
+                            cursor = resolve(*to, *relative, cursor);
+                            path.line_to(cursor);
+                            last_quad = None;
+                            last_cubic = None;
+                        }
+                        crate::canvas::CurveElement::Quad {
+                            control,
+                            to,
+                            relative,
+                        } => {
+                            let end = resolve(*to, *relative, cursor);
+                            let control = match control {
+                                crate::canvas::CurveControl::None => end,
+                                crate::canvas::CurveControl::Auto => last_quad
+                                    .map(|p: Point| {
+                                        Point::new(2.0 * cursor.x - p.x, 2.0 * cursor.y - p.y)
+                                    })
+                                    .unwrap_or(cursor),
+                                crate::canvas::CurveControl::Point(point) => {
+                                    resolve(*point, *relative, cursor)
+                                }
+                            };
+                            path.quad_to(control, end);
+                            cursor = end;
+                            last_quad = Some(control);
+                            last_cubic = None;
+                        }
+                        crate::canvas::CurveElement::Cubic {
+                            control_start,
+                            control_end,
+                            to,
+                            relative,
+                        } => {
+                            let end = resolve(*to, *relative, cursor);
+                            let start = match control_start {
+                                crate::canvas::CurveControl::None => cursor,
+                                crate::canvas::CurveControl::Auto => last_cubic
+                                    .map(|p: Point| {
+                                        Point::new(2.0 * cursor.x - p.x, 2.0 * cursor.y - p.y)
+                                    })
+                                    .unwrap_or(cursor),
+                                crate::canvas::CurveControl::Point(point) => {
+                                    resolve(*point, *relative, cursor)
+                                }
+                            };
+                            let finish = match control_end {
+                                crate::canvas::CurveControl::None => end,
+                                crate::canvas::CurveControl::Auto => end,
+                                crate::canvas::CurveControl::Point(point) => {
+                                    resolve(*point, *relative, cursor)
+                                }
+                            };
+                            path.curve_to(start, finish, end);
+                            cursor = end;
+                            last_cubic = Some(finish);
+                            last_quad = None;
+                        }
+                        crate::canvas::CurveElement::Close { smooth } => {
+                            if *smooth {
+                                let control = last_cubic
+                                    .or(last_quad)
+                                    .map(|p: Point| {
+                                        Point::new(2.0 * cursor.x - p.x, 2.0 * cursor.y - p.y)
+                                    })
+                                    .unwrap_or(cursor);
+                                path.curve_to(control, subpath_start, subpath_start);
+                            } else {
+                                path.close_path();
+                            }
+                            cursor = subpath_start;
+                            last_quad = None;
+                            last_cubic = None;
+                        }
+                    }
+                }
+                let rect = path.bounding_box();
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "Curve".to_string(),
+                    path,
+                    bounds: Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Axes {
                 x_range,
                 y_range,

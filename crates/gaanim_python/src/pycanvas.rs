@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, ImageCrop, ImageFit, ImageOptions,
+    AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CurveControl, CurveElement, ImageCrop,
+    ImageFit, ImageOptions,
 };
 
 use crate::color::PyColor;
@@ -206,6 +207,95 @@ impl PyScene {
                 .lock()
                 .expect("scene canvas poisoned")
                 .bezier(start, controls, end),
+        ))
+    }
+
+    /// Create a composed native curve from Typst-inspired cursor commands.
+    ///
+    /// Each command is `(name, arguments)`. Use `move`, `line`, `quad`, and
+    /// `cubic` for absolute coordinates; append `_rel` to make every point an
+    /// offset from the current cursor. `quad` takes `(control, endpoint)` and
+    /// `cubic` takes `(start_control, end_control, endpoint)`. A control may be
+    /// a point, `None` (a collapsed handle), or `"auto"` (a reflected handle).
+    /// Finish a subpath with `close` or `close_smooth`, both with no arguments.
+    fn curve(&self, commands: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        let mut elements = Vec::new();
+        for command in commands.try_iter()? {
+            let command = command?;
+            let (kind, arguments): (String, Bound<'_, PyAny>) = command.extract()?;
+            let arguments: Vec<Bound<'_, PyAny>> =
+                arguments.try_iter()?.collect::<PyResult<_>>()?;
+            let (kind, relative) = match kind.as_str() {
+                "move" => ("move", false),
+                "move_rel" => ("move", true),
+                "line" => ("line", false),
+                "line_rel" => ("line", true),
+                "quad" => ("quad", false),
+                "quad_rel" => ("quad", true),
+                "cubic" => ("cubic", false),
+                "cubic_rel" => ("cubic", true),
+                "close" | "close_smooth" => (kind.as_str(), false),
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "unknown curve command {kind:?}; expected move, line, quad, cubic, close, or close_smooth (with optional _rel)"
+                    )));
+                }
+            };
+            let point = |value: &Bound<'_, PyAny>| -> PyResult<(f64, f64)> {
+                value.extract().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err("curve points must be (x, y) pairs")
+                })
+            };
+            let control = |value: &Bound<'_, PyAny>| -> PyResult<CurveControl> {
+                if value.is_none() {
+                    Ok(CurveControl::None)
+                } else if let Ok(name) = value.extract::<&str>() {
+                    if name == "auto" {
+                        Ok(CurveControl::Auto)
+                    } else {
+                        Err(pyo3::exceptions::PyValueError::new_err(
+                            "curve controls may only use the string 'auto'",
+                        ))
+                    }
+                } else {
+                    point(value).map(CurveControl::Point)
+                }
+            };
+            let element = match (kind, arguments.as_slice()) {
+                ("move", [to]) => CurveElement::Move {
+                    to: point(to)?,
+                    relative,
+                },
+                ("line", [to]) => CurveElement::Line {
+                    to: point(to)?,
+                    relative,
+                },
+                ("quad", [handle, to]) => CurveElement::Quad {
+                    control: control(handle)?,
+                    to: point(to)?,
+                    relative,
+                },
+                ("cubic", [start, end, to]) => CurveElement::Cubic {
+                    control_start: control(start)?,
+                    control_end: control(end)?,
+                    to: point(to)?,
+                    relative,
+                },
+                ("close", []) => CurveElement::Close { smooth: false },
+                ("close_smooth", []) => CurveElement::Close { smooth: true },
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "invalid arguments for curve command {kind:?}"
+                    )))
+                }
+            };
+            elements.push(element);
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .curve(elements),
         ))
     }
 

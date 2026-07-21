@@ -274,6 +274,16 @@ impl Canvas {
             end,
         })
     }
+
+    /// Create a composed native curve from cursor commands.
+    ///
+    /// Commands may move the cursor, add line or Bézier segments, and close a
+    /// subpath. Points on a relative command are offsets from the current
+    /// cursor. `CurveControl::Auto` mirrors the preceding matching control
+    /// point; `CurveControl::None` collapses that handle onto the endpoint.
+    pub fn curve(&mut self, elements: Vec<crate::canvas::CurveElement>) -> DrawableHandle {
+        self.spawn(SpawnKind::Curve(elements))
+    }
     /// Creates configurable Cartesian axes, optionally with a grid and numeric labels.
     pub fn axes(
         &mut self,
