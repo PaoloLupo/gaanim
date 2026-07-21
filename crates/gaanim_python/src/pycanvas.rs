@@ -6,11 +6,12 @@ use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
     AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CurveControl, CurveElement, ImageCrop,
-    ImageFit, ImageOptions,
+    ImageFit, ImageOptions, ParagraphOptions, TextAlign,
 };
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
+use crate::pylayout::PyFrameLayout;
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -96,6 +97,18 @@ impl PyScene {
         PyCanvas {
             inner: self.inner.clone(),
         }
+    }
+
+    /// Defines reusable `header`, `content`, and `footer` safe areas.
+    /// Use `region.place(drawable, Anchor.TOP_LEFT)` to place a drawable.
+    #[pyo3(signature = (header=0.0, footer=0.0, gap=24.0))]
+    fn layout(&self, header: f64, footer: f64, gap: f64) -> PyFrameLayout {
+        PyFrameLayout(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .layout(header, footer, gap),
+        )
     }
 
     fn circle(&self, r: f64) -> PyDrawable {
@@ -387,6 +400,57 @@ impl PyScene {
     }
     fn text(&self, s: &str) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
+    }
+    /// Multi-line vector text constrained to a width.
+    #[pyo3(signature = (s, width, *, align="left", line_spacing=1.2, font_size=None, font_family=None))]
+    fn paragraph(
+        &self,
+        s: &str,
+        width: f64,
+        align: &str,
+        line_spacing: f64,
+        font_size: Option<f64>,
+        font_family: Option<String>,
+    ) -> PyResult<PyDrawable> {
+        let align = match align {
+            "left" => TextAlign::Left,
+            "center" => TextAlign::Center,
+            "right" => TextAlign::Right,
+            "justify" => TextAlign::Justify,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "align must be 'left', 'center', 'right', or 'justify'",
+                ));
+            }
+        };
+        if !width.is_finite() || width <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width must be a finite positive number",
+            ));
+        }
+        if !line_spacing.is_finite() || line_spacing < 1.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "line_spacing must be finite and at least 1.0",
+            ));
+        }
+        if font_size.is_some_and(|size| !size.is_finite() || size <= 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "font_size must be a finite positive number",
+            ));
+        }
+        let options = ParagraphOptions {
+            width,
+            align,
+            line_spacing,
+            font_size,
+            font_family,
+        };
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .paragraph(s, options),
+        ))
     }
     fn title(&self, s: &str) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").title(s))

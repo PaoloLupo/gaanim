@@ -10,10 +10,11 @@ use gaanim_objects::prelude::SvgLoadError;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
+use crate::canvas::FrameLayout;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
 use crate::canvas::types::{
-    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, SpawnKind,
+    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, ParagraphOptions, SpawnKind,
 };
 
 /// Failures while decoding a raster image requested by `Canvas::image`.
@@ -119,6 +120,19 @@ impl Canvas {
     pub fn margin(mut self, m: Margin) -> Self {
         self.margin = m;
         self
+    }
+
+    /// Creates reusable regions for a conventional title/content/footer video.
+    /// Heights, gap, and margins are expressed in the canvas coordinate system.
+    pub fn layout(&self, header_height: f64, footer_height: f64, gap: f64) -> FrameLayout {
+        let raw = self.units.frame_bounds(self.width, self.height);
+        let frame = gaanim_math::Bounds3D::new_2d(
+            raw.min.x + self.margin.left,
+            raw.min.y + self.margin.bottom,
+            raw.max.x - self.margin.right,
+            raw.max.y - self.margin.top,
+        );
+        FrameLayout::new(frame, header_height, footer_height, gap)
     }
 
     pub fn current_time(&self) -> f64 {
@@ -299,6 +313,12 @@ impl Canvas {
     }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Text(s.to_string()))
+    }
+    pub fn paragraph(&mut self, s: &str, options: ParagraphOptions) -> DrawableHandle {
+        self.spawn(SpawnKind::Paragraph {
+            text: s.to_string(),
+            options,
+        })
     }
     pub fn title(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Title(s.to_string()))

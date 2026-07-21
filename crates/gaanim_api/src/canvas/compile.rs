@@ -16,13 +16,37 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, Op, Segment};
-use crate::canvas::types::{LayoutOp, ObjectSpec, SpawnKind};
+use crate::canvas::types::{LayoutOp, ObjectSpec, ParagraphOptions, SpawnKind, TextAlign};
 
 use gaanim_animation::{
     CurvatureOnCurve, NormalOnCurve, PointOnCurve, PositionBinding, TangentOnCurve, TracedPath,
     TrackingEndpoint, TrackingLine, Updater,
 };
 use gaanim_math::SpatialTransform;
+
+fn escape_typst_string(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+
+fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64) -> String {
+    let width = options.width.max(1.0);
+    let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
+    let (alignment, justify) = match options.align {
+        TextAlign::Left => ("left", false),
+        TextAlign::Center => ("center", false),
+        TextAlign::Right => ("right", false),
+        TextAlign::Justify => ("left", true),
+    };
+    format!(
+        "#set page(width: {width}pt, height: auto, margin: 0pt)\n\
+         #set par(justify: {justify}, leading: {leading}pt)\n\
+         #align({alignment})[#text(\"{}\")]",
+        escape_typst_string(text)
+    )
+}
 
 impl Canvas {
     pub fn compile_into<'w, 's>(
@@ -977,6 +1001,27 @@ impl Canvas {
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Paragraph { text, options } => {
+                let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                let font_size = options.font_size.unwrap_or(body.size).max(1.0);
+                let font_family = options.font_family.as_deref().unwrap_or(&body.font_family);
+                let source = paragraph_typst_source(text, options, font_size);
+                let mr = builder.typst(
+                    &source,
+                    false,
+                    Some(font_family),
+                    None,
+                    Some(font_size),
+                    None,
+                );
+                let mut paragraph_spec = spec.clone();
+                if !paragraph_spec.fill_overridden {
+                    paragraph_spec.fill = Some(gaanim_core::peniko::Brush::Solid(body.fill_color));
+                    paragraph_spec.fill_overridden = true;
+                }
+                Self::post_apply(builder, mr.id, &paragraph_spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Title(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Title];
                 let mr = builder.text(t, &style.font_family, style.size);
@@ -1011,6 +1056,7 @@ impl Canvas {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group(&refs);
+                Self::apply_group_arrangement(builder, mr.id, spec);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
@@ -1303,6 +1349,10 @@ impl Canvas {
                         frame_bounds,
                     );
                 }
+                LayoutOp::Arrange { .. } => {
+                    // Group child placement is resolved before this group's own
+                    // bounds are positioned by the other layout operations.
+                }
             }
         }
 
@@ -1318,5 +1368,85 @@ impl Canvas {
             }
             builder.commands.entity(entity).insert(transform);
         }
+    }
+
+    fn apply_group_arrangement(builder: &mut SceneBuilder, id: ObjectId, spec: &ObjectSpec) {
+        for op in &spec.layout_ops {
+            if let LayoutOp::Arrange {
+                direction,
+                spacing,
+                aligned_edge,
+            } = op
+            {
+                builder.arrange_aligned(MobjectRef { id }, *direction, *spacing, *aligned_edge);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
+    use gaanim_layout::Anchor;
+    use gaanim_scene::LocalBounds;
+
+    #[test]
+    fn justified_paragraph_compiles_to_vector_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.paragraph(
+            "Este párrafo debe ocupar varias líneas y conservar glifos vectoriales.",
+            ParagraphOptions {
+                width: 180.0,
+                align: TextAlign::Justify,
+                line_spacing: 1.25,
+                font_size: Some(28.0),
+                font_family: None,
+            },
+        );
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&LocalBounds>();
+        let visible_bounds = query
+            .iter(&world)
+            .filter(|bounds| bounds.0.width() > 0.0 && bounds.0.height() > 0.0)
+            .count();
+        assert!(visible_bounds > 5, "paragraph should produce vector glyphs");
+    }
+
+    #[test]
+    fn vstack_updates_group_bounds_before_region_placement() {
+        let mut canvas = Canvas::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let stack = canvas.group(&[&first, &second]).vstack(20.0, Anchor::Left);
+        let layout = canvas.layout(0.0, 0.0, 0.0);
+        let _ = layout.content.place(stack, Anchor::TopLeft);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&LocalBounds>();
+        assert!(query.iter(&world).any(|bounds| {
+            (bounds.0.width() - 80.0).abs() < 1e-6 && (bounds.0.height() - 80.0).abs() < 1e-6
+        }));
     }
 }

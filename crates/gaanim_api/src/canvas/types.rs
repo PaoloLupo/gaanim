@@ -54,6 +54,51 @@ pub struct AxesConfig {
     pub grid_width: f64,
 }
 
+/// Horizontal alignment for multi-line paragraph text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+/// Vector paragraph layout options.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParagraphOptions {
+    /// Maximum line width in canvas units/Typst points.
+    pub width: f64,
+    pub align: TextAlign,
+    /// Baseline multiplier. `1.0` is compact and `1.2` is a readable default.
+    pub line_spacing: f64,
+    /// Overrides the configured Body role when present.
+    pub font_size: Option<f64>,
+    /// Overrides the configured Body role when present.
+    pub font_family: Option<String>,
+}
+
+impl ParagraphOptions {
+    pub fn new(width: f64) -> Self {
+        Self {
+            width: width.max(1.0),
+            ..Self::default()
+        }
+    }
+}
+
+impl Default for ParagraphOptions {
+    fn default() -> Self {
+        Self {
+            width: 640.0,
+            align: TextAlign::Left,
+            line_spacing: 1.2,
+            font_size: None,
+            font_family: None,
+        }
+    }
+}
+
 impl Default for AxesConfig {
     fn default() -> Self {
         Self {
@@ -273,6 +318,10 @@ pub enum SpawnKind {
         config: AxesConfig,
     },
     Text(String),
+    Paragraph {
+        text: String,
+        options: ParagraphOptions,
+    },
     Title(String),
     Subtitle(String),
     Equation(String),
@@ -356,6 +405,12 @@ pub enum LayoutOp {
     ToCorner {
         corner: Anchor,
         buff: f64,
+    },
+    /// Arrange the direct children of a group before its own placement is resolved.
+    Arrange {
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
     },
 }
 

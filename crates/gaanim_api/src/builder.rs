@@ -2591,6 +2591,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Arranges the immediate children of a group linearly.
     pub fn arrange(&mut self, group: MobjectRef, direction: Direction, spacing: f64) {
+        self.arrange_aligned(group, direction, spacing, Anchor::Center);
+    }
+
+    /// Arranges immediate children linearly while keeping one edge aligned.
+    pub fn arrange_aligned(
+        &mut self,
+        group: MobjectRef,
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
+    ) {
         let children_ids = match self.states.get(group.id) {
             Some(state) => state.children.clone(),
             None => return,
@@ -2607,7 +2618,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         let new_translations =
-            gaanim_layout::arrange(&items, direction, spacing, Anchor::Center, true);
+            gaanim_layout::arrange(&items, direction, spacing.max(0.0), aligned_edge, true);
 
         let mut union_min =
             gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);

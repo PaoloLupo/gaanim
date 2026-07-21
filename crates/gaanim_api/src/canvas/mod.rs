@@ -5,8 +5,11 @@ mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
     Anim, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop, ImageFit,
-    ImageOptions, ImageOptionsError, LayoutOp, Margin, ObjectSpec, OptDuration, SpawnKind,
+    ImageOptions, ImageOptionsError, LayoutOp, Margin, ObjectSpec, OptDuration, ParagraphOptions,
+    SpawnKind, TextAlign,
 };
+mod layout;
+pub use layout::{FrameLayout, GridLayout, LayoutRegion};
 mod drawable;
 pub use drawable::DrawableHandle;
 mod canvas_impl;

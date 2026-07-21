@@ -174,6 +174,24 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::ToCorner { corner, buff })
     }
 
+    /// Stacks this group's direct children from top to bottom.
+    pub fn vstack(self, spacing: f64, aligned_edge: Anchor) -> Self {
+        self.push_layout(LayoutOp::Arrange {
+            direction: Direction::Down,
+            spacing: spacing.max(0.0),
+            aligned_edge,
+        })
+    }
+
+    /// Stacks this group's direct children from left to right.
+    pub fn hstack(self, spacing: f64, aligned_edge: Anchor) -> Self {
+        self.push_layout(LayoutOp::Arrange {
+            direction: Direction::Right,
+            spacing: spacing.max(0.0),
+            aligned_edge,
+        })
+    }
+
     // -- Internal helpers --
 
     fn anim(&self, ty: AnimationType) -> Anim {

@@ -163,6 +163,28 @@ impl PyDrawable {
     fn to_corner(&self, corner: &PyAnchor, buff: f64) -> Self {
         Self(self.0.clone().to_corner(corner.0, buff))
     }
+    #[pyo3(signature = (gap=24.0, align=None))]
+    fn vstack(&self, gap: f64, align: Option<&PyAnchor>) -> Self {
+        Self(
+            self.0.clone().vstack(
+                gap,
+                align
+                    .map(|anchor| anchor.0)
+                    .unwrap_or(gaanim_api::canvas::Anchor::Left),
+            ),
+        )
+    }
+    #[pyo3(signature = (gap=24.0, align=None))]
+    fn hstack(&self, gap: f64, align: Option<&PyAnchor>) -> Self {
+        Self(
+            self.0.clone().hstack(
+                gap,
+                align
+                    .map(|anchor| anchor.0)
+                    .unwrap_or(gaanim_api::canvas::Anchor::Bottom),
+            ),
+        )
+    }
 
     fn r#move(&self, dx: f64, dy: f64) -> PyCanvasAnim {
         PyCanvasAnim {
