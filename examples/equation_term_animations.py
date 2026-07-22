@@ -1,6 +1,6 @@
 """Four semantic equation animations: terms, reveal, indication, and focus."""
 
-from gaanim import BLACK, BLUE, GOLD, GRAY, WHITE, Scene
+from gaanim import BLACK, CORAL, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK)
@@ -16,7 +16,8 @@ formula = scene.equation(
     },
 ).at(0, 70)
 formula.tag("mass").fill(GOLD)
-formula.tag("light_speed").fill(BLUE)
+# CORAL keeps c² legible on the black canvas; reveal_fragment does not change color.
+formula.tag("light_speed").fill(CORAL)
 
 caption = scene.text("1. Escribir cada término semántico").fill(GRAY).at(0, -100)
 

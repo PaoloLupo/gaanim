@@ -1,6 +1,7 @@
 use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
+use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
@@ -1542,10 +1543,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let half = anim.duration * 0.5;
 
         // 1. Scale up on root target (first half), then scale back down (second half)
-        let root_state = match self.states.get(anim.target) {
+        let root_state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => return,
         };
+        // Textual glyph paths are positioned around their parent rather than
+        // their own origin. Scaling them around `(0, 0)` therefore looks like
+        // a diagonal translation. Use each glyph's local visual center as the
+        // pivot, while preserving an explicit pivot on normal mobjects.
+        if root_state.parent.is_some() && root_state.transform.anchor == DVec3::ZERO {
+            root_state.transform.anchor = root_state.bounds.center();
+            self.commands
+                .entity(root_state.entity)
+                .insert(root_state.transform);
+        }
         let scale_from = root_state.transform.scale;
         let scale_to = scale_from * scale_factor;
 
