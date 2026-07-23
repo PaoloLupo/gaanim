@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_layout"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Mathematical relative coordinate layout and bounding box alignment tools for gaanim v2"
 

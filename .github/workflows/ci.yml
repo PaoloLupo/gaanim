@@ -100,3 +100,25 @@ jobs:
             tests/visual/camera_demo/report
           if-no-files-found: warn
           retention-days: 14
+
+  python-package:
+    name: Python package (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and install the extension wheel
+        run: |
+          python -m pip install maturin
+          python -m maturin build --manifest-path crates/gaanim_python/Cargo.toml --out dist
+          python -m pip install dist/*.whl
+
+      - name: Validate the Python API stub
+        run: python tests/validate_python_api.py

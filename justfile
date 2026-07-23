@@ -11,12 +11,12 @@ default:
 [windows]
 bootstrap:
     if (-not (Test-Path .venv)) { {{ system_python }} -m venv .venv }
-    {{ python }} -m pip install --upgrade pip
+    {{ python }} -m pip install --upgrade pip maturin
 
 [unix]
 bootstrap:
     if test ! -e .venv; then {{ system_python }} -m venv .venv; fi
-    {{ python }} -m pip install --upgrade pip
+    {{ python }} -m pip install --upgrade pip maturin
 
 # Wipe the local .venv (forces a fresh `just bootstrap`).
 [windows]
@@ -52,6 +52,18 @@ build:
 # Build the `gaanim` application binary (release mode).
 build-release:
     cargo build -p gaanim_editor --release
+
+# Install the Python extension in the local virtual environment.
+python-develop:
+    {{ python }} -m maturin develop --manifest-path crates/gaanim_python/Cargo.toml
+
+# Build a distributable Python wheel in target/wheels/.
+wheel:
+    {{ python }} -m maturin build --release --manifest-path crates/gaanim_python/Cargo.toml
+
+# Check that the installed extension exports every public stub declaration.
+validate-python-api:
+    {{ python }} tests/validate_python_api.py
 
 # ---- Run --------------------------------------------------------------------
 

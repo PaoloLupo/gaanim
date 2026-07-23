@@ -442,9 +442,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] Separar el viewport/configuración visual en `scene.canvas`.
 - [x] Migrar la documentación y los ejemplos que usaban la fachada `Canvas` a `Scene`.
 - [ ] Completar la cobertura Python de las capacidades que ya son estables en Rust.
-- [ ] Corregir stubs, versiones y estrategia de empaquetado.
+- [x] Corregir stubs, versiones y estrategia de empaquetado.
 - [x] Añadir CI y regresión visual headless.
-- [ ] Publicar un quickstart reproducible.
+- [x] Publicar un quickstart reproducible.
 
 ### 0.4 — Producción de contenido vectorial
 

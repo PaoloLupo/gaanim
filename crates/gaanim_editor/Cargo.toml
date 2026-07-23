@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_editor"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Gaanim application: interactive viewer with hot-reload of animation scripts"
 

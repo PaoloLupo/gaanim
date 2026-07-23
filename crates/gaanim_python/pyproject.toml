@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "gaanim"
 version = "0.3.0"
 description = "High-performance GPU-accelerated mathematical vector animation engine"
-requires-python = ">=3.7"
+requires-python = ">=3.12"
 dependencies = []
 
 [tool.maturin]

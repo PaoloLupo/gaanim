@@ -181,6 +181,10 @@ scene.play([rect.fade_out().duration(0.5)])
 Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
 connect them, and `scene.slide()` to add a presentation breakpoint.
 
+`Transition.zoom_through(duration, center=(0, 0), max_zoom=4)` zooms into a
+scene-space point before revealing the next segment. It is useful when a detail
+of the outgoing scene introduces the following section.
+
 == Camera
 
 ```python
