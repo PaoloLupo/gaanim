@@ -34,9 +34,9 @@ pub struct DrawableHandle {
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
 #[derive(Debug, Clone)]
 pub struct FragmentSelection {
-    target: ObjectId,
-    fragment: String,
-    occurrence: Option<usize>,
+    pub(crate) target: ObjectId,
+    pub(crate) fragment: String,
+    pub(crate) occurrence: Option<usize>,
     state: SharedCanvasState,
     segment_idx: usize,
 }
@@ -668,6 +668,19 @@ impl FragmentSelection {
                 occurrence: self.occurrence,
                 style,
                 duration: duration.into_opt().unwrap_or(1.0),
+            });
+        }
+        self
+    }
+
+    /// Strikes through this fragment and fades it from the equation.
+    pub fn cancel(self, duration: impl OptDuration) -> Self {
+        if !self.fragment.trim().is_empty() {
+            self.push(Op::CancelFragment {
+                target: self.target,
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                duration: duration.into_opt().unwrap_or(0.6),
             });
         }
         self

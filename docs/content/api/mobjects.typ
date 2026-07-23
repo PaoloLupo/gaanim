@@ -144,6 +144,38 @@ formula.reveal_fragment("c^2", style="from_below", duration=0.5)
 scene.focus_equation(formula, ["mass", "speed"], duration=0.6, dim_opacity=0.2)
 ```
 
+Use `replace_term` when a tagged part changes between equation states; common
+glyphs stay in place. `cancel_term` marks a named term with a diagonal strike;
+the term and strike fade together when the following equation transition starts.
+
+```python
+before = scene.equation("x + 3 = 7", tags={"constant": "3", "variable": "x"})
+after = scene.equation("x = 4", tags={"variable": "x"})
+
+before.cancel_term("constant", duration=0.5)
+scene.replace_term(before, after, tag="variable", duration=0.7)
+```
+
+`brace_label` places a labelled curly brace relative to a semantic term. By
+default it goes below; pass `above=True` to put it above. `annotate_tag` adds a
+label and a leader line whose term endpoint follows the tagged glyph as it moves.
+
+```python
+formula = scene.equation(
+    "E = m c^2",
+    tags={"mass": "m", "light_speed": "c^2"},
+)
+
+scene.brace_label(formula, "mass", "masa", duration=0.6)
+scene.annotate_tag(
+    formula,
+    "light_speed",
+    "velocidad de la luz",
+    offset=(160, 90),
+    duration=0.6,
+)
+```
+
 Use `transform_equation` to animate every shared tag at once while preserving
 the source equation. Provide `tags` to restrict the transition; without it,
 all shared names move in parallel.

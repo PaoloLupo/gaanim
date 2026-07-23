@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
+use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::Color;
 use gaanim_objects::prelude::SvgLoadError;
 use gaanim_timeline::transition::TransitionType;
@@ -463,6 +464,60 @@ impl Canvas {
             });
     }
 
+    /// Replaces a tagged term while retaining the rest of the equation in
+    /// place. Source and target tags may differ when a derivation renames a
+    /// semantic role.
+    pub fn replace_equation_term(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        source_tag: &str,
+        target_tag: &str,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &source.state)
+            || !Arc::ptr_eq(&self.state, &target.state)
+            || source_tag.trim().is_empty()
+            || target_tag.trim().is_empty()
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return;
+        }
+        let find_tag = |equation: &DrawableHandle, tag: &str| {
+            equation
+                .spec
+                .lock()
+                .expect("object spec poisoned")
+                .fragment_tags
+                .iter()
+                .rev()
+                .find(|(name, _, _)| name == tag)
+                .cloned()
+        };
+        let (
+            Some((_, source_fragment, source_occurrence)),
+            Some((_, target_fragment, target_occurrence)),
+        ) = (find_tag(source, source_tag), find_tag(target, target_tag))
+        else {
+            return;
+        };
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::ExpandEquation {
+                source: source.id,
+                target: target.id,
+                source_fragment,
+                source_occurrence,
+                target_fragment,
+                target_occurrence,
+                duration,
+            });
+    }
+
     /// Transitions from one equation step to another. Shared glyphs move to
     /// their new positions; removed and introduced glyphs fade out and in.
     pub fn step_equation(
@@ -538,6 +593,64 @@ impl Canvas {
                     duration,
                 });
         }
+    }
+
+    pub fn brace_label(
+        &mut self,
+        equation: &DrawableHandle,
+        tag: &str,
+        label: String,
+        above: bool,
+        duration: f64,
+    ) {
+        let Some(selection) = equation.tag(tag) else {
+            return;
+        };
+        if label.trim().is_empty() || !duration.is_finite() || duration <= 0.0 {
+            return;
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::BraceLabel {
+                target: equation.id,
+                fragment: selection.fragment,
+                occurrence: selection.occurrence,
+                label,
+                above,
+                duration,
+            });
+    }
+
+    pub fn annotate_tag(
+        &mut self,
+        equation: &DrawableHandle,
+        tag: &str,
+        label: String,
+        offset: DVec3,
+        duration: f64,
+    ) {
+        let Some(selection) = equation.tag(tag) else {
+            return;
+        };
+        if label.trim().is_empty() || !duration.is_finite() || duration <= 0.0 {
+            return;
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AnnotateFragment {
+                target: equation.id,
+                fragment: selection.fragment,
+                occurrence: selection.occurrence,
+                label,
+                offset,
+                duration,
+            });
     }
     /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
     ///

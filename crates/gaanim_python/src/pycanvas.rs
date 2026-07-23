@@ -594,6 +594,37 @@ impl PyScene {
             .expand_equation_tag(&source.0, &target.0, &tag, duration);
         Ok(())
     }
+    /// Replace one tagged term while keeping the unchanged equation glyphs in place.
+    #[pyo3(signature = (source, target, *, tag, target_tag=None, duration=1.0))]
+    fn replace_term(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        tag: String,
+        target_tag: Option<String>,
+        duration: f64,
+    ) -> PyResult<()> {
+        if tag.trim().is_empty()
+            || target_tag
+                .as_deref()
+                .is_some_and(|target_tag| target_tag.trim().is_empty())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tag names must not be empty",
+            ));
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        let target_tag = target_tag.as_deref().unwrap_or(&tag);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .replace_equation_term(&source.0, &target.0, &tag, target_tag, duration);
+        Ok(())
+    }
     /// Transition between two equation steps by moving their common glyphs.
     #[pyo3(signature = (source, target, *, duration=1.0))]
     fn step_equation(
@@ -641,6 +672,60 @@ impl PyScene {
             .lock()
             .expect("scene canvas poisoned")
             .focus_equation(&equation.0, tags, dim_opacity, duration);
+        Ok(())
+    }
+    #[pyo3(signature = (equation, tag, label, *, above=false, duration=0.6))]
+    fn brace_label(
+        &self,
+        equation: &PyDrawable,
+        tag: &str,
+        label: String,
+        above: bool,
+        duration: f64,
+    ) -> PyResult<()> {
+        if tag.trim().is_empty()
+            || label.trim().is_empty()
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tag, label, and positive duration are required",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .brace_label(&equation.0, tag, label, above, duration);
+        Ok(())
+    }
+    #[pyo3(signature = (equation, tag, label, *, offset=(120.0, 80.0), duration=0.6))]
+    fn annotate_tag(
+        &self,
+        equation: &PyDrawable,
+        tag: &str,
+        label: String,
+        offset: (f64, f64),
+        duration: f64,
+    ) -> PyResult<()> {
+        if tag.trim().is_empty()
+            || label.trim().is_empty()
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tag, label, and positive duration are required",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .annotate_tag(
+                &equation.0,
+                tag,
+                label,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                duration,
+            );
         Ok(())
     }
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, and crop.

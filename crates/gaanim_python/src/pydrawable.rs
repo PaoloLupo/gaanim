@@ -117,6 +117,12 @@ impl PyFragmentSelection {
         Ok(Self(self.0.clone().reveal(style, duration)))
     }
 
+    /// Draw a strikethrough over this fragment and fade it out.
+    #[pyo3(signature = (duration=None))]
+    fn cancel(&self, duration: Option<f64>) -> Self {
+        Self(self.0.clone().cancel(duration))
+    }
+
     /// Animates the selected glyphs to `color`.
     #[pyo3(signature = (color, duration=None))]
     fn color_to(&self, color: PyColor, duration: Option<f64>) -> Self {
@@ -181,6 +187,16 @@ impl PyDrawable {
             .tag(name)
             .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))?;
         tag.indicate(duration);
+        Ok(Self(self.0.clone()))
+    }
+    /// Strike through and remove one named semantic term.
+    #[pyo3(signature = (name, duration=None))]
+    fn cancel_term(&self, name: &str, duration: Option<f64>) -> PyResult<Self> {
+        let tag = self
+            .0
+            .tag(name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))?;
+        tag.cancel(duration);
         Ok(Self(self.0.clone()))
     }
     /// Reveal a raw equation fragment with ``fade``, ``wipe``, or ``from_below``.

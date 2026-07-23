@@ -97,6 +97,29 @@ pub(crate) enum Op {
         style: FragmentRevealStyle,
         duration: f64,
     },
+    /// Draw a strikethrough across a selected fragment while fading it out.
+    CancelFragment {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        duration: f64,
+    },
+    BraceLabel {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        label: String,
+        above: bool,
+        duration: f64,
+    },
+    AnnotateFragment {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        label: String,
+        offset: DVec3,
+        duration: f64,
+    },
     /// Write semantic equation terms one after another. Each tuple is one
     /// term, even when it resolves to several glyphs.
     WriteTerms {

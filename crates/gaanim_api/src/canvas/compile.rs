@@ -80,6 +80,8 @@ impl Canvas {
         let mut camera_position = DVec3::ZERO;
         let mut camera_zoom = 1.0;
         let mut camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
+        let mut cancellation_marks: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+        let mut canceled_term_children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.units.frame_bounds(self.width, self.height);
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
@@ -102,6 +104,8 @@ impl Canvas {
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
+                &mut cancellation_marks,
+                &mut canceled_term_children,
             );
             builder.end_scene();
         }
@@ -166,6 +170,8 @@ impl Canvas {
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
+        cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
+        canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
     ) {
         for op in &seg.ops {
             match op {
@@ -209,6 +215,10 @@ impl Canvas {
                 } => {
                     let children =
                         Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    canceled_term_children
+                        .entry(*target)
+                        .or_default()
+                        .extend(children.iter().copied());
                     let anims = children
                         .into_iter()
                         .map(|target| AnimationBuilder {
@@ -252,6 +262,263 @@ impl Canvas {
                         })
                         .collect();
                     builder.play_parallel(anims);
+                }
+                Op::CancelFragment {
+                    target,
+                    fragment,
+                    occurrence,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let parent_transform = id_map
+                        .get(target)
+                        .and_then(|parent| builder.states.get(*parent))
+                        .map(|state| state.transform);
+                    let strike_color = children
+                        .iter()
+                        .find_map(|child| {
+                            builder
+                                .states
+                                .get(*child)
+                                .and_then(|state| match &state.fill {
+                                    Some(gaanim_core::peniko::Brush::Solid(color)) => Some(*color),
+                                    _ => None,
+                                })
+                        })
+                        .unwrap_or(PenikoColor::WHITE);
+                    let bounds = children
+                        .iter()
+                        .filter_map(|child| {
+                            let state = builder.states.get(*child)?;
+                            // Textual child bounds have already been centered
+                            // into their parent's local coordinate system by
+                            // the shaper. Applying the child's transform here
+                            // would subtract that center a second time and put
+                            // the strike near the canvas corner.
+                            let bounds = state.bounds;
+                            Some(match parent_transform {
+                                Some(parent) => bounds.transform_2d(&parent.to_affine_2d()),
+                                None => bounds,
+                            })
+                        })
+                        .reduce(|bounds, next| bounds.union(&next));
+                    if let Some(bounds) = bounds {
+                        let pad = (bounds.width() * 0.08).max(3.0);
+                        let strike = builder
+                            .line(
+                                Point::new(bounds.min.x - pad, bounds.min.y - pad * 0.25),
+                                Point::new(bounds.max.x + pad, bounds.max.y + pad * 0.25),
+                            )
+                            .no_fill()
+                            .stroke(strike_color, 3.0)
+                            .spawn();
+                        cancellation_marks
+                            .entry(*target)
+                            .or_default()
+                            .push(strike.id);
+                        builder.play(AnimationBuilder {
+                            target: strike.id,
+                            anim_type: AnimationType::Create {
+                                config: Default::default(),
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                    } else {
+                        builder.wait(*duration);
+                    }
+                }
+                Op::BraceLabel {
+                    target,
+                    fragment,
+                    occurrence,
+                    label,
+                    above,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let parent = id_map
+                        .get(target)
+                        .and_then(|id| builder.states.get(*id))
+                        .map(|s| s.transform);
+                    let bounds = children
+                        .iter()
+                        .filter_map(|id| builder.states.get(*id).map(|s| s.bounds))
+                        .map(|b| {
+                            parent
+                                .map(|p| b.transform_2d(&p.to_affine_2d()))
+                                .unwrap_or(b)
+                        })
+                        .reduce(|a, b| a.union(&b));
+                    if let Some(bounds) = bounds {
+                        let color = children
+                            .iter()
+                            .find_map(|id| {
+                                builder.states.get(*id).and_then(|s| match &s.fill {
+                                    Some(gaanim_core::peniko::Brush::Solid(c)) => Some(*c),
+                                    _ => None,
+                                })
+                            })
+                            .unwrap_or(PenikoColor::WHITE);
+                        let side = if *above { 1.0 } else { -1.0 };
+                        let y = if *above {
+                            bounds.max.y + 12.0
+                        } else {
+                            bounds.min.y - 12.0
+                        };
+                        let brace = builder
+                            .brace(
+                                Point::new(bounds.min.x, y),
+                                Point::new(bounds.max.x, y),
+                                -side * 10.0,
+                            )
+                            .no_fill()
+                            .stroke(color, 2.0)
+                            .spawn();
+                        let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                        let label_ref = builder.text(label, &style.font_family, style.size);
+                        if let Some(state) = builder.states.get_mut(label_ref.id) {
+                            state.transform.translation =
+                                DVec3::new(bounds.center().x, y + side * 25.0, 0.0);
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(state.transform);
+                        }
+                        builder.play_parallel(vec![
+                            AnimationBuilder {
+                                target: brace.id,
+                                anim_type: AnimationType::Create {
+                                    config: Default::default(),
+                                },
+                                duration: *duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            },
+                            AnimationBuilder {
+                                target: label_ref.id,
+                                anim_type: AnimationType::FadeIn,
+                                duration: *duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            },
+                        ]);
+                    }
+                }
+                Op::AnnotateFragment {
+                    target,
+                    fragment,
+                    occurrence,
+                    label,
+                    offset,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let parent = id_map
+                        .get(target)
+                        .and_then(|id| builder.states.get(*id))
+                        .map(|s| s.transform);
+                    let bounds = children
+                        .iter()
+                        .filter_map(|id| builder.states.get(*id).map(|s| s.bounds))
+                        .map(|b| {
+                            parent
+                                .map(|p| b.transform_2d(&p.to_affine_2d()))
+                                .unwrap_or(b)
+                        })
+                        .reduce(|a, b| a.union(&b));
+                    if let Some(bounds) = bounds {
+                        let position = bounds.center() + *offset;
+                        let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                        let label_ref = builder.text(label, &style.font_family, style.size);
+                        let label_size = builder
+                            .states
+                            .get(label_ref.id)
+                            .map(|state| state.bounds.size())
+                            .unwrap_or(DVec3::new(80.0, 24.0, 0.0));
+                        let toward_label_x = if offset.x >= 0.0 { -1.0 } else { 1.0 };
+                        let toward_label_y = if offset.y >= 0.0 { -1.0 } else { 1.0 };
+                        // Attach at the label corner nearest the term, so the
+                        // leader line never crosses the annotation text.
+                        let label_anchor = position
+                            + DVec3::new(
+                                toward_label_x * label_size.x * 0.46,
+                                toward_label_y * label_size.y * 0.42,
+                                0.0,
+                            );
+                        if let Some(state) = builder.states.get_mut(label_ref.id) {
+                            state.transform.translation = position;
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(state.transform);
+                        }
+                        let line = builder
+                            .line(
+                                Point::new(bounds.center().x, bounds.center().y),
+                                Point::new(label_anchor.x, label_anchor.y),
+                            )
+                            .no_fill()
+                            .stroke(PenikoColor::WHITE, 2.0)
+                            .spawn();
+                        // Text glyph transforms are local to their equation.
+                        // Use an invisible scene-space proxy so the leader
+                        // starts at the tag rather than a canvas corner.
+                        let proxy = builder.dot(0.01).no_fill().no_stroke().spawn();
+                        if let Some(proxy_state) = builder.states.get_mut(proxy.id) {
+                            proxy_state.transform.translation = bounds.center();
+                            builder
+                                .commands
+                                .entity(proxy_state.entity)
+                                .insert(proxy_state.transform);
+                        }
+                        if let (Some(line_state), Some(proxy_state)) =
+                            (builder.states.get(line.id), builder.states.get(proxy.id))
+                        {
+                            if let Some(parent_id) = id_map.get(target).copied()
+                                && let Some(parent_state) = builder.states.get(parent_id)
+                            {
+                                builder.commands.entity(proxy_state.entity).insert(
+                                    PositionBinding::with_offset(
+                                        parent_state.entity,
+                                        gaanim_animation::AxisMask::XY,
+                                        bounds.center() - parent_state.transform.translation,
+                                    ),
+                                );
+                            }
+                            builder
+                                .commands
+                                .entity(line_state.entity)
+                                .insert(TrackingLine::new(
+                                    TrackingEndpoint::Entity(proxy_state.entity),
+                                    TrackingEndpoint::Static(label_anchor),
+                                ));
+                        }
+                        builder.play_parallel(vec![
+                            AnimationBuilder {
+                                target: line.id,
+                                // TrackingLine regenerates its path each
+                                // frame, so a path-draw clip cannot hide it
+                                // before its scheduled start. FadeIn keeps it
+                                // invisible until the annotation begins.
+                                anim_type: AnimationType::FadeIn,
+                                duration: *duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            },
+                            AnimationBuilder {
+                                target: label_ref.id,
+                                anim_type: AnimationType::FadeIn,
+                                duration: *duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            },
+                        ]);
+                    }
                 }
                 Op::WriteTerms {
                     target,
@@ -448,6 +715,13 @@ impl Canvas {
                     target_occurrence,
                     duration,
                 } => {
+                    Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
+                    Self::fade_canceled_term_children(
+                        builder,
+                        canceled_term_children,
+                        *source,
+                        *duration,
+                    );
                     let sources = Self::fragment_child_ids(
                         builder,
                         id_map,
@@ -479,6 +753,13 @@ impl Canvas {
                     target,
                     duration,
                 } => {
+                    Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
+                    Self::fade_canceled_term_children(
+                        builder,
+                        canceled_term_children,
+                        *source,
+                        *duration,
+                    );
                     if let (Some(&source_parent), Some(&target_parent)) =
                         (id_map.get(source), id_map.get(target))
                     {
@@ -1011,6 +1292,48 @@ impl Canvas {
         builder
             .select_occurrence(MobjectRef { id: target }, fragment, occurrence)
             .child_ids
+    }
+
+    fn fade_cancellation_marks(
+        builder: &mut SceneBuilder,
+        cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
+        source: ObjectId,
+        transition_duration: f64,
+    ) {
+        let Some(marks) = cancellation_marks.remove(&source) else {
+            return;
+        };
+        let duration = (transition_duration * 0.25).clamp(0.12, 0.3);
+        for target in marks {
+            builder.play_at_current_time(AnimationBuilder {
+                target,
+                anim_type: AnimationType::FadeOut,
+                duration,
+                rate_func: RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+    }
+
+    fn fade_canceled_term_children(
+        builder: &mut SceneBuilder,
+        canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
+        source: ObjectId,
+        transition_duration: f64,
+    ) {
+        let Some(children) = canceled_term_children.remove(&source) else {
+            return;
+        };
+        let duration = (transition_duration * 0.25).clamp(0.12, 0.3);
+        for target in children {
+            builder.play_at_current_time(AnimationBuilder {
+                target,
+                anim_type: AnimationType::FadeOut,
+                duration,
+                rate_func: RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
     }
 
     fn spawn_one(
@@ -1893,6 +2216,41 @@ mod tests {
                 Some(gaanim_core::peniko::Brush::Solid(color)) if *color == highlight
             )
         }));
+    }
+
+    #[test]
+    fn cancel_term_places_a_diagonal_strike_over_the_selected_glyphs() {
+        let strike_color = PenikoColor::WHITE;
+        let mut canvas = Canvas::new(640, 360);
+        let formula = canvas
+            .equation("x + 3 = 7")
+            .define_tag("constant", "3", None);
+        formula
+            .tag("constant")
+            .expect("registered tag should resolve")
+            .cancel(0.6);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<(&gaanim_scene::StrokeBrush, &LocalBounds)>();
+        let bounds = query
+            .iter(&world)
+            .find_map(|(stroke, bounds)| {
+                matches!(&stroke.brush, Some(gaanim_core::peniko::Brush::Solid(color)) if *color == strike_color)
+                    .then_some(bounds.0)
+            })
+            .expect("cancel should spawn a coral strikethrough");
+        assert!(bounds.center().x.abs() < 100.0);
+        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
     }
 
     #[test]

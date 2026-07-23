@@ -651,6 +651,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_time += max_duration;
     }
 
+    /// Schedule an animation at the current cursor without advancing it.
+    ///
+    /// Used for transient helpers such as cancellation marks that must fade
+    /// concurrently with the equation transition that follows them.
+    pub(crate) fn play_at_current_time(&mut self, anim: AnimationBuilder) {
+        self.play_internal(anim);
+    }
+
     /// Schedule a glyph-copy transition while accounting for the transforms of
     /// the two textual parent containers. Text glyph transforms are local to
     /// their equation, so a plain child translation cannot move between
