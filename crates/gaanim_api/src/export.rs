@@ -3,13 +3,13 @@
 //! Language bindings should construct a [`Canvas`](crate::canvas::Canvas) and
 //! call these helpers instead of duplicating Bevy/world setup.
 
-use gaanim_export::prelude::{ExportConfig, ExportError, export_scene, export_scene_direct};
+use gaanim_export::prelude::{ExportError, export_scene, export_scene_direct};
 
 use crate::canvas::Canvas;
 use crate::runtime::replay_canvas_into;
 
-pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder};
-pub use gaanim_export::prelude::{AspectRatioPreset, ExportFormat, QualityPreset};
+pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
+pub use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, ExportFormat, QualityPreset};
 
 /// Export a Canvas using the supplied `gaanim_export::ExportConfig`.
 pub fn export_canvas(canvas: Canvas, config: ExportConfig) -> Result<(), ExportError> {

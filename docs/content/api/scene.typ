@@ -209,6 +209,26 @@ scene.export("output.webp", fps=30)   # Format follows the file extension
 scene.snapshots("snapshots", [0.0, 1.0])
 ```
 
+All export controls are available from Python. `quality` accepts `"draft"`,
+`"standard"`, or `"production"`; combine it with `aspect_ratio="youtube"`,
+`"tiktok"`, or `"instagram"` to use an output preset. Explicit `width`,
+`height`, and `fps` take precedence over a preset. Use `start_time` and
+`end_time` to export an interval, `transparent=True` for alpha-capable formats,
+and `encoder="auto"` (or `"libx264"`, `"nvenc"`, `"amf"`, `"qsv"`, or
+`"vaapi"`) to select encoding. `crf` ranges from 0 to 51 and `speed` accepts
+`"fast"`, `"balanced"`, or `"best"`.
+
+```python
+scene.export(
+    "vertical.webm",
+    quality="standard",
+    aspect_ratio="tiktok",
+    transparent=True,
+    start_time=2.0,
+    end_time=12.0,
+)
+```
+
 Run a script through the Gaanim application:
 
 ```bash

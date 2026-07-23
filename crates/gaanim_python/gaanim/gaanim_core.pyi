@@ -379,7 +379,22 @@ class Scene:
     def slide(self) -> None: ...
     def fade_out_all(self, d: float) -> None: ...
     def render(self) -> None: ...
-    def export(self, path: str, fps: Optional[int] = None) -> None: ...
+    def export(
+        self,
+        path: str,
+        fps: Optional[int] = None,
+        *,
+        transparent: Optional[bool] = None,
+        quality: Optional[Literal["draft", "standard", "production"]] = None,
+        aspect_ratio: Optional[Literal["youtube", "tiktok", "instagram", "custom"]] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        crf: Optional[int] = None,
+        encoder: Literal["auto", "libx264", "nvenc", "amf", "qsv", "vaapi"] = "auto",
+        speed: Optional[Literal["fast", "balanced", "best"]] = None,
+    ) -> None: ...
     def snapshots(self, directory: str, times: Sequence[float]) -> int: ...
     # Reactive objects
     def value_tracker(self, initial: float) -> ValueTracker: ...

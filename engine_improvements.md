@@ -457,7 +457,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
 - [ ] Componentes editoriales: listas, callouts, captions y title cards.
 - [ ] Presets 16:9, 9:16 y 1:1 con safe areas.
-- [ ] Perfil de exportación completamente accesible desde Python.
+- [x] Perfil de exportación completamente accesible desde Python.
 
 ### 0.5 — Datos, código y plantillas
 
