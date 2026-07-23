@@ -149,6 +149,17 @@ scene.play([mechanism.rotate(PI / 3).duration(1.0)])
 spring. Each endpoint can be a drawable or an `(x, y)` tuple, so it follows a
 moving mass without a Python callback every frame.
 
+`callout(text, target, offset=(160, 96), width=240, height=72)` creates a
+reusable editorial label: its card, text, and connector follow the target
+natively. It returns a regular `Drawable` group, so it can be animated like any
+other mobject.
+
+```python
+mass = scene.dot(20).fill(GOLD)
+note = scene.callout("Moving mass", mass, offset=(180, 100))
+scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to

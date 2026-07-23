@@ -909,6 +909,69 @@ impl PyScene {
         )
     }
 
+    /// Create a labeled card with a native connector that follows `target`.
+    #[pyo3(signature = (
+        text,
+        target,
+        *,
+        offset=(160.0, 96.0),
+        width=240.0,
+        height=72.0,
+        background=None,
+        color=None,
+    ))]
+    fn callout(
+        &self,
+        text: String,
+        target: &PyDrawable,
+        offset: (f64, f64),
+        width: f64,
+        height: f64,
+        background: Option<PyColor>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if text.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "callout text must not be empty",
+            ));
+        }
+        if !offset.0.is_finite()
+            || !offset.1.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "offset must be finite and width and height must be finite positive numbers",
+            ));
+        }
+
+        let background = background
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x1B, 0x1F, 0x3B));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let card = scene
+            .rounded_rect(width, height, 12.0)
+            .fill(background)
+            .stroke(color, 2.0);
+        card.follow_to(&target.0, offset.0, offset.1);
+        let label = scene.text(&text).fill(color);
+        label.follow_to(&target.0, offset.0, offset.1);
+        let connector = scene
+            .tracking_line(
+                CanvasEndpoint::Entity(target.0.id),
+                CanvasEndpoint::Entity(card.id),
+            )
+            .no_fill()
+            .stroke(color, 2.0)
+            .z_index(-1);
+        Ok(PyDrawable(scene.group(&[&connector, &card, &label])))
+    }
+
     #[pyo3(signature = (x, y, duration=1.0))]
     fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
         self.inner
