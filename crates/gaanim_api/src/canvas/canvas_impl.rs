@@ -16,7 +16,7 @@ use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasS
 use crate::canvas::types::{
     Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, ParagraphOptions, SpawnKind,
 };
-use crate::canvas::{FrameLayout, LayoutPreset};
+use crate::canvas::{FrameLayout, LayoutPreset, LayoutRegion};
 
 /// Failures while decoding a raster image requested by `Canvas::image`.
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +132,13 @@ impl Canvas {
     /// Creates one of the built-in editorial compositions.
     pub fn layout_preset(&self, preset: LayoutPreset) -> FrameLayout {
         FrameLayout::preset(self.safe_frame(), preset)
+    }
+
+    /// Returns the drawable region remaining after the configured safe-area margins.
+    pub fn safe_area(&self) -> LayoutRegion {
+        LayoutRegion {
+            bounds: self.safe_frame(),
+        }
     }
 
     fn safe_frame(&self) -> gaanim_math::Bounds3D {

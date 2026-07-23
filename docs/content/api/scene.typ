@@ -27,6 +27,20 @@ scene.canvas.height = 720
 scene.canvas.set_margin(32)
 ```
 
+`scene.canvas.set_preset(...)` configures a standard output format and a safe
+area that every layout and edge-placement operation respects:
+
+```python
+scene.canvas.set_preset("vertical")  # 1080×1920, safe around mobile UI
+safe = scene.canvas.safe_area()
+title = safe.place(scene.title("Vertical video"), Anchor.TOP)
+```
+
+Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
+(1080×1920 / 9:16), and `"square"` (1080×1080 / 1:1). Use
+`set_safe_area(top=..., right=..., bottom=..., left=...)` when a brand or
+platform requires custom insets.
+
 == Spawning mobjects
 
 Every factory returns a `Drawable` handle with fluent style and layout methods.

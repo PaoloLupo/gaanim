@@ -236,6 +236,16 @@ class Canvas:
     height: int
     background: Optional[Color]
     def set_margin(self, margin: float) -> None: ...
+    def set_safe_area(
+        self,
+        *,
+        top: float = 0.0,
+        right: float = 0.0,
+        bottom: float = 0.0,
+        left: float = 0.0,
+    ) -> None: ...
+    def set_preset(self, name: Literal["widescreen", "vertical", "square"]) -> None: ...
+    def safe_area(self) -> LayoutRegion: ...
 
 class Scene:
     def __init__(

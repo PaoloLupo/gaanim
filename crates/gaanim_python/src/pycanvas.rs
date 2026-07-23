@@ -16,7 +16,7 @@ use gaanim_api::export::{
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
-use crate::pylayout::{PyFlow, PyFrameLayout};
+use crate::pylayout::{PyFlow, PyFrameLayout, PyLayoutRegion};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -118,6 +118,70 @@ impl PyCanvas {
     fn set_margin(&self, margin: f64) {
         self.inner.lock().expect("scene canvas poisoned").margin =
             gaanim_api::canvas::Margin::all(margin);
+    }
+
+    /// Configure a per-edge safe area in canvas coordinates.
+    #[pyo3(signature = (*, top=0.0, right=0.0, bottom=0.0, left=0.0))]
+    fn set_safe_area(&self, top: f64, right: f64, bottom: f64, left: f64) -> PyResult<()> {
+        for (name, value) in [
+            ("top", top),
+            ("right", right),
+            ("bottom", bottom),
+            ("left", left),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} safe-area margin must be a finite non-negative number"
+                )));
+            }
+        }
+        self.inner.lock().expect("scene canvas poisoned").margin = gaanim_api::canvas::Margin {
+            top,
+            right,
+            bottom,
+            left,
+        };
+        Ok(())
+    }
+
+    /// Apply a common output format and its conservative safe area.
+    fn set_preset(&self, name: &str) -> PyResult<()> {
+        let (width, height, margin) = match name.to_ascii_lowercase().as_str() {
+            "widescreen" | "youtube" | "16:9" => {
+                (1920, 1080, gaanim_api::canvas::Margin::all(96.0))
+            }
+            "vertical" | "tiktok" | "9:16" => (
+                1080,
+                1920,
+                gaanim_api::canvas::Margin {
+                    top: 192.0,
+                    right: 72.0,
+                    bottom: 320.0,
+                    left: 72.0,
+                },
+            ),
+            "square" | "instagram" | "1:1" => (1080, 1080, gaanim_api::canvas::Margin::all(72.0)),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "preset must be 'widescreen', 'vertical', or 'square'",
+                ));
+            }
+        };
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.margin = margin;
+        Ok(())
+    }
+
+    /// The region available after the configured safe-area margins.
+    fn safe_area(&self) -> PyLayoutRegion {
+        PyLayoutRegion(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .safe_area(),
+        )
     }
 }
 
