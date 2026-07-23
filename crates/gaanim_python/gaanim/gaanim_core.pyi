@@ -393,6 +393,17 @@ class Scene:
         background: Optional[Color] = None,
         color: Optional[Color] = None,
     ) -> Drawable: ...
+    def caption(
+        self,
+        text: str,
+        *,
+        position: Literal["top", "bottom"] = "bottom",
+        width: float = 720.0,
+        height: float = 92.0,
+        margin: float = 32.0,
+        background: Optional[Color] = None,
+        color: Optional[Color] = None,
+    ) -> Drawable: ...
     def segment(self, name: str, transition: Optional[Transition] = None) -> int: ...
     def link(self, from_: int, to: int, transition: Transition) -> None: ...
     def wait(self, d: float) -> None: ...

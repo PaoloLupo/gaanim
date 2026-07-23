@@ -160,6 +160,18 @@ note = scene.callout("Moving mass", mass, offset=(180, 100))
 scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
 ```
 
+`caption(text, position="bottom")` adds a readable lower-third card and
+automatically respects the canvas safe area. Use `position="top"` for
+headlines or translation overlays.
+
+```python
+caption = scene.caption(
+    "The callout follows the mass without a Python callback.",
+    position="bottom",
+)
+scene.play([caption.fade_in().duration(0.3)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to

@@ -972,6 +972,71 @@ impl PyScene {
         Ok(PyDrawable(scene.group(&[&connector, &card, &label])))
     }
 
+    /// Create a caption card positioned at the top or bottom safe edge.
+    #[pyo3(signature = (
+        text,
+        *,
+        position="bottom",
+        width=720.0,
+        height=92.0,
+        margin=32.0,
+        background=None,
+        color=None,
+    ))]
+    fn caption(
+        &self,
+        text: String,
+        position: &str,
+        width: f64,
+        height: f64,
+        margin: f64,
+        background: Option<PyColor>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if text.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "caption text must not be empty",
+            ));
+        }
+        if !width.is_finite()
+            || !height.is_finite()
+            || !margin.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+            || margin < 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width and height must be finite positive numbers and margin must be non-negative",
+            ));
+        }
+        let direction = match position.to_ascii_lowercase().as_str() {
+            "bottom" => gaanim_api::canvas::Direction::Down,
+            "top" => gaanim_api::canvas::Direction::Up,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "position must be 'top' or 'bottom'",
+                ));
+            }
+        };
+        let background = background
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgba8(0x0F, 0x17, 0x2A, 0xE8));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let card = scene
+            .rounded_rect(width, height, 14.0)
+            .fill(background)
+            .no_stroke();
+        let mut options = ParagraphOptions::new(width - 48.0);
+        options.align = TextAlign::Center;
+        options.max_lines = Some(2);
+        let label = scene.paragraph(&text, options).fill(color);
+        let caption = scene.group(&[&card, &label]).to_edge(direction, margin);
+        Ok(PyDrawable(caption))
+    }
+
     #[pyo3(signature = (x, y, duration=1.0))]
     fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
         self.inner
