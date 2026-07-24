@@ -13,6 +13,6 @@ pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion}
 mod drawable;
 pub use drawable::{DrawableHandle, FragmentSelection};
 mod canvas_impl;
-pub use canvas_impl::{Canvas, ImageLoadError};
+pub use canvas_impl::{Canvas, ImageLoadError, ThemeError};
 pub use gaanim_objects::prelude::SvgLoadError;
 mod compile;

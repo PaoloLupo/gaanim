@@ -235,6 +235,10 @@ class Canvas:
     width: int
     height: int
     background: Optional[Color]
+    theme: Optional[Literal["technical", "paper"]]
+    def set_theme(self, name: Literal["technical", "paper", "scientific", "light"]) -> None:
+        """Apply a built-in theme and its background."""
+        ...
     def set_margin(self, margin: float) -> None: ...
     def set_safe_area(
         self,

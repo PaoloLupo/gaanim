@@ -463,7 +463,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 - [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
 - [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
-- [ ] Sistema de plantillas/temas público.
+- [~] Sistema de temas público: `technical` y `paper` configuran fondo y jerarquía tipográfica; faltan plantillas de composición con branding.
 - [ ] Asset manager y formato mínimo de proyecto.
 - [ ] Cache y hot reload incremental donde sea medible.
 

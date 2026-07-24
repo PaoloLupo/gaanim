@@ -121,6 +121,25 @@ impl PyCanvas {
         self.inner.lock().expect("scene canvas poisoned").background = background.map(|c| c.0);
     }
 
+    /// Name of the selected built-in visual theme, if any.
+    #[getter]
+    fn theme(&self) -> Option<String> {
+        self.inner.lock().expect("scene canvas poisoned").theme.clone()
+    }
+
+    /// Apply a built-in visual theme.
+    ///
+    /// `technical` uses a near-black technical canvas with restrained gray
+    /// hierarchy. `paper` uses the same hierarchy for light documentation.
+    /// The aliases `scientific` and `light` are also accepted.
+    fn set_theme(&self, name: &str) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_theme(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     /// Set a uniform margin on all four sides. It affects `to_edge` and
     /// `to_corner` layout operations.
     fn set_margin(&self, margin: f64) {

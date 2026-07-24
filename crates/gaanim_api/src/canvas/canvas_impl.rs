@@ -18,6 +18,13 @@ use crate::canvas::types::{
 };
 use crate::canvas::{FrameLayout, LayoutPreset, LayoutRegion};
 
+/// Error returned when selecting a built-in visual theme by name.
+#[derive(Debug, thiserror::Error)]
+#[error("unknown theme '{name}'; expected 'technical' or 'paper'")]
+pub struct ThemeError {
+    pub name: String,
+}
+
 /// Failures while decoding a raster image requested by `Canvas::image`.
 #[derive(Debug, thiserror::Error)]
 pub enum ImageLoadError {
@@ -103,6 +110,59 @@ impl Canvas {
     pub fn background(mut self, c: Color) -> Self {
         self.background = Some(c);
         self
+    }
+
+    /// Apply one of the built-in visual themes.
+    ///
+    /// `technical` is the quiet dark style used by the built-in technical
+    /// components. `paper` provides the same hierarchy on a light canvas.
+    /// Calling this method also selects the theme background; callers can
+    /// still override [`Canvas::background`] afterwards.
+    pub fn set_theme(&mut self, name: &str) -> Result<(), ThemeError> {
+        match name.to_ascii_lowercase().as_str() {
+            "technical" | "scientific" => {
+                self.theme = Some("technical".to_string());
+                self.background = Some(Color::from_rgb8(0x0B, 0x10, 0x18));
+            }
+            "paper" | "light" => {
+                self.theme = Some("paper".to_string());
+                self.background = Some(Color::from_rgb8(0xFF, 0xFF, 0xFF));
+            }
+            _ => {
+                return Err(ThemeError {
+                    name: name.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn themed_text_config(&self) -> gaanim_text::prelude::TextConfig {
+        use gaanim_text::prelude::TextRole;
+
+        let mut config = gaanim_text::prelude::TextConfig::default();
+        let colors = match self.theme.as_deref() {
+            Some("technical") => Some((
+                Color::from_rgb8(0xF8, 0xFA, 0xFC),
+                Color::from_rgb8(0x94, 0xA3, 0xB8),
+                Color::from_rgb8(0xE2, 0xE8, 0xF0),
+            )),
+            Some("paper") => Some((
+                Color::from_rgb8(0x11, 0x18, 0x27),
+                Color::from_rgb8(0x47, 0x55, 0x69),
+                Color::from_rgb8(0x1F, 0x29, 0x37),
+            )),
+            _ => None,
+        };
+        if let Some((title, muted, body)) = colors {
+            config.roles.get_mut(&TextRole::Title).unwrap().fill_color = title;
+            config.roles.get_mut(&TextRole::Subtitle).unwrap().fill_color = muted;
+            config.roles.get_mut(&TextRole::Caption).unwrap().fill_color = muted;
+            config.roles.get_mut(&TextRole::Body).unwrap().fill_color = body;
+            config.roles.get_mut(&TextRole::Math).unwrap().fill_color = body;
+            config.roles.get_mut(&TextRole::Code).unwrap().fill_color = body;
+        }
+        config
     }
 
     pub fn with_units(mut self, u: CoordinateSystem) -> Self {

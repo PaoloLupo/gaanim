@@ -11,7 +11,7 @@
 = Colors
 
 Use a scene background and the exported color constants to define the visual
-language of an animation. Theme objects are not part of the public Python API.
+language of an animation. Built-in themes are available through `scene.canvas`.
 
 For technical or LaTeX-style material, prefer a near-black background, white or
 soft-gray text, muted blue for structural emphasis, and reserve saturated
@@ -34,6 +34,27 @@ from gaanim import Color
 
 scene.canvas.background = Color(40, 42, 54)
 ```
+
+== Built-in themes
+
+`technical` is the sober dark default for mathematical explanations and
+technical documentation. It uses New Computer Modern with a restrained
+white/gray hierarchy. `paper` applies the corresponding dark hierarchy on a
+white canvas. Both themes style unfilled `text`, `title`, `subtitle`, and
+`equation` objects; an explicit `.fill(...)` always takes precedence.
+
+```python
+from gaanim import Scene
+
+scene = Scene(1280, 720)
+scene.canvas.set_theme("technical")
+
+title = scene.title("Fourier transform")
+subtitle = scene.subtitle("Frequency-domain representation")
+equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x")
+```
+
+The aliases `scientific` and `light` map to `technical` and `paper`.
 
 == Color constants
 

@@ -160,9 +160,12 @@ impl Canvas {
         let font_registry = world
             .remove_resource::<gaanim_text::font::FontRegistry>()
             .expect("FontRegistry missing");
-        let text_config = world
+        let mut text_config = world
             .remove_resource::<gaanim_text::prelude::TextConfig>()
             .expect("TextConfig missing");
+        if self.theme.is_some() {
+            text_config = self.themed_text_config();
+        }
         let mut commands = world.commands();
         self.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
         world.insert_resource(timeline);
@@ -1771,8 +1774,9 @@ impl Canvas {
             SpawnKind::Text(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let mr = builder.text(t, &style.font_family, style.size);
-                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, spec);
+                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Paragraph { text, options } => {
@@ -1800,21 +1804,25 @@ impl Canvas {
             SpawnKind::Title(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Title];
                 let mr = builder.text(t, &style.font_family, style.size);
-                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, spec);
+                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Subtitle(t) => {
                 let style = &text_config.roles[&gaanim_text::prelude::TextRole::Subtitle];
                 let mr = builder.text(t, &style.font_family, style.size);
-                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, spec);
+                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Equation(f) => {
                 let mr = builder.equation(f);
-                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, spec);
+                let math = &text_config.roles[&gaanim_text::prelude::TextRole::Math];
+                let styled_spec = Self::with_default_text_fill(spec, math.fill_color);
+                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Typst(source) => {
@@ -1929,6 +1937,15 @@ impl Canvas {
         for (fragment, color) in &spec.fragment_fills {
             builder.select(target, fragment).set_fill(*color);
         }
+    }
+
+    fn with_default_text_fill(spec: &ObjectSpec, color: PenikoColor) -> ObjectSpec {
+        let mut styled = spec.clone();
+        if !styled.fill_overridden {
+            styled.fill = Some(gaanim_core::peniko::Brush::Solid(color));
+            styled.fill_overridden = true;
+        }
+        styled
     }
 
     fn post_apply(
