@@ -422,6 +422,52 @@ impl PyScene {
         ))
     }
 
+    fn sector(
+        &self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyDrawable> {
+        if !radius.is_finite()
+            || !start_angle.is_finite()
+            || !sweep_angle.is_finite()
+            || radius <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "sector requires a finite positive radius and finite angles",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").sector(
+                cx,
+                cy,
+                radius,
+                start_angle,
+                sweep_angle,
+            ),
+        ))
+    }
+
+    fn annulus(&self, outer_radius: f64, inner_radius: f64) -> PyResult<PyDrawable> {
+        if !outer_radius.is_finite()
+            || !inner_radius.is_finite()
+            || inner_radius <= 0.0
+            || outer_radius <= inner_radius
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "annulus requires finite radii with outer_radius greater than inner_radius",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .annulus(outer_radius, inner_radius),
+        ))
+    }
+
     fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
             cx,

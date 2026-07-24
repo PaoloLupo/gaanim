@@ -320,6 +320,16 @@ pub enum SpawnKind {
         sides: u32,
         radius: f64,
     },
+    Sector {
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    Annulus {
+        outer_radius: f64,
+        inner_radius: f64,
+    },
     /// Circular arc centered at `(cx, cy)`, in radians.
     Arc {
         center: (f64, f64),

@@ -1447,6 +1447,31 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Sector {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                let b = builder.sector(
+                    Point::new(center.0, center.1),
+                    *radius,
+                    *start_angle,
+                    *sweep_angle,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Annulus {
+                outer_radius,
+                inner_radius,
+            } => {
+                let b = builder.annulus(*outer_radius, *inner_radius);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Arc {
                 center,
                 radius,

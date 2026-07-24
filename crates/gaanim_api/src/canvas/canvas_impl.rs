@@ -278,6 +278,27 @@ impl Canvas {
     pub fn regular_polygon(&mut self, sides: u32, radius: f64) -> DrawableHandle {
         self.spawn(SpawnKind::RegularPolygon { sides, radius })
     }
+    pub fn sector(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Sector {
+            center: (cx, cy),
+            radius,
+            start_angle,
+            sweep_angle,
+        })
+    }
+    pub fn annulus(&mut self, outer_radius: f64, inner_radius: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Annulus {
+            outer_radius,
+            inner_radius,
+        })
+    }
     /// Creates an open circular arc. Angles are expressed in radians.
     pub fn arc(
         &mut self,
