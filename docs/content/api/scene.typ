@@ -63,6 +63,8 @@ arrow = scene.arrow(-80, 0, 80, 0)
 angle = scene.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
 rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
 rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
+guide = scene.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
+measure_arrow = scene.double_arrow(-140, -160, 140, -160)
 measure = scene.dimension(-80, 80, 80, 80, 24)
 spring = scene.polyline([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
 axes = scene.axes(
@@ -74,7 +76,7 @@ icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `polygon`, `star`, `regular_polygon`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
+`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
 `group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.

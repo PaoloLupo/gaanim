@@ -1392,6 +1392,38 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::DashedLine {
+                start,
+                end,
+                dash_length,
+                gap_length,
+            } => {
+                let b = builder.dashed_line(
+                    Point::new(start.0, start.1),
+                    Point::new(end.0, end.1),
+                    *dash_length,
+                    *gap_length,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::DoubleArrow {
+                start,
+                end,
+                head_length,
+                head_width,
+            } => {
+                let b = builder.double_arrow(
+                    Point::new(start.0, start.1),
+                    Point::new(end.0, end.1),
+                    *head_length,
+                    *head_width,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Polygon(points) => {
                 let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
                 let b = builder.polygon(&points);

@@ -233,6 +233,38 @@ impl Canvas {
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
     }
+    pub fn dashed_line(
+        &mut self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        dash_length: f64,
+        gap_length: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::DashedLine {
+            start: (x1, y1),
+            end: (x2, y2),
+            dash_length,
+            gap_length,
+        })
+    }
+    pub fn double_arrow(
+        &mut self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::DoubleArrow {
+            start: (x1, y1),
+            end: (x2, y2),
+            head_length,
+            head_width,
+        })
+    }
     pub fn polygon(&mut self, points: Vec<(f64, f64)>) -> DrawableHandle {
         self.spawn(SpawnKind::Polygon(points))
     }

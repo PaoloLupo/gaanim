@@ -295,6 +295,18 @@ pub enum SpawnKind {
     Ellipse(f64, f64),
     Line(f64, f64, f64, f64),
     Arrow(f64, f64, f64, f64),
+    DashedLine {
+        start: (f64, f64),
+        end: (f64, f64),
+        dash_length: f64,
+        gap_length: f64,
+    },
+    DoubleArrow {
+        start: (f64, f64),
+        end: (f64, f64),
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+    },
     /// Closed polygon defined by scene-space vertices.
     Polygon(Vec<(f64, f64)>),
     /// Symmetric star centered at the origin.

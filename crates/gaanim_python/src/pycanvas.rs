@@ -322,6 +322,58 @@ impl PyScene {
                 .arrow(x1, y1, x2, y2),
         )
     }
+    #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=16.0, gap_length=10.0))]
+    fn dashed_line(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        dash_length: f64,
+        gap_length: f64,
+    ) -> PyResult<PyDrawable> {
+        if !dash_length.is_finite()
+            || !gap_length.is_finite()
+            || dash_length <= 0.0
+            || gap_length <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dash_length and gap_length must be finite positive numbers",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .dashed_line(x1, y1, x2, y2, dash_length, gap_length),
+        ))
+    }
+
+    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None))]
+    fn double_arrow(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        for value in [head_length, head_width].into_iter().flatten() {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "head_length and head_width must be finite positive numbers",
+                ));
+            }
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .double_arrow(x1, y1, x2, y2, head_length, head_width),
+        ))
+    }
+
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
         if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
