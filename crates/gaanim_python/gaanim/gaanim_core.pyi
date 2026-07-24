@@ -404,6 +404,18 @@ class Scene:
         background: Optional[Color] = None,
         color: Optional[Color] = None,
     ) -> Drawable: ...
+    def title_card(
+        self,
+        title: str,
+        subtitle: Optional[str] = None,
+        *,
+        width: float = 760.0,
+        height: float = 320.0,
+        panel: bool = False,
+        background: Optional[Color] = None,
+        color: Optional[Color] = None,
+        accent: Optional[Color] = None,
+    ) -> Drawable: ...
     def segment(self, name: str, transition: Optional[Transition] = None) -> int: ...
     def link(self, from_: int, to: int, transition: Transition) -> None: ...
     def wait(self, d: float) -> None: ...

@@ -1037,6 +1037,81 @@ impl PyScene {
         Ok(PyDrawable(caption))
     }
 
+    /// Create a centered title card with an optional subtitle and accent rule.
+    #[pyo3(signature = (
+        title,
+        subtitle=None,
+        *,
+        width=760.0,
+        height=320.0,
+        panel=false,
+        background=None,
+        color=None,
+        accent=None,
+    ))]
+    fn title_card(
+        &self,
+        title: String,
+        subtitle: Option<String>,
+        width: f64,
+        height: f64,
+        panel: bool,
+        background: Option<PyColor>,
+        color: Option<PyColor>,
+        accent: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if title.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "title must not be empty",
+            ));
+        }
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width and height must be finite positive numbers",
+            ));
+        }
+        if subtitle
+            .as_ref()
+            .is_some_and(|subtitle| subtitle.trim().is_empty())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "subtitle must not be empty when provided",
+            ));
+        }
+
+        let background = background
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x1B, 0x1F, 0x3B));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let accent = accent
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00));
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let title_y = if subtitle.is_some() { 44.0 } else { 0.0 };
+        let title = scene.title(&title).fill(color).at(0.0, title_y);
+        let rule = scene
+            .line(-width * 0.28, -12.0, width * 0.28, -12.0)
+            .stroke(accent, 5.0);
+        let mut members = Vec::new();
+        if panel {
+            members.push(
+                scene
+                    .rounded_rect(width, height, 24.0)
+                    .fill(background)
+                    .stroke(accent, 3.0),
+            );
+        }
+        members.push(title);
+        members.push(rule);
+        if let Some(subtitle) = subtitle {
+            members.push(scene.subtitle(&subtitle).fill(color).at(0.0, -64.0));
+        }
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
+        Ok(PyDrawable(scene.group(&refs)))
+    }
+
     #[pyo3(signature = (x, y, duration=1.0))]
     fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
         self.inner

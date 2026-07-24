@@ -172,6 +172,15 @@ caption = scene.caption(
 scene.play([caption.fade_in().duration(0.3)])
 ```
 
+`title_card(title, subtitle=None)` returns a restrained, centered opening with
+title, optional subtitle, and an accent rule. Its elements remain a single
+animatable drawable. Pass `panel=True` for a framed version.
+
+```python
+opening = scene.title_card("Vector motion", "A short technical explanation")
+scene.play([opening.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to
