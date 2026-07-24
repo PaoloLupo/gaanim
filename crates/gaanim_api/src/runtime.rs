@@ -31,7 +31,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
             return;
         }
     };
-    let text_config = match world.remove_resource::<gaanim_text::prelude::TextConfig>() {
+    let mut text_config = match world.remove_resource::<gaanim_text::prelude::TextConfig>() {
         Some(res) => res,
         None => {
             bevy::prelude::error!("TextConfig resource missing");
@@ -40,6 +40,9 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
             return;
         }
     };
+    if canvas.theme.is_some() {
+        text_config = canvas.themed_text_config();
+    }
 
     {
         let has_camera = world
@@ -64,5 +67,31 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
 
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         tl.loop_range = Some((0.0, cached_duration));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_text::prelude::TextRole;
+
+    #[test]
+    fn replay_applies_the_paper_text_theme() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .set_theme("paper")
+            .expect("paper is a built-in theme");
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+
+        replay_canvas_into(&mut world, canvas);
+
+        assert_eq!(
+            world.resource::<gaanim_text::prelude::TextConfig>().roles[&TextRole::Body].fill_color,
+            gaanim_core::peniko::Color::BLACK
+        );
     }
 }

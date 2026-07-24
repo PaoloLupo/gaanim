@@ -126,7 +126,7 @@ impl Canvas {
             }
             "paper" | "light" => {
                 self.theme = Some("paper".to_string());
-                self.background = Some(Color::from_rgb8(0xFF, 0xFF, 0xFF));
+                self.background = Some(Color::WHITE);
             }
             _ => {
                 return Err(ThemeError {
@@ -147,16 +147,16 @@ impl Canvas {
                 Color::from_rgb8(0x94, 0xA3, 0xB8),
                 Color::from_rgb8(0xE2, 0xE8, 0xF0),
             )),
-            Some("paper") => Some((
-                Color::from_rgb8(0x11, 0x18, 0x27),
-                Color::from_rgb8(0x47, 0x55, 0x69),
-                Color::from_rgb8(0x1F, 0x29, 0x37),
-            )),
+            Some("paper") => Some((Color::BLACK, Color::BLACK, Color::BLACK)),
             _ => None,
         };
         if let Some((title, muted, body)) = colors {
             config.roles.get_mut(&TextRole::Title).unwrap().fill_color = title;
-            config.roles.get_mut(&TextRole::Subtitle).unwrap().fill_color = muted;
+            config
+                .roles
+                .get_mut(&TextRole::Subtitle)
+                .unwrap()
+                .fill_color = muted;
             config.roles.get_mut(&TextRole::Caption).unwrap().fill_color = muted;
             config.roles.get_mut(&TextRole::Body).unwrap().fill_color = body;
             config.roles.get_mut(&TextRole::Math).unwrap().fill_color = body;
@@ -1278,6 +1278,28 @@ mod tests {
     use gaanim_scene::MobjectId;
     use gaanim_timeline::scene::SceneMember;
     use gaanim_timeline::timeline::Timeline;
+
+    #[test]
+    fn paper_theme_uses_dark_text_fills() {
+        use gaanim_text::prelude::TextRole;
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas
+            .set_theme("paper")
+            .expect("paper is a built-in theme");
+        let config = canvas.themed_text_config();
+
+        for role in [
+            TextRole::Title,
+            TextRole::Subtitle,
+            TextRole::Body,
+            TextRole::Caption,
+            TextRole::Math,
+            TextRole::Code,
+        ] {
+            assert_eq!(config.roles[&role].fill_color, Color::BLACK);
+        }
+    }
 
     #[test]
     fn play_with_lag_offsets_delays_and_cursor() {

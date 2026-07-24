@@ -1772,9 +1772,10 @@ impl Canvas {
                 }
             }
             SpawnKind::Text(t) => {
-                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                let mr = builder.text(t, &style.font_family, style.size);
-                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                let role = gaanim_text::prelude::TextRole::Body;
+                let mr = builder.spawn_text(t, role);
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
@@ -1802,17 +1803,19 @@ impl Canvas {
                 mr
             }
             SpawnKind::Title(t) => {
-                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Title];
-                let mr = builder.text(t, &style.font_family, style.size);
-                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                let role = gaanim_text::prelude::TextRole::Title;
+                let mr = builder.spawn_text(t, role);
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Subtitle(t) => {
-                let style = &text_config.roles[&gaanim_text::prelude::TextRole::Subtitle];
-                let mr = builder.text(t, &style.font_family, style.size);
-                let styled_spec = Self::with_default_text_fill(spec, style.fill_color);
+                let role = gaanim_text::prelude::TextRole::Subtitle;
+                let mr = builder.spawn_text(t, role);
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
@@ -2320,6 +2323,41 @@ mod tests {
                 Some(gaanim_core::peniko::Brush::Solid(color)) if *color == highlight
             )
         }));
+    }
+
+    #[test]
+    fn paper_theme_applies_role_fills_to_text_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .set_theme("paper")
+            .expect("paper is a built-in theme");
+        canvas.title("Heading");
+        canvas.subtitle("Subheading");
+        canvas.text("Body copy");
+        canvas.equation("x = y");
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = canvas.themed_text_config();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let fills: Vec<_> = world
+            .query::<&gaanim_scene::FillBrush>()
+            .iter(&world)
+            .filter_map(|fill| match fill.0 {
+                Some(gaanim_core::peniko::Brush::Solid(color)) => Some(color),
+                _ => None,
+            })
+            .collect();
+
+        assert!(fills.contains(&PenikoColor::BLACK));
+        assert!(!fills.contains(&PenikoColor::WHITE));
     }
 
     #[test]

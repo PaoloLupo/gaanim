@@ -39,9 +39,9 @@ scene.canvas.background = Color(40, 42, 54)
 
 `technical` is the sober dark default for mathematical explanations and
 technical documentation. It uses New Computer Modern with a restrained
-white/gray hierarchy. `paper` applies the corresponding dark hierarchy on a
-white canvas. Both themes style unfilled `text`, `title`, `subtitle`, and
-`equation` objects; an explicit `.fill(...)` always takes precedence.
+white/gray hierarchy. `paper` uses a literal white canvas with a restrained
+black ink fill for unfilled vector text, so it remains readable. An explicit
+`.fill(...)` always takes precedence.
 
 ```python
 from gaanim import Scene
