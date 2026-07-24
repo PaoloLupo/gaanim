@@ -455,7 +455,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] Audio con muxing en exportación.
 - [ ] API de fuentes, gradientes y cámara.
 - [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
-- [~] Componentes editoriales: callouts, captions y title cards disponibles; faltan listas.
+- [x] Componentes editoriales: listas, callouts, captions y title cards.
 - [x] Presets 16:9, 9:16 y 1:1 con safe areas.
 - [x] Perfil de exportación completamente accesible desde Python.
 

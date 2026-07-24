@@ -181,6 +181,15 @@ opening = scene.title_card("Vector motion", "A short technical explanation")
 scene.play([opening.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
 ```
 
+`bullets(items)` creates a vertically aligned bullet list as one drawable. The
+default gap and colors are suitable for a technical presentation; tune
+`width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
+
+```python
+agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
+scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to

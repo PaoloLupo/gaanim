@@ -1112,6 +1112,61 @@ impl PyScene {
         Ok(PyDrawable(scene.group(&refs)))
     }
 
+    /// Create a vertically arranged editorial bullet list.
+    #[pyo3(signature = (
+        items,
+        *,
+        width=720.0,
+        gap=68.0,
+        bullet_radius=8.0,
+        bullet_color=None,
+        color=None,
+    ))]
+    fn bullets(
+        &self,
+        items: Vec<String>,
+        width: f64,
+        gap: f64,
+        bullet_radius: f64,
+        bullet_color: Option<PyColor>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if items.is_empty() || items.iter().any(|item| item.trim().is_empty()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "items must contain at least one non-empty string",
+            ));
+        }
+        if !width.is_finite()
+            || !gap.is_finite()
+            || !bullet_radius.is_finite()
+            || width <= 0.0
+            || gap <= 0.0
+            || bullet_radius <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width, gap, and bullet_radius must be finite positive numbers",
+            ));
+        }
+        let bullet_color = bullet_color
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let start_y = (items.len().saturating_sub(1) as f64 * gap) * 0.5;
+        let bullet_x = -width * 0.5;
+        let label_x = bullet_x + bullet_radius * 4.0;
+        let mut members = Vec::with_capacity(items.len() * 2);
+        for (index, item) in items.iter().enumerate() {
+            let y = start_y - index as f64 * gap;
+            members.push(scene.dot(bullet_radius).fill(bullet_color).at(bullet_x, y));
+            members.push(scene.text(item).fill(color).at(label_x, y));
+        }
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
+        Ok(PyDrawable(scene.group(&refs)))
+    }
+
     #[pyo3(signature = (x, y, duration=1.0))]
     fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
         self.inner

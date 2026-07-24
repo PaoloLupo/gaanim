@@ -416,6 +416,16 @@ class Scene:
         color: Optional[Color] = None,
         accent: Optional[Color] = None,
     ) -> Drawable: ...
+    def bullets(
+        self,
+        items: Sequence[str],
+        *,
+        width: float = 720.0,
+        gap: float = 68.0,
+        bullet_radius: float = 8.0,
+        bullet_color: Optional[Color] = None,
+        color: Optional[Color] = None,
+    ) -> Drawable: ...
     def segment(self, name: str, transition: Optional[Transition] = None) -> int: ...
     def link(self, from_: int, to: int, transition: Transition) -> None: ...
     def wait(self, d: float) -> None: ...
