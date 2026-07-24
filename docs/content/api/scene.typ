@@ -59,6 +59,7 @@ star = scene.star(5, 90, 42)
 hexagon = scene.regular_polygon(6, 84)
 slice = scene.sector(0, 0, 100, 0.0, 1.8)
 ring = scene.annulus(100, 56)
+underbrace = scene.brace(-120, -100, 120, -100, 36)
 label = scene.title("Gaanim").at(0, 220)
 formula = scene.equation("E = m c^2").at(0, -180)
 arrow = scene.arrow(-80, 0, 80, 0)
@@ -78,7 +79,7 @@ icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
+`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
 `group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.

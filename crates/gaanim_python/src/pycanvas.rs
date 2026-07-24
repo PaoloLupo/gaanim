@@ -468,6 +468,27 @@ impl PyScene {
         ))
     }
 
+    fn brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, height: f64) -> PyResult<PyDrawable> {
+        if !x1.is_finite()
+            || !y1.is_finite()
+            || !x2.is_finite()
+            || !y2.is_finite()
+            || !height.is_finite()
+            || height == 0.0
+            || (x1 == x2 && y1 == y2)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "brace requires distinct finite endpoints and a non-zero finite height",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .brace(x1, y1, x2, y2, height),
+        ))
+    }
+
     fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
             cx,

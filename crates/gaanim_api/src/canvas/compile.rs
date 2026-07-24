@@ -1472,6 +1472,16 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Brace { start, end, height } => {
+                let b = builder.brace(
+                    Point::new(start.0, start.1),
+                    Point::new(end.0, end.1),
+                    *height,
+                );
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Arc {
                 center,
                 radius,

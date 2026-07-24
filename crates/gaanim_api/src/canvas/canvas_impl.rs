@@ -299,6 +299,13 @@ impl Canvas {
             inner_radius,
         })
     }
+    pub fn brace(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, height: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Brace {
+            start: (x1, y1),
+            end: (x2, y2),
+            height,
+        })
+    }
     /// Creates an open circular arc. Angles are expressed in radians.
     pub fn arc(
         &mut self,

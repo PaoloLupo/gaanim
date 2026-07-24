@@ -330,6 +330,11 @@ pub enum SpawnKind {
         outer_radius: f64,
         inner_radius: f64,
     },
+    Brace {
+        start: (f64, f64),
+        end: (f64, f64),
+        height: f64,
+    },
     /// Circular arc centered at `(cx, cy)`, in radians.
     Arc {
         center: (f64, f64),
