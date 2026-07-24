@@ -335,6 +335,9 @@ pub enum SpawnKind {
         end: (f64, f64),
         height: f64,
     },
+    Checkmark(f64),
+    Cross(f64),
+    RightAngle(f64),
     /// Circular arc centered at `(cx, cy)`, in radians.
     Arc {
         center: (f64, f64),

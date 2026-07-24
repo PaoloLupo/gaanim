@@ -489,6 +489,48 @@ impl PyScene {
         ))
     }
 
+    fn checkmark(&self, size: f64) -> PyResult<PyDrawable> {
+        if !size.is_finite() || size <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "checkmark size must be a finite positive number",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .checkmark(size),
+        ))
+    }
+
+    fn cross(&self, size: f64) -> PyResult<PyDrawable> {
+        if !size.is_finite() || size <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "cross size must be a finite positive number",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .cross(size),
+        ))
+    }
+
+    fn right_angle(&self, arm_length: f64) -> PyResult<PyDrawable> {
+        if !arm_length.is_finite() || arm_length <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "right_angle arm_length must be a finite positive number",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .right_angle(arm_length),
+        ))
+    }
+
     fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
             cx,

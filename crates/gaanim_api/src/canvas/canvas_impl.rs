@@ -306,6 +306,15 @@ impl Canvas {
             height,
         })
     }
+    pub fn checkmark(&mut self, size: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Checkmark(size))
+    }
+    pub fn cross(&mut self, size: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Cross(size))
+    }
+    pub fn right_angle(&mut self, arm_length: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::RightAngle(arm_length))
+    }
     /// Creates an open circular arc. Angles are expressed in radians.
     pub fn arc(
         &mut self,
