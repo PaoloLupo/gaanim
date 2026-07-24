@@ -201,6 +201,26 @@ agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
 scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
 ```
 
+`bar_chart(values, labels=...)` creates a grouped chart with a baseline,
+labels, and bars scaled to the maximum value. It accepts finite non-negative
+values and returns a regular drawable for animation.
+
+```python
+chart = scene.bar_chart([18, 42, 31], labels=["Q1", "Q2", "Q3"])
+scene.play([chart.grow_from_center().duration(0.6)])
+```
+
+`table(headers, rows)` creates a compact table with a restrained blue header and
+thin construction rules. Each row must have exactly one non-empty cell per header.
+
+```python
+results = scene.table(
+    ["Method", "Error", "Time"],
+    [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
+)
+scene.play([results.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to

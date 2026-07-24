@@ -13,6 +13,12 @@
 Use a scene background and the exported color constants to define the visual
 language of an animation. Theme objects are not part of the public Python API.
 
+For technical or LaTeX-style material, prefer a near-black background, white or
+soft-gray text, muted blue for structural emphasis, and reserve saturated
+semantic colors (green, red, gold) for positive, negative, or exceptional
+meaning. The built-in title cards, bullets, and bar charts follow this quieter
+default.
+
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 

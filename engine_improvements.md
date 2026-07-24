@@ -461,7 +461,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 ### 0.5 — Datos, código y plantillas
 
-- [ ] Charts, tablas y matrices.
+- [~] Charts, tablas y matrices: `bar_chart` y `table` disponibles; faltan matrices y otros charts.
 - [ ] Code mobject con highlighting y edición animada.
 - [ ] Sistema de plantillas/temas público.
 - [ ] Asset manager y formato mínimo de proyecto.

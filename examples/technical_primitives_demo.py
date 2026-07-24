@@ -2,18 +2,18 @@
 
 import os
 
-from gaanim import BLACK, BLUE, GOLD, GREEN, PURPLE, WHITE, Scene
+from gaanim import BLACK, BLUE, GRAY, NAVY, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
 title = scene.title("Technical primitives").fill(WHITE).at(0, 260)
-guide = scene.dashed_line(-420, 130, -100, 130, dash_length=20, gap_length=12).stroke(WHITE, 3)
-measure = scene.double_arrow(-420, 70, -100, 70).fill(GOLD)
-star = scene.star(5, 78, 36).fill(PURPLE).at(80, 100)
+guide = scene.dashed_line(-420, 130, -100, 130, dash_length=20, gap_length=12).stroke(GRAY, 3)
+measure = scene.double_arrow(-420, 70, -100, 70).fill(BLUE)
+star = scene.star(5, 78, 36).fill(NAVY).at(80, 100)
 hexagon = scene.regular_polygon(6, 72).fill(BLUE).at(300, 100)
-slice = scene.sector(-170, -145, 90, 0.2, 1.9).fill(GREEN)
-ring = scene.annulus(90, 52).fill(GOLD).at(160, -145)
+slice = scene.sector(-170, -145, 90, 0.2, 1.9).fill(GRAY)
+ring = scene.annulus(90, 52).fill(NAVY).at(160, -145)
 
 scene.play([
     title.write().duration(0.5),

@@ -441,6 +441,27 @@ class Scene:
         bullet_color: Optional[Color] = None,
         color: Optional[Color] = None,
     ) -> Drawable: ...
+    def bar_chart(
+        self,
+        values: Sequence[float],
+        *,
+        labels: Optional[Sequence[str]] = None,
+        width: float = 640.0,
+        height: float = 320.0,
+        gap: float = 20.0,
+        color: Optional[Color] = None,
+    ) -> Drawable: ...
+    def table(
+        self,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        *,
+        width: float = 760.0,
+        row_height: float = 58.0,
+        header_background: Optional[Color] = None,
+        rule_color: Optional[Color] = None,
+        color: Optional[Color] = None,
+    ) -> Drawable: ...
     def segment(self, name: str, transition: Optional[Transition] = None) -> int: ...
     def link(self, from_: int, to: int, transition: Transition) -> None: ...
     def wait(self, d: float) -> None: ...

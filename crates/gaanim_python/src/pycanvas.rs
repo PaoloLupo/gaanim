@@ -1296,7 +1296,7 @@ impl PyScene {
             .unwrap_or(gaanim_core::peniko::Color::WHITE);
         let accent = accent
             .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00));
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let title_y = if subtitle.is_some() { 44.0 } else { 0.0 };
         let title = scene.title(&title).fill(color).at(0.0, title_y);
@@ -1358,7 +1358,7 @@ impl PyScene {
         }
         let bullet_color = bullet_color
             .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xFF, 0xD7, 0x00));
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
         let color = color
             .map(|color| color.0)
             .unwrap_or(gaanim_core::peniko::Color::WHITE);
@@ -1371,6 +1371,188 @@ impl PyScene {
             let y = start_y - index as f64 * gap;
             members.push(scene.dot(bullet_radius).fill(bullet_color).at(bullet_x, y));
             members.push(scene.text(item).fill(color).at(label_x, y));
+        }
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
+        Ok(PyDrawable(scene.group(&refs)))
+    }
+
+    /// Create a labeled bar chart for finite non-negative values.
+    #[pyo3(signature = (values, *, labels=None, width=640.0, height=320.0, gap=20.0, color=None))]
+    fn bar_chart(
+        &self,
+        values: Vec<f64>,
+        labels: Option<Vec<String>>,
+        width: f64,
+        height: f64,
+        gap: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if values.is_empty()
+            || values
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "values must contain finite non-negative numbers",
+            ));
+        }
+        if !width.is_finite()
+            || !height.is_finite()
+            || !gap.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+            || gap < 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width and height must be finite positive numbers and gap must be non-negative",
+            ));
+        }
+        let labels =
+            labels.unwrap_or_else(|| (1..=values.len()).map(|index| index.to_string()).collect());
+        if labels.len() != values.len() || labels.iter().any(|label| label.trim().is_empty()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "labels must contain one non-empty label per value",
+            ));
+        }
+        let available_width = width - gap * (values.len() as f64 + 1.0);
+        if available_width <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width is too small for the requested number of bars and gap",
+            ));
+        }
+        let max_value = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+        let bar_width = available_width / values.len() as f64;
+        let chart_height = height - 56.0;
+        if chart_height <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "height must be greater than 56",
+            ));
+        }
+        let bar_color = color
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x4C, 0x78, 0xA8));
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let baseline_y = -height * 0.5 + 28.0;
+        let mut members = Vec::with_capacity(values.len() * 2 + 1);
+        members.push(
+            scene
+                .line(-width * 0.5, baseline_y, width * 0.5, baseline_y)
+                .stroke(gaanim_core::peniko::Color::from_rgb8(0x94, 0xA3, 0xB8), 2.0),
+        );
+        for (index, (value, label)) in values.iter().zip(labels.iter()).enumerate() {
+            let bar_height = chart_height * (*value / max_value);
+            let x = -width * 0.5 + gap + bar_width * (index as f64 + 0.5) + gap * index as f64;
+            members.push(
+                scene
+                    .rounded_rect(bar_width, bar_height.max(1.0), 6.0)
+                    .fill(bar_color)
+                    .at(x, baseline_y + bar_height * 0.5),
+            );
+            members.push(
+                scene
+                    .text(label)
+                    .fill(gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5))
+                    .at(x, baseline_y - 28.0),
+            );
+        }
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
+        Ok(PyDrawable(scene.group(&refs)))
+    }
+
+    /// Create a compact technical table with a muted header and construction rules.
+    #[pyo3(signature = (
+        headers,
+        rows,
+        *,
+        width=760.0,
+        row_height=58.0,
+        header_background=None,
+        rule_color=None,
+        color=None,
+    ))]
+    fn table(
+        &self,
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+        width: f64,
+        row_height: f64,
+        header_background: Option<PyColor>,
+        rule_color: Option<PyColor>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if headers.is_empty() || headers.iter().any(|header| header.trim().is_empty()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "headers must contain at least one non-empty string",
+            ));
+        }
+        if rows.is_empty()
+            || rows.iter().any(|row| {
+                row.len() != headers.len() || row.iter().any(|cell| cell.trim().is_empty())
+            })
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "rows must contain at least one complete row of non-empty cells",
+            ));
+        }
+        if !width.is_finite() || !row_height.is_finite() || width <= 0.0 || row_height <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width and row_height must be finite positive numbers",
+            ));
+        }
+
+        let header_background = header_background
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x16, 0x2B, 0x46));
+        let rule_color = rule_color
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x70, 0x88));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5));
+        let columns = headers.len() as f64;
+        let total_height = row_height * (rows.len() as f64 + 1.0);
+        let cell_width = width / columns;
+        let top_y = total_height * 0.5;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let mut members = Vec::with_capacity((rows.len() + 1) * headers.len() + rows.len() + 3);
+
+        members.push(
+            scene
+                .rounded_rect(width, row_height, 6.0)
+                .fill(header_background)
+                .at(0.0, top_y - row_height * 0.5),
+        );
+        for column in 1..headers.len() {
+            let x = -width * 0.5 + cell_width * column as f64;
+            members.push(
+                scene
+                    .line(x, -total_height * 0.5, x, total_height * 0.5)
+                    .stroke(rule_color, 1.0),
+            );
+        }
+        for row in 0..=(rows.len() + 1) {
+            let y = top_y - row_height * row as f64;
+            members.push(
+                scene
+                    .line(-width * 0.5, y, width * 0.5, y)
+                    .stroke(rule_color, if row == 0 { 2.0 } else { 1.0 }),
+            );
+        }
+        for (column, header) in headers.iter().enumerate() {
+            let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
+            members.push(
+                scene
+                    .text(header)
+                    .fill(color)
+                    .at(x, top_y - row_height * 0.5),
+            );
+        }
+        for (row_index, row) in rows.iter().enumerate() {
+            let y = top_y - row_height * (row_index as f64 + 1.5);
+            for (column, cell) in row.iter().enumerate() {
+                let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
+                members.push(scene.text(cell).fill(color).at(x, y));
+            }
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
