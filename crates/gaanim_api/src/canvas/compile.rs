@@ -1392,6 +1392,29 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Polygon(points) => {
+                let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
+                let b = builder.polygon(&points);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Star {
+                points,
+                outer_radius,
+                inner_radius,
+            } => {
+                let b = builder.star(*points, *outer_radius, *inner_radius);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::RegularPolygon { sides, radius } => {
+                let b = builder.regular_polygon(*sides, *radius);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Arc {
                 center,
                 radius,

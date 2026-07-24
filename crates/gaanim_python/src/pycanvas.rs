@@ -322,6 +322,54 @@ impl PyScene {
                 .arrow(x1, y1, x2, y2),
         )
     }
+    fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
+        if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "polygon requires at least three finite points",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polygon(points),
+        ))
+    }
+
+    fn star(&self, points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyDrawable> {
+        if points < 2
+            || !outer_radius.is_finite()
+            || !inner_radius.is_finite()
+            || outer_radius <= 0.0
+            || inner_radius <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "star requires at least two points and finite positive radii",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").star(
+                points,
+                outer_radius,
+                inner_radius,
+            ),
+        ))
+    }
+
+    fn regular_polygon(&self, sides: u32, radius: f64) -> PyResult<PyDrawable> {
+        if sides < 3 || !radius.is_finite() || radius <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "regular_polygon requires at least three sides and a finite positive radius",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .regular_polygon(sides, radius),
+        ))
+    }
+
     fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
             cx,

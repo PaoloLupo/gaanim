@@ -295,6 +295,19 @@ pub enum SpawnKind {
     Ellipse(f64, f64),
     Line(f64, f64, f64, f64),
     Arrow(f64, f64, f64, f64),
+    /// Closed polygon defined by scene-space vertices.
+    Polygon(Vec<(f64, f64)>),
+    /// Symmetric star centered at the origin.
+    Star {
+        points: u32,
+        outer_radius: f64,
+        inner_radius: f64,
+    },
+    /// Regular polygon centered at the origin.
+    RegularPolygon {
+        sides: u32,
+        radius: f64,
+    },
     /// Circular arc centered at `(cx, cy)`, in radians.
     Arc {
         center: (f64, f64),

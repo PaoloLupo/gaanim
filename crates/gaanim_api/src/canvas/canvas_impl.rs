@@ -233,6 +233,19 @@ impl Canvas {
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
     }
+    pub fn polygon(&mut self, points: Vec<(f64, f64)>) -> DrawableHandle {
+        self.spawn(SpawnKind::Polygon(points))
+    }
+    pub fn star(&mut self, points: u32, outer_radius: f64, inner_radius: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::Star {
+            points,
+            outer_radius,
+            inner_radius,
+        })
+    }
+    pub fn regular_polygon(&mut self, sides: u32, radius: f64) -> DrawableHandle {
+        self.spawn(SpawnKind::RegularPolygon { sides, radius })
+    }
     /// Creates an open circular arc. Angles are expressed in radians.
     pub fn arc(
         &mut self,
