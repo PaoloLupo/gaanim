@@ -427,6 +427,10 @@ impl Canvas {
     pub fn equation(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Equation(s.to_string()))
     }
+    /// Compile full Typst markup, including tables and other document layout.
+    pub fn typst(&mut self, source: &str) -> DrawableHandle {
+        self.spawn(SpawnKind::Typst(source.to_string()))
+    }
 
     /// Morphs all shared semantic tags from one equation into another in
     /// parallel. Tags are registered through `DrawableHandle::define_tag`.

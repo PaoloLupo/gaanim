@@ -68,6 +68,14 @@ fn parse_encoding_speed(value: &str) -> PyResult<EncodingSpeed> {
     }
 }
 
+fn escape_typst_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+
 /// Visual configuration owned by a [`PyScene`].
 ///
 /// A canvas deliberately has no timeline or mobject factories.  Those belong to
@@ -874,6 +882,23 @@ impl PyScene {
         }
         Ok(PyDrawable(equation))
     }
+
+    /// Compile full Typst markup into a vector drawable.
+    ///
+    /// Unlike `equation`, this accepts document constructs such as `#table`.
+    fn typst(&self, source: &str) -> PyResult<PyDrawable> {
+        if source.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Typst source must not be empty",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .typst(source),
+        ))
+    }
     /// Morph the semantic tags shared by two equations in parallel.
     #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
     fn transform_equation(
@@ -1556,6 +1581,96 @@ impl PyScene {
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
+    }
+
+    /// Create a restrained monospaced code block backed by Typst vector text.
+    #[pyo3(signature = (
+        source,
+        *,
+        language="text",
+        width=760.0,
+        height=300.0,
+        font_size=20.0,
+        background=None,
+        color=None,
+        accent=None,
+    ))]
+    fn code(
+        &self,
+        source: &str,
+        language: &str,
+        width: f64,
+        height: f64,
+        font_size: f64,
+        background: Option<PyColor>,
+        color: Option<PyColor>,
+        accent: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if source.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "source must not be empty",
+            ));
+        }
+        if language.trim().is_empty()
+            || !language.chars().all(|character| {
+                character.is_ascii_alphanumeric() || character == '-' || character == '_'
+            })
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "language must contain only ASCII letters, digits, '-' or '_'",
+            ));
+        }
+        if !width.is_finite()
+            || !height.is_finite()
+            || !font_size.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+            || font_size <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width, height, and font_size must be finite positive numbers",
+            ));
+        }
+        let background = background
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x10, 0x16, 0x20));
+        let color = color
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5));
+        let accent = accent
+            .map(|color| color.0)
+            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
+        let content_width = (width - 64.0).max(1.0);
+        let typst_source = format!(
+            r#"#set text(font: "Consolas", size: {font_size}pt)
+#block(width: {content_width}pt)[#raw("{}", block: true, lang: "{}")]"#,
+            escape_typst_string(source),
+            escape_typst_string(language),
+        );
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let panel = scene
+            .rounded_rect(width, height, 10.0)
+            .fill(background)
+            .stroke(accent, 1.5);
+        let rule = scene
+            .line(
+                -width * 0.5 + 24.0,
+                height * 0.5 - 40.0,
+                width * 0.5 - 24.0,
+                height * 0.5 - 40.0,
+            )
+            .stroke(accent, 1.0);
+        let label = scene
+            .text(&language.to_ascii_uppercase())
+            .fill(accent)
+            .at(-width * 0.5 + 90.0, height * 0.5 - 20.0);
+        // Typst hierarchies are centered on their visual bounds. Shift the
+        // resulting raw block into the panel's reading column.
+        let body = scene
+            .typst(&typst_source)
+            .fill(color)
+            .at(-width * 0.25, -18.0);
+        Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 
     #[pyo3(signature = (x, y, duration=1.0))]

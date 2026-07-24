@@ -221,6 +221,32 @@ results = scene.table(
 scene.play([results.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
 ```
 
+`typst(source)` compiles full Typst document markup into a vector drawable.
+Use it for publication-style layouts such as table spans or custom mathematical
+structures; `equation(...)` remains the concise API for math-only content. The
+embedded world resolves `@preview/...` imports through the standard Typst
+Universe cache; the first use downloads the requested package.
+
+```python
+comparison = scene.typst('''
+#table(
+  columns: 2,
+  [*Method*], [*Error*],
+  [Baseline], [0.18],
+  [GPU], [0.04],
+)
+''')
+```
+
+`code(source, language=...)` creates a monospaced vector code block with a
+quiet technical frame. It is suitable for code reveals and can be animated as
+one drawable; token-level highlighting and diffs are planned separately.
+
+```python
+snippet = scene.code("result = mass * acceleration", language="python")
+scene.play([snippet.fade_in().duration(0.4)])
+```
+
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
 normalized value of a `ValueTracker` along a sampled `polyline`,
 `function_graph`, `parametric_curve`, or Bézier path. The value is clamped to

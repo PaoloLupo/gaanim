@@ -7,6 +7,11 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
 };
+use typst_kit::{
+    downloader::SystemDownloader,
+    files::{FileLoader, FileStore},
+    packages::SystemPackages,
+};
 
 use crate::font::{FontRegistry, OutlineCollector};
 use crate::shaper::HierarchyChild;
@@ -75,10 +80,35 @@ fn typst_hierarchy_cache() -> &'static Mutex<HashMap<TypstCacheKey, Arc<CachedTy
 /// A custom self-contained implementation of `typst::World` for math and document vector compilation.
 pub struct GaanimTypstWorld {
     source: Source,
+    files: FileStore<UniverseFileLoader>,
     fonts: Vec<Font>,
     font_book: LazyHash<FontBook>,
     library: LazyHash<Library>,
     main_id: FileId,
+}
+
+/// Resolves package files through the same cache and registry as Typst's CLI.
+/// Project-local files deliberately remain unavailable: scene markup is supplied
+/// in memory and should not gain implicit access to the host file system.
+struct UniverseFileLoader {
+    packages: SystemPackages,
+}
+
+impl UniverseFileLoader {
+    fn new() -> Self {
+        Self {
+            packages: SystemPackages::new(SystemDownloader::new("gaanim/0.3")),
+        }
+    }
+}
+
+impl FileLoader for UniverseFileLoader {
+    fn load(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
+        match id.root() {
+            VirtualRoot::Package(spec) => self.packages.obtain(spec)?.load(id.vpath()),
+            VirtualRoot::Project => Err(FileError::NotFound(id.vpath().get_with_slash().into())),
+        }
+    }
 }
 
 impl GaanimTypstWorld {
@@ -124,6 +154,7 @@ impl GaanimTypstWorld {
 
         Self {
             source,
+            files: FileStore::new(UniverseFileLoader::new()),
             fonts,
             font_book,
             library,
@@ -149,12 +180,12 @@ impl World for GaanimTypstWorld {
         if id == self.main_id {
             Ok(self.source.clone())
         } else {
-            Err(FileError::NotFound(id.vpath().get_with_slash().into()))
+            self.files.source(id)
         }
     }
 
     fn file(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
-        Err(FileError::NotFound(id.vpath().get_with_slash().into()))
+        self.files.file(id)
     }
 
     fn font(&self, index: usize) -> Option<Font> {

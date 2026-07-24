@@ -33,6 +33,14 @@ fn escape_typst_string(text: &str) -> String {
         .replace('\r', "")
 }
 
+fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'static str {
+    let rgba = background.to_rgba8();
+    let luminance =
+        (0.2126 * f64::from(rgba.r) + 0.7152 * f64::from(rgba.g) + 0.0722 * f64::from(rgba.b))
+            / 255.0;
+    if luminance > 0.5 { "000000" } else { "ffffff" }
+}
+
 fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64) -> String {
     let width = options.width.max(1.0);
     let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
@@ -92,6 +100,7 @@ impl Canvas {
             raw_bounds.max.x - m.right,
             raw_bounds.max.y - m.top,
         );
+        let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
 
         for seg in &segments {
             scene_ids.push(builder.begin_scene(&seg.name));
@@ -101,6 +110,7 @@ impl Canvas {
                 &mut id_map,
                 frame_bounds,
                 text_config,
+                bg_color,
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
@@ -126,7 +136,6 @@ impl Canvas {
         // Insert canvas background resource so the renderer draws a visible
         // canvas boundary, distinguishing the canvas area from the window.
         // Uses raw_bounds (no margin) — the visual background covers the full canvas.
-        let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
         builder
             .commands
             .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
@@ -167,6 +176,7 @@ impl Canvas {
         id_map: &mut HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
+        scene_background: gaanim_core::peniko::Color,
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
@@ -177,7 +187,14 @@ impl Canvas {
             match op {
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
-                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds, text_config);
+                    let actual = Self::spawn_one(
+                        builder,
+                        &spec,
+                        id_map,
+                        frame_bounds,
+                        text_config,
+                        scene_background,
+                    );
                     id_map.insert(spec.id, actual.id);
                 }
                 Op::Animate { anim, active } => {
@@ -1342,6 +1359,7 @@ impl Canvas {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
+        scene_background: gaanim_core::peniko::Color,
     ) -> MobjectRef {
         match &spec.kind {
             SpawnKind::Circle(r) => {
@@ -1795,6 +1813,25 @@ impl Canvas {
             }
             SpawnKind::Equation(f) => {
                 let mr = builder.equation(f);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                Self::apply_fragment_fills(builder, mr, spec);
+                mr
+            }
+            SpawnKind::Typst(source) => {
+                let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                // Let Typst retain every explicit fill from document markup
+                // (including package-provided shapes). Only unstyled text gets
+                // a foreground that contrasts with the scene background.
+                let foreground = typst_foreground_for_background(scene_background);
+                let source = format!("#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let mr = builder.typst(
+                    &source,
+                    false,
+                    Some(&body.font_family),
+                    None,
+                    Some(body.size),
+                    None,
+                );
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr

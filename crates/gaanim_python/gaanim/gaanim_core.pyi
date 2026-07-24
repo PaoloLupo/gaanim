@@ -336,6 +336,7 @@ class Scene:
     def title(self, s: str) -> Drawable: ...
     def subtitle(self, s: str) -> Drawable: ...
     def equation(self, s: str, *, tags: Optional[dict[str, str]] = None) -> Drawable: ...
+    def typst(self, source: str) -> Drawable: ...
     def transform_equation(
         self,
         source: Drawable,
@@ -461,6 +462,18 @@ class Scene:
         header_background: Optional[Color] = None,
         rule_color: Optional[Color] = None,
         color: Optional[Color] = None,
+    ) -> Drawable: ...
+    def code(
+        self,
+        source: str,
+        *,
+        language: str = "text",
+        width: float = 760.0,
+        height: float = 300.0,
+        font_size: float = 20.0,
+        background: Optional[Color] = None,
+        color: Optional[Color] = None,
+        accent: Optional[Color] = None,
     ) -> Drawable: ...
     def segment(self, name: str, transition: Optional[Transition] = None) -> int: ...
     def link(self, from_: int, to: int, transition: Transition) -> None: ...

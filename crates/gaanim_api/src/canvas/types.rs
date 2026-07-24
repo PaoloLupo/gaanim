@@ -383,6 +383,8 @@ pub enum SpawnKind {
     Title(String),
     Subtitle(String),
     Equation(String),
+    /// Full Typst document markup, compiled as vector text and shapes.
+    Typst(String),
     /// Decoded RGBA texture plus its source and destination mapping.
     Image {
         image: ImageData,
