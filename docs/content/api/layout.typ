@@ -19,7 +19,7 @@ subdivided into grids.
 from gaanim import Anchor, Scene
 
 scene = Scene(1920, 1080, margin=72)
-layout = scene.layout(header=180, footer=72, gap=32)
+layout = scene.frame_layout(header=180, footer=72, gap=32)
 
 title = layout.header.place(scene.title("Fourier transform"), Anchor.TOP_LEFT)
 footer = layout.footer.place(scene.text("Chapter 1"), Anchor.BOTTOM_RIGHT)
@@ -38,7 +38,7 @@ minimal = scene.layout_preset("minimal")
 ```
 
 Use presets for the common editorial structure, then refine individual regions
-with `inset` or a grid. `layout(...)` remains available when exact header,
+with `inset` or a grid. `frame_layout(...)` remains available when exact header,
 footer, and gap dimensions are needed.
 
 == Regions and anchors
@@ -116,6 +116,26 @@ copy.place(body, Anchor.TOP_LEFT)
 that box.
 
 == Stacks and flow
+
+`scene.layout(...)` is the persistent presentation container. It can contain
+drawables or other layouts. Calling `add(..., animate=...)` inserts an item,
+reflows every affected container, and animates the displaced elements.
+
+```python
+agenda = scene.layout("column", gap=20)
+agenda.add(scene.text("Prepare"))
+agenda.add(scene.text("Explain"))
+agenda.add(scene.text("New section"), at=1, animate=0.45)
+
+side_by_side = scene.layout("row", gap=48)
+cards = scene.layout("grid", columns=2, gap=24)
+cards.add(scene.circle(32))
+side_by_side.add(agenda)
+side_by_side.add(cards)
+```
+
+`row`, `column`, and `grid` are the only layout kinds. The same `add` and
+`reflow` operations work at every level of the tree.
 
 Groups can arrange their direct children with `vstack` or `hstack` before the
 group itself is placed in a region.

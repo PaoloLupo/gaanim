@@ -5,7 +5,7 @@ import os
 from gaanim import Anchor, BLUE, GRAY, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLUE, margin=48)
-layout = scene.layout(header=120, footer=56, gap=24)
+layout = scene.frame_layout(header=120, footer=56, gap=24)
 
 title = layout.header.place(scene.title("Stacks dentro del grid"), Anchor.TOP_LEFT)
 grid = layout.content.grid(rows=1, columns=12, column_gap=24)

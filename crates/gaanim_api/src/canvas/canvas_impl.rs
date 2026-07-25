@@ -14,7 +14,8 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
 use crate::canvas::types::{
-    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, Margin, ParagraphOptions, SpawnKind,
+    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
+    SpawnKind,
 };
 use crate::canvas::{FrameLayout, LayoutPreset, LayoutRegion};
 
@@ -839,6 +840,42 @@ impl Canvas {
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
         self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+    }
+
+    /// Updates the direct children of a group created by [`Self::group`].
+    /// This is used by the persistent layout container; regular group users
+    /// can continue treating groups as immutable.
+    pub fn set_group_members(&mut self, group: &DrawableHandle, members: &[&DrawableHandle]) {
+        let mut spec = group.spec.lock().expect("group spec poisoned");
+        if let SpawnKind::Group(children) = &mut spec.kind {
+            *children = members.iter().map(|member| member.id).collect();
+        }
+    }
+
+    /// Queue a layout recalculation. `duration = Some(_)` animates the move
+    /// and fades the newly inserted member in; `None` updates immediately.
+    pub fn reflow_layout(
+        &mut self,
+        container: &DrawableHandle,
+        members: &[&DrawableHandle],
+        kind: LayoutKind,
+        gap: f64,
+        duration: Option<f64>,
+        entering: Option<&DrawableHandle>,
+    ) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::LayoutReflow {
+                container: container.id,
+                members: members.iter().map(|member| member.id).collect(),
+                kind,
+                gap: gap.max(0.0),
+                duration: duration.filter(|value| value.is_finite() && *value > 0.0),
+                entering: entering.map(|member| member.id),
+            });
     }
 
     /// Pan the orthographic camera to a world-space point.

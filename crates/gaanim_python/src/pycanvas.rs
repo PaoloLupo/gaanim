@@ -16,7 +16,7 @@ use gaanim_api::export::{
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
-use crate::pylayout::{PyFlow, PyFrameLayout, PyLayoutRegion};
+use crate::pylayout::{PyFlow, PyFrameLayout, PyLayout, PyLayoutRegion};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -124,7 +124,11 @@ impl PyCanvas {
     /// Name of the selected built-in visual theme, if any.
     #[getter]
     fn theme(&self) -> Option<String> {
-        self.inner.lock().expect("scene canvas poisoned").theme.clone()
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .theme
+            .clone()
     }
 
     /// Apply a built-in visual theme.
@@ -246,13 +250,32 @@ impl PyScene {
     /// Defines reusable `header`, `content`, and `footer` safe areas.
     /// Use `region.place(drawable, Anchor.TOP_LEFT)` to place a drawable.
     #[pyo3(signature = (header=0.0, footer=0.0, gap=24.0))]
-    fn layout(&self, header: f64, footer: f64, gap: f64) -> PyFrameLayout {
+    fn frame_layout(&self, header: f64, footer: f64, gap: f64) -> PyFrameLayout {
         PyFrameLayout(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .layout(header, footer, gap),
         )
+    }
+
+    /// Creates the one persistent container API for presentation layouts.
+    /// Layouts accept drawables and other layouts through `.add(...)`.
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2))]
+    fn layout(&self, kind: &str, gap: f64, columns: usize) -> PyResult<PyLayout> {
+        let kind = match kind {
+            "row" => gaanim_api::canvas::LayoutKind::Row,
+            "column" => gaanim_api::canvas::LayoutKind::Column,
+            "grid" => gaanim_api::canvas::LayoutKind::Grid {
+                columns: columns.max(1),
+            },
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "kind must be 'row', 'column', or 'grid'",
+                ))
+            }
+        };
+        Ok(PyLayout::new(self.inner.clone(), kind, gap))
     }
 
     /// Creates an editorial layout preset that scales with the safe frame.

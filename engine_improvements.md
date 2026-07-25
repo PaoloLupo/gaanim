@@ -369,19 +369,21 @@ Orden de implementación:
 disco con resorte y masa: el conjunto rota, la masa se desplaza, el resorte se
 deforma y las cotas o ecuaciones siguen el estado sin depender de SVG externo.
 
-### P1 — Tema científico y coordenadas configurables
+### P1 — Tema científico y coordenadas configurables (parcialmente completado)
 
 La escena debe tener una identidad técnica coherente por defecto y no depender
 de que cada ejemplo configure tipografías o ejes manualmente.
 
-1. tema `Scientific` con New Computer Modern para texto técnico y New Computer Modern Math para ecuaciones;
-2. fuentes empaquetadas y registradas por el motor para resultados idénticos en todas las plataformas;
-3. `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
-4. estilos separados para ejes, grilla, ticks y rótulos, además de una API para ocultar elementos individuales.
+1. [x] temas públicos `technical`/`scientific` y `paper`, con New Computer Modern para texto técnico y New Computer Modern Math para ecuaciones;
+2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para `title`, `subtitle`, `text`, `equation`, `caption` y `code`; un `.fill(...)` explícito conserva prioridad;
+3. [x] fuentes registradas por el motor para la composición técnica actual;
+4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
+5. [ ] estilos separados para ejes, grilla, ticks y rótulos, además de una API para ocultar elementos individuales;
+6. [ ] plantillas de composición y branding reutilizable sobre el sistema de temas.
 
 **Criterio de salida:** un diagrama científico puede crear ejes numerados y una
-grilla legible con una sola llamada, y texto/equaciones mantienen una familia
-tipográfica consistente en preview y export.
+grilla legible con una sola llamada; texto y ecuaciones mantienen una familia
+tipográfica consistente en preview y export, tanto en fondo oscuro como en `paper`.
 
 ### P1 — Componentes de contenido reutilizables
 
@@ -463,7 +465,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 - [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
 - [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
-- [~] Sistema de temas público: `technical` y `paper` configuran fondo y jerarquía tipográfica; faltan plantillas de composición con branding.
+- [~] Sistema de temas público: `technical`/`scientific` y `paper` configuran fondo y fills tipográficos en el runtime; `paper` está cubierto por regresión visual con texto y ecuación negros. Faltan plantillas de composición con branding.
 - [ ] Asset manager y formato mínimo de proyecto.
 - [ ] Cache y hot reload incremental donde sea medible.
 
@@ -472,7 +474,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] Overview, indicadores y navegación por slide.
 - [ ] Presenter view y notas.
 - [ ] Exportación independiente por slide.
-- [ ] Biblioteca de layouts de presentación.
+- [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
+  `add(...)` y `reflow(...)` desplazan y animan hijos; faltan presets semánticos
+  de slides, wrapping/overflow y variantes responsive.
 - [ ] Interacción/picking útil para demos en vivo.
 
 ### 1.0 — Librería estable

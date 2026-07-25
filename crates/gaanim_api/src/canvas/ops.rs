@@ -9,7 +9,7 @@ use gaanim_core::peniko::Color;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
-use crate::canvas::types::ObjectSpec;
+use crate::canvas::types::{LayoutKind, ObjectSpec};
 
 // -----------------------------------------------------------------------
 // Shared state
@@ -214,6 +214,16 @@ pub(crate) enum Op {
     Hide(ObjectId),
     /// Remove an object completely.
     Remove(ObjectId),
+    /// Recompute a layout container and optionally animate every affected child
+    /// into its new position.
+    LayoutReflow {
+        container: ObjectId,
+        members: Vec<ObjectId>,
+        kind: LayoutKind,
+        gap: f64,
+        duration: Option<f64>,
+        entering: Option<ObjectId>,
+    },
 
     // -- Reactive ops (Phase 2) --
     /// Attach a preset updater to an existing entity.

@@ -5,7 +5,7 @@ import os
 from gaanim import Anchor, BLUE, GRAY, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLUE, margin=48)
-layout = scene.layout(header=120, footer=56, gap=24)
+layout = scene.frame_layout(header=120, footer=56, gap=24)
 title = layout.header.place(scene.title("Tracks fijos y flexibles"), Anchor.TOP_LEFT)
 
 grid = layout.content.grid_tracks(

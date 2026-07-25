@@ -474,6 +474,17 @@ pub enum LayoutOp {
     },
 }
 
+/// The small set of container algorithms exposed by the high-level layout API.
+///
+/// Layouts intentionally use the same primitives as groups: every child can be
+/// a shape, text, equation, group, or another layout container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutKind {
+    Row,
+    Column,
+    Grid { columns: usize },
+}
+
 #[derive(Debug, Clone)]
 pub struct ObjectSpec {
     pub id: ObjectId,

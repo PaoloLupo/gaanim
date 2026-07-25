@@ -6,7 +6,7 @@ from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=64)
-layout = scene.layout(header=150, footer=64, gap=24)
+layout = scene.frame_layout(header=150, footer=64, gap=24)
 
 title = layout.header.place(
     scene.title("Colores que explican la fórmula").color_by("fórmula", GOLD),

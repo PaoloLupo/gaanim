@@ -5,8 +5,8 @@ mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
     Anim, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop, ImageFit,
-    ImageOptions, ImageOptionsError, LayoutOp, Margin, ObjectSpec, OptDuration, ParagraphOptions,
-    ParagraphOverflow, SpawnKind, TextAlign,
+    ImageOptions, ImageOptionsError, LayoutKind, LayoutOp, Margin, ObjectSpec, OptDuration,
+    ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
 };
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};

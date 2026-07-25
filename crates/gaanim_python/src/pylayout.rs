@@ -1,12 +1,161 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use gaanim_api::canvas::{
-    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, GridTrack, LayoutRegion,
+    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, GridTrack, LayoutKind,
+    LayoutRegion,
 };
 use gaanim_core::glam::DVec3;
 use pyo3::prelude::*;
 
 use crate::pydrawable::PyDrawable;
+
+#[derive(Clone)]
+struct LayoutState {
+    canvas: Arc<Mutex<ApiCanvas>>,
+    kind: LayoutKind,
+    gap: f64,
+    members: Vec<gaanim_api::canvas::DrawableHandle>,
+    root: Option<gaanim_api::canvas::DrawableHandle>,
+    parents: Vec<Weak<Mutex<LayoutState>>>,
+}
+
+/// A persistent, nestable layout container. It accepts drawables and other
+/// layouts; changing it recalculates its children and can animate the reflow.
+#[pyclass(name = "Layout", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyLayout {
+    inner: Arc<Mutex<LayoutState>>,
+}
+
+impl PyLayout {
+    pub fn new(canvas: Arc<Mutex<ApiCanvas>>, kind: LayoutKind, gap: f64) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(LayoutState {
+                canvas,
+                kind,
+                gap: gap.max(0.0),
+                members: Vec::new(),
+                root: None,
+                parents: Vec::new(),
+            })),
+        }
+    }
+
+    fn root(&self) -> Option<gaanim_api::canvas::DrawableHandle> {
+        self.inner.lock().expect("layout poisoned").root.clone()
+    }
+
+    fn reflow_inner(
+        inner: &Arc<Mutex<LayoutState>>,
+        duration: Option<f64>,
+        entering: Option<gaanim_api::canvas::DrawableHandle>,
+    ) {
+        let (canvas, kind, gap, root, members, parents) = {
+            let state = inner.lock().expect("layout poisoned");
+            (
+                state.canvas.clone(),
+                state.kind,
+                state.gap,
+                state.root.clone(),
+                state.members.clone(),
+                state.parents.clone(),
+            )
+        };
+        let Some(root) = root else { return };
+        let refs: Vec<_> = members.iter().collect();
+        let mut canvas = canvas.lock().expect("scene canvas poisoned");
+        canvas.set_group_members(&root, &refs);
+        canvas.reflow_layout(&root, &refs, kind, gap, duration, entering.as_ref());
+        drop(canvas);
+        for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
+            Self::reflow_inner(&parent, duration, None);
+        }
+    }
+
+    fn add_member(
+        &self,
+        member: gaanim_api::canvas::DrawableHandle,
+        at: Option<usize>,
+        animate: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let index = at.unwrap_or(state.members.len());
+            if index > state.members.len() {
+                return Err(pyo3::exceptions::PyIndexError::new_err(
+                    "layout insertion index is out of bounds",
+                ));
+            }
+            state.members.insert(index, member.clone());
+            if state.root.is_none() {
+                let refs: Vec<_> = state.members.iter().collect();
+                let canvas = state.canvas.clone();
+                let root = canvas.lock().expect("scene canvas poisoned").group(&refs);
+                state.root = Some(root);
+            }
+        }
+        Self::reflow_inner(&self.inner, animate, Some(member.clone()));
+        Ok(PyDrawable(member))
+    }
+}
+
+#[pymethods]
+impl PyLayout {
+    /// Adds a drawable or another Layout. `animate` smoothly moves the items
+    /// displaced by the insertion and fades the new item in.
+    #[pyo3(signature = (child, *, at=None, animate=None))]
+    fn add(
+        &self,
+        child: &Bound<'_, PyAny>,
+        at: Option<usize>,
+        animate: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
+            return self.add_member(drawable.0.clone(), at, animate);
+        }
+        if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
+            if Arc::ptr_eq(&self.inner, &layout.inner) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "a Layout cannot contain itself",
+                ));
+            }
+            let root = layout.root().ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(
+                    "cannot add an empty Layout; add a drawable to it first",
+                )
+            })?;
+            layout
+                .inner
+                .lock()
+                .expect("layout poisoned")
+                .parents
+                .push(Arc::downgrade(&self.inner));
+            return self.add_member(root, at, animate);
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Layout.add expects a Drawable or Layout",
+        ))
+    }
+
+    /// Recalculate this container after external changes to its children.
+    #[pyo3(signature = (*, animate=None))]
+    fn reflow(&self, animate: Option<f64>) {
+        Self::reflow_inner(&self.inner, animate, None);
+    }
+
+    #[getter]
+    fn count(&self) -> usize {
+        self.inner.lock().expect("layout poisoned").members.len()
+    }
+
+    /// The backing group, for placing the completed layout with existing APIs.
+    #[getter]
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        self.root().map(PyDrawable).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("an empty Layout has no drawable yet")
+        })
+    }
+}
 
 fn parse_tracks(values: &Bound<'_, PyAny>, axis: &str) -> PyResult<Vec<GridTrack>> {
     let mut tracks = Vec::new();

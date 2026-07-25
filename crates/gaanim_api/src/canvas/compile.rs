@@ -17,7 +17,7 @@ use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
-    LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
+    LayoutKind, LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
 };
 
 use gaanim_animation::{
@@ -785,6 +785,121 @@ impl Canvas {
                     {
                         builder.play_equation_expansion(source_parent, target_parent, *duration);
                     }
+                }
+                Op::LayoutReflow {
+                    container,
+                    members,
+                    kind,
+                    gap,
+                    duration,
+                    entering,
+                } => {
+                    let Some(container) = id_map.get(container).copied() else {
+                        continue;
+                    };
+                    let members: Vec<ObjectId> = members
+                        .iter()
+                        .filter_map(|member| id_map.get(member).copied())
+                        .filter(|member| builder.states.get(*member).is_some())
+                        .collect();
+                    if members.is_empty() {
+                        continue;
+                    }
+
+                    // A layout group may gain children after it was first
+                    // declared. Reparent them before arranging: this keeps a
+                    // nested layout's transform attached to its visual tree,
+                    // rather than merely moving its invisible group root.
+                    for member in &members {
+                        let parent = builder.states.get(*member).and_then(|state| state.parent);
+                        if parent != Some(container) {
+                            builder.add_to_group(
+                                MobjectRef { id: container },
+                                MobjectRef { id: *member },
+                            );
+                        }
+                    }
+                    if let Some(state) = builder.states.get_mut(container) {
+                        state.children = members.clone();
+                    }
+                    let before: HashMap<ObjectId, SpatialTransform> = members
+                        .iter()
+                        .filter_map(|member| {
+                            builder
+                                .states
+                                .get(*member)
+                                .map(|state| (*member, state.transform))
+                        })
+                        .collect();
+                    match kind {
+                        LayoutKind::Row => builder.arrange_aligned(
+                            MobjectRef { id: container },
+                            gaanim_layout::Direction::Right,
+                            *gap,
+                            gaanim_layout::Anchor::Center,
+                        ),
+                        LayoutKind::Column => builder.arrange_aligned(
+                            MobjectRef { id: container },
+                            gaanim_layout::Direction::Down,
+                            *gap,
+                            gaanim_layout::Anchor::Left,
+                        ),
+                        LayoutKind::Grid { columns } => builder.arrange_in_grid(
+                            MobjectRef { id: container },
+                            None,
+                            Some((*columns).max(1)),
+                            *gap,
+                            *gap,
+                        ),
+                    }
+
+                    let targets: Vec<(ObjectId, DVec3)> = members
+                        .iter()
+                        .filter_map(|member| {
+                            builder
+                                .states
+                                .get(*member)
+                                .map(|state| (*member, state.transform.translation))
+                        })
+                        .collect();
+                    let Some(duration) = duration else {
+                        continue;
+                    };
+
+                    // Arrangement writes the final transforms. Restore the
+                    // layout visible at the current timeline cursor, then let
+                    // the regular animation machinery interpolate to the new
+                    // arrangement and advance its cursor.
+                    for (member, transform) in before {
+                        if let Some(state) = builder.states.get_mut(member) {
+                            state.transform = transform;
+                            builder.commands.entity(state.entity).insert(transform);
+                        }
+                    }
+                    let mut animations: Vec<AnimationBuilder> = targets
+                        .into_iter()
+                        .map(|(target, to)| AnimationBuilder {
+                            target,
+                            anim_type: AnimationType::TranslateTo { to },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        })
+                        .collect();
+                    if let Some(entering) = entering
+                        .as_ref()
+                        .and_then(|member| id_map.get(member))
+                        .copied()
+                    {
+                        animations.push(AnimationBuilder {
+                            target: entering,
+                            anim_type: AnimationType::FadeIn,
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                    }
+                    builder.play_parallel(animations);
                 }
                 Op::Wait(d) => builder.wait(*d),
                 Op::CameraPosition { to, duration, .. } => {
@@ -2623,5 +2738,48 @@ mod tests {
         assert!(query.iter(&world).any(|bounds| {
             (bounds.0.width() - 80.0).abs() < 1e-6 && (bounds.0.height() - 80.0).abs() < 1e-6
         }));
+    }
+
+    #[test]
+    fn layout_reflow_animates_displaced_members_and_fades_the_insertion() {
+        let mut canvas = Canvas::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first]);
+        canvas.reflow_layout(&container, &[&first], LayoutKind::Column, 20.0, None, None);
+        canvas.set_group_members(&container, &[&first, &second]);
+        canvas.reflow_layout(
+            &container,
+            &[&first, &second],
+            LayoutKind::Column,
+            20.0,
+            Some(0.5),
+            Some(&second),
+        );
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(timeline.clips.values().any(|clip| matches!(
+            &clip.payload,
+            gaanim_timeline::clip::ClipPayload::Animation(gaanim_timeline::clip::AnimationSpec {
+                lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
+                ..
+            })
+        )));
+        assert!(timeline.clips.values().any(|clip| matches!(
+            &clip.payload,
+            gaanim_timeline::clip::ClipPayload::Animation(
+                gaanim_timeline::clip::AnimationSpec {
+                    lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { from, to },
+                    ..
+                }
+            ) if *from == 0.0 && *to == 1.0
+        )));
     }
 }
