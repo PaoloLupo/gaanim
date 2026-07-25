@@ -793,6 +793,7 @@ impl Canvas {
                     gap,
                     duration,
                     entering,
+                    leaving,
                 } => {
                     let Some(container) = id_map.get(container).copied() else {
                         continue;
@@ -894,6 +895,19 @@ impl Canvas {
                         animations.push(AnimationBuilder {
                             target: entering,
                             anim_type: AnimationType::FadeIn,
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                    }
+                    if let Some(leaving) = leaving
+                        .as_ref()
+                        .and_then(|member| id_map.get(member))
+                        .copied()
+                    {
+                        animations.push(AnimationBuilder {
+                            target: leaving,
+                            anim_type: AnimationType::FadeOut,
                             duration: *duration,
                             rate_func: RateFunc::Smooth,
                             delay: 0.0,
@@ -2746,7 +2760,15 @@ mod tests {
         let first = canvas.rect(80.0, 30.0);
         let second = canvas.rect(80.0, 30.0);
         let container = canvas.group(&[&first]);
-        canvas.reflow_layout(&container, &[&first], LayoutKind::Column, 20.0, None, None);
+        canvas.reflow_layout(
+            &container,
+            &[&first],
+            LayoutKind::Column,
+            20.0,
+            None,
+            None,
+            None,
+        );
         canvas.set_group_members(&container, &[&first, &second]);
         canvas.reflow_layout(
             &container,
@@ -2755,6 +2777,7 @@ mod tests {
             20.0,
             Some(0.5),
             Some(&second),
+            None,
         );
 
         let world = World::new();

@@ -134,8 +134,10 @@ side_by_side.add(agenda)
 side_by_side.add(cards)
 ```
 
-`row`, `column`, and `grid` are the only layout kinds. The same `add` and
-`reflow` operations work at every level of the tree.
+`row`, `column`, and `grid` are the only layout kinds. The same `add`, `remove`
+and `reflow` operations work at every level of the tree. For example,
+`agenda.remove(item, animate=0.35)` fades an item out while the remaining rows
+close the gap.
 
 Groups can arrange their direct children with `vstack` or `hstack` before the
 group itself is placed in a region.

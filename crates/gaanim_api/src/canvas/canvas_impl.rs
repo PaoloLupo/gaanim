@@ -862,6 +862,7 @@ impl Canvas {
         gap: f64,
         duration: Option<f64>,
         entering: Option<&DrawableHandle>,
+        leaving: Option<&DrawableHandle>,
     ) {
         self.state
             .lock()
@@ -875,6 +876,7 @@ impl Canvas {
                 gap: gap.max(0.0),
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
                 entering: entering.map(|member| member.id),
+                leaving: leaving.map(|member| member.id),
             });
     }
 

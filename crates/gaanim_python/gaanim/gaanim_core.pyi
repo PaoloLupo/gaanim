@@ -88,6 +88,20 @@ class Flow:
     def add(self, drawable: Drawable) -> None: ...
     def build(self) -> Drawable: ...
 
+class Layout:
+    count: int
+    @property
+    def drawable(self) -> Drawable: ...
+    def add(
+        self,
+        child: Drawable | Layout,
+        *,
+        at: Optional[int] = None,
+        animate: Optional[float] = None,
+    ) -> Drawable: ...
+    def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None: ...
+    def reflow(self, *, animate: Optional[float] = None) -> None: ...
+
 class Transition:
     @staticmethod
     def cut() -> Transition: ...
@@ -261,7 +275,19 @@ class Scene:
     ) -> None: ...
     @property
     def canvas(self) -> Canvas: ...
-    def layout(self, header: float = 0.0, footer: float = 0.0, gap: float = 24.0) -> FrameLayout: ...
+    def frame_layout(
+        self,
+        header: float = 0.0,
+        footer: float = 0.0,
+        gap: float = 24.0,
+    ) -> FrameLayout: ...
+    def layout(
+        self,
+        kind: Literal["row", "column", "grid"] = "column",
+        *,
+        gap: float = 24.0,
+        columns: int = 2,
+    ) -> Layout: ...
     def layout_preset(
         self,
         name: Literal["lecture", "comparison", "vertical_short", "minimal"],

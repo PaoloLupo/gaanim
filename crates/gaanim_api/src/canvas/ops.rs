@@ -223,6 +223,7 @@ pub(crate) enum Op {
         gap: f64,
         duration: Option<f64>,
         entering: Option<ObjectId>,
+        leaving: Option<ObjectId>,
     },
 
     // -- Reactive ops (Phase 2) --

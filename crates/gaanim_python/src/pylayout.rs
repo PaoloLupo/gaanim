@@ -49,6 +49,7 @@ impl PyLayout {
         inner: &Arc<Mutex<LayoutState>>,
         duration: Option<f64>,
         entering: Option<gaanim_api::canvas::DrawableHandle>,
+        leaving: Option<gaanim_api::canvas::DrawableHandle>,
     ) {
         let (canvas, kind, gap, root, members, parents) = {
             let state = inner.lock().expect("layout poisoned");
@@ -65,10 +66,18 @@ impl PyLayout {
         let refs: Vec<_> = members.iter().collect();
         let mut canvas = canvas.lock().expect("scene canvas poisoned");
         canvas.set_group_members(&root, &refs);
-        canvas.reflow_layout(&root, &refs, kind, gap, duration, entering.as_ref());
+        canvas.reflow_layout(
+            &root,
+            &refs,
+            kind,
+            gap,
+            duration,
+            entering.as_ref(),
+            leaving.as_ref(),
+        );
         drop(canvas);
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
-            Self::reflow_inner(&parent, duration, None);
+            Self::reflow_inner(&parent, duration, None, None);
         }
     }
 
@@ -94,7 +103,7 @@ impl PyLayout {
                 state.root = Some(root);
             }
         }
-        Self::reflow_inner(&self.inner, animate, Some(member.clone()));
+        Self::reflow_inner(&self.inner, animate, Some(member.clone()), None);
         Ok(PyDrawable(member))
     }
 }
@@ -140,7 +149,39 @@ impl PyLayout {
     /// Recalculate this container after external changes to its children.
     #[pyo3(signature = (*, animate=None))]
     fn reflow(&self, animate: Option<f64>) {
-        Self::reflow_inner(&self.inner, animate, None);
+        Self::reflow_inner(&self.inner, animate, None, None);
+    }
+
+    /// Removes a direct child. With `animate`, it fades out while the other
+    /// children collapse into their new layout positions.
+    #[pyo3(signature = (child, *, animate=None))]
+    fn remove(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
+        let member = if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
+            drawable.0.clone()
+        } else if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
+            layout.root().ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err("cannot remove an empty Layout")
+            })?
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "Layout.remove expects a Drawable or Layout",
+            ));
+        };
+        let removed = {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let index = state
+                .members
+                .iter()
+                .position(|item| item.id == member.id)
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "child is not a direct member of this Layout",
+                    )
+                })?;
+            state.members.remove(index)
+        };
+        Self::reflow_inner(&self.inner, animate, None, Some(removed));
+        Ok(())
     }
 
     #[getter]
