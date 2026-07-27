@@ -794,6 +794,9 @@ impl Canvas {
                     duration,
                     entering,
                     leaving,
+                    max_width,
+                    max_height,
+                    shrink_to_fit,
                 } => {
                     let Some(container) = id_map.get(container).copied() else {
                         continue;
@@ -863,7 +866,30 @@ impl Canvas {
                                 .map(|state| (*member, state.transform.translation))
                         })
                         .collect();
+                    let scale_to = if *shrink_to_fit {
+                        builder.states.get(container).map(|state| {
+                            let bounds = state.bounds;
+                            let width_scale = max_width
+                                .map(|max| max / bounds.width().max(1.0))
+                                .unwrap_or(1.0);
+                            let height_scale = max_height
+                                .map(|max| max / bounds.height().max(1.0))
+                                .unwrap_or(1.0);
+                            width_scale.min(height_scale).min(1.0)
+                        })
+                    } else {
+                        None
+                    };
                     let Some(duration) = duration else {
+                        if let Some(scale) = scale_to
+                            && let Some(state) = builder.states.get_mut(container)
+                        {
+                            state.transform.scale = DVec3::splat(scale);
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(state.transform);
+                        }
                         continue;
                     };
 
@@ -908,6 +934,17 @@ impl Canvas {
                         animations.push(AnimationBuilder {
                             target: leaving,
                             anim_type: AnimationType::FadeOut,
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                    }
+                    if let Some(scale) = scale_to {
+                        animations.push(AnimationBuilder {
+                            target: container,
+                            anim_type: AnimationType::ScaleTo {
+                                to: DVec3::splat(scale),
+                            },
                             duration: *duration,
                             rate_func: RateFunc::Smooth,
                             delay: 0.0,
@@ -2768,6 +2805,9 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            false,
         );
         canvas.set_group_members(&container, &[&first, &second]);
         canvas.reflow_layout(
@@ -2778,6 +2818,9 @@ mod tests {
             Some(0.5),
             Some(&second),
             None,
+            None,
+            None,
+            false,
         );
 
         let world = World::new();

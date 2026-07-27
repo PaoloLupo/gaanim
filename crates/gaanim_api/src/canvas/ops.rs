@@ -224,6 +224,9 @@ pub(crate) enum Op {
         duration: Option<f64>,
         entering: Option<ObjectId>,
         leaving: Option<ObjectId>,
+        max_width: Option<f64>,
+        max_height: Option<f64>,
+        shrink_to_fit: bool,
     },
 
     // -- Reactive ops (Phase 2) --

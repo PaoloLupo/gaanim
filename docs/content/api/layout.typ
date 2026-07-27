@@ -15,6 +15,16 @@ the safe frame into `header`, `content`, and `footer` regions. Regions place
 regular drawables using the existing `Anchor` values, can be inset, and can be
 subdivided into grids.
 
+For a persistent layout already anchored in a region, call `layout` on that
+region instead of creating a free layout and placing its backing drawable:
+
+```python
+content = scene.frame_layout(header=180, footer=72).content
+agenda = content.layout("column", gap=20, fit="shrink")
+agenda.add(scene.text("Context"))
+agenda.add(scene.text("Main idea"), animate=0.35)
+```
+
 ```python
 from gaanim import Anchor, Scene
 
@@ -138,6 +148,22 @@ side_by_side.add(cards)
 and `reflow` operations work at every level of the tree. For example,
 `agenda.remove(item, animate=0.35)` fades an item out while the remaining rows
 close the gap.
+
+`agenda.replace(old, new, animate=0.35)` performs the inverse operation in one
+transition: the old element fades away, the replacement appears, and sibling
+positions are recalculated together.
+
+Use `configure(...)` when the same container should become a different
+composition, for example `cards.configure(kind="grid", columns=2, animate=0.4)`.
+
+For a dense title card or a long formula, constrain a complete layout instead
+of special-casing its children. `fit="shrink"` preserves proportions and only
+scales down when the requested area would overflow:
+
+```python
+formula = scene.layout("column", width=520, height=240, fit="shrink")
+formula.add(scene.equation("F(k) = integral f(x) e^(-i k x) dx"))
+```
 
 Groups can arrange their direct children with `vstack` or `hstack` before the
 group itself is placed in a region.

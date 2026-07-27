@@ -63,6 +63,14 @@ class LayoutRegion:
         row_gap: float = 0.0,
         column_gap: float = 0.0,
     ) -> GridLayout: ...
+    def layout(
+        self,
+        kind: Literal["row", "column", "grid"] = "column",
+        *,
+        gap: float = 24.0,
+        columns: int = 2,
+        fit: Literal["none", "shrink"] = "none",
+    ) -> Layout: ...
 
 class GridLayout:
     rows: int
@@ -100,7 +108,25 @@ class Layout:
         animate: Optional[float] = None,
     ) -> Drawable: ...
     def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None: ...
+    def replace(
+        self,
+        old: Drawable | Layout,
+        new: Drawable | Layout,
+        *,
+        animate: Optional[float] = None,
+    ) -> Drawable: ...
     def reflow(self, *, animate: Optional[float] = None) -> None: ...
+    def configure(
+        self,
+        *,
+        kind: Optional[Literal["row", "column", "grid"]] = None,
+        gap: Optional[float] = None,
+        columns: Optional[int] = None,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Optional[Literal["none", "shrink"]] = None,
+        animate: Optional[float] = None,
+    ) -> None: ...
 
 class Transition:
     @staticmethod
@@ -287,6 +313,9 @@ class Scene:
         *,
         gap: float = 24.0,
         columns: int = 2,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Literal["none", "shrink"] = "none",
     ) -> Layout: ...
     def layout_preset(
         self,

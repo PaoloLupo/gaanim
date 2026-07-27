@@ -207,12 +207,14 @@ impl PyCanvas {
 
     /// The region available after the configured safe-area margins.
     fn safe_area(&self) -> PyLayoutRegion {
-        PyLayoutRegion(
-            self.inner
+        PyLayoutRegion {
+            region: self
+                .inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .safe_area(),
-        )
+            canvas: self.inner.clone(),
+        }
     }
 }
 
@@ -251,18 +253,28 @@ impl PyScene {
     /// Use `region.place(drawable, Anchor.TOP_LEFT)` to place a drawable.
     #[pyo3(signature = (header=0.0, footer=0.0, gap=24.0))]
     fn frame_layout(&self, header: f64, footer: f64, gap: f64) -> PyFrameLayout {
-        PyFrameLayout(
-            self.inner
+        PyFrameLayout {
+            layout: self
+                .inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .layout(header, footer, gap),
-        )
+            canvas: self.inner.clone(),
+        }
     }
 
     /// Creates the one persistent container API for presentation layouts.
     /// Layouts accept drawables and other layouts through `.add(...)`.
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2))]
-    fn layout(&self, kind: &str, gap: f64, columns: usize) -> PyResult<PyLayout> {
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none"))]
+    fn layout(
+        &self,
+        kind: &str,
+        gap: f64,
+        columns: usize,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+    ) -> PyResult<PyLayout> {
         let kind = match kind {
             "row" => gaanim_api::canvas::LayoutKind::Row,
             "column" => gaanim_api::canvas::LayoutKind::Column,
@@ -275,7 +287,33 @@ impl PyScene {
                 ))
             }
         };
-        Ok(PyLayout::new(self.inner.clone(), kind, gap))
+        for (name, value) in [("width", width), ("height", height)] {
+            if let Some(value) = value {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "{name} must be a finite positive number"
+                    )));
+                }
+            }
+        }
+        let shrink_to_fit = match fit {
+            "none" => false,
+            "shrink" => true,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "fit must be 'none' or 'shrink'",
+                ))
+            }
+        };
+        Ok(PyLayout::new(
+            self.inner.clone(),
+            kind,
+            gap,
+            width,
+            height,
+            shrink_to_fit,
+            None,
+        ))
     }
 
     /// Creates an editorial layout preset that scales with the safe frame.
@@ -291,12 +329,14 @@ impl PyScene {
                 ))
             }
         };
-        Ok(PyFrameLayout(
-            self.inner
+        Ok(PyFrameLayout {
+            layout: self
+                .inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .layout_preset(preset),
-        ))
+            canvas: self.inner.clone(),
+        })
     }
 
     /// Starts a deferred vertical or horizontal sequence of drawables.

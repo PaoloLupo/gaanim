@@ -863,6 +863,9 @@ impl Canvas {
         duration: Option<f64>,
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
+        max_width: Option<f64>,
+        max_height: Option<f64>,
+        shrink_to_fit: bool,
     ) {
         self.state
             .lock()
@@ -877,6 +880,9 @@ impl Canvas {
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
                 entering: entering.map(|member| member.id),
                 leaving: leaving.map(|member| member.id),
+                max_width: max_width.filter(|value| value.is_finite() && *value > 0.0),
+                max_height: max_height.filter(|value| value.is_finite() && *value > 0.0),
+                shrink_to_fit,
             });
     }
 

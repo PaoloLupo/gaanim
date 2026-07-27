@@ -475,8 +475,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] Presenter view y notas.
 - [ ] Exportación independiente por slide.
 - [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
-  `add(...)` y `reflow(...)` desplazan y animan hijos; faltan presets semánticos
-  de slides, wrapping/overflow y variantes responsive.
+  `add(...)`, `remove(...)`, `configure(...)` y `reflow(...)` desplazan y animan
+  hijos; incluye límites `width`/`height` y `fit="shrink"`. Faltan presets
+  semánticos de slides, wrapping/overflow y variantes responsive.
 - [ ] Interacción/picking útil para demos en vivo.
 
 ### 1.0 — Librería estable

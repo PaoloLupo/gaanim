@@ -14,6 +14,10 @@ struct LayoutState {
     canvas: Arc<Mutex<ApiCanvas>>,
     kind: LayoutKind,
     gap: f64,
+    max_width: Option<f64>,
+    max_height: Option<f64>,
+    shrink_to_fit: bool,
+    region: Option<LayoutRegion>,
     members: Vec<gaanim_api::canvas::DrawableHandle>,
     root: Option<gaanim_api::canvas::DrawableHandle>,
     parents: Vec<Weak<Mutex<LayoutState>>>,
@@ -28,12 +32,24 @@ pub struct PyLayout {
 }
 
 impl PyLayout {
-    pub fn new(canvas: Arc<Mutex<ApiCanvas>>, kind: LayoutKind, gap: f64) -> Self {
+    pub fn new(
+        canvas: Arc<Mutex<ApiCanvas>>,
+        kind: LayoutKind,
+        gap: f64,
+        max_width: Option<f64>,
+        max_height: Option<f64>,
+        shrink_to_fit: bool,
+        region: Option<LayoutRegion>,
+    ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LayoutState {
                 canvas,
                 kind,
                 gap: gap.max(0.0),
+                max_width,
+                max_height,
+                shrink_to_fit,
+                region,
                 members: Vec::new(),
                 root: None,
                 parents: Vec::new(),
@@ -51,12 +67,15 @@ impl PyLayout {
         entering: Option<gaanim_api::canvas::DrawableHandle>,
         leaving: Option<gaanim_api::canvas::DrawableHandle>,
     ) {
-        let (canvas, kind, gap, root, members, parents) = {
+        let (canvas, kind, gap, max_width, max_height, shrink_to_fit, root, members, parents) = {
             let state = inner.lock().expect("layout poisoned");
             (
                 state.canvas.clone(),
                 state.kind,
                 state.gap,
+                state.max_width,
+                state.max_height,
+                state.shrink_to_fit,
                 state.root.clone(),
                 state.members.clone(),
                 state.parents.clone(),
@@ -74,6 +93,9 @@ impl PyLayout {
             duration,
             entering.as_ref(),
             leaving.as_ref(),
+            max_width,
+            max_height,
+            shrink_to_fit,
         );
         drop(canvas);
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
@@ -100,11 +122,31 @@ impl PyLayout {
                 let refs: Vec<_> = state.members.iter().collect();
                 let canvas = state.canvas.clone();
                 let root = canvas.lock().expect("scene canvas poisoned").group(&refs);
+                let root = state
+                    .region
+                    .map(|region| region.place(root.clone(), Anchor::Center))
+                    .unwrap_or(root);
                 state.root = Some(root);
             }
         }
         Self::reflow_inner(&self.inner, animate, Some(member.clone()), None);
         Ok(PyDrawable(member))
+    }
+
+    fn member_from_python(
+        child: &Bound<'_, PyAny>,
+    ) -> PyResult<gaanim_api::canvas::DrawableHandle> {
+        if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
+            return Ok(drawable.0.clone());
+        }
+        if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
+            return layout.root().ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err("cannot use an empty Layout as a child")
+            });
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Layout children must be a Drawable or Layout",
+        ))
     }
 }
 
@@ -152,21 +194,88 @@ impl PyLayout {
         Self::reflow_inner(&self.inner, animate, None, None);
     }
 
+    /// Updates this container's layout rule and recalculates its children.
+    /// Omitted values keep their current setting.
+    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, animate=None))]
+    fn configure(
+        &self,
+        kind: Option<&str>,
+        gap: Option<f64>,
+        columns: Option<usize>,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: Option<&str>,
+        animate: Option<f64>,
+    ) -> PyResult<()> {
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            if let Some(gap) = gap {
+                if !gap.is_finite() || gap < 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "gap must be a finite non-negative number",
+                    ));
+                }
+                state.gap = gap;
+            }
+            if let Some(width) = width {
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "width must be a finite positive number",
+                    ));
+                }
+                state.max_width = Some(width);
+            }
+            if let Some(height) = height {
+                if !height.is_finite() || height <= 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "height must be a finite positive number",
+                    ));
+                }
+                state.max_height = Some(height);
+            }
+            if let Some(fit) = fit {
+                state.shrink_to_fit = match fit {
+                    "none" => false,
+                    "shrink" => true,
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "fit must be 'none' or 'shrink'",
+                        ))
+                    }
+                };
+            }
+            if let Some(kind) = kind {
+                state.kind = match kind {
+                    "row" => LayoutKind::Row,
+                    "column" => LayoutKind::Column,
+                    "grid" => LayoutKind::Grid {
+                        columns: columns.unwrap_or(2).max(1),
+                    },
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "kind must be 'row', 'column', or 'grid'",
+                        ))
+                    }
+                };
+            } else if let Some(columns) = columns {
+                if let LayoutKind::Grid { columns: current } = &mut state.kind {
+                    *current = columns.max(1);
+                } else {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "columns can only be configured on a grid Layout",
+                    ));
+                }
+            }
+        }
+        Self::reflow_inner(&self.inner, animate, None, None);
+        Ok(())
+    }
+
     /// Removes a direct child. With `animate`, it fades out while the other
     /// children collapse into their new layout positions.
     #[pyo3(signature = (child, *, animate=None))]
     fn remove(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
-        let member = if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
-            drawable.0.clone()
-        } else if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
-            layout.root().ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err("cannot remove an empty Layout")
-            })?
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "Layout.remove expects a Drawable or Layout",
-            ));
-        };
+        let member = Self::member_from_python(child)?;
         let removed = {
             let mut state = self.inner.lock().expect("layout poisoned");
             let index = state
@@ -182,6 +291,34 @@ impl PyLayout {
         };
         Self::reflow_inner(&self.inner, animate, None, Some(removed));
         Ok(())
+    }
+
+    /// Replaces one direct child in place. The outgoing child fades out, the
+    /// incoming child fades in, and the enclosing layout transitions once.
+    #[pyo3(signature = (old, new, *, animate=None))]
+    fn replace(
+        &self,
+        old: &Bound<'_, PyAny>,
+        new: &Bound<'_, PyAny>,
+        animate: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        let old = Self::member_from_python(old)?;
+        let new = Self::member_from_python(new)?;
+        let removed = {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let index = state
+                .members
+                .iter()
+                .position(|item| item.id == old.id)
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "old child is not a direct member of this Layout",
+                    )
+                })?;
+            std::mem::replace(&mut state.members[index], new.clone())
+        };
+        Self::reflow_inner(&self.inner, animate, Some(new.clone()), Some(removed));
+        Ok(PyDrawable(new))
     }
 
     #[getter]
@@ -311,29 +448,32 @@ impl PyFlow {
     frozen,
     skip_from_py_object
 )]
-#[derive(Clone, Copy, Debug)]
-pub struct PyLayoutRegion(pub LayoutRegion);
+#[derive(Clone, Debug)]
+pub struct PyLayoutRegion {
+    pub(crate) region: LayoutRegion,
+    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
+}
 
 #[pymethods]
 impl PyLayoutRegion {
     #[getter]
     fn width(&self) -> f64 {
-        self.0.width()
+        self.region.width()
     }
 
     #[getter]
     fn height(&self) -> f64 {
-        self.0.height()
+        self.region.height()
     }
 
     /// Pins the chosen anchor of a drawable to the same anchor in this region.
     fn place(&self, drawable: &PyDrawable, anchor: &PyAnchor) -> PyDrawable {
-        PyDrawable(self.0.place(drawable.0.clone(), anchor.0))
+        PyDrawable(self.region.place(drawable.0.clone(), anchor.0))
     }
 
     /// Coordinates for an anchor in this region; useful for custom placement.
     fn point(&self, anchor: &PyAnchor) -> (f64, f64) {
-        let point = self.0.anchor_point(anchor.0);
+        let point = self.region.anchor_point(anchor.0);
         (point.x, point.y)
     }
 
@@ -349,12 +489,18 @@ impl PyLayoutRegion {
         let right = right.unwrap_or(value);
         let bottom = bottom.unwrap_or(value);
         let left = left.unwrap_or(right);
-        Self(self.0.inset(value, right, bottom, left))
+        Self {
+            region: self.region.inset(value, right, bottom, left),
+            canvas: self.canvas.clone(),
+        }
     }
 
     #[pyo3(signature = (rows=1, columns=1, row_gap=0.0, column_gap=0.0))]
     fn grid(&self, rows: usize, columns: usize, row_gap: f64, column_gap: f64) -> PyGridLayout {
-        PyGridLayout(self.0.grid(rows, columns, row_gap, column_gap))
+        PyGridLayout {
+            grid: self.region.grid(rows, columns, row_gap, column_gap),
+            canvas: self.canvas.clone(),
+        }
     }
 
     /// Creates a grid with fixed numeric tracks and fractional strings (`"1fr"`).
@@ -366,12 +512,49 @@ impl PyLayoutRegion {
         row_gap: f64,
         column_gap: f64,
     ) -> PyResult<PyGridLayout> {
-        Ok(PyGridLayout(self.0.grid_with_tracks(
-            parse_tracks(&rows, "row")?,
-            parse_tracks(&columns, "column")?,
-            row_gap,
-            column_gap,
-        )))
+        Ok(PyGridLayout {
+            grid: self.region.grid_with_tracks(
+                parse_tracks(&rows, "row")?,
+                parse_tracks(&columns, "column")?,
+                row_gap,
+                column_gap,
+            ),
+            canvas: self.canvas.clone(),
+        })
+    }
+
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, fit="none"))]
+    fn layout(&self, kind: &str, gap: f64, columns: usize, fit: &str) -> PyResult<PyLayout> {
+        let kind = match kind {
+            "row" => LayoutKind::Row,
+            "column" => LayoutKind::Column,
+            "grid" => LayoutKind::Grid {
+                columns: columns.max(1),
+            },
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "kind must be 'row', 'column', or 'grid'",
+                ))
+            }
+        };
+        let shrink_to_fit = match fit {
+            "none" => false,
+            "shrink" => true,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "fit must be 'none' or 'shrink'",
+                ))
+            }
+        };
+        Ok(PyLayout::new(
+            self.canvas.clone(),
+            kind,
+            gap,
+            Some(self.region.width()),
+            Some(self.region.height()),
+            shrink_to_fit,
+            Some(self.region),
+        ))
     }
 }
 
@@ -382,18 +565,21 @@ impl PyLayoutRegion {
     skip_from_py_object
 )]
 #[derive(Clone, Debug)]
-pub struct PyGridLayout(pub GridLayout);
+pub struct PyGridLayout {
+    pub(crate) grid: GridLayout,
+    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
+}
 
 #[pymethods]
 impl PyGridLayout {
     #[getter]
     fn rows(&self) -> usize {
-        self.0.rows
+        self.grid.rows
     }
 
     #[getter]
     fn columns(&self) -> usize {
-        self.0.columns
+        self.grid.columns
     }
 
     fn cell(&self, row: usize, column: usize) -> PyResult<PyLayoutRegion> {
@@ -408,9 +594,12 @@ impl PyGridLayout {
         row_span: usize,
         column_span: usize,
     ) -> PyResult<PyLayoutRegion> {
-        self.0
+        self.grid
             .area(row, column, row_span, column_span)
-            .map(PyLayoutRegion)
+            .map(|region| PyLayoutRegion {
+                region,
+                canvas: self.canvas.clone(),
+            })
             .ok_or_else(|| pyo3::exceptions::PyIndexError::new_err("grid area is out of bounds"))
     }
 }
@@ -422,36 +611,54 @@ impl PyGridLayout {
     frozen,
     skip_from_py_object
 )]
-#[derive(Clone, Copy, Debug)]
-pub struct PyFrameLayout(pub FrameLayout);
+#[derive(Clone, Debug)]
+pub struct PyFrameLayout {
+    pub(crate) layout: FrameLayout,
+    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
+}
 
 #[pymethods]
 impl PyFrameLayout {
     #[getter]
     fn frame(&self) -> PyLayoutRegion {
-        PyLayoutRegion(self.0.frame)
+        PyLayoutRegion {
+            region: self.layout.frame,
+            canvas: self.canvas.clone(),
+        }
     }
     #[getter]
     fn header(&self) -> PyLayoutRegion {
-        PyLayoutRegion(self.0.header)
+        PyLayoutRegion {
+            region: self.layout.header,
+            canvas: self.canvas.clone(),
+        }
     }
     #[getter]
     fn content(&self) -> PyLayoutRegion {
-        PyLayoutRegion(self.0.content)
+        PyLayoutRegion {
+            region: self.layout.content,
+            canvas: self.canvas.clone(),
+        }
     }
     #[getter]
     fn footer(&self) -> PyLayoutRegion {
-        PyLayoutRegion(self.0.footer)
+        PyLayoutRegion {
+            region: self.layout.footer,
+            canvas: self.canvas.clone(),
+        }
     }
 
     /// Convenience accessor for a column spanning the whole content area.
     #[pyo3(signature = (index, count=2, gap=24.0))]
     fn column(&self, index: usize, count: usize, gap: f64) -> PyResult<PyLayoutRegion> {
-        self.0
+        self.layout
             .content
             .grid(1, count, 0.0, gap)
             .cell(0, index)
-            .map(PyLayoutRegion)
+            .map(|region| PyLayoutRegion {
+                region,
+                canvas: self.canvas.clone(),
+            })
             .ok_or_else(|| {
                 pyo3::exceptions::PyIndexError::new_err("column index must be smaller than count")
             })
