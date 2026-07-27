@@ -10,7 +10,7 @@ use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::Bounds3D;
 use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
 use gaanim_timeline::clip::SceneId;
-use gaanim_timeline::timeline::Timeline;
+use gaanim_timeline::timeline::{PresentationSlide, PresentationStep, Timeline};
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
@@ -76,6 +76,30 @@ impl Canvas {
         font_registry: &gaanim_text::font::FontRegistry,
         text_config: &gaanim_text::prelude::TextConfig,
     ) {
+        // Finalize the open slide's metadata. Breakpoints are already stored
+        // as deferred operations, so compilation remains timeline-driven.
+        let presentation = self.presentation_manifest();
+        timeline.set_presentation(
+            presentation
+                .slides
+                .into_iter()
+                .map(|slide| PresentationSlide {
+                    id: slide.id.raw(),
+                    name: slide.name,
+                    notes: slide.notes,
+                    start_time: slide.start_time,
+                    end_time: slide.end_time.unwrap_or_default(),
+                    steps: slide
+                        .steps
+                        .into_iter()
+                        .map(|step| PresentationStep {
+                            name: step.name,
+                            time: step.time,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        );
         let segments = self
             .state
             .lock()

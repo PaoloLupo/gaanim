@@ -17,6 +17,35 @@ struct ReactiveEntityState {
     traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
 }
 
+/// A named reveal pause inside a presentation slide.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationStep {
+    pub name: Option<String>,
+    pub time: f64,
+}
+
+/// Semantic metadata for a slide, independent of the API crate that authored it.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationSlide {
+    pub id: u32,
+    pub name: String,
+    pub notes: Option<String>,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub steps: Vec<PresentationStep>,
+}
+
+/// The current semantic location in a presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationPosition {
+    pub slide_id: u32,
+    /// `None` means the slide's initial state; otherwise this is a zero-based reveal step.
+    pub step_index: Option<usize>,
+}
+
 /// The primary Timeline manager, stored as a Bevy ECS resource.
 ///
 /// It coordinates tracks, clips, keyframes, and seek operations,
@@ -44,6 +73,10 @@ pub struct Timeline {
     pub playback_rate: f64,
     /// Interactive slide presentation breakpoints.
     pub breakpoints: Vec<f64>,
+    /// Semantic presentation structure, when the canvas used `scene.slide(...)`.
+    pub presentation: Vec<PresentationSlide>,
+    /// Cached semantic position matching [`Self::current_time`].
+    pub presentation_position: Option<PresentationPosition>,
     /// Flag to ignore interactive presentation inputs (e.g. when GUI has focus).
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ignore_input: bool,
@@ -80,6 +113,8 @@ impl Default for Timeline {
             is_playing: false,
             playback_rate: 1.0,
             breakpoints: Vec::new(),
+            presentation: Vec::new(),
+            presentation_position: None,
             ignore_input: false,
             loop_range: None,
             seek_request: None,
@@ -95,6 +130,109 @@ impl Timeline {
     /// Creates a new empty `Timeline`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Replace the semantic presentation metadata compiled from the current canvas.
+    pub fn set_presentation(&mut self, mut slides: Vec<PresentationSlide>) {
+        slides.sort_by(|left, right| left.start_time.total_cmp(&right.start_time));
+        for slide in &mut slides {
+            slide
+                .steps
+                .sort_by(|left, right| left.time.total_cmp(&right.time));
+        }
+        self.presentation = slides;
+        self.update_presentation_position();
+    }
+
+    /// Find the semantic slide and reveal step at `time`.
+    pub fn presentation_position_at(&self, time: f64) -> Option<PresentationPosition> {
+        const EPSILON: f64 = 1e-5;
+        let slide =
+            self.presentation.iter().rev().find(|slide| {
+                slide.start_time <= time + EPSILON && time <= slide.end_time + EPSILON
+            })?;
+        let step_index = slide
+            .steps
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, step)| (step.time <= time + EPSILON).then_some(index));
+        Some(PresentationPosition {
+            slide_id: slide.id,
+            step_index,
+        })
+    }
+
+    /// Return the timestamp for a semantic position in the current presentation.
+    pub fn presentation_time(&self, position: PresentationPosition) -> Option<f64> {
+        let slide = self
+            .presentation
+            .iter()
+            .find(|slide| slide.id == position.slide_id)?;
+        match position.step_index {
+            Some(index) => slide.steps.get(index).map(|step| step.time),
+            None => Some(slide.start_time),
+        }
+    }
+
+    /// Return the previous meaningful presentation stop before `time`.
+    pub fn previous_presentation_stop(&self, time: f64) -> Option<f64> {
+        self.presentation_stops()
+            .into_iter()
+            .filter(|stop| *stop < time - 0.2)
+            .last()
+    }
+
+    /// Return the next meaningful presentation stop after `time`.
+    pub fn next_presentation_stop(&self, time: f64) -> Option<f64> {
+        self.presentation_stops()
+            .into_iter()
+            .find(|stop| *stop > time + 1e-5)
+    }
+
+    /// A compact label suitable for editor transport controls.
+    pub fn presentation_label(&self) -> Option<String> {
+        let position = self.presentation_position?;
+        let index = self
+            .presentation
+            .iter()
+            .position(|slide| slide.id == position.slide_id)?;
+        let slide = &self.presentation[index];
+        let step = position.step_index.map(|step| step + 1).unwrap_or(0);
+        Some(if step == 0 {
+            format!(
+                "{} / {} · {}",
+                index + 1,
+                self.presentation.len(),
+                slide.name
+            )
+        } else {
+            format!(
+                "{} / {} · {} · step {}",
+                index + 1,
+                self.presentation.len(),
+                slide.name,
+                step
+            )
+        })
+    }
+
+    /// Update the cached semantic position after a seek or metadata change.
+    pub fn update_presentation_position(&mut self) {
+        self.presentation_position = self.presentation_position_at(self.current_time);
+    }
+
+    fn presentation_stops(&self) -> Vec<f64> {
+        let mut stops = self
+            .presentation
+            .iter()
+            .flat_map(|slide| {
+                std::iter::once(slide.start_time).chain(slide.steps.iter().map(|step| step.time))
+            })
+            .collect::<Vec<_>>();
+        stops.sort_by(|left, right| left.total_cmp(right));
+        stops.dedup_by(|left, right| (*left - *right).abs() < 1e-5);
+        stops
     }
 
     /// Adds a new track to the timeline.
@@ -654,6 +792,7 @@ impl Timeline {
             rebuild_traced_paths(world, self.current_time);
         }
 
+        self.update_presentation_position();
         self.restore_followed_shake_origin(world);
     }
 
@@ -1411,5 +1550,58 @@ mod tests {
 
         assert_eq!(world.get::<Path2D>(entity).unwrap().0.as_ref(), &to);
         assert_eq!(world.get::<PathSource>(entity).unwrap().0.as_ref(), &to);
+    }
+
+    #[test]
+    fn semantic_presentation_positions_and_stops_follow_slides_and_steps() {
+        let mut timeline = Timeline::default();
+        timeline.set_presentation(vec![
+            PresentationSlide {
+                id: 10,
+                name: "intro".to_string(),
+                notes: Some("Opening".to_string()),
+                start_time: 0.0,
+                end_time: 3.0,
+                steps: vec![PresentationStep {
+                    name: Some("reveal".to_string()),
+                    time: 1.0,
+                }],
+            },
+            PresentationSlide {
+                id: 20,
+                name: "details".to_string(),
+                notes: None,
+                start_time: 3.0,
+                end_time: 5.0,
+                steps: vec![PresentationStep {
+                    name: None,
+                    time: 4.0,
+                }],
+            },
+        ]);
+
+        assert_eq!(
+            timeline.presentation_position_at(1.5),
+            Some(PresentationPosition {
+                slide_id: 10,
+                step_index: Some(0),
+            })
+        );
+        assert_eq!(timeline.next_presentation_stop(1.0), Some(3.0));
+        assert_eq!(timeline.previous_presentation_stop(3.0), Some(1.0));
+        assert_eq!(
+            timeline.presentation_time(PresentationPosition {
+                slide_id: 20,
+                step_index: Some(0),
+            }),
+            Some(4.0)
+        );
+
+        timeline.current_time = 4.0;
+        timeline.update_presentation_position();
+        assert_eq!(
+            timeline.presentation_label().as_deref(),
+            Some("2 / 2 · details · step 1")
+        );
     }
 }

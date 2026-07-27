@@ -342,6 +342,7 @@ fn editor_ui_system(
             .and_then(|id| timeline.scenes.get(id))
             .map(|s| s.name.clone())
             .unwrap_or_default();
+        let presentation_name = timeline.presentation_label();
         let total = timeline.cached_duration.max(0.0);
         let current = timeline.current_time.clamp(0.0, total);
 
@@ -434,8 +435,17 @@ fn editor_ui_system(
                             // Row 2: controls
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                // Scene name (truncated to avoid pushing controls)
-                                if !scene_name.is_empty() {
+                                // Presentation position takes precedence over the internal scene name.
+                                if let Some(presentation_name) = &presentation_name {
+                                    let display = truncate_with_ellipsis(presentation_name, 28);
+                                    ui.label(
+                                        egui::RichText::new(display)
+                                            .color(egui::Color32::from_rgb(160, 200, 255))
+                                            .strong()
+                                            .small(),
+                                    );
+                                    ui.add_space(8.0);
+                                } else if !scene_name.is_empty() {
                                     let display = truncate_with_ellipsis(&scene_name, 20);
                                     ui.label(
                                         egui::RichText::new(display)

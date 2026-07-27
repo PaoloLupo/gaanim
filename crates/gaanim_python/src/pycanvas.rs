@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
     AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CurveControl, CurveElement, ImageCrop,
-    ImageFit, ImageOptions, ParagraphOptions, TextAlign,
+    ImageFit, ImageOptions, ParagraphOptions, SlideId, SlideTemplate, TextAlign,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, AspectRatioPreset, EncodingSpeed, ExportConfig,
@@ -222,6 +222,40 @@ impl PyCanvas {
 #[pyclass(name = "Scene", module = "gaanim_core")]
 pub struct PyScene {
     inner: Arc<Mutex<ApiCanvas>>,
+}
+
+/// Handle for adding reveal pauses to one semantic presentation slide.
+#[pyclass(name = "Slide", module = "gaanim_core")]
+pub struct PySlide {
+    inner: Arc<Mutex<ApiCanvas>>,
+    id: SlideId,
+    template: SlideTemplate,
+}
+
+#[pymethods]
+impl PySlide {
+    #[pyo3(signature = (name=None))]
+    fn step(&self, name: Option<String>) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .slide_step(self.id, name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Resolve a named region supplied by this slide's template.
+    fn region(&self, name: &str) -> PyResult<PyLayoutRegion> {
+        let region = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .slide_region(self.template, name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyLayoutRegion {
+            region,
+            canvas: self.inner.clone(),
+        })
+    }
 }
 
 #[pymethods]
@@ -1942,8 +1976,21 @@ impl PyScene {
         }
     }
 
-    fn slide(&self) {
-        self.inner.lock().expect("scene canvas poisoned").slide();
+    #[pyo3(signature = (name, *, notes=None, layout="blank"))]
+    fn slide(&self, name: String, notes: Option<String>, layout: &str) -> PyResult<PySlide> {
+        let template = SlideTemplate::parse(layout)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let id = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .slide(name, notes, template)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PySlide {
+            inner: self.inner.clone(),
+            id,
+            template,
+        })
     }
     fn fade_out_all(&self, duration: f64) {
         self.inner

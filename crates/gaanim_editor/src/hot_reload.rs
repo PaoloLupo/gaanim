@@ -75,9 +75,14 @@ pub fn reload_listener_system(world: &mut World) {
     let payload = payloads.last().expect("checked non-empty").clone();
 
     // Snapshot playback state before tearing down entities.
-    let (saved_time, was_playing, had_previous_timeline) = {
+    let (saved_time, saved_presentation_position, was_playing, had_previous_timeline) = {
         let tl = world.resource::<Timeline>();
-        (tl.current_time, tl.is_playing, tl.cached_duration > 0.0)
+        (
+            tl.current_time,
+            tl.presentation_position,
+            tl.is_playing,
+            tl.cached_duration > 0.0,
+        )
     };
 
     let width = payload.canvas.width;
@@ -86,7 +91,9 @@ pub fn reload_listener_system(world: &mut World) {
 
     // Restore playback position after rebuild.
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
-        let target = saved_time.min(tl.cached_duration.max(0.0));
+        let target = saved_presentation_position
+            .and_then(|position| tl.presentation_time(position))
+            .unwrap_or_else(|| saved_time.min(tl.cached_duration.max(0.0)));
         tl.seek_request = Some(target);
         tl.is_playing = if had_previous_timeline {
             was_playing

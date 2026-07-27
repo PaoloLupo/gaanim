@@ -17,7 +17,10 @@ use crate::canvas::types::{
     Anim, CoordinateSystem, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
     SpawnKind,
 };
-use crate::canvas::{FrameLayout, LayoutPreset, LayoutRegion};
+use crate::canvas::{
+    FrameLayout, LayoutPreset, LayoutRegion, PresentationError, PresentationManifest, SlideId,
+    SlideTemplate,
+};
 use crate::export::{AudioTrack, AudioTrackError};
 
 /// Error returned when selecting a built-in visual theme by name.
@@ -118,6 +121,7 @@ pub struct Canvas {
     pub asset_root: Option<PathBuf>,
     /// Audio sources mixed by FFmpeg when this canvas is exported.
     pub audio_tracks: Vec<AudioTrack>,
+    presentation: Arc<Mutex<PresentationManifest>>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
     pub(crate) camera_rotation: gaanim_core::glam::DQuat,
@@ -135,6 +139,7 @@ impl Canvas {
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
+            presentation: Arc::new(Mutex::new(PresentationManifest::default())),
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
@@ -1174,13 +1179,89 @@ impl Canvas {
         guard.active_mut().ops.push(Op::Play(anims));
     }
 
-    pub fn slide(&mut self) {
+    /// Begin a named presentation slide at the current timeline cursor.
+    ///
+    /// Starting a later slide closes the preceding slide and inserts the
+    /// breakpoint that pauses a live presentation between them.
+    pub fn slide(
+        &mut self,
+        name: impl Into<String>,
+        notes: Option<String>,
+        template: SlideTemplate,
+    ) -> Result<SlideId, PresentationError> {
+        let start_time = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .cursor;
+        let mut presentation = self.presentation.lock().expect("presentation poisoned");
+        let had_previous_slide = !presentation.slides.is_empty();
+        let id = presentation.start_slide(name.into(), notes, template, start_time)?;
+        drop(presentation);
+
+        if had_previous_slide {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::Slide);
+        }
+        Ok(id)
+    }
+
+    /// Resolve a named region supplied by a built-in slide template.
+    pub fn slide_region(
+        &self,
+        template: SlideTemplate,
+        region: &str,
+    ) -> Result<LayoutRegion, PresentationError> {
+        template
+            .region(self.safe_frame(), region)
+            .ok_or_else(|| PresentationError::UnknownRegion {
+                template: template.name().to_string(),
+                region: region.to_string(),
+            })
+    }
+
+    /// Insert a named or anonymous reveal pause inside the active slide.
+    pub fn slide_step(
+        &mut self,
+        id: SlideId,
+        name: Option<String>,
+    ) -> Result<(), PresentationError> {
+        let time = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .cursor;
+        self.presentation
+            .lock()
+            .expect("presentation poisoned")
+            .add_step(id, name, time)?;
         self.state
             .lock()
             .expect("canvas state poisoned")
             .active_mut()
             .ops
             .push(Op::Slide);
+        Ok(())
+    }
+
+    /// Return the presentation metadata, closing the final slide at the
+    /// canvas cursor when necessary.
+    pub fn presentation_manifest(&self) -> PresentationManifest {
+        let end_time = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .cursor;
+        let mut presentation = self.presentation.lock().expect("presentation poisoned");
+        presentation.finalize(end_time);
+        presentation.clone()
     }
 
     pub fn fade_out_all(&mut self, dur: f64) {
@@ -1764,5 +1845,89 @@ mod tests {
             path.0.elements().len() > 4,
             "spring must have zig-zag segments"
         );
+    }
+
+    #[test]
+    fn semantic_slides_close_at_boundaries_and_steps_add_breakpoints() {
+        let mut canvas = Canvas::new(1280, 720);
+        let intro = canvas
+            .slide("intro", Some("Opening".to_string()), SlideTemplate::Blank)
+            .unwrap();
+        canvas.wait(1.0);
+        canvas
+            .slide_step(intro, Some("reveal".to_string()))
+            .unwrap();
+        canvas.wait(2.0);
+        let details = canvas
+            .slide("details", None, SlideTemplate::TwoColumns)
+            .unwrap();
+        canvas.wait(0.5);
+
+        let manifest = canvas.presentation_manifest();
+        assert_eq!(manifest.slides.len(), 2);
+        assert_eq!(manifest.slides[0].name, "intro");
+        assert_eq!(manifest.slides[0].notes.as_deref(), Some("Opening"));
+        assert_eq!(manifest.slides[0].start_time, 0.0);
+        assert_eq!(manifest.slides[0].end_time, Some(3.0));
+        assert_eq!(manifest.slides[0].steps[0].time, 1.0);
+        assert_eq!(manifest.slides[1].id, details);
+        assert_eq!(manifest.slides[1].end_time, Some(3.5));
+
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        let breakpoints = state
+            .active()
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::Slide))
+            .count();
+        assert_eq!(breakpoints, 2, "one step and one slide boundary");
+    }
+
+    #[test]
+    fn semantic_slides_validate_names_and_active_handles() {
+        let mut canvas = Canvas::new(1280, 720);
+        assert!(matches!(
+            canvas.slide("  ", None, SlideTemplate::Blank),
+            Err(PresentationError::EmptySlideName)
+        ));
+
+        let first = canvas.slide("first", None, SlideTemplate::Blank).unwrap();
+        assert!(matches!(
+            canvas.slide("first", None, SlideTemplate::Blank),
+            Err(PresentationError::DuplicateSlideName { .. })
+        ));
+        let second = canvas.slide("second", None, SlideTemplate::Blank).unwrap();
+        assert!(matches!(
+            canvas.slide_step(first, None),
+            Err(PresentationError::InactiveSlide { .. })
+        ));
+        assert!(canvas.slide_step(second, None).is_ok());
+    }
+
+    #[test]
+    fn slide_templates_resolve_named_regions_inside_the_safe_area() {
+        let mut canvas = Canvas::new(1000, 600);
+        canvas.margin = Margin::all(50.0);
+
+        let title = canvas
+            .slide_region(SlideTemplate::TitleContent, "title")
+            .unwrap();
+        let content = canvas
+            .slide_region(SlideTemplate::TitleContent, "content")
+            .unwrap();
+        let left = canvas
+            .slide_region(SlideTemplate::TwoColumns, "left")
+            .unwrap();
+        let right = canvas
+            .slide_region(SlideTemplate::TwoColumns, "right")
+            .unwrap();
+
+        assert!(title.bounds.min.y >= content.bounds.max.y);
+        assert!(content.height() > title.height());
+        assert!(left.bounds.max.x < right.bounds.min.x);
+        assert!(matches!(
+            canvas.slide_region(SlideTemplate::Blank, "title"),
+            Err(PresentationError::UnknownRegion { .. })
+        ));
     }
 }

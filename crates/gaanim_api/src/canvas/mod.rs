@@ -1,4 +1,5 @@
 mod ops;
+mod presentation;
 pub use gaanim_animation::AxisMask;
 pub use ops::{CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
 mod types;
@@ -10,6 +11,9 @@ pub use types::{
 };
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};
+pub use presentation::{
+    PresentationError, PresentationManifest, SlideId, SlideSpec, SlideStep, SlideTemplate,
+};
 mod drawable;
 pub use drawable::{DrawableHandle, FragmentSelection, SvgPartError};
 mod canvas_impl;

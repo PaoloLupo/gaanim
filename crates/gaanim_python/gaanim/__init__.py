@@ -32,6 +32,7 @@ from .gaanim_core import (
     Updater,
     ValueTracker,
     Scene,
+    Slide,
 )
 
 
@@ -47,6 +48,7 @@ def Canvas(*args, **kwargs):
 
 __all__ = [
     "Scene",
+    "Slide",
     "Canvas",
     "Drawable",
     "Anim",

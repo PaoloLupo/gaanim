@@ -4,7 +4,7 @@ pub use crate::clip::{
 };
 pub use crate::scene::{CameraState, SceneMember, SceneMetadata};
 pub use crate::snapshot::{SnapshotDiff, WorldSnapshot};
-pub use crate::timeline::Timeline;
+pub use crate::timeline::{PresentationPosition, PresentationSlide, PresentationStep, Timeline};
 pub use crate::transition::{
     MorphMapping, MorphProperty, SceneConnection, SlideDirection, TransitionType,
 };

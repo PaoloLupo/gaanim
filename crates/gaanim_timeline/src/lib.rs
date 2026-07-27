@@ -149,7 +149,9 @@ pub fn presentation_input_system(
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     mut timeline: ResMut<Timeline>,
 ) {
-    if timeline.breakpoints.is_empty() || timeline.ignore_input {
+    if (timeline.breakpoints.is_empty() && timeline.presentation.is_empty())
+        || timeline.ignore_input
+    {
         return;
     }
 
@@ -181,6 +183,14 @@ pub fn presentation_input_system(
     if should_advance {
         if !timeline.is_playing {
             timeline.is_playing = true;
+        } else if !timeline.presentation.is_empty() {
+            if let Some(stop) = timeline.next_presentation_stop(timeline.current_time) {
+                timeline.seek_request = Some(stop);
+                timeline.is_playing = false;
+            } else {
+                timeline.seek_request = Some(timeline.cached_duration);
+                timeline.is_playing = false;
+            }
         } else {
             let current = timeline.current_time;
             let mut next_bp = None;
@@ -199,15 +209,20 @@ pub fn presentation_input_system(
             }
         }
     } else if should_go_back {
-        let current = timeline.current_time;
-        let mut prev_bp = None;
-        for &bp in timeline.breakpoints.iter().rev() {
-            if bp < current - 0.2 {
-                prev_bp = Some(bp);
-                break;
-            }
-        }
-        let target = prev_bp.unwrap_or(0.0);
+        let target = if timeline.presentation.is_empty() {
+            let current = timeline.current_time;
+            timeline
+                .breakpoints
+                .iter()
+                .rev()
+                .find(|&&bp| bp < current - 0.2)
+                .copied()
+                .unwrap_or(0.0)
+        } else {
+            timeline
+                .previous_presentation_stop(timeline.current_time)
+                .unwrap_or(0.0)
+        };
         timeline.seek_request = Some(target);
         timeline.is_playing = false;
     }
