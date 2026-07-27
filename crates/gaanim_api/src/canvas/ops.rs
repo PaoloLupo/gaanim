@@ -227,6 +227,7 @@ pub(crate) enum Op {
         max_width: Option<f64>,
         max_height: Option<f64>,
         shrink_to_fit: bool,
+        wrap: bool,
     },
 
     // -- Reactive ops (Phase 2) --

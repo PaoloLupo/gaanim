@@ -265,7 +265,7 @@ impl PyScene {
 
     /// Creates the one persistent container API for presentation layouts.
     /// Layouts accept drawables and other layouts through `.add(...)`.
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none"))]
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false))]
     fn layout(
         &self,
         kind: &str,
@@ -274,6 +274,7 @@ impl PyScene {
         width: Option<f64>,
         height: Option<f64>,
         fit: &str,
+        wrap: bool,
     ) -> PyResult<PyLayout> {
         let kind = match kind {
             "row" => gaanim_api::canvas::LayoutKind::Row,
@@ -313,6 +314,7 @@ impl PyScene {
             height,
             shrink_to_fit,
             None,
+            wrap,
         ))
     }
 

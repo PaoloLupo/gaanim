@@ -17,6 +17,7 @@ struct LayoutState {
     max_width: Option<f64>,
     max_height: Option<f64>,
     shrink_to_fit: bool,
+    wrap: bool,
     region: Option<LayoutRegion>,
     members: Vec<gaanim_api::canvas::DrawableHandle>,
     root: Option<gaanim_api::canvas::DrawableHandle>,
@@ -40,6 +41,7 @@ impl PyLayout {
         max_height: Option<f64>,
         shrink_to_fit: bool,
         region: Option<LayoutRegion>,
+        wrap: bool,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LayoutState {
@@ -49,6 +51,7 @@ impl PyLayout {
                 max_width,
                 max_height,
                 shrink_to_fit,
+                wrap,
                 region,
                 members: Vec::new(),
                 root: None,
@@ -67,7 +70,7 @@ impl PyLayout {
         entering: Option<gaanim_api::canvas::DrawableHandle>,
         leaving: Option<gaanim_api::canvas::DrawableHandle>,
     ) {
-        let (canvas, kind, gap, max_width, max_height, shrink_to_fit, root, members, parents) = {
+        let (canvas, kind, gap, max_width, max_height, shrink_to_fit, wrap, root, members, parents) = {
             let state = inner.lock().expect("layout poisoned");
             (
                 state.canvas.clone(),
@@ -76,6 +79,7 @@ impl PyLayout {
                 state.max_width,
                 state.max_height,
                 state.shrink_to_fit,
+                state.wrap,
                 state.root.clone(),
                 state.members.clone(),
                 state.parents.clone(),
@@ -96,6 +100,7 @@ impl PyLayout {
             max_width,
             max_height,
             shrink_to_fit,
+            wrap,
         );
         drop(canvas);
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
@@ -196,7 +201,7 @@ impl PyLayout {
 
     /// Updates this container's layout rule and recalculates its children.
     /// Omitted values keep their current setting.
-    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, animate=None))]
+    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, wrap=None, animate=None))]
     fn configure(
         &self,
         kind: Option<&str>,
@@ -205,6 +210,7 @@ impl PyLayout {
         width: Option<f64>,
         height: Option<f64>,
         fit: Option<&str>,
+        wrap: Option<bool>,
         animate: Option<f64>,
     ) -> PyResult<()> {
         {
@@ -243,6 +249,14 @@ impl PyLayout {
                         ))
                     }
                 };
+            }
+            if let Some(wrap) = wrap {
+                if !matches!(state.kind, LayoutKind::Row) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "wrap can only be configured on a row Layout",
+                    ));
+                }
+                state.wrap = wrap;
             }
             if let Some(kind) = kind {
                 state.kind = match kind {
@@ -523,8 +537,17 @@ impl PyLayoutRegion {
         })
     }
 
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, fit="none"))]
-    fn layout(&self, kind: &str, gap: f64, columns: usize, fit: &str) -> PyResult<PyLayout> {
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false))]
+    fn layout(
+        &self,
+        kind: &str,
+        gap: f64,
+        columns: usize,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        wrap: bool,
+    ) -> PyResult<PyLayout> {
         let kind = match kind {
             "row" => LayoutKind::Row,
             "column" => LayoutKind::Column,
@@ -546,14 +569,24 @@ impl PyLayoutRegion {
                 ))
             }
         };
+        for (name, value) in [("width", width), ("height", height)] {
+            if let Some(value) = value {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "{name} must be a finite positive number"
+                    )));
+                }
+            }
+        }
         Ok(PyLayout::new(
             self.canvas.clone(),
             kind,
             gap,
-            Some(self.region.width()),
-            Some(self.region.height()),
+            Some(width.unwrap_or_else(|| self.region.width())),
+            Some(height.unwrap_or_else(|| self.region.height())),
             shrink_to_fit,
             Some(self.region),
+            wrap,
         ))
     }
 }

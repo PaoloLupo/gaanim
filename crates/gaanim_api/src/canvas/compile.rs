@@ -797,6 +797,7 @@ impl Canvas {
                     max_width,
                     max_height,
                     shrink_to_fit,
+                    wrap,
                 } => {
                     let Some(container) = id_map.get(container).copied() else {
                         continue;
@@ -836,6 +837,11 @@ impl Canvas {
                         })
                         .collect();
                     match kind {
+                        LayoutKind::Row if *wrap => builder.arrange_wrapped(
+                            MobjectRef { id: container },
+                            max_width.unwrap_or(f64::INFINITY),
+                            *gap,
+                        ),
                         LayoutKind::Row => builder.arrange_aligned(
                             MobjectRef { id: container },
                             gaanim_layout::Direction::Right,
@@ -2808,6 +2814,7 @@ mod tests {
             None,
             None,
             false,
+            false,
         );
         canvas.set_group_members(&container, &[&first, &second]);
         canvas.reflow_layout(
@@ -2820,6 +2827,7 @@ mod tests {
             None,
             None,
             None,
+            false,
             false,
         );
 

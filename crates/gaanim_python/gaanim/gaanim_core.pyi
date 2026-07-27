@@ -69,7 +69,10 @@ class LayoutRegion:
         *,
         gap: float = 24.0,
         columns: int = 2,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
         fit: Literal["none", "shrink"] = "none",
+        wrap: bool = False,
     ) -> Layout: ...
 
 class GridLayout:
@@ -125,6 +128,7 @@ class Layout:
         width: Optional[float] = None,
         height: Optional[float] = None,
         fit: Optional[Literal["none", "shrink"]] = None,
+        wrap: Optional[bool] = None,
         animate: Optional[float] = None,
     ) -> None: ...
 
@@ -316,6 +320,7 @@ class Scene:
         width: Optional[float] = None,
         height: Optional[float] = None,
         fit: Literal["none", "shrink"] = "none",
+        wrap: bool = False,
     ) -> Layout: ...
     def layout_preset(
         self,

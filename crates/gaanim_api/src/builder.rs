@@ -2853,6 +2853,70 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Arranges direct children left-to-right, starting a new row when the
+    /// next item would exceed `max_width`. The resulting block is centered on
+    /// the group origin, matching the other arrange helpers.
+    pub fn arrange_wrapped(&mut self, group: MobjectRef, max_width: f64, gap: f64) {
+        let children = match self.states.get(group.id) {
+            Some(state) => state.children.clone(),
+            None => return,
+        };
+        if children.is_empty() || !max_width.is_finite() || max_width <= 0.0 {
+            return;
+        }
+        let gap = gap.max(0.0);
+        let mut placements = Vec::with_capacity(children.len());
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut row_height = 0.0;
+        let mut union: Option<Bounds3D> = None;
+
+        for child in &children {
+            let Some(state) = self.states.get(*child) else {
+                continue;
+            };
+            let mut transform = state.transform;
+            transform.translation = gaanim_core::glam::DVec3::ZERO;
+            let local = gaanim_layout::transform_bounds(state.bounds, &transform);
+            let size = local.size();
+            if x > 0.0 && x + size.x > max_width {
+                x = 0.0;
+                y -= row_height + gap;
+                row_height = 0.0;
+            }
+            let translation = gaanim_core::glam::DVec3::new(x - local.min.x, y - local.max.y, 0.0);
+            let placed = Bounds3D::new(local.min + translation, local.max + translation);
+            union = Some(union.map(|bounds| bounds.union(&placed)).unwrap_or(placed));
+            placements.push((*child, translation));
+            x += size.x + gap;
+            row_height = row_height.max(size.y);
+        }
+        let Some(union) = union else { return };
+        let center = union.center();
+        let mut final_union: Option<Bounds3D> = None;
+        for (child, mut translation) in placements {
+            translation -= center;
+            if let Some(state) = self.states.get_mut(child) {
+                state.transform.translation = translation;
+                self.commands.entity(state.entity).insert(state.transform);
+                let bounds = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                final_union = Some(
+                    final_union
+                        .map(|value| value.union(&bounds))
+                        .unwrap_or(bounds),
+                );
+            }
+        }
+        if let Some(bounds) = final_union
+            && let Some(group_state) = self.states.get_mut(group.id)
+        {
+            group_state.bounds = bounds;
+            self.commands
+                .entity(group_state.entity)
+                .insert(gaanim_scene::LocalBounds(bounds));
+        }
+    }
+
     /// Arranges the immediate children of a group in a grid.
     pub fn arrange_in_grid(
         &mut self,

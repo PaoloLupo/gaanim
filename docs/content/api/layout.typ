@@ -25,6 +25,12 @@ agenda.add(scene.text("Context"))
 agenda.add(scene.text("Main idea"), animate=0.35)
 ```
 
+Rows can wrap cards into new lines when they reach their configured width:
+
+```python
+cards = content.layout("row", width=760, gap=24, wrap=True)
+```
+
 ```python
 from gaanim import Anchor, Scene
 
