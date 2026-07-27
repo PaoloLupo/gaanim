@@ -220,18 +220,6 @@ where
 
     let resize_filter = filter_for_quality(config.encoding_speed);
 
-    let encoder = ParallelEncoder::new(EncoderConfig {
-        output_path: config.output_path.clone(),
-        width: config.width,
-        height: config.height,
-        fps: config.fps,
-        format: config.format,
-        transparent: config.transparent,
-        crf: config.crf,
-        encoding_speed: config.encoding_speed,
-        video_encoder: config.video_encoder,
-    })?;
-
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -271,6 +259,21 @@ where
         .unwrap_or(timeline_duration)
         .min(timeline_duration);
     let render_length = render_end - render_start;
+
+    let encoder = ParallelEncoder::new(EncoderConfig {
+        output_path: config.output_path.clone(),
+        width: config.width,
+        height: config.height,
+        fps: config.fps,
+        format: config.format,
+        transparent: config.transparent,
+        crf: config.crf,
+        encoding_speed: config.encoding_speed,
+        video_encoder: config.video_encoder,
+        audio_tracks: config.audio_tracks.clone(),
+        render_start,
+        render_duration: render_length,
+    })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
     let pb = create_progress_bar(total_frames);
@@ -331,18 +334,6 @@ where
     }
     println!("------------------------------------------------------------");
 
-    let mut encoder = ParallelEncoder::new(EncoderConfig {
-        output_path: config.output_path.clone(),
-        width: config.width,
-        height: config.height,
-        fps: config.fps,
-        format: config.format,
-        transparent: config.transparent,
-        crf: config.crf,
-        encoding_speed: config.encoding_speed,
-        video_encoder: config.video_encoder,
-    })?;
-
     let mut gpu = GpuContext::new(config.width, config.height)
         .map_err(crate::encoder::ExportError::General)?;
 
@@ -367,6 +358,21 @@ where
         .unwrap_or(timeline_duration)
         .min(timeline_duration);
     let render_length = render_end - render_start;
+
+    let mut encoder = ParallelEncoder::new(EncoderConfig {
+        output_path: config.output_path.clone(),
+        width: config.width,
+        height: config.height,
+        fps: config.fps,
+        format: config.format,
+        transparent: config.transparent,
+        crf: config.crf,
+        encoding_speed: config.encoding_speed,
+        video_encoder: config.video_encoder,
+        audio_tracks: config.audio_tracks.clone(),
+        render_start,
+        render_duration: render_length,
+    })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
     let frame_time_step = 1.0 / config.fps as f64;

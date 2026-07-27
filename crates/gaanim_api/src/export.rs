@@ -9,10 +9,13 @@ use crate::canvas::Canvas;
 use crate::runtime::replay_canvas_into;
 
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
-pub use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, ExportFormat, QualityPreset};
+pub use gaanim_export::prelude::{
+    AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, QualityPreset,
+};
 
 /// Export a Canvas using the supplied `gaanim_export::ExportConfig`.
-pub fn export_canvas(canvas: Canvas, config: ExportConfig) -> Result<(), ExportError> {
+pub fn export_canvas(canvas: Canvas, mut config: ExportConfig) -> Result<(), ExportError> {
+    config.audio_tracks.extend(canvas.audio_tracks.clone());
     if config.headless {
         export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
     } else {

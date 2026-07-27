@@ -418,6 +418,33 @@ impl PyScene {
             .reload_assets();
     }
 
+    /// Mix an audio file into MP4/WebM exports. With no explicit `start`, the
+    /// file begins at the scene's current timeline cursor.
+    #[pyo3(signature = (
+        path,
+        *,
+        start=None,
+        duration=None,
+        volume=1.0,
+        fade_in=0.0,
+        fade_out=0.0,
+    ))]
+    fn audio(
+        &self,
+        path: &str,
+        start: Option<f64>,
+        duration: Option<f64>,
+        volume: f64,
+        fade_in: f64,
+        fade_out: f64,
+    ) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .audio(path, start, duration, volume, fade_in, fade_out)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     /// Starts a deferred vertical or horizontal sequence of drawables.
     #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
     fn flow(

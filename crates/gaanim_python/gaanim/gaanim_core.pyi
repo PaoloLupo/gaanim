@@ -317,6 +317,16 @@ class Scene:
     def preload(self, paths: Sequence[str]) -> None: ...
     def load_project(self, path: str = "gaanim.toml") -> None: ...
     def reload_assets(self) -> None: ...
+    def audio(
+        self,
+        path: str,
+        *,
+        start: Optional[float] = None,
+        duration: Optional[float] = None,
+        volume: float = 1.0,
+        fade_in: float = 0.0,
+        fade_out: float = 0.0,
+    ) -> None: ...
     def layout(
         self,
         kind: Literal["row", "column", "grid"] = "column",

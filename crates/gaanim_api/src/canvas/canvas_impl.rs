@@ -18,6 +18,7 @@ use crate::canvas::types::{
     SpawnKind,
 };
 use crate::canvas::{FrameLayout, LayoutPreset, LayoutRegion};
+use crate::export::{AudioTrack, AudioTrackError};
 
 /// Error returned when selecting a built-in visual theme by name.
 #[derive(Debug, thiserror::Error)]
@@ -115,6 +116,8 @@ pub struct Canvas {
     pub theme: Option<String>,
     pub margin: Margin,
     pub asset_root: Option<PathBuf>,
+    /// Audio sources mixed by FFmpeg when this canvas is exported.
+    pub audio_tracks: Vec<AudioTrack>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
     pub(crate) camera_rotation: gaanim_core::glam::DQuat,
@@ -131,6 +134,7 @@ impl Canvas {
             units: CoordinateSystem::Pixels,
             margin: Margin::default(),
             asset_root: None,
+            audio_tracks: Vec::new(),
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
@@ -257,6 +261,37 @@ impl Canvas {
         } else {
             path.to_path_buf()
         }
+    }
+
+    /// Add an audio source at an absolute scene time, or at the current cursor
+    /// when `start_time` is omitted. Audio is mixed and muxed into MP4/WebM
+    /// exports; preview playback remains visual-only for now.
+    pub fn audio(
+        &mut self,
+        path: impl AsRef<Path>,
+        start_time: Option<f64>,
+        duration: Option<f64>,
+        volume: f64,
+        fade_in: f64,
+        fade_out: f64,
+    ) -> Result<(), AudioTrackError> {
+        let start_time = start_time.unwrap_or_else(|| {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active()
+                .cursor
+        });
+        let track = AudioTrack::new(
+            self.resolve_asset_path(path),
+            start_time,
+            duration,
+            volume,
+            fade_in,
+            fade_out,
+        )?;
+        self.audio_tracks.push(track);
+        Ok(())
     }
 
     /// Resolve and validate assets before playback. Raster images are also

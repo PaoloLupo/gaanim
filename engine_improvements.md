@@ -35,11 +35,12 @@ paquete Python autónomo.
 En términos prácticos:
 
 - **Sí es viable hoy** para prototipos y piezas vectoriales programáticas: títulos,
-  diagramas simples, fórmulas, explicaciones matemáticas y animaciones cortas sin audio.
+  diagramas simples, fórmulas, explicaciones matemáticas y animaciones cortas con audio
+  mezclado al exportar.
 - **Es experimental** para presentaciones interactivas: existen breakpoints y navegación,
   pero faltan las herramientas propias de una solución de slides.
 - **Todavía no está listo** como pipeline general de producción de contenido: faltan
-  audio, SVG, gráficos de datos, código, plantillas y una distribución coherente.
+  preview de audio, SVG avanzado, gráficos de datos, código, plantillas y una distribución coherente.
 - **Todavía no está listo** como librería pública estable: API, documentación, ejemplos,
   stubs, versionado, pruebas de integración y empaquetado deben converger.
 
@@ -277,7 +278,9 @@ formato por extensión y usa el tamaño del canvas. Transparencia, presets, enco
 calidad y rangos no están expuestos de forma completa. La exportación depende de FFmpeg
 y aún necesita smoke tests automatizados por plataforma y formato.
 
-No hay audio: los exports son video o secuencias de imagen sin mezcla ni muxing de pistas.
+`scene.audio(...)` declara pistas relativas al timeline; el exportador las mezcla y
+muxea con FFmpeg en MP4 (AAC) y WebM (Opus). PNG, GIF y WebP no aceptan audio.
+Todavía no hay reproducción, waveform ni scrubbing de audio en el editor.
 
 ### 9. Editor y flujo de iteración
 
@@ -454,7 +457,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
   transforms, `viewBox` y `<use>`.
 - [ ] SVG avanzado: grupos origen direccionables, clipping, gradientes, filtros y texto.
-- [ ] Audio con muxing en exportación.
+- [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
+  aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
+  reproducción/scrubbing en preview, análisis de duración y editor de pistas.
 - [ ] API de fuentes, gradientes y cámara.
 - [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
 - [x] Componentes editoriales: listas, callouts, captions y title cards.

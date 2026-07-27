@@ -4,6 +4,8 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::JoinHandle;
 use thiserror::Error;
 
+use crate::config::AudioTrack;
+
 #[derive(Error, Debug)]
 pub enum ExportError {
     #[error("FFmpeg error: {0}")]
@@ -217,6 +219,11 @@ pub struct EncoderConfig {
     pub crf: u32,
     pub encoding_speed: EncodingSpeed,
     pub video_encoder: VideoEncoder,
+    /// Tracks use scene-time coordinates; these values place them in the
+    /// exported range before FFmpeg mixes them.
+    pub audio_tracks: Vec<AudioTrack>,
+    pub render_start: f64,
+    pub render_duration: f64,
 }
 
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
@@ -290,6 +297,71 @@ impl ParallelEncoder {
         }
     }
 
+    fn audio_filter(track: &AudioTrack, input_index: usize, render_start: f64) -> String {
+        let relative_start = track.start_time - render_start;
+        let source_trim = (-relative_start).max(0.0);
+        let mut filter = format!("[{input_index}:a]aresample=48000");
+        if source_trim > 0.0 || track.duration.is_some() {
+            filter.push_str(&format!(",atrim=start={source_trim:.6}"));
+            if let Some(duration) = track.duration {
+                filter.push_str(&format!(":duration={duration:.6}"));
+            }
+        }
+        filter.push_str(&format!(",volume={:.6}", track.volume));
+        if track.fade_in > 0.0 {
+            filter.push_str(&format!(",afade=t=in:st=0:d={:.6}", track.fade_in));
+        }
+        if track.fade_out > 0.0 {
+            let duration = track.duration.expect("validated audio fade-out duration");
+            filter.push_str(&format!(
+                ",afade=t=out:st={:.6}:d={:.6}",
+                (duration - track.fade_out).max(0.0),
+                track.fade_out
+            ));
+        }
+        if relative_start > 0.0 {
+            let delay_ms = (relative_start * 1000.0).round().max(0.0) as u64;
+            filter.push_str(&format!(",adelay={delay_ms}:all=1"));
+        }
+        filter
+    }
+
+    fn add_audio_inputs(cmd: &mut Command, config: &EncoderConfig) -> Result<Option<String>> {
+        if config.audio_tracks.is_empty() {
+            return Ok(None);
+        }
+        if !matches!(config.format, ExportFormat::Mp4 | ExportFormat::Webm) {
+            return Err(ExportError::General(
+                "audio tracks can only be exported to MP4 or WebM".to_string(),
+            ));
+        }
+        for track in &config.audio_tracks {
+            cmd.arg("-i").arg(&track.path);
+        }
+        let filters = config
+            .audio_tracks
+            .iter()
+            .enumerate()
+            .map(|(index, track)| {
+                format!(
+                    "{}[audio_{index}]",
+                    Self::audio_filter(track, index + 1, config.render_start)
+                )
+            })
+            .collect::<Vec<_>>();
+        let inputs = (0..config.audio_tracks.len())
+            .map(|index| format!("[audio_{index}]"))
+            .collect::<String>();
+        let mix = format!(
+            "{inputs}amix=inputs={}:duration=longest:normalize=0,atrim=duration={:.6}[audio_out]",
+            config.audio_tracks.len(),
+            config.render_duration
+        );
+        cmd.arg("-filter_complex")
+            .arg(filters.join(";") + ";" + &mix);
+        Ok(Some("[audio_out]".to_string()))
+    }
+
     fn encoder_worker(config: EncoderConfig, receiver: Receiver<Option<Vec<u8>>>) -> Result<()> {
         match config.format {
             ExportFormat::PngSequence => {
@@ -348,6 +420,8 @@ impl ParallelEncoder {
                     .arg(config.fps.to_string())
                     .arg("-i")
                     .arg("-");
+
+                let audio_output = Self::add_audio_inputs(&mut cmd, &config)?;
 
                 match config.format {
                     ExportFormat::Mp4 => {
@@ -454,6 +528,20 @@ impl ParallelEncoder {
                            .arg("[0:v] split [a][b];[a] palettegen=stats_mode=single [p];[b][p] paletteuse=new=1");
                     }
                     _ => unreachable!(),
+                }
+
+                if let Some(audio_output) = audio_output {
+                    cmd.arg("-map").arg("0:v:0").arg("-map").arg(audio_output);
+                    match config.format {
+                        ExportFormat::Mp4 => {
+                            cmd.arg("-c:a").arg("aac").arg("-b:a").arg("192k");
+                        }
+                        ExportFormat::Webm => {
+                            cmd.arg("-c:a").arg("libopus").arg("-b:a").arg("128k");
+                        }
+                        _ => unreachable!("validated audio export format"),
+                    }
+                    cmd.arg("-shortest");
                 }
 
                 cmd.arg(&config.output_path);
