@@ -73,6 +73,7 @@ class LayoutRegion:
         height: Optional[float] = None,
         fit: Literal["none", "shrink"] = "none",
         wrap: bool = False,
+        justify: Literal["start", "center", "end", "between"] = "center",
     ) -> Layout: ...
 
 class GridLayout:
@@ -129,6 +130,7 @@ class Layout:
         height: Optional[float] = None,
         fit: Optional[Literal["none", "shrink"]] = None,
         wrap: Optional[bool] = None,
+        justify: Optional[Literal["start", "center", "end", "between"]] = None,
         animate: Optional[float] = None,
     ) -> None: ...
 
@@ -321,6 +323,7 @@ class Scene:
         height: Optional[float] = None,
         fit: Literal["none", "shrink"] = "none",
         wrap: bool = False,
+        justify: Literal["start", "center", "end", "between"] = "center",
     ) -> Layout: ...
     def layout_preset(
         self,

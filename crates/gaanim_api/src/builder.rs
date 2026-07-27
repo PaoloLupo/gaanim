@@ -2917,6 +2917,67 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Arranges a row within a fixed width using start/center/end/between.
+    pub fn arrange_justified(&mut self, group: MobjectRef, width: f64, gap: f64, justify: &str) {
+        let children = match self.states.get(group.id) {
+            Some(state) => state.children.clone(),
+            None => return,
+        };
+        if children.is_empty() {
+            return;
+        }
+        let mut items = Vec::new();
+        let mut total = 0.0;
+        for child in &children {
+            if let Some(state) = self.states.get(*child) {
+                let mut transform = state.transform;
+                transform.translation = gaanim_core::glam::DVec3::ZERO;
+                let bounds = gaanim_layout::transform_bounds(state.bounds, &transform);
+                total += bounds.width();
+                items.push((*child, bounds));
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        let width = if width.is_finite() {
+            width.max(total)
+        } else {
+            total + gap.max(0.0) * (items.len().saturating_sub(1) as f64)
+        };
+        let base_gap = gap.max(0.0);
+        let used = total + base_gap * (items.len().saturating_sub(1) as f64);
+        let (mut x, spacing) = match justify {
+            "start" => (-width * 0.5, base_gap),
+            "end" => (width * 0.5 - used, base_gap),
+            "between" if items.len() > 1 => (
+                -width * 0.5,
+                ((width - total) / (items.len() - 1) as f64).max(0.0),
+            ),
+            _ => (-used * 0.5, base_gap),
+        };
+        let mut union: Option<Bounds3D> = None;
+        for (child, bounds) in items {
+            let translation =
+                gaanim_core::glam::DVec3::new(x - bounds.min.x, -bounds.center().y, 0.0);
+            if let Some(state) = self.states.get_mut(child) {
+                state.transform.translation = translation;
+                self.commands.entity(state.entity).insert(state.transform);
+                let placed = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                union = Some(union.map(|value| value.union(&placed)).unwrap_or(placed));
+            }
+            x += bounds.width() + spacing;
+        }
+        if let Some(bounds) = union
+            && let Some(state) = self.states.get_mut(group.id)
+        {
+            state.bounds = bounds;
+            self.commands
+                .entity(state.entity)
+                .insert(gaanim_scene::LocalBounds(bounds));
+        }
+    }
+
     /// Arranges the immediate children of a group in a grid.
     pub fn arrange_in_grid(
         &mut self,

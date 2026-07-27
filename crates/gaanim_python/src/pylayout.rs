@@ -18,6 +18,7 @@ struct LayoutState {
     max_height: Option<f64>,
     shrink_to_fit: bool,
     wrap: bool,
+    justify: String,
     region: Option<LayoutRegion>,
     members: Vec<gaanim_api::canvas::DrawableHandle>,
     root: Option<gaanim_api::canvas::DrawableHandle>,
@@ -42,6 +43,7 @@ impl PyLayout {
         shrink_to_fit: bool,
         region: Option<LayoutRegion>,
         wrap: bool,
+        justify: &str,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LayoutState {
@@ -52,6 +54,7 @@ impl PyLayout {
                 max_height,
                 shrink_to_fit,
                 wrap,
+                justify: justify.to_string(),
                 region,
                 members: Vec::new(),
                 root: None,
@@ -70,7 +73,19 @@ impl PyLayout {
         entering: Option<gaanim_api::canvas::DrawableHandle>,
         leaving: Option<gaanim_api::canvas::DrawableHandle>,
     ) {
-        let (canvas, kind, gap, max_width, max_height, shrink_to_fit, wrap, root, members, parents) = {
+        let (
+            canvas,
+            kind,
+            gap,
+            max_width,
+            max_height,
+            shrink_to_fit,
+            wrap,
+            justify,
+            root,
+            members,
+            parents,
+        ) = {
             let state = inner.lock().expect("layout poisoned");
             (
                 state.canvas.clone(),
@@ -80,6 +95,7 @@ impl PyLayout {
                 state.max_height,
                 state.shrink_to_fit,
                 state.wrap,
+                state.justify.clone(),
                 state.root.clone(),
                 state.members.clone(),
                 state.parents.clone(),
@@ -101,6 +117,7 @@ impl PyLayout {
             max_height,
             shrink_to_fit,
             wrap,
+            &justify,
         );
         drop(canvas);
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
@@ -201,7 +218,7 @@ impl PyLayout {
 
     /// Updates this container's layout rule and recalculates its children.
     /// Omitted values keep their current setting.
-    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, wrap=None, animate=None))]
+    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, wrap=None, justify=None, animate=None))]
     fn configure(
         &self,
         kind: Option<&str>,
@@ -211,6 +228,7 @@ impl PyLayout {
         height: Option<f64>,
         fit: Option<&str>,
         wrap: Option<bool>,
+        justify: Option<&str>,
         animate: Option<f64>,
     ) -> PyResult<()> {
         {
@@ -257,6 +275,19 @@ impl PyLayout {
                     ));
                 }
                 state.wrap = wrap;
+            }
+            if let Some(justify) = justify {
+                if !matches!(state.kind, LayoutKind::Row) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "justify can only be configured on a row Layout",
+                    ));
+                }
+                if !matches!(justify, "start" | "center" | "end" | "between") {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "justify must be 'start', 'center', 'end', or 'between'",
+                    ));
+                }
+                state.justify = justify.to_string();
             }
             if let Some(kind) = kind {
                 state.kind = match kind {
@@ -537,7 +568,7 @@ impl PyLayoutRegion {
         })
     }
 
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false))]
+    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false, justify="center"))]
     fn layout(
         &self,
         kind: &str,
@@ -547,6 +578,7 @@ impl PyLayoutRegion {
         height: Option<f64>,
         fit: &str,
         wrap: bool,
+        justify: &str,
     ) -> PyResult<PyLayout> {
         let kind = match kind {
             "row" => LayoutKind::Row,
@@ -569,6 +601,11 @@ impl PyLayoutRegion {
                 ))
             }
         };
+        if !matches!(justify, "start" | "center" | "end" | "between") {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "justify must be 'start', 'center', 'end', or 'between'",
+            ));
+        }
         for (name, value) in [("width", width), ("height", height)] {
             if let Some(value) = value {
                 if !value.is_finite() || value <= 0.0 {
@@ -587,6 +624,7 @@ impl PyLayoutRegion {
             shrink_to_fit,
             Some(self.region),
             wrap,
+            justify,
         ))
     }
 }

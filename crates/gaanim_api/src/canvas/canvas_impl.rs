@@ -867,6 +867,7 @@ impl Canvas {
         max_height: Option<f64>,
         shrink_to_fit: bool,
         wrap: bool,
+        justify: &str,
     ) {
         self.state
             .lock()
@@ -885,6 +886,7 @@ impl Canvas {
                 max_height: max_height.filter(|value| value.is_finite() && *value > 0.0),
                 shrink_to_fit,
                 wrap,
+                justify: justify.to_string(),
             });
     }
 

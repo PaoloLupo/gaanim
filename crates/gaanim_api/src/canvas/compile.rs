@@ -798,6 +798,7 @@ impl Canvas {
                     max_height,
                     shrink_to_fit,
                     wrap,
+                    justify,
                 } => {
                     let Some(container) = id_map.get(container).copied() else {
                         continue;
@@ -841,6 +842,12 @@ impl Canvas {
                             MobjectRef { id: container },
                             max_width.unwrap_or(f64::INFINITY),
                             *gap,
+                        ),
+                        LayoutKind::Row if justify != "center" => builder.arrange_justified(
+                            MobjectRef { id: container },
+                            max_width.unwrap_or(f64::INFINITY),
+                            *gap,
+                            justify,
                         ),
                         LayoutKind::Row => builder.arrange_aligned(
                             MobjectRef { id: container },

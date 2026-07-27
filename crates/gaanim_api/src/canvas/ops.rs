@@ -228,6 +228,7 @@ pub(crate) enum Op {
         max_height: Option<f64>,
         shrink_to_fit: bool,
         wrap: bool,
+        justify: String,
     },
 
     // -- Reactive ops (Phase 2) --
