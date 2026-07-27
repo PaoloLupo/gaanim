@@ -410,6 +410,14 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
+    /// Invalidate decoded raster assets so a hot reload reads changed files.
+    fn reload_assets(&self) {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .reload_assets();
+    }
+
     /// Starts a deferred vertical or horizontal sequence of drawables.
     #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
     fn flow(

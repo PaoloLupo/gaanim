@@ -469,8 +469,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [~] Asset manager y formato mínimo de proyecto: `scene.assets_dir(...)`
   resuelve rutas relativas para imágenes y SVG, y `scene.preload([...])`
   valida SVG y calienta la caché raster. `scene.load_project("gaanim.toml")`
-  adopta el `assets_dir` relativo del manifiesto mínimo; falta recarga de assets
-  y un manifiesto más rico.
+  adopta el `assets_dir` relativo del manifiesto mínimo y
+  `scene.reload_assets()` invalida la caché raster; falta watcher automático y
+  un manifiesto más rico.
 - [ ] Cache y hot reload incremental donde sea medible.
 
 ### 0.6 — Presentaciones

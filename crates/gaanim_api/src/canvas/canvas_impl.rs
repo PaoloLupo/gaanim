@@ -284,6 +284,14 @@ impl Canvas {
         Ok(())
     }
 
+    /// Drop decoded raster assets so the next `image`/`preload` observes files
+    /// changed on disk. SVG documents are resolved anew for every drawable.
+    pub fn reload_assets(&mut self) {
+        if let Some(cache) = IMAGE_CACHE.get() {
+            cache.lock().expect("image cache poisoned").clear();
+        }
+    }
+
     fn safe_frame(&self) -> gaanim_math::Bounds3D {
         let raw = self.units.frame_bounds(self.width, self.height);
         gaanim_math::Bounds3D::new_2d(

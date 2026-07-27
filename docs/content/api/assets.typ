@@ -54,5 +54,17 @@ scene.preload(["logo.svg", "cover.png", "diagram.webp"])
 ```
 
 Failures identify the asset that could not be resolved or decoded. The current
-manifest intentionally contains only `assets_dir`; fonts, export presets and
-asset hot reload are planned extensions.
+manifest intentionally contains only `assets_dir`; fonts and export presets are
+planned extensions.
+
+== Refreshing changed files
+
+When a raster asset changes on disk without restarting the process, clear the
+decoded image cache before rebuilding the affected drawables:
+
+```python
+scene.reload_assets()
+cover = scene.image("cover.png")
+```
+
+SVG files are parsed again whenever `scene.svg(...)` creates a drawable.
