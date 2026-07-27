@@ -370,6 +370,46 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
+    /// Load the minimal project manifest. It currently accepts one setting:
+    /// `assets_dir = "assets"`, resolved relative to the manifest file.
+    #[pyo3(signature = (path="gaanim.toml"))]
+    fn load_project(&self, path: &str) -> PyResult<()> {
+        let manifest = std::path::PathBuf::from(path);
+        let source = std::fs::read_to_string(&manifest).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "could not read project manifest {path:?}: {error}"
+            ))
+        })?;
+        let assets_dir = source
+            .lines()
+            .find_map(|line| {
+                let line = line.trim();
+                let value = line
+                    .strip_prefix("assets_dir")?
+                    .trim_start()
+                    .strip_prefix('=')?
+                    .trim();
+                value
+                    .strip_prefix('"')?
+                    .strip_suffix('"')
+                    .map(str::to_owned)
+            })
+            .ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(
+                    "project manifest must declare assets_dir = \"...\"",
+                )
+            })?;
+        let root = manifest
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(assets_dir);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_asset_root(root)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     /// Starts a deferred vertical or horizontal sequence of drawables.
     #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
     fn flow(

@@ -2,6 +2,7 @@
 #include "getting-started/index.typ"
 #include "api/scene.typ"
 #include "api/layout.typ"
+#include "api/assets.typ"
 #include "api/mobjects.typ"
 #include "api/animations.typ"
 #include "api/themes.typ"

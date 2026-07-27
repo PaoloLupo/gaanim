@@ -468,8 +468,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [~] Sistema de temas público: `technical`/`scientific` y `paper` configuran fondo y fills tipográficos en el runtime; `paper` está cubierto por regresión visual con texto y ecuación negros. Faltan plantillas de composición con branding.
 - [~] Asset manager y formato mínimo de proyecto: `scene.assets_dir(...)`
   resuelve rutas relativas para imágenes y SVG, y `scene.preload([...])`
-  valida SVG y calienta la caché raster; faltan manifiesto de proyecto y
-  recarga de assets.
+  valida SVG y calienta la caché raster. `scene.load_project("gaanim.toml")`
+  adopta el `assets_dir` relativo del manifiesto mínimo; falta recarga de assets
+  y un manifiesto más rico.
 - [ ] Cache y hot reload incremental donde sea medible.
 
 ### 0.6 — Presentaciones
