@@ -11,7 +11,7 @@ pub use types::{
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};
 mod drawable;
-pub use drawable::{DrawableHandle, FragmentSelection};
+pub use drawable::{DrawableHandle, FragmentSelection, SvgPartError};
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{AssetPreloadError, AssetRootError, Canvas, ImageLoadError, ThemeError};

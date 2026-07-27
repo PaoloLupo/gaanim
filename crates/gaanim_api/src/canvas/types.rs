@@ -5,7 +5,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
-use gaanim_objects::prelude::{ImageView, SvgDocument};
+use gaanim_objects::prelude::{ImageView, SvgPath};
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::ops::{Op, SharedCanvasState};
@@ -390,8 +390,8 @@ pub enum SpawnKind {
         image: ImageData,
         view: ImageView,
     },
-    /// Resolved vector paths imported from an SVG document.
-    Svg(SvgDocument),
+    /// One resolved vector path imported from an SVG document.
+    SvgPath(SvgPath),
     Group(Vec<ObjectId>),
     /// Invisible value tracker entity (FloatSignal). No visual output.
     ValueTracker(f64),

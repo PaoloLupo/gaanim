@@ -2703,31 +2703,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         MobjectRef { id }
     }
 
-    /// Creates an SVG container before its child paths are spawned.
-    ///
-    /// Unlike retroactive grouping, children are parented at spawn time. This
-    /// matches text hierarchies and keeps the imported vector paths visible
-    /// while allowing the returned container to be transformed as one object.
-    pub fn svg_group(&mut self, paths: &[gaanim_objects::prelude::SvgPath]) -> MobjectRef {
-        let mut paths = paths.iter();
-        let Some(first) = paths.next() else {
-            return self
-                .svg_path(&gaanim_objects::prelude::SvgPath {
-                    id: String::new(),
-                    path: kurbo::BezPath::new(),
-                    bounds: Bounds3D::default(),
-                    fill: None,
-                    stroke: StrokeBrush::transparent(),
-                })
-                .spawn();
-        };
-        let root = self.svg_path(first).spawn();
-        for path in paths {
-            self.svg_path(path).spawn();
-        }
-        root
-    }
-
     /// Adds a child mobject to an existing group, adjusting its local transform.
     pub fn add_to_group(&mut self, group: MobjectRef, child: MobjectRef) {
         let (group_entity, group_transform) = match self.states.get(group.id) {

@@ -4,5 +4,5 @@ pub use crate::primitives::{
     dot, ellipse, image, line, open_path, polygon, rectangle, regular_polygon, rounded_rect,
     square, star, triangle,
 };
-pub use crate::svg::{SvgDocument, SvgLoadError, SvgPath};
+pub use crate::svg::{SvgDocument, SvgGroup, SvgLoadError, SvgNode, SvgPath};
 pub use crate::text::{MathContent, TextContent, TypstDocument};

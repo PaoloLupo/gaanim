@@ -9,24 +9,29 @@
       "file": "seek_0000_t_0_000000.png"
     },
     {
-      "id": "seek_0001_t_0_600000",
+      "id": "seek_0001_t_0_400000",
+      "time_seconds": 0.4,
+      "file": "seek_0001_t_0_400000.png"
+    },
+    {
+      "id": "seek_0002_t_0_600000",
       "time_seconds": 0.6,
-      "file": "seek_0001_t_0_600000.png"
+      "file": "seek_0002_t_0_600000.png"
     },
     {
-      "id": "seek_0002_t_0_900000",
-      "time_seconds": 0.9,
-      "file": "seek_0002_t_0_900000.png"
+      "id": "seek_0003_t_0_800000",
+      "time_seconds": 0.8,
+      "file": "seek_0003_t_0_800000.png"
     },
     {
-      "id": "seek_0003_t_1_400000",
-      "time_seconds": 1.4,
-      "file": "seek_0003_t_1_400000.png"
+      "id": "seek_0004_t_1_200000",
+      "time_seconds": 1.2,
+      "file": "seek_0004_t_1_200000.png"
     },
     {
-      "id": "seek_0004_t_2_050000",
-      "time_seconds": 2.05,
-      "file": "seek_0004_t_2_050000.png"
+      "id": "seek_0005_t_1_600000",
+      "time_seconds": 1.6,
+      "file": "seek_0005_t_1_600000.png"
     }
   ]
 }

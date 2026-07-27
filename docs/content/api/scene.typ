@@ -91,12 +91,23 @@ a source rectangle. The regular `Drawable` methods such as `scaled`, `rotated`,
 `opacity`, and `at` remain available. Reusing the same path shares its decoded
 texture for the process.
 
-`svg(path)` imports SVG geometry as a group of regular vector paths, so the
-imported vector paths can be styled individually by their SVG source. It resolves
-paths and basic shapes, solid fills/strokes, CSS,
-`viewBox`, transforms, and `<use>`. Raster SVG images, text, gradients,
-patterns, filters, masks, and individual source-group handles are not yet
-preserved.
+`svg(path)` imports SVG geometry as a real hierarchy of regular vector paths
+and source groups. Named groups and paths are available through `part(id)`:
+
+```python
+robot = scene.svg("assets/robot.svg")
+arm = robot.part("left-arm")
+joint = robot.part("elbow")
+
+arm.fill(BLUE)  # group styles reach every descendant path
+scene.play([joint.rotate(0.6)])
+```
+
+Part IDs are case-sensitive. Duplicate source IDs fail during import, while an
+unknown ID raises `KeyError` and lists the available names. The importer
+resolves paths and basic shapes, solid fills/strokes, CSS, `viewBox`,
+transforms, and `<use>`. Raster SVG images, text, gradients, patterns, filters,
+masks, and clipping are not yet preserved.
 
 `axes(x=..., y=..., *, grid=True, ticks=True, numbers=True, axis_color=...,
 grid_color=..., axis_width=3, grid_width=1)` creates Cartesian axes with

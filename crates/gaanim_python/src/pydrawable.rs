@@ -1,6 +1,6 @@
 //! Thin PyDrawable wrapper over gaanim_api DrawableHandle.
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
@@ -138,6 +138,22 @@ impl PyFragmentSelection {
 
 #[pymethods]
 impl PyDrawable {
+    /// Return a named source group or path from an imported SVG.
+    fn part(&self, id: &str) -> PyResult<Self> {
+        if id.is_empty() {
+            return Err(PyKeyError::new_err("SVG part id must not be empty"));
+        }
+        match self.0.part(id) {
+            Ok(part) => Ok(Self(part)),
+            Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
+                "this drawable has no named SVG parts",
+            )),
+            Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
+                Err(PyKeyError::new_err(error.to_string()))
+            }
+        }
+    }
+
     fn fill(&self, color: PyColor) -> Self {
         Self(self.0.clone().fill(color.0))
     }

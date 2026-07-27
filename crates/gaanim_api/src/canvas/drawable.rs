@@ -1,5 +1,8 @@
 //! DrawableHandle — ergonomic mobject handle with fluent configuration.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
@@ -29,6 +32,16 @@ pub struct DrawableHandle {
     pub(crate) spec: SharedObjectSpec,
     pub(crate) state: SharedCanvasState,
     pub(crate) segment_idx: usize,
+    svg_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
+    style_targets: Arc<Vec<SharedObjectSpec>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SvgPartError {
+    #[error("this drawable has no named SVG parts")]
+    NotSvg,
+    #[error("unknown SVG part '{id}'; available ids: {available}")]
+    Unknown { id: String, available: String },
 }
 
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
@@ -79,12 +92,47 @@ impl DrawableHandle {
             spec: std::sync::Arc::new(std::sync::Mutex::new(ObjectSpec::new(id, kind))),
             state,
             segment_idx,
+            svg_parts: None,
+            style_targets: Arc::new(Vec::new()),
         }
     }
 
     fn update_spec(&self, f: impl FnOnce(&mut ObjectSpec)) -> Self {
         f(&mut self.spec.lock().expect("object spec poisoned"));
         self.clone()
+    }
+
+    fn update_style(&self, f: impl Fn(&mut ObjectSpec)) -> Self {
+        f(&mut self.spec.lock().expect("object spec poisoned"));
+        for target in self.style_targets.iter() {
+            f(&mut target.lock().expect("SVG part spec poisoned"));
+        }
+        self.clone()
+    }
+
+    pub(crate) fn with_style_targets(mut self, targets: Vec<SharedObjectSpec>) -> Self {
+        self.style_targets = Arc::new(targets);
+        self
+    }
+
+    pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
+        self.svg_parts = Some(Arc::new(parts));
+        self
+    }
+
+    /// Resolve a named source group or path from an imported SVG.
+    pub fn part(&self, id: &str) -> Result<DrawableHandle, SvgPartError> {
+        let Some(parts) = &self.svg_parts else {
+            return Err(SvgPartError::NotSvg);
+        };
+        parts.get(id).cloned().ok_or_else(|| {
+            let mut available = parts.keys().cloned().collect::<Vec<_>>();
+            available.sort();
+            SvgPartError::Unknown {
+                id: id.to_owned(),
+                available: available.join(", "),
+            }
+        })
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {
@@ -94,28 +142,28 @@ impl DrawableHandle {
     // -- Instant setters (return Self) --
 
     pub fn fill(self, color: Color) -> Self {
-        self.update_spec(|spec| {
+        self.update_style(|spec| {
             spec.fill = Some(Brush::Solid(color));
             spec.fill_overridden = true;
         })
     }
 
     pub fn no_fill(self) -> Self {
-        self.update_spec(|spec| {
+        self.update_style(|spec| {
             spec.fill = None;
             spec.fill_overridden = true;
         })
     }
 
     pub fn stroke(self, color: Color, width: f64) -> Self {
-        self.update_spec(|spec| {
+        self.update_style(|spec| {
             spec.stroke = Some((color, width));
             spec.stroke_overridden = true;
         })
     }
 
     pub fn no_stroke(self) -> Self {
-        self.update_spec(|spec| {
+        self.update_style(|spec| {
             spec.stroke = None;
             spec.stroke_overridden = true;
         })

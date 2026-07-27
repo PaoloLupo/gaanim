@@ -53,8 +53,8 @@ En términos prácticos:
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
 | Presentaciones animadas en vivo | 🟡 | Breakpoints básicos; faltan overview, notas y exportación por slide |
 | Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
-| Motion graphics con multimedia | 🟡 | PNG/JPEG/WebP disponibles; faltan SVG, video y audio |
-| Pipeline audiovisual de producción | 🔴 | Faltan assets, audio, pruebas E2E, empaquetado y estabilidad de API |
+| Motion graphics con multimedia | 🟡 | Raster, SVG vectorial y audio de exportación disponibles; falta video embebido y SVG avanzado |
+| Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
 
 ---
 
@@ -347,7 +347,7 @@ siendo correctos, no solo que el workspace compila.
 Orden recomendado:
 
 1. asset manager con rutas relativas, precarga y recarga de assets;
-2. ampliar SVG: preservar grupos origen, clipping, gradientes y texto;
+2. ampliar SVG: grupos origen ya direccionables; faltan clipping, gradientes y texto;
 3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg.
 
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
@@ -456,7 +456,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
 - [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
   transforms, `viewBox` y `<use>`.
-- [ ] SVG avanzado: grupos origen direccionables, clipping, gradientes, filtros y texto.
+- [~] SVG avanzado: los grupos y paths con `id` se preservan como jerarquía y
+  `svg.part(id)` devuelve un `Drawable` animable; estilos de grupo alcanzan sus
+  paths descendientes. Faltan clipping, gradientes, filtros y texto.
 - [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
   aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
   reproducción/scrubbing en preview, análisis de duración y editor de pistas.

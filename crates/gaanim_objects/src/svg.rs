@@ -1,5 +1,6 @@
 //! SVG import into gaanim vector paths.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use gaanim_core::kurbo::{BezPath, Point, Shape};
@@ -20,7 +21,22 @@ pub struct SvgPath {
 /// A parsed SVG document. Basic SVG shapes have already been normalized to paths.
 #[derive(Debug, Clone)]
 pub struct SvgDocument {
-    pub paths: Vec<SvgPath>,
+    pub root: SvgGroup,
+}
+
+/// A source SVG group whose children retain their original nesting.
+#[derive(Debug, Clone)]
+pub struct SvgGroup {
+    pub id: String,
+    pub opacity: f32,
+    pub children: Vec<SvgNode>,
+}
+
+/// One addressable node in an imported SVG hierarchy.
+#[derive(Debug, Clone)]
+pub enum SvgNode {
+    Group(SvgGroup),
+    Path(SvgPath),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -33,10 +49,12 @@ pub enum SvgLoadError {
     },
     #[error("could not parse SVG '{path}': {source}")]
     Parse { path: PathBuf, source: usvg::Error },
+    #[error("SVG '{path}' contains duplicate id '{id}'")]
+    DuplicateId { path: PathBuf, id: String },
 }
 
 impl SvgDocument {
-    /// Load an SVG and flatten its resolved vector geometry into engine paths.
+    /// Load an SVG while retaining source groups and named paths.
     ///
     /// `usvg` resolves basic shapes, CSS styles, `<use>`, `viewBox`, and nested
     /// transforms before this conversion. Raster `<image>` nodes and advanced
@@ -54,15 +72,15 @@ impl SvgDocument {
             }
         })?;
         let size = tree.size();
-        let mut paths = Vec::new();
-        collect_group(
+        let mut ids = HashSet::new();
+        let root = collect_group(
             tree.root(),
             size.width() as f64,
             size.height() as f64,
-            1.0,
-            &mut paths,
-        );
-        Ok(Self { paths })
+            path,
+            &mut ids,
+        )?;
+        Ok(Self { root })
     }
 }
 
@@ -70,24 +88,53 @@ fn collect_group(
     group: &usvg::Group,
     width: f64,
     height: f64,
-    opacity: f32,
-    out: &mut Vec<SvgPath>,
-) {
-    let opacity = opacity * group.opacity().get();
+    source_path: &Path,
+    ids: &mut HashSet<String>,
+) -> Result<SvgGroup, SvgLoadError> {
+    register_id(group.id(), source_path, ids)?;
+    let mut children = Vec::new();
     for node in group.children() {
         match node {
-            usvg::Node::Group(group) => collect_group(group, width, height, opacity, out),
-            usvg::Node::Path(path) if path.is_visible() => {
-                if let Some(path) = convert_path(path, width, height, opacity) {
-                    out.push(path);
+            usvg::Node::Group(group) => children.push(SvgNode::Group(collect_group(
+                group,
+                width,
+                height,
+                source_path,
+                ids,
+            )?)),
+            usvg::Node::Path(path) => {
+                register_id(path.id(), source_path, ids)?;
+                if path.is_visible()
+                    && let Some(path) = convert_path(path, width, height)
+                {
+                    children.push(SvgNode::Path(path));
                 }
             }
             _ => {}
         }
     }
+    Ok(SvgGroup {
+        id: group.id().to_owned(),
+        opacity: group.opacity().get(),
+        children,
+    })
 }
 
-fn convert_path(path: &usvg::Path, width: f64, height: f64, opacity: f32) -> Option<SvgPath> {
+fn register_id(
+    id: &str,
+    source_path: &Path,
+    ids: &mut HashSet<String>,
+) -> Result<(), SvgLoadError> {
+    if !id.is_empty() && !ids.insert(id.to_owned()) {
+        return Err(SvgLoadError::DuplicateId {
+            path: source_path.to_path_buf(),
+            id: id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn convert_path(path: &usvg::Path, width: f64, height: f64) -> Option<SvgPath> {
     let transform = path.abs_transform();
     let to_scene = |p: usvg::tiny_skia_path::Point| {
         let x = p.x * transform.sx + p.y * transform.kx + transform.tx;
@@ -116,10 +163,10 @@ fn convert_path(path: &usvg::Path, width: f64, height: f64, opacity: f32) -> Opt
     let bounds = bez.bounding_box();
     let fill = path
         .fill()
-        .and_then(|fill| solid_paint(fill.paint(), opacity * fill.opacity().get()))
+        .and_then(|fill| solid_paint(fill.paint(), fill.opacity().get()))
         .map(Brush::Solid);
     let stroke = path.stroke().and_then(|stroke| {
-        solid_paint(stroke.paint(), opacity * stroke.opacity().get()).map(|color| {
+        solid_paint(stroke.paint(), stroke.opacity().get()).map(|color| {
             let scale =
                 f64::from((transform.sx * transform.sy - transform.kx * transform.ky).abs()).sqrt();
             StrokeBrush::new(color, f64::from(stroke.width().get()) * scale)
@@ -149,7 +196,7 @@ fn solid_paint(paint: &usvg::Paint, opacity: f32) -> Option<Color> {
 
 #[cfg(test)]
 mod tests {
-    use super::SvgDocument;
+    use super::{SvgDocument, SvgLoadError, SvgNode};
 
     #[test]
     fn imports_shapes_transforms_and_solid_styles() {
@@ -157,7 +204,7 @@ mod tests {
         std::fs::write(
             &temp,
             r##"<svg width="100" height="60" xmlns="http://www.w3.org/2000/svg">
-                <g transform="translate(10 5)" opacity=".5">
+                <g id="shapes" transform="translate(10 5)" opacity=".5">
                   <rect id="box" width="20" height="10" fill="#ff0000" stroke="#0000ff" stroke-width="2"/>
                   <circle id="dot" cx="40" cy="20" r="5" fill="#00ff00"/>
                 </g>
@@ -166,10 +213,39 @@ mod tests {
         .unwrap();
         let document = SvgDocument::load(&temp).unwrap();
         std::fs::remove_file(temp).unwrap();
-        assert_eq!(document.paths.len(), 2);
-        assert_eq!(document.paths[0].id, "box");
-        assert!(document.paths[0].fill.is_some());
-        assert!(document.paths[0].stroke.brush.is_some());
-        assert_eq!(document.paths[1].id, "dot");
+        let SvgNode::Group(shapes) = &document.root.children[0] else {
+            panic!("expected source group");
+        };
+        assert_eq!(shapes.id, "shapes");
+        assert_eq!(shapes.opacity, 0.5);
+        assert_eq!(shapes.children.len(), 2);
+        let SvgNode::Path(box_path) = &shapes.children[0] else {
+            panic!("expected box path");
+        };
+        assert_eq!(box_path.id, "box");
+        assert!(box_path.fill.is_some());
+        assert!(box_path.stroke.brush.is_some());
+        let SvgNode::Path(dot_path) = &shapes.children[1] else {
+            panic!("expected dot path");
+        };
+        assert_eq!(dot_path.id, "dot");
+    }
+
+    #[test]
+    fn rejects_duplicate_group_and_path_ids() {
+        let temp = std::env::temp_dir().join("gaanim_svg_duplicate_id_test.svg");
+        std::fs::write(
+            &temp,
+            r##"<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+                <g id="same"><circle id="same" cx="20" cy="20" r="10"/></g>
+              </svg>"##,
+        )
+        .unwrap();
+        let error = SvgDocument::load(&temp).unwrap_err();
+        std::fs::remove_file(temp).unwrap();
+        assert!(matches!(
+            error,
+            SvgLoadError::DuplicateId { id, .. } if id == "same"
+        ));
     }
 }

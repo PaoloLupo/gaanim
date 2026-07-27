@@ -354,11 +354,17 @@ impl Canvas {
     }
 
     fn spawn(&mut self, kind: SpawnKind) -> DrawableHandle {
+        self.spawn_registered(kind, true)
+    }
+
+    fn spawn_registered(&mut self, kind: SpawnKind, register_top_level: bool) -> DrawableHandle {
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let id = guard.next_object_id();
         let active_idx = guard.active_idx;
-        guard.active_mut().mobject_ids.push(id);
-        guard.all_drawables.push(id);
+        if register_top_level {
+            guard.active_mut().mobject_ids.push(id);
+            guard.all_drawables.push(id);
+        }
         drop(guard);
 
         let handle = DrawableHandle::new(id, kind, self.state.clone(), active_idx);
@@ -956,11 +962,49 @@ impl Canvas {
     /// `viewBox` are imported. Raster images and advanced SVG paint effects are
     /// omitted by this vector-only importer.
     pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
-        Ok(
-            self.spawn(SpawnKind::Svg(gaanim_objects::prelude::SvgDocument::load(
-                self.resolve_asset_path(path),
-            )?)),
-        )
+        let document = gaanim_objects::prelude::SvgDocument::load(self.resolve_asset_path(path))?;
+        let mut parts = HashMap::new();
+        let (root, _) = self.spawn_svg_group(&document.root, true, &mut parts);
+        if !document.root.id.is_empty() {
+            parts.insert(document.root.id.clone(), root.clone());
+        }
+        Ok(root.with_svg_parts(parts))
+    }
+
+    fn spawn_svg_group(
+        &mut self,
+        group: &gaanim_objects::prelude::SvgGroup,
+        register_top_level: bool,
+        parts: &mut HashMap<String, DrawableHandle>,
+    ) -> (DrawableHandle, Vec<crate::canvas::ops::SharedObjectSpec>) {
+        let mut children = Vec::new();
+        let mut leaf_specs = Vec::new();
+        for node in &group.children {
+            match node {
+                gaanim_objects::prelude::SvgNode::Path(path) => {
+                    let handle = self.spawn_registered(SpawnKind::SvgPath(path.clone()), false);
+                    leaf_specs.push(handle.spec.clone());
+                    if !path.id.is_empty() {
+                        parts.insert(path.id.clone(), handle.clone());
+                    }
+                    children.push(handle);
+                }
+                gaanim_objects::prelude::SvgNode::Group(child_group) => {
+                    let (handle, descendants) = self.spawn_svg_group(child_group, false, parts);
+                    leaf_specs.extend(descendants);
+                    children.push(handle);
+                }
+            }
+        }
+
+        let child_ids = children.iter().map(|child| child.id).collect();
+        let mut handle = self.spawn_registered(SpawnKind::Group(child_ids), register_top_level);
+        handle.spec.lock().expect("SVG group spec poisoned").opacity = group.opacity;
+        handle = handle.with_style_targets(leaf_specs.clone());
+        if !group.id.is_empty() {
+            parts.insert(group.id.clone(), handle.clone());
+        }
+        (handle, leaf_specs)
     }
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
@@ -1473,6 +1517,61 @@ mod tests {
         ] {
             assert_eq!(config.roles[&role].fill_color, Color::BLACK);
         }
+    }
+
+    #[test]
+    fn svg_parts_are_addressable_and_group_styles_reach_descendant_paths() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_parts_api_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="80" height="40" xmlns="http://www.w3.org/2000/svg">
+                <g id="assembly">
+                  <rect id="body" width="30" height="20" fill="#0000ff"/>
+                  <circle id="joint" cx="50" cy="20" r="8" fill="#00ff00"/>
+                </g>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = Canvas::new(320, 180);
+        let svg = canvas.svg(&temp).unwrap();
+        std::fs::remove_file(temp).unwrap();
+
+        assert_eq!(
+            canvas
+                .state
+                .lock()
+                .expect("canvas state poisoned")
+                .all_drawables
+                .len(),
+            1,
+            "only the SVG root should be a top-level drawable"
+        );
+
+        let red = Color::from_rgb8(255, 0, 0);
+        svg.part("assembly").unwrap().fill(red);
+        for id in ["body", "joint"] {
+            let part = svg.part(id).unwrap();
+            let spec = part.spec.lock().expect("SVG path spec poisoned");
+            assert!(spec.fill_overridden);
+            assert!(matches!(
+                spec.fill,
+                Some(gaanim_core::peniko::Brush::Solid(color)) if color == red
+            ));
+        }
+
+        assert!(matches!(
+            svg.part("missing"),
+            Err(crate::canvas::SvgPartError::Unknown { available, .. })
+                if available == "assembly, body, joint"
+        ));
+        assert!(matches!(
+            canvas.circle(10.0).part("body"),
+            Err(crate::canvas::SvgPartError::NotSvg)
+        ));
     }
 
     #[test]

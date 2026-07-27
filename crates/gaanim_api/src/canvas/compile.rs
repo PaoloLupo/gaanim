@@ -2032,9 +2032,10 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
-            SpawnKind::Svg(document) => {
-                let mr = builder.svg_group(&document.paths);
-                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+            SpawnKind::SvgPath(path) => {
+                let b = builder.svg_path(path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
             SpawnKind::Group(ids) => {
@@ -2540,7 +2541,7 @@ mod tests {
     }
 
     #[test]
-    fn fragment_transform_schedules_vector_path_morphs() {
+    fn fragment_transform_moves_selected_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
         let source = canvas.equation("E = m c^2");
         let target = canvas.equation("p = m v");
@@ -2559,7 +2560,7 @@ mod tests {
                 &clip.payload,
                 gaanim_timeline::clip::ClipPayload::Animation(
                     gaanim_timeline::clip::AnimationSpec {
-                        lens: gaanim_timeline::clip::PropertyLensSpec::PathMorph { .. },
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
                         ..
                     }
                 )
@@ -2822,6 +2823,7 @@ mod tests {
             None,
             false,
             false,
+            "center",
         );
         canvas.set_group_members(&container, &[&first, &second]);
         canvas.reflow_layout(
@@ -2836,6 +2838,7 @@ mod tests {
             None,
             false,
             false,
+            "center",
         );
 
         let world = World::new();
