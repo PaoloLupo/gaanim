@@ -466,7 +466,10 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
 - [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
 - [~] Sistema de temas público: `technical`/`scientific` y `paper` configuran fondo y fills tipográficos en el runtime; `paper` está cubierto por regresión visual con texto y ecuación negros. Faltan plantillas de composición con branding.
-- [ ] Asset manager y formato mínimo de proyecto.
+- [~] Asset manager y formato mínimo de proyecto: `scene.assets_dir(...)`
+  resuelve rutas relativas para imágenes y SVG, y `scene.preload([...])`
+  valida SVG y calienta la caché raster; faltan manifiesto de proyecto y
+  recarga de assets.
 - [ ] Cache y hot reload incremental donde sea medible.
 
 ### 0.6 — Presentaciones
@@ -475,9 +478,12 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [ ] Presenter view y notas.
 - [ ] Exportación independiente por slide.
 - [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
-  `add(...)`, `remove(...)`, `configure(...)` y `reflow(...)` desplazan y animan
-  hijos; incluye límites `width`/`height` y `fit="shrink"`. Faltan presets
-  semánticos de slides, wrapping/overflow y variantes responsive.
+  `add(...)`, `remove(...)`, `replace(...)`, `configure(...)` y `reflow(...)`
+  desplazan y animan hijos. `LayoutRegion.layout(...)` los ancla a regiones;
+  hay límites `width`/`height`, `fit="shrink"`, filas con `wrap=True` y
+  `justify` (`start`/`center`/`end`/`between`). Faltan overflow explícito,
+  grid con spans, reflow reactivo, presets semánticos de slides y variantes
+  responsive.
 - [ ] Interacción/picking útil para demos en vivo.
 
 ### 1.0 — Librería estable

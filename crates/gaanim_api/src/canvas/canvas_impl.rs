@@ -39,6 +39,34 @@ pub enum ImageLoadError {
     Options(#[from] ImageOptionsError),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum AssetRootError {
+    #[error("asset directory '{path}' does not exist or is not a directory")]
+    Invalid { path: PathBuf },
+    #[error("could not resolve asset directory '{path}': {source}")]
+    Resolve {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AssetPreloadError {
+    #[error("could not preload image '{path}': {source}")]
+    Image {
+        path: PathBuf,
+        #[source]
+        source: ImageLoadError,
+    },
+    #[error("could not preload SVG '{path}': {source}")]
+    Svg {
+        path: PathBuf,
+        #[source]
+        source: SvgLoadError,
+    },
+}
+
 /// Process-local decoded texture cache. Each canvas still receives its own
 /// mobject, while repeated references to the same canonical path share the
 /// immutable RGBA data used by Vello.
@@ -86,6 +114,7 @@ pub struct Canvas {
     pub units: CoordinateSystem,
     pub theme: Option<String>,
     pub margin: Margin,
+    pub asset_root: Option<PathBuf>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
     pub(crate) camera_rotation: gaanim_core::glam::DQuat,
@@ -101,6 +130,7 @@ impl Canvas {
             theme: None,
             units: CoordinateSystem::Pixels,
             margin: Margin::default(),
+            asset_root: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
@@ -200,6 +230,58 @@ impl Canvas {
         LayoutRegion {
             bounds: self.safe_frame(),
         }
+    }
+
+    /// Set the base directory used by relative image and SVG paths.
+    pub fn set_asset_root(&mut self, path: impl AsRef<Path>) -> Result<(), AssetRootError> {
+        let path = path.as_ref().to_path_buf();
+        if !path.is_dir() {
+            return Err(AssetRootError::Invalid { path });
+        }
+        self.asset_root = Some(
+            path.canonicalize()
+                .map_err(|source| AssetRootError::Resolve {
+                    path: path.clone(),
+                    source,
+                })?,
+        );
+        Ok(())
+    }
+
+    fn resolve_asset_path(&self, path: impl AsRef<Path>) -> PathBuf {
+        let path = path.as_ref();
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(root) = &self.asset_root {
+            root.join(path)
+        } else {
+            path.to_path_buf()
+        }
+    }
+
+    /// Resolve and validate assets before playback. Raster images are also
+    /// decoded into the process-local image cache used by [`Self::image`].
+    pub fn preload(&self, paths: &[PathBuf]) -> Result<(), AssetPreloadError> {
+        for path in paths {
+            let resolved = self.resolve_asset_path(path);
+            if resolved
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+            {
+                gaanim_objects::prelude::SvgDocument::load(&resolved).map_err(|source| {
+                    AssetPreloadError::Svg {
+                        path: resolved.clone(),
+                        source,
+                    }
+                })?;
+            } else {
+                load_image(&resolved).map_err(|source| AssetPreloadError::Image {
+                    path: resolved.clone(),
+                    source,
+                })?;
+            }
+        }
+        Ok(())
     }
 
     fn safe_frame(&self) -> gaanim_math::Bounds3D {
@@ -820,7 +902,7 @@ impl Canvas {
         path: impl AsRef<Path>,
         options: ImageOptions,
     ) -> Result<DrawableHandle, ImageLoadError> {
-        let image = load_image(path)?;
+        let image = load_image(self.resolve_asset_path(path))?;
         let view = options.resolve(image.width, image.height)?;
         Ok(self.spawn(SpawnKind::Image { image, view }))
     }
@@ -833,7 +915,7 @@ impl Canvas {
     pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
         Ok(
             self.spawn(SpawnKind::Svg(gaanim_objects::prelude::SvgDocument::load(
-                path,
+                self.resolve_asset_path(path),
             )?)),
         )
     }

@@ -348,6 +348,28 @@ impl PyScene {
         })
     }
 
+    /// Sets the directory used to resolve relative image and SVG paths.
+    fn assets_dir(&self, path: &str) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_asset_root(path)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Resolve and validate raster/SVG assets before the scene is played.
+    fn preload(&self, paths: Vec<String>) -> PyResult<()> {
+        let paths = paths
+            .into_iter()
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .preload(&paths)
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+    }
+
     /// Starts a deferred vertical or horizontal sequence of drawables.
     #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
     fn flow(
