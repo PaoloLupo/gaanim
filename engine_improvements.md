@@ -262,7 +262,6 @@ capturas de regresión. La guía operativa está en `docs/thesis-presentations.m
 
 Para convertirlo en una solución general de slides todavía faltan:
 
-- exportación independiente por slide;
 - enlaces internos y navegación no lineal de presentación;
 - temas de branding parametrizables más allá de la plantilla de tesis incluida;
 - integración de imágenes, tablas, charts y código.
@@ -442,7 +441,8 @@ componer cada pieza desde primitivas.
 - [x] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
 - [x] Caché de miniaturas en mundo ECS/Vello aislado, publicada como texturas egui sin
   mutar el `Timeline` de reproducción;
-- exportación por slide y exportación continua;
+- [x] exportación continua, por un slide nombrado o por todos los slides con una plantilla
+  de ruta desde la misma función `scene.export(...)`;
 - [x] navegación directa por nombre de slide y por nombre/índice de paso;
 - plantillas y temas expuestos desde Python;
 - control remoto o protocolo simple de navegación.
@@ -513,7 +513,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 - [x] Overview con miniaturas, indicadores y navegación por slide/paso.
 - [x] Presenter view y notas.
-- [ ] Exportación independiente por slide.
+- [x] Exportación independiente por slide.
 - [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
   `add(...)`, `remove(...)`, `replace(...)`, `configure(...)` y `reflow(...)`
   desplazan y animan hijos. `LayoutRegion.layout(...)` los ancla a regiones;

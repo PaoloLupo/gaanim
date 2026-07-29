@@ -145,6 +145,25 @@ Remove-Item Env:GAANIM_EXPORT
 El respaldo se exporta a 60 FPS con calidad `production`. Requiere FFmpeg disponible en
 `PATH`. La presentación interactiva y el video usan el mismo timeline.
 
+También puedes exportar un slide específico por su nombre semántico:
+
+```python
+scene.export("resultados.mp4", slide="Resultados", quality="production")
+```
+
+Para generar un archivo por cada slide sin añadir otra función al API:
+
+```python
+scene.export(
+    "slides/{index}-{slide}.mp4",
+    slide="*",
+    quality="production",
+)
+```
+
+`{index}` produce `01`, `02`, etc.; `{slide}` usa un nombre seguro para archivos. Gaanim
+crea el directorio padre y usa los límites exactos registrados por `scene.slide(...)`.
+
 ## 7. Checklist para el día de la sustentación
 
 1. Compila en release: `cargo build -p gaanim_editor --release`.

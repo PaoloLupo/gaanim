@@ -357,6 +357,12 @@ and `encoder="auto"` (or `"libx264"`, `"nvenc"`, `"amf"`, `"qsv"`, or
 `"vaapi"`) to select encoding. `crf` ranges from 0 to 51 and `speed` accepts
 `"fast"`, `"balanced"`, or `"best"`.
 
+For semantic presentations, use `slide="Name"` to export only one slide. Use
+`slide="*"` to export every slide; the path must contain `{slide}` or `{index}`
+so files cannot overwrite each other. Parent directories are created
+automatically. `slide` is intentionally exclusive with `start_time` and
+`end_time`.
+
 ```python
 scene.export(
     "vertical.webm",
@@ -365,6 +371,13 @@ scene.export(
     transparent=True,
     start_time=2.0,
     end_time=12.0,
+)
+
+scene.export("defense/results.mp4", slide="Resultados", quality="production")
+scene.export(
+    "defense/slides/{index}-{slide}.mp4",
+    slide="*",
+    quality="production",
 )
 ```
 

@@ -11,8 +11,8 @@ use gaanim_api::canvas::{
     ThemeFont,
 };
 use gaanim_api::export::{
-    detect_best_encoder, export_canvas, AspectRatioPreset, EncodingSpeed, ExportConfig,
-    QualityPreset, VideoEncoder,
+    detect_best_encoder, export_canvas, export_canvas_slide, export_canvas_slides,
+    AspectRatioPreset, EncodingSpeed, ExportConfig, QualityPreset, SlideExportError, VideoEncoder,
 };
 
 use crate::color::PyColor;
@@ -20,6 +20,15 @@ use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 use crate::pylayout::{PyFlow, PyFrameLayout, PyLayout, PyLayoutRegion};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
+
+fn slide_export_error(error: SlideExportError) -> PyErr {
+    match &error {
+        SlideExportError::Export(_) | SlideExportError::Io(_) => {
+            pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+        }
+        _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
+    }
+}
 
 fn parse_quality(value: &str) -> PyResult<QualityPreset> {
     match value.to_ascii_lowercase().as_str() {
@@ -2351,6 +2360,7 @@ impl PyScene {
         height=None,
         start_time=None,
         end_time=None,
+        slide=None,
         crf=None,
         encoder="auto",
         speed=None,
@@ -2366,6 +2376,7 @@ impl PyScene {
         height: Option<u32>,
         start_time: Option<f64>,
         end_time: Option<f64>,
+        slide: Option<&str>,
         crf: Option<u32>,
         encoder: &str,
         speed: Option<&str>,
@@ -2447,14 +2458,27 @@ impl PyScene {
                 ));
             }
         }
+        if slide.is_some() && (start_time.is_some() || end_time.is_some()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "slide cannot be combined with start_time or end_time",
+            ));
+        }
 
         config.video_encoder = parse_encoder(encoder)?;
         if let Some(speed) = speed {
             config.encoding_speed = parse_encoding_speed(speed)?;
         }
 
-        export_canvas(canvas, config)
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+        match slide {
+            Some("*") => export_canvas_slides(canvas, path, config)
+                .map(|_| ())
+                .map_err(slide_export_error),
+            Some(slide_name) => {
+                export_canvas_slide(canvas, slide_name, config).map_err(slide_export_error)
+            }
+            None => export_canvas(canvas, config)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),
+        }
     }
 
     /// Render exact timeline seeks into PNG snapshots and a comparison manifest.

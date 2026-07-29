@@ -679,6 +679,7 @@ class Scene:
         height: Optional[int] = None,
         start_time: Optional[float] = None,
         end_time: Optional[float] = None,
+        slide: Optional[str] = None,
         crf: Optional[int] = None,
         encoder: Literal["auto", "libx264", "nvenc", "amf", "qsv", "vaapi"] = "auto",
         speed: Optional[Literal["fast", "balanced", "best"]] = None,
