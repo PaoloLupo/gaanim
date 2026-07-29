@@ -209,6 +209,22 @@ impl PyDrawable {
     fn no_effects(&self) -> Self {
         Self(self.0.clone().no_effects())
     }
+    /// Clip this drawable to another drawable's vector outline.
+    #[pyo3(signature = (mask, rule="nonzero"))]
+    fn clip(&self, mask: &PyDrawable, rule: &str) -> PyResult<Self> {
+        let rule = match rule {
+            "nonzero" => gaanim_core::peniko::Fill::NonZero,
+            "evenodd" | "even_odd" => gaanim_core::peniko::Fill::EvenOdd,
+            _ => {
+                return Err(PyValueError::new_err("rule must be 'nonzero' or 'evenodd'"));
+            }
+        };
+        Ok(Self(self.0.clone().clip(&mask.0, rule)))
+    }
+    /// Remove the clipping mask from this drawable.
+    fn no_clip(&self) -> Self {
+        Self(self.0.clone().no_clip())
+    }
     /// Colors every matching fragment of a text or equation drawable.
     ///
     /// Matching is case-insensitive and ignores mathematical spacing and

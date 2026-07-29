@@ -431,10 +431,10 @@ componer cada pieza desde primitivas.
 
 ### P1 — Cámara y composición
 
-- API Python para posición, zoom y framing de cámara;
-- `camera.frame_to(mobject, margin=...)`;
-- cámara follow, pan, zoom y shake como animaciones de alto nivel;
-- clipping/masks públicos;
+- [x] controlador semántico Python `scene.camera` para posición, zoom y rotación;
+- [x] `scene.camera.frame_to(mobject, margin=...)` con pan y zoom paralelos;
+- [x] cámara follow, pan, zoom, rotación y shake como animaciones de alto nivel;
+- [x] clipping/masks vectoriales públicos con `.clip(mask)` para drawables y grupos;
 - [x] gradientes y efectos vectoriales de sombra/blur/glow con caché retained;
 - soporte explícito de aspect ratios y safe areas en `scene.canvas`.
 
@@ -490,8 +490,8 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
   reproducción/scrubbing en preview, análisis de duración y editor de pistas.
 - [x] API de fuentes y gradientes: temas pueden embeber TTF/OTF y `Brush`
   expone gradientes lineales, radiales y angulares para fill/stroke.
-- [~] Cámara: pan, zoom y rotación están expuestos; faltan encuadres automáticos
-  y trayectorias editoriales de cámara.
+- [x] Cámara editorial: `scene.camera` expone pan, zoom, rotación, encuadre automático,
+  follow y shake determinista.
 - [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
 - [x] Componentes editoriales: listas, callouts, captions y title cards.
 - [x] Presets 16:9, 9:16 y 1:1 con safe areas.

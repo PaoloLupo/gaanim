@@ -207,6 +207,12 @@ pub(crate) enum Op {
         frequency: f64,
         duration: f64,
     },
+    /// Clip a drawable hierarchy by another drawable's vector geometry.
+    SetClip {
+        target: ObjectId,
+        mask: Option<ObjectId>,
+        rule: gaanim_core::peniko::Fill,
+    },
     /// Insert a slide breakpoint.
     Slide,
     /// Begin a semantic slide. Unlike [`Self::Slide`], this is not a

@@ -70,6 +70,44 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
 }
 
 impl Canvas {
+    fn visual_leaf_ids(builder: &SceneBuilder<'_, '_, '_>, root: ObjectId) -> Vec<ObjectId> {
+        let mut leaves = Vec::new();
+        let mut stack = vec![root];
+        let mut visited = HashSet::new();
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            let Some(state) = builder.states.get(id) else {
+                continue;
+            };
+            let mut children = state.children.clone();
+            children.extend(state.child_spans.iter().map(|child| child.id));
+            if children.is_empty() {
+                leaves.push(id);
+            } else {
+                stack.extend(children);
+            }
+        }
+        leaves
+    }
+
+    fn mask_path_in_world(
+        builder: &SceneBuilder<'_, '_, '_>,
+        root: ObjectId,
+    ) -> gaanim_core::kurbo::BezPath {
+        let mut result = gaanim_core::kurbo::BezPath::new();
+        for id in Self::visual_leaf_ids(builder, root) {
+            let Some(state) = builder.states.get(id) else {
+                continue;
+            };
+            let mut path = (*state.path).clone();
+            path.apply_affine(builder.get_world_transform(id).to_affine_2d());
+            result.extend(path);
+        }
+        result
+    }
+
     pub fn compile_into<'w, 's>(
         &self,
         commands: &mut Commands<'w, 's>,
@@ -1175,6 +1213,42 @@ impl Canvas {
                         ),
                     );
                     builder.wait(*duration);
+                }
+                Op::SetClip { target, mask, rule } => {
+                    let Some(target) = id_map.get(target).copied() else {
+                        continue;
+                    };
+                    let target_leaves = Self::visual_leaf_ids(builder, target);
+                    if let Some(mask) = mask {
+                        let Some(mask) = id_map.get(mask).copied() else {
+                            continue;
+                        };
+                        let mask_world = Self::mask_path_in_world(builder, mask);
+                        for leaf in target_leaves {
+                            let Some(state) = builder.states.get(leaf) else {
+                                continue;
+                            };
+                            let mut local_path = mask_world.clone();
+                            local_path.apply_affine(
+                                builder.get_world_transform(leaf).to_affine_2d().inverse(),
+                            );
+                            builder.commands.entity(state.entity).insert(
+                                gaanim_renderer::effects::ClipMask {
+                                    path: local_path,
+                                    rule: *rule,
+                                },
+                            );
+                        }
+                    } else {
+                        for leaf in target_leaves {
+                            if let Some(state) = builder.states.get(leaf) {
+                                builder
+                                    .commands
+                                    .entity(state.entity)
+                                    .remove::<gaanim_renderer::effects::ClipMask>();
+                            }
+                        }
+                    }
                 }
                 Op::Slide => builder.slide(),
                 Op::Show(id) => {
@@ -2547,6 +2621,35 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn clip_mask_uses_another_drawables_world_geometry() {
+        let mut canvas = Canvas::new(640, 360);
+        let target = canvas.rect(300.0, 160.0).at(80.0, 0.0);
+        let mask = canvas.circle(55.0).at(80.0, 0.0);
+        target.clip(&mask, gaanim_core::peniko::Fill::NonZero);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let masks = world
+            .query::<&gaanim_renderer::effects::ClipMask>()
+            .iter(&world)
+            .collect::<Vec<_>>();
+        assert_eq!(masks.len(), 1);
+        assert!(!masks[0].path.is_empty());
+        let bounds = masks[0].path.bounding_box();
+        assert!((bounds.center().x).abs() < 1e-6);
+        assert!((bounds.width() - 110.0).abs() < 1e-3);
     }
 
     #[test]

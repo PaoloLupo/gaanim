@@ -311,18 +311,34 @@ of the outgoing scene introduces the following section.
 == Camera
 
 ```python
-scene.camera_pan_to(-160, 40, duration=0.8)
-scene.camera_zoom_to(1.5, duration=0.6)
-scene.camera_frame_to(circle, margin=48, duration=0.9)
-scene.camera_rotate_to(0.15, duration=0.5)
-scene.camera_follow(circle, duration=2.0)
-scene.camera_shake(amplitude=12, frequency=8, duration=0.4)
+scene.camera.pan_to(-160, 40, duration=0.8)
+scene.camera.zoom_to(1.5, duration=0.6)
+scene.camera.frame_to(circle, margin=48, duration=0.9)
+scene.camera.rotate_to(0.15, duration=0.5)
+scene.camera.follow(circle, duration=2.0)
+scene.camera.shake(amplitude=12, frequency=8, duration=0.4)
 ```
 
-`camera_frame_to` derives a pan and orthographic zoom from the target's current
-bounds, keeping it inside the viewport with the requested margin.
-`camera_follow` follows a mobject while reactive updaters are active, and
-`camera_shake` is deterministic so previews, seeks, and exports match.
+`camera.frame_to` derives a pan and orthographic zoom from the target's current
+bounds and runs both in parallel, keeping it inside the safe viewport.
+`camera.follow` follows a mobject while reactive updaters are active, and
+`camera.shake` is deterministic so previews, seeks, and exports match. The
+legacy `scene.camera_*` methods remain available for existing projects.
+
+== Clipping and masks
+
+Use any vector drawable as clipping geometry for another drawable or a nested
+group. The mask keeps its own visibility; make it transparent when it should
+only constrain content:
+
+```python
+mask = scene.rounded_rect(420, 220, 28).no_fill().no_stroke()
+chart_group.clip(mask)
+```
+
+Mask and target transforms are resolved in world space, so they can be placed,
+scaled, rotated, or nested independently. `rule="evenodd"` supports paths with
+holes, and `drawable.no_clip()` removes a previously assigned mask.
 
 == Output
 

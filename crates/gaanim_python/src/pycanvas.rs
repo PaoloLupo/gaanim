@@ -403,6 +403,126 @@ pub struct PyScene {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// Semantic camera controller exposed as ``scene.camera``.
+#[pyclass(name = "Camera", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCamera {
+    inner: Arc<Mutex<ApiCanvas>>,
+}
+
+fn require_finite(value: f64, name: &str) -> PyResult<f64> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be finite"
+        )))
+    }
+}
+
+fn require_duration(duration: f64) -> PyResult<f64> {
+    if duration.is_finite() && duration >= 0.0 {
+        Ok(duration)
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(
+            "duration must be finite and non-negative",
+        ))
+    }
+}
+
+#[pymethods]
+impl PyCamera {
+    /// Pan to a world-space point.
+    #[pyo3(signature = (x, y, duration=1.0))]
+    fn pan_to(&self, x: f64, y: f64, duration: f64) -> PyResult<()> {
+        let (x, y, duration) = (
+            require_finite(x, "x")?,
+            require_finite(y, "y")?,
+            require_duration(duration)?,
+        );
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_pan_to(x, y, duration);
+        Ok(())
+    }
+
+    /// Set the orthographic zoom. Values above one zoom in.
+    #[pyo3(signature = (zoom, duration=1.0))]
+    fn zoom_to(&self, zoom: f64, duration: f64) -> PyResult<()> {
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "zoom must be finite and positive",
+            ));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_zoom_to(zoom, duration);
+        Ok(())
+    }
+
+    /// Pan and zoom in parallel so the target fits inside the safe viewport.
+    #[pyo3(signature = (target, margin=40.0, duration=1.0))]
+    fn frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) -> PyResult<()> {
+        if !margin.is_finite() || margin < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "margin must be finite and non-negative",
+            ));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_frame_to(&target.0, margin, duration);
+        Ok(())
+    }
+
+    /// Rotate the camera around the viewport center, in radians.
+    #[pyo3(signature = (angle, duration=1.0))]
+    fn rotate_to(&self, angle: f64, duration: f64) -> PyResult<()> {
+        let (angle, duration) = (require_finite(angle, "angle")?, require_duration(duration)?);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_rotate_to(angle, duration);
+        Ok(())
+    }
+
+    /// Keep the camera centered on a drawable while it moves.
+    #[pyo3(signature = (target, duration=1.0))]
+    fn follow(&self, target: &PyDrawable, duration: f64) -> PyResult<()> {
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_follow(&target.0, duration);
+        Ok(())
+    }
+
+    /// Apply a deterministic shake that settles at the original position.
+    #[pyo3(signature = (amplitude=12.0, frequency=8.0, duration=0.5))]
+    fn shake(&self, amplitude: f64, frequency: f64, duration: f64) -> PyResult<()> {
+        if !amplitude.is_finite() || amplitude < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "amplitude must be finite and non-negative",
+            ));
+        }
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "frequency must be finite and non-negative",
+            ));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_shake(amplitude, frequency, duration);
+        Ok(())
+    }
+}
+
 /// Handle for adding reveal pauses to one semantic presentation slide.
 #[pyclass(name = "Slide", module = "gaanim_core")]
 pub struct PySlide {
@@ -458,6 +578,14 @@ impl PyScene {
     #[getter]
     fn canvas(&self) -> PyCanvas {
         PyCanvas {
+            inner: self.inner.clone(),
+        }
+    }
+
+    /// Editorial camera controller.
+    #[getter]
+    fn camera(&self) -> PyCamera {
+        PyCamera {
             inner: self.inner.clone(),
         }
     }

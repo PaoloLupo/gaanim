@@ -215,6 +215,39 @@ impl DrawableHandle {
         })
     }
 
+    /// Clip this drawable to another drawable's vector geometry.
+    ///
+    /// The mask keeps its own visibility, so call `mask.no_fill().no_stroke()`
+    /// when it should act only as clipping geometry.
+    pub fn clip(self, mask: &DrawableHandle, rule: gaanim_core::peniko::Fill) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::SetClip {
+                target: self.id,
+                mask: Some(mask.id),
+                rule,
+            });
+        self
+    }
+
+    /// Remove a previously configured clipping mask.
+    pub fn no_clip(self) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::SetClip {
+                target: self.id,
+                mask: None,
+                rule: gaanim_core::peniko::Fill::NonZero,
+            });
+        self
+    }
+
     /// Colors every matching text or equation fragment in this drawable.
     ///
     /// Matching is case-insensitive and tolerant of math formatting, so a
