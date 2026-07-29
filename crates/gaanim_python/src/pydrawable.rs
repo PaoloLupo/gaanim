@@ -3,6 +3,7 @@
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 
+use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pylayout::{PyAnchor, PyDirection};
 use crate::updater::PyUpdater;
@@ -154,14 +155,14 @@ impl PyDrawable {
         }
     }
 
-    fn fill(&self, color: PyColor) -> Self {
-        Self(self.0.clone().fill(color.0))
+    fn fill(&self, paint: PyPaint) -> Self {
+        Self(self.0.clone().fill_brush(paint.0))
     }
     fn no_fill(&self) -> Self {
         Self(self.0.clone().no_fill())
     }
-    fn stroke(&self, color: PyColor, width: f64) -> Self {
-        Self(self.0.clone().stroke(color.0, width))
+    fn stroke(&self, paint: PyPaint, width: f64) -> Self {
+        Self(self.0.clone().stroke_brush(paint.0, width))
     }
     fn no_stroke(&self) -> Self {
         Self(self.0.clone().no_stroke())

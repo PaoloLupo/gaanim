@@ -142,8 +142,12 @@ impl DrawableHandle {
     // -- Instant setters (return Self) --
 
     pub fn fill(self, color: Color) -> Self {
+        self.fill_brush(Brush::Solid(color))
+    }
+
+    pub fn fill_brush(self, brush: Brush) -> Self {
         self.update_style(|spec| {
-            spec.fill = Some(Brush::Solid(color));
+            spec.fill = Some(brush.clone());
             spec.fill_overridden = true;
         })
     }
@@ -156,8 +160,12 @@ impl DrawableHandle {
     }
 
     pub fn stroke(self, color: Color, width: f64) -> Self {
+        self.stroke_brush(Brush::Solid(color), width)
+    }
+
+    pub fn stroke_brush(self, brush: Brush, width: f64) -> Self {
         self.update_style(|spec| {
-            spec.stroke = Some((color, width));
+            spec.stroke = Some((brush.clone(), width));
             spec.stroke_overridden = true;
         })
     }

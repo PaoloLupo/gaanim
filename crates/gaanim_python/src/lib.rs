@@ -1,6 +1,7 @@
 use ::gaanim_core as engine_core;
 use pyo3::prelude::*;
 
+mod brush;
 mod color;
 mod pycanvas;
 mod pydrawable;
@@ -18,6 +19,7 @@ pub fn register_inittab() {
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<transition::PyTransitionType>()?;
     m.add_class::<color::PyColor>()?;
+    m.add_class::<brush::PyBrush>()?;
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;
     m.add_class::<pylayout::PyLayoutRegion>()?;

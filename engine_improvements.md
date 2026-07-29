@@ -282,8 +282,8 @@ Estado de efectos:
 - `DropShadow` sí se dibuja en el pipeline actual;
 - `GaussianBlur` y `Glow` están definidos, pero el renderer contiene un TODO explícito
   y todavía no producen el efecto visual;
-- gradientes pueden representarse internamente con `Brush`, pero no hay constructores
-  de gradiente en la API de Python.
+- `Brush.linear`, `Brush.radial` y `Brush.sweep` exponen gradientes para fill y stroke
+  en Python, con ramps `pad`, `repeat` y `reflect`.
 
 No existe todavía un pipeline 3D. Los transforms usan tipos preparados para z, pero el
 producto actual debe presentarse como **2D vectorial**.
@@ -487,7 +487,10 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
   aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
   reproducción/scrubbing en preview, análisis de duración y editor de pistas.
-- [ ] API de fuentes, gradientes y cámara.
+- [x] API de fuentes y gradientes: temas pueden embeber TTF/OTF y `Brush`
+  expone gradientes lineales, radiales y angulares para fill/stroke.
+- [~] Cámara: pan, zoom y rotación están expuestos; faltan encuadres automáticos
+  y trayectorias editoriales de cámara.
 - [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
 - [x] Componentes editoriales: listas, callouts, captions y title cards.
 - [x] Presets 16:9, 9:16 y 1:1 con safe areas.

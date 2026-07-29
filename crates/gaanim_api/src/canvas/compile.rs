@@ -2174,8 +2174,8 @@ impl Canvas {
         spec: &ObjectSpec,
     ) -> MobjectRef {
         if spec.stroke_overridden {
-            if let Some((c, w)) = spec.stroke {
-                b = b.stroke(c, w);
+            if let Some((ref brush, w)) = spec.stroke {
+                b = b.stroke_brush(brush.clone(), w);
             } else {
                 b = b.no_stroke();
             }
@@ -2220,8 +2220,11 @@ impl Canvas {
             child_spans = st.child_spans.clone();
             let is_textual_hierarchy = !child_spans.is_empty();
             if spec.stroke_overridden {
-                if let Some((c, w)) = spec.stroke {
-                    let sb = StrokeBrush::new(c, w);
+                if let Some((ref brush, w)) = spec.stroke {
+                    let sb = StrokeBrush {
+                        brush: Some(brush.clone()),
+                        style: gaanim_core::kurbo::Stroke::new(w),
+                    };
                     st.stroke = sb.clone();
                     if !is_textual_hierarchy {
                         builder.commands.entity(st.entity).insert(sb);
@@ -2297,8 +2300,11 @@ impl Canvas {
         }
         if spec.stroke_overridden {
             for child in &child_spans {
-                let sb = if let Some((c, w)) = spec.stroke {
-                    StrokeBrush::new(c, w)
+                let sb = if let Some((ref brush, w)) = spec.stroke {
+                    StrokeBrush {
+                        brush: Some(brush.clone()),
+                        style: gaanim_core::kurbo::Stroke::new(w),
+                    }
                 } else {
                     StrokeBrush::transparent()
                 };

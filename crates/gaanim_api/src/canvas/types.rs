@@ -491,7 +491,7 @@ pub struct ObjectSpec {
     pub kind: SpawnKind,
     pub fill: Option<Brush>,
     pub fill_overridden: bool,
-    pub stroke: Option<(Color, f64)>,
+    pub stroke: Option<(Brush, f64)>,
     pub stroke_overridden: bool,
     pub opacity: f32,
     pub z_index: i32,

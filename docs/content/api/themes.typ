@@ -179,6 +179,49 @@ if warnings:
 Validation is advisory rather than automatic rejection, so intentional
 low-contrast animation states remain possible.
 
+== Brushes and gradients
+
+`Drawable.fill(...)` and `Drawable.stroke(...)` accept either an ordinary
+`ColorLike` value or a reusable `Brush`. Gradient coordinates use the
+drawable's local coordinate space, so the paint follows later transforms.
+
+```python
+from gaanim import Brush
+
+gradient = Brush.linear(
+    ["#7AA2F7", "#BB9AF7", "#F7768E"],
+    start=(-240, 0),
+    end=(240, 0),
+)
+
+card = scene.rounded_rect(480, 220, 28).fill(gradient)
+```
+
+Radial and angular gradients use the same color-list convention. Colors are
+distributed uniformly and two or more stops are required:
+
+```python
+orb = scene.circle(120).fill(
+    Brush.radial(
+        ["white", scene.canvas.color("accent"), "#0000"],
+        center=(-30, 35),
+        radius=150,
+    )
+)
+
+ring = scene.circle(110).no_fill().stroke(
+    Brush.sweep(
+        ["#7DCFFF", "#9ECE6A", "#E0AF68", "#F7768E", "#7DCFFF"],
+        center=(0, 0),
+    ),
+    20,
+)
+```
+
+`extend="pad"` is the default. Use `"repeat"` or `"reflect"` for repeating
+ramps. Sweep angles are expressed in degrees; linear points and radial radii
+use scene units.
+
 == Color constants
 
 #table(

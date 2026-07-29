@@ -16,6 +16,37 @@ class Color:
 
 ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
 
+class Brush:
+    @staticmethod
+    def solid(color: ColorLike) -> Brush: ...
+    @staticmethod
+    def linear(
+        colors: Sequence[ColorLike],
+        *,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        extend: Literal["pad", "repeat", "reflect"] = "pad",
+    ) -> Brush: ...
+    @staticmethod
+    def radial(
+        colors: Sequence[ColorLike],
+        *,
+        center: tuple[float, float] = (0.0, 0.0),
+        radius: float,
+        extend: Literal["pad", "repeat", "reflect"] = "pad",
+    ) -> Brush: ...
+    @staticmethod
+    def sweep(
+        colors: Sequence[ColorLike],
+        *,
+        center: tuple[float, float] = (0.0, 0.0),
+        start_angle: float = 0.0,
+        end_angle: float = 360.0,
+        extend: Literal["pad", "repeat", "reflect"] = "pad",
+    ) -> Brush: ...
+
+Paint: TypeAlias = ColorLike | Brush
+
 class Theme:
     def __init__(
         self,
@@ -201,9 +232,9 @@ class Drawable:
     def part(self, id: str) -> Drawable:
         """Return a named source group or path from an imported SVG."""
         ...
-    def fill(self, color: Color) -> Drawable: ...
+    def fill(self, paint: Paint) -> Drawable: ...
     def no_fill(self) -> Drawable: ...
-    def stroke(self, color: Color, width: float) -> Drawable: ...
+    def stroke(self, paint: Paint, width: float) -> Drawable: ...
     def no_stroke(self) -> Drawable: ...
     def color_by(self, fragment: str, color: Color) -> Drawable: ...
     def select(self, fragment: str, occurrence: Optional[int] = None) -> FragmentSelection: ...
