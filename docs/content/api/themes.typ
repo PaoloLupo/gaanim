@@ -222,6 +222,22 @@ ring = scene.circle(110).no_fill().stroke(
 ramps. Sweep angles are expressed in degrees; linear points and radial radii
 use scene units.
 
+== Visual effects
+
+Effects use the same fluent `Drawable` surface. Defaults keep common calls
+short, while radius, intensity, offset, and blur remain configurable:
+
+```python
+title.glow("#38BDF8")
+background_blob.blur(12)
+card.shadow("#00000080", x=10, y=-10, blur=8)
+```
+
+`glow`, `blur`, and `shadow` are compiled into retained vector fragments, so
+unchanged effects are cached. They work on vector fills and strokes, including
+gradient brushes. `no_effects()` removes all three without changing the
+drawable's fill or stroke.
+
 == Color constants
 
 #table(

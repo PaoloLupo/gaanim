@@ -279,9 +279,10 @@ para rutas repetidas.
 
 Estado de efectos:
 
-- `DropShadow` sí se dibuja en el pipeline actual;
-- `GaussianBlur` y `Glow` están definidos, pero el renderer contiene un TODO explícito
-  y todavía no producen el efecto visual;
+- `DropShadow`, `GaussianBlur` y `Glow` se dibujan mediante muestras vectoriales suaves
+  conservadas en la caché de fragmentos;
+- Python expone la superficie compacta `.shadow(...)`, `.blur(...)`, `.glow(...)` y
+  `.no_effects()`, compatible con fills y strokes sólidos o gradientes;
 - `Brush.linear`, `Brush.radial` y `Brush.sweep` exponen gradientes para fill y stroke
   en Python, con ramps `pad`, `repeat` y `reflect`.
 
@@ -434,7 +435,7 @@ componer cada pieza desde primitivas.
 - `camera.frame_to(mobject, margin=...)`;
 - cámara follow, pan, zoom y shake como animaciones de alto nivel;
 - clipping/masks públicos;
-- gradientes y efectos de sombra/blur/glow completos;
+- [x] gradientes y efectos vectoriales de sombra/blur/glow con caché retained;
 - soporte explícito de aspect ratios y safe areas en `scene.canvas`.
 
 ### P1 — Presentaciones completas

@@ -10,7 +10,13 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 STUB = ROOT / "crates" / "gaanim_python" / "gaanim" / "gaanim_core.pyi"
-TYPE_CHECKING_ONLY = {"CurvePoint", "CurveControl", "CurveCommand"}
+TYPE_CHECKING_ONLY = {
+    "CurvePoint",
+    "CurveControl",
+    "CurveCommand",
+    "ColorLike",
+    "Paint",
+}
 
 
 def declared_members(node: ast.ClassDef) -> set[str]:

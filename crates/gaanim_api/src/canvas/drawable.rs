@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
@@ -174,6 +174,44 @@ impl DrawableHandle {
         self.update_style(|spec| {
             spec.stroke = None;
             spec.stroke_overridden = true;
+        })
+    }
+
+    /// Add a soft outer glow. The effect is compiled into the retained vector fragment.
+    pub fn glow(self, color: Color, radius: f64, intensity: f32) -> Self {
+        self.update_style(|spec| {
+            spec.glow = Some(gaanim_renderer::effects::Glow {
+                color,
+                radius,
+                intensity,
+            });
+        })
+    }
+
+    /// Apply a soft vector blur to this drawable.
+    pub fn blur(self, sigma: f64) -> Self {
+        self.update_style(|spec| {
+            spec.blur = Some(gaanim_renderer::effects::GaussianBlur { sigma });
+        })
+    }
+
+    /// Add a soft shadow behind this drawable.
+    pub fn shadow(self, color: Color, offset: DVec2, blur_radius: f64) -> Self {
+        self.update_style(|spec| {
+            spec.shadow = Some(gaanim_renderer::effects::DropShadow {
+                color,
+                offset,
+                blur_radius,
+            });
+        })
+    }
+
+    /// Remove all visual effects while preserving fill and stroke styling.
+    pub fn no_effects(self) -> Self {
+        self.update_style(|spec| {
+            spec.glow = None;
+            spec.blur = None;
+            spec.shadow = None;
         })
     }
 

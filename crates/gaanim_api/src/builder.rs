@@ -4897,11 +4897,29 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
     /// Finalizes the setup, spawning the Bevy ECS bundle and recording its tracked hot state in the SceneBuilder.
     pub fn spawn(self) -> MobjectRef {
+        self.spawn_with_effects(None, None, None)
+    }
+
+    pub(crate) fn spawn_with_effects(
+        self,
+        glow: Option<gaanim_renderer::effects::Glow>,
+        blur: Option<gaanim_renderer::effects::GaussianBlur>,
+        shadow: Option<gaanim_renderer::effects::DropShadow>,
+    ) -> MobjectRef {
         let mut entity_cmd = self.builder.commands.spawn(self.bundle.clone());
         let entity = entity_cmd.id();
 
         if let Some(parent) = self.parent_entity {
             entity_cmd.set_parent_in_place(parent);
+        }
+        if let Some(glow) = glow {
+            entity_cmd.insert(glow);
+        }
+        if let Some(blur) = blur {
+            entity_cmd.insert(blur);
+        }
+        if let Some(shadow) = shadow {
+            entity_cmd.insert(shadow);
         }
 
         // Tag entity with the current scene if inside a scene scope

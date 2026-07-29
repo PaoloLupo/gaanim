@@ -167,6 +167,48 @@ impl PyDrawable {
     fn no_stroke(&self) -> Self {
         Self(self.0.clone().no_stroke())
     }
+    /// Add a cached soft outer glow.
+    #[pyo3(signature = (color, radius=16.0, intensity=1.0))]
+    fn glow(&self, color: PyColor, radius: f64, intensity: f32) -> PyResult<Self> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err("radius must be finite and positive"));
+        }
+        if !intensity.is_finite() || intensity <= 0.0 {
+            return Err(PyValueError::new_err(
+                "intensity must be finite and positive",
+            ));
+        }
+        Ok(Self(self.0.clone().glow(color.0, radius, intensity)))
+    }
+    /// Apply a cached soft vector blur.
+    #[pyo3(signature = (sigma=4.0))]
+    fn blur(&self, sigma: f64) -> PyResult<Self> {
+        if !sigma.is_finite() || sigma <= 0.0 {
+            return Err(PyValueError::new_err("sigma must be finite and positive"));
+        }
+        Ok(Self(self.0.clone().blur(sigma)))
+    }
+    /// Add a cached soft shadow behind the drawable.
+    #[pyo3(signature = (color, x=8.0, y=-8.0, blur=6.0))]
+    fn shadow(&self, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<Self> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyValueError::new_err("shadow offset must be finite"));
+        }
+        if !blur.is_finite() || blur < 0.0 {
+            return Err(PyValueError::new_err(
+                "shadow blur must be finite and non-negative",
+            ));
+        }
+        Ok(Self(self.0.clone().shadow(
+            color.0,
+            gaanim_core::glam::DVec2::new(x, y),
+            blur,
+        )))
+    }
+    /// Remove glow, blur, and shadow from the drawable.
+    fn no_effects(&self) -> Self {
+        Self(self.0.clone().no_effects())
+    }
     /// Colors every matching fragment of a text or equation drawable.
     ///
     /// Matching is case-insensitive and ignores mathematical spacing and

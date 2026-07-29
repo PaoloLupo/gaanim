@@ -87,6 +87,81 @@ fn stroke_clip_path<'a>(
         .then_some(clip_path)
 }
 
+const BLUR_KERNEL: [((f64, f64), f32); 13] = [
+    ((0.0, 0.0), 0.20),
+    ((0.65, 0.0), 0.10),
+    ((-0.65, 0.0), 0.10),
+    ((0.0, 0.65), 0.10),
+    ((0.0, -0.65), 0.10),
+    ((0.65, 0.65), 0.06),
+    ((0.65, -0.65), 0.06),
+    ((-0.65, 0.65), 0.06),
+    ((-0.65, -0.65), 0.06),
+    ((1.4, 0.0), 0.04),
+    ((-1.4, 0.0), 0.04),
+    ((0.0, 1.4), 0.04),
+    ((0.0, -1.4), 0.04),
+];
+
+fn draw_soft_fill(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    brush: &peniko::Brush,
+    sigma: f64,
+    alpha: f32,
+    origin: kurbo::Affine,
+) {
+    for ((x, y), weight) in BLUR_KERNEL {
+        let sample_brush = brush.clone().multiply_alpha(weight * alpha);
+        let transform = origin * kurbo::Affine::translate((x * sigma, y * sigma));
+        scene.fill(peniko::Fill::NonZero, transform, &sample_brush, None, path);
+    }
+}
+
+fn draw_soft_stroke(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    brush: &peniko::Brush,
+    style: &kurbo::Stroke,
+    sigma: f64,
+) {
+    for ((x, y), weight) in BLUR_KERNEL {
+        let sample_brush = brush.clone().multiply_alpha(weight);
+        scene.stroke(
+            style,
+            kurbo::Affine::translate((x * sigma, y * sigma)),
+            &sample_brush,
+            None,
+            path,
+        );
+    }
+}
+
+fn draw_glow(scene: &mut vello::Scene, path: &kurbo::BezPath, glow: &Glow) {
+    if !glow.radius.is_finite()
+        || glow.radius <= 0.0
+        || !glow.intensity.is_finite()
+        || glow.intensity <= 0.0
+    {
+        return;
+    }
+    let brush = peniko::Brush::Solid(glow.color);
+    for step in (1..=7).rev() {
+        let spread = glow.radius * f64::from(step) / 7.0;
+        let falloff = 1.0 - (step as f32 - 1.0) / 7.0;
+        let sample = brush
+            .clone()
+            .multiply_alpha((glow.intensity * 0.18 * falloff * falloff).clamp(0.0, 1.0));
+        scene.stroke(
+            &kurbo::Stroke::new(spread * 2.0),
+            kurbo::Affine::IDENTITY,
+            &sample,
+            None,
+            path,
+        );
+    }
+}
+
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
 ///
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
@@ -202,6 +277,8 @@ pub fn compile_scene_from_world(
 
     let mut query_effects = world.query::<(
         Option<&DropShadow>,
+        Option<&Glow>,
+        Option<&GaussianBlur>,
         Option<&FillDrawProgress>,
         Option<&ClipMask>,
         Option<&WorldBounds>,
@@ -229,8 +306,15 @@ pub fn compile_scene_from_world(
             continue;
         }
 
-        let Ok((shadow_opt, fill_progress_opt, clip_opt, world_bounds_opt, is_group_opt)) =
-            query_effects.get(world, entity)
+        let Ok((
+            shadow_opt,
+            glow_opt,
+            blur_opt,
+            fill_progress_opt,
+            clip_opt,
+            world_bounds_opt,
+            is_group_opt,
+        )) = query_effects.get(world, entity)
         else {
             continue;
         };
@@ -279,22 +363,60 @@ pub fn compile_scene_from_world(
         if let Some(shadow) = shadow_opt {
             let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
             let shadow_brush = peniko::Brush::Solid(shadow.color);
-            scene.fill(
-                peniko::Fill::NonZero,
-                shadow_transform,
-                &shadow_brush,
-                None,
-                elem_path,
-            );
+            if shadow.blur_radius > 0.0 {
+                draw_soft_fill(
+                    &mut scene,
+                    elem_path,
+                    &shadow_brush,
+                    shadow.blur_radius,
+                    1.0,
+                    shadow_transform,
+                );
+            } else {
+                scene.fill(
+                    peniko::Fill::NonZero,
+                    shadow_transform,
+                    &shadow_brush,
+                    None,
+                    elem_path,
+                );
+            }
         }
 
-        if let Some(raster_image) = raster_image_opt
+        if let Some(glow) = glow_opt {
+            draw_glow(&mut scene, elem_path, glow);
+        }
+
+        let blur_sigma = blur_opt
+            .map(|blur| blur.sigma)
+            .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
+        let blurred_vector = if let Some(sigma) = blur_sigma {
+            if let Some(fill_brush) = elem_fill {
+                draw_soft_fill(
+                    &mut scene,
+                    elem_path,
+                    fill_brush,
+                    sigma,
+                    fill_alpha,
+                    kurbo::Affine::IDENTITY,
+                );
+            }
+            if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
+                draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
+            }
+            elem_fill.is_some() || elem_stroke.is_some()
+        } else {
+            false
+        };
+
+        if !blurred_vector
+            && let Some(raster_image) = raster_image_opt
             && let Some(image) = raster_image.image.as_ref()
         {
             scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
             scene.draw_image(image.as_ref(), raster_image.local_transform);
             scene.pop_layer();
-        } else if fill_alpha < 1.0 {
+        } else if !blurred_vector && fill_alpha < 1.0 {
             if let Some(fill_brush) = elem_fill {
                 let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                 if let Some(ref brush) = modulated {
@@ -307,7 +429,7 @@ pub fn compile_scene_from_world(
                     );
                 }
             }
-        } else if let Some(fill_brush) = elem_fill {
+        } else if !blurred_vector && let Some(fill_brush) = elem_fill {
             scene.fill(
                 peniko::Fill::NonZero,
                 kurbo::Affine::IDENTITY,
@@ -317,7 +439,8 @@ pub fn compile_scene_from_world(
             );
         }
 
-        if let Some(stroke_brush) = elem_stroke
+        if !blurred_vector
+            && let Some(stroke_brush) = elem_stroke
             && let Some(style) = elem_stroke_style
         {
             if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
@@ -609,19 +732,58 @@ pub fn gaanim_render_system(
             let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
             let elem_raster_image = raster_image_ref.as_deref();
             let elem_shadow = shadow_ref.as_deref();
+            let elem_glow = glow_ref.as_deref();
+            let elem_blur = blur_ref.as_deref();
 
             // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
             if let Some(shadow) = elem_shadow {
                 let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
                 let shadow_brush = peniko::Brush::Solid(shadow.color);
-                scene.fill(
-                    peniko::Fill::NonZero,
-                    shadow_transform,
-                    &shadow_brush,
-                    None,
-                    elem_path,
-                );
+                if shadow.blur_radius > 0.0 {
+                    draw_soft_fill(
+                        &mut scene,
+                        elem_path,
+                        &shadow_brush,
+                        shadow.blur_radius,
+                        1.0,
+                        shadow_transform,
+                    );
+                } else {
+                    scene.fill(
+                        peniko::Fill::NonZero,
+                        shadow_transform,
+                        &shadow_brush,
+                        None,
+                        elem_path,
+                    );
+                }
             }
+
+            if let Some(glow) = elem_glow {
+                draw_glow(&mut scene, elem_path, glow);
+            }
+
+            let blur_sigma = elem_blur
+                .map(|blur| blur.sigma)
+                .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
+            let blurred_vector = if let Some(sigma) = blur_sigma {
+                if let Some(fill_brush) = elem_fill {
+                    draw_soft_fill(
+                        &mut scene,
+                        elem_path,
+                        fill_brush,
+                        sigma,
+                        fill_alpha,
+                        kurbo::Affine::IDENTITY,
+                    );
+                }
+                if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
+                    draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
+                }
+                elem_fill.is_some() || elem_stroke.is_some()
+            } else {
+                false
+            };
 
             // 2. Draw Fill
             //
@@ -631,13 +793,14 @@ pub fn gaanim_render_system(
             // brushes we still draw at full alpha (a small visual quirk
             // during the cross-fade, but the user-visible effect is
             // preserved: outline first, then fill).
-            if let Some(raster_image) = elem_raster_image
+            if !blurred_vector
+                && let Some(raster_image) = elem_raster_image
                 && let Some(image) = raster_image.image.as_ref()
             {
                 scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
                 scene.draw_image(image.as_ref(), raster_image.local_transform);
                 scene.pop_layer();
-            } else if fill_alpha < 1.0 {
+            } else if !blurred_vector && fill_alpha < 1.0 {
                 if let Some(fill_brush) = elem_fill {
                     let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                     if let Some(ref brush) = modulated {
@@ -650,7 +813,7 @@ pub fn gaanim_render_system(
                         );
                     }
                 }
-            } else if let Some(fill_brush) = elem_fill {
+            } else if !blurred_vector && let Some(fill_brush) = elem_fill {
                 scene.fill(
                     peniko::Fill::NonZero,
                     kurbo::Affine::IDENTITY,
@@ -673,7 +836,8 @@ pub fn gaanim_render_system(
             // over them clips the stroke to nothing and the line
             // becomes invisible. So we only push the layer when the
             // path actually contains a `ClosePath` element.
-            if let Some(stroke_brush) = elem_stroke
+            if !blurred_vector
+                && let Some(stroke_brush) = elem_stroke
                 && let Some(style) = elem_stroke_style
             {
                 if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
@@ -702,11 +866,6 @@ pub fn gaanim_render_system(
                     );
                 }
             }
-
-            // TODO: GaussianBlur and Glow effects are not yet implemented
-            // in Vello's native pipeline. They are read above to invalidate cache,
-            // but do not affect the scene until a post-processing pass is wired.
-            let _ = (glow_ref, blur_ref);
 
             Arc::new(scene)
         });

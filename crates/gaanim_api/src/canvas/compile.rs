@@ -2188,7 +2188,7 @@ impl Canvas {
             }
         }
         b = b.opacity(spec.opacity).z_index(spec.z_index);
-        b.spawn()
+        b.spawn_with_effects(spec.glow.clone(), spec.blur, spec.shadow.clone())
     }
 
     /// Applies deferred glyph-level color overrides after the normal object
@@ -2312,6 +2312,27 @@ impl Canvas {
                     child_state.stroke = sb.clone();
                 }
                 builder.commands.entity(child.entity).insert(sb);
+            }
+        }
+        let effect_targets = if child_spans.is_empty() {
+            builder
+                .states
+                .get(id)
+                .map(|state| vec![state.entity])
+                .unwrap_or_default()
+        } else {
+            child_spans.iter().map(|child| child.entity).collect()
+        };
+        for entity in effect_targets {
+            let mut commands = builder.commands.entity(entity);
+            if let Some(glow) = &spec.glow {
+                commands.insert(glow.clone());
+            }
+            if let Some(blur) = spec.blur {
+                commands.insert(blur);
+            }
+            if let Some(shadow) = &spec.shadow {
+                commands.insert(shadow.clone());
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
@@ -2480,6 +2501,53 @@ mod tests {
     use gaanim_layout::Anchor;
     use gaanim_scene::LocalBounds;
     use gaanim_timeline::snapshot::WorldSnapshot;
+
+    #[test]
+    fn visual_effects_are_attached_to_compiled_drawables() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .circle(60.0)
+            .glow(PenikoColor::WHITE, 18.0, 1.2)
+            .blur(5.0)
+            .shadow(
+                PenikoColor::BLACK,
+                gaanim_core::glam::DVec2::new(8.0, -8.0),
+                7.0,
+            );
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        assert_eq!(
+            world
+                .query::<&gaanim_renderer::effects::Glow>()
+                .iter(&world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query::<&gaanim_renderer::effects::GaussianBlur>()
+                .iter(&world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query::<&gaanim_renderer::effects::DropShadow>()
+                .iter(&world)
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn semantic_slides_show_only_the_active_slide_on_seek() {
