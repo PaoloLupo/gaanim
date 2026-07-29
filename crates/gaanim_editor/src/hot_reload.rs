@@ -6,7 +6,7 @@ use crossbeam_channel::Receiver;
 use gaanim_api::host::ReloadPayload;
 use gaanim_api::runtime;
 
-use crate::export::StashedReplay;
+use gaanim_editor::export::StashedReplay;
 use gaanim_scene::MobjectId;
 use gaanim_timeline::timeline::Timeline;
 
@@ -113,7 +113,13 @@ pub fn reload_listener_system(world: &mut World) {
 /// t=0 keyframe capture for the next frame (after deferred Commands flush).
 pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
     clear_scene_entities(world);
-    world.insert_resource(StashedReplay(Some(canvas.clone())));
+    let revision = world
+        .get_resource::<StashedReplay>()
+        .map_or(1, |stash| stash.revision.wrapping_add(1).max(1));
+    world.insert_resource(StashedReplay {
+        canvas: Some(canvas.clone()),
+        revision,
+    });
     runtime::replay_canvas_into(world, canvas);
     // Defer keyframe capture to the next frame so that deferred Commands
     // (entity spawns, SceneMember inserts, etc.) are flushed first.

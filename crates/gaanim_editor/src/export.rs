@@ -8,8 +8,12 @@ use gaanim_timeline::timeline::Timeline;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[derive(Resource, Clone)]
-pub struct StashedReplay(pub Option<Canvas>);
+#[derive(Resource, Clone, Default)]
+pub struct StashedReplay {
+    pub canvas: Option<Canvas>,
+    /// Changes on every replay, even when slide names and timings stay equal.
+    pub revision: u64,
+}
 
 #[derive(Resource)]
 pub struct ExportState {
@@ -171,7 +175,7 @@ pub fn export_dialog_system(
     let mut current_format = state.format;
     let mut current_quality = state.quality;
     let mut current_output = state.output_path.clone();
-    let has_replay = replay_stash.0.is_some();
+    let has_replay = replay_stash.canvas.is_some();
     let dur = timeline.cached_duration;
     let fps = current_quality.fps();
     let total = (dur * fps as f64).ceil() as u64;
@@ -252,7 +256,7 @@ pub fn export_dialog_system(
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
-            let canvas = replay_stash.0.clone().unwrap();
+            let canvas = replay_stash.canvas.clone().unwrap();
 
             state.active = true;
             state.dialog_open = false;

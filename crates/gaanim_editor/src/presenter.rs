@@ -7,9 +7,12 @@ use bevy::{
     window::{WindowClosed, WindowCreated, WindowRef, WindowResolution},
 };
 use bevy_egui::{EguiContext, EguiMultipassSchedule, egui};
+use crossbeam_channel::{Receiver, TryRecvError, bounded};
+use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, capture_scene_direct};
 use gaanim_timeline::timeline::Timeline;
+use std::collections::HashMap;
 
-use crate::{AudienceBlank, PresentationMode};
+use crate::{AudienceBlank, PresentationMode, export::StashedReplay};
 
 /// Dedicated egui schedule for the presenter window.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -28,6 +31,129 @@ pub(crate) struct PresenterCamera {
 pub(crate) struct PresenterOverviewState {
     open: bool,
     query: String,
+    textures: HashMap<u32, egui::TextureHandle>,
+}
+
+#[derive(Debug)]
+struct ThumbnailPixels {
+    slide_id: u32,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+type ThumbnailResult = Result<Vec<ThumbnailPixels>, String>;
+
+/// Async thumbnail state. Captures use a fresh headless world, so generating
+/// the overview never seeks or mutates the audience's live presentation.
+#[derive(Resource, Default)]
+pub(crate) struct PresenterThumbnailCache {
+    requested_revision: u64,
+    receiver: Option<Receiver<(u64, ThumbnailResult)>>,
+    error: Option<String>,
+}
+
+impl PresenterThumbnailCache {
+    fn request(&mut self, stash: &StashedReplay, timeline: &Timeline) {
+        if stash.revision == 0
+            || stash.revision == self.requested_revision
+            || timeline.presentation.is_empty()
+        {
+            return;
+        }
+        let Some(canvas) = stash.canvas.clone() else {
+            return;
+        };
+
+        let revision = stash.revision;
+        let slide_ids = timeline
+            .presentation
+            .iter()
+            .map(|slide| slide.id)
+            .collect::<Vec<_>>();
+        let times = timeline
+            .presentation
+            .iter()
+            .map(|slide| representative_slide_time(slide.start_time, slide.end_time))
+            .collect::<Vec<_>>();
+        let (width, height) = thumbnail_dimensions(canvas.width, canvas.height);
+        let (sender, receiver) = bounded(1);
+
+        self.requested_revision = revision;
+        self.receiver = Some(receiver);
+        self.error = None;
+
+        let spawn_result = std::thread::Builder::new()
+            .name("gaanim-presenter-thumbnails".to_string())
+            .spawn(move || {
+                let mut config = ExportConfig::new("presenter-thumbnails.png");
+                config.width = width;
+                config.height = height;
+                config.aspect_ratio = AspectRatioPreset::Custom;
+                config.headless = true;
+                let result = capture_scene_direct(config, &times, move |world| {
+                    gaanim_api::runtime::replay_canvas_into(world, canvas)
+                })
+                .map(|frames| {
+                    slide_ids
+                        .into_iter()
+                        .zip(frames)
+                        .map(|(slide_id, frame)| ThumbnailPixels {
+                            slide_id,
+                            width: frame.width,
+                            height: frame.height,
+                            rgba: frame.rgba,
+                        })
+                        .collect()
+                })
+                .map_err(|error| error.to_string());
+                let _ = sender.send((revision, result));
+            });
+
+        if let Err(error) = spawn_result {
+            self.receiver = None;
+            self.error = Some(format!("could not start thumbnail renderer: {error}"));
+        }
+    }
+
+    fn receive(&mut self) -> Option<(u64, ThumbnailResult)> {
+        let result = match self.receiver.as_ref()?.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                self.error = Some("thumbnail renderer stopped unexpectedly".to_string());
+                self.receiver = None;
+                None
+            }
+        };
+        if result.is_some() {
+            self.receiver = None;
+        }
+        result
+    }
+
+    fn is_loading(&self) -> bool {
+        self.receiver.is_some()
+    }
+}
+
+fn thumbnail_dimensions(canvas_width: u32, canvas_height: u32) -> (u32, u32) {
+    const MAX_EDGE: f64 = 320.0;
+    let width = canvas_width.max(1) as f64;
+    let height = canvas_height.max(1) as f64;
+    let scale = MAX_EDGE / width.max(height);
+    (
+        (width * scale).round().max(1.0) as u32,
+        (height * scale).round().max(1.0) as u32,
+    )
+}
+
+fn representative_slide_time(start_time: f64, end_time: f64) -> f64 {
+    if end_time > start_time + 1e-4 {
+        (end_time - 1e-4).max(start_time)
+    } else {
+        start_time
+    }
 }
 
 fn apply_presenter_style(ctx: &egui::Context) {
@@ -139,6 +265,8 @@ pub(crate) fn presenter_view_system(
     mut contexts: Query<&mut EguiContext, With<PresenterCamera>>,
     mut timeline: ResMut<Timeline>,
     mut audience_blank: ResMut<AudienceBlank>,
+    replay_stash: Res<StashedReplay>,
+    mut thumbnail_cache: ResMut<PresenterThumbnailCache>,
     mut overview: Local<PresenterOverviewState>,
 ) {
     let Ok(mut context) = contexts.single_mut() else {
@@ -146,6 +274,32 @@ pub(crate) fn presenter_view_system(
     };
     let ctx = context.get_mut();
     apply_presenter_style(ctx);
+    if overview.open {
+        thumbnail_cache.request(&replay_stash, &timeline);
+    }
+    if let Some((revision, result)) = thumbnail_cache.receive()
+        && revision == replay_stash.revision
+    {
+        overview.textures.clear();
+        match result {
+            Ok(frames) => {
+                for frame in frames {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [frame.width as usize, frame.height as usize],
+                        &frame.rgba,
+                    );
+                    let texture = ctx.load_texture(
+                        format!("presenter-slide-{}-{revision}", frame.slide_id),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    overview.textures.insert(frame.slide_id, texture);
+                }
+                thumbnail_cache.error = None;
+            }
+            Err(error) => thumbnail_cache.error = Some(error),
+        }
+    }
     let current_time = timeline.current_time;
     let current_position = timeline.presentation_position_at(current_time);
     let current = current_position.and_then(|position| {
@@ -346,9 +500,24 @@ pub(crate) fn presenter_view_system(
             .resizable(true)
             .default_width(620.0)
             .show(ctx, |ui| {
+                thumbnail_cache.request(&replay_stash, &timeline);
                 ui.label("Jump to a slide by name");
                 ui.text_edit_singleline(&mut overview.query);
                 ui.add_space(8.0);
+
+                if thumbnail_cache.is_loading() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Rendering slide previews...");
+                    });
+                    ui.add_space(8.0);
+                } else if let Some(error) = &thumbnail_cache.error {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 140, 140),
+                        format!("Could not render previews: {error}"),
+                    );
+                    ui.add_space(8.0);
+                }
 
                 let query = overview.query.trim().to_lowercase();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -360,21 +529,83 @@ pub(crate) fn presenter_view_system(
                         let active =
                             current_position.is_some_and(|position| position.slide_id == slide.id);
                         let step_count = slide.steps.len();
-                        let label = format!(
-                            "{:02}  {}  · {} step{}",
-                            index + 1,
-                            slide.name,
-                            step_count,
-                            if step_count == 1 { "" } else { "s" }
-                        );
-                        if ui
-                            .add_sized(
-                                [560.0, 64.0],
-                                egui::Button::new(label).selected(active).wrap(),
-                            )
-                            .clicked()
-                        {
-                            requested_seek = Some(slide.start_time);
+                        let mut clicked = false;
+                        egui::Frame::group(ui.style())
+                            .fill(if active {
+                                egui::Color32::from_rgb(31, 50, 84)
+                            } else {
+                                egui::Color32::from_rgb(13, 20, 36)
+                            })
+                            .inner_margin(egui::Margin::same(10))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    if let Some(texture) = overview.textures.get(&slide.id) {
+                                        let texture_size = texture.size_vec2();
+                                        let scale =
+                                            (190.0 / texture_size.x).min(140.0 / texture_size.y);
+                                        clicked |= ui
+                                            .add(
+                                                egui::Image::new(texture)
+                                                    .fit_to_exact_size(texture_size * scale)
+                                                    .sense(egui::Sense::click()),
+                                            )
+                                            .clicked();
+                                    } else {
+                                        let (rect, response) = ui.allocate_exact_size(
+                                            egui::vec2(190.0, 107.0),
+                                            egui::Sense::click(),
+                                        );
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            6.0,
+                                            egui::Color32::from_rgb(5, 8, 16),
+                                        );
+                                        clicked |= response.clicked();
+                                    }
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{:02}  {}",
+                                                index + 1,
+                                                slide.name
+                                            ))
+                                            .strong()
+                                            .size(18.0),
+                                        );
+                                        ui.label(format!(
+                                            "{} step{}",
+                                            step_count,
+                                            if step_count == 1 { "" } else { "s" }
+                                        ));
+                                        clicked |= ui.button("Go to slide").clicked();
+                                        if !slide.steps.is_empty() {
+                                            ui.horizontal_wrapped(|ui| {
+                                                for (step_index, step) in
+                                                    slide.steps.iter().enumerate()
+                                                {
+                                                    let label = step
+                                                        .name
+                                                        .as_deref()
+                                                        .map(str::to_owned)
+                                                        .unwrap_or_else(|| {
+                                                            format!("Step {}", step_index + 1)
+                                                        });
+                                                    if ui.small_button(label).clicked() {
+                                                        requested_seek = timeline
+                                                            .presentation_time_indexed(
+                                                                &slide.name,
+                                                                Some(step_index),
+                                                            );
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                            });
+                        ui.add_space(8.0);
+                        if clicked {
+                            requested_seek = timeline.presentation_time_named(&slide.name);
                         }
                     }
                 });
@@ -385,5 +616,24 @@ pub(crate) fn presenter_view_system(
     if let Some(time) = requested_seek {
         timeline.is_playing = false;
         timeline.seek_request = Some(time);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{representative_slide_time, thumbnail_dimensions};
+
+    #[test]
+    fn thumbnail_dimensions_preserve_common_aspect_ratios() {
+        assert_eq!(thumbnail_dimensions(1920, 1080), (320, 180));
+        assert_eq!(thumbnail_dimensions(1080, 1920), (180, 320));
+        assert_eq!(thumbnail_dimensions(0, 0), (320, 320));
+    }
+
+    #[test]
+    fn representative_time_stays_inside_the_slide() {
+        assert_eq!(representative_slide_time(2.0, 2.0), 2.0);
+        let time = representative_slide_time(2.0, 5.0);
+        assert!(time >= 2.0 && time < 5.0);
     }
 }

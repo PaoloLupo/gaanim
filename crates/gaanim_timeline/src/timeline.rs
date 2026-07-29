@@ -175,6 +175,61 @@ impl Timeline {
         }
     }
 
+    /// Resolve a slide by its semantic name and return its initial timestamp.
+    ///
+    /// Names are matched exactly first, then ASCII case-insensitively. This keeps
+    /// authored identifiers deterministic while making presenter navigation
+    /// forgiving when driven from a search field.
+    pub fn presentation_time_named(&self, slide_name: &str) -> Option<f64> {
+        self.presentation_slide_named(slide_name)
+            .map(|slide| slide.start_time)
+    }
+
+    /// Resolve a named slide and one of its reveal steps.
+    ///
+    /// `step_name` follows the same exact-then-case-insensitive matching rule as
+    /// slide names. Unnamed steps intentionally cannot be addressed by this
+    /// method; use [`Self::presentation_time_indexed`] for those.
+    pub fn presentation_step_time_named(&self, slide_name: &str, step_name: &str) -> Option<f64> {
+        let slide = self.presentation_slide_named(slide_name)?;
+        slide
+            .steps
+            .iter()
+            .find(|step| step.name.as_deref() == Some(step_name))
+            .or_else(|| {
+                slide.steps.iter().find(|step| {
+                    step.name
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(step_name))
+                })
+            })
+            .map(|step| step.time)
+    }
+
+    /// Resolve a slide and zero-based reveal step index.
+    pub fn presentation_time_indexed(
+        &self,
+        slide_name: &str,
+        step_index: Option<usize>,
+    ) -> Option<f64> {
+        let slide = self.presentation_slide_named(slide_name)?;
+        match step_index {
+            Some(index) => slide.steps.get(index).map(|step| step.time),
+            None => Some(slide.start_time),
+        }
+    }
+
+    fn presentation_slide_named(&self, slide_name: &str) -> Option<&PresentationSlide> {
+        self.presentation
+            .iter()
+            .find(|slide| slide.name == slide_name)
+            .or_else(|| {
+                self.presentation
+                    .iter()
+                    .find(|slide| slide.name.eq_ignore_ascii_case(slide_name))
+            })
+    }
+
     /// Return the previous meaningful presentation stop before `time`.
     pub fn previous_presentation_stop(&self, time: f64) -> Option<f64> {
         self.presentation_stops()
@@ -1596,6 +1651,16 @@ mod tests {
             }),
             Some(4.0)
         );
+        assert_eq!(timeline.presentation_time_named("DETAILS"), Some(3.0));
+        assert_eq!(
+            timeline.presentation_step_time_named("INTRO", "REVEAL"),
+            Some(1.0)
+        );
+        assert_eq!(
+            timeline.presentation_time_indexed("details", Some(0)),
+            Some(4.0)
+        );
+        assert_eq!(timeline.presentation_time_indexed("details", Some(1)), None);
 
         timeline.current_time = 4.0;
         timeline.update_presentation_position();

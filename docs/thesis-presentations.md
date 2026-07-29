@@ -96,7 +96,13 @@ ventana. Presenter View contiene:
 - notas del expositor;
 - tiempo de la presentación;
 - controles anterior, pausa y siguiente;
-- búsqueda y salto directo por nombre de slide.
+- overview con miniaturas renderizadas de cada slide;
+- búsqueda y salto directo por nombre de slide;
+- acceso directo a cualquier paso nombrado desde la tarjeta del slide.
+
+Las miniaturas se generan de forma asíncrona en un mundo de render aislado. Abrir el
+overview no mueve el timeline público ni interrumpe una animación. Al guardar el script,
+hot reload incrementa la revisión de la escena y las miniaturas se regeneran.
 
 ## 5. Validación visual
 

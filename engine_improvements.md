@@ -236,7 +236,9 @@ alcanzarlos y permite avanzar o retroceder con teclado o mouse. El editor muestr
 breakpoints en la barra temporal y puede iniciarse en pantalla completa con `--present`.
 
 La Presenter View abre una segunda ventana con slide/paso actual, siguiente parada, notas,
-cronómetro, navegación, overview consultable por nombre y salto directo. Sus atajos locales
+cronómetro, navegación, overview consultable por nombre, miniaturas y salto directo a
+slides o pasos. Las miniaturas se capturan de forma asíncrona en un mundo ECS/Vello
+aislado, se invalidan con hot reload y nunca hacen seek sobre el timeline público. Sus atajos locales
 son `←`, `→`, `Espacio`, `O` (overview), `B` (pantalla negra) y `W` (pantalla blanca).
 `gaanim check <script.py>` ejecuta además un preflight de formato 16:9, notas, pasos,
 duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
@@ -260,9 +262,6 @@ capturas de regresión. La guía operativa está en `docs/thesis-presentations.m
 
 Para convertirlo en una solución general de slides todavía faltan:
 
-- miniaturas rasterizadas en el overview: requieren un mundo de preview aislado, porque el
-  capturador actual renderiza la ventana/timeline activo y no puede hacer seek sin alterar la
-  salida al público;
 - exportación independiente por slide;
 - enlaces internos y navegación no lineal de presentación;
 - temas de branding parametrizables más allá de la plantilla de tesis incluida;
@@ -440,11 +439,11 @@ componer cada pieza desde primitivas.
 
 ### P1 — Presentaciones completas
 
-- [~] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
-- [ ] Caché de miniaturas: renderizar cada stop en un mundo ECS/Vello aislado, con sus propios
-  targets `Image`, y publicar sus texturas en egui sin mutar el `Timeline` de reproducción;
+- [x] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
+- [x] Caché de miniaturas en mundo ECS/Vello aislado, publicada como texturas egui sin
+  mutar el `Timeline` de reproducción;
 - exportación por slide y exportación continua;
-- navegación directa por nombre/id de slide;
+- [x] navegación directa por nombre de slide y por nombre/índice de paso;
 - plantillas y temas expuestos desde Python;
 - control remoto o protocolo simple de navegación.
 
@@ -512,8 +511,8 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 ### 0.6 — Presentaciones
 
-- [ ] Overview, indicadores y navegación por slide.
-- [ ] Presenter view y notas.
+- [x] Overview con miniaturas, indicadores y navegación por slide/paso.
+- [x] Presenter view y notas.
 - [ ] Exportación independiente por slide.
 - [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
   `add(...)`, `remove(...)`, `replace(...)`, `configure(...)` y `reflow(...)`
