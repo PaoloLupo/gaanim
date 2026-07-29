@@ -167,6 +167,17 @@ pub fn presentation_input_system(
             .is_some_and(|mouse| mouse.just_pressed(button))
     };
 
+    if key_pressed(KeyCode::Home) {
+        timeline.seek_request = Some(0.0);
+        timeline.is_playing = false;
+        return;
+    }
+    if key_pressed(KeyCode::End) {
+        timeline.seek_request = Some(timeline.cached_duration);
+        timeline.is_playing = false;
+        return;
+    }
+
     if key_pressed(KeyCode::Space)
         || key_pressed(KeyCode::Enter)
         || key_pressed(KeyCode::ArrowRight)

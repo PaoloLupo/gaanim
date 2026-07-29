@@ -18,14 +18,14 @@ use crate::canvas::types::{
     SpawnKind,
 };
 use crate::canvas::{
-    FrameLayout, LayoutPreset, LayoutRegion, PresentationError, PresentationManifest, SlideId,
-    SlideTemplate,
+    CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationError, PresentationManifest,
+    SlideId, SlideTemplate,
 };
 use crate::export::{AudioTrack, AudioTrackError};
 
 /// Error returned when selecting a built-in visual theme by name.
 #[derive(Debug, thiserror::Error)]
-#[error("unknown theme '{name}'; expected 'technical' or 'paper'")]
+#[error("unknown theme '{name}'; use CanvasTheme::BUILTIN_NAMES for the available color schemes")]
 pub struct ThemeError {
     pub name: String,
 }
@@ -116,7 +116,10 @@ pub struct Canvas {
     pub height: u32,
     pub background: Option<Color>,
     pub units: CoordinateSystem,
+    /// Canonical name of the selected theme.
     pub theme: Option<String>,
+    /// Complete semantic colors and typography for the selected theme.
+    pub theme_style: Option<CanvasTheme>,
     pub margin: Margin,
     pub asset_root: Option<PathBuf>,
     /// Audio sources mixed by FFmpeg when this canvas is exported.
@@ -135,6 +138,7 @@ impl Canvas {
             height,
             background: None,
             theme: None,
+            theme_style: None,
             units: CoordinateSystem::Pixels,
             margin: Margin::default(),
             asset_root: None,
@@ -155,54 +159,52 @@ impl Canvas {
     /// Apply one of the built-in visual themes.
     ///
     /// `technical` is the quiet dark style used by the built-in technical
-    /// components. `paper` provides the same hierarchy on a light canvas.
+    /// components. `presentation` adds a warmer, higher-contrast hierarchy for
+    /// projected slides. `paper` provides a light documentation canvas.
     /// Calling this method also selects the theme background; callers can
     /// still override [`Canvas::background`] afterwards.
     pub fn set_theme(&mut self, name: &str) -> Result<(), ThemeError> {
-        match name.to_ascii_lowercase().as_str() {
-            "technical" | "scientific" => {
-                self.theme = Some("technical".to_string());
-                self.background = Some(Color::from_rgb8(0x0B, 0x10, 0x18));
-            }
-            "paper" | "light" => {
-                self.theme = Some("paper".to_string());
-                self.background = Some(Color::WHITE);
-            }
-            _ => {
-                return Err(ThemeError {
-                    name: name.to_string(),
-                });
-            }
-        }
+        self.apply_theme(CanvasTheme::builtin(name)?);
         Ok(())
     }
 
-    pub(crate) fn themed_text_config(&self) -> gaanim_text::prelude::TextConfig {
-        use gaanim_text::prelude::TextRole;
+    /// Apply a complete custom or derived visual theme.
+    pub fn apply_theme(&mut self, theme: CanvasTheme) {
+        self.background = Some(theme.palette.background);
+        self.theme = Some(theme.name.clone());
+        self.theme_style = Some(theme);
+    }
 
-        let mut config = gaanim_text::prelude::TextConfig::default();
-        let colors = match self.theme.as_deref() {
-            Some("technical") => Some((
-                Color::from_rgb8(0xF8, 0xFA, 0xFC),
-                Color::from_rgb8(0x94, 0xA3, 0xB8),
-                Color::from_rgb8(0xE2, 0xE8, 0xF0),
-            )),
-            Some("paper") => Some((Color::BLACK, Color::BLACK, Color::BLACK)),
-            _ => None,
-        };
-        if let Some((title, muted, body)) = colors {
-            config.roles.get_mut(&TextRole::Title).unwrap().fill_color = title;
-            config
-                .roles
-                .get_mut(&TextRole::Subtitle)
-                .unwrap()
-                .fill_color = muted;
-            config.roles.get_mut(&TextRole::Caption).unwrap().fill_color = muted;
-            config.roles.get_mut(&TextRole::Body).unwrap().fill_color = body;
-            config.roles.get_mut(&TextRole::Math).unwrap().fill_color = body;
-            config.roles.get_mut(&TextRole::Code).unwrap().fill_color = body;
+    /// Resolve a semantic token from the active theme.
+    pub fn theme_color(&self, role: &str) -> Result<Color, String> {
+        self.theme_style
+            .as_ref()
+            .ok_or_else(|| "no theme is active on this canvas".to_string())?
+            .color(role)
+    }
+
+    /// Validate the active theme for projected-text readability.
+    pub fn validate_theme(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .theme_style
+            .as_ref()
+            .ok_or_else(|| "no theme is active on this canvas".to_string())?
+            .validate())
+    }
+
+    pub(crate) fn themed_text_config(&self) -> gaanim_text::prelude::TextConfig {
+        self.theme_style
+            .as_ref()
+            .map(|theme| theme.text.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn register_theme_fonts(&self, registry: &mut gaanim_text::font::FontRegistry) {
+        if let Some(theme) = &self.theme_style {
+            for font in &theme.fonts {
+                registry.register_font(font.family.clone(), font.bytes.to_vec());
+            }
         }
-        config
     }
 
     pub fn with_units(mut self, u: CoordinateSystem) -> Self {
@@ -1181,8 +1183,9 @@ impl Canvas {
 
     /// Begin a named presentation slide at the current timeline cursor.
     ///
-    /// Starting a later slide closes the preceding slide and inserts the
-    /// breakpoint that pauses a live presentation between them.
+    /// Starting a later slide closes the preceding slide. Slide boundaries
+    /// deliberately do not create a pause: advancing from the preceding
+    /// reveal continues into this slide's first animation, like PowerPoint.
     pub fn slide(
         &mut self,
         name: impl Into<String>,
@@ -1196,18 +1199,14 @@ impl Canvas {
             .active()
             .cursor;
         let mut presentation = self.presentation.lock().expect("presentation poisoned");
-        let had_previous_slide = !presentation.slides.is_empty();
         let id = presentation.start_slide(name.into(), notes, template, start_time)?;
         drop(presentation);
-
-        if had_previous_slide {
-            self.state
-                .lock()
-                .expect("canvas state poisoned")
-                .active_mut()
-                .ops
-                .push(Op::Slide);
-        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::PresentationSlideStart(id));
         Ok(id)
     }
 
@@ -1601,6 +1600,100 @@ mod tests {
     }
 
     #[test]
+    fn presentation_theme_uses_projector_contrast() {
+        use gaanim_text::prelude::TextRole;
+
+        let mut canvas = Canvas::new(1920, 1080);
+        canvas
+            .set_theme("presentation")
+            .expect("presentation is a built-in theme");
+        let config = canvas.themed_text_config();
+
+        assert_eq!(canvas.background, Some(Color::from_rgb8(0x07, 0x0B, 0x16)));
+        assert_eq!(
+            config.roles[&TextRole::Title].fill_color,
+            Color::from_rgb8(0xFF, 0xD1, 0x66)
+        );
+        assert_eq!(
+            config.roles[&TextRole::Body].fill_color,
+            Color::from_rgb8(0xF4, 0xF7, 0xFB)
+        );
+    }
+
+    #[test]
+    fn known_color_scheme_drives_text_and_components_from_one_palette() {
+        use gaanim_text::prelude::TextRole;
+
+        let mut canvas = Canvas::new(1920, 1080);
+        canvas.set_theme("dracula").expect("dracula is built in");
+        let theme = canvas.theme_style.as_ref().unwrap();
+
+        assert_eq!(canvas.theme.as_deref(), Some("dracula"));
+        assert_eq!(canvas.background, Some(Color::from_rgb8(0x28, 0x2A, 0x36)));
+        assert_eq!(
+            theme.text.roles[&TextRole::Title].fill_color,
+            theme.palette.title
+        );
+        assert_eq!(
+            theme.text.roles[&TextRole::Body].fill_color,
+            theme.palette.foreground
+        );
+    }
+
+    #[test]
+    fn derived_theme_can_override_semantic_colors_and_fonts() {
+        use std::collections::HashMap;
+
+        use gaanim_text::prelude::TextRole;
+
+        let mut theme = CanvasTheme::builtin("nord").unwrap();
+        theme.name = "research-lab".into();
+        theme
+            .set_colors(&HashMap::from([(
+                "accent".into(),
+                Color::from_rgb8(0xFF, 0x00, 0x66),
+            )]))
+            .unwrap();
+        theme
+            .set_fonts(&HashMap::from([("text".into(), "Inter".into())]))
+            .unwrap();
+
+        assert_eq!(theme.palette.accent, Color::from_rgb8(0xFF, 0x00, 0x66));
+        for role in [
+            TextRole::Title,
+            TextRole::Subtitle,
+            TextRole::Body,
+            TextRole::Caption,
+        ] {
+            assert_eq!(theme.text.roles[&role].font_family, "Inter");
+        }
+        assert_ne!(theme.text.roles[&TextRole::Math].font_family, "Inter");
+    }
+
+    #[test]
+    fn theme_tokens_are_queryable_and_low_contrast_is_reported() {
+        use std::collections::HashMap;
+
+        let mut theme = CanvasTheme::builtin("presentation").unwrap();
+        assert_eq!(theme.color("border").unwrap(), theme.palette.rule);
+        assert_eq!(theme.color("primary").unwrap(), theme.palette.foreground);
+        assert!(theme.validate().is_empty());
+
+        theme
+            .set_colors(&HashMap::from([(
+                "foreground".into(),
+                theme.palette.background,
+            )]))
+            .unwrap();
+        assert!(
+            theme
+                .validate()
+                .iter()
+                .any(|warning| warning.contains("foreground on background"))
+        );
+    }
+
+    #[test]
     fn svg_parts_are_addressable_and_group_styles_reach_descendant_paths() {
         let temp = std::env::temp_dir().join(format!(
             "gaanim_svg_parts_api_test_{}.svg",
@@ -1880,7 +1973,17 @@ mod tests {
             .iter()
             .filter(|op| matches!(op, Op::Slide))
             .count();
-        assert_eq!(breakpoints, 2, "one step and one slide boundary");
+        assert_eq!(breakpoints, 1, "only explicit slide steps pause playback");
+        assert_eq!(
+            state
+                .active()
+                .ops
+                .iter()
+                .filter(|op| matches!(op, Op::PresentationSlideStart(_)))
+                .count(),
+            2,
+            "each semantic slide starts an automatic visibility scope"
+        );
     }
 
     #[test]

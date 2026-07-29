@@ -340,6 +340,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         for child in &child_spans {
             self.tag_entity(child.entity);
+            // Text and Typst are compiled as individual glyph entities. Keep
+            // the ECS hierarchy in sync with `MobjectState::parent` so
+            // transforms, opacity, and visibility applied to the textual
+            // parent propagate to every glyph.
+            self.commands
+                .entity(child.entity)
+                .set_parent_in_place(entity);
             let child_state = MobjectState {
                 path: child.path.clone(),
                 bounds: child.bounds,
@@ -379,12 +386,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    fn hide_visuals_now(&mut self, state: &MobjectState) {
+    pub(crate) fn hide_visuals_now(&mut self, state: &MobjectState) {
         self.commands.entity(state.entity).insert(Opacity(0.0));
         self.hide_child_spans_now(&state.child_spans);
     }
 
-    fn schedule_show_hierarchy(
+    pub(crate) fn schedule_show_hierarchy(
         &mut self,
         root_id: ObjectId,
         state: &MobjectState,
@@ -423,6 +430,63 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     lens: PropertyLensSpec::Opacity {
                         from: 0.0,
                         to: child_opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+    }
+
+    /// Make a previously hidden hierarchy visible at the current playhead.
+    pub(crate) fn schedule_show_now(&mut self, root_id: ObjectId) {
+        let Some(state) = self.states.get(root_id).cloned() else {
+            return;
+        };
+        let track = self.ensure_track(root_id);
+        self.schedule_show_hierarchy(root_id, &state, track, self.current_time);
+    }
+
+    /// Schedule an instantaneous hide for a root and its generated text
+    /// children. This keeps semantic slide transitions correct even though all
+    /// entities are spawned up front for timeline seeking.
+    pub(crate) fn schedule_hide_hierarchy(&mut self, root_id: ObjectId) {
+        let Some(state) = self.states.get(root_id).cloned() else {
+            return;
+        };
+        let track = self.ensure_track(root_id);
+        let time = self.current_time;
+        self.timeline.add_clip(
+            track,
+            time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: root_id,
+                lens: PropertyLensSpec::Opacity {
+                    from: state.opacity,
+                    to: 0.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        for child in state.child_spans {
+            let opacity = self
+                .states
+                .get(child.id)
+                .map(|child_state| child_state.opacity)
+                .unwrap_or(1.0);
+            self.timeline.add_clip(
+                track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: child.id,
+                    lens: PropertyLensSpec::Opacity {
+                        from: opacity,
+                        to: 0.0,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,

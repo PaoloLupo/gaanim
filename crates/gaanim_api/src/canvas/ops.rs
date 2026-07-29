@@ -9,6 +9,7 @@ use gaanim_core::peniko::Color;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
+use crate::canvas::SlideId;
 use crate::canvas::types::{LayoutKind, ObjectSpec};
 
 // -----------------------------------------------------------------------
@@ -208,6 +209,10 @@ pub(crate) enum Op {
     },
     /// Insert a slide breakpoint.
     Slide,
+    /// Begin a semantic slide. Unlike [`Self::Slide`], this is not a
+    /// breakpoint: it scopes the objects that follow so the compiler can keep
+    /// future slides hidden and retire the preceding slide automatically.
+    PresentationSlideStart(SlideId),
     /// Set an object visible (instant).
     Show(ObjectId),
     /// Set an object invisible (instant).

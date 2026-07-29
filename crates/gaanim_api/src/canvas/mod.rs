@@ -19,5 +19,7 @@ pub use drawable::{DrawableHandle, FragmentSelection, SvgPartError};
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{AssetPreloadError, AssetRootError, Canvas, ImageLoadError, ThemeError};
+mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
+pub use theme::{CanvasTheme, ThemeFont, ThemePalette};
 mod compile;

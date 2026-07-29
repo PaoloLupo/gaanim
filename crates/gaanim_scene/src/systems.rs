@@ -75,12 +75,37 @@ pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Op
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.18's `ChildOf` relation.
 pub fn opacity_propagation_system(
-    roots: Query<Entity, (Without<ChildOf>, With<Opacity>)>,
+    roots: Query<(Entity, Option<&ChildOf>), With<Opacity>>,
     children_query: Query<&Children>,
+    local_opacities: Query<&Opacity>,
+    parents: Query<&ChildOf>,
     mut opacities: Query<(&Opacity, &mut GlobalOpacity)>,
 ) {
-    for root in &roots {
-        propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities);
+    for (root, parent) in &roots {
+        // Text and imported assets can contain structural grouping entities
+        // without an Opacity component. Such an entity must not cut the
+        // cascade: an opacity-bearing child below it is a propagation root.
+        if parent
+            .is_none_or(|parent| !has_opacity_ancestor(parent.parent(), &parents, &local_opacities))
+        {
+            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities);
+        }
+    }
+}
+
+fn has_opacity_ancestor(
+    mut entity: Entity,
+    parents: &Query<&ChildOf>,
+    opacities: &Query<&Opacity>,
+) -> bool {
+    loop {
+        if opacities.get(entity).is_ok() {
+            return true;
+        }
+        let Ok(parent) = parents.get(entity) else {
+            return false;
+        };
+        entity = parent.parent();
     }
 }
 
@@ -90,12 +115,12 @@ fn propagate_opacities_recursive(
     children_query: &Query<&Children>,
     opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
 ) {
-    let Ok((local, mut global)) = opacities.get_mut(entity) else {
-        return;
+    let current_opacity = if let Ok((local, mut global)) = opacities.get_mut(entity) {
+        global.0 = local.0 * parent_opacity;
+        global.0
+    } else {
+        parent_opacity
     };
-    global.0 = local.0 * parent_opacity;
-    let current_opacity = global.0;
-    drop(global);
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
@@ -322,5 +347,25 @@ mod tests {
             .as_coeffs()[4];
         assert!((tx - 15.0).abs() < f64::EPSILON);
         assert!((world.get::<GlobalOpacity>(glyph).unwrap().0 - 0.05).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn opacity_cascade_crosses_structural_nodes_without_opacity() {
+        let mut world = World::new();
+        let root = world.spawn((Opacity(0.5), GlobalOpacity::default())).id();
+        let structural = world.spawn_empty().id();
+        let glyph = world.spawn((Opacity(0.4), GlobalOpacity::default())).id();
+        world.entity_mut(structural).set_parent_in_place(root);
+        world.entity_mut(glyph).set_parent_in_place(structural);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(opacity_propagation_system);
+        schedule.run(&mut world);
+
+        let opacity = world.get::<GlobalOpacity>(glyph).unwrap().0;
+        assert!(
+            (opacity - 0.2).abs() < f32::EPSILON,
+            "expected propagated opacity 0.2, got {opacity}"
+        );
     }
 }

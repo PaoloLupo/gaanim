@@ -16,6 +16,7 @@ use gaanim_api::DecimalNumber;
 
 pub mod export;
 mod fps_overlay;
+mod presenter;
 mod timeline_widget;
 mod vsync;
 
@@ -57,6 +58,8 @@ impl Plugin for GaanimEditorPlugin {
         .insert_resource(export::StashedReplay(None))
         .init_resource::<fps_overlay::FpsOverlay>()
         .init_resource::<vsync::VsyncState>()
+        .init_resource::<PresentationMode>()
+        .init_resource::<AudienceBlank>()
         .init_resource::<ViewportInset>()
         .add_systems(
             Update,
@@ -66,17 +69,44 @@ impl Plugin for GaanimEditorPlugin {
                     .before(gaanim_timeline::timeline_playback_system),
                 editor_picking_system,
                 global_playback_keys_system,
+                presentation_blank_shortcuts_system,
+                presentation_escape_system,
                 fps_overlay::fps_overlay_system,
                 vsync::vsync_toggle_system,
             ),
         )
+        .add_systems(Startup, presenter::spawn_presenter_window_system)
+        .add_systems(Update, presenter::sync_presenter_camera_system)
         .add_systems(
             Update,
             viewport_adjust_system.before(gaanim_scene::hierarchy::SceneSet::Bounds),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
-        .add_systems(EguiPrimaryContextPass, export::export_dialog_system);
+        .add_systems(
+            EguiPrimaryContextPass,
+            presentation_blank_overlay_system.after(editor_ui_system),
+        )
+        .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
+        .add_systems(
+            presenter::PresenterEguiPass,
+            presenter::presenter_view_system,
+        );
     }
+}
+
+/// Whether the primary window is currently an audience-facing presentation.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct PresentationMode {
+    pub active: bool,
+}
+
+/// Emergency audience-screen blanking used during a live presentation.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AudienceBlank {
+    #[default]
+    None,
+    Black,
+    White,
 }
 
 #[derive(Resource)]
@@ -146,15 +176,21 @@ struct EditorQueries<'w, 's> {
 
 fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
+    mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
     mut export_state: ResMut<export::ExportState>,
     mut timeline: ResMut<Timeline>,
     mut inset: ResMut<ViewportInset>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut commands: Commands,
     camera: Option<Res<Camera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     q: EditorQueries,
 ) {
+    if presentation_mode.active {
+        inset.bottom = 0.0;
+        return;
+    }
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
     };
@@ -713,6 +749,33 @@ fn editor_ui_system(
                                             state.timeline_visible = !state.timeline_visible;
                                         }
 
+                                        let present_btn = egui::Button::new(
+                                            egui::RichText::new("▶ Present")
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(150, 215, 255)),
+                                        )
+                                        .min_size(egui::vec2(72.0, 20.0))
+                                        .corner_radius(4.0)
+                                        .fill(egui::Color32::from_rgba_premultiplied(
+                                            35, 70, 95, 180,
+                                        ));
+                                        if ui
+                                            .add(present_btn)
+                                            .on_hover_text(
+                                                "Start fullscreen audience mode on this monitor",
+                                            )
+                                            .clicked()
+                                        {
+                                            if let Ok(mut window) = windows.single_mut() {
+                                                window.mode =
+                                                    bevy::window::WindowMode::BorderlessFullscreen(
+                                                        bevy::window::MonitorSelection::Current,
+                                                    );
+                                                presentation_mode.active = true;
+                                                presenter::spawn_presenter_window(&mut commands);
+                                            }
+                                        }
+
                                         // Export button / progress
                                         if is_exporting {
                                             let pct_text =
@@ -1131,6 +1194,12 @@ fn global_playback_keys_system(
         return;
     }
 
+    // Presentation navigation is owned by `presentation_input_system`, which
+    // advances by semantic slides and reveal steps rather than raw scenes.
+    if !timeline.presentation.is_empty() {
+        return;
+    }
+
     let total = timeline.cached_duration.max(0.0);
 
     if keys.just_pressed(KeyCode::Space) {
@@ -1203,6 +1272,86 @@ fn global_playback_keys_system(
             if let Some(t) = target {
                 timeline.seek_request = Some(t);
             }
+        }
+    }
+}
+
+fn presentation_blank_shortcuts_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    presentation_mode: Res<PresentationMode>,
+    mut blank: ResMut<AudienceBlank>,
+) {
+    if !presentation_mode.active {
+        *blank = AudienceBlank::None;
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyB) {
+        *blank = if *blank == AudienceBlank::Black {
+            AudienceBlank::None
+        } else {
+            AudienceBlank::Black
+        };
+    }
+    if keys.just_pressed(KeyCode::KeyW) {
+        *blank = if *blank == AudienceBlank::White {
+            AudienceBlank::None
+        } else {
+            AudienceBlank::White
+        };
+    }
+}
+
+fn presentation_blank_overlay_system(
+    mut contexts: bevy_egui::EguiContexts,
+    presentation_mode: Res<PresentationMode>,
+    blank: Res<AudienceBlank>,
+) {
+    if !presentation_mode.active || *blank == AudienceBlank::None {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    let rect = ctx.viewport_rect();
+    let color = match *blank {
+        AudienceBlank::Black => egui::Color32::BLACK,
+        AudienceBlank::White => egui::Color32::WHITE,
+        AudienceBlank::None => return,
+    };
+    egui::Area::new(egui::Id::new("gaanim-audience-blank"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(rect, 0.0, color);
+            ui.allocate_rect(rect, egui::Sense::hover());
+        });
+}
+
+/// Escape leaves audience mode and restores the editor chrome in a window.
+fn presentation_escape_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut presentation_mode: ResMut<PresentationMode>,
+    mut blank: ResMut<AudienceBlank>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    presenter_windows: Query<Entity, With<presenter::PresenterWindow>>,
+    presenter_cameras: Query<Entity, With<presenter::PresenterCamera>>,
+    mut commands: Commands,
+) {
+    if !presentation_mode.active || !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if *blank != AudienceBlank::None {
+        *blank = AudienceBlank::None;
+        return;
+    }
+    if let Ok(mut window) = windows.single_mut() {
+        window.mode = bevy::window::WindowMode::Windowed;
+        presentation_mode.active = false;
+        for entity in &presenter_windows {
+            commands.entity(entity).despawn();
+        }
+        for entity in &presenter_cameras {
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -1286,4 +1435,34 @@ fn viewport_adjust_system(
     // Shift the Vello centre upward so the animation sits above the timeline.
     // When there is no timeline panel (inset.bottom == 0) the offset is 0.
     cam.viewport_offset_y = -(inset.bottom as f64) / 2.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn black_screen_shortcut_only_affects_active_presentations() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<AudienceBlank>()
+            .insert_resource(PresentationMode { active: true })
+            .add_systems(Update, presentation_blank_shortcuts_system);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<AudienceBlank>(),
+            AudienceBlank::Black
+        );
+
+        app.world_mut().resource_mut::<PresentationMode>().active = false;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<AudienceBlank>(),
+            AudienceBlank::None
+        );
+    }
 }

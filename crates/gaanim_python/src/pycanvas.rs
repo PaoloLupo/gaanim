@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CurveControl, CurveElement, ImageCrop,
-    ImageFit, ImageOptions, ParagraphOptions, SlideId, SlideTemplate, TextAlign,
+    AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl, CurveElement,
+    ImageCrop, ImageFit, ImageOptions, ParagraphOptions, SlideId, SlideTemplate, TextAlign,
+    ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, AspectRatioPreset, EncodingSpeed, ExportConfig,
@@ -76,6 +77,157 @@ fn escape_typst_string(value: &str) -> String {
         .replace('\r', "")
 }
 
+#[derive(Clone, Copy)]
+struct ComponentPalette {
+    foreground: gaanim_core::peniko::Color,
+    muted: gaanim_core::peniko::Color,
+    accent: gaanim_core::peniko::Color,
+    chart: gaanim_core::peniko::Color,
+    panel: gaanim_core::peniko::Color,
+    header: gaanim_core::peniko::Color,
+    rule: gaanim_core::peniko::Color,
+}
+
+fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
+    use gaanim_core::peniko::Color;
+
+    if let Some(theme) = &scene.theme_style {
+        ComponentPalette {
+            foreground: theme.palette.foreground,
+            muted: theme.palette.muted,
+            accent: theme.palette.accent,
+            chart: theme.palette.chart,
+            panel: theme.palette.panel,
+            header: theme.palette.header,
+            rule: theme.palette.rule,
+        }
+    } else {
+        ComponentPalette {
+            foreground: Color::from_rgb8(0xE6, 0xED, 0xF5),
+            muted: Color::from_rgb8(0x94, 0xA3, 0xB8),
+            accent: Color::from_rgb8(0x5B, 0x8F, 0xC9),
+            chart: Color::from_rgb8(0x4C, 0x78, 0xA8),
+            panel: Color::from_rgb8(0x10, 0x16, 0x20),
+            header: Color::from_rgb8(0x16, 0x2B, 0x46),
+            rule: Color::from_rgb8(0x5B, 0x70, 0x88),
+        }
+    }
+}
+
+/// Reusable colors, typography, and embedded font files for a scene.
+#[pyclass(name = "Theme", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyTheme {
+    pub(crate) inner: CanvasTheme,
+}
+
+#[pymethods]
+impl PyTheme {
+    /// Create a theme from scratch, from a built-in scheme name, or from
+    /// another Theme. Dictionaries override only the supplied semantic roles.
+    #[new]
+    #[pyo3(signature = (
+        base=None,
+        *,
+        name=None,
+        colors=None,
+        fonts=None,
+        sizes=None,
+        font_files=None,
+    ))]
+    fn new(
+        base: Option<&Bound<'_, PyAny>>,
+        name: Option<String>,
+        colors: Option<HashMap<String, PyColor>>,
+        fonts: Option<HashMap<String, String>>,
+        sizes: Option<HashMap<String, f64>>,
+        font_files: Option<HashMap<String, String>>,
+    ) -> PyResult<Self> {
+        let mut theme = match base {
+            Some(base) => {
+                if let Ok(name) = base.extract::<String>() {
+                    CanvasTheme::builtin(&name).map_err(|error| {
+                        pyo3::exceptions::PyValueError::new_err(error.to_string())
+                    })?
+                } else if let Ok(theme) = base.extract::<PyRef<'_, PyTheme>>() {
+                    theme.inner.clone()
+                } else {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(
+                        "Theme base must be a built-in scheme name, another Theme, or None",
+                    ));
+                }
+            }
+            None => CanvasTheme::custom(name.clone().unwrap_or_else(|| "custom".into())),
+        };
+        if let Some(name) = name {
+            theme.name = name;
+        } else if base.is_some_and(|base| base.extract::<PyRef<'_, PyTheme>>().is_ok()) {
+            theme.name = format!("{}-derived", theme.name);
+        }
+        if let Some(colors) = colors {
+            let colors = colors
+                .into_iter()
+                .map(|(role, color)| (role, color.0))
+                .collect();
+            theme
+                .set_colors(&colors)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(fonts) = fonts {
+            theme
+                .set_fonts(&fonts)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(sizes) = sizes {
+            theme
+                .set_sizes(&sizes)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(font_files) = font_files {
+            for (family, path) in font_files {
+                let bytes = std::fs::read(&path).map_err(|error| {
+                    pyo3::exceptions::PyIOError::new_err(format!(
+                        "could not read font file '{path}' for '{family}': {error}"
+                    ))
+                })?;
+                theme.fonts.push(ThemeFont {
+                    family,
+                    bytes: bytes.into(),
+                });
+            }
+        }
+        Ok(Self { inner: theme })
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    /// Names accepted by `Theme(name)` and `scene.canvas.set_theme(name)`.
+    #[staticmethod]
+    fn schemes() -> Vec<&'static str> {
+        CanvasTheme::BUILTIN_NAMES.to_vec()
+    }
+
+    /// Resolve a semantic token for styling manual primitives.
+    fn color(&self, role: &str) -> PyResult<PyColor> {
+        self.inner
+            .color(role)
+            .map(PyColor)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Return contrast and typography warnings. An empty list is presentation-ready.
+    fn validate(&self) -> Vec<String> {
+        self.inner.validate()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Theme({:?})", self.inner.name)
+    }
+}
+
 /// Visual configuration owned by a [`PyScene`].
 ///
 /// A canvas deliberately has no timeline or mobject factories.  Those belong to
@@ -121,7 +273,7 @@ impl PyCanvas {
         self.inner.lock().expect("scene canvas poisoned").background = background.map(|c| c.0);
     }
 
-    /// Name of the selected built-in visual theme, if any.
+    /// Name of the selected built-in or custom visual theme, if any.
     #[getter]
     fn theme(&self) -> Option<String> {
         self.inner
@@ -133,15 +285,42 @@ impl PyCanvas {
 
     /// Apply a built-in visual theme.
     ///
-    /// `technical` uses a near-black technical canvas with restrained gray
-    /// hierarchy. `paper` uses the same hierarchy for light documentation.
-    /// The aliases `scientific` and `light` are also accepted.
-    fn set_theme(&self, name: &str) -> PyResult<()> {
+    /// Accepts either a built-in color-scheme name or a reusable `Theme`.
+    /// Custom themes can derive a scheme and override semantic colors,
+    /// typography, sizes, and embedded font files.
+    fn set_theme(&self, theme: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        if let Ok(name) = theme.extract::<String>() {
+            canvas
+                .set_theme(&name)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        } else if let Ok(theme) = theme.extract::<PyRef<'_, PyTheme>>() {
+            canvas.apply_theme(theme.inner.clone());
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "set_theme expects a built-in scheme name or Theme",
+            ))
+        }
+    }
+
+    /// Resolve a semantic token from the active theme.
+    fn color(&self, role: &str) -> PyResult<PyColor> {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .set_theme(name)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+            .theme_color(role)
+            .map(PyColor)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Return readability warnings for the active theme.
+    fn validate_theme(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .validate_theme()
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Set a uniform margin on all four sides. It affects `to_edge` and
@@ -1403,12 +1582,12 @@ impl PyScene {
             ));
         }
 
-        let background = background
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x1B, 0x1F, 0x3B));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let background = background.map(|color| color.0).unwrap_or(palette.panel);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let card = scene
             .rounded_rect(width, height, 12.0)
@@ -1474,12 +1653,12 @@ impl PyScene {
                 ));
             }
         };
-        let background = background
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgba8(0x0F, 0x17, 0x2A, 0xE8));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let background = background.map(|color| color.0).unwrap_or(palette.panel);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let card = scene
             .rounded_rect(width, height, 14.0)
@@ -1535,15 +1714,13 @@ impl PyScene {
             ));
         }
 
-        let background = background
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x1B, 0x1F, 0x3B));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or(gaanim_core::peniko::Color::WHITE);
-        let accent = accent
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let background = background.map(|color| color.0).unwrap_or(palette.panel);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
+        let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let title_y = if subtitle.is_some() { 44.0 } else { 0.0 };
         let title = scene.title(&title).fill(color).at(0.0, title_y);
@@ -1603,21 +1780,28 @@ impl PyScene {
                 "width, gap, and bullet_radius must be finite positive numbers",
             ));
         }
-        let bullet_color = bullet_color
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let bullet_color = bullet_color.map(|color| color.0).unwrap_or(palette.accent);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let start_y = (items.len().saturating_sub(1) as f64 * gap) * 0.5;
         let bullet_x = -width * 0.5;
-        let label_x = bullet_x + bullet_radius * 4.0;
+        let text_left = bullet_x + bullet_radius * 4.0;
+        let text_width = (width - bullet_radius * 4.0).max(1.0);
+        let label_x = text_left + text_width * 0.5;
         let mut members = Vec::with_capacity(items.len() * 2);
         for (index, item) in items.iter().enumerate() {
             let y = start_y - index as f64 * gap;
             members.push(scene.dot(bullet_radius).fill(bullet_color).at(bullet_x, y));
-            members.push(scene.text(item).fill(color).at(label_x, y));
+            members.push(
+                scene
+                    .paragraph(item, ParagraphOptions::new(text_width))
+                    .fill(color)
+                    .at(label_x, y),
+            );
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
@@ -1669,22 +1853,26 @@ impl PyScene {
         }
         let max_value = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
         let bar_width = available_width / values.len() as f64;
-        let chart_height = height - 56.0;
+        // Reserve room above the bars for value labels and below for category
+        // labels, keeping both inside the requested chart bounds.
+        let chart_height = height - 92.0;
         if chart_height <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "height must be greater than 56",
+                "height must be greater than 92",
             ));
         }
-        let bar_color = color
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x4C, 0x78, 0xA8));
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let bar_color = color.map(|color| color.0).unwrap_or(palette.chart);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let baseline_y = -height * 0.5 + 28.0;
-        let mut members = Vec::with_capacity(values.len() * 2 + 1);
+        let mut members = Vec::with_capacity(values.len() * 3 + 1);
         members.push(
             scene
                 .line(-width * 0.5, baseline_y, width * 0.5, baseline_y)
-                .stroke(gaanim_core::peniko::Color::from_rgb8(0x94, 0xA3, 0xB8), 2.0),
+                .stroke(palette.rule, 2.0),
         );
         for (index, (value, label)) in values.iter().zip(labels.iter()).enumerate() {
             let bar_height = chart_height * (*value / max_value);
@@ -1693,12 +1881,24 @@ impl PyScene {
                 scene
                     .rounded_rect(bar_width, bar_height.max(1.0), 6.0)
                     .fill(bar_color)
+                    .stroke(palette.rule, 1.5)
                     .at(x, baseline_y + bar_height * 0.5),
+            );
+            let value_label = if value.fract().abs() < 1e-9 {
+                format!("{value:.0}")
+            } else {
+                format!("{value:.1}")
+            };
+            members.push(
+                scene
+                    .text(&value_label)
+                    .fill(palette.foreground)
+                    .at(x, baseline_y + bar_height + 24.0),
             );
             members.push(
                 scene
                     .text(label)
-                    .fill(gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5))
+                    .fill(palette.muted)
                     .at(x, baseline_y - 28.0),
             );
         }
@@ -1747,15 +1947,15 @@ impl PyScene {
             ));
         }
 
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
         let header_background = header_background
             .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x16, 0x2B, 0x46));
-        let rule_color = rule_color
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x70, 0x88));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5));
+            .unwrap_or(palette.header);
+        let rule_color = rule_color.map(|color| color.0).unwrap_or(palette.rule);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let columns = headers.len() as f64;
         let total_height = row_height * (rows.len() as f64 + 1.0);
         let cell_width = width / columns;
@@ -1853,15 +2053,13 @@ impl PyScene {
                 "width, height, and font_size must be finite positive numbers",
             ));
         }
-        let background = background
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x10, 0x16, 0x20));
-        let color = color
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0xE6, 0xED, 0xF5));
-        let accent = accent
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x5B, 0x8F, 0xC9));
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let background = background.map(|color| color.0).unwrap_or(palette.panel);
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
+        let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
         let content_width = (width - 64.0).max(1.0);
         let typst_source = format!(
             r#"#set text(font: "Consolas", size: {font_size}pt)

@@ -6,7 +6,7 @@ contenido educativo, piezas para redes y presentaciones animadas mediante una AP
 programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 > [!NOTE]
-> Última auditoría del repositorio: **2026-07-19**.
+> Última auditoría del repositorio: **2026-07-28**.
 > `Scene` es la fachada pública de Python; `scene.canvas` contiene la configuración del
 > viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. No se
 > asume que una capacidad interna de Rust esté disponible desde Python. `Transform` y
@@ -37,8 +37,9 @@ En términos prácticos:
 - **Sí es viable hoy** para prototipos y piezas vectoriales programáticas: títulos,
   diagramas simples, fórmulas, explicaciones matemáticas y animaciones cortas con audio
   mezclado al exportar.
-- **Es experimental** para presentaciones interactivas: existen breakpoints y navegación,
-  pero faltan las herramientas propias de una solución de slides.
+- **Es beta funcional** para presentaciones interactivas: existen slides y pasos
+  semánticos, layouts, notas, Presenter View, overview, navegación por monitor y una
+  plantilla completa de sustentación.
 - **Todavía no está listo** como pipeline general de producción de contenido: faltan
   preview de audio, SVG avanzado, gráficos de datos, código, plantillas y una distribución coherente.
 - **Todavía no está listo** como librería pública estable: API, documentación, ejemplos,
@@ -51,7 +52,7 @@ En términos prácticos:
 | Animación vectorial 2D programática | 🟢 | Núcleo funcional con preview y exportación |
 | Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
-| Presentaciones animadas en vivo | 🟡 | Breakpoints básicos; faltan overview, notas y exportación por slide |
+| Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View, overview y plantilla de tesis verificadas |
 | Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
 | Motion graphics con multimedia | 🟡 | Raster, SVG vectorial y audio de exportación disponibles; falta video embebido y SVG avanzado |
 | Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
@@ -229,18 +230,42 @@ composición no lineal de alto nivel.
 
 ### 6. Presentaciones
 
-`Canvas.slide()` inserta breakpoints. Durante la reproducción, el timeline se pausa al
+`Scene.slide(name, notes=..., layout=...)` define paradas semánticas y `slide.step()`
+define pasos dentro de una diapositiva. Durante la reproducción, el timeline se pausa al
 alcanzarlos y permite avanzar o retroceder con teclado o mouse. El editor muestra los
-breakpoints en la barra temporal.
+breakpoints en la barra temporal y puede iniciarse en pantalla completa con `--present`.
 
-Este es un **modo de presentación básico**, no una solución completa de slides. Faltan:
+La Presenter View abre una segunda ventana con slide/paso actual, siguiente parada, notas,
+cronómetro, navegación, overview consultable por nombre y salto directo. Sus atajos locales
+son `←`, `→`, `Espacio`, `O` (overview), `B` (pantalla negra) y `W` (pantalla blanca).
+`gaanim check <script.py>` ejecuta además un preflight de formato 16:9, notas, pasos,
+duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
 
-- overview con miniaturas;
-- número de slide y progreso visible;
-- notas del presentador y vista secundaria;
+Presenter View usa una interfaz oscura de alto contraste, jerarquía tipográfica ampliada
+y progreso visual del timeline. El tema público `presentation`/`thesis` unifica fondo,
+roles de texto y defaults de title cards, bullets, captions, callouts, bar charts, tablas
+y bloques de código; los bar charts muestran también el valor de cada barra.
+
+La configuración visual ya no está limitada a nombres fijos: `Theme` reúne colores
+semánticos, tipografías, tamaños y archivos TTF/OTF embebidos. Puede construirse desde
+cero, derivarse de otro tema o de esquemas conocidos como Nord, Dracula, Solarized,
+Gruvbox, Tokyo Night y Catppuccin; los componentes consumen el mismo palette.
+Los tokens también se consultan con `theme.color(...)`/`canvas.color(...)`, y
+`validate_theme()` audita contraste y tipografía antes de una presentación.
+
+Este es un **modo de presentación beta orientado a exposiciones técnicas y tesis**. El
+comando `gaanim init thesis` genera una presentación 16:9 completa con portada, agenda,
+problema, objetivos, teoría, metodología, resultados, conclusiones, cierre, notas y
+capturas de regresión. La guía operativa está en `docs/thesis-presentations.md`.
+
+Para convertirlo en una solución general de slides todavía faltan:
+
+- miniaturas rasterizadas en el overview: requieren un mundo de preview aislado, porque el
+  capturador actual renderiza la ventana/timeline activo y no puede hacer seek sin alterar la
+  salida al público;
 - exportación independiente por slide;
 - enlaces internos y navegación no lineal de presentación;
-- plantillas de título, agenda, dos columnas, cierre y branding;
+- temas de branding parametrizables más allá de la plantilla de tesis incluida;
 - integración de imágenes, tablas, charts y código.
 
 ### 7. Render y efectos
@@ -414,9 +439,9 @@ componer cada pieza desde primitivas.
 
 ### P1 — Presentaciones completas
 
-- overview con miniaturas;
-- slide indicator y barra de progreso;
-- presenter notes y presenter view;
+- [~] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
+- [ ] Caché de miniaturas: renderizar cada stop en un mundo ECS/Vello aislado, con sus propios
+  targets `Image`, y publicar sus texturas en egui sin mutar el `Timeline` de reproducción;
 - exportación por slide y exportación continua;
 - navegación directa por nombre/id de slide;
 - plantillas y temas expuestos desde Python;

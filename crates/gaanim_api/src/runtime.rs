@@ -23,7 +23,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
             return;
         }
     };
-    let font_registry = match world.remove_resource::<gaanim_text::font::FontRegistry>() {
+    let mut font_registry = match world.remove_resource::<gaanim_text::font::FontRegistry>() {
         Some(res) => res,
         None => {
             bevy::prelude::error!("FontRegistry resource missing");
@@ -43,6 +43,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
     if canvas.theme.is_some() {
         text_config = canvas.themed_text_config();
     }
+    canvas.register_theme_fonts(&mut font_registry);
 
     {
         let has_camera = world

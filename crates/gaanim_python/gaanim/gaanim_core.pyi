@@ -14,6 +14,26 @@ CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
 class Color:
     def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
 
+ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
+
+class Theme:
+    def __init__(
+        self,
+        base: Optional[str | Theme] = None,
+        *,
+        name: Optional[str] = None,
+        colors: Optional[dict[str, ColorLike]] = None,
+        fonts: Optional[dict[str, str]] = None,
+        sizes: Optional[dict[str, float]] = None,
+        font_files: Optional[dict[str, str]] = None,
+    ) -> None: ...
+    @property
+    def name(self) -> str: ...
+    @staticmethod
+    def schemes() -> list[str]: ...
+    def color(self, role: str) -> Color: ...
+    def validate(self) -> list[str]: ...
+
 class Anchor:
     CENTER: ClassVar[Anchor]
     TOP: ClassVar[Anchor]
@@ -284,10 +304,14 @@ class Canvas:
     width: int
     height: int
     background: Optional[Color]
-    theme: Optional[Literal["technical", "paper"]]
-    def set_theme(self, name: Literal["technical", "paper", "scientific", "light"]) -> None:
-        """Apply a built-in theme and its background."""
+    theme: Optional[str]
+    def set_theme(self, theme: str | Theme) -> None:
+        """Apply a built-in color scheme or a custom Theme."""
         ...
+    def color(self, role: str) -> Color:
+        """Resolve a semantic color from the active theme."""
+        ...
+    def validate_theme(self) -> list[str]: ...
     def set_margin(self, margin: float) -> None: ...
     def set_safe_area(
         self,

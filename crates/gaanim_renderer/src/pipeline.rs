@@ -382,6 +382,15 @@ pub fn compile_scene_from_world(
     }
 
     for elem in extracted {
+        // Do not emit transparent retained fragments. Semantic presentations
+        // keep the contents of future slides in the World at opacity zero so
+        // exact timeline seeks remain possible. Wrapping every hidden glyph in
+        // an enormous Vello opacity layer can exhaust/overflow the compositor
+        // and make the entire frame render black.
+        if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
+            continue;
+        }
+
         let mut layers_to_pop = 0;
 
         if let Some(clip) = &elem.clip_mask {
@@ -399,7 +408,7 @@ pub fn compile_scene_from_world(
             main_scene.push_layer(
                 peniko::Fill::NonZero,
                 peniko::BlendMode::default(),
-                elem.opacity,
+                elem.opacity.clamp(0.0, 1.0),
                 kurbo::Affine::IDENTITY,
                 &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
             );
@@ -756,6 +765,13 @@ pub fn gaanim_render_system(
     }
 
     for elem in local_extracted.drain(..) {
+        // Objects from inactive semantic slides intentionally remain spawned
+        // with zero global opacity. Skipping them is both cheaper and avoids
+        // feeding Vello thousands of transparent full-scene layers.
+        if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
+            continue;
+        }
+
         let mut layers_to_pop = 0;
 
         if let Some(clip) = &elem.clip_mask {
@@ -774,7 +790,7 @@ pub fn gaanim_render_system(
             main_scene.push_layer(
                 peniko::Fill::NonZero,
                 peniko::BlendMode::default(),
-                elem.opacity,
+                elem.opacity.clamp(0.0, 1.0),
                 kurbo::Affine::IDENTITY,
                 &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
             );

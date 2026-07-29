@@ -139,6 +139,35 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
     result.map_err(|error| error.to_string())
 }
 
+/// Execute a script once and return the canvas submitted by `scene.render()`.
+///
+/// Used by non-interactive CLI tooling such as `gaanim check`. Export and
+/// snapshot environment switches are removed so validation can never start a
+/// render job as a side effect.
+pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Canvas, String> {
+    let (sender, receiver) = crossbeam_channel::bounded::<ReloadPayload>(1);
+    host::set_host_sender(Some(sender));
+
+    let result = Python::attach(|py| -> PyResult<()> {
+        py.run(
+            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
+            None,
+            None,
+        )?;
+        let environment = py.import("os")?.getattr("environ")?;
+        let _ = environment.del_item("GAANIM_SNAPSHOTS");
+        let _ = environment.del_item("GAANIM_EXPORT");
+        run_script_file(py, script_path)
+    });
+
+    host::set_host_sender(None);
+    result.map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .map(|payload| payload.canvas)
+        .map_err(|_| "script did not submit a scene; finish it with `scene.render()`".to_string())
+}
+
 /// Execute a Python file by path inside the given interpreter, in a fresh
 /// `__main__` namespace so each re-run is isolated from the previous one.
 fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {

@@ -1,6 +1,6 @@
 //! Compile — replay Canvas ops into SceneBuilder/Bevy.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
@@ -14,6 +14,7 @@ use gaanim_timeline::timeline::{PresentationSlide, PresentationStep, Timeline};
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
+use crate::canvas::SlideId;
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
@@ -181,7 +182,7 @@ impl Canvas {
         let mut timeline = world
             .remove_resource::<Timeline>()
             .expect("Timeline missing");
-        let font_registry = world
+        let mut font_registry = world
             .remove_resource::<gaanim_text::font::FontRegistry>()
             .expect("FontRegistry missing");
         let mut text_config = world
@@ -190,6 +191,7 @@ impl Canvas {
         if self.theme.is_some() {
             text_config = self.themed_text_config();
         }
+        self.register_theme_fonts(&mut font_registry);
         let mut commands = world.commands();
         self.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
         world.insert_resource(timeline);
@@ -210,8 +212,17 @@ impl Canvas {
         cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
         canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
     ) {
+        let entry_animated = Self::entry_animated_by_slide(&seg.ops);
+        let mut active_slide: Option<SlideId> = None;
+        let mut active_slide_objects = Vec::new();
         for op in &seg.ops {
             match op {
+                Op::PresentationSlideStart(id) => {
+                    for object in active_slide_objects.drain(..) {
+                        builder.schedule_hide_hierarchy(object);
+                    }
+                    active_slide = Some(*id);
+                }
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
                     let actual = Self::spawn_one(
@@ -223,6 +234,18 @@ impl Canvas {
                         scene_background,
                     );
                     id_map.insert(spec.id, actual.id);
+                    if let Some(slide) = active_slide {
+                        let has_explicit_entry = entry_animated
+                            .get(&slide)
+                            .is_some_and(|targets| targets.contains(&spec.id));
+                        if let Some(state) = builder.states.get(actual.id).cloned() {
+                            builder.hide_visuals_now(&state);
+                            if !has_explicit_entry {
+                                builder.schedule_show_now(actual.id);
+                            }
+                        }
+                        active_slide_objects.push(actual.id);
+                    }
                 }
                 Op::Animate { anim, active } => {
                     if *active {
@@ -1476,6 +1499,36 @@ impl Canvas {
         }
     }
 
+    /// Identify animations that are explicit entrances. Their targets must
+    /// remain hidden until their own animation starts; all other objects in a
+    /// semantic slide are shown automatically when that slide is entered.
+    fn entry_animated_by_slide(ops: &[Op]) -> HashMap<SlideId, HashSet<ObjectId>> {
+        let mut result: HashMap<SlideId, HashSet<ObjectId>> = HashMap::new();
+        let mut active_slide = None;
+        for op in ops {
+            match op {
+                Op::PresentationSlideStart(id) => active_slide = Some(*id),
+                Op::Animate { anim, active } if *active && anim.anim_type.is_entry() => {
+                    if let Some(slide) = active_slide {
+                        result.entry(slide).or_default().insert(anim.target);
+                    }
+                }
+                Op::Play(anims) => {
+                    if let Some(slide) = active_slide {
+                        result.entry(slide).or_default().extend(
+                            anims
+                                .iter()
+                                .filter(|anim| anim.anim_type.is_entry())
+                                .map(|anim| anim.target),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        result
+    }
+
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -2417,8 +2470,63 @@ impl Canvas {
 mod tests {
     use super::*;
     use bevy::ecs::world::CommandQueue;
+    use gaanim_core::peniko::Brush;
     use gaanim_layout::Anchor;
     use gaanim_scene::LocalBounds;
+    use gaanim_timeline::snapshot::WorldSnapshot;
+
+    #[test]
+    fn semantic_slides_show_only_the_active_slide_on_seek() {
+        let red = PenikoColor::from_rgb8(255, 0, 0);
+        let blue = PenikoColor::from_rgb8(0, 0, 255);
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .slide("first", None, crate::canvas::SlideTemplate::Blank)
+            .unwrap();
+        canvas.text("First slide").fill(red);
+        canvas.wait(1.0);
+        canvas
+            .slide("second", None, crate::canvas::SlideTemplate::Blank)
+            .unwrap();
+        canvas.text("Second slide").fill(blue);
+        canvas.wait(1.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let opacity_for = |world: &mut World, color| {
+            world
+                .query::<(&FillBrush, &gaanim_scene::GlobalOpacity)>()
+                .iter(world)
+                .find_map(|(fill, opacity)| {
+                    matches!(&fill.0, Some(Brush::Solid(found)) if *found == color)
+                        .then_some(opacity.0)
+                })
+                .expect("colored slide object should exist")
+        };
+
+        timeline.seek(&mut world, 0.0);
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::opacity_propagation_system);
+        propagation.run(&mut world);
+        assert_eq!(opacity_for(&mut world, red), 1.0);
+        assert_eq!(opacity_for(&mut world, blue), 0.0);
+
+        timeline.seek(&mut world, 1.0);
+        propagation.run(&mut world);
+        assert_eq!(opacity_for(&mut world, red), 0.0);
+        assert_eq!(opacity_for(&mut world, blue), 1.0);
+    }
 
     #[test]
     fn justified_paragraph_compiles_to_vector_glyphs() {

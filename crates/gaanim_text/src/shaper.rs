@@ -43,6 +43,10 @@ pub struct HierarchyChild {
     pub stroke: StrokeBrush,
 }
 
+fn normalize_single_line_text(text: &str) -> String {
+    text.replace(['\r', '\n'], " ")
+}
+
 /// Shapes a text string using rustybuzz.
 pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     let face = match rustybuzz::Face::from_slice(font_bytes, 0) {
@@ -51,7 +55,11 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     };
 
     let mut buffer = rustybuzz::UnicodeBuffer::new();
-    buffer.push_str(text);
+    // RustyBuzz treats a raw line-feed as a glyph in this low-level shaping
+    // path. Fonts commonly render that missing glyph as a square. Paragraph
+    // layout owns real multiline flow; plain `scene.text()` is single-line,
+    // so normalize line endings to ordinary spaces here.
+    buffer.push_str(&normalize_single_line_text(text));
 
     let output = rustybuzz::shape(&face, &[], buffer);
     let glyph_infos = output.glyph_infos();
@@ -69,6 +77,19 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
             cluster: info.cluster,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_single_line_text;
+
+    #[test]
+    fn single_line_text_normalizes_line_endings_before_shaping() {
+        assert_eq!(
+            normalize_single_line_text("first\nsecond\rthird\r\nfourth"),
+            "first second third  fourth"
+        );
+    }
 }
 
 /// Compiles a plain text string into a parent Mobject entity with individual child letters.

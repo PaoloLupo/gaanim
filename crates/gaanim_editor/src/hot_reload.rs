@@ -130,7 +130,11 @@ pub fn reload_status_overlay_system(
     mut ctx: bevy_egui::EguiContexts,
     mut status: ResMut<ReloadStatus>,
     time: Res<Time>,
+    presentation_mode: Option<Res<gaanim_editor::PresentationMode>>,
 ) {
+    if presentation_mode.is_some_and(|mode| mode.active) {
+        return;
+    }
     let Some(shown_at) = status.shown_at else {
         return;
     };

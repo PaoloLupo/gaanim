@@ -32,11 +32,12 @@ just bootstrap
 
 This creates `.venv/` and installs `maturin` into it.
 
-Build the Python extension:
+Build the native application and install the Python extension:
 
 ```bash
-just build           # Debug mode (faster compile, slower runtime)
-just build-release   # Release mode (slower compile, faster runtime)
+just build             # Native application, debug
+just python-develop    # Python extension in .venv
+just build-release     # Native application, release
 ```
 
 == Verify Installation
@@ -100,6 +101,8 @@ To export instead of previewing:
 ```
 
 = Next Steps
+
+- #link("/guides/thesis/", "Thesis presentations") - complete live-presentation workflow
 
 - #link("/api/scene/", "Scene API") — learn the core Scene class
 - #link("/api/mobjects/", "Mobjects") — all available shapes and objects

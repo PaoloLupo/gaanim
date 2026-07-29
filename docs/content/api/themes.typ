@@ -38,23 +38,146 @@ scene.canvas.background = Color(40, 42, 54)
 == Built-in themes
 
 `technical` is the sober dark default for mathematical explanations and
-technical documentation. It uses New Computer Modern with a restrained
-white/gray hierarchy. `paper` uses a literal white canvas with a restrained
-black ink fill for unfilled vector text, so it remains readable. An explicit
+technical documentation. `presentation` is optimized for projection: deep navy
+background, warm gold titles, bright body text and cooler secondary labels.
+`paper` uses a literal white canvas with restrained dark ink. An explicit
 `.fill(...)` always takes precedence.
+
+Component defaults also follow the selected theme. Title cards, bullets,
+captions, callouts, bar charts, tables and code panels inherit compatible
+foreground, accent, panel and rule colors. Bar charts include value labels and
+reserve enough vertical space to keep them inside their bounds.
 
 ```python
 from gaanim import Scene
 
 scene = Scene(1280, 720)
-scene.canvas.set_theme("technical")
+scene.canvas.set_theme("presentation")
 
 title = scene.title("Fourier transform")
 subtitle = scene.subtitle("Frequency-domain representation")
 equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x")
 ```
 
-The aliases `scientific` and `light` map to `technical` and `paper`.
+The aliases `scientific`, `thesis`, `deck`, and `light` map to `technical`,
+`presentation`, `presentation`, and `paper`.
+
+== Known color schemes
+
+The same short API includes established editor and terminal palettes:
+
+```python
+scene.canvas.set_theme("dracula")
+scene.canvas.set_theme("nord")
+scene.canvas.set_theme("solarized-dark")
+scene.canvas.set_theme("solarized-light")
+scene.canvas.set_theme("gruvbox-dark")
+scene.canvas.set_theme("tokyo-night")
+scene.canvas.set_theme("catppuccin-mocha")
+scene.canvas.set_theme("catppuccin-latte")
+```
+
+Use `Theme.schemes()` when a tool or GUI needs to enumerate every built-in
+scheme.
+
+== Custom and derived themes
+
+`Theme` is the single configuration object for semantic colors, typographic
+roles, sizes, and font files. Pass a scheme name to derive it and override only
+what changes:
+
+```python
+from gaanim import Scene, Theme
+
+theme = Theme(
+    "nord",
+    name="my-thesis",
+    colors={
+        "title": "#A3D9FF",
+        "accent": "#FFB86C",
+        "chart": "#88C0D0",
+    },
+    fonts={
+        "text": "Inter",
+        "code": "JetBrains Mono",
+    },
+    sizes={"title": 72, "body": 34},
+    font_files={
+        "Inter": "assets/Inter-Regular.ttf",
+        "JetBrains Mono": "assets/JetBrainsMono-Regular.ttf",
+    },
+)
+
+scene = Scene(1920, 1080)
+scene.canvas.set_theme(theme)
+```
+
+Font files are read when `Theme` is created and embedded in the canvas runtime,
+so exports do not depend on the font being installed on the presentation
+computer. TTF and OTF files are supported by the underlying font registry.
+
+To start without inheriting a named scheme, omit the first argument:
+
+```python
+brand = Theme(
+    name="brand",
+    colors={
+        "background": "#10131A",
+        "foreground": "#F8FAFC",
+        "muted": "#94A3B8",
+        "title": "#FDE68A",
+        "accent": "#38BDF8",
+        "chart": "#22C55E",
+        "panel": "#18202E",
+        "header": "#202B3D",
+        "rule": "#475569",
+    },
+    fonts={"text": "Aptos", "code": "Consolas"},
+)
+```
+
+Another `Theme` can be the first argument, which makes modification and reuse
+explicit:
+
+```python
+print_theme = Theme(
+    brand,
+    name="brand-print",
+    colors={"background": "white", "foreground": "#172033"},
+)
+```
+
+Color roles are `background`, `foreground`, `muted`, `title`, `accent`,
+`chart`, `panel`, `header`, and `rule`. Font roles are `text`, `all`, `title`,
+`subtitle`, `body`, `caption`, `math`, and `code`; size roles use the six
+individual text roles.
+
+== Theme tokens and readability
+
+Manual vector objects can consume the same semantic tokens as components:
+
+```python
+scene.rounded_rect(420, 180, 24) \
+    .fill(scene.canvas.color("panel")) \
+    .stroke(scene.canvas.color("accent"), 3)
+
+divider = scene.line(-400, 0, 400, 0) \
+    .stroke(theme.color("rule"), 2)
+```
+
+`Theme.validate()` and `scene.canvas.validate_theme()` return actionable
+warnings for insufficient foreground, title, muted, or panel contrast and for
+invalid typography. They return an empty list when the core combinations are
+ready:
+
+```python
+warnings = scene.canvas.validate_theme()
+if warnings:
+    raise ValueError("\n".join(warnings))
+```
+
+Validation is advisory rather than automatic rejection, so intentional
+low-contrast animation states remain possible.
 
 == Color constants
 

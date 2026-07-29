@@ -21,7 +21,7 @@ GPU-accelerated 2D vector animation engine, Manim-style. Built in Rust with Bevy
 - *Glyph-level selection* for text and equations
 - *Colors*: exported color constants and custom RGBA colors
 - *Export*: MP4, WebM, WebP, GIF, PNG sequences
-- *Multi-scene engine* with transitions for presentations
+- *Semantic presentations* with slide layouts, notes, controlled reveals, and Presenter View
 
 == Quick Start
 
@@ -39,6 +39,8 @@ just run math_animation
 #link("/getting-started/", "Getting Started →")
 
 == Links
+
+- #link("/guides/thesis/", "Thesis presentations")
 
 - #link("/api/scene/", "API Reference")
 - #link("/examples/basic/", "Examples")
