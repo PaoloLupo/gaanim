@@ -18,7 +18,8 @@ use crate::canvas::SlideId;
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
-    LayoutKind, LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
+    AxesConfig, LayoutKind, LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind,
+    TextAlign,
 };
 
 use gaanim_animation::{
@@ -70,6 +71,195 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
 }
 
 impl Canvas {
+    fn axis_path(
+        builder: &mut SceneBuilder<'_, '_, '_>,
+        path: gaanim_core::kurbo::BezPath,
+        bounds: Bounds3D,
+        color: PenikoColor,
+        width: f64,
+        tag: &str,
+    ) -> MobjectRef {
+        let path = gaanim_objects::prelude::SvgPath {
+            id: tag.to_owned(),
+            path,
+            bounds,
+            fill: None,
+            stroke: StrokeBrush::new(color, width),
+        };
+        builder.svg_path(&path).spawn()
+    }
+
+    fn axis_text(
+        builder: &mut SceneBuilder<'_, '_, '_>,
+        text: &str,
+        x: f64,
+        y: f64,
+        color: PenikoColor,
+    ) -> MobjectRef {
+        let label = builder.body(text);
+        if let Some(state) = builder.states.get_mut(label.id) {
+            state.transform = state.transform.shift_2d(x, y);
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(state.transform);
+        }
+        builder.select(label, text).set_fill(color);
+        label
+    }
+
+    fn styled_axes(
+        builder: &mut SceneBuilder<'_, '_, '_>,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        config: &AxesConfig,
+    ) -> MobjectRef {
+        let (x_min, x_max, x_step) = x_range;
+        let (y_min, y_max, y_step) = y_range;
+        let bounds = Bounds3D::new_2d(x_min, y_min, x_max, y_max);
+        let mut children = Vec::new();
+        let x_axis_in_range = y_min <= 0.0 && y_max >= 0.0;
+        let y_axis_in_range = x_min <= 0.0 && x_max >= 0.0;
+
+        let mut grid = gaanim_core::kurbo::BezPath::new();
+        if config.grid && config.x_grid {
+            let mut x = (x_min / x_step).ceil() * x_step;
+            while x <= x_max + 1e-9 {
+                if x.abs() > 1e-9 {
+                    grid.move_to(Point::new(x, y_min));
+                    grid.line_to(Point::new(x, y_max));
+                }
+                x += x_step;
+            }
+        }
+        if config.grid && config.y_grid {
+            let mut y = (y_min / y_step).ceil() * y_step;
+            while y <= y_max + 1e-9 {
+                if y.abs() > 1e-9 {
+                    grid.move_to(Point::new(x_min, y));
+                    grid.line_to(Point::new(x_max, y));
+                }
+                y += y_step;
+            }
+        }
+        if !grid.elements().is_empty() {
+            children.push(Self::axis_path(
+                builder,
+                grid,
+                bounds,
+                config.grid_color,
+                config.grid_width,
+                "AxesGrid",
+            ));
+        }
+
+        let mut axes = gaanim_core::kurbo::BezPath::new();
+        if config.x_axis && x_axis_in_range {
+            axes.move_to(Point::new(x_min, 0.0));
+            axes.line_to(Point::new(x_max, 0.0));
+        }
+        if config.y_axis && y_axis_in_range {
+            axes.move_to(Point::new(0.0, y_min));
+            axes.line_to(Point::new(0.0, y_max));
+        }
+        if !axes.elements().is_empty() {
+            children.push(Self::axis_path(
+                builder,
+                axes,
+                bounds,
+                config.axis_color,
+                config.axis_width,
+                "AxesLines",
+            ));
+        }
+
+        let tick_half = config.tick_length * 0.5;
+        let mut ticks = gaanim_core::kurbo::BezPath::new();
+        if config.ticks && config.x_ticks && x_axis_in_range {
+            let mut x = (x_min / x_step).ceil() * x_step;
+            while x <= x_max + 1e-9 {
+                ticks.move_to(Point::new(x, -tick_half));
+                ticks.line_to(Point::new(x, tick_half));
+                x += x_step;
+            }
+        }
+        if config.ticks && config.y_ticks && y_axis_in_range {
+            let mut y = (y_min / y_step).ceil() * y_step;
+            while y <= y_max + 1e-9 {
+                ticks.move_to(Point::new(-tick_half, y));
+                ticks.line_to(Point::new(tick_half, y));
+                y += y_step;
+            }
+        }
+        if !ticks.elements().is_empty() {
+            children.push(Self::axis_path(
+                builder,
+                ticks,
+                bounds,
+                config.tick_color,
+                config.tick_width,
+                "AxesTicks",
+            ));
+        }
+
+        if config.numbers && config.x_numbers && x_axis_in_range {
+            let mut x = (x_min / x_step).ceil() * x_step;
+            while x <= x_max + 1e-9 {
+                let value = if x.abs() < 1e-9 { 0.0 } else { x };
+                let text = format!("{value}");
+                children.push(Self::axis_text(
+                    builder,
+                    &text,
+                    x,
+                    -tick_half - 14.0,
+                    config.number_color,
+                ));
+                x += x_step;
+            }
+        }
+        if config.numbers && config.y_numbers && y_axis_in_range {
+            let mut y = (y_min / y_step).ceil() * y_step;
+            while y <= y_max + 1e-9 {
+                if y.abs() > 1e-9 || !config.x_numbers {
+                    let value = if y.abs() < 1e-9 { 0.0 } else { y };
+                    let text = format!("{value}");
+                    let estimated_width = text.chars().count() as f64 * 9.0;
+                    children.push(Self::axis_text(
+                        builder,
+                        &text,
+                        -tick_half - 8.0 - estimated_width * 0.5,
+                        y,
+                        config.number_color,
+                    ));
+                }
+                y += y_step;
+            }
+        }
+
+        if config.labels {
+            if let Some(label) = config.x_label.as_deref().filter(|_| x_axis_in_range) {
+                children.push(Self::axis_text(
+                    builder,
+                    label,
+                    x_max + 18.0,
+                    -tick_half - 2.0,
+                    config.label_color,
+                ));
+            }
+            if let Some(label) = config.y_label.as_deref().filter(|_| y_axis_in_range) {
+                children.push(Self::axis_text(
+                    builder,
+                    label,
+                    tick_half + 12.0,
+                    y_max + 12.0,
+                    config.label_color,
+                ));
+            }
+        }
+
+        builder.group(&children)
+    }
+
     fn visual_leaf_ids(builder: &SceneBuilder<'_, '_, '_>, root: ObjectId) -> Vec<ObjectId> {
         let mut leaves = Vec::new();
         let mut stack = vec![root];
@@ -2080,26 +2270,9 @@ impl Canvas {
                 y_range,
                 config,
             } => {
-                let axes = builder.axes(*x_range, *y_range, config.numbers, config.ticks);
-                if let Some(axis_state) = builder.states.get_mut(axes.id) {
-                    let stroke = StrokeBrush::new(config.axis_color, config.axis_width);
-                    axis_state.stroke = stroke.clone();
-                    builder.commands.entity(axis_state.entity).insert(stroke);
-                }
-                if config.grid {
-                    let grid = Self::finish_spawn_builder(
-                        builder
-                            .number_plane(*x_range, *y_range, config.axis_width, config.grid_width)
-                            .stroke(config.grid_color, config.grid_width),
-                        spec,
-                    );
-                    let group = builder.group(&[grid, axes]);
-                    Self::post_apply(builder, group.id, spec, id_map, frame_bounds);
-                    group
-                } else {
-                    Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
-                    axes
-                }
+                let axes = Self::styled_axes(builder, *x_range, *y_range, config);
+                Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
+                axes
             }
             SpawnKind::Text(t) => {
                 let role = gaanim_text::prelude::TextRole::Body;

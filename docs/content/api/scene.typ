@@ -75,7 +75,10 @@ measure = scene.dimension(-80, 80, 80, 80, 24)
 spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
 axes = scene.axes(
     x=(-5, 5, 1), y=(-3, 3, 1), grid=True, ticks=True, numbers=True,
-    axis_color=WHITE, grid_color="#6B7280", axis_width=3, grid_width=1,
+    x_label="x", y_label="f(x)",
+    axis_color=WHITE, grid_color="#6B7280", tick_color=GOLD,
+    number_color=WHITE, label_color=GOLD,
+    axis_width=3, grid_width=1, tick_width=2, tick_length=10,
 )
 logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
 icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
@@ -110,10 +113,14 @@ strokes, CSS, `viewBox`, transforms, `<use>`, outlined text, `clipPath`,
 `feGaussianBlur`, and `feDropShadow`. Patterns, masks, embedded raster images,
 and arbitrary filter graphs are intentionally omitted.
 
-`axes(x=..., y=..., *, grid=True, ticks=True, numbers=True, axis_color=...,
-grid_color=..., axis_width=3, grid_width=1)` creates Cartesian axes with
-independently configurable grid, tick marks, numeric labels, colors, and stroke
-widths. Ranges are `(minimum, maximum, step)`.
+`axes(x=..., y=...)` creates Cartesian axes as five independent vector layers:
+grid, axis lines, ticks, numbers, and axis labels. Ranges are
+`(minimum, maximum, step)`. The aggregate `grid`, `ticks`, `numbers`, and
+`labels` switches retain concise defaults. Per-axis overrides such as
+`x_grid=False`, `y_ticks=False`, or `x_numbers=False` hide only one component.
+Use `axis_color`, `grid_color`, `tick_color`, `number_color`, and `label_color`
+for independent colors; `axis_width`, `grid_width`, `tick_width`, and
+`tick_length` control vector geometry. `x_label` and `y_label` are optional.
 
 `function_graph(function, x=(minimum, maximum), samples=160)` samples `y =
 function(x)` once while the scene is built and returns a regular vector path.

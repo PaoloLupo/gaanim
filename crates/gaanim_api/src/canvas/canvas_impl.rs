@@ -1937,6 +1937,47 @@ mod tests {
     }
 
     #[test]
+    fn axes_compile_grid_lines_and_ticks_with_independent_styles() {
+        let mut canvas = Canvas::new(640, 360);
+        let axis_color = Color::from_rgb8(0x11, 0x22, 0x33);
+        let grid_color = Color::from_rgb8(0x44, 0x55, 0x66);
+        let tick_color = Color::from_rgb8(0x77, 0x88, 0x99);
+        let config = crate::canvas::AxesConfig {
+            y_grid: false,
+            y_ticks: false,
+            y_numbers: false,
+            axis_color,
+            grid_color,
+            tick_color,
+            x_label: Some("time".to_owned()),
+            ..Default::default()
+        };
+        let _axes = canvas.axes((-200.0, 200.0, 50.0), (-100.0, 100.0, 25.0), config);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut query = world.query::<(&gaanim_scene::ObjectTag, &gaanim_scene::StrokeBrush)>();
+        let layers = query
+            .iter(&world)
+            .filter_map(|(tag, stroke)| {
+                let gaanim_core::peniko::Brush::Solid(color) = stroke.brush.as_ref()? else {
+                    return None;
+                };
+                Some((tag.0.as_str(), *color, stroke.style.width))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(layers.contains(&("SvgPath#AxesLines", axis_color, 3.0)));
+        assert!(layers.contains(&("SvgPath#AxesGrid", grid_color, 1.0)));
+        assert!(layers.contains(&("SvgPath#AxesTicks", tick_color, 2.0)));
+    }
+
+    #[test]
     fn reactive_spring_regenerates_a_zig_zag_path() {
         let mut canvas = Canvas::new(1280, 720);
         let _spring = canvas.spring_between(

@@ -1325,7 +1325,18 @@ impl PyScene {
                 .polyline(&points),
         ))
     }
-    #[pyo3(signature = (x, y, *, grid=true, ticks=true, numbers=true, axis_color=None, grid_color=None, axis_width=3.0, grid_width=1.0))]
+    #[pyo3(signature = (
+        x, y, *,
+        grid=true, ticks=true, numbers=true, labels=true,
+        x_axis=true, y_axis=true,
+        x_grid=None, y_grid=None,
+        x_ticks=None, y_ticks=None,
+        x_numbers=None, y_numbers=None,
+        x_label=None, y_label=None,
+        axis_color=None, grid_color=None, tick_color=None,
+        number_color=None, label_color=None,
+        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0
+    ))]
     fn axes(
         &self,
         x: (f64, f64, f64),
@@ -1333,30 +1344,87 @@ impl PyScene {
         grid: bool,
         ticks: bool,
         numbers: bool,
+        labels: bool,
+        x_axis: bool,
+        y_axis: bool,
+        x_grid: Option<bool>,
+        y_grid: Option<bool>,
+        x_ticks: Option<bool>,
+        y_ticks: Option<bool>,
+        x_numbers: Option<bool>,
+        y_numbers: Option<bool>,
+        x_label: Option<String>,
+        y_label: Option<String>,
         axis_color: Option<PyColor>,
         grid_color: Option<PyColor>,
+        tick_color: Option<PyColor>,
+        number_color: Option<PyColor>,
+        label_color: Option<PyColor>,
         axis_width: f64,
         grid_width: f64,
-    ) -> PyDrawable {
+        tick_width: f64,
+        tick_length: f64,
+    ) -> PyResult<PyDrawable> {
+        if !x.0.is_finite()
+            || !x.1.is_finite()
+            || !x.2.is_finite()
+            || !y.0.is_finite()
+            || !y.1.is_finite()
+            || !y.2.is_finite()
+            || x.0 >= x.1
+            || y.0 >= y.1
+            || x.2 <= 0.0
+            || y.2 <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "axis ranges must be finite (min, max, step) tuples with min < max and step > 0",
+            ));
+        }
+        if [axis_width, grid_width, tick_width, tick_length]
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "axis, grid, and tick dimensions must be finite and non-negative",
+            ));
+        }
+        let defaults = AxesConfig::default();
+        let axis_color = axis_color
+            .map(|color| color.0)
+            .unwrap_or(defaults.axis_color);
         let config = AxesConfig {
             grid,
             ticks,
             numbers,
-            axis_color: axis_color
-                .map(|color| color.0)
-                .unwrap_or_else(|| AxesConfig::default().axis_color),
+            labels,
+            x_axis,
+            y_axis,
+            x_grid: x_grid.unwrap_or(grid),
+            y_grid: y_grid.unwrap_or(grid),
+            x_ticks: x_ticks.unwrap_or(ticks),
+            y_ticks: y_ticks.unwrap_or(ticks),
+            x_numbers: x_numbers.unwrap_or(numbers),
+            y_numbers: y_numbers.unwrap_or(numbers),
+            x_label,
+            y_label,
+            axis_color,
             grid_color: grid_color
                 .map(|color| color.0)
-                .unwrap_or_else(|| AxesConfig::default().grid_color),
-            axis_width: axis_width.max(0.0),
-            grid_width: grid_width.max(0.0),
+                .unwrap_or(defaults.grid_color),
+            tick_color: tick_color.map(|color| color.0).unwrap_or(axis_color),
+            number_color: number_color.map(|color| color.0).unwrap_or(axis_color),
+            label_color: label_color.map(|color| color.0).unwrap_or(axis_color),
+            axis_width,
+            grid_width,
+            tick_width,
+            tick_length,
         };
-        PyDrawable(
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .axes(x, y, config),
-        )
+        ))
     }
     fn text(&self, s: &str) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))

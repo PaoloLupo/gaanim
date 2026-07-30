@@ -408,7 +408,8 @@ de que cada ejemplo configure tipografías o ejes manualmente.
 2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para `title`, `subtitle`, `text`, `equation`, `caption` y `code`; un `.fill(...)` explícito conserva prioridad;
 3. [x] fuentes registradas por el motor para la composición técnica actual;
 4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
-5. [ ] estilos separados para ejes, grilla, ticks y rótulos, además de una API para ocultar elementos individuales;
+5. [x] estilos separados para ejes, grilla, ticks, números y rótulos, con
+   visibilidad global o independiente por eje desde `scene.axes(...)`;
 6. [ ] plantillas de composición y branding reutilizable sobre el sistema de temas.
 
 **Criterio de salida:** un diagrama científico puede crear ejes numerados y una
