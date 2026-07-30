@@ -72,7 +72,7 @@ rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
 guide = scene.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
 measure_arrow = scene.double_arrow(-140, -160, 140, -160)
 measure = scene.dimension(-80, 80, 80, 80, 24)
-spring = scene.polyline([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
+spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
 axes = scene.axes(
     x=(-5, 5, 1), y=(-3, 3, 1), grid=True, ticks=True, numbers=True,
     axis_color=WHITE, grid_color="#6B7280", axis_width=3, grid_width=1,
@@ -82,7 +82,7 @@ icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `polyline`, `axes`, `text`, `title`, `subtitle`, `equation`, and
+`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `path`, `axes`, `text`, `title`, `subtitle`, `equation`, and
 `group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.
@@ -105,9 +105,10 @@ scene.play([joint.rotate(0.6)])
 
 Part IDs are case-sensitive. Duplicate source IDs fail during import, while an
 unknown ID raises `KeyError` and lists the available names. The importer
-resolves paths and basic shapes, solid fills/strokes, CSS, `viewBox`,
-transforms, and `<use>`. Raster SVG images, text, gradients, patterns, filters,
-masks, and clipping are not yet preserved.
+resolves paths and basic shapes, solid or linear/radial gradient fills and
+strokes, CSS, `viewBox`, transforms, `<use>`, outlined text, `clipPath`,
+`feGaussianBlur`, and `feDropShadow`. Patterns, masks, embedded raster images,
+and arbitrary filter graphs are intentionally omitted.
 
 `axes(x=..., y=..., *, grid=True, ticks=True, numbers=True, axis_color=...,
 grid_color=..., axis_width=3, grid_width=1)` creates Cartesian axes with
@@ -130,6 +131,19 @@ can drive the reactive curve bindings directly.
 
 ```python
 curve = scene.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
+```
+
+`path(definition)` is the compact entry point for custom technical geometry.
+Pass a sequence of `(x, y)` points for an open polyline, or cursor commands for
+a composed path. The explicit `polyline` and `curve` factories remain available
+for code that benefits from stating the exact path kind.
+
+```python
+rail = scene.path([(-180, 0), (0, 80), (180, 0)])
+profile = scene.path([
+    ("move", [(-180, -40)]),
+    ("cubic", [(-80, 100), (80, -100), (180, 40)]),
+])
 ```
 
 `arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`

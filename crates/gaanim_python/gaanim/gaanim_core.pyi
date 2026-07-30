@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from typing import Callable, ClassVar, Literal, Optional, Sequence, TypeAlias
+from typing import Callable, ClassVar, Literal, Optional, Sequence, TypeAlias, overload
 
 CurvePoint: TypeAlias = tuple[float, float]
-"""A coordinate pair used by :meth:`Scene.curve`."""
+"""A coordinate pair used by :meth:`Scene.path` and :meth:`Scene.curve`."""
 
 CurveControl: TypeAlias = CurvePoint | Literal["auto"] | None
 """A Bézier control point, an automatically reflected handle, or a collapsed handle."""
 
 CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
-"""A ``Scene.curve`` command and its arguments."""
+"""A ``Scene.path`` or ``Scene.curve`` command and its arguments."""
 
 class Color:
     def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
@@ -474,6 +474,10 @@ class Scene:
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Drawable: ...
     def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable: ...
     def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable: ...
+    @overload
+    def path(self, definition: Sequence[CurvePoint]) -> Drawable: ...
+    @overload
+    def path(self, definition: Sequence[CurveCommand]) -> Drawable: ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable: ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable: ...
     def curve(self, commands: Sequence[CurveCommand]) -> Drawable:

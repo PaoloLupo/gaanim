@@ -378,20 +378,22 @@ Orden recomendado:
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
 parte de las piezas de contenido comercial o social.
 
-### P1 — Diagramas técnicos y mecanismos dinámicos (prioridad inmediata)
+### P1 — Diagramas técnicos y mecanismos dinámicos (completado)
 
 Las figuras de física, ingeniería y matemáticas deben poder construirse como
 geometría animable, no como una imagen plana. Este bloque pasa por delante de
 los componentes editoriales generales porque también desbloquea gráficas,
 diagramas de procesos y explicaciones educativas.
 
-Orden de implementación:
+Capacidades completadas:
 
-1. `polyline`/`path` públicos para rieles, resortes, trayectorias y contornos abiertos;
-2. arcos, flechas curvas, ángulos y cotas (`arc`, `curved_arrow`, `dimension`);
-3. `ValueTracker` completo desde Python, con animación de valor y bindings;
-4. geometría reactiva/`always_redraw` para que resortes, etiquetas y cotas respondan a un tracker;
-5. grupos con pivote de transformación para mecanismos rotatorios.
+1. [x] `path` unificado y `polyline`/`curve` explícitos para rieles, resortes,
+   trayectorias y contornos;
+2. [x] arcos, flechas curvas, ángulos y cotas (`arc`, `curved_arrow`, `dimension`);
+3. [x] `ValueTracker` desde Python, con animación de valor y bindings;
+4. [x] geometría reactiva nativa para arcos, resortes, etiquetas, tangentes,
+   normales, curvatura y cotas;
+5. [x] grupos y drawables con pivote de transformación para mecanismos rotatorios.
 
 **Criterio de salida:** una escena Python puede animar un mecanismo como un
 disco con resorte y masa: el conjunto rota, la masa se desplaza, el resorte se
@@ -493,7 +495,8 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
   expone gradientes lineales, radiales y angulares para fill/stroke.
 - [x] Cámara editorial: `scene.camera` expone pan, zoom, rotación, encuadre automático,
   follow y shake determinista.
-- [ ] Diagramas técnicos dinámicos: paths, arcos/cotas y trackers reactivos.
+- [x] Diagramas técnicos dinámicos: paths unificados, arcos/cotas, pivotes,
+  trackers y geometría reactiva.
 - [x] Componentes editoriales: listas, callouts, captions y title cards.
 - [x] Presets 16:9, 9:16 y 1:1 con safe areas.
 - [x] Perfil de exportación completamente accesible desde Python.

@@ -12,18 +12,18 @@ x_axis = scene.arrow(25, 0, 360, 0).stroke(GRAY, 4)
 y_axis = scene.arrow(0, 25, 0, 215).stroke(GRAY, 4)
 
 # An open polyline makes the rail and zig-zag spring ordinary animatable paths.
-rail = scene.polyline([(-230, -55), (175, -55), (175, 35), (-230, 35), (-230, -55)]).no_fill().stroke(GRAY, 5)
-spring = scene.polyline(
+rail = scene.path([(-230, -55), (175, -55), (175, 35), (-230, 35), (-230, -55)]).no_fill().stroke(GRAY, 5)
+spring = scene.path(
     [(-210, -10), (-175, 25), (-140, -45), (-105, 25), (-70, -45), (-35, 25), (0, -10)]
 ).no_fill().stroke(CYAN, 5)
 mass = scene.rect(70, 62).fill(GOLD).stroke(GRAY, 4).at(48, -10)
 mass_label = scene.text("m").fill(GRAY).at(48, -10)
-mechanism = scene.group([rail, spring, mass, mass_label]).rotated(0.48).at(-35, 40)
+mechanism = scene.group([rail, spring, mass, mass_label]).at(-35, 40).pivot(-35, 40).rotated(0.48)
 
 # Technical annotations use dedicated primitives instead of hand-built paths.
 angle_arc = scene.arc(-20, 20, 55, 0.48, 0.22).no_fill().stroke(GRAY, 3)
 rotation = scene.curved_arrow(-20, -155, 145, -115, 0.9).fill(GRAY)
-omega = scene.text("ω").fill(GRAY).at(115, -135)
+omega = scene.equation("omega").fill(GRAY).at(115, -135)
 extension = scene.dimension(85, 145, 175, 145, 35)
 extension_label = scene.text("e").fill(GRAY).at(130, 195)
 
