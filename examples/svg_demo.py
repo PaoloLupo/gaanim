@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from gaanim import CORAL, GOLD, NAVY, Scene
+from gaanim import GOLD, NAVY, Scene
 
 
 scene = Scene(960, 540)
@@ -11,9 +11,9 @@ asset = Path(__file__).resolve().parents[1] / "tests" / "assets" / "svg_demo.svg
 
 title = scene.title("SVG vector import").fill(NAVY).at(0, 220)
 art = scene.svg(str(asset)).scaled(1.35).at(0, -15)
-orb = art.part("orb").fill(CORAL)
+orb = art.part("orb")
 top_spark = art.part("spark-top")
-caption = scene.text("paths, fills, strokes, transforms and <use>").fill(GOLD).at(0, -205)
+caption = scene.text("gradients, text outlines, clipPath, filters and <use>").fill(GOLD).at(0, -205)
 
 scene.wait(0.4)
 scene.play([orb.indicate(0.8), top_spark.rotate(0.8).duration(0.8)])

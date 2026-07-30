@@ -41,7 +41,7 @@ En términos prácticos:
   semánticos, layouts, notas, Presenter View, overview, navegación por monitor y una
   plantilla completa de sustentación.
 - **Todavía no está listo** como pipeline general de producción de contenido: faltan
-  preview de audio, SVG avanzado, gráficos de datos, código, plantillas y una distribución coherente.
+  preview de audio, video embebido, más gráficos de datos, plantillas y una distribución coherente.
 - **Todavía no está listo** como librería pública estable: API, documentación, ejemplos,
   stubs, versionado, pruebas de integración y empaquetado deben converger.
 
@@ -54,7 +54,7 @@ En términos prácticos:
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
 | Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View, overview y plantilla de tesis verificadas |
 | Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
-| Motion graphics con multimedia | 🟡 | Raster, SVG vectorial y audio de exportación disponibles; falta video embebido y SVG avanzado |
+| Motion graphics con multimedia | 🟡 | Raster, SVG vectorial avanzado y audio de exportación disponibles; falta video embebido |
 | Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
 
 ---
@@ -371,7 +371,8 @@ siendo correctos, no solo que el workspace compila.
 Orden recomendado:
 
 1. asset manager con rutas relativas, precarga y recarga de assets;
-2. ampliar SVG: grupos origen ya direccionables; faltan clipping, gradientes y texto;
+2. [x] ampliar SVG con grupos direccionables, clipping, gradientes, texto outlineado y
+   filtros comunes;
 3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg.
 
 Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
@@ -481,9 +482,10 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
 - [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
   transforms, `viewBox` y `<use>`.
-- [~] SVG avanzado: los grupos y paths con `id` se preservan como jerarquía y
-  `svg.part(id)` devuelve un `Drawable` animable; estilos de grupo alcanzan sus
-  paths descendientes. Faltan clipping, gradientes, filtros y texto.
+- [x] SVG avanzado vectorial: grupos, paths y texto con `id` se preservan como
+  jerarquía animable; se importan gradientes lineales/radiales, `clipPath`, texto
+  convertido a contornos y los filtros comunes `feGaussianBlur`/`feDropShadow`.
+  Quedan fuera los patterns, masks, raster embebido y grafos arbitrarios de filtros.
 - [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
   aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
   reproducción/scrubbing en preview, análisis de duración y editor de pistas.

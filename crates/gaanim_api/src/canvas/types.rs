@@ -391,7 +391,7 @@ pub enum SpawnKind {
         view: ImageView,
     },
     /// One resolved vector path imported from an SVG document.
-    SvgPath(SvgPath),
+    SvgPath(Box<SvgPath>),
     Group(Vec<ObjectId>),
     /// Invisible value tracker entity (FloatSignal). No visual output.
     ValueTracker(f64),

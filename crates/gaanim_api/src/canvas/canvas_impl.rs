@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DVec2, DVec3};
+use gaanim_core::kurbo::Shape;
 use gaanim_core::peniko::Color;
 use gaanim_objects::prelude::SvgLoadError;
 use gaanim_timeline::transition::TransitionType;
@@ -965,9 +966,9 @@ impl Canvas {
 
     /// Load an SVG as an animatable group of resolved vector paths.
     ///
-    /// Basic shapes, paths, solid fills/strokes, transforms, CSS, `<use>`, and
-    /// `viewBox` are imported. Raster images and advanced SVG paint effects are
-    /// omitted by this vector-only importer.
+    /// Shapes, paths, solid or gradient paints, outlined text, transforms,
+    /// CSS, `<use>`, `viewBox`, and vector `clipPath` groups are imported.
+    /// Raster images, patterns, masks, and arbitrary filters remain omitted.
     pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
         let document = gaanim_objects::prelude::SvgDocument::load(self.resolve_asset_path(path))?;
         let mut parts = HashMap::new();
@@ -989,7 +990,10 @@ impl Canvas {
         for node in &group.children {
             match node {
                 gaanim_objects::prelude::SvgNode::Path(path) => {
-                    let handle = self.spawn_registered(SpawnKind::SvgPath(path.clone()), false);
+                    let handle = self.spawn_registered(
+                        SpawnKind::SvgPath(Box::new(path.as_ref().clone())),
+                        false,
+                    );
                     leaf_specs.push(handle.spec.clone());
                     if !path.id.is_empty() {
                         parts.insert(path.id.clone(), handle.clone());
@@ -1008,6 +1012,30 @@ impl Canvas {
         let mut handle = self.spawn_registered(SpawnKind::Group(child_ids), register_top_level);
         handle.spec.lock().expect("SVG group spec poisoned").opacity = group.opacity;
         handle = handle.with_style_targets(leaf_specs.clone());
+        if let Some(sigma) = group.blur_sigma {
+            handle = handle.blur(sigma);
+        }
+        if let Some(shadow) = &group.shadow {
+            handle = handle.shadow(
+                shadow.color,
+                DVec2::new(shadow.offset_x, shadow.offset_y),
+                shadow.blur_radius,
+            );
+        }
+        if let Some(clip_path) = &group.clip_path {
+            let rect = clip_path.bounding_box();
+            let mask = self.spawn_registered(
+                SpawnKind::SvgPath(Box::new(gaanim_objects::prelude::SvgPath {
+                    id: String::new(),
+                    path: clip_path.clone(),
+                    bounds: gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+                    fill: None,
+                    stroke: gaanim_scene::StrokeBrush::transparent(),
+                })),
+                false,
+            );
+            handle = handle.clip(&mask, gaanim_core::peniko::Fill::NonZero);
+        }
         if !group.id.is_empty() {
             parts.insert(group.id.clone(), handle.clone());
         }

@@ -68,3 +68,27 @@ cover = scene.image("cover.png")
 ```
 
 SVG files are parsed again whenever `scene.svg(...)` creates a drawable.
+
+== Advanced SVG
+
+`scene.svg(...)` keeps the document as vector geometry. The importer resolves:
+
+- nested groups, CSS, transforms, `viewBox` and `<use>`;
+- solid, linear and radial fills or strokes, including gradient spread modes;
+- `clipPath` geometry applied without rasterizing the document;
+- SVG text converted to font outlines using installed system fonts;
+- common `feGaussianBlur` and `feDropShadow` filters through Gaanim's retained
+  vector effects.
+
+Named source groups, paths and text remain addressable:
+
+```python
+diagram = scene.svg("architecture.svg")
+diagram.part("database").indicate(0.6)
+diagram.part("caption").fade_to(0.5)
+```
+
+The import is intentionally vector-first. Pattern paints, luminance/alpha
+masks, embedded raster images and arbitrary SVG filter graphs are not yet
+preserved. For portable text outlines, make sure the requested font is
+installed on every render machine or convert text to paths in the source SVG.
