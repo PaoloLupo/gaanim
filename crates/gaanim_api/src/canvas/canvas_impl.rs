@@ -19,8 +19,8 @@ use crate::canvas::types::{
     SpawnKind,
 };
 use crate::canvas::{
-    CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationError, PresentationManifest,
-    SlideId, SlideTemplate,
+    Anchor, CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationBrand,
+    PresentationError, PresentationManifest, SlideId, SlideTemplate,
 };
 use crate::export::{AudioTrack, AudioTrackError};
 
@@ -125,6 +125,8 @@ pub struct Canvas {
     pub asset_root: Option<PathBuf>,
     /// Audio sources mixed by FFmpeg when this canvas is exported.
     pub audio_tracks: Vec<AudioTrack>,
+    /// Reusable logo/footer treatment generated for every semantic slide.
+    pub branding: Option<PresentationBrand>,
     presentation: Arc<Mutex<PresentationManifest>>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
@@ -144,6 +146,7 @@ impl Canvas {
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
+            branding: None,
             presentation: Arc::new(Mutex::new(PresentationManifest::default())),
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
@@ -1209,6 +1212,77 @@ impl Canvas {
         guard.active_mut().ops.push(Op::Play(anims));
     }
 
+    /// Configure reusable branding generated automatically for semantic slides.
+    pub fn set_branding(&mut self, branding: PresentationBrand) {
+        self.branding = Some(branding);
+    }
+
+    fn spawn_slide_branding(
+        &mut self,
+        template: SlideTemplate,
+        slide_number: usize,
+    ) -> Result<(), PresentationError> {
+        let Some(branding) = self.branding.clone() else {
+            return Ok(());
+        };
+        if template == SlideTemplate::Title && !branding.show_on_cover {
+            return Ok(());
+        }
+
+        let frame = self.safe_frame();
+        let palette = self.theme_style.as_ref().map(|theme| theme.palette);
+        let muted = palette
+            .map(|palette| palette.muted)
+            .unwrap_or(Color::from_rgb8(0x94, 0xA3, 0xB8));
+        let rule = palette
+            .map(|palette| palette.rule)
+            .unwrap_or(Color::from_rgb8(0x5B, 0x70, 0x88));
+        let footer_y = frame.min.y + frame.height() * 0.018;
+        let rule_y = frame.min.y + frame.height() * 0.075;
+
+        if branding.rule {
+            self.line(frame.min.x, rule_y, frame.max.x, rule_y)
+                .no_fill()
+                .stroke(rule, 1.5)
+                .z_index(100);
+        }
+        let footer = match (branding.footer.as_deref(), branding.slide_numbers) {
+            (Some(footer), true) => Some(format!("{footer}    ·    {slide_number:02}")),
+            (Some(footer), false) => Some(footer.to_owned()),
+            (None, true) => Some(format!("{slide_number:02}")),
+            (None, false) => None,
+        };
+        if let Some(footer) = footer {
+            self.text(&footer)
+                .fill(muted)
+                .scaled(0.5)
+                .at(frame.min.x + frame.width() * 0.14, footer_y + 8.0)
+                .z_index(101);
+        }
+        if let Some(logo) = branding.logo.as_deref() {
+            let extension = logo
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let logo = if extension == "svg" {
+                self.svg(logo)
+                    .map_err(|error| PresentationError::BrandAsset {
+                        message: error.to_string(),
+                    })?
+            } else {
+                self.image(logo)
+                    .map_err(|error| PresentationError::BrandAsset {
+                        message: error.to_string(),
+                    })?
+            };
+            logo.scaled(branding.logo_scale)
+                .at_anchor(frame.max.x, frame.max.y, Anchor::TopRight)
+                .z_index(101);
+        }
+        Ok(())
+    }
+
     /// Begin a named presentation slide at the current timeline cursor.
     ///
     /// Starting a later slide closes the preceding slide. Slide boundaries
@@ -1228,6 +1302,7 @@ impl Canvas {
             .cursor;
         let mut presentation = self.presentation.lock().expect("presentation poisoned");
         let id = presentation.start_slide(name.into(), notes, template, start_time)?;
+        let slide_number = presentation.slides.len();
         drop(presentation);
         self.state
             .lock()
@@ -1235,6 +1310,7 @@ impl Canvas {
             .active_mut()
             .ops
             .push(Op::PresentationSlideStart(id));
+        self.spawn_slide_branding(template, slide_number)?;
         Ok(id)
     }
 
@@ -2101,5 +2177,66 @@ mod tests {
             canvas.slide_region(SlideTemplate::Blank, "title"),
             Err(PresentationError::UnknownRegion { .. })
         ));
+    }
+
+    #[test]
+    fn semantic_template_aliases_and_branding_are_reusable() {
+        assert_eq!(
+            SlideTemplate::parse("cover").expect("cover alias"),
+            SlideTemplate::Title
+        );
+        assert_eq!(
+            SlideTemplate::parse("comparison").expect("comparison alias"),
+            SlideTemplate::TwoColumns
+        );
+        assert!(
+            SlideTemplate::TwoColumns
+                .region(
+                    gaanim_math::Bounds3D::new_2d(-100.0, -50.0, 100.0, 50.0),
+                    "before",
+                )
+                .is_some()
+        );
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas.set_branding(PresentationBrand {
+            footer: Some("Thesis · Research Lab".to_owned()),
+            show_on_cover: false,
+            ..Default::default()
+        });
+        let before = canvas
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .ops
+            .len();
+        canvas
+            .slide("cover", None, SlideTemplate::Title)
+            .expect("cover slide");
+        let after_cover = canvas
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .ops
+            .len();
+        assert_eq!(after_cover, before + 1, "cover branding is opt-in");
+
+        canvas
+            .slide("content", None, SlideTemplate::TitleContent)
+            .expect("content slide");
+        let after_content = canvas
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .ops
+            .len();
+        assert_eq!(
+            after_content,
+            after_cover + 3,
+            "slide start plus rule and numbered footer"
+        );
     }
 }

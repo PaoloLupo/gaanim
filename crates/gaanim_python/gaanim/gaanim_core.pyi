@@ -405,6 +405,16 @@ class Scene:
     def canvas(self) -> Canvas: ...
     @property
     def camera(self) -> Camera: ...
+    def brand(
+        self,
+        *,
+        logo: Optional[str] = None,
+        footer: Optional[str] = None,
+        slide_numbers: bool = True,
+        rule: bool = True,
+        show_on_cover: bool = False,
+        logo_scale: float = 1.0,
+    ) -> None: ...
     def frame_layout(
         self,
         header: float = 0.0,
@@ -683,7 +693,10 @@ class Scene:
         name: str,
         *,
         notes: Optional[str] = None,
-        layout: Literal["blank", "title", "title_content", "two_columns", "section", "closing"] = "blank",
+        layout: Literal[
+            "blank", "title", "cover", "title_content", "content", "agenda",
+            "two_columns", "comparison", "section", "divider", "closing", "conclusion"
+        ] = "blank",
     ) -> Slide: ...
     def fade_out_all(self, d: float) -> None: ...
     def render(self) -> None: ...

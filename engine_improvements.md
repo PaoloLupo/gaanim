@@ -410,7 +410,9 @@ de que cada ejemplo configure tipografías o ejes manualmente.
 4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
 5. [x] estilos separados para ejes, grilla, ticks, números y rótulos, con
    visibilidad global o independiente por eje desde `scene.axes(...)`;
-6. [ ] plantillas de composición y branding reutilizable sobre el sistema de temas.
+6. [x] aliases semánticos de composición (`cover`, `content`, `comparison`,
+   `divider`, `conclusion`) y branding global reutilizable con logo, regla,
+   footer y numeración sobre el sistema de temas.
 
 **Criterio de salida:** un diagrama científico puede crear ejes numerados y una
 grilla legible con una sola llamada; texto y ecuaciones mantienen una familia
@@ -448,7 +450,7 @@ componer cada pieza desde primitivas.
 - [x] exportación continua, por un slide nombrado o por todos los slides con una plantilla
   de ruta desde la misma función `scene.export(...)`;
 - [x] navegación directa por nombre de slide y por nombre/índice de paso;
-- plantillas y temas expuestos desde Python;
+- [x] plantillas semánticas, temas y branding global expuestos desde Python;
 - control remoto o protocolo simple de navegación.
 
 ### P2 — Animación avanzada
@@ -506,7 +508,9 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 - [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
 - [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
-- [~] Sistema de temas público: `technical`/`scientific` y `paper` configuran fondo y fills tipográficos en el runtime; `paper` está cubierto por regresión visual con texto y ecuación negros. Faltan plantillas de composición con branding.
+- [x] Sistema de temas público: esquemas integrados y custom themes configuran
+  colores, tipografía y fuentes; las plantillas semánticas heredan branding
+  global con logo, footer, regla y numeración.
 - [~] Asset manager y formato mínimo de proyecto: `scene.assets_dir(...)`
   resuelve rutas relativas para imágenes y SVG, y `scene.preload([...])`
   valida SVG y calienta la caché raster. `scene.load_project("gaanim.toml")`
@@ -525,8 +529,8 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
   desplazan y animan hijos. `LayoutRegion.layout(...)` los ancla a regiones;
   hay límites `width`/`height`, `fit="shrink"`, filas con `wrap=True` y
   `justify` (`start`/`center`/`end`/`between`). Faltan overflow explícito,
-  grid con spans, reflow reactivo, presets semánticos de slides y variantes
-  responsive.
+  grid con spans, reflow reactivo y variantes responsive. Los presets
+  semánticos de slides ya están disponibles.
 - [ ] Interacción/picking útil para demos en vivo.
 
 ### 1.0 — Librería estable

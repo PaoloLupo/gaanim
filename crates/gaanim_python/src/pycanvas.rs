@@ -1,14 +1,15 @@
 //! Python scene facade and its visual canvas configuration.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
     AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl, CurveElement,
-    ImageCrop, ImageFit, ImageOptions, ParagraphOptions, SlideId, SlideTemplate, TextAlign,
-    ThemeFont,
+    ImageCrop, ImageFit, ImageOptions, ParagraphOptions, PresentationBrand, SlideId, SlideTemplate,
+    TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_slide, export_canvas_slides,
@@ -672,6 +673,36 @@ impl PyScene {
         PyCamera {
             inner: self.inner.clone(),
         }
+    }
+
+    /// Configure a reusable logo, footer, rule, and slide numbering treatment.
+    #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, rule=true, show_on_cover=false, logo_scale=1.0))]
+    fn brand(
+        &self,
+        logo: Option<String>,
+        footer: Option<String>,
+        slide_numbers: bool,
+        rule: bool,
+        show_on_cover: bool,
+        logo_scale: f64,
+    ) -> PyResult<()> {
+        if !logo_scale.is_finite() || logo_scale <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "logo_scale must be finite and positive",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_branding(PresentationBrand {
+                logo: logo.map(PathBuf::from),
+                footer,
+                slide_numbers,
+                rule,
+                show_on_cover,
+                logo_scale,
+            });
+        Ok(())
     }
 
     /// Defines reusable `header`, `content`, and `footer` safe areas.

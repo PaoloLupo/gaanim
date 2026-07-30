@@ -12,7 +12,8 @@ pub use types::{
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};
 pub use presentation::{
-    PresentationError, PresentationManifest, SlideId, SlideSpec, SlideStep, SlideTemplate,
+    PresentationBrand, PresentationError, PresentationManifest, SlideId, SlideSpec, SlideStep,
+    SlideTemplate,
 };
 mod drawable;
 pub use drawable::{DrawableHandle, FragmentSelection, SvgPartError};

@@ -325,6 +325,37 @@ scene.play([rect.fade_out().duration(0.5)])
 Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
 connect them, and `scene.slide()` to add a presentation breakpoint.
 
+== Semantic slides and branding
+
+Configure the deck identity once before declaring slides:
+
+```python
+scene.canvas.set_theme("presentation")
+scene.brand(
+    logo="assets/university.svg",
+    footer="UNIVERSITY · MASTER THESIS · 2026",
+    slide_numbers=True,
+    rule=True,
+    show_on_cover=False,
+    logo_scale=0.75,
+)
+```
+
+The logo, theme-colored rule, footer, and current slide number are generated
+inside every semantic slide, so navigation and independent slide export remain
+correct. Cover slides omit the chrome by default.
+
+`slide(layout=...)` accepts both structural names and presentation-oriented
+aliases: `cover`, `content`, `agenda`, `comparison`, `divider`, and
+`conclusion`. A comparison exposes `before` and `after` regions as aliases for
+its two columns.
+
+```python
+slide = scene.slide("Results", layout="comparison", notes="Compare both models.")
+slide.region("before").place(baseline, Anchor.CENTER)
+slide.region("after").place(proposed, Anchor.CENTER)
+```
+
 `Transition.zoom_through(duration, center=(0, 0), max_zoom=4)` zooms into a
 scene-space point before revealing the next segment. It is useful when a detail
 of the outgoing scene introduces the following section.

@@ -1,8 +1,33 @@
 //! Semantic presentation metadata built on top of the timeline breakpoints.
 
 use gaanim_math::Bounds3D;
+use std::path::PathBuf;
 
 use super::LayoutRegion;
+
+/// Reusable visual identity automatically added to semantic slides.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresentationBrand {
+    pub logo: Option<PathBuf>,
+    pub footer: Option<String>,
+    pub slide_numbers: bool,
+    pub rule: bool,
+    pub show_on_cover: bool,
+    pub logo_scale: f64,
+}
+
+impl Default for PresentationBrand {
+    fn default() -> Self {
+        Self {
+            logo: None,
+            footer: None,
+            slide_numbers: true,
+            rule: true,
+            show_on_cover: false,
+            logo_scale: 1.0,
+        }
+    }
+}
 
 /// Built-in composition for a semantic slide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,11 +45,11 @@ impl SlideTemplate {
     pub fn parse(name: &str) -> Result<Self, PresentationError> {
         match name {
             "blank" => Ok(Self::Blank),
-            "title" => Ok(Self::Title),
-            "title_content" => Ok(Self::TitleContent),
-            "two_columns" => Ok(Self::TwoColumns),
-            "section" => Ok(Self::Section),
-            "closing" => Ok(Self::Closing),
+            "title" | "cover" => Ok(Self::Title),
+            "title_content" | "content" | "agenda" => Ok(Self::TitleContent),
+            "two_columns" | "comparison" => Ok(Self::TwoColumns),
+            "section" | "divider" => Ok(Self::Section),
+            "closing" | "conclusion" => Ok(Self::Closing),
             _ => Err(PresentationError::UnknownTemplate {
                 name: name.to_string(),
             }),
@@ -55,10 +80,10 @@ impl SlideTemplate {
             (Self::TitleContent, "title") => grid(5, 1, 0, 0),
             (Self::TitleContent, "content") => region.grid(5, 1, 0.0, 0.0).area(1, 0, 4, 1),
             (Self::TwoColumns, "title") => grid(5, 1, 0, 0),
-            (Self::TwoColumns, "left") => region
+            (Self::TwoColumns, "left" | "before") => region
                 .grid(5, 2, frame.height() * 0.03, frame.width() * 0.04)
                 .area(1, 0, 4, 1),
-            (Self::TwoColumns, "right") => region
+            (Self::TwoColumns, "right" | "after") => region
                 .grid(5, 2, frame.height() * 0.03, frame.width() * 0.04)
                 .area(1, 1, 4, 1),
             (Self::Section, "eyebrow") => grid(4, 1, 0, 0),
@@ -178,6 +203,8 @@ pub enum PresentationError {
     UnknownTemplate { name: String },
     #[error("template '{template}' has no region named '{region}'")]
     UnknownRegion { template: String, region: String },
+    #[error("could not create slide branding: {message}")]
+    BrandAsset { message: String },
     #[error("slide {id:?} does not exist")]
     UnknownSlide { id: SlideId },
     #[error("slide {id:?} is no longer active")]
