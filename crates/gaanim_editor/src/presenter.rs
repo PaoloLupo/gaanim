@@ -31,12 +31,20 @@ pub(crate) struct PresenterCamera {
 pub(crate) struct PresenterOverviewState {
     open: bool,
     query: String,
-    textures: HashMap<u32, egui::TextureHandle>,
+    texture_revision: u64,
+    textures: HashMap<(u32, ThumbnailMoment), egui::TextureHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ThumbnailMoment {
+    Entry,
+    Complete,
 }
 
 #[derive(Debug)]
 struct ThumbnailPixels {
     slide_id: u32,
+    moment: ThumbnailMoment,
     width: u32,
     height: u32,
     rgba: Vec<u8>,
@@ -66,15 +74,27 @@ impl PresenterThumbnailCache {
         };
 
         let revision = stash.revision;
-        let slide_ids = timeline
+        let requests = timeline
             .presentation
             .iter()
-            .map(|slide| slide.id)
+            .flat_map(|slide| {
+                [
+                    (
+                        slide.id,
+                        ThumbnailMoment::Entry,
+                        entry_slide_time(slide.start_time, slide.end_time),
+                    ),
+                    (
+                        slide.id,
+                        ThumbnailMoment::Complete,
+                        representative_slide_time(slide.start_time, slide.end_time),
+                    ),
+                ]
+            })
             .collect::<Vec<_>>();
-        let times = timeline
-            .presentation
+        let times = requests
             .iter()
-            .map(|slide| representative_slide_time(slide.start_time, slide.end_time))
+            .map(|(_, _, time)| *time)
             .collect::<Vec<_>>();
         let (width, height) = thumbnail_dimensions(canvas.width, canvas.height);
         let (sender, receiver) = bounded(1);
@@ -95,11 +115,12 @@ impl PresenterThumbnailCache {
                     gaanim_api::runtime::replay_canvas_into(world, canvas)
                 })
                 .map(|frames| {
-                    slide_ids
+                    requests
                         .into_iter()
                         .zip(frames)
-                        .map(|(slide_id, frame)| ThumbnailPixels {
+                        .map(|((slide_id, moment, _), frame)| ThumbnailPixels {
                             slide_id,
+                            moment,
                             width: frame.width,
                             height: frame.height,
                             rgba: frame.rgba,
@@ -154,6 +175,116 @@ fn representative_slide_time(start_time: f64, end_time: f64) -> f64 {
     } else {
         start_time
     }
+}
+
+fn entry_slide_time(start_time: f64, end_time: f64) -> f64 {
+    if end_time > start_time + 2e-4 {
+        (start_time + 1e-4).min(end_time - 1e-4)
+    } else {
+        start_time
+    }
+}
+
+fn neighboring_slide_indices(index: usize, count: usize) -> (Option<usize>, usize, Option<usize>) {
+    (
+        index.checked_sub(1),
+        index,
+        (index + 1 < count).then_some(index + 1),
+    )
+}
+
+fn show_slide_preview(
+    ui: &mut egui::Ui,
+    role: &str,
+    position: Option<(usize, &str)>,
+    count: usize,
+    texture: Option<&egui::TextureHandle>,
+    width: f32,
+    active: bool,
+) -> bool {
+    let mut clicked = false;
+    let fill = if active {
+        egui::Color32::from_rgb(24, 43, 76)
+    } else {
+        egui::Color32::from_rgb(13, 20, 36)
+    };
+    let stroke = if active {
+        egui::Stroke::new(2.0, egui::Color32::from_rgb(91, 143, 255))
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 58, 82))
+    };
+
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::same(9))
+        .show(ui, |ui| {
+            ui.set_width(width);
+            ui.label(
+                egui::RichText::new(role.to_uppercase())
+                    .strong()
+                    .size(12.0)
+                    .color(if active {
+                        egui::Color32::from_rgb(145, 190, 255)
+                    } else {
+                        egui::Color32::from_rgb(137, 151, 174)
+                    }),
+            );
+            ui.add_space(4.0);
+            let preview_height = width * 9.0 / 16.0;
+            ui.vertical_centered(|ui| {
+                if let Some(texture) = texture {
+                    let texture_size = texture.size_vec2();
+                    let scale = (width / texture_size.x).min(preview_height / texture_size.y);
+                    clicked |= ui
+                        .add(
+                            egui::Image::new(texture)
+                                .fit_to_exact_size(texture_size * scale)
+                                .sense(egui::Sense::click()),
+                        )
+                        .clicked();
+                } else {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(width, preview_height),
+                        egui::Sense::click(),
+                    );
+                    ui.painter()
+                        .rect_filled(rect, 5.0, egui::Color32::from_rgb(5, 8, 16));
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        if position.is_some() {
+                            "Rendering..."
+                        } else {
+                            "—"
+                        },
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::from_rgb(112, 126, 149),
+                    );
+                    clicked |= response.clicked();
+                }
+            });
+            ui.add_space(5.0);
+            if let Some((index, name)) = position {
+                ui.label(
+                    egui::RichText::new(format!("{:02} / {:02}  {name}", index + 1, count))
+                        .strong()
+                        .size(if active { 16.0 } else { 14.0 }),
+                );
+            } else {
+                ui.label(
+                    egui::RichText::new(if role == "Previous" {
+                        "Start of deck"
+                    } else {
+                        "End of deck"
+                    })
+                    .italics()
+                    .color(egui::Color32::from_rgb(112, 126, 149)),
+                );
+            }
+        });
+    clicked
 }
 
 fn apply_presenter_style(ctx: &egui::Context) {
@@ -212,7 +343,7 @@ pub(crate) fn spawn_presenter_window(commands: &mut Commands) {
     commands.spawn((
         Window {
             title: "Gaanim — Presenter View".to_string(),
-            resolution: WindowResolution::new(960, 640),
+            resolution: WindowResolution::new(1180, 760),
             resizable: true,
             ..default()
         },
@@ -274,9 +405,11 @@ pub(crate) fn presenter_view_system(
     };
     let ctx = context.get_mut();
     apply_presenter_style(ctx);
-    if overview.open {
-        thumbnail_cache.request(&replay_stash, &timeline);
+    if overview.texture_revision != replay_stash.revision {
+        overview.texture_revision = replay_stash.revision;
+        overview.textures.clear();
     }
+    thumbnail_cache.request(&replay_stash, &timeline);
     if let Some((revision, result)) = thumbnail_cache.receive()
         && revision == replay_stash.revision
     {
@@ -289,11 +422,16 @@ pub(crate) fn presenter_view_system(
                         &frame.rgba,
                     );
                     let texture = ctx.load_texture(
-                        format!("presenter-slide-{}-{revision}", frame.slide_id),
+                        format!(
+                            "presenter-slide-{}-{:?}-{revision}",
+                            frame.slide_id, frame.moment
+                        ),
                         image,
                         egui::TextureOptions::LINEAR,
                     );
-                    overview.textures.insert(frame.slide_id, texture);
+                    overview
+                        .textures
+                        .insert((frame.slide_id, frame.moment), texture);
                 }
                 thumbnail_cache.error = None;
             }
@@ -427,7 +565,66 @@ pub(crate) fn presenter_view_system(
                     "Slide time {}",
                     format_time(current_time - slide.start_time)
                 ));
-                ui.add_space(8.0);
+                ui.add_space(10.0);
+
+                let (previous, current_index, next) =
+                    neighboring_slide_indices(index, timeline.presentation.len());
+                ui.horizontal_top(|ui| {
+                    let cards = [
+                        (
+                            "Previous",
+                            previous,
+                            210.0,
+                            ThumbnailMoment::Complete,
+                            false,
+                        ),
+                        (
+                            "Current",
+                            Some(current_index),
+                            330.0,
+                            ThumbnailMoment::Complete,
+                            true,
+                        ),
+                        ("Next", next, 210.0, ThumbnailMoment::Entry, false),
+                    ];
+                    for (role, card_index, width, moment, active) in cards {
+                        let position = card_index.map(|card_index| {
+                            (card_index, timeline.presentation[card_index].name.as_str())
+                        });
+                        let texture = card_index.and_then(|card_index| {
+                            overview
+                                .textures
+                                .get(&(timeline.presentation[card_index].id, moment))
+                        });
+                        if show_slide_preview(
+                            ui,
+                            role,
+                            position,
+                            timeline.presentation.len(),
+                            texture,
+                            width,
+                            active,
+                        ) && !active
+                            && let Some(card_index) = card_index
+                        {
+                            requested_seek = timeline
+                                .presentation_time_named(&timeline.presentation[card_index].name);
+                        }
+                    }
+                });
+                if thumbnail_cache.is_loading() && overview.textures.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Rendering slide previews...");
+                    });
+                } else if let Some(error) = &thumbnail_cache.error {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 140, 140),
+                        format!("Could not render previews: {error}"),
+                    );
+                }
+
+                ui.add_space(10.0);
                 ui.label(egui::RichText::new("Notes").strong());
                 ui.label(slide.notes.as_deref().unwrap_or("No notes for this slide."));
 
@@ -539,7 +736,10 @@ pub(crate) fn presenter_view_system(
                             .inner_margin(egui::Margin::same(10))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    if let Some(texture) = overview.textures.get(&slide.id) {
+                                    if let Some(texture) = overview
+                                        .textures
+                                        .get(&(slide.id, ThumbnailMoment::Complete))
+                                    {
                                         let texture_size = texture.size_vec2();
                                         let scale =
                                             (190.0 / texture_size.x).min(140.0 / texture_size.y);
@@ -621,7 +821,10 @@ pub(crate) fn presenter_view_system(
 
 #[cfg(test)]
 mod tests {
-    use super::{representative_slide_time, thumbnail_dimensions};
+    use super::{
+        entry_slide_time, neighboring_slide_indices, representative_slide_time,
+        thumbnail_dimensions,
+    };
 
     #[test]
     fn thumbnail_dimensions_preserve_common_aspect_ratios() {
@@ -635,5 +838,19 @@ mod tests {
         assert_eq!(representative_slide_time(2.0, 2.0), 2.0);
         let time = representative_slide_time(2.0, 5.0);
         assert!(time >= 2.0 && time < 5.0);
+    }
+
+    #[test]
+    fn entry_time_stays_inside_the_slide() {
+        assert_eq!(entry_slide_time(2.0, 2.0), 2.0);
+        let time = entry_slide_time(2.0, 5.0);
+        assert!(time > 2.0 && time < 5.0);
+    }
+
+    #[test]
+    fn neighboring_slides_handle_deck_edges() {
+        assert_eq!(neighboring_slide_indices(0, 3), (None, 0, Some(1)));
+        assert_eq!(neighboring_slide_indices(1, 3), (Some(0), 1, Some(2)));
+        assert_eq!(neighboring_slide_indices(2, 3), (Some(1), 2, None));
     }
 }

@@ -240,6 +240,9 @@ cronómetro, navegación, overview consultable por nombre, miniaturas y salto di
 slides o pasos. Las miniaturas se capturan de forma asíncrona en un mundo ECS/Vello
 aislado, se invalidan con hot reload y nunca hacen seek sobre el timeline público. Sus atajos locales
 son `←`, `→`, `Espacio`, `O` (overview), `B` (pantalla negra) y `W` (pantalla blanca).
+El panel principal mantiene previews clicables del slide anterior, actual y siguiente; el
+siguiente usa su estado de entrada para no revelar anticipadamente animaciones, mientras
+el overview conserva la composición completa de cada slide.
 `gaanim check <script.py>` ejecuta además un preflight de formato 16:9, notas, pasos,
 duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
 
@@ -449,6 +452,8 @@ componer cada pieza desde primitivas.
 - [x] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
 - [x] Caché de miniaturas en mundo ECS/Vello aislado, publicada como texturas egui sin
   mutar el `Timeline` de reproducción;
+- [x] previews persistentes anterior/actual/siguiente en Presenter View, con navegación
+  por clic y estado de entrada separado para el siguiente slide;
 - [x] exportación continua, por un slide nombrado o por todos los slides con una plantilla
   de ruta desde la misma función `scene.export(...)`;
 - [x] navegación directa por nombre de slide y por nombre/índice de paso;

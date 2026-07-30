@@ -116,6 +116,9 @@ target/debug/gaanim.exe --present --monitor 1 mi_tesis.py
 La salida pública se abre a pantalla completa y Presenter View queda en una segunda
 ventana. Presenter View contiene:
 
+- previsualizadores persistentes del slide anterior, actual y siguiente;
+- vista inicial del siguiente slide, sin adelantar sus revelados o animaciones;
+- salto directo al slide anterior o siguiente haciendo clic en su previsualización;
 - título y paso actuales;
 - siguiente parada;
 - notas del expositor;
