@@ -31,10 +31,35 @@ El comando no reemplaza archivos existentes. Para reemplazar uno de forma explí
 target/debug/gaanim.exe init thesis mi_tesis.py --force
 ```
 
-La plantilla generada funciona inmediatamente. Busca los textos entre corchetes (`[...]`)
-y reemplázalos con el contenido de tu investigación. Usa el tema integrado
-`scene.canvas.set_theme("presentation")`, que configura contraste para proyector y hace
-que títulos, texto, tablas, gráficos, captions y paneles compartan la misma paleta.
+La plantilla generada funciona inmediatamente. La portada incluida reproduce el sistema
+visual institucional con fondo exacto `#1601FC`, texto blanco y Tw Cen MT. En Windows la
+fuente se detecta desde `C:\Windows\Fonts\TCM_____.TTF`; no se sustituye silenciosamente
+por otra tipografía.
+
+Todo el sistema visual se configura con un único objeto:
+
+```python
+from gaanim import Scene, ThesisTemplate
+
+scene = Scene(1920, 1080, margin=72)
+design = ThesisTemplate(
+    scene,
+    font_path="assets/TwCenMT.ttf",  # opcional en Windows
+    logo="assets/logo_ucsp_blanco.svg",
+    background="#1601FC",
+)
+design.cover(
+    "TÍTULO DE LA TESIS\nEN DOS O TRES LÍNEAS",
+    "NOMBRE DEL AUTOR  •  NOMBRE DEL COAUTOR",
+    "AGOSTO 2026",
+)
+```
+
+También puede definirse `GAANIM_TW_CEN_FONT` para una copia licenciada de la fuente y
+`GAANIM_THESIS_LOGO` para el logo blanco. Si no se proporciona un logo, aparece un
+marcador vectorial neutro que hace evidente el lugar que debe reemplazarse. Busca los
+textos entre corchetes (`[...]`) del resto de slides y reemplázalos con tu investigación.
+Colores, títulos, texto, tablas, gráficos, captions y paneles heredan el mismo tema.
 
 ## 2. Previsualizar mientras editas
 

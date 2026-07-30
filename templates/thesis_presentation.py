@@ -12,25 +12,36 @@ define una pausa controlada por el expositor.
 
 import os
 
-from gaanim import GOLD, WHITE, Anchor, Color, Scene
+from gaanim import WHITE, Scene, ThesisTemplate
 
 
 scene = Scene(1920, 1080, margin=72)
-scene.canvas.set_theme("presentation")
 scene.canvas.set_safe_area(top=52, right=72, bottom=52, left=72)
-PRESENTATION_BLUE = Color(91, 143, 255)
-PRESENTATION_PANEL = Color(16, 24, 43)
+
+# Identidad visual ------------------------------------------------------------
+# Tw Cen MT se detecta en C:\Windows\Fonts\TCM_____.TTF. Para usar otra copia
+# licenciada, define GAANIM_TW_CEN_FONT o pasa font_path="assets/TwCenMT.ttf".
+# El logo debe ser un SVG blanco; si se omite aparece un marcador vectorial.
+design = ThesisTemplate(
+    scene,
+    font_path=os.environ.get("GAANIM_TW_CEN_FONT"),
+    logo=os.environ.get("GAANIM_THESIS_LOGO"),
+    background="#1601FC",
+    institution="UNIVERSIDAD CATÓLICA SAN PABLO",
+    faculty="FACULTAD DE ARQUITECTURA, COMPUTACIÓN E INGENIERÍAS",
+    school="ESCUELA PROFESIONAL DE INGENIERÍA CIVIL",
+)
+ACCENT = scene.canvas.color("accent")
+PRESENTATION_BLUE = scene.canvas.color("chart")
+PRESENTATION_PANEL = scene.canvas.color("panel")
 
 
 def title_in(slide, text):
-    return slide.region("title").place(
-        scene.title(text),
-        Anchor.CENTER,
-    )
+    return design.title(slide, text)
 
 
 def thesis_point(text, y, *, color=WHITE):
-    marker = scene.dot(8).fill(GOLD).at(-680, y + 4)
+    marker = scene.dot(8).fill(ACCENT).at(-680, y + 4)
     body = scene.paragraph(
         text,
         1240,
@@ -41,19 +52,16 @@ def thesis_point(text, y, *, color=WHITE):
 
 
 # 1. Portada -----------------------------------------------------------------
-cover = scene.slide(
-    "Portada",
+cover = design.cover(
+    "MARCO DE TRABAJO PARA LA\n"
+    "IMPLEMENTACIÓN AUTOMATIZADA DEL\n"
+    "DISEÑO DE MUROS DE ALBAÑILERÍA\n"
+    "CONFINADA",
+    "PAOLO CESAR GUILLEN LUPO  •  PAMELA BANDA ALARTA",
+    "AGOSTO 2026",
     notes="[Saluda, preséntate y enuncia la pregunta central de la investigación.]",
-    layout="title",
 )
-title_in(cover, "[TÍTULO DE LA TESIS]")
-cover.region("subtitle").place(
-    scene.subtitle("[Subtítulo o pregunta de investigación]"),
-    Anchor.CENTER,
-)
-scene.text("[Autor/a]  ·  [Programa]  ·  [Universidad]  ·  [Año]").at(0, -210)
-cover_prompt = scene.text("Comenzar sustentación").fill(GOLD).at(0, -320)
-scene.play([cover_prompt.write().duration(0.45)])
+scene.wait(0.6)
 cover.step("inicio")
 
 
@@ -120,7 +128,7 @@ scene.paragraph(
     "Objetivo general: [verbo en infinitivo + aporte + contexto + criterio de éxito].",
     1370,
     font_size=38,
-).fill(GOLD).at(0, 180)
+).fill(ACCENT).at(0, 180)
 specific_objectives = [
     thesis_point("OE1. [Caracterizar o diagnosticar el estado inicial.]", 60),
     thesis_point("OE2. [Diseñar o implementar la propuesta.]", -50),
@@ -174,9 +182,9 @@ for x, name in zip(method_x, method_names):
     ).at(x, -20)
     scene.text(name).fill(WHITE).at(x, -20)
 method_arrows = [
-    scene.arrow(-465, -20, -375, -20).stroke(GOLD, 7),
-    scene.arrow(-45, -20, 45, -20).stroke(GOLD, 7),
-    scene.arrow(375, -20, 465, -20).stroke(GOLD, 7),
+    scene.arrow(-465, -20, -375, -20).stroke(ACCENT, 7),
+    scene.arrow(-45, -20, 45, -20).stroke(ACCENT, 7),
+    scene.arrow(375, -20, 465, -20).stroke(ACCENT, 7),
 ]
 scene.play([arrow.create().duration(0.45) for arrow in method_arrows])
 method.step("proceso")
@@ -239,7 +247,7 @@ closing = scene.slide(
     notes="[Agradece. Durante preguntas usa O en Presenter View para saltar a cualquier tema.]",
     layout="closing",
 )
-scene.title("Gracias").fill(GOLD).at(0, 180)
+scene.title("Gracias").fill(ACCENT).at(0, 180)
 scene.subtitle("[Una frase final que resuma el aporte de la tesis]").fill(WHITE).at(0, 40)
 scene.text("[correo@universidad.edu]").fill(PRESENTATION_BLUE).at(0, -100)
 questions = scene.text("Preguntas").fill(WHITE).at(0, -240)

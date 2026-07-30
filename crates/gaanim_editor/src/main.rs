@@ -796,6 +796,9 @@ mod tests {
         );
         assert!(THESIS_PRESENTATION_TEMPLATE.contains("scene.slide("));
         assert!(THESIS_PRESENTATION_TEMPLATE.contains("notes="));
+        assert!(THESIS_PRESENTATION_TEMPLATE.contains("ThesisTemplate("));
+        assert!(THESIS_PRESENTATION_TEMPLATE.contains("background=\"#1601FC\""));
+        assert!(THESIS_PRESENTATION_TEMPLATE.contains("design.cover("));
     }
 
     #[test]

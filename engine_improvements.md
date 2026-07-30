@@ -260,10 +260,12 @@ comando `gaanim init thesis` genera una presentación 16:9 completa con portada,
 problema, objetivos, teoría, metodología, resultados, conclusiones, cierre, notas y
 capturas de regresión. La guía operativa está en `docs/thesis-presentations.md`.
 
+El branding ya es parametrizable mediante `ThesisTemplate`: fondo, Tw Cen MT embebida,
+institución, facultad, escuela y logo se configuran una sola vez.
+
 Para convertirlo en una solución general de slides todavía faltan:
 
 - enlaces internos y navegación no lineal de presentación;
-- temas de branding parametrizables más allá de la plantilla de tesis incluida;
 - integración de imágenes, tablas, charts y código.
 
 ### 7. Render y efectos
