@@ -197,24 +197,14 @@ impl World for GaanimTypstWorld {
     }
 }
 
-/// Convert a Typst `Paint` into an optional `peniko::Brush`, overriding default black with `default_brush` if provided.
+/// Convert a Typst `Paint` into an optional `peniko::Brush`.
 fn typst_paint_to_brush(
     paint: &Paint,
-    default_brush: &Option<peniko::Brush>,
+    _default_brush: &Option<peniko::Brush>,
 ) -> Option<peniko::Brush> {
     match paint {
         Paint::Solid(color) => {
             let [r, g, b, a] = color.to_vec4_u8();
-            // Typst uses black (#000000) as its default document color.
-            // In Gaanim, we want defaults to match the parent's default_fill (often white on a dark background).
-            if r == 0
-                && g == 0
-                && b == 0
-                && a == 255
-                && let Some(db) = default_brush
-            {
-                return Some(db.clone());
-            }
             Some(peniko::Brush::Solid(peniko::Color::from_rgba8(r, g, b, a)))
         }
         _ => None,

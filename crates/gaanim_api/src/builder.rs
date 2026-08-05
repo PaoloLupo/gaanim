@@ -3921,9 +3921,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectRef {
         let text_font = text_font.or_else(|| (!is_math).then_some("New Computer Modern"));
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(
-            gaanim_core::peniko::Color::BLACK,
-        ));
+        let style_color = self
+            .text_config
+            .roles
+            .get(&gaanim_text::prelude::TextRole::Body)
+            .map(|s| s.fill_color)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style_color));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
@@ -3944,8 +3948,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             math_font,
             text_size,
             math_size,
-            fill,
-            stroke,
+            fill.clone(),
+            stroke.clone(),
             parent_id,
             next_id_fn,
             &mut child_spans,
@@ -3954,10 +3958,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id,
             entity,
             bounds,
-            Some(gaanim_core::peniko::Brush::Solid(
-                gaanim_core::peniko::Color::BLACK,
-            )),
-            gaanim_scene::StrokeBrush::transparent(),
+            fill,
+            stroke,
             child_spans,
         )
     }

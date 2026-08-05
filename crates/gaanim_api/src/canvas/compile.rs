@@ -418,6 +418,16 @@ impl Canvas {
             .expect("TextConfig missing");
         if self.theme.is_some() {
             text_config = self.themed_text_config();
+        } else {
+            let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
+            let default_fg = if typst_foreground_for_background(bg_color) == "000000" {
+                gaanim_core::peniko::Color::BLACK
+            } else {
+                gaanim_core::peniko::Color::WHITE
+            };
+            for role_style in text_config.roles.values_mut() {
+                role_style.fill_color = default_fg;
+            }
         }
         self.register_theme_fonts(&mut font_registry);
         let mut commands = world.commands();
@@ -2520,6 +2530,15 @@ impl Canvas {
             for child in &child_spans {
                 if let Some(child_state) = builder.states.get_mut(child.id) {
                     child_state.fill = spec.fill.clone();
+                    if let Some(ref f) = spec.fill
+                        && child_state.stroke.brush.is_some()
+                    {
+                        child_state.stroke.brush = Some(f.clone());
+                        builder
+                            .commands
+                            .entity(child.entity)
+                            .insert(child_state.stroke.clone());
+                    }
                 }
                 builder
                     .commands
