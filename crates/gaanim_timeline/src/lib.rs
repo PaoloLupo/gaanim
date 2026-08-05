@@ -10,6 +10,13 @@ pub mod transition;
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::Timeline;
 
+/// Keep playback just inside the outgoing semantic slide at a boundary.
+///
+/// Seeking exactly to the next slide's start applies its visibility changes,
+/// so a presentation would appear to advance without a new input. This small
+/// guard preserves the completed outgoing slide until the presenter advances.
+const PRESENTATION_BOUNDARY_GUARD: f64 = 1e-5;
+
 /// Marker resource: inserted by `reload_with` to signal that the t=0 keyframe
 /// snapshot should be captured on the next frame — after deferred Commands from
 /// `replay_into` have been flushed.
@@ -110,15 +117,10 @@ pub fn timeline_playback_system(
         let delta = scaled_dt;
         let next_time = timeline.current_time + delta;
 
-        // Check if we crossed a slide breakpoint.
+        // Check whether we crossed an authored reveal breakpoint or the guard
+        // immediately before a semantic slide boundary.
         let current = timeline.current_time;
-        let mut hit_breakpoint = None;
-        for &bp in &timeline.breakpoints {
-            if bp > current + 1e-5 && bp <= next_time + 1e-5 {
-                hit_breakpoint = Some(bp);
-                break;
-            }
-        }
+        let hit_breakpoint = timeline.next_playback_stop(current, next_time);
 
         if let Some(bp) = hit_breakpoint {
             timeline.seek_request = Some(bp);
@@ -305,5 +307,43 @@ mod tests {
         assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
         assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
         app.update();
+    }
+    #[test]
+    fn playback_pauses_before_entering_the_next_semantic_slide() {
+        let mut timeline = Timeline::new();
+        timeline.current_time = 0.4;
+        timeline.cached_duration = 2.0;
+        timeline.is_playing = true;
+        timeline.set_presentation(vec![
+            timeline::PresentationSlide {
+                id: 1,
+                name: "first".to_owned(),
+                notes: None,
+                start_time: 0.0,
+                end_time: 1.0,
+                steps: Vec::new(),
+            },
+            timeline::PresentationSlide {
+                id: 2,
+                name: "second".to_owned(),
+                notes: None,
+                start_time: 1.0,
+                end_time: 2.0,
+                steps: Vec::new(),
+            },
+        ]);
+
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(gaanim_animation::DeltaTime { dt: 1.0 })
+            .add_systems(Update, timeline_playback_system);
+        app.update();
+
+        let timeline = app.world().resource::<Timeline>();
+        assert_eq!(
+            timeline.seek_request,
+            Some(1.0 - PRESENTATION_BOUNDARY_GUARD)
+        );
+        assert!(!timeline.is_playing);
     }
 }

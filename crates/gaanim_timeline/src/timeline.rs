@@ -245,6 +245,32 @@ impl Timeline {
             .find(|stop| *stop > time + 1e-5)
     }
 
+    /// Return the earliest authored breakpoint or semantic boundary guard
+    /// crossed while playing from `current` to `next`.
+    ///
+    /// Presentation boundaries are guarded just before the incoming slide's
+    /// start time. At the exact start, seeking applies that slide's visibility
+    /// changes, which would make it appear to advance automatically.
+    pub(crate) fn next_playback_stop(&self, current: f64, next: f64) -> Option<f64> {
+        const EPSILON: f64 = 1e-5;
+        let authored =
+            self.breakpoints.iter().copied().find(|breakpoint| {
+                *breakpoint > current + EPSILON && *breakpoint <= next + EPSILON
+            });
+        let boundary = self
+            .presentation
+            .iter()
+            .skip(1)
+            .map(|slide| slide.start_time - super::PRESENTATION_BOUNDARY_GUARD)
+            .find(|guard| *guard > current && *guard <= next + EPSILON);
+
+        match (authored, boundary) {
+            (Some(authored), Some(boundary)) => Some(authored.min(boundary)),
+            (Some(stop), None) | (None, Some(stop)) => Some(stop),
+            (None, None) => None,
+        }
+    }
+
     /// A compact label suitable for editor transport controls.
     pub fn presentation_label(&self) -> Option<String> {
         let position = self.presentation_position?;
