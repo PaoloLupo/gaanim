@@ -2,11 +2,11 @@
 
 from gaanim import Anchor, BLACK, BLUE, GOLD, RED, Scene
 
-scene = Scene(640, 360, background=BLACK)
+scene = Scene(1920,1080, background=BLACK)
 intro = scene.slide("intro", notes="Present the goal.", layout="title")
-intro.region("title").place(scene.text("Gaanim slides").fill(GOLD), Anchor.CENTER)
+title = scene.title("Gaanim slides").fill(GOLD)
 circle = scene.circle(60).fill(BLUE)
-scene.play([circle.create().duration(0.5)])
+scene.play([title.write(),circle.create().duration(0.5)])
 scene.wait(0.3)
 intro.step("circle")
 

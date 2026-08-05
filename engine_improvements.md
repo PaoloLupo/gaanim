@@ -225,8 +225,8 @@ Rust anterior.
 
 El timeline Rust también define `ZoomThrough` y `Morph`, pero no están expuestos por el
 binding `Transition` actual. Los segmentos ya son suficientes para organizar un video
-por capítulos o escenas, aunque aún no existe una API de proyecto, asset management o
-composición no lineal de alto nivel.
+por capítulos o escenas. El formato mínimo de proyecto y el asset manager ya existen;
+aún falta una composición no lineal de alto nivel.
 
 ### 6. Presentaciones
 
@@ -518,12 +518,16 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] Sistema de temas público: esquemas integrados y custom themes configuran
   colores, tipografía y fuentes; las plantillas semánticas heredan branding
   global con logo, footer, regla y numeración.
-- [~] Asset manager y formato mínimo de proyecto: `scene.assets_dir(...)`
-  resuelve rutas relativas para imágenes y SVG, y `scene.preload([...])`
-  valida SVG y calienta la caché raster. `scene.load_project("gaanim.toml")`
-  adopta el `assets_dir` relativo del manifiesto mínimo y
-  `scene.reload_assets()` invalida la caché raster; falta watcher automático y
-  un manifiesto más rico.
+- [x] Asset manager y formato mínimo de proyecto: `gaanim init video`,
+  `gaanim init presentation` y `gaanim init thesis` generan proyectos portables con
+  `gaanim.toml`, entry point, assets, exports y documentación. El CLI abre, valida,
+  presenta y captura regresiones visuales usando la carpeta del proyecto.
+  `scene.assets_dir(...)` resuelve rutas relativas para imágenes y SVG, y
+  `scene.preload([...])` valida SVG y calienta la caché raster.
+  `scene.load_project("gaanim.toml")` adopta el `assets_dir` relativo y
+  `scene.reload_assets()` invalida la caché raster.
+- [ ] Watcher automático de assets y presets de exportación consumidos directamente
+  desde `gaanim.toml`.
 - [ ] Cache y hot reload incremental donde sea medible.
 
 ### 0.6 — Presentaciones

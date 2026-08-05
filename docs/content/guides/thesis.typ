@@ -16,20 +16,22 @@ It starts with `scene.canvas.set_theme("presentation")`: projected-slide contras
 semantic title/body colors, component panels, chart labels, and data values therefore
 stay visually consistent without repeating colors on every object.
 
-On Windows, make the Python runtime available and generate a new file:
+On Windows, make the Python runtime available and generate a new project:
 
 ```powershell
 $pyBase = & .\.venv\Scripts\python.exe -c "import sys; print(sys.base_prefix)"
 $env:PATH = "$pyBase;$env:PATH"
-target/debug/gaanim.exe init thesis mi_tesis.py
+target/debug/gaanim.exe init thesis mi_tesis
 ```
 
-Gaanim will not overwrite an existing file unless `--force` is supplied.
+The generated directory contains the entry script, manifest, assets, exports, and its
+own README. Gaanim will not update scaffold files unless `--force` is supplied; custom
+assets are preserved.
 
 = Edit and preview
 
 ```powershell
-target/debug/gaanim.exe mi_tesis.py
+target/debug/gaanim.exe mi_tesis
 ```
 
 Saving the Python file triggers hot reload. Replace every placeholder enclosed in
@@ -38,7 +40,7 @@ brackets and customize the values used by charts, tables, equations, and notes.
 = Present
 
 ```powershell
-target/debug/gaanim.exe --present --monitor 1 mi_tesis.py
+target/debug/gaanim.exe --present --monitor 1 mi_tesis
 ```
 
 The public output opens full-screen. Presenter View shows the current slide and step,
@@ -59,23 +61,23 @@ first animation. Playback pauses at every `slide.step()`.
 Run semantic preflight before rehearsal:
 
 ```powershell
-target/debug/gaanim.exe check mi_tesis.py
-target/debug/gaanim.exe check mi_tesis.py --strict
+target/debug/gaanim.exe check mi_tesis
+target/debug/gaanim.exe check mi_tesis --strict
 ```
 
 It checks slide duration, 16:9 aspect ratio, speaker notes, named reveal steps, and
 unresolved placeholders.
 
 ```powershell
-target/debug/gaanim.exe --diff --example mi_tesis.py --bless --no-gui
-target/debug/gaanim.exe --diff --example mi_tesis.py --no-gui
+target/debug/gaanim.exe --diff --example mi_tesis --bless --no-gui
+target/debug/gaanim.exe --diff --example mi_tesis --no-gui
 ```
 
 To produce a 60 FPS production-quality video backup:
 
 ```powershell
-$env:GAANIM_EXPORT = "mi_tesis_respaldo.mp4"
-.\.venv\Scripts\python.exe mi_tesis.py
+$env:GAANIM_EXPORT = "exports/mi_tesis_respaldo.mp4"
+target/debug/gaanim.exe mi_tesis
 Remove-Item Env:GAANIM_EXPORT
 ```
 

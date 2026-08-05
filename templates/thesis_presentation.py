@@ -1,21 +1,26 @@
 """Plantilla completa para una sustentación de tesis en Gaanim.
 
 Desarrollo:
-    gaanim thesis_presentation.py
+    gaanim .
 
 Presentación:
-    gaanim --present --monitor 1 thesis_presentation.py
+    gaanim --present --monitor 1 .
 
 Reemplaza los textos, datos y notas entre corchetes. Cada ``slide.step()``
 define una pausa controlada por el expositor.
 """
 
 import os
+from pathlib import Path
 
 from gaanim import WHITE, Scene, ThesisTemplate
 
 
+ROOT = Path(__file__).resolve().parent
 scene = Scene(1920, 1080, margin=72)
+manifest = ROOT / "gaanim.toml"
+if manifest.is_file():
+    scene.load_project(str(manifest))
 scene.canvas.set_safe_area(top=52, right=72, bottom=52, left=72)
 
 # Identidad visual ------------------------------------------------------------

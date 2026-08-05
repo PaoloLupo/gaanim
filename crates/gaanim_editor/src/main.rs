@@ -13,7 +13,6 @@
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
 use pyo3::prelude::*;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -121,10 +120,72 @@ fn main() {
 
 const THESIS_PRESENTATION_TEMPLATE: &str =
     include_str!("../../../templates/thesis_presentation.py");
+const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
+const PRESENTATION_PROJECT_TEMPLATE: &str =
+    include_str!("../../../templates/presentation_project.py");
+
+const PROJECT_GITIGNORE: &str = r#"exports/*
+!exports/.gitkeep
+snapshots/
+__pycache__/
+*.mp4
+*.webm
+*.webp
+*.gif
+"#;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitTemplate {
+    Video,
+    Presentation,
+    Thesis,
+}
+
+impl InitTemplate {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "video" => Ok(Self::Video),
+            "presentation" | "slides" => Ok(Self::Presentation),
+            "thesis" => Ok(Self::Thesis),
+            _ => Err(format!(
+                "unknown template `{value}`; available templates: video, presentation, thesis"
+            )),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Video => "video",
+            Self::Presentation => "presentation",
+            Self::Thesis => "thesis",
+        }
+    }
+
+    const fn default_directory(self) -> &'static str {
+        match self {
+            Self::Video => "gaanim-video",
+            Self::Presentation => "gaanim-presentation",
+            Self::Thesis => "gaanim-thesis",
+        }
+    }
+
+    const fn source(self) -> &'static str {
+        match self {
+            Self::Video => VIDEO_PROJECT_TEMPLATE,
+            Self::Presentation => PRESENTATION_PROJECT_TEMPLATE,
+            Self::Thesis => THESIS_PRESENTATION_TEMPLATE,
+        }
+    }
+
+    const fn is_presentation(self) -> bool {
+        matches!(self, Self::Presentation | Self::Thesis)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InitArgs {
-    output: PathBuf,
+    template: InitTemplate,
+    directory: PathBuf,
     force: bool,
 }
 
@@ -146,88 +207,139 @@ fn dispatch_init_mode() -> bool {
         std::process::exit(2);
     });
 
-    if let Some(parent) = parsed.output.parent()
-        && !parent.as_os_str().is_empty()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        eprintln!(
-            "gaanim init: could not create {}: {error}",
-            parent.display()
-        );
+    if let Err(error) = create_project(&parsed) {
+        eprintln!("gaanim init: {error}");
         std::process::exit(2);
     }
 
-    let result = if parsed.force {
-        std::fs::write(&parsed.output, THESIS_PRESENTATION_TEMPLATE)
-    } else {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&parsed.output)
-            .and_then(|mut file| file.write_all(THESIS_PRESENTATION_TEMPLATE.as_bytes()))
-    };
-    if let Err(error) = result {
-        let hint = if parsed.output.exists() && !parsed.force {
-            " (use --force to replace it)"
-        } else {
-            ""
-        };
-        eprintln!(
-            "gaanim init: could not write {}: {error}{hint}",
-            parsed.output.display()
-        );
-        std::process::exit(2);
-    }
-
-    println!("Created thesis presentation: {}", parsed.output.display());
-    println!("Preview: gaanim {}", parsed.output.display());
     println!(
-        "Present: gaanim --present --monitor 1 {}",
-        parsed.output.display()
+        "Created {} project: {}",
+        parsed.template.name(),
+        parsed.directory.display()
     );
+    println!("Edit: {}", parsed.directory.join("main.py").display());
+    println!("Preview: gaanim {}", parsed.directory.display());
+    println!("Check: gaanim check {}", parsed.directory.display());
+    if parsed.template.is_presentation() {
+        println!(
+            "Present: gaanim --present --monitor 1 {}",
+            parsed.directory.display()
+        );
+    } else {
+        println!("Export: set GAANIM_EXPORT=exports/video.mp4, then run the project");
+    }
     true
 }
 
 fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
-    let Some(template) = args.first() else {
-        return Err("missing template name; available template: thesis".to_string());
-    };
-    if template != "thesis" {
-        return Err(format!(
-            "unknown template `{template}`; available template: thesis"
-        ));
-    }
+    let template = args
+        .first()
+        .ok_or_else(|| {
+            "missing template name; available templates: video, presentation, thesis".to_string()
+        })
+        .and_then(|value| InitTemplate::parse(value))?;
 
-    let mut output = None;
+    let mut directory = None;
     let mut force = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--force" => force = true,
             value if value.starts_with('-') => return Err(format!("unknown option `{value}`")),
-            value if output.is_none() => output = Some(PathBuf::from(value)),
+            value if directory.is_none() => directory = Some(PathBuf::from(value)),
             value => return Err(format!("unexpected argument `{value}`")),
         }
     }
 
     Ok(InitArgs {
-        output: output.unwrap_or_else(|| PathBuf::from("thesis_presentation.py")),
+        template,
+        directory: directory.unwrap_or_else(|| PathBuf::from(template.default_directory())),
         force,
     })
 }
 
+fn create_project(args: &InitArgs) -> Result<(), String> {
+    if args.directory.is_file() {
+        return Err(format!(
+            "{} is a file; choose a project directory",
+            args.directory.display()
+        ));
+    }
+
+    let project_name = args
+        .directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(args.template.default_directory());
+    let manifest = format!(
+        "name = \"{}\"\nkind = \"{}\"\nentry = \"main.py\"\nassets_dir = \"assets\"\noutput_dir = \"exports\"\n",
+        escape_manifest_value(project_name),
+        args.template.name(),
+    );
+    let readme = project_readme(project_name, args.template);
+    let files = [
+        (args.directory.join("main.py"), args.template.source()),
+        (args.directory.join("gaanim.toml"), manifest.as_str()),
+        (args.directory.join(".gitignore"), PROJECT_GITIGNORE),
+        (args.directory.join("README.md"), readme.as_str()),
+        (args.directory.join("assets").join(".gitkeep"), ""),
+        (args.directory.join("exports").join(".gitkeep"), ""),
+    ];
+
+    if !args.force
+        && let Some((path, _)) = files.iter().find(|(path, _)| path.exists())
+    {
+        return Err(format!(
+            "{} already exists (use --force to update scaffold files)",
+            path.display()
+        ));
+    }
+
+    for (path, source) in files {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        std::fs::write(&path, source)
+            .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn escape_manifest_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn project_readme(name: &str, template: InitTemplate) -> String {
+    let presentation = if template.is_presentation() {
+        "\n## Presentar\n\n```powershell\ngaanim --present --monitor 1 .\n```\n"
+    } else {
+        "\n## Exportar\n\n```powershell\n$env:GAANIM_EXPORT = \"exports/video.mp4\"\ngaanim .\nRemove-Item Env:GAANIM_EXPORT\n```\n"
+    };
+    format!(
+        "# {name}\n\nProyecto `{}` generado por Gaanim.\n\n## Editar y previsualizar\n\n\
+         Edita `main.py` y ejecuta:\n\n```powershell\ngaanim .\n```\n\n\
+         Los recursos van en `assets/`; las salidas generadas van en `exports/`.\n\
+         {presentation}\n## Validar\n\n```powershell\ngaanim check .\n```\n",
+        template.name()
+    )
+}
+
 fn print_init_help() {
     println!(
-        r#"gaanim init - create a runnable presentation starter
+        r#"gaanim init - create a runnable Gaanim project
 
 USAGE:
-    gaanim init thesis [OUTPUT] [--force]
+    gaanim init <TEMPLATE> [DIRECTORY] [--force]
 
 ARGUMENTS:
-    thesis              Complete Spanish thesis-defense template
-    OUTPUT              Destination (default: thesis_presentation.py)
+    video               Animated-video starter
+    presentation        Semantic slide-deck starter
+    thesis              Complete Spanish thesis-defense project
+    DIRECTORY           Project directory (defaults to gaanim-<template>)
 
 OPTIONS:
-    --force             Replace OUTPUT if it already exists
+    --force             Update scaffold files without deleting user assets
     -h, --help          Print this help"#
     );
 }
@@ -254,28 +366,45 @@ fn dispatch_check_mode() -> bool {
         eprintln!("Run `gaanim check --help` for usage.");
         std::process::exit(2);
     });
-    if !parsed.script.is_file() {
-        eprintln!(
-            "gaanim check: script does not exist: {}",
-            parsed.script.display()
-        );
+    let script = resolve_project_entry(&parsed.script).unwrap_or_else(|error| {
+        eprintln!("gaanim check: {error}");
         std::process::exit(2);
-    }
+    });
 
     gaanim_python::register_inittab();
     Python::initialize();
-    let canvas = script_runner::load_script_canvas(&parsed.script).unwrap_or_else(|error| {
-        eprintln!("gaanim check: could not load presentation: {error}");
+    let canvas = script_runner::load_script_canvas(&script).unwrap_or_else(|error| {
+        eprintln!("gaanim check: could not load project: {error}");
         std::process::exit(2);
     });
-    let source = std::fs::read_to_string(&parsed.script).unwrap_or_default();
-    let report = presentation_preflight(&canvas, &source);
+    let source = std::fs::read_to_string(&script).unwrap_or_default();
+    let is_presentation = !canvas.presentation_manifest().slides.is_empty();
+    let report = if is_presentation {
+        presentation_preflight(&canvas, &source)
+    } else {
+        scene_preflight(&canvas, &source)
+    };
 
-    println!("Presentation preflight: {}", parsed.script.display());
     println!(
-        "  {} slides · {} stops · {:.1} seconds · {}x{}",
-        report.slide_count, report.stop_count, report.duration, canvas.width, canvas.height
+        "{} preflight: {}",
+        if is_presentation {
+            "Presentation"
+        } else {
+            "Scene"
+        },
+        script.display()
     );
+    if is_presentation {
+        println!(
+            "  {} slides · {} stops · {:.1} seconds · {}x{}",
+            report.slide_count, report.stop_count, report.duration, canvas.width, canvas.height
+        );
+    } else {
+        println!(
+            "  {:.1} seconds · {}x{}",
+            report.duration, canvas.width, canvas.height
+        );
+    }
     for error in &report.errors {
         println!("  ERROR: {error}");
     }
@@ -349,13 +478,6 @@ fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> 
             .push("no semantic slides; use `scene.slide(...)`".to_string());
         return report;
     }
-    if manifest.slides.len() < 5 {
-        report.warnings.push(format!(
-            "only {} slides; verify that the complete thesis argument is represented",
-            manifest.slides.len()
-        ));
-    }
-
     let aspect_ratio = canvas.width as f64 / canvas.height.max(1) as f64;
     if (aspect_ratio - 16.0 / 9.0).abs() > 0.02 {
         report.warnings.push(format!(
@@ -412,17 +534,45 @@ fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> 
     report
 }
 
+fn scene_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> PreflightReport {
+    let mut report = PreflightReport {
+        duration: canvas.current_time(),
+        ..default()
+    };
+    if canvas.width == 0 || canvas.height == 0 {
+        report
+            .errors
+            .push("canvas width and height must be positive".to_string());
+    }
+    if report.duration < 1e-3 {
+        report
+            .warnings
+            .push("timeline has no visible duration".to_string());
+    }
+    let placeholders = source
+        .lines()
+        .filter(|line| line.contains("\"[") || line.contains("'["))
+        .count();
+    if placeholders > 0 {
+        report.warnings.push(format!(
+            "{placeholders} placeholder line{} still contain text beginning with `[`",
+            if placeholders == 1 { "" } else { "s" }
+        ));
+    }
+    report
+}
+
 fn print_check_help() {
     println!(
-        r#"gaanim check - validate a presentation before rehearsal
+        r#"gaanim check - validate a video or presentation project
 
 USAGE:
-    gaanim check <SCRIPT> [--strict]
+    gaanim check <SCRIPT_OR_PROJECT> [--strict]
 
 CHECKS:
-    semantic slides and duration
-    16:9 projector aspect ratio
-    speaker notes and named reveal steps
+    entry script and timeline duration
+    semantic slides, notes and named reveal steps when present
+    16:9 projector aspect ratio for presentations
     unresolved template placeholders
 
 OPTIONS:
@@ -467,13 +617,10 @@ fn dispatch_diff_mode() -> bool {
     if let Some(example) = &parsed.example
         && (parsed.capture || parsed.bless)
     {
-        if !example.is_file() {
-            eprintln!(
-                "gaanim --diff: example script does not exist: {}",
-                example.display()
-            );
+        let script = resolve_project_entry(example).unwrap_or_else(|error| {
+            eprintln!("gaanim --diff: {error}");
             std::process::exit(2);
-        }
+        });
         let capture_dir = if parsed.bless {
             &parsed.baseline
         } else {
@@ -481,19 +628,19 @@ fn dispatch_diff_mode() -> bool {
         };
         println!(
             "Capturing {} -> {}",
-            example.display(),
+            script.display(),
             capture_dir.display()
         );
         gaanim_python::register_inittab();
         Python::initialize();
-        if let Err(error) = script_runner::capture_script_snapshots(example, capture_dir) {
+        if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
             eprintln!("gaanim --diff: snapshot capture failed: {error}");
             std::process::exit(2);
         }
         if !capture_dir.join(gaanim_diff::MANIFEST_FILE).is_file() {
             eprintln!(
                 "gaanim --diff: {} did not call scene.snapshots(...)",
-                example.display()
+                script.display()
             );
             std::process::exit(2);
         }
@@ -605,14 +752,16 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     }
 
     if bless {
-        return Err("--bless requires --example <SCRIPT>".to_string());
+        return Err("--bless requires --example <SCRIPT_OR_PROJECT>".to_string());
     }
 
     Ok(Some(DiffModeArgs {
-        baseline: baseline
-            .ok_or_else(|| "missing --baseline <DIR> or --example <SCRIPT>".to_string())?,
-        current: current
-            .ok_or_else(|| "missing --current <DIR> or --example <SCRIPT>".to_string())?,
+        baseline: baseline.ok_or_else(|| {
+            "missing --baseline <DIR> or --example <SCRIPT_OR_PROJECT>".to_string()
+        })?,
+        current: current.ok_or_else(|| {
+            "missing --current <DIR> or --example <SCRIPT_OR_PROJECT>".to_string()
+        })?,
         output: output.unwrap_or_else(|| PathBuf::from("tests/visual/report")),
         options,
         open_gui,
@@ -649,11 +798,12 @@ fn print_diff_help() {
         r#"gaanim --diff - native egui visual regression viewer
 
 USAGE:
-    gaanim --diff --example <SCRIPT> [OPTIONS]
+    gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]
     gaanim --diff --baseline <DIR> --current <DIR> [OPTIONS]
 
 OPTIONS:
-    -e, --example <SCRIPT>          Capture and compare one example automatically
+    -e, --example <SCRIPT_OR_PROJECT>
+                                     Capture and compare one project automatically
         --tests-root <DIR>           Global snapshot root (default: tests/visual)
         --bless                      Capture this example as its baseline and exit
         --no-capture                 Reuse the example's existing current snapshots
@@ -675,13 +825,76 @@ struct LaunchArgs {
     monitor: Option<usize>,
 }
 
+fn resolve_project_entry(path: &Path) -> Result<PathBuf, String> {
+    if path.is_file() {
+        return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+    }
+    if !path.exists() {
+        return Err(format!("script or project not found: {}", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "expected a Python script or project directory: {}",
+            path.display()
+        ));
+    }
+
+    let manifest = path.join("gaanim.toml");
+    let source = std::fs::read_to_string(&manifest).map_err(|error| {
+        format!(
+            "could not read project manifest {}: {error}",
+            manifest.display()
+        )
+    })?;
+    let entry = manifest_string_value(&source, "entry")
+        .ok_or_else(|| format!("{} must declare entry = \"...\"", manifest.display()))?;
+    let entry_path = PathBuf::from(&entry);
+    if entry_path.is_absolute()
+        || entry_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "project entry must stay inside the project directory: {entry:?}"
+        ));
+    }
+    let script = path.join(entry_path);
+    if !script.is_file() {
+        return Err(format!(
+            "project entry does not exist or is not a file: {}",
+            script.display()
+        ));
+    }
+    Ok(script.canonicalize().unwrap_or(script))
+}
+
+fn manifest_string_value(source: &str, key: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let line = line.split('#').next()?.trim();
+        let (candidate, value) = line.split_once('=')?;
+        if candidate.trim() != key {
+            return None;
+        }
+        let value = value.trim();
+        value
+            .strip_prefix('"')?
+            .strip_suffix('"')
+            .map(str::to_owned)
+    })
+}
+
 fn parse_args() -> LaunchArgs {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("usage:");
-        eprintln!("  gaanim [--present] [--monitor <INDEX>] <script.py>");
-        eprintln!("  gaanim init thesis [OUTPUT] [--force]");
-        eprintln!("  gaanim check <script.py> [--strict]");
+        eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
+        eprintln!("  gaanim init <video|presentation|thesis> [DIRECTORY] [--force]");
+        eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --baseline <DIR> --current <DIR> [OPTIONS]");
         std::process::exit(2);
     }
@@ -689,24 +902,22 @@ fn parse_args() -> LaunchArgs {
         eprintln!("gaanim — GPU-accelerated vector animation engine (hot-reload viewer)");
         eprintln!();
         eprintln!("usage:");
-        eprintln!("  gaanim [--present] [--monitor <INDEX>] <script.py>");
-        eprintln!("  gaanim init thesis [OUTPUT] [--force]");
-        eprintln!("  gaanim check <script.py> [--strict]");
-        eprintln!("  gaanim --diff --example <SCRIPT> [OPTIONS]");
+        eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
+        eprintln!("  gaanim init <video|presentation|thesis> [DIRECTORY] [--force]");
+        eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
+        eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
         std::process::exit(0);
     }
     let parsed = parse_launch_args(&args).unwrap_or_else(|error| {
         eprintln!("gaanim: {error}");
         std::process::exit(2);
     });
-    let path = parsed.script_path;
-    if !path.exists() {
-        eprintln!("gaanim: script not found: {}", path.display());
+    let path = resolve_project_entry(&parsed.script_path).unwrap_or_else(|error| {
+        eprintln!("gaanim: {error}");
         std::process::exit(2);
-    }
-    // Canonicalize so the file watcher can match absolute event paths.
+    });
     LaunchArgs {
-        script_path: path.canonicalize().unwrap_or(path),
+        script_path: path,
         ..parsed
     }
 }
@@ -742,7 +953,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if monitor.is_some() && !present {
         return Err("--monitor requires --present".to_string());
     }
-    let script_path = script_path.ok_or_else(|| "missing <script.py>".to_string())?;
+    let script_path = script_path.ok_or_else(|| "missing <SCRIPT_OR_PROJECT>".to_string())?;
     Ok(LaunchArgs {
         script_path,
         present,
@@ -774,23 +985,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_thesis_template_with_safe_default_output() {
+    fn parses_thesis_template_with_safe_default_directory() {
         assert_eq!(
             parse_init_args(&["thesis".to_string()]).unwrap(),
             InitArgs {
-                output: PathBuf::from("thesis_presentation.py"),
+                template: InitTemplate::Thesis,
+                directory: PathBuf::from("gaanim-thesis"),
                 force: false,
             }
         );
     }
 
     #[test]
-    fn parses_custom_thesis_output_and_force() {
-        let args = ["thesis", "defense.py", "--force"].map(str::to_string);
+    fn parses_custom_thesis_directory_and_force() {
+        let args = ["thesis", "defense", "--force"].map(str::to_string);
         assert_eq!(
             parse_init_args(&args).unwrap(),
             InitArgs {
-                output: PathBuf::from("defense.py"),
+                template: InitTemplate::Thesis,
+                directory: PathBuf::from("defense"),
                 force: true,
             }
         );
@@ -799,6 +1012,33 @@ mod tests {
         assert!(THESIS_PRESENTATION_TEMPLATE.contains("ThesisTemplate("));
         assert!(THESIS_PRESENTATION_TEMPLATE.contains("background=\"#1601FC\""));
         assert!(THESIS_PRESENTATION_TEMPLATE.contains("design.cover("));
+    }
+
+    #[test]
+    fn parses_video_and_presentation_project_templates() {
+        assert_eq!(
+            parse_init_args(&["video".to_string()]).unwrap().template,
+            InitTemplate::Video
+        );
+        assert_eq!(
+            parse_init_args(&["slides".to_string()]).unwrap().template,
+            InitTemplate::Presentation
+        );
+        assert!(VIDEO_PROJECT_TEMPLATE.contains("scene.render()"));
+        assert!(PRESENTATION_PROJECT_TEMPLATE.contains("scene.slide("));
+    }
+
+    #[test]
+    fn reads_project_manifest_values() {
+        let source = r#"
+            name = "demo"
+            entry = "src/presentation.py" # entry point
+        "#;
+        assert_eq!(
+            manifest_string_value(source, "entry").as_deref(),
+            Some("src/presentation.py")
+        );
+        assert_eq!(manifest_string_value(source, "missing"), None);
     }
 
     #[test]

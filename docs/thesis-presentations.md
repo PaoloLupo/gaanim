@@ -22,15 +22,17 @@ $env:PATH = "$pyBase;$env:PATH"
 Ahora genera la presentación:
 
 ```powershell
-target/debug/gaanim.exe init thesis mi_tesis.py
+target/debug/gaanim.exe init thesis mi_tesis
 ```
 
 El comando no reemplaza archivos existentes. Para reemplazar uno de forma explícita:
 
 ```powershell
-target/debug/gaanim.exe init thesis mi_tesis.py --force
+target/debug/gaanim.exe init thesis mi_tesis --force
 ```
 
+El comando crea `mi_tesis/` con `main.py`, `gaanim.toml`, `assets/`, `exports/` y una
+guía breve. `--force` actualiza solo los archivos del scaffold y conserva recursos propios.
 La plantilla generada funciona inmediatamente. La portada incluida reproduce el sistema
 visual institucional con fondo exacto `#1601FC`, texto blanco y Tw Cen MT. En Windows la
 fuente se detecta desde `C:\Windows\Fonts\TCM_____.TTF`; no se sustituye silenciosamente
@@ -64,7 +66,7 @@ Colores, títulos, texto, tablas, gráficos, captions y paneles heredan el mismo
 ## 2. Previsualizar mientras editas
 
 ```powershell
-target/debug/gaanim.exe mi_tesis.py
+target/debug/gaanim.exe mi_tesis
 ```
 
 Guarda el archivo para aplicar hot reload sin reiniciar la ventana.
@@ -110,7 +112,7 @@ Controles:
 Los índices de monitor empiezan en cero. Normalmente el proyector será `1`:
 
 ```powershell
-target/debug/gaanim.exe --present --monitor 1 mi_tesis.py
+target/debug/gaanim.exe --present --monitor 1 mi_tesis
 ```
 
 La salida pública se abre a pantalla completa y Presenter View queda en una segunda
@@ -137,8 +139,8 @@ hot reload incrementa la revisión de la escena y las miniaturas se regeneran.
 Antes de ensayar, ejecuta el preflight semántico:
 
 ```powershell
-target/debug/gaanim.exe check mi_tesis.py
-target/debug/gaanim.exe check mi_tesis.py --strict
+target/debug/gaanim.exe check mi_tesis
+target/debug/gaanim.exe check mi_tesis --strict
 ```
 
 Comprueba slides, duración, formato 16:9, notas, pausas nombradas y placeholders sin
@@ -149,13 +151,13 @@ La plantilla incluye nueve tiempos de captura representativos. Crea la primera l
 cuando apruebes el diseño:
 
 ```powershell
-target/debug/gaanim.exe --diff --example mi_tesis.py --bless --no-gui
+target/debug/gaanim.exe --diff --example mi_tesis --bless --no-gui
 ```
 
 Después de cada cambio importante:
 
 ```powershell
-target/debug/gaanim.exe --diff --example mi_tesis.py --no-gui
+target/debug/gaanim.exe --diff --example mi_tesis --no-gui
 ```
 
 Un resultado sano termina con `0 changed, 0 missing`.
@@ -165,8 +167,8 @@ Un resultado sano termina con `0 changed, 0 missing`.
 La plantilla reconoce `GAANIM_EXPORT`:
 
 ```powershell
-$env:GAANIM_EXPORT = "mi_tesis_respaldo.mp4"
-.\.venv\Scripts\python.exe mi_tesis.py
+$env:GAANIM_EXPORT = "exports/mi_tesis_respaldo.mp4"
+target/debug/gaanim.exe mi_tesis
 Remove-Item Env:GAANIM_EXPORT
 ```
 
@@ -201,5 +203,5 @@ crea el directorio padre y usa los límites exactos registrados por `scene.slide
 5. Conecta el proyector antes de iniciar Gaanim.
 6. Comprueba el índice correcto con `--monitor`.
 7. Recorre todos los slides una vez usando solo los controles de presentación.
-8. Ejecuta `gaanim check mi_tesis.py --strict`.
-9. Mantén `mi_tesis.py`, assets, ejecutable y MP4 en una misma carpeta de respaldo.
+8. Ejecuta `gaanim check mi_tesis --strict`.
+9. Mantén la carpeta `mi_tesis`, el ejecutable y el MP4 en una misma copia de respaldo.

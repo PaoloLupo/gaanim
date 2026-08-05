@@ -27,10 +27,23 @@ Absolute paths continue to work and take precedence over `assets_dir`.
 
 == Project manifest
 
-For a minimal reproducible project, put `gaanim.toml` next to the script:
+Create a complete starter from the CLI:
+
+```text
+gaanim init video my-video
+gaanim init presentation my-deck
+gaanim init thesis my-defense
+```
+
+Every project contains `main.py`, `gaanim.toml`, `assets/`, `exports/`, a README,
+and a project `.gitignore`. The generated manifest is:
 
 ```toml
+name = "my-deck"
+kind = "presentation"
+entry = "main.py"
 assets_dir = "assets"
+output_dir = "exports"
 ```
 
 Then load it before creating drawables:
@@ -40,9 +53,10 @@ scene = Scene()
 scene.load_project()  # reads ./gaanim.toml
 ```
 
-The asset directory is resolved relative to the manifest, not the process
-working directory. `load_project("path/to/gaanim.toml")` accepts an explicit
-manifest path.
+The CLI accepts either the entry script or its project directory (`gaanim my-deck`,
+`gaanim check my-deck`). The asset directory is resolved relative to the manifest,
+not the process working directory. `load_project("path/to/gaanim.toml")` accepts
+an explicit manifest path.
 
 == Preloading
 
@@ -53,9 +67,9 @@ are decoded into the same cache used by `scene.image`.
 scene.preload(["logo.svg", "cover.png", "diagram.webp"])
 ```
 
-Failures identify the asset that could not be resolved or decoded. The current
-manifest intentionally contains only `assets_dir`; fonts and export presets are
-planned extensions.
+Failures identify the asset that could not be resolved or decoded. The scene currently
+consumes `assets_dir`; `name`, `kind`, `entry`, and `output_dir` describe the project
+workflow and leave room for future export presets.
 
 == Refreshing changed files
 
