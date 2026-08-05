@@ -1,12 +1,12 @@
 """Quick smoke test for semantic Scene slides and reveal steps."""
 
-from gaanim import Anchor, BLACK, BLUE, GOLD, RED, Scene
+from gaanim import GREEN, Anchor, BLACK, BLUE, GOLD, RED, Scene
 
 scene = Scene(1920,1080, background=BLACK)
 intro = scene.slide("intro", notes="Present the goal.", layout="title")
-title = scene.title("Gaanim slides").fill(GOLD)
+title = scene.text("Gaanim slides").scaled(5.0).fill(GREEN).at(0,200)
 circle = scene.circle(60).fill(BLUE)
-scene.play([title.write(),circle.create().duration(0.5)])
+scene.play([title.write(3),circle.create().duration(0.5)])
 scene.wait(0.3)
 intro.step("circle")
 

@@ -20,7 +20,7 @@ pub use updaters::{
     bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater, traced_path_system,
     tracking_line_system, updater_system,
 };
-pub use writing::{FillDrawProgress, PathSource, path_source_seed_added_system};
+pub use writing::{FillDrawProgress, PathSource, WriteTipGlow, path_source_seed_added_system};
 
 use bevy::prelude::*;
 use gaanim_scene::SceneSet;

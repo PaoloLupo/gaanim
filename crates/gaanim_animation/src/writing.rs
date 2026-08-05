@@ -37,6 +37,39 @@ impl Default for FillDrawProgress {
     }
 }
 
+/// Marker + parameters for the glowing pen-tip effect shown during Write.
+///
+/// When present on an entity that also has a `PathCompletion` animation,
+/// the renderer draws a soft radial glow at the current endpoint of the
+/// visible trimmed `Path2D`. The glow fades in over the first 5% of the
+/// draw progression and fades out over the last 5%, so it appears and
+/// disappears smoothly.
+///
+/// Inserted by the Write animation scheduler; removed automatically when
+/// the draw phase completes.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct WriteTipGlow {
+    /// Radius of the glow in world units.
+    pub radius: f64,
+    /// Intensity multiplier.
+    pub intensity: f32,
+    /// Color override. If `None`, the renderer derives it from the stroke brush.
+    pub color: Option<gaanim_core::peniko::Color>,
+    /// Current draw completion in [0, 1]. Updated by the PathCompletion lens.
+    pub completion: f64,
+}
+
+impl Default for WriteTipGlow {
+    fn default() -> Self {
+        Self {
+            radius: 1.0,
+            intensity: 1.0,
+            color: None,
+            completion: 0.0,
+        }
+    }
+}
+
 /// System: For every newly-spawned entity that has `Path2D` but no
 /// `PathSource` yet, seed the `PathSource` from the visible `Path2D`.
 ///

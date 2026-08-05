@@ -1187,7 +1187,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if state.child_spans.is_empty() {
                 vec![anim.target]
             } else {
-                state.child_spans.iter().map(|child| child.id).collect()
+                let mut children: Vec<ObjectId> =
+                    state.child_spans.iter().map(|child| child.id).collect();
+                // Sort child mobjects strictly by visual X position (left-to-right)
+                children.sort_by(|a, b| {
+                    let xa = self
+                        .states
+                        .get(*a)
+                        .map(|s| s.transform.translation.x)
+                        .unwrap_or(0.0);
+                    let xb = self
+                        .states
+                        .get(*b)
+                        .map(|s| s.transform.translation.x)
+                        .unwrap_or(0.0);
+                    xa.partial_cmp(&xb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                children
             }
         };
 
@@ -1228,6 +1244,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     self.commands
                         .entity(state.entity)
                         .insert(gaanim_animation::FillDrawProgress(initial_fill));
+                }
+
+                // Insert pen-tip glow for forward draw animations.
+                if !schedule.reversed {
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_animation::WriteTipGlow::default());
                 }
 
                 if !schedule.reversed {

@@ -6,7 +6,7 @@ use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform, get_point_at_alpha};
 use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
 
-use crate::writing::FillDrawProgress;
+use crate::writing::{FillDrawProgress, WriteTipGlow};
 
 /// Resource containing the current simulation delta time.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -262,6 +262,7 @@ pub fn evaluate_tweens_system(
     mut sources: Query<&mut PathSource>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
+    mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
@@ -342,6 +343,10 @@ pub fn evaluate_tweens_system(
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
                     path.0 = std::sync::Arc::new(gaanim_math::get_subpath(&source.0, completion));
+                }
+                // Update the pen-tip glow position if the entity has one.
+                if let Ok(mut tip) = tip_glows.get_mut(tween.target) {
+                    tip.completion = completion;
                 }
             }
             PropertyLens::FillDrawProgress { from, to } => {

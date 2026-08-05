@@ -1224,12 +1224,14 @@ fn apply_lens_spec(
                     }
                 }
             } else if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
-                // Take by reference instead of cloning — get_subpath
-                // already returns an owned trimmed BezPath.
                 let trimmed = gaanim_math::get_subpath(&source.0, completion);
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
                     path.0 = std::sync::Arc::new(trimmed);
                 }
+            }
+
+            if let Some(mut tip) = world.get_mut::<gaanim_animation::WriteTipGlow>(target) {
+                tip.completion = completion;
             }
         }
         PropertyLensSpec::PathMorph { from, to } => {
