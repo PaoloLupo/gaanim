@@ -5,14 +5,13 @@ import os
 from gaanim import BLACK, GRAY, WHITE, Direction, Scene
 
 
-scene = Scene(1280, 720, background=BLACK, margin=56)
+scene = Scene(1280, 720, background=WHITE, margin=56)
 
-title = scene.title("Typst Universe package").fill(WHITE).at(0, 250)
+title = scene.title("Typst Universe package").fill(BLACK).at(0, 250)
 subtitle = scene.subtitle("@preview/zebraw:0.6.3 resolved by the embedded world").fill(GRAY).at(0, 195)
 layout = scene.typst('''
 #import "@preview/zebraw:0.6.3": *
 #show: zebraw.with(
-  background-color: rgb("101620"),
   lang: true,
   lang-color: rgb("5b8fc9"),
   numbering-font-args: (fill: rgb("94a3b8")),
@@ -24,10 +23,10 @@ layout = scene.typst('''
   [Hello], [world!],
 )
 ```
-''').at(0, -35)
+''',width=200).scaled(3).at(0, -35)
 
 scene.play([
-    title.write().duration(0.55),
+    title.write(),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
     layout.fade_in_from(Direction.DOWN, distance=30).duration(0.65),
 ])

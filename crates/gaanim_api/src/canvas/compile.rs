@@ -2341,10 +2341,19 @@ impl Canvas {
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
-            SpawnKind::Typst(source) => {
+            SpawnKind::Typst { source, page_width } => {
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let foreground = typst_foreground_for_background(scene_background);
-                let source = format!("#set page(height: auto, margin: 0pt)\n#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let page_directive = if let Some(w) = page_width {
+                    // ponytail: raw interpolation into Typst source — reject control chars to avoid injection
+                    if w.trim().is_empty() || w.contains(['\n', '\r', ';', '"', '\'']) {
+                        panic!("invalid Typst page width: {w:?}");
+                    }
+                    format!("#set page(width: {w}, height: auto, margin: 0pt)\n")
+                } else {
+                    "#set page(height: auto, margin: 0pt)\n".to_string()
+                };
+                let source = format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
                 let mr = builder.typst(
                     &source,
                     false,

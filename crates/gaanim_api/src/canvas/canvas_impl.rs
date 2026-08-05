@@ -632,7 +632,19 @@ impl Canvas {
     }
     /// Compile full Typst markup, including tables and other document layout.
     pub fn typst(&mut self, source: &str) -> DrawableHandle {
-        self.spawn(SpawnKind::Typst(source.to_string()))
+        self.typst_inner(source, None)
+    }
+
+    /// Compile full Typst markup with a custom page width (e.g. `"16cm"`, `"800pt"`, `"12in"`).
+    pub fn typst_with_width(&mut self, source: &str, page_width: &str) -> DrawableHandle {
+        self.typst_inner(source, Some(page_width))
+    }
+
+    fn typst_inner(&mut self, source: &str, page_width: Option<&str>) -> DrawableHandle {
+        self.spawn(SpawnKind::Typst {
+            source: source.to_string(),
+            page_width: page_width.map(|w| w.to_string()),
+        })
     }
 
     /// Morphs all shared semantic tags from one equation into another in

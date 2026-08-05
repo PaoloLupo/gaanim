@@ -1755,21 +1755,57 @@ impl PyScene {
         Ok(PyDrawable(equation))
     }
 
-    /// Compile full Typst markup into a vector drawable.
-    ///
-    /// Unlike `equation`, this accepts document constructs such as `#table`.
-    fn typst(&self, source: &str) -> PyResult<PyDrawable> {
+    /// Compile full Typst markup into a vector drawable with optional custom page width (e.g. `width="16cm"` or `width=800`).
+    #[pyo3(signature = (source, *, width=None))]
+    fn typst(
+        &self,
+        py: pyo3::Python<'_>,
+        source: &str,
+        width: Option<pyo3::Py<pyo3::PyAny>>,
+    ) -> PyResult<PyDrawable> {
         if source.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "Typst source must not be empty",
             ));
         }
-        Ok(PyDrawable(
+        let handle = if let Some(w) = width {
+            // ponytail: String first, then f64 (covers int) — i64 branch is dead code
+            let width_str = if let Ok(s) = w.extract::<String>(py) {
+                s
+            } else if let Ok(f) = w.extract::<f64>(py) {
+                if f.is_finite() {
+                    if f.fract() == 0.0 {
+                        format!("{}pt", f as i64)
+                    } else {
+                        format!("{}pt", f)
+                    }
+                } else {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "width must be a finite number",
+                    ));
+                }
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "width must be a string (e.g. '16cm', '800pt') or a number",
+                ));
+            };
+            if width_str.trim().is_empty() || width_str.contains(['\n', '\r', ';', '"', '\'']) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "width must be a valid Typst length like '16cm' or '800pt'",
+                ));
+            }
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .typst(source),
-        ))
+                .typst_with_width(source, &width_str)
+        } else {
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .typst(source)
+        };
+
+        Ok(PyDrawable(handle))
     }
     /// Morph the semantic tags shared by two equations in parallel.
     #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
