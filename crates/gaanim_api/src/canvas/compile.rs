@@ -2333,17 +2333,14 @@ impl Canvas {
             }
             SpawnKind::Typst(source) => {
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                // Let Typst retain every explicit fill from document markup
-                // (including package-provided shapes). Only unstyled text gets
-                // a foreground that contrasts with the scene background.
                 let foreground = typst_foreground_for_background(scene_background);
-                let source = format!("#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let source = format!("#set page(height: auto, margin: 0pt)\n#set text(fill: rgb(\"{foreground}\"))\n{source}");
                 let mr = builder.typst(
                     &source,
                     false,
                     Some(&body.font_family),
                     None,
-                    Some(body.size),
+                    None,
                     None,
                 );
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
