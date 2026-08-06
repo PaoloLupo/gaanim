@@ -7,46 +7,35 @@
   updated: datetime.today().display(),
 )
 
-= Installation
+= Installation — resumen
 
-== Prerequisites
+Para la guía completa (usuario final con zip + `uv`, y desarrollo local desde fuente) ver #link("/getting-started/installation/")[Instalación].
 
-- *Rust* (edition 2024) — install via #link("https://rustup.rs", "rustup")
-- *Python* 3.10+ — with pip
-- *Vulkan-compatible GPU* — for rendering (most modern GPUs work)
+== Prerequisitos
 
-== Setup
+- *Rust* (edition 2024) — via #link("https://rustup.rs", "rustup")
+- *Python >=3.12* — 3.12 mínimo, 3.14 también soportado
+- *uv recomendado* — #link("https://docs.astral.sh/uv/")[uv] para venvs
+- *GPU con Vulkan* — para Vello/Bevy
 
-Clone the repository and bootstrap the environment:
+== Setup rápido (dev)
 
 ```bash
 git clone https://github.com/user/gaanim
 cd gaanim
+just bootstrap        # .venv + maturin
+just build            # debug: gaanim_launcher + gaanim-core
+just doctor           # verifica build y gaanim --help via launcher
 ```
 
-Create a virtual environment and install maturin (the Rust→Python build tool):
-
-```bash
-just bootstrap
-```
-
-This creates `.venv/` and installs `maturin` into it.
-
-Build the native application and install the Python extension:
-
-```bash
-just build             # Native application, debug
-just python-develop    # Python extension in .venv
-just build-release     # Native application, release
-```
+El zip de usuario final (`gaanim-v0.1.0-windows-x64.zip`) ya contiene `gaanim.exe` (launcher) + `gaanim-core.exe` y no requiere compilar. Ver detalle en #link("/getting-started/installation/")[Instalación / Usuario final].
 
 == Verify Installation
 
 ```bash
-just doctor
+just doctor           # compila y prueba launcher
+gaanim --help         # si tienes el zip en PATH
 ```
-
-This compiles the workspace and verifies the Python extension is importable.
 
 = Your First Animation
 

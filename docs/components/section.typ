@@ -45,10 +45,20 @@
 
       let site-map = (
         "Home": "",
-        "Getting Started": "getting-started/",
+        "Getting Started": (
+          "Overview": "getting-started/",
+          "Instalación": "getting-started/installation/",
+        ),
+        "Guides": (
+          "Proyectos": "guides/projects/",
+          "Tesis": "guides/thesis/",
+          "Regresión visual": "guides/visual-regression/",
+          "Layout proposal": "guides/layout-proposal/",
+        ),
         "API Reference": (
           "Overview": "api/",
           "Scene": "api/scene/",
+          "Layouts": "api/layout/",
           "Mobjects": "api/mobjects/",
           "Animations": "api/animations/",
           "Colors": "api/themes/",
