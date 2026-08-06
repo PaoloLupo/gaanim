@@ -47,6 +47,7 @@
         "Home": "",
         "Getting Started": "getting-started/",
         "API Reference": (
+          "Overview": "api/",
           "Scene": "api/scene/",
           "Mobjects": "api/mobjects/",
           "Animations": "api/animations/",

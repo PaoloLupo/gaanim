@@ -7,40 +7,62 @@
   code-langs: (),
 )
 
-= Gaanim
+#html.div(class: "home-hero", [
+  #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-gold); margin-bottom: 10px;", [● REC &nbsp;·&nbsp; GPU · Vello · Bevy · Python])
+  #html.h1(style: "margin: 0;", [Animate like you mean it.])
+  #html.div(class: "home-hero-desc", [Manim-style, GPU-accelerated. Escribe Python, exporta MP4/WebM/WebP/GIF. Timeline fluida, 30+ animaciones, tipografía y math con Typst. Hecho para quienes viven en el viewport.])
+  #html.div(class: "home-hero-cta", [
+    #html.a(href: "getting-started/", class: "primary", [Empezar →])
+    #html.a(href: "api/scene/", class: "secondary", [API Reference])
+    #html.a(href: "examples/basic/", class: "secondary", [Ver ejemplos])
+  ])
+])
 
-GPU-accelerated 2D vector animation engine, Manim-style. Built in Rust with Bevy ECS + Vello renderer, with Python bindings via PyO3/Maturin.
+== Por qué Gaanim
 
-== Features
+*GPU sin dolor.* Vello (compute) + Bevy ECS + PyO3. Python fluido por fuera, Rust rápido por dentro.
 
-- *GPU-accelerated rendering* via Vello (compute-based 2D renderer)
-- *Fluent Python API* with method chaining
-- *Rich primitives*: circles, rectangles, lines, arrows, polygons, stars, equations, text
-- *30+ animation types*: write, create, fade, shift, scale, rotate, indicate, circumscribe, and more
-- *Rate functions*: linear, smooth, spring, bounce, elastic, cubic bezier
-- *Glyph-level selection* for text and equations
-- *Colors*: exported color constants and custom RGBA colors
-- *Export*: MP4, WebM, WebP, GIF, PNG sequences
-- *Semantic presentations* with slide layouts, notes, controlled reveals, and Presenter View
+*API que encadena.* `scene.circle(80).fill(BLUE).at(0, 100).play([circle.create().spring()])` — sin boilerplate, sin `.animate()`.
 
-== Quick Start
+*Tipografía de verdad.* Texto y ecuaciones como vectores via Typst. Selección por glifo, `write` animado, `color_by` y tags semánticos.
 
-```bash
-# Clone and bootstrap
-git clone https://github.com/user/gaanim
-cd gaanim
-just bootstrap    # Create .venv, install maturin
-just build        # Build Python extension
+*Export listo para publicar.* MP4/WebM/WebP/GIF/PNG, presets `youtube`/`tiktok`/`instagram`, slides semánticas con `slide()` y export por slide.
 
-# Run an example
-just run math_animation
+== En 30 segundos
+
+```python
+from gaanim import BLUE, GOLD, Scene
+
+scene = Scene(1280, 720)
+circle = scene.circle(80).fill(BLUE).at(-160, 0)
+rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
+
+scene.play([
+    circle.create().duration(1.0).spring(),
+    rect.grow_from_center().duration(1.0),
+])
+scene.play([circle.move(200, 0).duration(0.8).smooth()])
+scene.export("demo.mp4", fps=30)
 ```
 
-#link("/getting-started/", "Getting Started →")
+#html.div(style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 28px 0;", [
+  #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
+    #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-gold); margin-bottom: 8px;", [30+ ANIMACIONES])
+    #html.div(style: "font-weight: 700; margin-bottom: 6px;", [Todo lo que necesitas])
+    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [write, create, fade, spin, wiggle, transform… con easing spring/smooth/linear.])
+  ])
+  #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
+    #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-violet); margin-bottom: 8px;", [VECTORES REALES])
+    #html.div(style: "font-weight: 700; margin-bottom: 6px;", [Typst dentro])
+    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [Ecuaciones, párrafos y SVG importados como paths animables.])
+  ])
+  #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
+    #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-cyan); margin-bottom: 8px;", [TIMELINE])
+    #html.div(style: "font-weight: 700; margin-bottom: 6px;", [Control total])
+    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [play, wait, segment, link, slide, camera pan/zoom/follow/shake.])
+  ])
+])
 
-== Links
+== Siguiente
 
-- #link("/guides/thesis/", "Thesis presentations")
-
-- #link("/api/scene/", "API Reference")
-- #link("/examples/basic/", "Examples")
+#link("/getting-started/", "Getting Started →") · #link("/api/scene/", "API Reference →") · #link("/examples/basic/", "Ejemplos →") · #link("/guides/thesis/", "Thesis decks →")

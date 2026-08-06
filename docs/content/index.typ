@@ -1,6 +1,7 @@
 #include "home.typ"
 #include "getting-started/index.typ"
 #include "guides/thesis.typ"
+#include "api/index.typ"
 #include "api/scene.typ"
 #include "api/layout.typ"
 #include "api/assets.typ"

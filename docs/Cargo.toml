@@ -5,14 +5,14 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
-typst-kit = { version ="0.15.0-rc.1", features = ["http-server", "datetime", "timer", "emit-diagnostics", "bundle", "watcher"] }
-typst = { version ="0.15.0-rc.1" }
-typst-utils = { version ="0.15.0-rc.1" }
-typst-library = { version ="0.15.0-rc.1" }
-typst-html = { version ="0.15.0-rc.1" }
-typst-svg = { version ="0.15.0-rc.1" }
-typst-bundle = { version ="0.15.0-rc.1" }
-typst-assets = { version ="0.15.0-rc.1", features = ["fonts"] }
+typst-kit = { version ="0.15", features = ["http-server", "datetime", "timer", "emit-diagnostics", "bundle", "watcher"] }
+typst = { version ="0.15" }
+typst-utils = { version ="0.15" }
+typst-library = { version ="0.15" }
+typst-html = { version ="0.15" }
+typst-svg = { version ="0.15" }
+typst-bundle = { version ="0.15" }
+typst-assets = { version ="0.15", features = ["fonts"] }
 open = "5.3.5"
 rayon = "1.12.0"
 anyhow = "1.0.102"
