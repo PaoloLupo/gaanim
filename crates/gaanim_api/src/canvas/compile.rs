@@ -3514,6 +3514,78 @@ mod tests {
     }
 
     #[test]
+    fn text_with_inline_math_compiles_to_vector_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.text("Energia $E = m c^2$ es famosa");
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+        let glyphs = world.query::<&gaanim_scene::FillBrush>().iter(&world).count();
+        assert!(glyphs > 10, "text with inline math should produce vector glyphs, got {glyphs}");
+        assert!(world.query::<&LocalBounds>().iter(&world).any(|b| b.0.width() > 50.0));
+    }
+
+    #[test]
+    fn paragraph_with_inline_math_compiles_to_vector_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.paragraph(
+            "La energia $E = m c^2$ relaciona masa y energia en $x^2 + y^2 = z^2$.",
+            ParagraphOptions {
+                width: 500.0,
+                align: TextAlign::Left,
+                line_spacing: 1.2,
+                font_size: Some(28.0),
+                ..Default::default()
+            },
+        );
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+        let glyphs = world.query::<&gaanim_scene::FillBrush>().iter(&world).count();
+        assert!(glyphs > 15, "paragraph with inline math should produce vector glyphs, got {glyphs}");
+    }
+
+    #[test]
+    fn inline_math_helpers_handle_escapes_and_doubles() {
+        assert_eq!(
+            typst_inline_content("a $x$ b"),
+            "#text(\"a \") $ x $ #text(\" b\")"
+        );
+        assert_eq!(typst_inline_content("sin math"), "#text(\"sin math\")");
+        assert_eq!(typst_inline_content("$E=mc^2$"), "$ E=mc^2 $");
+        assert_eq!(
+            typst_inline_content("Escapado \\$ literal $x$"),
+            "#text(\"Escapado $ literal \") $ x $"
+        );
+        assert_eq!(split_text_math("a $x$ b $y$ c").len(), 5);
+        let para = paragraph_typst_source(
+            "Hola $x^2$ mundo",
+            &ParagraphOptions {
+                width: 400.0,
+                align: TextAlign::Left,
+                ..Default::default()
+            },
+            32.0,
+        );
+        assert!(para.contains("$ x^2 $"), "paragraph source should embed math, got {para}");
+        assert!(para.contains("#text(\"Hola \")"));
+    }
+
+    #[test]
     fn layout_reflow_animates_displaced_members_and_fades_the_insertion() {
         let mut canvas = Canvas::new(640, 360);
         let first = canvas.rect(80.0, 30.0);
