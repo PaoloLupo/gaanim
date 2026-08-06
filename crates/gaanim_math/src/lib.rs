@@ -1,6 +1,7 @@
 pub mod bounds;
 pub mod camera;
 pub mod easing;
+pub mod matching;
 pub mod path;
 pub mod prelude;
 pub mod spatial;

@@ -1257,6 +1257,27 @@ impl Canvas {
                         builder.play_equation_expansion(source_parent, target_parent, *duration);
                     }
                 }
+                Op::TransformMatching {
+                    source,
+                    target,
+                    mode,
+                    duration,
+                } => {
+                    Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
+                    Self::fade_canceled_term_children(
+                        builder,
+                        canceled_term_children,
+                        *source,
+                        *duration,
+                    );
+                    if let (Some(&src), Some(&dst)) = (id_map.get(source), id_map.get(target)) {
+                        let m = match mode.as_str() {
+                            "tex" => gaanim_math::matching::MatchingMode::Tex,
+                            _ => gaanim_math::matching::MatchingMode::Shapes,
+                        };
+                        builder.play_transform_matching(src, dst, m, *duration, RateFunc::Smooth);
+                    }
+                }
                 Op::LayoutReflow {
                     container,
                     members,

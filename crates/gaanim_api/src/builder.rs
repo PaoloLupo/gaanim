@@ -5,6 +5,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
+use gaanim_math::matching::{MatchingConfig, MatchingMode, MatchItem};
 use gaanim_math::{Bounds3D, EasingCurve, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
@@ -2216,6 +2217,452 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             state.child_spans.clear();
             state.children.clear();
         }
+    }
+
+    fn world_center_for_match(&self, id: ObjectId) -> (f64, f64) {
+        // Use the glyph's transform world position, not its visual center.
+        // For text, bounds.center() is the shape's center, not its typographic
+        // origin; adding it would shift each glyph by half its width and break
+        // the final alignment. For shapes, bounds.center() is ~0, so no effect.
+        let world = self.get_world_transform(id).translation;
+        (world.x, world.y)
+    }
+
+    fn build_match_item(&self, id: ObjectId, key: Option<String>) -> Option<MatchItem> {
+        let state = self.states.get(id)?;
+        let center = self.world_center_for_match(id);
+        let fill = state
+            .fill
+            .as_ref()
+            .and_then(extract_brush_color);
+        Some(MatchItem {
+            index: 0, // caller sets
+            path: (*state.path).clone(),
+            center,
+            fill,
+            key,
+        })
+    }
+
+    fn collect_glyph_match_data(&self, root: ObjectId) -> (Vec<ObjectId>, Vec<MatchItem>) {
+        let Some(state) = self.states.get(root) else {
+            return (Vec::new(), Vec::new());
+        };
+        if state.child_spans.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let mut ids = Vec::new();
+        let mut items = Vec::new();
+        for (pos, child) in state.child_spans.iter().enumerate() {
+            if let Some(item) = self.build_match_item(child.id, Some(child.span.character.to_string())) {
+                ids.push(child.id);
+                let mut it = item;
+                it.index = pos;
+                items.push(it);
+            }
+        }
+        (ids, items)
+    }
+
+    fn collect_leaf_match_data(&self, root: ObjectId) -> (Vec<ObjectId>, Vec<MatchItem>) {
+        let Some(root_state) = self.states.get(root) else {
+            return (Vec::new(), Vec::new());
+        };
+        // If glyph hierarchy, flatten glyphs
+        if !root_state.child_spans.is_empty() {
+            return self.collect_glyph_match_data(root);
+        }
+        // Collect leaf ids recursively
+        let mut leaf_ids = Vec::new();
+        if root_state.children.is_empty() {
+            leaf_ids.push(root);
+        } else {
+            let mut stack = root_state.children.clone();
+            let mut visited = std::collections::HashSet::new();
+            while let Some(cid) = stack.pop() {
+                if !visited.insert(cid) {
+                    continue;
+                }
+                let Some(cstate) = self.states.get(cid) else {
+                    continue;
+                };
+                if !cstate.child_spans.is_empty() {
+                    for child in &cstate.child_spans {
+                        leaf_ids.push(child.id);
+                    }
+                } else if !cstate.children.is_empty() {
+                    stack.extend(cstate.children.iter().cloned());
+                } else {
+                    leaf_ids.push(cid);
+                }
+            }
+            // Keep deterministic order: sort by world x then y
+            leaf_ids.sort_by(|a, b| {
+                let ca = self.world_center_for_match(*a);
+                let cb = self.world_center_for_match(*b);
+                ca.0.partial_cmp(&cb.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(
+                        ca.1.partial_cmp(&cb.1)
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
+            });
+        }
+        let mut items = Vec::new();
+        for (pos, id) in leaf_ids.iter().enumerate() {
+            if let Some(mut it) = self.build_match_item(*id, None) {
+                it.index = pos;
+                items.push(it);
+            }
+        }
+        (leaf_ids, items)
+    }
+
+    /// Transform matching — improved over Manim's TransformMatchingShapes/Tex.
+    ///
+    /// Auto-matches submobjects between `source` and `target`:
+    /// - `Shapes` mode: geometry + position + color cost, Hungarian + shape hash bonus.
+    /// - `Tex` mode: LCS on character keys first (order-preserving), then Hungarian
+    ///   on remainder with tex penalty.
+    /// Matched source leaves morph into target leaves (path, transform, colors);
+    /// unmatched source leaves fade out, unmatched target leaves fade in.
+    pub fn play_transform_matching(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        mode: MatchingMode,
+        duration: f64,
+        rate_func: gaanim_math::RateFunc,
+    ) {
+        if !duration.is_finite() || duration <= 0.0 {
+            return;
+        }
+        if self.states.get(source).is_none() || self.states.get(target).is_none() {
+            return;
+        }
+
+        // Gather match data
+        let (src_ids, src_items) = match mode {
+            MatchingMode::Tex => {
+                let (ids, items) = self.collect_glyph_match_data(source);
+                if !ids.is_empty() {
+                    // For Tex, also need target glyph data to decide fallback
+                    let (tids, _) = self.collect_glyph_match_data(target);
+                    if !tids.is_empty() {
+                        (ids, items)
+                    } else {
+                        self.collect_leaf_match_data(source)
+                    }
+                } else {
+                    self.collect_leaf_match_data(source)
+                }
+            }
+            MatchingMode::Shapes => self.collect_leaf_match_data(source),
+        };
+        let (dst_ids, dst_items) = match mode {
+            MatchingMode::Tex => {
+                let (ids, items) = self.collect_glyph_match_data(target);
+                if !ids.is_empty() {
+                    (ids, items)
+                } else {
+                    self.collect_leaf_match_data(target)
+                }
+            }
+            MatchingMode::Shapes => self.collect_leaf_match_data(target),
+        };
+
+        if src_ids.is_empty() || dst_ids.is_empty() {
+            return;
+        }
+
+        // Single-element fallback: if both are singletons (root leaf) we can
+        // reuse the classic transform path for perfect continuity.
+        // But generic matching also handles 1-1; keep generic for now.
+
+        let config = MatchingConfig {
+            mode,
+            ..Default::default()
+        };
+        let result = gaanim_math::matching::match_items(&src_items, &dst_items, &config);
+
+        let start = self.current_time;
+        let end = start + duration;
+
+        // Hide all dst leaves at start (zero-duration) — they will be revealed
+        // via morph or fade-in. This prevents them being visible before morph.
+        for &dst_id in &dst_ids {
+            if let Some(state) = self.states.get(dst_id).cloned() {
+                let from = state.opacity;
+                let entity = state.entity;
+                let track = self.ensure_track(dst_id);
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: dst_id,
+                        lens: PropertyLensSpec::Opacity {
+                            from,
+                            to: 0.0,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+                // Immediate ECS hide to avoid flash before first clip
+                self.commands.entity(entity).insert(Opacity(0.0));
+            }
+        }
+
+        // Build quick lookup for matched status
+        let matched_src_set: std::collections::HashSet<usize> =
+            result.pairs.iter().map(|(s, _)| *s).collect();
+        let matched_dst_set: std::collections::HashSet<usize> =
+            result.pairs.iter().map(|(_, d)| *d).collect();
+
+        // For each matched pair, schedule morph on source leaf toward target leaf
+        for (src_pos, dst_pos) in &result.pairs {
+            let src_id = src_ids[*src_pos];
+            let dst_id = dst_ids[*dst_pos];
+            let Some(src_state) = self.states.get(src_id).cloned() else {
+                continue;
+            };
+            let Some(dst_state) = self.states.get(dst_id).cloned() else {
+                continue;
+            };
+            let track = self.ensure_track(src_id);
+
+            // Compute final local transform for `src_id` so it lands exactly
+            // on `dst_id`'s world transform (position, rotation, scale) within `src_id`'s parent space.
+            let src_parent_affine = src_state
+                .parent
+                .map(|pid| self.get_world_transform(pid).to_affine_2d())
+                .unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+            let dst_world_affine = self.get_world_transform(dst_id).to_affine_2d();
+
+            let target_local_affine = src_parent_affine.inverse() * dst_world_affine;
+            let target_transform = SpatialTransform::from_affine_2d(&target_local_affine);
+
+            // PathMorph
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::PathMorph {
+                        from: (*src_state.path).clone(),
+                        to: (*dst_state.path).clone(),
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: Some("TransformMatching".to_string()),
+                }),
+            );
+            // Translation
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::Translation {
+                        from: src_state.transform.translation,
+                        to: target_transform.translation,
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            // Rotation
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::Rotation {
+                        from: src_state.transform.rotation,
+                        to: target_transform.rotation,
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            // Scale
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::Scale {
+                        from: src_state.transform.scale,
+                        to: target_transform.scale,
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            // FillColor
+            let src_fill = src_state
+                .fill
+                .as_ref()
+                .and_then(extract_brush_color)
+                .unwrap_or(Color::WHITE);
+            let dst_fill = dst_state
+                .fill
+                .as_ref()
+                .and_then(extract_brush_color)
+                .unwrap_or(Color::WHITE);
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::FillColor {
+                        from: src_fill,
+                        to: dst_fill,
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            // Stroke
+            let src_stroke = src_state.stroke.brush.as_ref().and_then(extract_brush_color);
+            let dst_stroke = dst_state.stroke.brush.as_ref().and_then(extract_brush_color);
+            let stroke_colors = match (src_stroke, dst_stroke) {
+                (Some(f), Some(t)) => Some((f, t)),
+                (Some(f), None) => Some((f, f)),
+                (None, Some(t)) => Some((t, t)),
+                (None, None) => None,
+            };
+            if let Some((from, to)) = stroke_colors {
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: src_id,
+                        lens: PropertyLensSpec::StrokeColor { from, to },
+                        rate_func: rate_func.clone(),
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
+            if src_stroke.is_some() || dst_stroke.is_some() {
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: src_id,
+                        lens: PropertyLensSpec::StrokeWidth {
+                            from: src_state.stroke.style.width,
+                            to: dst_state.stroke.style.width,
+                        },
+                        rate_func: rate_func.clone(),
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
+
+            // Lock path at end (continuous seek)
+            self.timeline.add_clip(
+                track,
+                end,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::PathMorph {
+                        from: (*dst_state.path).clone(),
+                        to: (*dst_state.path).clone(),
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+
+            // Update hot state for source leaf to target's final appearance
+            if let Some(state) = self.states.get_mut(src_id) {
+                state.path = dst_state.path.clone();
+                state.bounds = dst_state.bounds;
+                state.transform = target_transform;
+                state.fill = dst_state.fill.clone();
+                state.stroke = dst_state.stroke.clone();
+                // Keep opacity 1 for matched
+                state.opacity = dst_state.opacity;
+            }
+        }
+
+        // Unmatched source: fade out
+        for (pos, &src_id) in src_ids.iter().enumerate() {
+            if matched_src_set.contains(&pos) {
+                continue;
+            }
+            if let Some(state) = self.states.get(src_id).cloned() {
+                let track = self.ensure_track(src_id);
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: src_id,
+                        lens: PropertyLensSpec::Opacity {
+                            from: state.opacity,
+                            to: 0.0,
+                        },
+                        rate_func: rate_func.clone(),
+                        delay: 0.0,
+                        label: Some("TransformMatchingFade".to_string()),
+                    }),
+                );
+                if let Some(s) = self.states.get_mut(src_id) {
+                    s.opacity = 0.0;
+                }
+            }
+        }
+
+        // Unmatched dst: fade in (they are hidden at start)
+        for (pos, &dst_id) in dst_ids.iter().enumerate() {
+            if matched_dst_set.contains(&pos) {
+                continue;
+            }
+            if let Some(state) = self.states.get(dst_id).cloned() {
+                let track = self.ensure_track(dst_id);
+                let target_opacity = state.opacity.max(1.0);
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: dst_id,
+                        lens: PropertyLensSpec::Opacity {
+                            from: 0.0,
+                            to: target_opacity,
+                        },
+                        rate_func: rate_func.clone(),
+                        delay: 0.0,
+                        label: Some("TransformMatchingFade".to_string()),
+                    }),
+                );
+                if let Some(s) = self.states.get_mut(dst_id) {
+                    s.opacity = target_opacity;
+                }
+                // Also ensure they become visible at end via schedule_show? opacity clip suffices
+            }
+        }
+
+        self.current_time = end;
     }
 
     fn play_wiggle_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {

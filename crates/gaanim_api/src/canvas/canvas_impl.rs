@@ -868,6 +868,61 @@ impl Canvas {
             });
     }
 
+    /// Auto-match and morph — improved TransformMatchingShapes.
+    /// Matches submobjects by geometry+position (shape hash + Hungarian)
+    /// and morphs source into target. Unmatched parts fade.
+    pub fn transform_matching_shapes(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        duration: f64,
+    ) {
+        self.transform_matching(source, target, "shapes", duration);
+    }
+
+    /// Auto-match and morph for text/math — improved TransformMatchingTex.
+    /// Matches by character key + order (LCS) then geometry, morphs source into target.
+    pub fn transform_matching_tex(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        duration: f64,
+    ) {
+        self.transform_matching(source, target, "tex", duration);
+    }
+
+    /// Generic auto-matching morph. `mode` is "shapes" or "tex".
+    pub fn transform_matching(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        mode: &str,
+        duration: f64,
+    ) {
+        if !Arc::ptr_eq(&self.state, &source.state)
+            || !Arc::ptr_eq(&self.state, &target.state)
+            || !duration.is_finite()
+            || duration <= 0.0
+        {
+            return;
+        }
+        let mode = match mode.to_ascii_lowercase().as_str() {
+            "tex" | "text" | "chars" => "tex".to_string(),
+            _ => "shapes".to_string(),
+        };
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::TransformMatching {
+                source: source.id,
+                target: target.id,
+                mode,
+                duration,
+            });
+    }
+
     /// Dims all equation glyphs except the requested semantic tags and pulses
     /// the surviving terms. This is tag-based rather than glyph-index based,
     /// so it stays stable when equation layout changes.

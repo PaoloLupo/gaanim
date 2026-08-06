@@ -179,6 +179,13 @@ pub(crate) enum Op {
         target: ObjectId,
         duration: f64,
     },
+    /// Auto-match and morph between two objects — improved TransformMatchingShapes/Tex.
+    TransformMatching {
+        source: ObjectId,
+        target: ObjectId,
+        mode: String,
+        duration: f64,
+    },
     /// Advance the cursor by a duration (no animation).
     Wait(f64),
     CameraPosition {

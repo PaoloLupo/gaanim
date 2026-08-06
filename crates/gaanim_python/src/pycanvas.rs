@@ -2120,6 +2120,64 @@ impl PyScene {
             .step_equation(&source.0, &target.0, duration);
         Ok(())
     }
+    /// Auto-match by shape geometry — improved TransformMatchingShapes.
+    #[pyo3(signature = (source, target, *, duration=1.0))]
+    fn transform_matching_shapes(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        duration: f64,
+    ) -> PyResult<()> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .transform_matching_shapes(&source.0, &target.0, duration);
+        Ok(())
+    }
+    /// Auto-match by character/tex — improved TransformMatchingTex.
+    #[pyo3(signature = (source, target, *, duration=1.0))]
+    fn transform_matching_tex(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        duration: f64,
+    ) -> PyResult<()> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .transform_matching_tex(&source.0, &target.0, duration);
+        Ok(())
+    }
+    /// Generic auto-matching morph. `mode` is "shapes" or "tex".
+    #[pyo3(signature = (source, target, *, mode="shapes", duration=1.0))]
+    fn transform_matching(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        mode: &str,
+        duration: f64,
+    ) -> PyResult<()> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .transform_matching(&source.0, &target.0, mode, duration);
+        Ok(())
+    }
     /// Dim an equation except for the requested semantic tags, then pulse them.
     #[pyo3(signature = (equation, tags, *, duration=1.0, dim_opacity=0.25))]
     fn focus_equation(

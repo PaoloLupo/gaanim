@@ -5,7 +5,8 @@ import os
 
 from gaanim import BLACK, BLUE, GOLD, GRAY, GREEN, RED, TEAL, WHITE, Direction, Scene
 
-scene = Scene(1920, 1080, background=WHITE)
+scene = Scene(1920, 1080)
+scene.canvas.set_theme("paper")
 
 # ── 1. Auto-fit a safe_frame ──────────────────────────────────────────
 scene.segment("auto-fit")
