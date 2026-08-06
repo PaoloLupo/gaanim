@@ -2121,6 +2121,11 @@ impl PyScene {
         Ok(())
     }
     /// Auto-match by shape geometry — improved TransformMatchingShapes.
+    ///
+    /// Matches submobjects between `source` and `target` using Hungarian algorithm,
+    /// normalized shape hashing, position, and color cost. Matched source submobjects
+    /// morph into target submobjects, surplus source elements fade out, and new target
+    /// elements fade in.
     #[pyo3(signature = (source, target, *, duration=1.0))]
     fn transform_matching_shapes(
         &self,
@@ -2140,6 +2145,10 @@ impl PyScene {
         Ok(())
     }
     /// Auto-match by character/tex — improved TransformMatchingTex.
+    ///
+    /// Matches submobjects (glyphs/letters) between text/math equations using an
+    /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
+    /// combined with Hungarian assignment for remaining elements.
     #[pyo3(signature = (source, target, *, duration=1.0))]
     fn transform_matching_tex(
         &self,
@@ -2159,6 +2168,8 @@ impl PyScene {
         Ok(())
     }
     /// Generic auto-matching morph. `mode` is "shapes" or "tex".
+    ///
+    /// Performs auto-matching transform between `source` and `target` using the specified `mode`.
     #[pyo3(signature = (source, target, *, mode="shapes", duration=1.0))]
     fn transform_matching(
         &self,

@@ -868,9 +868,12 @@ impl Canvas {
             });
     }
 
-    /// Auto-match and morph — improved TransformMatchingShapes.
-    /// Matches submobjects by geometry+position (shape hash + Hungarian)
-    /// and morphs source into target. Unmatched parts fade.
+    /// Auto-match and morph submobjects — improved `TransformMatchingShapes`.
+    ///
+    /// Matches sub-elements between `source` and `target` using Hungarian minimum-cost pairing,
+    /// normalized shape hashing, relative world position, and color similarity.
+    /// Matched source sub-elements morph into target sub-elements in exact world space,
+    /// surplus source elements fade out, and new target elements fade in.
     pub fn transform_matching_shapes(
         &mut self,
         source: &DrawableHandle,
@@ -880,8 +883,11 @@ impl Canvas {
         self.transform_matching(source, target, "shapes", duration);
     }
 
-    /// Auto-match and morph for text/math — improved TransformMatchingTex.
-    /// Matches by character key + order (LCS) then geometry, morphs source into target.
+    /// Auto-match and morph for text & math equations — improved `TransformMatchingTex`.
+    ///
+    /// Matches sub-elements (character glyphs) between text/math objects using an
+    /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
+    /// combined with Hungarian assignment for remaining elements.
     pub fn transform_matching_tex(
         &mut self,
         source: &DrawableHandle,
@@ -891,7 +897,10 @@ impl Canvas {
         self.transform_matching(source, target, "tex", duration);
     }
 
-    /// Generic auto-matching morph. `mode` is "shapes" or "tex".
+    /// Generic auto-matching morph. `mode` can be `"shapes"` or `"tex"`.
+    ///
+    /// Queues an `Op::TransformMatching` operation to pair and morph submobjects between
+    /// `source` and `target`.
     pub fn transform_matching(
         &mut self,
         source: &DrawableHandle,

@@ -307,6 +307,27 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
+#api-entry(
+  name: "Scene.transform_matching_shapes / transform_matching_tex",
+  kind: "method",
+  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / scene.transform_matching_tex(source, target, duration=1.0)",
+  params: (
+    (name: "source", type: "Drawable", default: none, desc: [Source object/group containing elements to match.]),
+    (name: "target", type: "Drawable", default: none, desc: [Target object/group containing elements to match.]),
+    (name: "duration", type: "float", default: "1.0", desc: [Duration of the transition in seconds.]),
+  ),
+  returns: (type: "none", desc: [Schedules the transform matching animation.]),
+  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` uses order-preserving LCS character matching for text/equations. Unmatched elements automatically fade in/out.],
+)[
+```python
+from gaanim import BLACK, BLUE, GOLD, GREEN, Scene
+scene = Scene(1920, 1080, background=BLACK)
+e1 = scene.equation("E = m c").fill(WHITE).at(0, 80).scaled(1.3)
+e2 = scene.equation("p = m v").fill(GOLD).at(0, 80).scaled(1.3)
+scene.transform_matching_tex(e1, e2, duration=1.6)
+```
+]
+
 == Timing & Easing
 
 Configure any `Anim` fluently before passing to `play`:
