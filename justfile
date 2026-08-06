@@ -48,10 +48,12 @@ clippy:
 # Build the `gaanim` application binary (debug mode).
 build:
     cargo build -p gaanim_editor
+    cargo build -p gaanim_launcher
 
 # Build the `gaanim` application binary (release mode).
 build-release:
     cargo build -p gaanim_editor --release
+    cargo build -p gaanim_launcher --release
 
 # Install the Python extension in the local virtual environment.
 python-develop:
@@ -70,7 +72,7 @@ validate-python-api:
 # Run an example script inside the Gaanim application. Usage: just run my_example
 [windows]
 run EX:
-    $pyBase = & "{{ python }}" -c "import sys; print(sys.base_prefix)"; $env:PATH = "$pyBase;$env:PATH"; cargo run -p gaanim_editor -- examples/{{ EX }}.py
+    cargo run -p gaanim_launcher -- examples/{{ EX }}.py
 
 [unix]
 run EX:
@@ -94,7 +96,8 @@ docs-watch:
 [windows]
 doctor: check
     cargo build -p gaanim_editor 2>&1
-    $pyBase = & "{{ python }}" -c "import sys; print(sys.base_prefix)"; $env:PATH = "$pyBase;$env:PATH"; cargo run -p gaanim_editor -- --help
+    cargo build -p gaanim_launcher 2>&1
+    cargo run -p gaanim_launcher -- --help
 
 [unix]
 doctor: check

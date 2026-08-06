@@ -19,6 +19,7 @@ use std::sync::mpsc;
 
 mod file_watcher;
 mod hot_reload;
+mod python_home;
 mod script_runner;
 
 use hot_reload::{
@@ -38,14 +39,23 @@ fn main() {
 
     let launch = parse_args();
     let script_path = launch.script_path.clone();
+    let project_paths = resolve_project_paths(&script_path);
 
-    // 1. Register the `gaanim_core` module in the embedded interpreter's init
+    // 1. Ensure python312.dll is on PATH by detecting a nearby uv/.venv
+    //    (VIRTUAL_ENV, walk-up from script/cwd/exe) or system Python.
+    //    No env vars required from the user.
+    let venv_root = python_home::ensure_python_available(Some(&script_path));
+
+    // 2. Register the `gaanim_core` module in the embedded interpreter's init
     //    table BEFORE initializing Python, so `import gaanim_core` resolves to
     //    our in-process module (no .pyd needed).
     gaanim_python::register_inittab();
 
-    // 2. Initialize the embedded CPython interpreter.
+    // 3. Initialize the embedded CPython interpreter.
     Python::initialize();
+    if let Some(ref venv) = venv_root {
+        python_home::inject_venv_site_packages(venv);
+    }
 
     // 3. Set up the host<->script channel.
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
@@ -105,6 +115,7 @@ fn main() {
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
+    .insert_resource(project_paths)
     .insert_resource(ReloadReceiver { rx: payload_rx })
     .insert_resource(ReloadStatus::default())
     .add_systems(
@@ -371,8 +382,12 @@ fn dispatch_check_mode() -> bool {
         std::process::exit(2);
     });
 
+    let venv_root = python_home::ensure_python_available(Some(&script));
     gaanim_python::register_inittab();
     Python::initialize();
+    if let Some(ref venv) = venv_root {
+        python_home::inject_venv_site_packages(venv);
+    }
     let canvas = script_runner::load_script_canvas(&script).unwrap_or_else(|error| {
         eprintln!("gaanim check: could not load project: {error}");
         std::process::exit(2);
@@ -631,8 +646,12 @@ fn dispatch_diff_mode() -> bool {
             script.display(),
             capture_dir.display()
         );
+        let venv_root = python_home::ensure_python_available(Some(&script));
         gaanim_python::register_inittab();
         Python::initialize();
+        if let Some(ref venv) = venv_root {
+            python_home::inject_venv_site_packages(venv);
+        }
         if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
             eprintln!("gaanim --diff: snapshot capture failed: {error}");
             std::process::exit(2);
@@ -886,6 +905,64 @@ fn manifest_string_value(source: &str, key: &str) -> Option<String> {
             .strip_suffix('"')
             .map(str::to_owned)
     })
+}
+
+fn resolve_project_paths(script_path: &Path) -> gaanim_editor::export::ProjectPaths {
+    let script_parent = script_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Walk up to find gaanim.toml
+    let mut cur = script_parent.clone();
+    let mut project_dir: Option<PathBuf> = None;
+    let mut manifest_path: Option<PathBuf> = None;
+    for _ in 0..5 {
+        let cand = cur.join("gaanim.toml");
+        if cand.is_file() {
+            project_dir = Some(cur.clone());
+            manifest_path = Some(cand);
+            break;
+        }
+        if let Some(parent) = cur.parent() {
+            cur = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    if let Some(dir) = project_dir {
+        let output_dir_str = manifest_path
+            .and_then(|p| {
+                std::fs::read_to_string(&p)
+                    .ok()
+                    .and_then(|s| manifest_string_value(&s, "output_dir"))
+            })
+            .unwrap_or_else(|| "exports".to_string());
+        let output_dir = if Path::new(&output_dir_str).is_absolute() {
+            PathBuf::from(&output_dir_str)
+        } else {
+            dir.join(&output_dir_str)
+        };
+        // Do not canonicalize output_dir if it doesn't exist yet; keep as absolute-ish
+        let project_dir_abs = dir.canonicalize().unwrap_or(dir);
+        let output_dir_abs = if output_dir.is_absolute() {
+            output_dir
+        } else {
+            project_dir_abs.join(output_dir)
+        };
+        gaanim_editor::export::ProjectPaths {
+            project_dir: project_dir_abs.clone(),
+            output_dir: output_dir_abs,
+            script_path: script_path.to_path_buf(),
+        }
+    } else {
+        let proj = script_parent.canonicalize().unwrap_or(script_parent);
+        let out = proj.join("exports");
+        gaanim_editor::export::ProjectPaths {
+            project_dir: proj.clone(),
+            output_dir: out,
+            script_path: script_path.to_path_buf(),
+        }
+    }
 }
 
 fn parse_args() -> LaunchArgs {

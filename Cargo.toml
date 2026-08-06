@@ -15,6 +15,7 @@ members = [
   "crates/gaanim_editor",
   "crates/gaanim_export",
   "crates/gaanim_diff",
+  "crates/gaanim_launcher",
   "docs"
 ]
 

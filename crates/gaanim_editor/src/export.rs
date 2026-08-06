@@ -5,8 +5,16 @@ use gaanim_api::export::export_canvas;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+#[derive(Resource, Clone, Debug)]
+pub struct ProjectPaths {
+    pub project_dir: PathBuf,
+    pub output_dir: PathBuf,
+    pub script_path: PathBuf,
+}
 
 #[derive(Resource, Clone, Default)]
 pub struct StashedReplay {
@@ -92,8 +100,22 @@ pub fn export_dialog_system(
     mut state: ResMut<ExportState>,
     timeline: ResMut<Timeline>,
     replay_stash: Res<StashedReplay>,
+    project_paths: Option<Res<ProjectPaths>>,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else { return };
+
+    // Initialize default output path from gaanim.toml if still default
+    if let Some(ref proj) = project_paths {
+        if state.output_path == "output.mp4" {
+            // Show relative to project for nicer UX: e.g. "exports/output.mp4"
+            let rel = proj
+                .output_dir
+                .strip_prefix(&proj.project_dir)
+                .unwrap_or(&proj.output_dir)
+                .join("output.mp4");
+            state.output_path = rel.to_string_lossy().to_string();
+        }
+    }
 
     // --- Collect intent from egui into local variables first ---
     let mut trigger_export = false;
@@ -252,7 +274,18 @@ pub fn export_dialog_system(
             state.show_complete = true;
             state.dialog_open = false;
         } else {
-            let out = state.output_path.clone();
+            let out_raw = state.output_path.clone();
+            // Resolve relative output against project_dir so gaanim.toml's output_dir is respected
+            let out = if let Some(ref proj) = project_paths {
+                let p = PathBuf::from(&out_raw);
+                if p.is_absolute() {
+                    out_raw
+                } else {
+                    proj.project_dir.join(p).to_string_lossy().to_string()
+                }
+            } else {
+                out_raw
+            };
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();

@@ -1,0 +1,11 @@
+[package]
+name = "gaanim_launcher"
+version = "0.1.0"
+edition = "2024"
+description = "Launcher for gaanim that sets up Python PATH before spawning gaanim-core"
+
+[[bin]]
+name = "gaanim"
+path = "src/main.rs"
+
+[dependencies]
