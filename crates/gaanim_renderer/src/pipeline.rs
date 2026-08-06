@@ -388,11 +388,16 @@ pub fn compile_scene_from_world(
             draw_glow(&mut scene, elem_path, glow);
         }
 
+        let is_trimmed_closed = source_path.is_some_and(|src| {
+            src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
+        });
         let blur_sigma = blur_opt
             .map(|blur| blur.sigma)
             .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
         let blurred_vector = if let Some(sigma) = blur_sigma {
-            if let Some(fill_brush) = elem_fill {
+            if let Some(fill_brush) = elem_fill
+                && !is_trimmed_closed
+            {
                 draw_soft_fill(
                     &mut scene,
                     elem_path,
@@ -405,7 +410,11 @@ pub fn compile_scene_from_world(
             if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
                 draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
             }
-            elem_fill.is_some() || elem_stroke.is_some()
+            if is_trimmed_closed {
+                elem_stroke.is_some()
+            } else {
+                elem_fill.is_some() || elem_stroke.is_some()
+            }
         } else {
             false
         };
@@ -428,7 +437,7 @@ pub fn compile_scene_from_world(
             scene.pop_layer();
         } else if !blurred_vector && fill_alpha < 1.0 {
             if let Some(fill_brush) = elem_fill {
-                if fill_alpha > 0.0 {
+                if fill_alpha > 0.0 && !is_trimmed_closed {
                     // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
                     scene.push_clip_layer(
                         peniko::Fill::NonZero,
@@ -472,7 +481,9 @@ pub fn compile_scene_from_world(
                     scene.pop_layer();
                 }
             }
-        } else if !blurred_vector && let Some(fill_brush) = elem_fill {
+        } else if !blurred_vector && let Some(fill_brush) = elem_fill
+            && !is_trimmed_closed
+        {
             scene.fill(
                 peniko::Fill::NonZero,
                 kurbo::Affine::IDENTITY,
@@ -830,11 +841,16 @@ pub fn gaanim_render_system(
                 draw_glow(&mut scene, elem_path, glow);
             }
 
+            let is_trimmed_closed = source_path.is_some_and(|src| {
+                src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
+            });
             let blur_sigma = elem_blur
                 .map(|blur| blur.sigma)
                 .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
             let blurred_vector = if let Some(sigma) = blur_sigma {
-                if let Some(fill_brush) = elem_fill {
+                if let Some(fill_brush) = elem_fill
+                    && !is_trimmed_closed
+                {
                     draw_soft_fill(
                         &mut scene,
                         elem_path,
@@ -847,7 +863,11 @@ pub fn gaanim_render_system(
                 if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
                     draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
                 }
-                elem_fill.is_some() || elem_stroke.is_some()
+                if is_trimmed_closed {
+                    elem_stroke.is_some()
+                } else {
+                    elem_fill.is_some() || elem_stroke.is_some()
+                }
             } else {
                 false
             };
@@ -862,7 +882,7 @@ pub fn gaanim_render_system(
                 scene.pop_layer();
             } else if !blurred_vector && fill_alpha < 1.0 {
                 if let Some(fill_brush) = elem_fill {
-                    if fill_alpha > 0.0 {
+                    if fill_alpha > 0.0 && !is_trimmed_closed {
                         // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
                         scene.push_clip_layer(
                             peniko::Fill::NonZero,
@@ -906,7 +926,9 @@ pub fn gaanim_render_system(
                         scene.pop_layer();
                     }
                 }
-            } else if !blurred_vector && let Some(fill_brush) = elem_fill {
+            } else if !blurred_vector && let Some(fill_brush) = elem_fill
+                && !is_trimmed_closed
+            {
                 scene.fill(
                     peniko::Fill::NonZero,
                     kurbo::Affine::IDENTITY,
