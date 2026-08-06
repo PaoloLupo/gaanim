@@ -120,6 +120,21 @@ impl DrawableHandle {
         self
     }
 
+    /// If this drawable is an axes, return its x/y ranges and auto_fit flag.
+    pub fn axes_info(&self) -> Option<((f64, f64, f64), (f64, f64, f64), bool)> {
+        let spec = self.spec.lock().ok()?;
+        if let crate::canvas::SpawnKind::Axes {
+            x_range,
+            y_range,
+            config,
+        } = &spec.kind
+        {
+            Some((*x_range, *y_range, config.auto_fit))
+        } else {
+            None
+        }
+    }
+
     /// Resolve a named source group or path from an imported SVG.
     pub fn part(&self, id: &str) -> Result<DrawableHandle, SvgPartError> {
         let Some(parts) = &self.svg_parts else {

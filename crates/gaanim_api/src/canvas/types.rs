@@ -68,6 +68,8 @@ pub struct AxesConfig {
     pub grid_width: f64,
     pub tick_width: f64,
     pub tick_length: f64,
+    /// If true, scale axes to occupy the safe_frame (default true).
+    pub auto_fit: bool,
 }
 
 /// Horizontal alignment for multi-line paragraph text.
@@ -156,6 +158,7 @@ impl Default for AxesConfig {
             grid_width: 1.0,
             tick_width: 2.0,
             tick_length: 8.0,
+            auto_fit: true,
         }
     }
 }

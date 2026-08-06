@@ -1184,12 +1184,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     return;
                 }
             };
-            if state.child_spans.is_empty() {
-                vec![anim.target]
-            } else {
+            // For text/equation hierarchies use child_spans, for groups
+            // like axes use children. Collect visual leaves so a single
+            // `axes.create()` animates grid→axes→ticks→numbers sequentially
+            // instead of trying to trim the group's empty Path2D.
+            if !state.child_spans.is_empty() {
                 let mut children: Vec<ObjectId> =
                     state.child_spans.iter().map(|child| child.id).collect();
-                // Sort child mobjects strictly by visual X position (left-to-right)
                 children.sort_by(|a, b| {
                     let xa = self
                         .states
@@ -1204,6 +1205,40 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     xa.partial_cmp(&xb).unwrap_or(std::cmp::Ordering::Equal)
                 });
                 children
+            } else if !state.children.is_empty() {
+                // Collect visual leaves for groups (e.g. axes). This flattens
+                // the 5-layer axes (grid, axes, ticks) plus any text glyph
+                // leaves, preserving the creation order (grid first).
+                let mut leaves = Vec::new();
+                let mut stack = state.children.clone();
+                let mut visited = std::collections::HashSet::new();
+                while let Some(id) = stack.pop() {
+                    if !visited.insert(id) {
+                        continue;
+                    }
+                    let Some(child_state) = self.states.get(id) else {
+                        continue;
+                    };
+                    // If this child itself has glyph spans, expand to glyphs
+                    if !child_state.child_spans.is_empty() {
+                        leaves.extend(child_state.child_spans.iter().map(|c| c.id));
+                    } else if !child_state.children.is_empty() {
+                        // Nested group – push its children to stack
+                        stack.extend(child_state.children.iter().cloned());
+                    } else {
+                        leaves.push(id);
+                    }
+                }
+                // Keep creation order: reverse because stack is LIFO and we
+                // want grid→axes→ticks first as pushed in styled_axes.
+                leaves.reverse();
+                if leaves.is_empty() {
+                    vec![anim.target]
+                } else {
+                    leaves
+                }
+            } else {
+                vec![anim.target]
             }
         };
 

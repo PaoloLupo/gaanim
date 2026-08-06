@@ -1563,7 +1563,8 @@ impl PyScene {
         x_label=None, y_label=None,
         axis_color=None, grid_color=None, tick_color=None,
         number_color=None, label_color=None,
-        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0
+        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
+        auto_fit=true
     ))]
     fn axes(
         &self,
@@ -1592,6 +1593,7 @@ impl PyScene {
         grid_width: f64,
         tick_width: f64,
         tick_length: f64,
+        auto_fit: bool,
     ) -> PyResult<PyDrawable> {
         if !x.0.is_finite()
             || !x.1.is_finite()
@@ -1646,12 +1648,70 @@ impl PyScene {
             grid_width,
             tick_width,
             tick_length,
+            auto_fit,
         };
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .axes(x, y, config),
+        ))
+    }
+
+    #[pyo3(signature = (axes, function, x, samples=160))]
+    fn plot(
+        &self,
+        axes: &PyDrawable,
+        function: Bound<'_, PyAny>,
+        x: (f64, f64),
+        samples: usize,
+    ) -> PyResult<PyDrawable> {
+        let Some(((x_min, x_max, _), (y_min, y_max, _), auto_fit)) = axes.0.axes_info() else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "plot() first argument must be an axes drawable",
+            ));
+        };
+        if samples < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "samples must be at least 2",
+            ));
+        }
+        if !x.0.is_finite() || !x.1.is_finite() || x.0 >= x.1 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "x range must be finite with min < max",
+            ));
+        }
+        // Compute same auto-fit scale as in compile.rs styled_axes
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let avail_w = if canvas.width == 0 { 800.0 } else { canvas.width as f64 - canvas.margin.left - canvas.margin.right };
+        let avail_h = if canvas.height == 0 { 480.0 } else { canvas.height as f64 - canvas.margin.top - canvas.margin.bottom };
+        drop(canvas);
+        let data_w = (x_max - x_min).max(1e-9);
+        let data_h = (y_max - y_min).max(1e-9);
+        let scale = if auto_fit {
+            (avail_w / data_w).min(avail_h / data_h)
+        } else {
+            1.0
+        };
+        let mut points = Vec::with_capacity(samples);
+        let x_center = (x_min + x_max) * 0.5;
+        let y_center = (y_min + y_max) * 0.5;
+        for i in 0..samples {
+            let t = i as f64 / (samples - 1) as f64;
+            let xv = x.0 + (x.1 - x.0) * t;
+            let yv: f64 = function.call1((xv,))?.extract()?;
+            let (sx, sy) = if auto_fit {
+                ((xv - x_center) * scale, (yv - y_center) * scale)
+            } else {
+                (xv, yv)
+            };
+            points.push((sx, sy));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline(&points),
         ))
     }
     fn text(&self, s: &str) -> PyDrawable {

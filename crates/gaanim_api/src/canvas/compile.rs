@@ -113,10 +113,33 @@ impl Canvas {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
         config: &AxesConfig,
+        frame_bounds: Bounds3D,
     ) -> MobjectRef {
         let (x_min, x_max, x_step) = x_range;
         let (y_min, y_max, y_step) = y_range;
-        let bounds = Bounds3D::new_2d(x_min, y_min, x_max, y_max);
+        // Auto-fit scale: map data range to safe_frame. Keep tick/label sizes unscaled.
+        let (scale, x_center, y_center) = if config.auto_fit {
+            let data_w = (x_max - x_min).max(1e-9);
+            let data_h = (y_max - y_min).max(1e-9);
+            let avail_w = frame_bounds.width().max(1.0);
+            let avail_h = frame_bounds.height().max(1.0);
+            let s = (avail_w / data_w).min(avail_h / data_h);
+            (s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
+        } else {
+            (1.0, 0.0, 0.0)
+        };
+        let sx = |x: f64| (x - x_center) * scale;
+        let sy = |y: f64| (y - y_center) * scale;
+        let bounds = if config.auto_fit {
+            Bounds3D::new_2d(
+                sx(x_min),
+                sy(y_min),
+                sx(x_max),
+                sy(y_max),
+            )
+        } else {
+            Bounds3D::new_2d(x_min, y_min, x_max, y_max)
+        };
         let mut children = Vec::new();
         let x_axis_in_range = y_min <= 0.0 && y_max >= 0.0;
         let y_axis_in_range = x_min <= 0.0 && x_max >= 0.0;
@@ -126,8 +149,8 @@ impl Canvas {
             let mut x = (x_min / x_step).ceil() * x_step;
             while x <= x_max + 1e-9 {
                 if x.abs() > 1e-9 {
-                    grid.move_to(Point::new(x, y_min));
-                    grid.line_to(Point::new(x, y_max));
+                    grid.move_to(Point::new(sx(x), sy(y_min)));
+                    grid.line_to(Point::new(sx(x), sy(y_max)));
                 }
                 x += x_step;
             }
@@ -136,8 +159,8 @@ impl Canvas {
             let mut y = (y_min / y_step).ceil() * y_step;
             while y <= y_max + 1e-9 {
                 if y.abs() > 1e-9 {
-                    grid.move_to(Point::new(x_min, y));
-                    grid.line_to(Point::new(x_max, y));
+                    grid.move_to(Point::new(sx(x_min), sy(y)));
+                    grid.line_to(Point::new(sx(x_max), sy(y)));
                 }
                 y += y_step;
             }
@@ -155,12 +178,12 @@ impl Canvas {
 
         let mut axes = gaanim_core::kurbo::BezPath::new();
         if config.x_axis && x_axis_in_range {
-            axes.move_to(Point::new(x_min, 0.0));
-            axes.line_to(Point::new(x_max, 0.0));
+            axes.move_to(Point::new(sx(x_min), sy(0.0)));
+            axes.line_to(Point::new(sx(x_max), sy(0.0)));
         }
         if config.y_axis && y_axis_in_range {
-            axes.move_to(Point::new(0.0, y_min));
-            axes.line_to(Point::new(0.0, y_max));
+            axes.move_to(Point::new(sx(0.0), sy(y_min)));
+            axes.line_to(Point::new(sx(0.0), sy(y_max)));
         }
         if !axes.elements().is_empty() {
             children.push(Self::axis_path(
@@ -178,16 +201,16 @@ impl Canvas {
         if config.ticks && config.x_ticks && x_axis_in_range {
             let mut x = (x_min / x_step).ceil() * x_step;
             while x <= x_max + 1e-9 {
-                ticks.move_to(Point::new(x, -tick_half));
-                ticks.line_to(Point::new(x, tick_half));
+                ticks.move_to(Point::new(sx(x), sy(0.0) - tick_half));
+                ticks.line_to(Point::new(sx(x), sy(0.0) + tick_half));
                 x += x_step;
             }
         }
         if config.ticks && config.y_ticks && y_axis_in_range {
             let mut y = (y_min / y_step).ceil() * y_step;
             while y <= y_max + 1e-9 {
-                ticks.move_to(Point::new(-tick_half, y));
-                ticks.line_to(Point::new(tick_half, y));
+                ticks.move_to(Point::new(sx(0.0) - tick_half, sy(y)));
+                ticks.line_to(Point::new(sx(0.0) + tick_half, sy(y)));
                 y += y_step;
             }
         }
@@ -210,8 +233,8 @@ impl Canvas {
                 children.push(Self::axis_text(
                     builder,
                     &text,
-                    x,
-                    -tick_half - 14.0,
+                    sx(x),
+                    sy(0.0) - tick_half - 14.0,
                     config.number_color,
                 ));
                 x += x_step;
@@ -227,8 +250,8 @@ impl Canvas {
                     children.push(Self::axis_text(
                         builder,
                         &text,
-                        -tick_half - 8.0 - estimated_width * 0.5,
-                        y,
+                        sx(0.0) - tick_half - 8.0 - estimated_width * 0.5,
+                        sy(y),
                         config.number_color,
                     ));
                 }
@@ -241,8 +264,8 @@ impl Canvas {
                 children.push(Self::axis_text(
                     builder,
                     label,
-                    x_max + 18.0,
-                    -tick_half - 2.0,
+                    sx(x_max) + 18.0,
+                    sy(0.0) - tick_half - 2.0,
                     config.label_color,
                 ));
             }
@@ -250,8 +273,8 @@ impl Canvas {
                 children.push(Self::axis_text(
                     builder,
                     label,
-                    tick_half + 12.0,
-                    y_max + 12.0,
+                    sx(0.0) + tick_half + 12.0,
+                    sy(y_max) + 12.0,
                     config.label_color,
                 ));
             }
@@ -2280,7 +2303,7 @@ impl Canvas {
                 y_range,
                 config,
             } => {
-                let axes = Self::styled_axes(builder, *x_range, *y_range, config);
+                let axes = Self::styled_axes(builder, *x_range, *y_range, config, frame_bounds);
                 Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
                 axes
             }
