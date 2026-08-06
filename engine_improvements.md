@@ -16,7 +16,7 @@ programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 ## Resumen ejecutivo
 
-**Estado de producto: alfa funcional (`gaanim` 0.3.0).**
+**Estado de producto: alfa funcional (`gaanim` 0.1.0).**
 
 Gaanim ya puede construir, previsualizar y exportar animaciones vectoriales 2D con
 formas, texto, fórmulas matemáticas, composición temporal, segmentos, transiciones y
@@ -63,7 +63,7 @@ En términos prácticos:
 
 - `cargo check --workspace` finaliza correctamente.
 - El workspace contiene 13 crates de gaanim más el crate de documentación.
-- El paquete declara versión Python `0.3.0`; varios crates Rust siguen en `0.1.0`.
+- El paquete declara versión Python `0.1.0`; varios crates Rust siguen en `0.1.0`.
 - La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
   `Anchor`, `Direction` y `Updater`. `Canvas(...)` emite una deprecación y devuelve un
   `Scene`; la configuración visual vive en `scene.canvas`.
@@ -113,7 +113,7 @@ Video / Presentation
 
 No hay releases públicas ni entornos externos de prueba que requieran compatibilidad con
 la fachada `Canvas`. Por ello, no se necesita un ciclo largo de deprecación: el cambio se
-hará directamente durante 0.3.x. Si resulta útil para migrar ejemplos locales, podrá
+hará directamente durante 0.1.x. Si resulta útil para migrar ejemplos locales, podrá
 existir temporalmente un alias `Canvas = Scene`, marcado como deprecado y sin aparecer en
 la documentación nueva. Debe eliminarse antes de 1.0.
 
@@ -478,7 +478,7 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 
 ## Roadmap propuesto por releases
 
-### 0.3.x — Convergencia y confiabilidad
+### 0.1.x — Convergencia y confiabilidad
 
 - [x] Terminar y probar el morph con regresión visual.
 - [x] Recuperar `Scene` como fachada pública y deprecar `Canvas` como punto de entrada.

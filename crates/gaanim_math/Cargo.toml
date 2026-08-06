@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_math"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2024"
 description = "Spatial transforms, bounding boxes, camera systems, and easing functions for gaanim v2"
 

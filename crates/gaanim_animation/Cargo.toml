@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_animation"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2024"
 description = "Tween systems, interpolation lenses, keyframes, and reactive signals for gaanim v2"
 

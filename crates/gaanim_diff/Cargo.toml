@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_diff"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2024"
 description = "Sparse seek snapshots and portable visual regression reports for gaanim"
 
