@@ -3954,14 +3954,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             next_id_fn,
             &mut child_spans,
         );
-        self.register_textual_hierarchy(
-            parent_id,
-            entity,
-            bounds,
-            fill,
-            stroke,
-            child_spans,
-        )
+        self.register_textual_hierarchy(parent_id, entity, bounds, fill, stroke, child_spans)
     }
 
     /// Convenience wrapper for `typst` that uses explicit fonts for both text and math.

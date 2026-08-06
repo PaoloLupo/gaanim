@@ -4,16 +4,21 @@ use gaanim_timeline::clip::{ClipId, ClipPayload, PropertyLensSpec, TrackId};
 use gaanim_timeline::timeline::Timeline;
 use std::collections::{HashMap, HashSet};
 
-// ── Color palette ──────────────────────────────────────────────────────
-const BG: Color32 = Color32::from_rgb(26, 26, 26);
-const TRACK_EVEN: Color32 = Color32::from_rgb(37, 37, 37);
-const RULER_BG: Color32 = Color32::from_rgb(45, 45, 45);
-const HEADER_BG: Color32 = Color32::from_rgb(35, 35, 35);
-const GRID_MAJOR: Color32 = Color32::from_rgb(55, 55, 55);
-const GRID_MINOR: Color32 = Color32::from_rgb(45, 45, 45);
-const PLAYHEAD: Color32 = Color32::from_rgb(255, 60, 60);
-const SELECTION: Color32 = Color32::from_rgb(68, 160, 255);
-const TEXT: Color32 = Color32::from_rgb(200, 200, 200);
+// ── Color palette (Premiere-inspired) ─────────────────────────────────
+const BG: Color32 = Color32::from_rgb(22, 22, 24);
+const TRACK_EVEN: Color32 = Color32::from_rgb(32, 32, 36);
+const TRACK_ODD: Color32 = Color32::from_rgb(28, 28, 32);
+const TRACK_HOVER: Color32 = Color32::from_rgb(42, 42, 48);
+const TRACK_SELECTED: Color32 = Color32::from_rgb(38, 52, 78);
+const RULER_BG: Color32 = Color32::from_rgb(36, 36, 40);
+const HEADER_BG: Color32 = Color32::from_rgb(30, 30, 34);
+const GRID_MAJOR: Color32 = Color32::from_rgb(60, 60, 66);
+const GRID_MINOR: Color32 = Color32::from_rgb(44, 44, 50);
+const PLAYHEAD: Color32 = Color32::from_rgb(255, 70, 70);
+const SELECTION: Color32 = Color32::from_rgb(75, 140, 255);
+const SELECTION_ACCENT: Color32 = Color32::from_rgb(75, 140, 255);
+const TEXT: Color32 = Color32::from_rgb(210, 210, 215);
+const TEXT_MUTED: Color32 = Color32::from_rgb(150, 150, 160);
 
 const TEXT_LABEL: Color32 = Color32::from_rgb(240, 240, 240);
 
@@ -256,6 +261,21 @@ impl TimelineWidget {
                 .is_some()
         });
 
+        // Hovered track (for highlight)
+        let hovered_track = hover_pos.and_then(|pos| {
+            if !tracks_rect.contains(pos) {
+                return None;
+            }
+            for (tid, layout) in &track_layouts {
+                let y0 = tracks_rect.min.y + layout.header_y - self.scroll_y;
+                let h = self.track_height + layout.prop_count as f32 * self.property_row_height;
+                if pos.y >= y0 && pos.y < y0 + h {
+                    return Some(*tid);
+                }
+            }
+            None
+        });
+
         // Input first so dragging feels responsive
         self.handle_input(
             ui,
@@ -277,7 +297,15 @@ impl TimelineWidget {
         let cp = ui.painter_at(clips_rect); // clips-region painter for clean clipping
         self.paint_zoom_bar(&p, zoom_bar_rect, clips_rect, timeline);
         self.paint_ruler(&p, ruler_rect);
-        self.paint_track_bg(&p, tracks_rect, label_rect, timeline, &track_layouts);
+        self.paint_track_bg(
+            &p,
+            tracks_rect,
+            label_rect,
+            timeline,
+            &track_layouts,
+            hovered_track,
+            self.selected_track,
+        );
         self.paint_grid(&cp, clips_rect, timeline);
         self.paint_clips(
             &cp,
@@ -298,9 +326,34 @@ impl TimelineWidget {
         {
             let mut lp = ui.painter_at(label_rect);
             lp.set_clip_rect(label_rect);
-            self.paint_track_labels(&lp, label_rect, timeline, &track_layouts, group_children);
+            self.paint_track_labels(
+                &lp,
+                label_rect,
+                timeline,
+                &track_layouts,
+                group_children,
+                hovered_track,
+                self.selected_track,
+            );
         }
         self.paint_divider(&p, label_rect, tracks_rect);
+        self.paint_vertical_scrollbar(&p, tracks_rect, content_height);
+        // Empty state placeholder (Premiere-like)
+        if timeline.clips.is_empty() && self.scene_expanded {
+            let msg_rect = Rect::from_center_size(
+                clips_rect.center(),
+                Vec2::new(280.0, 40.0),
+            );
+            p.rect_filled(msg_rect, 6u8, Color32::from_rgba_premultiplied(40, 40, 46, 220));
+            p.rect_stroke(msg_rect, 6u8, Stroke::new(1.0, Color32::from_rgb(70, 70, 80)), StrokeKind::Inside);
+            p.text(
+                msg_rect.center(),
+                Align2::CENTER_CENTER,
+                "No clips — add animations in Python",
+                FontId::proportional(11.0),
+                TEXT_MUTED,
+            );
+        }
         self.paint_keyframes(&p, ruler_rect, timeline);
         self.paint_playhead(&cp, clips_rect, ruler_rect.min.y, timeline);
         self.paint_track_properties(
@@ -404,29 +457,62 @@ impl TimelineWidget {
         (layouts, total.max(self.track_height))
     }
 
-    // ── Header ──────────────────────────────────────────────────────────
+    // ── Header (Premiere-style) ───────────────────────────────────────
     fn paint_header(&mut self, ui: &mut egui::Ui, timeline: &mut Timeline) {
-        let play_text = if timeline.is_playing { "⏸" } else { "▶" };
-        if ui.button(play_text).clicked() {
+        // Style helpers
+        let btn_fill = |active: bool| {
+            if active {
+                Color32::from_rgb(55, 90, 140)
+            } else {
+                Color32::from_rgb(45, 45, 48)
+            }
+        };
+        let btn_stroke = Color32::from_rgb(70, 70, 75);
+        let mk_btn = |label: &str, active: bool| {
+            egui::Button::new(egui::RichText::new(label).size(12.0).color(TEXT_LABEL))
+                .fill(btn_fill(active))
+                .stroke(egui::Stroke::new(1.0, btn_stroke))
+                .corner_radius(4.0)
+                .min_size(Vec2::new(28.0, 22.0))
+        };
+
+        // ── Left: transport ───────────────────────────────────────────────
+        let play_active = timeline.is_playing;
+        if ui
+            .add(mk_btn(
+                if play_active { "⏸" } else { "▶" },
+                play_active,
+            ))
+            .on_hover_text("Play / Pause (Space)")
+            .clicked()
+        {
             timeline.is_playing = !timeline.is_playing;
         }
-        if ui.button("⏮").clicked() {
+        if ui
+            .add(mk_btn("⏮", false))
+            .on_hover_text("Go to start (Home)")
+            .clicked()
+        {
             timeline.is_playing = false;
             timeline.seek_request = Some(0.0);
         }
-        if ui.button("⏭").clicked() {
+        if ui
+            .add(mk_btn("⏭", false))
+            .on_hover_text("Go to end (End)")
+            .clicked()
+        {
             timeline.is_playing = false;
             timeline.seek_request = Some(timeline.cached_duration);
         }
-
-        ui.separator();
-
-        // Loop toggle
+        ui.add_space(6.0);
         let loop_active = timeline.loop_range.is_some();
-        let loop_text = if loop_active { "🔁" } else { "➡" };
         if ui
-            .selectable_label(loop_active, loop_text)
-            .on_hover_text("Loop playback")
+            .add(mk_btn(if loop_active { "🔁" } else { "↻" }, loop_active))
+            .on_hover_text(if loop_active {
+                "Loop: ON"
+            } else {
+                "Loop: OFF"
+            })
             .clicked()
         {
             if loop_active {
@@ -439,29 +525,72 @@ impl TimelineWidget {
 
         ui.separator();
 
-        // Show clip info on hover, otherwise time label
-        if let Some(info) = &self.hovered_clip_info {
-            ui.label(info);
+        // ── Center: timecode + hover info ──────────────────────────────────
+        let time_text = if let Some(info) = &self.hovered_clip_info {
+            egui::RichText::new(info.clone())
+                .size(11.0)
+                .color(Color32::from_rgb(180, 220, 255))
         } else {
-            ui.label(format!(
-                "{:.2}s / {:.2}s",
-                timeline.current_time, timeline.cached_duration
-            ));
-        }
+            egui::RichText::new(format!(
+                "{:.2}s / {:.2}s  •  {} clips",
+                timeline.current_time,
+                timeline.cached_duration,
+                timeline.clips.len()
+            ))
+            .size(11.0)
+            .color(TEXT)
+        };
+        ui.label(time_text);
 
+        // ── Right: view controls ───────────────────────────────────────────
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Fit").clicked() {
+            // Fit
+            if ui
+                .add(mk_btn("Fit", false))
+                .on_hover_text("Fit timeline to view (double-click zoom bar)")
+                .clicked()
+            {
                 let dur = timeline.cached_duration.max(1.0);
                 let w = self.last_canvas_width.max(100.0);
                 self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
                 self.scroll_offset = 0.0;
             }
+            ui.add_space(8.0);
+            // Zoom slider (premiere-like)
+            let zoom_resp = ui.add(
+                egui::Slider::new(&mut self.pixels_per_second, 20.0..=500.0)
+                    .logarithmic(true)
+                    .show_value(false)
+                    .handle_shape(egui::style::HandleShape::Circle)
+                    .text(""),
+            );
+            if zoom_resp.on_hover_text("Zoom (Ctrl+Scroll)").hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            // Snap toggle
+            let snap_label = if self.snap_enabled { "🧲" } else { "○" };
+            if ui
+                .add(mk_btn(snap_label, self.snap_enabled))
+                .on_hover_text(if self.snap_enabled {
+                    "Snap: ON (magnet to playhead/clips)"
+                } else {
+                    "Snap: OFF"
+                })
+                .clicked()
+            {
+                self.snap_enabled = !self.snap_enabled;
+            }
         });
     }
 
-    // ── Ruler ───────────────────────────────────────────────────────────
+    // ── Ruler (Premiere-like: timecode + ticks) ───────────────────────
     fn paint_ruler(&self, p: &egui::Painter, rect: Rect) {
+        // Background with bottom border
         p.rect_filled(rect, 0u8, RULER_BG);
+        p.line_segment(
+            [Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)],
+            Stroke::new(1.0, Color32::from_rgb(55, 55, 60)),
+        );
 
         let (major, minor) = self.tick_intervals(rect);
         let t0 = self.x_to_time(rect.min.x, rect);
@@ -474,35 +603,49 @@ impl TimelineWidget {
                 || ((t / major) - (t / major).round()).abs() < 1e-9;
 
             let h = if is_major {
-                rect.height()
+                rect.height() - 4.0
             } else {
-                rect.height() * 0.45
+                rect.height() * 0.38
             };
             let c = if is_major {
-                Color32::from_rgb(200, 200, 200)
+                Color32::from_rgb(210, 210, 215)
             } else {
-                Color32::from_rgb(120, 120, 120)
+                Color32::from_rgb(110, 110, 120)
             };
             p.line_segment(
                 [Pos2::new(x, rect.max.y - h), Pos2::new(x, rect.max.y)],
-                Stroke::new(1.0, c),
+                Stroke::new(if is_major { 1.0 } else { 0.7 }, c),
             );
 
             if is_major {
+                // Timecode: mm:ss.d
+                let secs = t.max(0.0);
+                let mins = (secs / 60.0).floor() as i32;
+                let secs_rem = secs % 60.0;
+                let label = if mins > 0 {
+                    format!("{}:{:04.1}", mins, secs_rem)
+                } else {
+                    format!("{:.1}s", secs)
+                };
                 p.text(
-                    Pos2::new(x + 3.0, rect.min.y + 1.0),
+                    Pos2::new(x + 4.0, rect.min.y + 2.0),
                     Align2::LEFT_TOP,
-                    format!("{t:.1}s"),
-                    FontId::proportional(11.0),
-                    Color32::from_rgb(200, 200, 200),
+                    label,
+                    FontId::proportional(10.0),
+                    Color32::from_rgb(190, 190, 200),
                 );
             }
 
             t += minor;
         }
+        // Top highlight
+        p.line_segment(
+            [Pos2::new(rect.min.x, rect.min.y), Pos2::new(rect.max.x, rect.min.y)],
+            Stroke::new(1.0, Color32::from_white_alpha(8)),
+        );
     }
 
-    // ── Track backgrounds (drawn BEFORE clips) ────────────────────────
+    // ── Track backgrounds (Premiere-like alternating + hover/selection) ──
     fn paint_track_bg(
         &self,
         p: &egui::Painter,
@@ -510,38 +653,72 @@ impl TimelineWidget {
         label_rect: Rect,
         _timeline: &Timeline,
         track_layouts: &HashMap<TrackId, TrackLayout>,
+        hovered: Option<TrackId>,
+        selected: Option<TrackId>,
     ) {
         p.rect_filled(rect, 0u8, BG);
-
-        p.rect_filled(label_rect, 0u8, Color32::from_rgb(30, 30, 30));
+        p.rect_filled(label_rect, 0u8, Color32::from_rgb(28, 28, 30));
 
         if self.show_scene_header {
             let hdr = Rect::from_min_size(
                 Pos2::new(rect.min.x, rect.min.y),
                 Vec2::new(rect.width(), self.track_height),
             );
-            p.rect_filled(hdr, 0u8, Color32::from_rgb(30, 30, 30));
+            // Subtle header with bottom border
+            p.rect_filled(hdr, 0u8, Color32::from_rgb(32, 32, 36));
+            p.line_segment(
+                [Pos2::new(hdr.min.x, hdr.max.y), Pos2::new(hdr.max.x, hdr.max.y)],
+                Stroke::new(1.0, Color32::from_rgb(50, 50, 56)),
+            );
         }
 
         if !self.scene_expanded {
             return;
         }
 
-        for layout in track_layouts.values() {
+        // Sort for stable alternating
+        let mut sorted: Vec<(&TrackId, &TrackLayout)> = track_layouts.iter().collect();
+        sorted.sort_by_key(|(_, l)| l.header_y as i32);
+
+        for (idx, (tid, layout)) in sorted.iter().enumerate() {
+            let is_hovered = hovered == Some(**tid);
+            let is_selected = selected == Some(**tid);
+            let base = if idx % 2 == 0 { TRACK_EVEN } else { TRACK_ODD };
+            let bg = if is_selected {
+                TRACK_SELECTED
+            } else if is_hovered {
+                TRACK_HOVER
+            } else {
+                base
+            };
             let y = rect.min.y + layout.header_y - self.scroll_y;
 
+            // Left label bg with accent border when selected
             let lb = Rect::from_min_size(
                 label_rect.min + Vec2::new(0.0, layout.header_y - self.scroll_y),
                 Vec2::new(label_rect.width(), self.track_height),
             );
-            let bg = TRACK_EVEN;
-            p.rect_filled(lb, 0u8, bg);
+            p.rect_filled(lb, 2u8, bg);
+            if is_selected {
+                p.rect_stroke(lb, 2u8, Stroke::new(2.0, SELECTION_ACCENT), StrokeKind::Inside);
+                // Left accent bar
+                p.rect_filled(
+                    Rect::from_min_size(lb.min, Vec2::new(3.0, lb.height())),
+                    0u8,
+                    SELECTION_ACCENT,
+                );
+            } else if is_hovered {
+                p.rect_stroke(lb, 2u8, Stroke::new(1.0, Color32::from_rgb(60, 60, 70)), StrokeKind::Inside);
+            }
 
             let cb = Rect::from_min_size(
                 Pos2::new(label_rect.max.x, y),
                 Vec2::new(rect.max.x - label_rect.max.x, self.track_height),
             );
-            p.rect_filled(cb, 0u8, bg);
+            p.rect_filled(cb, 2u8, bg);
+            if is_selected {
+                p.rect_stroke(cb, 2u8, Stroke::new(1.0, SELECTION_ACCENT.linear_multiply(0.6)), StrokeKind::Inside);
+            }
 
             for i in 0..layout.prop_count {
                 let py = y + self.track_height + i as f32 * self.property_row_height;
@@ -549,13 +726,29 @@ impl TimelineWidget {
                     Pos2::new(label_rect.min.x, py),
                     Vec2::new(label_rect.width(), self.property_row_height),
                 );
-                p.rect_filled(plb, 0u8, PROP_ROW_BG);
                 let pcb = Rect::from_min_size(
                     Pos2::new(label_rect.max.x, py),
                     Vec2::new(rect.max.x - label_rect.max.x, self.property_row_height),
                 );
-                p.rect_filled(pcb, 0u8, PROP_ROW_BG);
+                // Property rows slightly darker
+                let prop_bg = if is_hovered {
+                    Color32::from_rgb(38, 38, 44)
+                } else {
+                    PROP_ROW_BG
+                };
+                p.rect_filled(plb, 0u8, prop_bg);
+                p.rect_filled(pcb, 0u8, prop_bg);
+                p.line_segment(
+                    [Pos2::new(plb.min.x, py), Pos2::new(pcb.max.x, py)],
+                    Stroke::new(0.5, PROP_SEPARATOR),
+                );
             }
+            // Bottom hairline
+            let bottom_y = y + self.track_height + layout.prop_count as f32 * self.property_row_height;
+            p.line_segment(
+                [Pos2::new(rect.min.x, bottom_y), Pos2::new(rect.max.x, bottom_y)],
+                Stroke::new(0.5, Color32::from_rgb(45, 45, 50)),
+            );
         }
     }
 
@@ -576,7 +769,7 @@ impl TimelineWidget {
         );
     }
 
-    // ── Track labels in sidebar (drawn AFTER clips) ──────────────────
+    // ── Track labels (Premiere-like: accent bar + type icon + badges) ──
     fn paint_track_labels(
         &self,
         p: &egui::Painter,
@@ -584,81 +777,115 @@ impl TimelineWidget {
         timeline: &Timeline,
         track_layouts: &HashMap<TrackId, TrackLayout>,
         group_children: &HashMap<TrackId, Vec<TrackId>>,
+        hovered: Option<TrackId>,
+        selected: Option<TrackId>,
     ) {
         if !self.scene_expanded {
             return;
         }
         for (track_id, layout) in track_layouts {
             let y = label_rect.min.y + layout.header_y - self.scroll_y;
-            if let Some(t) = timeline.tracks.get(*track_id) {
-                let is_group = group_children.contains_key(track_id);
-                let has_props = timeline
-                    .tracks
-                    .get(*track_id)
-                    .and_then(|t| t.object_id)
-                    .is_some();
-                let indent = layout.depth as f32 * 16.0;
-                let label = if is_group || has_props {
-                    let expanded = self.expanded_tracks.contains(track_id);
-                    let arrow = if expanded { "\u{25BE}" } else { "\u{25B8}" };
-                    format!("{} {}", arrow, t.name)
-                } else {
-                    t.name.clone()
-                };
-                p.text(
-                    Pos2::new(label_rect.min.x + 6.0 + indent, y + self.track_height / 2.0),
-                    Align2::LEFT_CENTER,
-                    &label,
-                    FontId::proportional(11.0),
-                    TEXT,
-                );
-
-                // Badge: updater icon
-                if layout.has_updater {
-                    let badge_x = label_rect.max.x - 18.0;
-                    p.text(
-                        Pos2::new(badge_x, y + self.track_height / 2.0),
-                        Align2::LEFT_CENTER,
-                        "\u{1F504}",
-                        FontId::proportional(9.0),
-                        CLR_UPDATER_BADGE,
-                    );
-                }
-
-                // Badge: signal icon (diamond dot)
-                if layout.has_signal {
-                    let badge_x = if layout.has_updater {
-                        label_rect.max.x - 34.0
-                    } else {
-                        label_rect.max.x - 18.0
-                    };
-                    p.text(
-                        Pos2::new(badge_x, y + self.track_height / 2.0),
-                        Align2::LEFT_CENTER,
-                        "\u{25C6}",
-                        FontId::proportional(9.0),
-                        CLR_SIGNAL_ACCENT,
-                    );
-                }
-
-                // Badge: decimal display icon
-                if layout.has_decimal {
-                    let badge_x = if layout.has_updater && layout.has_signal {
-                        label_rect.max.x - 50.0
-                    } else if layout.has_updater || layout.has_signal {
-                        label_rect.max.x - 34.0
-                    } else {
-                        label_rect.max.x - 18.0
-                    };
-                    p.text(
-                        Pos2::new(badge_x, y + self.track_height / 2.0),
-                        Align2::LEFT_CENTER,
-                        "\u{2116}",
-                        FontId::proportional(9.0),
-                        CLR_DECIMAL_ACCENT,
-                    );
-                }
+            // Cull offscreen
+            if y + self.track_height < label_rect.min.y - 10.0
+                || y > label_rect.max.y + 10.0
+            {
+                continue;
             }
+            let Some(t) = timeline.tracks.get(*track_id) else {
+                continue;
+            };
+            let is_group = group_children.contains_key(track_id);
+            let has_props = timeline
+                .tracks
+                .get(*track_id)
+                .and_then(|t| t.object_id)
+                .is_some();
+            let is_hovered = hovered == Some(*track_id);
+            let is_selected = selected == Some(*track_id);
+            let indent = layout.depth as f32 * 16.0;
+
+            // Accent color from first clip (track type)
+            let accent = timeline
+                .clips
+                .values()
+                .find(|c| c.track == *track_id)
+                .map(|c| clip_color(&c.payload))
+                .unwrap_or(Color32::from_rgb(80, 80, 90));
+            // Left accent bar
+            let bar_rect = Rect::from_min_size(
+                Pos2::new(label_rect.min.x, y + 2.0),
+                Vec2::new(3.0, self.track_height - 4.0),
+            );
+            p.rect_filled(bar_rect, 1u8, accent);
+
+            let label = if is_group || has_props {
+                let expanded = self.expanded_tracks.contains(track_id);
+                let arrow = if expanded { "▾" } else { "▸" };
+                format!("{} {}", arrow, t.name)
+            } else {
+                t.name.clone()
+            };
+            let text_color = if is_selected {
+                Color32::WHITE
+            } else if is_hovered {
+                TEXT_LABEL
+            } else {
+                TEXT
+            };
+            let text_x = label_rect.min.x + 10.0 + indent;
+            p.text(
+                Pos2::new(text_x, y + self.track_height / 2.0),
+                Align2::LEFT_CENTER,
+                &label,
+                FontId::proportional(11.0),
+                text_color,
+            );
+
+            // Right side: badges + visibility/lock placeholders (Premiere-like)
+            let mut badge_x = label_rect.max.x - 14.0;
+            // Decimal
+            if layout.has_decimal {
+                p.text(
+                    Pos2::new(badge_x, y + self.track_height / 2.0),
+                    Align2::RIGHT_CENTER,
+                    "№",
+                    FontId::proportional(9.0),
+                    if is_selected { Color32::WHITE } else { CLR_DECIMAL_ACCENT },
+                );
+                badge_x -= 16.0;
+            }
+            if layout.has_updater {
+                p.text(
+                    Pos2::new(badge_x, y + self.track_height / 2.0),
+                    Align2::RIGHT_CENTER,
+                    "◷",
+                    FontId::proportional(10.0),
+                    if is_selected { Color32::WHITE } else { CLR_UPDATER_BADGE },
+                );
+                badge_x -= 16.0;
+            }
+            if layout.has_signal {
+                p.text(
+                    Pos2::new(badge_x, y + self.track_height / 2.0),
+                    Align2::RIGHT_CENTER,
+                    "◆",
+                    FontId::proportional(8.0),
+                    if is_selected { Color32::WHITE } else { CLR_SIGNAL_ACCENT },
+                );
+                badge_x -= 16.0;
+            }
+            // Visibility eye (always show faint)
+            p.text(
+                Pos2::new(badge_x, y + self.track_height / 2.0),
+                Align2::RIGHT_CENTER,
+                "👁",
+                FontId::proportional(8.0),
+                if is_hovered || is_selected {
+                    TEXT_MUTED
+                } else {
+                    Color32::from_rgb(70, 70, 75)
+                },
+            );
         }
     }
 
@@ -801,7 +1028,41 @@ impl TimelineWidget {
                 ],
                 Stroke::new(1.0, Color32::from_rgb(80, 80, 80)),
             );
+            // Grip dots on divider
+            let mid_y = (tracks_rect.min.y + tracks_rect.max.y) / 2.0;
+            for dy in [-12.0, -6.0, 0.0, 6.0, 12.0] {
+                p.circle_filled(
+                    Pos2::new(div_x, mid_y + dy),
+                    1.2,
+                    Color32::from_rgb(100, 100, 110),
+                );
+            }
         }
+    }
+
+    // ── Vertical scrollbar (when content overflows) ─────────────────────
+    fn paint_vertical_scrollbar(&self, p: &egui::Painter, rect: Rect, content_h: f32) {
+        let visible_h = rect.height();
+        if content_h <= visible_h + 1.0 {
+            return;
+        }
+        let bar_w = 6.0;
+        let bar_rect = Rect::from_min_size(
+            Pos2::new(rect.max.x - bar_w - 2.0, rect.min.y),
+            Vec2::new(bar_w, visible_h),
+        );
+        // Track
+        p.rect_filled(bar_rect, 3u8, Color32::from_rgb(35, 35, 40));
+        // Thumb
+        let thumb_h = (visible_h * visible_h / content_h).clamp(20.0, visible_h * 0.8);
+        let max_scroll = (content_h - visible_h).max(1.0);
+        let thumb_y = bar_rect.min.y + (self.scroll_y / max_scroll) * (visible_h - thumb_h);
+        let thumb_rect = Rect::from_min_size(
+            Pos2::new(bar_rect.min.x + 1.0, thumb_y),
+            Vec2::new(bar_w - 2.0, thumb_h),
+        );
+        p.rect_filled(thumb_rect, 3u8, Color32::from_rgb(90, 90, 100));
+        p.rect_stroke(thumb_rect, 3u8, Stroke::new(1.0, Color32::from_rgb(120, 120, 130)), StrokeKind::Inside);
     }
 
     // ── Grid ────────────────────────────────────────────────────────────
@@ -853,12 +1114,33 @@ impl TimelineWidget {
             let y = rect.min.y + layout.header_y - self.scroll_y + 2.0;
             let ch = self.track_height - 4.0;
 
-            let color = clip_color(&clip.payload);
+            let base_color = clip_color(&clip.payload);
             let cr = Rect::from_min_size(Pos2::new(x1, y), Vec2::new((x2 - x1).max(2.0), ch));
-
             let is_hovered = hover_pos.is_some_and(|pos| cr.contains(pos));
-            let fill = if is_hovered { lighten(color) } else { color };
-            p.rect_filled(cr, 3u8, fill);
+            let is_selected = self.selected_clip == Some(clip.id);
+            // Shadow
+            let shadow_rect = cr.translate(Vec2::new(1.0, 1.0));
+            p.rect_filled(shadow_rect, 3u8, Color32::from_black_alpha(40));
+            // Fill with hover brightening
+            let fill = if is_selected {
+                lighten(base_color)
+            } else if is_hovered {
+                lighten(base_color)
+            } else {
+                base_color
+            };
+            p.rect_filled(cr, 4u8, fill);
+            // Top accent strip (darker)
+            let accent = Color32::from_rgba_premultiplied(
+                (base_color.r() as f32 * 0.7) as u8,
+                (base_color.g() as f32 * 0.7) as u8,
+                (base_color.b() as f32 * 0.7) as u8,
+                255,
+            );
+            let top_strip = Rect::from_min_size(cr.min, Vec2::new(cr.width(), 3.0));
+            p.rect_filled(top_strip, 2u8, accent);
+            // Inner highlight
+            p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::from_white_alpha(22)), StrokeKind::Inside);
 
             // ── Value ramp indicator for SignalFloat clips ──────────
             if let ClipPayload::Animation(anim) = &clip.payload {
@@ -876,7 +1158,6 @@ impl TimelineWidget {
                         } else {
                             Color32::from_rgb(200, 100, 100)
                         };
-                        // Draw a tiny gradient ramp: 4-segment approximation
                         let segments = 8;
                         let seg_w = (cr.width() / segments as f32).max(1.0);
                         for s in 0..segments {
@@ -894,9 +1175,8 @@ impl TimelineWidget {
                             );
                         }
                     }
-                    // Show from→to values on hover
                     if is_hovered {
-                        let val_label = format!("{:.2}\u{2192}{:.2}", from, to);
+                        let val_label = format!("{:.2}→{:.2}", from, to);
                         p.text(
                             Pos2::new(cr.min.x + 4.0, cr.max.y - 8.0),
                             Align2::LEFT_BOTTOM,
@@ -908,17 +1188,64 @@ impl TimelineWidget {
                 }
             }
 
+            // Icon + label
+            let icon = clip_icon(&clip.payload);
             let label = clip_label(&clip.payload);
-            p.text(
-                Pos2::new(cr.min.x + 4.0, cr.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                FontId::proportional(10.0),
-                TEXT_LABEL,
-            );
+            let label_x = cr.min.x + 6.0;
+            // Clip text to width
+            let available = cr.width() - 12.0;
+            if available > 20.0 {
+                p.text(
+                    Pos2::new(label_x, cr.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("{} {}", icon, label),
+                    FontId::proportional(10.0),
+                    TEXT_LABEL,
+                );
+            }
+            // Duration at bottom-right when wide enough
+            if cr.width() > 60.0 {
+                let dur_label = format!("{:.1}s", clip.duration);
+                p.text(
+                    Pos2::new(cr.max.x - 4.0, cr.max.y - 2.0),
+                    Align2::RIGHT_BOTTOM,
+                    dur_label,
+                    FontId::proportional(7.0),
+                    Color32::from_white_alpha(140),
+                );
+            }
 
-            if self.selected_clip == Some(clip.id) {
-                p.rect_stroke(cr, 3u8, Stroke::new(2.0, SELECTION), StrokeKind::Inside);
+            // Handles
+            if is_hovered || is_selected {
+                let handle_w = 4.0;
+                let handle_h = cr.height() * 0.55;
+                let handle_y = cr.center().y - handle_h / 2.0;
+                // Left handle
+                p.rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(cr.min.x - 1.0, handle_y),
+                        Vec2::new(handle_w, handle_h),
+                    ),
+                    2u8,
+                    Color32::from_white_alpha(210),
+                );
+                // Right handle
+                p.rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(cr.max.x - handle_w + 1.0, handle_y),
+                        Vec2::new(handle_w, handle_h),
+                    ),
+                    2u8,
+                    Color32::from_white_alpha(210),
+                );
+            }
+
+            if is_selected {
+                // Outer glow + stroke
+                p.rect_stroke(cr.expand(1.0), 5u8, Stroke::new(2.0, SELECTION), StrokeKind::Inside);
+                p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::WHITE), StrokeKind::Inside);
+            } else if is_hovered {
+                p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::from_white_alpha(90)), StrokeKind::Inside);
             }
         }
 
@@ -970,58 +1297,80 @@ impl TimelineWidget {
         }
     }
 
-    // ── Zoom bar ────────────────────────────────────────────────────────
+    // ── Zoom bar (Premiere-like scrollbar) ────────────────────────────
     fn paint_zoom_bar(&self, p: &egui::Painter, rect: Rect, clips_rect: Rect, timeline: &Timeline) {
-        p.rect_filled(rect, 0u8, Color32::from_rgb(25, 25, 25));
-
+        // Track background
+        p.rect_filled(rect, 2u8, Color32::from_rgb(28, 28, 32));
+        p.rect_stroke(rect, 2u8, Stroke::new(1.0, Color32::from_rgb(45, 45, 50)), StrokeKind::Inside);
+        // Subtle ticks in background
         let total = timeline.cached_duration.max(0.01);
         let bar_w = rect.width();
-
         let vw = clips_rect.width() as f64;
         let v_start = (self.scroll_offset as f64 / self.pixels_per_second).clamp(0.0, total);
         let v_end =
             ((self.scroll_offset + vw as f32) as f64 / self.pixels_per_second).clamp(0.0, total);
         let v_dur = (v_end - v_start).max(0.01);
-
         let l_ratio = v_start / total;
         let r_ratio = v_end / total;
-
         let win_l = rect.min.x + (l_ratio as f32 * bar_w);
         let win_r = rect.min.x + (r_ratio as f32 * bar_w);
-
-        // Window rect
+        // Window (visible range)
         let win_rect = Rect::from_min_size(
             Pos2::new(win_l, rect.min.y + 2.0),
-            Vec2::new((win_r - win_l).max(12.0), rect.height() - 4.0),
+            Vec2::new((win_r - win_l).max(16.0), rect.height() - 4.0),
         );
-        p.rect_filled(win_rect, 3u8, Color32::from_rgb(120, 120, 120));
+        // Window gradient-like fill
+        p.rect_filled(win_rect, 3u8, Color32::from_rgb(75, 75, 85));
+        p.rect_filled(
+            Rect::from_min_size(win_rect.min, Vec2::new(win_rect.width(), win_rect.height() * 0.5)),
+            3u8,
+            Color32::from_rgb(95, 95, 105),
+        );
         p.rect_stroke(
             win_rect,
             3u8,
-            Stroke::new(1.0, Color32::from_rgb(160, 160, 160)),
+            Stroke::new(1.0, Color32::from_rgb(130, 130, 140)),
             StrokeKind::Inside,
         );
-
-        // Label showing visible range / total
+        // Grip dots in center
+        if win_rect.width() > 24.0 {
+            let cx = win_rect.center().x;
+            let cy = win_rect.center().y;
+            for dx in [-6.0, 0.0, 6.0] {
+                p.circle_filled(Pos2::new(cx + dx as f32, cy), 1.5, Color32::from_rgb(200, 200, 210));
+            }
+        }
+        // Handles
+        let handle_w = 6.0;
+        p.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(win_rect.min.x - 1.0, win_rect.min.y),
+                Vec2::new(handle_w, win_rect.height()),
+            ),
+            2u8,
+            Color32::from_rgb(180, 180, 190),
+        );
+        p.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(win_rect.max.x - handle_w + 1.0, win_rect.min.y),
+                Vec2::new(handle_w, win_rect.height()),
+            ),
+            2u8,
+            Color32::from_rgb(180, 180, 190),
+        );
+        // Label
         let label = if v_dur >= 1.0 {
             format!("{:.0}s / {:.0}s", v_dur, total)
         } else {
             format!("{:.1}s / {:.0}s", v_dur, total)
         };
         let font = FontId::proportional(9.0);
-        let text_color = Color32::from_rgb(200, 200, 200);
-        // Center text in the window if wide enough, otherwise to the right
-        if win_rect.width() > 60.0 {
+        let text_color = Color32::from_rgb(220, 220, 230);
+        if win_rect.width() > 70.0 {
+            p.text(win_rect.center(), Align2::CENTER_CENTER, label, font, text_color);
+        } else if win_r + 4.0 < rect.max.x - 20.0 {
             p.text(
-                win_rect.center(),
-                Align2::CENTER_CENTER,
-                label,
-                font,
-                text_color,
-            );
-        } else {
-            p.text(
-                Pos2::new(win_r + 4.0, win_rect.center().y),
+                Pos2::new(win_r + 6.0, win_rect.center().y),
                 Align2::LEFT_CENTER,
                 label,
                 font,
@@ -1051,31 +1400,42 @@ impl TimelineWidget {
         }
     }
 
-    // ── Playhead ────────────────────────────────────────────────────────
+    // ── Playhead (Premiere-like) ──────────────────────────────────────
     fn paint_playhead(&self, p: &egui::Painter, rect: Rect, ruler_top: f32, timeline: &Timeline) {
         let x = self.time_to_x(timeline.current_time, rect);
-        if x < rect.min.x || x > rect.max.x {
+        if x < rect.min.x - 1.0 || x > rect.max.x + 1.0 {
             return;
         }
-
-        // Vertical line from ruler top to tracks bottom
+        // Glow behind line
         p.line_segment(
             [Pos2::new(x, ruler_top), Pos2::new(x, rect.max.y)],
-            Stroke::new(2.0, PLAYHEAD),
+            Stroke::new(4.0, Color32::from_rgba_premultiplied(255, 60, 60, 30)),
         );
-
-        // Triangle handle at the ruler top
-        let ts = 6.0;
-        let tri = [
-            Pos2::new(x, ruler_top),
-            Pos2::new(x - ts, ruler_top + ts),
-            Pos2::new(x + ts, ruler_top + ts),
-        ];
-        p.add(egui::Shape::convex_polygon(
-            tri.to_vec(),
-            PLAYHEAD,
-            Stroke::NONE,
-        ));
+        // Core line
+        p.line_segment(
+            [Pos2::new(x, ruler_top), Pos2::new(x, rect.max.y)],
+            Stroke::new(1.8, PLAYHEAD),
+        );
+        // Handle cap at ruler
+        let cap_w = 14.0;
+        let cap_h = 12.0;
+        let cap_rect = Rect::from_min_size(
+            Pos2::new(x - cap_w / 2.0, ruler_top - 1.0),
+            Vec2::new(cap_w, cap_h),
+        );
+        p.rect_filled(cap_rect, 2u8, PLAYHEAD);
+        p.rect_stroke(cap_rect, 2u8, Stroke::new(1.0, Color32::WHITE), StrokeKind::Inside);
+        // Inner dot
+        p.circle_filled(Pos2::new(x, ruler_top + cap_h / 2.0), 2.2, Color32::WHITE);
+        // Time label just below handle when not overlapping ruler text
+        let time_label = format!("{:.2}s", timeline.current_time);
+        p.text(
+            Pos2::new(x, ruler_top + cap_h + 4.0),
+            Align2::CENTER_TOP,
+            time_label,
+            FontId::proportional(9.0),
+            Color32::from_rgb(255, 200, 200),
+        );
     }
 
     // ── Input ───────────────────────────────────────────────────────────
@@ -1169,6 +1529,54 @@ impl TimelineWidget {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
         }
+
+        // ── Context menu (right-click, Premiere-like) ──────────────────────
+        if response.secondary_clicked() {
+            if let Some(pos) = hover_pos {
+                if let Some(cid) = self.hit_clip_body(pos, clips_rect, timeline, track_layouts) {
+                    self.selected_clip = Some(cid);
+                } else if let Some((cid, _)) =
+                    self.hit_clip_edge(pos, clips_rect, timeline, track_layouts)
+                {
+                    self.selected_clip = Some(cid);
+                }
+            }
+        }
+        response.context_menu(|ui| {
+            ui.set_min_width(180.0);
+            ui.label(egui::RichText::new("CLIP").weak().size(9.0).color(TEXT_MUTED));
+            let has_sel = self.selected_clip.is_some();
+            if ui
+                .add_enabled(has_sel, egui::Button::new("🗑  Delete  (Del)"))
+                .on_hover_text("Remove selected clip")
+                .clicked()
+            {
+                if let Some(cid) = self.selected_clip {
+                    timeline.remove_clip(cid);
+                    self.selected_clip = None;
+                }
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_sel, egui::Button::new("⎘  Duplicate"))
+                .on_hover_text("Duplicate clip (TODO)")
+                .clicked()
+            {
+                ui.close();
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("TIMELINE").weak().size(9.0).color(TEXT_MUTED));
+            if ui.button("◧  Split at playhead").clicked() {
+                ui.close();
+            }
+            if ui.button(" Fit to view ").clicked() {
+                let dur = timeline.cached_duration.max(1.0);
+                let w = clips_rect.width().max(100.0);
+                self.pixels_per_second = (w as f64 / dur).clamp(20.0, 500.0);
+                self.scroll_offset = 0.0;
+                ui.close();
+            }
+        });
 
         // Scroll → zoom (ctrl), vertical pan (shift or over tracks), or horizontal pan.
         let scroll = ui.input(|i| i.smooth_scroll_delta);
@@ -1662,6 +2070,43 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
         PropertyLensSpec::PathRange { .. } => Color32::from_rgb(255, 105, 180),
         PropertyLensSpec::PathMorph { .. } => Color32::from_rgb(100, 149, 237),
         PropertyLensSpec::Custom { .. } => Color32::from_rgb(200, 200, 200),
+    }
+}
+
+fn clip_icon(payload: &ClipPayload) -> &'static str {
+    match payload {
+        ClipPayload::Animation(a) => match &a.lens {
+            PropertyLensSpec::Translation { .. } => "↔",
+            PropertyLensSpec::Rotation { .. } => "⟲",
+            PropertyLensSpec::Scale { .. } => "⤢",
+            PropertyLensSpec::Opacity { .. } => "◐",
+            PropertyLensSpec::FillColor { .. } => "●",
+            PropertyLensSpec::StrokeColor { .. } => "◯",
+            PropertyLensSpec::StrokeWidth { .. } => "━",
+            PropertyLensSpec::PathCompletion { .. } => "✎",
+            PropertyLensSpec::FillDrawProgress { .. } => "⬔",
+            PropertyLensSpec::CameraPosition { .. } => "🎥",
+            PropertyLensSpec::CameraRotation { .. } => "🎞",
+            PropertyLensSpec::CameraZoom { .. } => "🔍",
+            PropertyLensSpec::CameraFollow { .. } => "🎯",
+            PropertyLensSpec::CameraShake { .. } => "〰",
+            PropertyLensSpec::PathFollow { .. } => "➰",
+            PropertyLensSpec::SignalFloat { .. } => "📈",
+            PropertyLensSpec::PathRange { .. } => "⚡",
+            PropertyLensSpec::PathMorph { .. } => "⬡",
+            PropertyLensSpec::Custom { .. } => "★",
+        },
+        ClipPayload::Audio { .. } => "♪",
+        ClipPayload::Wait => "⏳",
+        ClipPayload::Marker(_) => "⚑",
+        ClipPayload::Breakpoint => "🔴",
+        ClipPayload::SegmentStart(_) => "▶",
+        ClipPayload::Ungroup { .. } => "⧉",
+        ClipPayload::SceneStart(_) => "🎬",
+        ClipPayload::SceneEnd(_) => "■",
+        ClipPayload::RemoveUpdater { .. } => "✕",
+        ClipPayload::SetSceneMember { .. } => "👁",
+        ClipPayload::Transition { .. } => "⇄",
     }
 }
 

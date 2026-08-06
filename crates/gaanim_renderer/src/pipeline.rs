@@ -430,13 +430,21 @@ pub fn compile_scene_from_world(
             if let Some(fill_brush) = elem_fill {
                 if fill_alpha > 0.0 {
                     // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
-                    scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
+                    scene.push_clip_layer(
+                        peniko::Fill::NonZero,
+                        kurbo::Affine::IDENTITY,
+                        elem_path,
+                    );
 
                     let base_color = match fill_brush {
                         peniko::Brush::Solid(c) => *c,
                         _ => peniko::Color::WHITE,
                     };
-                    let illuminated_color = gaanim_core::interpolate_color(base_color, peniko::Color::WHITE, 0.22 * anim_wave);
+                    let illuminated_color = gaanim_core::interpolate_color(
+                        base_color,
+                        peniko::Color::WHITE,
+                        0.22 * anim_wave,
+                    );
 
                     // Soft interior ambient light pass (clipped strictly to character body)
                     draw_soft_fill(
@@ -483,7 +491,11 @@ pub fn compile_scene_from_world(
                     peniko::Brush::Solid(c) => *c,
                     _ => peniko::Color::WHITE,
                 };
-                let illuminated_stroke = gaanim_core::interpolate_color(base_stroke_color, peniko::Color::WHITE, 0.25 * anim_wave);
+                let illuminated_stroke = gaanim_core::interpolate_color(
+                    base_stroke_color,
+                    peniko::Color::WHITE,
+                    0.25 * anim_wave,
+                );
                 let boosted_style = kurbo::Stroke::new(style.width + 0.3 * anim_wave);
                 (peniko::Brush::Solid(illuminated_stroke), boosted_style)
             } else {
@@ -516,8 +528,6 @@ pub fn compile_scene_from_world(
                 );
             }
         }
-
-
 
         extracted.push(ExtractedElement {
             transform: transform.affine_2d,
@@ -854,13 +864,21 @@ pub fn gaanim_render_system(
                 if let Some(fill_brush) = elem_fill {
                     if fill_alpha > 0.0 {
                         // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
-                        scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
+                        scene.push_clip_layer(
+                            peniko::Fill::NonZero,
+                            kurbo::Affine::IDENTITY,
+                            elem_path,
+                        );
 
                         let base_color = match fill_brush {
                             peniko::Brush::Solid(c) => *c,
                             _ => peniko::Color::WHITE,
                         };
-                        let illuminated_color = gaanim_core::interpolate_color(base_color, peniko::Color::WHITE, 0.22 * anim_wave);
+                        let illuminated_color = gaanim_core::interpolate_color(
+                            base_color,
+                            peniko::Color::WHITE,
+                            0.22 * anim_wave,
+                        );
 
                         // Soft interior ambient light pass (clipped strictly to character body)
                         draw_soft_fill(
@@ -908,7 +926,11 @@ pub fn gaanim_render_system(
                         peniko::Brush::Solid(c) => *c,
                         _ => peniko::Color::WHITE,
                     };
-                    let illuminated_stroke = gaanim_core::interpolate_color(base_stroke_color, peniko::Color::WHITE, 0.25 * anim_wave);
+                    let illuminated_stroke = gaanim_core::interpolate_color(
+                        base_stroke_color,
+                        peniko::Color::WHITE,
+                        0.25 * anim_wave,
+                    );
                     let boosted_style = kurbo::Stroke::new(style.width + 0.3 * anim_wave);
                     (peniko::Brush::Solid(illuminated_stroke), boosted_style)
                 } else {

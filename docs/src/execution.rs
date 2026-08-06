@@ -507,9 +507,13 @@ pub fn compile_code_cell(
             // wait for exporter to finish flushing (Windows file lock)
             for _ in 0..15 {
                 if project_root.join(webp_name).exists() {
-                    let s1 = fs::metadata(project_root.join(webp_name)).map(|m| m.len()).unwrap_or(0);
+                    let s1 = fs::metadata(project_root.join(webp_name))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
                     std::thread::sleep(std::time::Duration::from_millis(120));
-                    let s2 = fs::metadata(project_root.join(webp_name)).map(|m| m.len()).unwrap_or(0);
+                    let s2 = fs::metadata(project_root.join(webp_name))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
                     if s1 == s2 && s1 > 1024 {
                         break;
                     }
@@ -518,7 +522,9 @@ pub fn compile_code_cell(
                 }
             }
             let src_path = project_root.join(webp_name);
-            let src_valid = fs::metadata(&src_path).map(|m| m.len() > 100).unwrap_or(false);
+            let src_valid = fs::metadata(&src_path)
+                .map(|m| m.len() > 100)
+                .unwrap_or(false);
             if src_valid {
                 let img_dir = project_root.join("assets/generated");
                 fs::create_dir_all(&img_dir).unwrap();
@@ -530,7 +536,12 @@ pub fn compile_code_cell(
                     if fs::copy(&src_path, &dest).is_ok() {
                         let _ = fs::remove_file(&src_path);
                     } else {
-                        eprintln!("Warning: could not move WebP '{}' -> '{}': {}", src_path.display(), dest.display(), e);
+                        eprintln!(
+                            "Warning: could not move WebP '{}' -> '{}': {}",
+                            src_path.display(),
+                            dest.display(),
+                            e
+                        );
                     }
                 }
                 // only set webp_path if dest now exists

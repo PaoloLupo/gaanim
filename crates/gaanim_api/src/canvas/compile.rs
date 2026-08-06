@@ -2353,15 +2353,9 @@ impl Canvas {
                 } else {
                     "#set page(height: auto, margin: 0pt)\n".to_string()
                 };
-                let source = format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
-                let mr = builder.typst(
-                    &source,
-                    false,
-                    Some(&body.font_family),
-                    None,
-                    None,
-                    None,
-                );
+                let source =
+                    format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let mr = builder.typst(&source, false, Some(&body.font_family), None, None, None);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr
