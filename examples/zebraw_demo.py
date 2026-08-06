@@ -29,7 +29,7 @@ scene.play([
     title.write(),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
     # layout.fade_in_from(Direction.DOWN, distance=30).duration(0.65),
-    layout.write(2)
+    layout.write(3)
 ])
 scene.wait(0.35)
 

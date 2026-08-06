@@ -23,7 +23,8 @@ mod python_home;
 mod script_runner;
 
 use hot_reload::{
-    ReloadReceiver, ReloadStatus, reload_listener_system, reload_status_overlay_system,
+    ReloadReceiver, ReloadStatus, ScriptError, ScriptErrorReceiver, reload_listener_system,
+    reload_status_overlay_system, script_error_listener_system, script_error_overlay_system,
 };
 
 fn main() {
@@ -57,11 +58,12 @@ fn main() {
         python_home::inject_venv_site_packages(venv);
     }
 
-    // 3. Set up the host<->script channel.
+    // 3. Set up the host<->script channels (payload + traceback).
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
+    let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
 
     // 4. Spawn the script-runner thread (holds the GIL, runs the script).
-    let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx);
+    let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx, error_tx);
 
     // 5. Spawn the file watcher and extract its channel endpoints.
     let file_watcher::FileWatcher { changed_rx, stop } =
@@ -117,13 +119,20 @@ fn main() {
     })
     .insert_resource(project_paths)
     .insert_resource(ReloadReceiver { rx: payload_rx })
+    .insert_resource(ScriptErrorReceiver { rx: error_rx })
     .insert_resource(ReloadStatus::default())
+    .insert_resource(ScriptError::default())
     .add_systems(
         Update,
         (
+            script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
             reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
             reload_status_overlay_system,
         ),
+    )
+    .add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        script_error_overlay_system,
     );
 
     app.run();

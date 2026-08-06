@@ -33,6 +33,19 @@ impl Default for ReloadStatus {
     }
 }
 
+/// Ultimo traceback de error del script, mostrado en el editor.
+#[derive(Resource, Default)]
+pub struct ScriptError {
+    pub message: Option<String>,
+    pub updated_at: Option<f64>,
+}
+
+/// Receiver para tracebacks enviados por el hilo de Python.
+#[derive(Resource)]
+pub struct ScriptErrorReceiver {
+    pub rx: Receiver<String>,
+}
+
 /// Despawn every mobject entity and reset the [`Timeline`]
 /// to a clean state. This is the "clear canvas" step before replaying fresh ops.
 ///
@@ -55,6 +68,30 @@ pub fn clear_scene_entities(world: &mut World) {
         tl.playback_rate = playback_rate;
         tl.loop_range = loop_range;
         tl.is_playing = false;
+    }
+}
+
+/// System: drains pending error strings and updates [`ScriptError`].
+pub fn script_error_listener_system(world: &mut World) {
+    let errors: Vec<String> = {
+        let Some(rx_res) = world.get_resource::<ScriptErrorReceiver>() else {
+            return;
+        };
+        rx_res.rx.try_iter().collect()
+    };
+    if errors.is_empty() {
+        return;
+    }
+    let last = errors.last().expect("checked non-empty").clone();
+    let now = world.resource::<Time>().elapsed_secs_f64();
+    if let Some(mut err) = world.get_resource_mut::<ScriptError>() {
+        err.message = Some(last);
+        err.updated_at = Some(now);
+    }
+    // limpiar el badge de éxito para no solapar
+    if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
+        status.last_message.clear();
+        status.shown_at = None;
     }
 }
 
@@ -106,6 +143,11 @@ pub fn reload_listener_system(world: &mut World) {
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.last_message = format!("Reloaded scene ({}x{})", width, height);
         status.shown_at = Some(now);
+    }
+    // Éxito limpia el error previo
+    if let Some(mut err) = world.get_resource_mut::<ScriptError>() {
+        err.message = None;
+        err.updated_at = None;
     }
 }
 
@@ -183,5 +225,102 @@ pub fn reload_status_overlay_system(
                             .small(),
                     );
                 });
+        });
+}
+
+/// Panel de error que muestra el traceback completo del script.
+///
+/// Persiste hasta el próximo reload exitoso o hasta que el usuario lo cierre con `Esc` o el botón.
+pub fn script_error_overlay_system(
+    mut ctx: bevy_egui::EguiContexts,
+    mut error: ResMut<ScriptError>,
+) {
+    let Some(msg) = error.message.clone() else {
+        return;
+    };
+    let Ok(ctx) = ctx.ctx_mut() else {
+        return;
+    };
+
+    // Esc cierra el panel
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        error.message = None;
+        error.updated_at = None;
+        return;
+    }
+
+    // Ventana centrada, con fondo oscuro y borde rojo (Foreground para no quedar detrás de toolbar)
+    egui::Window::new("Error en script  •  Esc para cerrar")
+        .id(egui::Id::new("script_error_window"))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Foreground)
+        .resizable(true)
+        .collapsible(false)
+        .min_width(560.0)
+        .min_height(220.0)
+        .default_width(720.0)
+        .default_height(380.0)
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_premultiplied(28, 14, 14, 245))
+                .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 60, 60)))
+                .corner_radius(10.0)
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: egui::Color32::from_rgba_premultiplied(0, 0, 0, 120),
+                })
+                .inner_margin(egui::Margin::symmetric(10, 10)),
+        )
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Traceback")
+                        .color(egui::Color32::from_rgb(255, 100, 100))
+                        .strong()
+                        .size(13.0),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button(egui::RichText::new("Cerrar  Esc").size(11.0))
+                        .on_hover_text("Descartar error (también Esc)")
+                        .clicked()
+                    {
+                        error.message = None;
+                        error.updated_at = None;
+                        return;
+                    }
+                    if ui
+                        .button(egui::RichText::new("Copiar").size(11.0))
+                        .on_hover_text("Copiar traceback al portapapeles")
+                        .clicked()
+                    {
+                        ctx.copy_text(msg.clone());
+                    }
+                });
+            });
+            ui.separator();
+            // Area scrolleable con monoespaciado
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .stick_to_bottom(false)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut msg.clone())
+                            .desired_width(f32::INFINITY)
+                            .font(egui::TextStyle::Monospace)
+                            .code_editor()
+                            .desired_rows(14)
+                            .lock_focus(true),
+                    );
+                });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Corrige el archivo y guarda — el editor reintentará automáticamente.")
+                    .color(egui::Color32::from_rgb(180, 160, 160))
+                    .size(10.0)
+                    .italics(),
+            );
         });
 }

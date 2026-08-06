@@ -29,7 +29,13 @@ impl ScriptRunner {
     /// * `script_path` — absolute path to the user's `.py` file.
     /// * `payload_tx` — channel end that receives scene payloads from the
     ///   embedded script (i.e. the host-side receiver of `host::send_to_host`).
-    pub fn spawn(script_path: PathBuf, payload_tx: Sender<ReloadPayload>) -> Self {
+    /// * `error_tx` — channel end that receives formatted tracebacks when the
+    ///   script raises.
+    pub fn spawn(
+        script_path: PathBuf,
+        payload_tx: Sender<ReloadPayload>,
+        error_tx: Sender<String>,
+    ) -> Self {
         let (rerun_tx, rerun_rx) = crossbeam_channel::unbounded::<bool>();
         let exited = Arc::new(AtomicBool::new(false));
         let exited_clone = exited.clone();
@@ -37,7 +43,7 @@ impl ScriptRunner {
         std::thread::Builder::new()
             .name("gaanim-script".into())
             .spawn(move || {
-                run_script_thread(script_path, payload_tx, rerun_rx, exited_clone);
+                run_script_thread(script_path, payload_tx, error_tx, rerun_rx, exited_clone);
             })
             .expect("failed to spawn script thread");
 
@@ -53,9 +59,39 @@ impl ScriptRunner {
     }
 }
 
+fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
+    // Intentar traceback.format_exception para obtener el traceback completo
+    if let Ok(tb_mod) = py.import("traceback") {
+        if let Ok(formatted) = tb_mod.call_method1(
+            "format_exception",
+            (err.get_type(py), err.value(py), err.traceback(py)),
+        ) {
+            if let Ok(list) = formatted.extract::<Vec<String>>() {
+                let joined = list.join("");
+                if !joined.trim().is_empty() {
+                    return joined;
+                }
+            }
+        }
+    }
+    // Fallback: valor de la excepción + tipo
+    if let Ok(val) = err.value(py).extract::<String>() {
+        if !val.trim().is_empty() {
+            let type_name = err
+                .get_type(py)
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "PythonError".to_string());
+            return format!("{type_name}: {val}");
+        }
+    }
+    err.to_string()
+}
+
 fn run_script_thread(
     script_path: PathBuf,
     payload_tx: Sender<ReloadPayload>,
+    error_tx: Sender<String>,
     rerun_rx: Receiver<bool>,
     exited: Arc<AtomicBool>,
 ) {
@@ -77,6 +113,8 @@ fn run_script_thread(
     });
     if let Err(e) = bootstrap_err {
         Python::attach(|py| {
+            let msg = format_py_traceback(py, &e);
+            let _ = error_tx.send(format!("[bootstrap] {}", msg));
             e.print(py);
         });
         eprintln!("[gaanim] failed to bootstrap in-memory `gaanim` package");
@@ -91,6 +129,10 @@ fn run_script_thread(
         let result = Python::attach(|py| run_script_file(py, &script_path));
         if let Err(e) = result {
             Python::attach(|py| {
+                let tb = format_py_traceback(py, &e);
+                let header = format!("{} — traceback:", script_path.display());
+                let full = format!("{}\n{}", header, tb);
+                let _ = error_tx.send(full);
                 e.print(py);
             });
             eprintln!("[gaanim] script error (waiting for next save to retry)");
@@ -136,7 +178,7 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
     });
 
     host::set_host_sender(None);
-    result.map_err(|error| error.to_string())
+    result.map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))
 }
 
 /// Execute a script once and return the canvas submitted by `scene.render()`.
@@ -161,7 +203,7 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Canv
     });
 
     host::set_host_sender(None);
-    result.map_err(|error| error.to_string())?;
+    result.map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))?;
     receiver
         .recv_timeout(std::time::Duration::from_secs(2))
         .map(|payload| payload.canvas)
