@@ -16,6 +16,7 @@ use gaanim_api::DecimalNumber;
 
 pub mod export;
 mod fps_overlay;
+pub mod overlays;
 mod presenter;
 mod timeline_widget;
 mod vsync;
@@ -94,6 +95,7 @@ impl Plugin for GaanimEditorPlugin {
         .init_resource::<AudienceBlank>()
         .init_resource::<ViewportInset>()
         .init_resource::<PreviewInteractive>()
+        .init_resource::<overlays::EditorOverlays>()
         .add_systems(
             Update,
             (
@@ -107,6 +109,7 @@ impl Plugin for GaanimEditorPlugin {
                     .in_set(gaanim_scene::hierarchy::SceneSet::Input)
                     .after(preview_mode_keys_system),
                 editor_picking_system,
+                overlays::overlays_toggle_keys_system,
                 global_playback_keys_system,
                 presentation_blank_shortcuts_system,
                 presentation_escape_system,
@@ -128,6 +131,14 @@ impl Plugin for GaanimEditorPlugin {
             presentation_blank_overlay_system.after(editor_ui_system),
         )
         .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
+        .add_systems(
+            EguiPrimaryContextPass,
+            (
+                overlays::overlays_settings_ui_system,
+                overlays::scene_overlays_system,
+            )
+                .after(editor_ui_system),
+        )
         .add_systems(
             presenter::PresenterEguiPass,
             presenter::presenter_view_system,
@@ -237,10 +248,10 @@ fn editor_ui_system(
         return;
     };
 
-    // Interactive mode banner (always on top, non-interactive)
+    // Interactive mode banner (esquina para no tapar toolbar de overlays en CENTER_TOP)
     if interactive.enabled {
         egui::Area::new("interactive_banner".into())
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
             .order(egui::Order::Foreground)
             .interactable(false)
             .show(ctx, |ui| {

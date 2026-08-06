@@ -5,7 +5,7 @@ import os
 from gaanim import BLACK, GRAY, WHITE, Direction, Scene
 
 
-scene = Scene(1280, 720, background=WHITE, margin=56)
+scene = Scene(1920, 1080, background=WHITE, margin=56)
 
 title = scene.title("Typst Universe package").fill(BLACK).at(0, 250)
 subtitle = scene.subtitle("@preview/zebraw:0.6.3 resolved by the embedded world").fill(GRAY).at(0, 195)
@@ -28,7 +28,8 @@ layout = scene.typst('''
 scene.play([
     title.write(),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
-    layout.fade_in_from(Direction.DOWN, distance=30).duration(0.65),
+    # layout.fade_in_from(Direction.DOWN, distance=30).duration(0.65),
+    layout.write(2)
 ])
 scene.wait(0.35)
 
