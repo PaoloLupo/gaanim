@@ -43,6 +43,12 @@ impl CoordinateSystem {
 }
 
 /// Display and styling options for Cartesian axes.
+///
+/// Compatible with `manim.mobject.graphing.coordinate_systems.Axes`:
+/// `x_range`/`y_range` define data intervals, `x_length`/`y_length` control
+/// scene size (like Manim), `tips` adds arrowheads, and `axis_config` dicts
+/// allow per-axis overrides. When `auto_fit` is true and no explicit lengths
+/// are given, axes scale to `safe_frame` (gaanim layout idiom).
 #[derive(Debug, Clone)]
 pub struct AxesConfig {
     pub grid: bool,
@@ -69,7 +75,13 @@ pub struct AxesConfig {
     pub tick_width: f64,
     pub tick_length: f64,
     /// If true, scale axes to occupy the safe_frame (default true).
+    /// Ignored when `x_length`/`y_length` are set (Manim-like explicit size).
     pub auto_fit: bool,
+    /// Manim-compatible explicit lengths (scene units). `None` → auto.
+    pub x_length: Option<f64>,
+    pub y_length: Option<f64>,
+    /// Whether to draw arrow tips at positive ends (Manim `tips=True`).
+    pub tips: bool,
 }
 
 /// Horizontal alignment for multi-line paragraph text.
@@ -159,6 +171,9 @@ impl Default for AxesConfig {
             tick_width: 2.0,
             tick_length: 8.0,
             auto_fit: true,
+            x_length: None,
+            y_length: None,
+            tips: true,
         }
     }
 }

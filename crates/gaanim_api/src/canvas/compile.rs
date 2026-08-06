@@ -43,6 +43,97 @@ fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'
     if luminance > 0.5 { "000000" } else { "ffffff" }
 }
 
+fn split_text_math(text: &str) -> Vec<(bool, String)> {
+    let mut segments: Vec<(bool, String)> = Vec::new();
+    let mut buf = String::new();
+    let mut in_math = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                if next == '$' {
+                    chars.next();
+                    buf.push('$');
+                } else if next == '\\' {
+                    chars.next();
+                    buf.push('\\');
+                } else {
+                    buf.push(c);
+                }
+            } else {
+                buf.push(c);
+            }
+        } else if c == '$' {
+            let is_double = chars.peek() == Some(&'$');
+            if is_double {
+                chars.next();
+            }
+            if !in_math {
+                if !buf.is_empty() {
+                    segments.push((false, std::mem::take(&mut buf)));
+                }
+                in_math = true;
+            } else {
+                if !buf.is_empty() {
+                    segments.push((true, std::mem::take(&mut buf)));
+                } else {
+                    segments.push((true, String::new()));
+                }
+                in_math = false;
+            }
+        } else {
+            buf.push(c);
+        }
+    }
+    if !buf.is_empty() {
+        if in_math {
+            // Unclosed `$` — treat the opening delimiter and trailing content as literal text.
+            segments.push((false, format!("${buf}")));
+        } else {
+            segments.push((false, buf));
+        }
+    }
+    if segments.is_empty() {
+        segments.push((false, String::new()));
+    }
+    segments
+}
+
+fn typst_inline_content(text: &str) -> String {
+    if !text.contains('$') {
+        return format!("#text(\"{}\")", escape_typst_string(text));
+    }
+    let segments = split_text_math(text);
+    let has_math = segments.iter().any(|(is_math, _)| *is_math);
+    if !has_math {
+        return format!("#text(\"{}\")", escape_typst_string(text));
+    }
+    let mut parts = Vec::new();
+    for (is_math, content) in segments {
+        if content.is_empty() {
+            continue;
+        }
+        if is_math {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            parts.push(format!("$ {} $", trimmed));
+        } else {
+            parts.push(format!("#text(\"{}\")", escape_typst_string(&content)));
+        }
+    }
+    if parts.is_empty() {
+        return format!("#text(\"{}\")", escape_typst_string(text));
+    }
+    parts.join(" ")
+}
+
+fn text_inline_typst_source(text: &str) -> String {
+    let content = typst_inline_content(text);
+    format!("#set page(width: auto, height: auto, margin: 0pt)\n#align(left)[{content}]")
+}
+
 fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64) -> String {
     let width = options.width.max(1.0);
     let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
@@ -52,10 +143,7 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
         TextAlign::Right => ("right", false),
         TextAlign::Justify => ("left", true),
     };
-    let content = format!(
-        "#align({alignment})[#text(\"{}\")]",
-        escape_typst_string(text)
-    );
+    let content = format!("#align({alignment})[{}]", typst_inline_content(text));
     let content = if let Some(max_lines) = options.max_lines.filter(|lines| *lines > 0) {
         let height = font_size * options.line_spacing.max(1.0) * max_lines as f64;
         let clip = matches!(options.overflow, ParagraphOverflow::Clip);
@@ -117,26 +205,35 @@ impl Canvas {
     ) -> MobjectRef {
         let (x_min, x_max, x_step) = x_range;
         let (y_min, y_max, y_step) = y_range;
-        // Auto-fit scale: map data range to safe_frame. Keep tick/label sizes unscaled.
-        let (scale, x_center, y_center) = if config.auto_fit {
-            let data_w = (x_max - x_min).max(1e-9);
-            let data_h = (y_max - y_min).max(1e-9);
-            let avail_w = frame_bounds.width().max(1.0);
-            let avail_h = frame_bounds.height().max(1.0);
-            let s = (avail_w / data_w).min(avail_h / data_h);
-            (s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
-        } else {
-            (1.0, 0.0, 0.0)
+        // Manim-compatible sizing: x_length/y_length override auto_fit, otherwise map to safe_frame.
+        let (scale_x, scale_y, x_center, y_center) = match (config.x_length, config.y_length) {
+            (Some(xl), Some(yl)) => {
+                let sx = xl / (x_max - x_min).max(1e-9);
+                let sy = yl / (y_max - y_min).max(1e-9);
+                (sx, sy, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
+            }
+            (Some(xl), None) => {
+                let s = xl / (x_max - x_min).max(1e-9);
+                (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
+            }
+            (None, Some(yl)) => {
+                let s = yl / (y_max - y_min).max(1e-9);
+                (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
+            }
+            (None, None) if config.auto_fit => {
+                let data_w = (x_max - x_min).max(1e-9);
+                let data_h = (y_max - y_min).max(1e-9);
+                let avail_w = frame_bounds.width().max(1.0);
+                let avail_h = frame_bounds.height().max(1.0);
+                let s = (avail_w / data_w).min(avail_h / data_h);
+                (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
+            }
+            (None, None) => (1.0, 1.0, 0.0, 0.0),
         };
-        let sx = |x: f64| (x - x_center) * scale;
-        let sy = |y: f64| (y - y_center) * scale;
-        let bounds = if config.auto_fit {
-            Bounds3D::new_2d(
-                sx(x_min),
-                sy(y_min),
-                sx(x_max),
-                sy(y_max),
-            )
+        let sx = |x: f64| (x - x_center) * scale_x;
+        let sy = |y: f64| (y - y_center) * scale_y;
+        let bounds = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+            Bounds3D::new_2d(sx(x_min), sy(y_min), sx(x_max), sy(y_max))
         } else {
             Bounds3D::new_2d(x_min, y_min, x_max, y_max)
         };
@@ -194,6 +291,45 @@ impl Canvas {
                 config.axis_width,
                 "AxesLines",
             ));
+        }
+        // Manim-like arrow tips at positive ends
+        if config.tips {
+            let tip_len: f64 = 10.0;
+            let tip_half_w: f64 = 5.0;
+            if config.x_axis && x_axis_in_range {
+                let mut tip = gaanim_core::kurbo::BezPath::new();
+                let tx = sx(x_max);
+                let ty = sy(0.0);
+                tip.move_to(Point::new(tx + tip_len, ty));
+                tip.line_to(Point::new(tx - tip_len * 0.3, ty - tip_half_w));
+                tip.line_to(Point::new(tx - tip_len * 0.3, ty + tip_half_w));
+                tip.close_path();
+                let tip_path = gaanim_objects::prelude::SvgPath {
+                    id: "AxesTips".to_string(),
+                    path: tip,
+                    bounds,
+                    fill: Some(gaanim_core::peniko::Brush::Solid(config.axis_color)),
+                    stroke: StrokeBrush::transparent(),
+                };
+                children.push(builder.svg_path(&tip_path).spawn());
+            }
+            if config.y_axis && y_axis_in_range {
+                let mut tip = gaanim_core::kurbo::BezPath::new();
+                let tx = sx(0.0);
+                let ty = sy(y_max);
+                tip.move_to(Point::new(tx, ty + tip_len));
+                tip.line_to(Point::new(tx - tip_half_w, ty - tip_len * 0.3));
+                tip.line_to(Point::new(tx + tip_half_w, ty - tip_len * 0.3));
+                tip.close_path();
+                let tip_path = gaanim_objects::prelude::SvgPath {
+                    id: "AxesTips".to_string(),
+                    path: tip,
+                    bounds,
+                    fill: Some(gaanim_core::peniko::Brush::Solid(config.axis_color)),
+                    stroke: StrokeBrush::transparent(),
+                };
+                children.push(builder.svg_path(&tip_path).spawn());
+            }
         }
 
         let tick_half = config.tick_length * 0.5;
@@ -2309,7 +2445,23 @@ impl Canvas {
             }
             SpawnKind::Text(t) => {
                 let role = gaanim_text::prelude::TextRole::Body;
-                let mr = builder.spawn_text(t, role);
+                let has_inline_math = split_text_math(t)
+                    .iter()
+                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
+                let mr = if has_inline_math {
+                    let style = &text_config.roles[&role];
+                    let source = text_inline_typst_source(t);
+                    builder.typst(
+                        &source,
+                        false,
+                        Some(&style.font_family),
+                        None,
+                        Some(style.size),
+                        None,
+                    )
+                } else {
+                    builder.spawn_text(t, role)
+                };
                 let styled_spec =
                     Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
@@ -2340,7 +2492,23 @@ impl Canvas {
             }
             SpawnKind::Title(t) => {
                 let role = gaanim_text::prelude::TextRole::Title;
-                let mr = builder.spawn_text(t, role);
+                let has_inline_math = split_text_math(t)
+                    .iter()
+                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
+                let mr = if has_inline_math {
+                    let style = &text_config.roles[&role];
+                    let source = text_inline_typst_source(t);
+                    builder.typst(
+                        &source,
+                        false,
+                        Some(&style.font_family),
+                        None,
+                        Some(style.size),
+                        None,
+                    )
+                } else {
+                    builder.spawn_text(t, role)
+                };
                 let styled_spec =
                     Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
@@ -2349,7 +2517,23 @@ impl Canvas {
             }
             SpawnKind::Subtitle(t) => {
                 let role = gaanim_text::prelude::TextRole::Subtitle;
-                let mr = builder.spawn_text(t, role);
+                let has_inline_math = split_text_math(t)
+                    .iter()
+                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
+                let mr = if has_inline_math {
+                    let style = &text_config.roles[&role];
+                    let source = text_inline_typst_source(t);
+                    builder.typst(
+                        &source,
+                        false,
+                        Some(&style.font_family),
+                        None,
+                        Some(style.size),
+                        None,
+                    )
+                } else {
+                    builder.spawn_text(t, role)
+                };
                 let styled_spec =
                     Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);

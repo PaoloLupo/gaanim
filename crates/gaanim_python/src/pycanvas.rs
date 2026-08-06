@@ -1564,7 +1564,8 @@ impl PyScene {
         axis_color=None, grid_color=None, tick_color=None,
         number_color=None, label_color=None,
         axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
-        auto_fit=true
+        auto_fit=true, x_length=None, y_length=None, tips=true,
+        axis_config=None, x_axis_config=None, y_axis_config=None
     ))]
     fn axes(
         &self,
@@ -1594,6 +1595,12 @@ impl PyScene {
         tick_width: f64,
         tick_length: f64,
         auto_fit: bool,
+        x_length: Option<f64>,
+        y_length: Option<f64>,
+        tips: bool,
+        axis_config: Option<Bound<'_, PyAny>>,
+        x_axis_config: Option<Bound<'_, PyAny>>,
+        y_axis_config: Option<Bound<'_, PyAny>>,
     ) -> PyResult<PyDrawable> {
         if !x.0.is_finite()
             || !x.1.is_finite()
@@ -1618,6 +1625,22 @@ impl PyScene {
                 "axis, grid, and tick dimensions must be finite and non-negative",
             ));
         }
+        if let Some(v) = x_length {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "x_length must be finite and positive",
+                ));
+            }
+        }
+        if let Some(v) = y_length {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "y_length must be finite and positive",
+                ));
+            }
+        }
+        // axis_config dicts kept for manim compat (currently no-op, reserved for NumberLine overrides)
+        let _ = (&axis_config, &x_axis_config, &y_axis_config);
         let defaults = AxesConfig::default();
         let axis_color = axis_color
             .map(|color| color.0)
@@ -1649,6 +1672,9 @@ impl PyScene {
             tick_width,
             tick_length,
             auto_fit,
+            x_length,
+            y_length,
+            tips,
         };
         Ok(PyDrawable(
             self.inner
@@ -1666,7 +1692,7 @@ impl PyScene {
         x: (f64, f64),
         samples: usize,
     ) -> PyResult<PyDrawable> {
-        let Some(((x_min, x_max, _), (y_min, y_max, _), auto_fit)) = axes.0.axes_info() else {
+        let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = axes.0.axes_info() else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "plot() first argument must be an axes drawable",
             ));
@@ -1681,27 +1707,41 @@ impl PyScene {
                 "x range must be finite with min < max",
             ));
         }
-        // Compute same auto-fit scale as in compile.rs styled_axes
+        // Compute same scale as in compile.rs styled_axes (manim x_length/y_length or auto_fit)
         let canvas = self.inner.lock().expect("scene canvas poisoned");
         let avail_w = if canvas.width == 0 { 800.0 } else { canvas.width as f64 - canvas.margin.left - canvas.margin.right };
         let avail_h = if canvas.height == 0 { 480.0 } else { canvas.height as f64 - canvas.margin.top - canvas.margin.bottom };
         drop(canvas);
         let data_w = (x_max - x_min).max(1e-9);
         let data_h = (y_max - y_min).max(1e-9);
-        let scale = if auto_fit {
-            (avail_w / data_w).min(avail_h / data_h)
-        } else {
-            1.0
+        let (scale_x, scale_y) = match (config.x_length, config.y_length) {
+            (Some(xl), Some(yl)) => (xl / data_w, yl / data_h),
+            (Some(xl), None) => {
+                let s = xl / data_w;
+                (s, s)
+            }
+            (None, Some(yl)) => {
+                let s = yl / data_h;
+                (s, s)
+            }
+            (None, None) if config.auto_fit => {
+                let s = (avail_w / data_w).min(avail_h / data_h);
+                (s, s)
+            }
+            (None, None) => (1.0, 1.0),
         };
-        let mut points = Vec::with_capacity(samples);
         let x_center = (x_min + x_max) * 0.5;
         let y_center = (y_min + y_max) * 0.5;
+        let mut points = Vec::with_capacity(samples);
         for i in 0..samples {
             let t = i as f64 / (samples - 1) as f64;
             let xv = x.0 + (x.1 - x.0) * t;
             let yv: f64 = function.call1((xv,))?.extract()?;
-            let (sx, sy) = if auto_fit {
-                ((xv - x_center) * scale, (yv - y_center) * scale)
+            let sx = (xv - x_center) * scale_x;
+            let sy = (yv - y_center) * scale_y;
+            // When neither auto_fit nor explicit length, keep raw data coords (manim-like no scaling)
+            let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+                (sx, sy)
             } else {
                 (xv, yv)
             };
@@ -1714,6 +1754,82 @@ impl PyScene {
                 .polyline(&points),
         ))
     }
+
+    /// manim `get_graph` — alias to `plot`
+    #[pyo3(signature = (axes, function, x, samples=160))]
+    fn get_graph(
+        &self,
+        axes: &PyDrawable,
+        function: Bound<'_, PyAny>,
+        x: (f64, f64),
+        samples: usize,
+    ) -> PyResult<PyDrawable> {
+        self.plot(axes, function, x, samples)
+    }
+
+    /// manim `plot_parametric_curve` — (t -> (x,y)) with t_range, respects auto_fit/x_length
+    #[pyo3(signature = (axes, function, t, samples=160))]
+    fn plot_parametric_curve(
+        &self,
+        axes: &PyDrawable,
+        function: Bound<'_, PyAny>,
+        t: (f64, f64),
+        samples: usize,
+    ) -> PyResult<PyDrawable> {
+        let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = axes.0.axes_info() else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "plot_parametric_curve() first argument must be an axes drawable",
+            ));
+        };
+        if samples < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "samples must be at least 2",
+            ));
+        }
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let avail_w = if canvas.width == 0 { 800.0 } else { canvas.width as f64 - canvas.margin.left - canvas.margin.right };
+        let avail_h = if canvas.height == 0 { 480.0 } else { canvas.height as f64 - canvas.margin.top - canvas.margin.bottom };
+        drop(canvas);
+        let data_w = (x_max - x_min).max(1e-9);
+        let data_h = (y_max - y_min).max(1e-9);
+        let (scale_x, scale_y) = match (config.x_length, config.y_length) {
+            (Some(xl), Some(yl)) => (xl / data_w, yl / data_h),
+            (Some(xl), None) => {
+                let s = xl / data_w;
+                (s, s)
+            }
+            (None, Some(yl)) => {
+                let s = yl / data_h;
+                (s, s)
+            }
+            (None, None) if config.auto_fit => {
+                let s = (avail_w / data_w).min(avail_h / data_h);
+                (s, s)
+            }
+            _ => (1.0, 1.0),
+        };
+        let x_center = (x_min + x_max) * 0.5;
+        let y_center = (y_min + y_max) * 0.5;
+        let mut points = Vec::with_capacity(samples);
+        for i in 0..samples {
+            let tt = i as f64 / (samples - 1) as f64;
+            let tv = t.0 + (t.1 - t.0) * tt;
+            let (xv, yv): (f64, f64) = function.call1((tv,))?.extract()?;
+            let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+                ((xv - x_center) * scale_x, (yv - y_center) * scale_y)
+            } else {
+                (xv, yv)
+            };
+            points.push((sx, sy));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline(&points),
+        ))
+    }
+
     fn text(&self, s: &str) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
     }

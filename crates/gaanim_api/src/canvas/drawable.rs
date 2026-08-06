@@ -120,8 +120,8 @@ impl DrawableHandle {
         self
     }
 
-    /// If this drawable is an axes, return its x/y ranges and auto_fit flag.
-    pub fn axes_info(&self) -> Option<((f64, f64, f64), (f64, f64, f64), bool)> {
+    /// If this drawable is an axes, return its x/y ranges and full config.
+    pub fn axes_info(&self) -> Option<((f64, f64, f64), (f64, f64, f64), crate::canvas::AxesConfig)> {
         let spec = self.spec.lock().ok()?;
         if let crate::canvas::SpawnKind::Axes {
             x_range,
@@ -129,7 +129,7 @@ impl DrawableHandle {
             config,
         } = &spec.kind
         {
-            Some((*x_range, *y_range, config.auto_fit))
+            Some((*x_range, *y_range, config.clone()))
         } else {
             None
         }

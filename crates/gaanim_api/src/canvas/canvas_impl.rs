@@ -599,7 +599,22 @@ impl Canvas {
     pub fn curve(&mut self, elements: Vec<crate::canvas::CurveElement>) -> DrawableHandle {
         self.spawn(SpawnKind::Curve(elements))
     }
-    /// Creates configurable Cartesian axes, optionally with a grid and numeric labels.
+    /// Creates Cartesian axes — manim `Axes` compatible.
+    ///
+    /// Mirrors `manim.mobject.graphing.coordinate_systems.Axes`:
+    /// `x_range`/`y_range` as `(min, max, step)`, `x_length`/`y_length` control
+    /// scene size (like Manim), `tips` adds arrowheads, `axis_config` dicts are
+    /// accepted for compatibility (mapped to `axis_color`/`include_numbers` etc).
+    /// `auto_fit=true` (default) scales data to `safe_frame` (gaanim layout idiom);
+    /// set `auto_fit=false` or explicit `x_length`/`y_length` for Manim-like fixed size.
+    ///
+    /// The returned `DrawableHandle` is animable: `axes.create()` draws
+    /// sequentially `Grid → Axes → Ticks → Numbers/Labels` via `PathCompletion`
+    /// leaves (`crates/gaanim_api/src/builder.rs` expansion). Use
+    /// `scene.plot(axes, f, x_range)` or `axes.coords_to_point(x,y)` /
+    /// `axes.point_to_coords(p)` (manim `coords_to_point`/`point_to_coords`),
+    /// `scene.plot_parametric_curve(axes, f, t_range)`, and
+    /// `axes.get_x_axis()`/`get_y_axis()` for compatibility.
     pub fn axes(
         &mut self,
         x_range: (f64, f64, f64),
