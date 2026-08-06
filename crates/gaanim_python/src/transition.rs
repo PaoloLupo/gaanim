@@ -1,3 +1,4 @@
+use gaanim_core::glam::DVec2;
 use gaanim_timeline::transition::{SlideDirection, TransitionType};
 use pyo3::prelude::*;
 
@@ -29,7 +30,7 @@ impl PyTransitionType {
 
     /// Fade to a color, then fade in from that color.
     #[staticmethod]
-    fn fade_through(duration: f64, color: &super::color::PyColor) -> Self {
+    fn fade_through(duration: f64, color: super::color::PyColor) -> Self {
         Self(TransitionType::FadeThrough {
             duration,
             fade_color: color.0,
@@ -54,6 +55,32 @@ impl PyTransitionType {
         Ok(Self(TransitionType::Slide {
             duration,
             direction: dir,
+        }))
+    }
+
+    /// Zoom through a point in the outgoing scene before revealing the next one.
+    #[staticmethod]
+    #[pyo3(signature = (duration, *, center=(0.0, 0.0), max_zoom=4.0))]
+    fn zoom_through(duration: f64, center: (f64, f64), max_zoom: f64) -> PyResult<Self> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        if !center.0.is_finite() || !center.1.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "center coordinates must be finite",
+            ));
+        }
+        if !max_zoom.is_finite() || max_zoom <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_zoom must be a finite positive number",
+            ));
+        }
+        Ok(Self(TransitionType::ZoomThrough {
+            duration,
+            center: DVec2::new(center.0, center.1),
+            max_zoom,
         }))
     }
 

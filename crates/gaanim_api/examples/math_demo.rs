@@ -1,19 +1,24 @@
+//! Canvas multi-segment demo with transitions between segments.
+//!
+//! Run: `cargo run --example math_demo -p gaanim_api`
+
 use bevy::prelude::*;
 use gaanim_animation::{DeltaTime, GaanimAnimationPlugin};
-use gaanim_api::prelude::*;
+use gaanim_api::GaanimApiPlugin;
+use gaanim_api::canvas::Canvas;
+use gaanim_core::peniko::Color;
 use gaanim_math::Camera;
 use gaanim_renderer::prelude::*;
 use gaanim_scene::GaanimScenePlugin;
 use gaanim_text::GaanimTextPlugin;
 use gaanim_text::font::FontRegistry;
-use gaanim_timeline::{GaanimTimelinePlugin, timeline::Timeline};
+use gaanim_timeline::{GaanimTimelinePlugin, timeline::Timeline, transition::TransitionType};
 
 fn main() {
     App::new()
-        // Standard window settings for the demo
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Gaanim v2 — GPU Math Equations & Text Demo".into(),
+                title: "Gaanim Multi-Segment Demo".into(),
                 resolution: (1280, 720).into(),
                 ..default()
             }),
@@ -36,80 +41,53 @@ fn setup_scene(
     font_registry: Res<FontRegistry>,
     text_config: Res<gaanim_text::prelude::TextConfig>,
 ) {
-    // 1. Spawn viewport camera and Vello view
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
-    // 2. Initialize the fluent SceneBuilder
-    let mut scene = SceneBuilder::new(
-        &mut commands,
-        &mut *timeline,
-        &*font_registry,
-        &*text_config,
+    let mut canvas = Canvas::new(1280, 720);
+
+    // Segment 1: Intro
+    let _s1 = canvas.segment("intro", None);
+    let title = canvas
+        .title("Multi-Segment Demo")
+        .fill(Color::WHITE)
+        .at(0.0, 0.0);
+    title.fade_in(1.0);
+    canvas.wait(1.5);
+    title.fade_out(0.8); // manual exit (Patron B)
+    canvas.wait(0.3);
+
+    // Segment 2: Content with auto cross-fade
+    let _s2 = canvas.segment("content", Some(TransitionType::CrossFade { duration: 0.5 }));
+    let circle = canvas
+        .circle(60.0)
+        .fill(Color::from_rgb8(0xE5, 0x4B, 0x4B))
+        .at(-200.0, 0.0);
+    circle.create(1.5);
+    canvas.wait(0.5);
+    circle.grow_from_center(1.0);
+    canvas.wait(1.0);
+    canvas.fade_out_all(0.8);
+    canvas.wait(0.3);
+
+    // Segment 3: Conclusion with slide transition
+    let _s3 = canvas.segment(
+        "conclusion",
+        Some(TransitionType::Slide {
+            duration: 0.6,
+            direction: gaanim_timeline::transition::SlideDirection::Left,
+        }),
     );
+    let thanks = canvas.title("Thank You!").fill(Color::WHITE).at(0.0, 0.0);
+    thanks.fade_in(1.0);
+    canvas.wait(2.0);
 
-    // 3. Spawn a plain Title text using HarfBuzz shaper (Arial, 64px, White by default)
-    let title_text = scene.title("Gaanim Vector Engine");
-
-    // 4. Spawn a premium mathematical formula using default Math role (NewCMMath, 48pt by default)
-    // Formula: E = m c^2
-    let math_formula = scene.equation("E = m c^2");
-
-    // 5. Spawn another equation showing fraction and sum limits
-    // Formula: sum_(i=1)^n i = (n(n+1))/2
-    let sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)");
-
-    // 6. Spawn a beautiful decorative circle in the background
-    let bg_circle = scene
-        .circle(80.0)
-        .fill(gaanim_core::peniko::Color::from_rgb8(25, 50, 100))
-        .z_index(-10)
-        .spawn();
-
-    // Setup initial animation timeline
-    // Slide plain text, formulas and scale the circle in parallel
-    scene.play_parallel(vec![
-        bg_circle.scale_uniform(1.2).spring().duration(1.5),
-        title_text
-            .translate_to_2d(-230.0, 240.0)
-            .spring()
-            .duration(1.8),
-        math_formula
-            .translate_to_2d(-100.0, 60.0)
-            .smooth()
-            .duration(1.0),
-        sum_formula
-            .translate_to_2d(-200.0, -150.0)
-            .spring()
-            .duration(2.0),
-    ]);
-
-    // Let the scene hold for a brief moment
-    scene.wait(1.0);
-
-    // INNOVATION DEMO: Select specific characters semantically and color/animate them!
-    // 1. Select "m c^2" in the first equation and color it bright gold!
-    let mut mc2_selection = scene.select(math_formula, "m c^2");
-    mc2_selection.set_fill(gaanim_core::peniko::Color::from_rgb8(255, 215, 0)); // Gold
-
-    // 2. Select "n(n+1)" in the sum equation and color it coral red, then animate it!
-    let mut numerator_selection = scene.select(sum_formula, "n(n+1)");
-    numerator_selection.set_fill(gaanim_core::peniko::Color::from_rgb8(255, 100, 100)); // Premium Coral Red
-
-    // Coordinated animation: shift numerator "n(n+1)" up slightly in parallel
-    numerator_selection
-        .animate()
-        .spring()
-        .duration(1.5)
-        .shift_2d(0.0, 30.0);
-
-    // Hold at the end of the animation sequence
-    scene.wait(1.5);
-
-    // Add a breakpoint marker
-    scene.slide();
-
-    // Loop duration configuration
+    info!(
+        "Canvas: {} segs, {:.1}s active segment",
+        canvas.segment_count(),
+        canvas.current_time()
+    );
+    canvas.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
     timeline.loop_range = Some((0.0, timeline.cached_duration + 0.5));
 }
 

@@ -75,6 +75,7 @@ impl Default for FontRegistry {
             cache: RwLock::new(HashMap::new()),
             aliases: HashMap::new(),
         };
+        registry.register_embedded_scientific_font();
         registry.catalog_system_fonts();
         registry
     }
@@ -197,11 +198,33 @@ impl FontRegistry {
         }
 
         if self.db.faces().count() == 0 {
-            bevy::prelude::warn!(
+            eprintln!(
                 "FontRegistry: no system fonts were found. Text rendering via rustybuzz may fail. \
                  Ensure standard font directories exist or register fonts manually."
             );
         }
+    }
+
+    /// Register Typst's bundled New Computer Modern text face under Gaanim's
+    /// stable family name. This keeps ordinary vector text consistent with
+    /// equations on machines that do not have TeX fonts installed.
+    fn register_embedded_scientific_font(&mut self) {
+        let Some(bytes) = typst_assets::fonts().find(|bytes| {
+            let Ok(face) = ttf_parser::Face::parse(bytes, 0) else {
+                return false;
+            };
+            face.is_regular()
+                && face.names().into_iter().any(|name| {
+                    name.is_unicode()
+                        && name.to_string().is_some_and(|value| {
+                            let value = value.to_ascii_lowercase();
+                            value.contains("new computer modern") || value.contains("newcm10")
+                        })
+                })
+        }) else {
+            return;
+        };
+        self.register_font("New Computer Modern", bytes.to_vec());
     }
 
     /// Resolve an alias (e.g. "sans-serif") to a concrete family name.
@@ -283,5 +306,23 @@ impl FontRegistry {
         let mut cache = self.cache.write().unwrap();
         cache.insert(family, arc.clone());
         Some(arc)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FontRegistry;
+
+    #[test]
+    fn bundled_new_computer_modern_is_resolvable() {
+        let registry = FontRegistry::new();
+        assert!(
+            registry.registered.contains_key("new computer modern"),
+            "the default must be backed by Typst's embedded New Computer Modern bytes"
+        );
+        assert!(
+            registry.get_font("New Computer Modern").is_some(),
+            "the scientific default must resolve without relying on a system font"
+        );
     }
 }

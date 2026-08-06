@@ -23,11 +23,14 @@
 
 #context {
   let pairs = query(<metadata-asset>).map(meta => meta.value)
+  let seen = (:)
   for pair in pairs {
     let path = pair.at(0)
     while path.starts-with("../") {
       path = path.slice(3)
     }
+    if path in seen { continue }
+    seen.insert(path, true)
     asset(path, pair.at(1))
   }
 }

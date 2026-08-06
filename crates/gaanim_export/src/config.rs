@@ -1,4 +1,77 @@
+use std::path::PathBuf;
+
 use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
+
+/// A source file mixed into the exported video.
+///
+/// Times are expressed in the scene timeline. A track with `start_time = 2.0`
+/// begins two seconds after the start of the scene, independently of an export
+/// range selected later.
+#[derive(Debug, Clone)]
+pub struct AudioTrack {
+    pub path: PathBuf,
+    pub start_time: f64,
+    pub duration: Option<f64>,
+    pub volume: f64,
+    pub fade_in: f64,
+    pub fade_out: f64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AudioTrackError {
+    #[error("audio file '{path}' does not exist or is not a file")]
+    InvalidPath { path: PathBuf },
+    #[error("{name} must be a finite non-negative number")]
+    InvalidNumber { name: &'static str },
+    #[error("fade_out requires an explicit track duration")]
+    FadeOutNeedsDuration,
+    #[error("fade duration cannot exceed the track duration")]
+    FadeExceedsDuration,
+}
+
+impl AudioTrack {
+    pub fn new(
+        path: impl Into<PathBuf>,
+        start_time: f64,
+        duration: Option<f64>,
+        volume: f64,
+        fade_in: f64,
+        fade_out: f64,
+    ) -> Result<Self, AudioTrackError> {
+        let path = path.into();
+        if !path.is_file() {
+            return Err(AudioTrackError::InvalidPath { path });
+        }
+        for (name, value) in [
+            ("start_time", start_time),
+            ("volume", volume),
+            ("fade_in", fade_in),
+            ("fade_out", fade_out),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name });
+            }
+        }
+        if let Some(duration) = duration {
+            if !duration.is_finite() || duration <= 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name: "duration" });
+            }
+            if fade_in + fade_out > duration {
+                return Err(AudioTrackError::FadeExceedsDuration);
+            }
+        } else if fade_out > 0.0 {
+            return Err(AudioTrackError::FadeOutNeedsDuration);
+        }
+        Ok(Self {
+            path,
+            start_time,
+            duration,
+            volume,
+            fade_in,
+            fade_out,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AspectRatioPreset {
@@ -44,6 +117,7 @@ pub struct ExportConfig {
     pub encoding_speed: EncodingSpeed,
     pub video_encoder: VideoEncoder,
     pub headless: bool,
+    pub audio_tracks: Vec<AudioTrack>,
 }
 
 impl Default for ExportConfig {
@@ -63,6 +137,7 @@ impl Default for ExportConfig {
             encoding_speed: EncodingSpeed::Balanced,
             video_encoder: VideoEncoder::Libx264,
             headless: false,
+            audio_tracks: Vec::new(),
         }
     }
 }

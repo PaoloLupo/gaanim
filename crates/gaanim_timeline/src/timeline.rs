@@ -1,14 +1,50 @@
-use bevy::prelude::{BuildChildrenTransformExt, Entity, Resource, World};
+use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
 use crate::scene::{SceneMember, SceneMetadata};
 use crate::snapshot::WorldSnapshot;
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, Opacity, Path2D, StrokeBrush};
+use gaanim_scene::{FillBrush, MobjectId, Opacity, Path2D, StrokeBrush};
+
+#[derive(Debug, Clone, Default)]
+struct ReactiveEntityState {
+    updater_elapsed: Option<f64>,
+    updater_stop_at: Option<f64>,
+    traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
+}
+
+/// A named reveal pause inside a presentation slide.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationStep {
+    pub name: Option<String>,
+    pub time: f64,
+}
+
+/// Semantic metadata for a slide, independent of the API crate that authored it.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationSlide {
+    pub id: u32,
+    pub name: String,
+    pub notes: Option<String>,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub steps: Vec<PresentationStep>,
+}
+
+/// The current semantic location in a presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PresentationPosition {
+    pub slide_id: u32,
+    /// `None` means the slide's initial state; otherwise this is a zero-based reveal step.
+    pub step_index: Option<usize>,
+}
 
 /// The primary Timeline manager, stored as a Bevy ECS resource.
 ///
@@ -37,6 +73,10 @@ pub struct Timeline {
     pub playback_rate: f64,
     /// Interactive slide presentation breakpoints.
     pub breakpoints: Vec<f64>,
+    /// Semantic presentation structure, when the canvas used `scene.slide(...)`.
+    pub presentation: Vec<PresentationSlide>,
+    /// Cached semantic position matching [`Self::current_time`].
+    pub presentation_position: Option<PresentationPosition>,
     /// Flag to ignore interactive presentation inputs (e.g. when GUI has focus).
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ignore_input: bool,
@@ -73,6 +113,8 @@ impl Default for Timeline {
             is_playing: false,
             playback_rate: 1.0,
             breakpoints: Vec::new(),
+            presentation: Vec::new(),
+            presentation_position: None,
             ignore_input: false,
             loop_range: None,
             seek_request: None,
@@ -88,6 +130,190 @@ impl Timeline {
     /// Creates a new empty `Timeline`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Replace the semantic presentation metadata compiled from the current canvas.
+    pub fn set_presentation(&mut self, mut slides: Vec<PresentationSlide>) {
+        slides.sort_by(|left, right| left.start_time.total_cmp(&right.start_time));
+        for slide in &mut slides {
+            slide
+                .steps
+                .sort_by(|left, right| left.time.total_cmp(&right.time));
+        }
+        self.presentation = slides;
+        self.update_presentation_position();
+    }
+
+    /// Find the semantic slide and reveal step at `time`.
+    pub fn presentation_position_at(&self, time: f64) -> Option<PresentationPosition> {
+        const EPSILON: f64 = 1e-5;
+        let slide =
+            self.presentation.iter().rev().find(|slide| {
+                slide.start_time <= time + EPSILON && time <= slide.end_time + EPSILON
+            })?;
+        let step_index = slide
+            .steps
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, step)| (step.time <= time + EPSILON).then_some(index));
+        Some(PresentationPosition {
+            slide_id: slide.id,
+            step_index,
+        })
+    }
+
+    /// Return the timestamp for a semantic position in the current presentation.
+    pub fn presentation_time(&self, position: PresentationPosition) -> Option<f64> {
+        let slide = self
+            .presentation
+            .iter()
+            .find(|slide| slide.id == position.slide_id)?;
+        match position.step_index {
+            Some(index) => slide.steps.get(index).map(|step| step.time),
+            None => Some(slide.start_time),
+        }
+    }
+
+    /// Resolve a slide by its semantic name and return its initial timestamp.
+    ///
+    /// Names are matched exactly first, then ASCII case-insensitively. This keeps
+    /// authored identifiers deterministic while making presenter navigation
+    /// forgiving when driven from a search field.
+    pub fn presentation_time_named(&self, slide_name: &str) -> Option<f64> {
+        self.presentation_slide_named(slide_name)
+            .map(|slide| slide.start_time)
+    }
+
+    /// Resolve a named slide and one of its reveal steps.
+    ///
+    /// `step_name` follows the same exact-then-case-insensitive matching rule as
+    /// slide names. Unnamed steps intentionally cannot be addressed by this
+    /// method; use [`Self::presentation_time_indexed`] for those.
+    pub fn presentation_step_time_named(&self, slide_name: &str, step_name: &str) -> Option<f64> {
+        let slide = self.presentation_slide_named(slide_name)?;
+        slide
+            .steps
+            .iter()
+            .find(|step| step.name.as_deref() == Some(step_name))
+            .or_else(|| {
+                slide.steps.iter().find(|step| {
+                    step.name
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(step_name))
+                })
+            })
+            .map(|step| step.time)
+    }
+
+    /// Resolve a slide and zero-based reveal step index.
+    pub fn presentation_time_indexed(
+        &self,
+        slide_name: &str,
+        step_index: Option<usize>,
+    ) -> Option<f64> {
+        let slide = self.presentation_slide_named(slide_name)?;
+        match step_index {
+            Some(index) => slide.steps.get(index).map(|step| step.time),
+            None => Some(slide.start_time),
+        }
+    }
+
+    fn presentation_slide_named(&self, slide_name: &str) -> Option<&PresentationSlide> {
+        self.presentation
+            .iter()
+            .find(|slide| slide.name == slide_name)
+            .or_else(|| {
+                self.presentation
+                    .iter()
+                    .find(|slide| slide.name.eq_ignore_ascii_case(slide_name))
+            })
+    }
+
+    /// Return the previous meaningful presentation stop before `time`.
+    pub fn previous_presentation_stop(&self, time: f64) -> Option<f64> {
+        self.presentation_stops()
+            .into_iter()
+            .filter(|stop| *stop < time - 0.2)
+            .last()
+    }
+
+    /// Return the next meaningful presentation stop after `time`.
+    pub fn next_presentation_stop(&self, time: f64) -> Option<f64> {
+        self.presentation_stops()
+            .into_iter()
+            .find(|stop| *stop > time + 1e-5)
+    }
+
+    /// Return the earliest authored breakpoint or semantic boundary guard
+    /// crossed while playing from `current` to `next`.
+    ///
+    /// Presentation boundaries are guarded just before the incoming slide's
+    /// start time. At the exact start, seeking applies that slide's visibility
+    /// changes, which would make it appear to advance automatically.
+    pub(crate) fn next_playback_stop(&self, current: f64, next: f64) -> Option<f64> {
+        const EPSILON: f64 = 1e-5;
+        let authored =
+            self.breakpoints.iter().copied().find(|breakpoint| {
+                *breakpoint > current + EPSILON && *breakpoint <= next + EPSILON
+            });
+        let boundary = self
+            .presentation
+            .iter()
+            .skip(1)
+            .map(|slide| slide.start_time - super::PRESENTATION_BOUNDARY_GUARD)
+            .find(|guard| *guard > current && *guard <= next + EPSILON);
+
+        match (authored, boundary) {
+            (Some(authored), Some(boundary)) => Some(authored.min(boundary)),
+            (Some(stop), None) | (None, Some(stop)) => Some(stop),
+            (None, None) => None,
+        }
+    }
+
+    /// A compact label suitable for editor transport controls.
+    pub fn presentation_label(&self) -> Option<String> {
+        let position = self.presentation_position?;
+        let index = self
+            .presentation
+            .iter()
+            .position(|slide| slide.id == position.slide_id)?;
+        let slide = &self.presentation[index];
+        let step = position.step_index.map(|step| step + 1).unwrap_or(0);
+        Some(if step == 0 {
+            format!(
+                "{} / {} · {}",
+                index + 1,
+                self.presentation.len(),
+                slide.name
+            )
+        } else {
+            format!(
+                "{} / {} · {} · step {}",
+                index + 1,
+                self.presentation.len(),
+                slide.name,
+                step
+            )
+        })
+    }
+
+    /// Update the cached semantic position after a seek or metadata change.
+    pub fn update_presentation_position(&mut self) {
+        self.presentation_position = self.presentation_position_at(self.current_time);
+    }
+
+    fn presentation_stops(&self) -> Vec<f64> {
+        let mut stops = self
+            .presentation
+            .iter()
+            .flat_map(|slide| {
+                std::iter::once(slide.start_time).chain(slide.steps.iter().map(|step| step.time))
+            })
+            .collect::<Vec<_>>();
+        stops.sort_by(|left, right| left.total_cmp(right));
+        stops.dedup_by(|left, right| (*left - *right).abs() < 1e-5);
+        stops
     }
 
     /// Adds a new track to the timeline.
@@ -286,14 +512,15 @@ impl Timeline {
         let mut result = Vec::new();
         let time_key = OrderedFloat(time);
 
-        // A clip is active if: clip.start <= time && clip.start + clip.duration > time
+        // A clip is active if: clip.start <= time && clip.start + clip.duration >= time
         // Therefore, clip.start must be in the range [time - max_clip_duration, time]
+        // Note: uses >= to include zero-duration clips at their exact start time.
         let lower_bound = OrderedFloat((time - self.max_clip_duration).max(0.0));
 
         for (_, ids) in self.clip_index.range(lower_bound..=time_key) {
             for &id in ids {
                 if let Some(clip) = self.clips.get(id)
-                    && clip.end() > time
+                    && clip.end() >= time
                 {
                     result.push(clip);
                 }
@@ -337,6 +564,20 @@ impl Timeline {
             .map(|(_, end)| end)
             .unwrap_or(self.cached_duration);
         let clamped_target = target_time.clamp(0.0, max_time);
+        let previous_time = self.current_time;
+        let expected_forward_dt = world
+            .get_resource::<gaanim_animation::PlaybackState>()
+            .map(|s| s.scaled_dt)
+            .unwrap_or(0.0);
+        let forward_delta = (clamped_target - previous_time).max(0.0);
+        let preserve_reactive_state = self.is_playing
+            && clamped_target >= previous_time
+            && forward_delta <= (expected_forward_dt * 1.5).max(1.0 / 120.0);
+        let reactive_state = if preserve_reactive_state {
+            capture_reactive_state(world)
+        } else {
+            HashMap::new()
+        };
 
         // 1. Locate the nearest recorded keyframe <= target_time
         let keyframe = self
@@ -345,20 +586,30 @@ impl Timeline {
             .next_back();
 
         let kf_start_time = if let Some((&kf_time, snapshot)) = keyframe {
-            // Skip full restore when seeking forward within the same keyframe interval:
-            // clip replay is deterministic and produces correct state from any baseline.
-            let same_kf_and_forward =
-                self.last_restore_kf_time == Some(kf_time) && clamped_target >= self.current_time;
-            if !same_kf_and_forward {
-                snapshot.restore(world);
-                self.last_restore_kf_time = Some(kf_time);
-            }
+            // Always restore the snapshot to guarantee correct entity state.
+            // Transitions (slide, crossfade, etc.) apply one-shot offsets that
+            // accumulate without a full restore, so skipping the restore on
+            // forward seeks produces incorrect results.
+            // TODO: optimise with intermediate keyframes to avoid per-frame restore.
+            snapshot.restore(world);
+            self.last_restore_kf_time = Some(kf_time);
             kf_time.0
         } else {
             self.last_restore_kf_time = None;
             // No keyframe found: keep active Mobjects visible as default baseline
             0.0
         };
+
+        // Snapshots contain entity state but not resources. Reset the camera
+        // before replaying explicit camera clips so random seeks cannot retain
+        // pan, zoom, or rotation from a later frame.
+        if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+            camera.position = gaanim_core::glam::DVec3::ZERO;
+            camera.rotation = gaanim_core::glam::DQuat::IDENTITY;
+            if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
+                *zoom = 1.0;
+            }
+        }
 
         self.current_time = clamped_target;
 
@@ -388,19 +639,45 @@ impl Timeline {
                         if clip.end() <= self.current_time {
                             // Animation finished before or at seek head: apply final state.
                             let final_t = anim.rate_func.evaluate(1.0);
-                            apply_lens_spec(world, target_entity, &anim.lens, final_t);
+                            apply_lens_spec(world, target_entity, &anim.lens, final_t, true);
                         } else if clip.start <= self.current_time && clip.end() > self.current_time
                         {
                             // Animation is actively running at seek head: interpolate
                             let progress =
                                 ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
                             let t = anim.rate_func.evaluate(progress);
-                            apply_lens_spec(world, target_entity, &anim.lens, t);
+                            apply_lens_spec(world, target_entity, &anim.lens, t, false);
                         }
                     }
                 }
                 ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
                     // Scene boundary markers — visibility is handled in the post-pass below.
+                }
+                ClipPayload::RemoveUpdater { target } => {
+                    if clip.start <= self.current_time
+                        && let Some(&target_entity) = entity_map.get(&target)
+                        && let Ok(mut entity_mut) = world.get_entity_mut(target_entity)
+                    {
+                        if let Some(mut updater) = entity_mut.get_mut::<gaanim_animation::Updater>()
+                        {
+                            updater.stop_at = Some(clip.start);
+                            if updater.elapsed > clip.start {
+                                updater.elapsed = clip.start;
+                            }
+                        }
+                    }
+                }
+                ClipPayload::SetSceneMember { target, scene } => {
+                    if clip.start <= self.current_time
+                        && let Some(&target_entity) = entity_map.get(&target)
+                        && let Ok(mut entity_mut) = world.get_entity_mut(target_entity)
+                    {
+                        if let Some(scene) = scene {
+                            entity_mut.insert(SceneMember(scene));
+                        } else {
+                            entity_mut.remove::<SceneMember>();
+                        }
+                    }
                 }
                 ClipPayload::Transition {
                     ref transition_type,
@@ -588,11 +865,300 @@ impl Timeline {
                 }
             }
         }
+
+        if preserve_reactive_state {
+            restore_reactive_state(world, &reactive_state);
+        } else {
+            resync_updaters(world, self.current_time);
+            rebuild_traced_paths(world, self.current_time);
+        }
+
+        self.update_presentation_position();
+        self.restore_followed_shake_origin(world);
+    }
+
+    /// A shake immediately after a follow must be based on the target's position
+    /// at the end of the follow, not the compile-time camera position. Snapshot
+    /// seeking skips intermediate frames, so resolve that anchor explicitly and
+    /// restore reactive updaters to the requested time afterwards.
+    fn restore_followed_shake_origin(&self, world: &mut World) {
+        let Some((shake_start, shake_end, shake_t, amplitude, frequency)) = self
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(anim) => match &anim.lens {
+                    PropertyLensSpec::CameraShake {
+                        amplitude,
+                        frequency,
+                        ..
+                    } if clip.start <= self.current_time => {
+                        let progress = if clip.duration > 0.0 {
+                            ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        Some((
+                            clip.start,
+                            clip.end(),
+                            anim.rate_func.evaluate(progress),
+                            *amplitude,
+                            *frequency,
+                        ))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .max_by(|(left, ..), (right, ..)| left.total_cmp(right))
+        else {
+            return;
+        };
+
+        // A later pan/frame/follow owns the camera position instead.
+        let has_later_position_control = self.clips.values().any(|clip| {
+            clip.start > shake_start
+                && clip.start <= self.current_time
+                && matches!(
+                    &clip.payload,
+                    ClipPayload::Animation(anim)
+                        if matches!(
+                            anim.lens,
+                            PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraFollow { .. }
+                        )
+                )
+        });
+        if has_later_position_control {
+            return;
+        }
+
+        let Some((follow_end, target)) = self
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(anim) => match anim.lens {
+                    PropertyLensSpec::CameraFollow { target } if clip.end() <= shake_start => {
+                        Some((clip.end(), target))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .max_by(|(left, _), (right, _)| left.total_cmp(right))
+        else {
+            return;
+        };
+
+        resync_updaters(world, follow_end);
+        let anchor = {
+            let mut query = world.query::<(&MobjectId, &SpatialTransform)>();
+            query
+                .iter(world)
+                .find_map(|(id, transform)| (id.0 == target).then_some(transform.translation))
+        };
+        resync_updaters(world, self.current_time);
+
+        let Some(anchor) = anchor else {
+            return;
+        };
+        let phase = shake_t * frequency * std::f64::consts::TAU;
+        let envelope = if self.current_time <= shake_end {
+            (1.0 - shake_t).max(0.0)
+        } else {
+            0.0
+        };
+        let offset = gaanim_core::glam::DVec3::new(
+            phase.sin() * amplitude * envelope,
+            (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
+            0.0,
+        );
+        if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+            camera.position = anchor + offset;
+        }
+    }
+}
+
+fn capture_reactive_state(
+    world: &mut World,
+) -> HashMap<gaanim_core::ObjectId, ReactiveEntityState> {
+    let mut state = HashMap::new();
+    let mut query = world.query::<(
+        Entity,
+        &gaanim_scene::MobjectId,
+        Option<&gaanim_animation::Updater>,
+        Option<&gaanim_animation::TracedPath>,
+    )>();
+    for (_entity, mobject_id, updater, traced_path) in query.iter(world) {
+        if updater.is_none() && traced_path.is_none() {
+            continue;
+        }
+        state.insert(
+            mobject_id.0,
+            ReactiveEntityState {
+                updater_elapsed: updater.map(|u| u.elapsed),
+                updater_stop_at: updater.and_then(|u| u.stop_at),
+                traced_path_points: traced_path.map(|t| t.points.clone()),
+            },
+        );
+    }
+    state
+}
+
+fn restore_reactive_state(
+    world: &mut World,
+    reactive_state: &HashMap<gaanim_core::ObjectId, ReactiveEntityState>,
+) {
+    let mut entity_map = HashMap::new();
+    let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
+    for (entity, mobject_id) in query.iter(world) {
+        entity_map.insert(mobject_id.0, entity);
+    }
+
+    for (object_id, state) in reactive_state {
+        let Some(&entity) = entity_map.get(object_id) else {
+            continue;
+        };
+
+        if let Some(mut updater) = world.get_mut::<gaanim_animation::Updater>(entity) {
+            if let Some(elapsed) = state.updater_elapsed {
+                updater.elapsed = updater
+                    .stop_at
+                    .map(|stop_at| elapsed.min(stop_at))
+                    .unwrap_or(elapsed);
+            }
+            if updater.stop_at.is_none() {
+                updater.stop_at = state.updater_stop_at;
+            }
+        }
+
+        if let Some(points) = &state.traced_path_points {
+            if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(entity) {
+                traced_path.points = points.clone();
+            }
+            if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
+                let mut path = gaanim_core::kurbo::BezPath::new();
+                if let Some(first) = points.first() {
+                    path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+                    for pt in &points[1..] {
+                        path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
+                    }
+                }
+                path_comp.0 = std::sync::Arc::new(path);
+            }
+        }
+    }
+}
+
+fn resync_updaters(world: &mut World, target_time: f64) {
+    let mut updater_jobs = Vec::new();
+    let mut updater_query = world.query::<(Entity, &mut gaanim_animation::Updater)>();
+    for (entity, mut updater) in updater_query.iter_mut(world) {
+        let elapsed = updater
+            .stop_at
+            .map(|stop_at| target_time.min(stop_at))
+            .unwrap_or(target_time);
+        updater.elapsed = elapsed;
+        updater_jobs.push((entity, updater.func.clone(), elapsed));
+    }
+    for (entity, func, elapsed) in updater_jobs {
+        let _ = func(0.0, elapsed, entity, world);
+    }
+}
+
+fn rebuild_traced_paths(world: &mut World, target_time: f64) {
+    let traces: Vec<(Entity, Entity, f64, Option<usize>)> = {
+        let mut query = world.query::<(Entity, &gaanim_animation::TracedPath)>();
+        query
+            .iter(world)
+            .map(|(entity, trace)| (entity, trace.source, trace.min_distance, trace.max_points))
+            .collect()
+    };
+
+    if traces.is_empty() {
+        return;
+    }
+
+    for (trace_entity, _, _, _) in &traces {
+        if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
+        {
+            traced_path.points.clear();
+        }
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
+            path_comp.0 = std::sync::Arc::new(gaanim_core::kurbo::BezPath::new());
+        }
+    }
+
+    if target_time <= 0.0 {
+        return;
+    }
+
+    let mut sample_time = 0.0;
+    let step = 1.0 / 60.0;
+    let mut sample_times = Vec::new();
+    while sample_time < target_time {
+        sample_times.push(sample_time);
+        sample_time += step;
+    }
+    sample_times.push(target_time);
+
+    for sample_time in sample_times {
+        resync_updaters(world, sample_time);
+        gaanim_animation::position_binding_system(world);
+
+        for (trace_entity, source_entity, min_distance, max_points) in &traces {
+            let Some(source_pos) = world
+                .get::<SpatialTransform>(*source_entity)
+                .map(|t| t.translation)
+            else {
+                continue;
+            };
+
+            if let Some(mut traced_path) =
+                world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
+            {
+                let should_add = match traced_path.points.last() {
+                    Some(last_point) => last_point.distance(source_pos) >= *min_distance,
+                    None => true,
+                };
+
+                if should_add {
+                    traced_path.points.push(source_pos);
+                    if let Some(max) = max_points {
+                        if traced_path.points.len() > *max {
+                            traced_path.points.remove(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (trace_entity, _, _, _) in &traces {
+        let points = world
+            .get::<gaanim_animation::TracedPath>(*trace_entity)
+            .map(|trace| trace.points.clone())
+            .unwrap_or_default();
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
+            let mut path = gaanim_core::kurbo::BezPath::new();
+            if let Some(first) = points.first() {
+                path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+                for pt in &points[1..] {
+                    path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
+                }
+            }
+            path_comp.0 = std::sync::Arc::new(path);
+        }
     }
 }
 
 /// Helper function to evaluate and apply a PropertyLensSpec to an entity.
-fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t: f64) {
+fn apply_lens_spec(
+    world: &mut World,
+    target: Entity,
+    lens: &PropertyLensSpec,
+    t: f64,
+    completed: bool,
+) {
     match lens {
         PropertyLensSpec::Translation { from, to } => {
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
@@ -658,12 +1224,30 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                     }
                 }
             } else if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
-                // Take by reference instead of cloning — get_subpath
-                // already returns an owned trimmed BezPath.
                 let trimmed = gaanim_math::get_subpath(&source.0, completion);
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
                     path.0 = std::sync::Arc::new(trimmed);
                 }
+            }
+
+            if let Some(mut tip) = world.get_mut::<gaanim_animation::WriteTipGlow>(target) {
+                tip.completion = completion;
+            }
+        }
+        PropertyLensSpec::PathMorph { from, to } => {
+            let morphed = if completed {
+                to.clone()
+            } else {
+                gaanim_math::interpolate_paths_continuous(from, to, t)
+            };
+            if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                path.0 = std::sync::Arc::new(morphed.clone());
+            }
+            // Keep the stroke clipping source in lockstep with `Path2D`.
+            // A stale source geometry otherwise leaks the previous outline
+            // (notably the circle around a morphing diamond) during seeks.
+            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target) {
+                source.0 = std::sync::Arc::new(morphed);
             }
         }
         PropertyLensSpec::FillDrawProgress { from, to } => {
@@ -691,6 +1275,36 @@ fn apply_lens_spec(world: &mut World, target: Entity, lens: &PropertyLensSpec, t
                 && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
             {
                 *zoom = *from + (*to - *from) * t;
+            }
+        }
+        PropertyLensSpec::CameraFollow { target: followed } => {
+            let position = {
+                let mut query = world.query::<(&MobjectId, &SpatialTransform)>();
+                query.iter(world).find_map(|(id, transform)| {
+                    (id.0 == *followed).then_some(transform.translation)
+                })
+            };
+            if let Some(position) = position
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = position.x;
+                camera.position.y = position.y;
+            }
+        }
+        PropertyLensSpec::CameraShake {
+            origin,
+            amplitude,
+            frequency,
+        } => {
+            let phase = t * frequency * std::f64::consts::TAU;
+            let envelope = (1.0 - t).max(0.0);
+            let offset = gaanim_core::glam::DVec3::new(
+                phase.sin() * amplitude * envelope,
+                (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
+                0.0,
+            );
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = *origin + offset;
             }
         }
         PropertyLensSpec::PathFollow { path } => {
@@ -755,9 +1369,13 @@ fn apply_transition(
             // Instant cut — no visual effect needed.
         }
         TransitionType::CrossFade { .. } => {
-            // Crossfade: from scene fades out (opacity 1→0), to scene fades in (opacity 0→1).
+            // Crossfade: multiplicatively modulate existing opacity.
+            // Only touch root entities — opacity_propagation_system cascades to children.
             for (entity, scene_id) in scene_entities {
-                let target_opacity = if *scene_id == from {
+                if world.get::<ChildOf>(*entity).is_some() {
+                    continue; // skip children, they inherit from root
+                }
+                let factor = if *scene_id == from {
                     1.0 - t as f32
                 } else if *scene_id == to {
                     t as f32
@@ -765,23 +1383,27 @@ fn apply_transition(
                     continue;
                 };
                 if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
-                    opacity.0 = target_opacity;
+                    opacity.0 *= factor;
                 }
             }
         }
         TransitionType::FadeThrough { fade_color, .. } => {
-            // Fade-through: first half fades everything to fade_color, second half reveals to-scene.
+            // Fade-through: multiplicatively modulate existing opacity.
+            // Only touch root entities — opacity_propagation_system cascades to children.
             let _ = fade_color;
             for (entity, scene_id) in scene_entities {
-                let target_opacity = if t < 0.5 {
-                    // First half: fade out both scenes
+                if world.get::<ChildOf>(*entity).is_some() {
+                    continue; // skip children, they inherit from root
+                }
+                let factor = if t < 0.5 {
+                    // First half: fade out from-scene, keep to-scene hidden
                     if *scene_id == from {
                         1.0 - (t * 2.0) as f32
                     } else {
                         0.0
                     }
                 } else {
-                    // Second half: fade in to-scene
+                    // Second half: fade in to-scene, keep from-scene hidden
                     if *scene_id == to {
                         ((t - 0.5) * 2.0) as f32
                     } else {
@@ -789,7 +1411,7 @@ fn apply_transition(
                     }
                 };
                 if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
-                    opacity.0 = target_opacity;
+                    opacity.0 *= factor;
                 }
             }
         }
@@ -848,5 +1470,231 @@ fn apply_transition(
         TransitionType::Morph { mappings, .. } => {
             let _ = mappings;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clip::{AnimationSpec, ClipPayload};
+    use crate::snapshot::WorldSnapshot;
+    use gaanim_core::ObjectId;
+    use gaanim_core::kurbo::BezPath;
+    use gaanim_math::{RateFunc, SpatialTransform};
+    use gaanim_scene::{MobjectId, PathSource};
+    use std::sync::Arc;
+
+    #[test]
+    fn remove_updater_clip_removes_component_after_timestamp() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                gaanim_animation::orbit_updater(gaanim_core::glam::DVec3::ZERO, 10.0, 1.0),
+            ))
+            .id();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let mut timeline = Timeline::default();
+        let track = timeline.tracks.insert_with_key(|id| crate::clip::Track {
+            id,
+            name: "Reactive".into(),
+            order: 0,
+            object_id: Some(object_id),
+            scene: None,
+        });
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            1.0,
+            0.0,
+            ClipPayload::RemoveUpdater { target: object_id },
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert!(world.get::<gaanim_animation::Updater>(entity).is_some());
+        assert_eq!(
+            world
+                .get::<gaanim_animation::Updater>(entity)
+                .and_then(|u| u.stop_at),
+            None
+        );
+
+        timeline.seek(&mut world, 1.5);
+        let updater = world
+            .get::<gaanim_animation::Updater>(entity)
+            .expect("updater should remain present but frozen");
+        assert_eq!(updater.stop_at, Some(1.0));
+        assert!((updater.elapsed - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scene_membership_event_is_applied_at_its_timestamp_and_reversible() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let mut timeline = Timeline::default();
+        let first_scene = timeline.add_scene("first");
+        let second_scene = timeline.add_scene("second");
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                SceneMember(first_scene),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let track = timeline.add_track("Scene membership", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            1.0,
+            0.0,
+            ClipPayload::SetSceneMember {
+                target: object_id,
+                scene: Some(second_scene),
+            },
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(first_scene)
+        );
+
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(second_scene)
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world.get::<SceneMember>(entity).map(|s| s.0),
+            Some(first_scene)
+        );
+    }
+
+    #[test]
+    fn completed_spring_morph_commits_exact_target_path() {
+        let mut from = BezPath::new();
+        from.move_to((0.0, 0.0));
+        from.line_to((10.0, 0.0));
+        from.line_to((5.0, 10.0));
+        from.close_path();
+
+        let mut to = BezPath::new();
+        to.move_to((0.0, 0.0));
+        to.curve_to((0.0, 8.0), (10.0, 8.0), (10.0, 0.0));
+        to.close_path();
+
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                Path2D(Arc::new(from.clone())),
+                PathSource(Arc::new(from.clone())),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Morph", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::PathMorph {
+                    from,
+                    to: to.clone(),
+                },
+                rate_func: RateFunc::Spring {
+                    stiffness: 90.0,
+                    damping: 12.0,
+                },
+                delay: 0.0,
+                label: Some("Transform".into()),
+            }),
+        );
+
+        timeline.seek(&mut world, 0.5);
+        let active_path = world.get::<Path2D>(entity).unwrap().0.clone();
+        assert_eq!(world.get::<PathSource>(entity).unwrap().0, active_path);
+        assert_ne!(active_path.as_ref(), &to);
+
+        timeline.seek(&mut world, 1.0);
+
+        assert_eq!(world.get::<Path2D>(entity).unwrap().0.as_ref(), &to);
+        assert_eq!(world.get::<PathSource>(entity).unwrap().0.as_ref(), &to);
+    }
+
+    #[test]
+    fn semantic_presentation_positions_and_stops_follow_slides_and_steps() {
+        let mut timeline = Timeline::default();
+        timeline.set_presentation(vec![
+            PresentationSlide {
+                id: 10,
+                name: "intro".to_string(),
+                notes: Some("Opening".to_string()),
+                start_time: 0.0,
+                end_time: 3.0,
+                steps: vec![PresentationStep {
+                    name: Some("reveal".to_string()),
+                    time: 1.0,
+                }],
+            },
+            PresentationSlide {
+                id: 20,
+                name: "details".to_string(),
+                notes: None,
+                start_time: 3.0,
+                end_time: 5.0,
+                steps: vec![PresentationStep {
+                    name: None,
+                    time: 4.0,
+                }],
+            },
+        ]);
+
+        assert_eq!(
+            timeline.presentation_position_at(1.5),
+            Some(PresentationPosition {
+                slide_id: 10,
+                step_index: Some(0),
+            })
+        );
+        assert_eq!(timeline.next_presentation_stop(1.0), Some(3.0));
+        assert_eq!(timeline.previous_presentation_stop(3.0), Some(1.0));
+        assert_eq!(
+            timeline.presentation_time(PresentationPosition {
+                slide_id: 20,
+                step_index: Some(0),
+            }),
+            Some(4.0)
+        );
+        assert_eq!(timeline.presentation_time_named("DETAILS"), Some(3.0));
+        assert_eq!(
+            timeline.presentation_step_time_named("INTRO", "REVEAL"),
+            Some(1.0)
+        );
+        assert_eq!(
+            timeline.presentation_time_indexed("details", Some(0)),
+            Some(4.0)
+        );
+        assert_eq!(timeline.presentation_time_indexed("details", Some(1)), None);
+
+        timeline.current_time = 4.0;
+        timeline.update_presentation_position();
+        assert_eq!(
+            timeline.presentation_label().as_deref(),
+            Some("2 / 2 · details · step 1")
+        );
     }
 }

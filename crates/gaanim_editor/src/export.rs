@@ -1,15 +1,27 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
+use gaanim_api::canvas::Canvas;
+use gaanim_api::export::export_canvas;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-pub type ReplayFn = Arc<dyn Fn(&mut World) + Send + Sync>;
+#[derive(Resource, Clone, Debug)]
+pub struct ProjectPaths {
+    pub project_dir: PathBuf,
+    pub output_dir: PathBuf,
+    pub script_path: PathBuf,
+}
 
-#[derive(Resource, Clone)]
-pub struct StashedReplay(pub Option<ReplayFn>);
+#[derive(Resource, Clone, Default)]
+pub struct StashedReplay {
+    pub canvas: Option<Canvas>,
+    /// Changes on every replay, even when slide names and timings stay equal.
+    pub revision: u64,
+}
 
 #[derive(Resource)]
 pub struct ExportState {
@@ -88,8 +100,22 @@ pub fn export_dialog_system(
     mut state: ResMut<ExportState>,
     timeline: ResMut<Timeline>,
     replay_stash: Res<StashedReplay>,
+    project_paths: Option<Res<ProjectPaths>>,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else { return };
+
+    // Initialize default output path from gaanim.toml if still default
+    if let Some(ref proj) = project_paths {
+        if state.output_path == "output.mp4" {
+            // Show relative to project for nicer UX: e.g. "exports/output.mp4"
+            let rel = proj
+                .output_dir
+                .strip_prefix(&proj.project_dir)
+                .unwrap_or(&proj.output_dir)
+                .join("output.mp4");
+            state.output_path = rel.to_string_lossy().to_string();
+        }
+    }
 
     // --- Collect intent from egui into local variables first ---
     let mut trigger_export = false;
@@ -171,7 +197,7 @@ pub fn export_dialog_system(
     let mut current_format = state.format;
     let mut current_quality = state.quality;
     let mut current_output = state.output_path.clone();
-    let has_replay = replay_stash.0.is_some();
+    let has_replay = replay_stash.canvas.is_some();
     let dur = timeline.cached_duration;
     let fps = current_quality.fps();
     let total = (dur * fps as f64).ceil() as u64;
@@ -248,11 +274,22 @@ pub fn export_dialog_system(
             state.show_complete = true;
             state.dialog_open = false;
         } else {
-            let out = state.output_path.clone();
+            let out_raw = state.output_path.clone();
+            // Resolve relative output against project_dir so gaanim.toml's output_dir is respected
+            let out = if let Some(ref proj) = project_paths {
+                let p = PathBuf::from(&out_raw);
+                if p.is_absolute() {
+                    out_raw
+                } else {
+                    proj.project_dir.join(p).to_string_lossy().to_string()
+                }
+            } else {
+                out_raw
+            };
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
-            let replay = replay_stash.0.clone().unwrap();
+            let canvas = replay_stash.canvas.clone().unwrap();
 
             state.active = true;
             state.dialog_open = false;
@@ -264,7 +301,6 @@ pub fn export_dialog_system(
             });
 
             let progress_clone = progress.clone();
-            let replay2 = replay.clone();
             std::thread::spawn(move || {
                 let mut config = ExportConfig::new(&out).with_quality(match qual {
                     ExportQuality::Draft => QualityPreset::Draft,
@@ -277,9 +313,7 @@ pub fn export_dialog_system(
                 config.format = fmt;
                 config.headless = true;
 
-                let _ = export_scene_direct(config, move |world| {
-                    replay2(world);
-                });
+                let _ = export_canvas(canvas, config);
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
                         p.current_frame = p.total_frames;

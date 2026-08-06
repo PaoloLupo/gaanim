@@ -100,6 +100,17 @@ pub enum ClipPayload {
     SceneStart(SceneId),
     /// Marks the end of a scene at this timestamp.
     SceneEnd(SceneId),
+    /// Removes a continuous updater from a mobject at a specific timestamp.
+    RemoveUpdater {
+        /// Target object whose `Updater` component should be removed.
+        target: ObjectId,
+    },
+    /// Changes an object's scene membership at this exact timeline position.
+    /// Snapshot restore makes the event reversible when scrubbing backwards.
+    SetSceneMember {
+        target: ObjectId,
+        scene: Option<SceneId>,
+    },
     /// A scene transition spanning the boundary between two scenes.
     Transition {
         /// The outgoing scene.
@@ -121,6 +132,8 @@ pub struct AnimationSpec {
     pub lens: PropertyLensSpec,
     /// Easing curve or physical spring rate function.
     pub rate_func: RateFunc,
+    /// Initial delay in seconds before the animation starts.
+    pub delay: f64,
     /// High-level animation label (e.g. "Write", "Grow", "SpinIn").
     pub label: Option<String>,
 }
@@ -164,6 +177,10 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    PathMorph {
+        from: BezPath,
+        to: BezPath,
+    },
     /// Cross-fade the fill alpha from `from` to `to` (both in `[0, 1]`).
     /// Used by the Write animation to reveal the fill after the path
     /// has been fully drawn. Applied by inserting/updating a
@@ -183,6 +200,16 @@ pub enum PropertyLensSpec {
     CameraZoom {
         from: f64,
         to: f64,
+    },
+    /// Center the camera on a moving mobject for the lifetime of the clip.
+    CameraFollow {
+        target: ObjectId,
+    },
+    /// A deterministic damped shake around `origin`.
+    CameraShake {
+        origin: gaanim_core::glam::DVec3,
+        amplitude: f64,
+        frequency: f64,
     },
     /// Move the entity's translation along a Bézier path. Sampled at
     /// the rate-function-eased `t` and applied as the entity's
@@ -243,6 +270,11 @@ impl PropertyLensSpec {
                 from: *from,
                 to: *to,
             },
+            Self::PathMorph { from, to } => PropertyLens::PathMorph {
+                from: from.clone(),
+                to: to.clone(),
+                table: gaanim_animation::MorphTable,
+            },
             Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
                 from: *from,
                 to: *to,
@@ -258,6 +290,16 @@ impl PropertyLensSpec {
             Self::CameraZoom { from, to } => PropertyLens::CameraZoom {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraFollow { target } => PropertyLens::CameraFollow { target: *target },
+            Self::CameraShake {
+                origin,
+                amplitude,
+                frequency,
+            } => PropertyLens::CameraShake {
+                origin: *origin,
+                amplitude: *amplitude,
+                frequency: *frequency,
             },
             Self::PathFollow { path } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),

@@ -1,6 +1,7 @@
 pub mod boolean;
 pub mod prelude;
 pub mod primitives;
+pub mod svg;
 pub mod text;
 
 use bevy::prelude::*;

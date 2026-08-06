@@ -212,11 +212,11 @@ pub fn compile_code_cell(
     for (line, _) in code_lines {
         let trimmed = line.trim();
 
-        if trimmed == "# show-code: true" || trimmed == "# show-code" {
+        if trimmed.starts_with("# show-code: true") || trimmed == "# show-code" {
             show_code = true;
             continue;
         }
-        if trimmed == "# show-code: false" || trimmed == "# hide-code" {
+        if trimmed.starts_with("# show-code: false") || trimmed == "# hide-code" {
             show_code = false;
             continue;
         }
@@ -266,6 +266,33 @@ pub fn compile_code_cell(
         code_to_execute.push('\n');
         code_to_display.push_str(line);
         code_to_display.push('\n');
+    }
+
+    // Auto-infer output: si el codigo hace scene.export("algo") y no hay # output:, usar ese archivo automaticamente
+    if expected_webp.is_none() && code_to_execute.contains(".export(") {
+        // extrae primer argumento entre comillas de .export("...") o .export('...')
+        let mut inferred: Option<String> = None;
+        if let Some(start) = code_to_execute.find(".export(") {
+            let rest = &code_to_execute[start + ".export(".len()..];
+            if let Some(q) = rest.find('"') {
+                let after = &rest[q + 1..];
+                if let Some(end) = after.find('"') {
+                    inferred = Some(after[..end].to_string());
+                }
+            } else if let Some(q) = rest.find('\'') {
+                let after = &rest[q + 1..];
+                if let Some(end) = after.find('\'') {
+                    inferred = Some(after[..end].to_string());
+                }
+            }
+        }
+        if let Some(p) = inferred {
+            if !p.is_empty() {
+                expected_webp = Some(p);
+            }
+        } else if code_to_execute.contains("preview.webp") {
+            expected_webp = Some("preview.webp".to_string());
+        }
     }
 
     // Resolve companion file cell
@@ -477,14 +504,55 @@ pub fn compile_code_cell(
 
         // Detect output WebP
         if let Some(ref webp_name) = expected_webp {
+            // wait for exporter to finish flushing (Windows file lock)
+            for _ in 0..15 {
+                if project_root.join(webp_name).exists() {
+                    let s1 = fs::metadata(project_root.join(webp_name))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    let s2 = fs::metadata(project_root.join(webp_name))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    if s1 == s2 && s1 > 1024 {
+                        break;
+                    }
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                }
+            }
             let src_path = project_root.join(webp_name);
-            if src_path.exists() {
+            let src_valid = fs::metadata(&src_path)
+                .map(|m| m.len() > 100)
+                .unwrap_or(false);
+            if src_valid {
                 let img_dir = project_root.join("assets/generated");
                 fs::create_dir_all(&img_dir).unwrap();
                 let dest_name = format!("{}_anim.webp", cell_id);
                 let dest = img_dir.join(&dest_name);
-                let _ = fs::rename(&src_path, &dest);
-                webp_path = format!("assets/generated/{}", dest_name);
+                // Windows: rename fails if dest exists or src still locked — fallback to copy
+                if let Err(e) = fs::rename(&src_path, &dest) {
+                    // try copy+remove
+                    if fs::copy(&src_path, &dest).is_ok() {
+                        let _ = fs::remove_file(&src_path);
+                    } else {
+                        eprintln!(
+                            "Warning: could not move WebP '{}' -> '{}': {}",
+                            src_path.display(),
+                            dest.display(),
+                            e
+                        );
+                    }
+                }
+                // only set webp_path if dest now exists
+                if dest.exists() {
+                    webp_path = format!("assets/generated/{}", dest_name);
+                } else {
+                    eprintln!(
+                        "Warning: expected WebP '{}' not found after execution (dest missing)",
+                        webp_name
+                    );
+                }
             } else {
                 eprintln!(
                     "Warning: expected WebP '{}' not found after execution",

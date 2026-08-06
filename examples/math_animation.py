@@ -1,69 +1,25 @@
-"""Example: Mathematical formula animation.
+"""Mathematical text, writing, and transforms using Scene."""
 
-Demonstrates the fluent Gaanim Python API:
-  - Scene construction with viewport
-  - Text and equation mobjects via Typst
-  - Instant configuration chaining (fill, z_index, at, etc.)
-  - **Manim-style Write animation** (progressive pen-stroke draw)
-  - Coordinated parallel animations via .animate() + .play()
-  - Glyph-level selection and styling (math character highlighting)
-  - Selection-based per-glyph shift animations
-"""
-
-from gaanim import BLUE, CORAL, GOLD, WHITE, Scene
+from gaanim import BLACK, BLUE, CORAL, GOLD, WHITE, Scene
 
 
 def main():
-    # 1. Initialize a high-performance Python GPU scene
-    print("[Gaanim Python] Initializing GPU Scene...")
-    scene = Scene(width=1280, height=720, title="Gaanim — Math Demo (Write)")
+    scene = Scene(1280, 720, background=BLACK)
+    title = scene.title("Gaanim Vector Engine").fill(WHITE).at(0, 220)
+    energy = scene.equation("E = m c^2").fill(GOLD).at(-180, 0)
+    sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)").fill(CORAL).at(180, 0)
+    halo = scene.circle(100).stroke(BLUE, 5).no_fill().at(-180, 0)
 
-    # 2. Spawn a plain Title text (white by default, HarfBuzz-shaped)
-    print("[Gaanim Python] Spawning Title text and Mathematical Equations...")
-    title_text = scene.title("Gaanim Vector Engine")
-
-    # 3. Spawn premium math formulas (rendered and compiled with Typst/NewCMMath)
-    math_formula = scene.equation("E = m c^2")
-    sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)")
-
-    # 4. Spawn a beautiful dark blue decorative circle in the background
-    bg_circle = scene.circle(80).fill(BLUE).z_index(-10)
-
-    # 5. Play the new **Write** effect in parallel on the text and equations,
-    #    plus a regular scale animation on the bg circle.
-    #    Write progressively draws the path along its arc length, with
-    #    staggered per-glyph clips for text/equation roots.
-    print("[Gaanim Python] Queueing Write animations (pen-stroke draw)...")
-    scene.play(
-        bg_circle.animate().scale(1.2).duration(1.5).spring(),
-        title_text.animate().write(duration=1.0).linear(),
-        math_formula.animate().write(duration=5.0).smooth(),
-        sum_formula.animate().write(duration=5.0).linear(),
-    )
-
-    # 6. Wait for a moment
+    scene.play([
+        title.write().duration(1.0),
+        energy.write().duration(2.0).smooth(),
+        sum_formula.write().duration(2.0).linear(),
+        halo.create().duration(1.2).spring(),
+    ])
+    scene.wait(0.8)
+    target = scene.equation("p = m v").fill(GOLD).at(-180, 0)
+    scene.play([energy.transform(target).duration(1.5).spring()])
     scene.wait(1.0)
-
-    # 7. Select "m c^2" in the first equation and color it bright Gold
-    print("[Gaanim Python] Performing semantic character selection and styling...")
-    mc2 = scene.select(math_formula, "m c^2")
-    scene.fill_selection(mc2, GOLD)
-
-    # 8. Select "n(n+1)" in the fraction and color it bright Coral Red,
-    #    then shift it up with a spring animation
-    numerator = scene.select(sum_formula, "n(n+1)")
-    scene.fill_selection(numerator, CORAL)
-
-    # Build a per-glyph shift animation and play it
-    sel_anim = scene.selection_anim(numerator, 0.0, 30.0)
-    sel_anim.duration(1.5).spring()
-    scene.play(sel_anim.build(scene))
-
-    # 9. Final wait
-    scene.wait(1.5)
-
-    # 10. Render using Vulkan GPU pipeline
-    print("[Gaanim Python] Starting native Vulkan GPU Renderer window...")
     scene.render()
 
 

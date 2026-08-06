@@ -1,64 +1,33 @@
-"""Example: Native Role-Based Color Theme Demo.
+"""Use the public technical theme with deliberate semantic accents."""
 
-Demonstrates the premium native theme system:
-  - Creating a scene with a predefined theme (Theme.DRACULA, Theme.GRUVBOX, Theme.LIGHT, etc.)
-  - How spawned shapes, text, and equations automatically adopt theme.primary/secondary colors by default
-  - Setting a theme dynamically using scene.set_theme(...)
-  - Customizing and animating elements using scene.theme.accent, secondary, and muted roles
-"""
+import os
 
-from gaanim import Scene, Theme
+from gaanim import BLUE, GOLD, GREEN, Direction, Scene
 
 
 def main():
-    print("[Gaanim Python] Spawning Scene with a native GRUVBOX theme...")
-    # Initialize the scene with the retro Gruvbox theme (background is warm dark gray)
-    scene = Scene(
-        width=1280,
-        height=720,
-        title="Gaanim — Theme & Semantic Color Roles",
-        theme=Theme.GRUVBOX
-    )
+    scene = Scene(1280, 720, margin=72)
+    scene.canvas.set_theme("technical")
+    title = scene.title("Technical visual language").at(0, 220)
+    subtitle = scene.subtitle("A reusable scientific theme").at(0, 155)
+    circle = scene.circle(75).fill(GREEN).at(-250, -10)
+    square = scene.rect(150, 150).stroke(GOLD, 6).no_fill().at(250, -10)
+    equation = scene.equation("H psi = E psi").at(0, -180)
 
-    # 1. Elements dynamically adopt the active theme's colors
-    # Spawn text which automatically uses the theme's primary color (EBDBB2)
-    title_text = scene.title("Gruvbox Role-Based Palette").at(0.0, 200.0)
-
-    # Spawn an equation that automatically uses theme's primary color
-    math_eq = scene.equation("H | psi angle.r = E | psi angle.r").at(0.0, -180.0)
-
-    # Spawn a circle filled with the theme's secondary accent color (green B8BB26)
-    circle = scene.circle(75.0).fill(scene.theme.secondary).at(-250.0, -10.0)
-
-    # Spawn a square outlined in the theme's prominent accent color (orange FE8019)
-    square = scene.rectangle(150.0, 150.0).stroke(scene.theme.accent, 6.0).no_fill().at(250.0, -10.0)
-
-    # 2. Play animations in parallel
-    print("[Gaanim Python] Queueing animations...")
-    scene.play(
-        circle.animate().grow_from_center().duration(1.5).spring(),
-        square.animate().create(duration=2.0).smooth(),
-        title_text.animate().write(duration=1.5).linear(),
-        math_eq.animate().spin_in_from_nothing().duration(2.0).smooth(),
-    )
-
-    scene.wait(1.5)
-
-    # 3. Dynamic Theme Switching: Switch to Dracula theme mid-scene!
-    # Changing the theme updates the clear color and the available semantic roles.
-    print("[Gaanim Python] Switching active theme to DRACULA...")
-    scene.set_theme(Theme.DRACULA)
-
-    # Indicate our elements with Dracula's prominent accent (Pink FF79C6)
-    scene.play(
-        circle.animate().indicate(color=scene.theme.accent, scale_factor=1.35).duration(1.5),
-        math_eq.animate().indicate(color=scene.theme.secondary, scale_factor=1.2).duration(1.5),
-    )
-
+    scene.play([
+        circle.grow_from_center().duration(1.2).spring(),
+        square.create().duration(1.5).smooth(),
+        title.write().duration(1.0),
+        subtitle.fade_in_from(Direction.DOWN, distance=20).duration(0.4),
+        equation.spin_in_from_nothing().duration(1.4).smooth(),
+    ])
     scene.wait(1.0)
-
-    print("[Gaanim Python] Launching GPU window render...")
-    scene.render()
+    circle.fill(BLUE)
+    scene.play([circle.indicate().duration(0.8)])
+    if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+        scene.snapshots(snapshots, [0.0, 1.0, 2.2])
+    else:
+        scene.render()
 
 
 if __name__ == "__main__":

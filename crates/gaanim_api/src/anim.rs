@@ -3,6 +3,13 @@ use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_math::RateFunc;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrawAnimationConfig {
+    pub stroke_width: Option<f64>,
+    pub lag_ratio: Option<f64>,
+    pub pen_tip: bool,
+}
+
 /// High-level, developer-friendly animation types that do not require explicitly defining
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
@@ -30,6 +37,10 @@ pub enum AnimationType {
     },
     FadeIn,
     FadeOut,
+    /// Fade in while translating from an offset to the drawable's position.
+    FadeInFrom {
+        offset: DVec3,
+    },
     FillColorTo {
         to: Color,
     },
@@ -74,18 +85,16 @@ pub enum AnimationType {
     /// - The `stroke_width` controls the outline thickness used during the
     ///   draw phase (defaults to the target's existing stroke width).
     Write {
-        /// Optional override for the outline stroke width used during the
-        /// draw phase. `None` means "use the target's existing stroke width".
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Create {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Uncreate {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     Unwrite {
-        stroke_width: Option<f64>,
+        config: DrawAnimationConfig,
     },
     GrowFromCenter,
     ShrinkToCenter,
@@ -96,6 +105,16 @@ pub enum AnimationType {
     },
     /// Fade out the source and fade in the target concurrently.
     FadeTransform {
+        target: ObjectId,
+    },
+    /// Morph the source into the target's visual state while preserving the
+    /// source ObjectId, so later animations continue from the morphed result.
+    Transform {
+        target: ObjectId,
+    },
+    /// Morph the source into the target, then hide the source and reveal the
+    /// actual target object at the end of the animation.
+    ReplacementTransform {
         target: ObjectId,
     },
     /// Oscillating wiggle vibration (horizontal).
@@ -110,7 +129,9 @@ pub enum AnimationType {
         direction: String,
     },
     /// Draw the outline first (like Write) then fill in.
-    DrawBorderThenFill,
+    DrawBorderThenFill {
+        config: DrawAnimationConfig,
+    },
     /// Lines radiating outward from a point (flash of insight effect).
     Flash {
         color: Option<Color>,
@@ -148,6 +169,7 @@ pub struct AnimationBuilder {
     pub target: ObjectId,
     pub anim_type: AnimationType,
     pub duration: f64,
+    pub delay: f64,
     pub rate_func: RateFunc,
 }
 
@@ -181,6 +203,82 @@ impl AnimationBuilder {
     pub fn linear(self) -> Self {
         self.rate_func(RateFunc::Linear)
     }
+
+    pub fn lag_ratio(mut self, lag_ratio: f64) -> Self {
+        let lag_ratio = lag_ratio.max(0.0);
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.lag_ratio = Some(lag_ratio);
+            }
+            _ => {}
+        }
+        self
+    }
+
+    pub fn stroke_width(mut self, stroke_width: f64) -> Self {
+        let stroke_width = stroke_width.max(0.0);
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.stroke_width = Some(stroke_width);
+            }
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_pen_tip(mut self) -> Self {
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.pen_tip = true;
+            }
+            _ => {}
+        }
+        self
+    }
+}
+
+impl AnimationType {
+    /// Whether this animation establishes an object by animating its opacity
+    /// from an initially hidden state. Semantic presentation slides use this
+    /// to avoid auto-showing an object immediately before that entrance.
+    ///
+    /// `Write` and `Create` deliberately do not belong here: they reveal an
+    /// already-visible hierarchy by animating its path/fill progress. Hiding
+    /// that hierarchy by opacity would keep it invisible for the whole draw.
+    pub(crate) fn is_entry(&self) -> bool {
+        matches!(
+            self,
+            Self::FadeIn | Self::FadeInFrom { .. } | Self::GrowFromCenter | Self::SpinInFromNothing
+        )
+    }
+
+    pub fn default_rate_func(&self) -> RateFunc {
+        match self {
+            Self::Write { .. }
+            | Self::Create { .. }
+            | Self::Unwrite { .. }
+            | Self::Uncreate { .. }
+            | Self::ShowPassingFlash { .. }
+            | Self::Wiggle => RateFunc::Linear,
+            Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
+            Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {
+                RateFunc::ThereAndBack
+            }
+            _ => RateFunc::Smooth,
+        }
+    }
 }
 
 use crate::builder::MobjectRef;
@@ -192,6 +290,7 @@ impl MobjectRef {
             anim_type: AnimationType::TranslateTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -205,6 +304,7 @@ impl MobjectRef {
             anim_type: AnimationType::TranslateBy { delta },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -218,6 +318,7 @@ impl MobjectRef {
             anim_type: AnimationType::RotateTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -231,6 +332,7 @@ impl MobjectRef {
             anim_type: AnimationType::RotateBy { angle_radians },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -240,6 +342,7 @@ impl MobjectRef {
             anim_type: AnimationType::ScaleTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -249,6 +352,7 @@ impl MobjectRef {
             anim_type: AnimationType::ScaleUniform { factor },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -258,6 +362,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -267,6 +372,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeIn,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -276,6 +382,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeOut,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -285,6 +392,7 @@ impl MobjectRef {
             anim_type: AnimationType::FillColorTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -294,6 +402,7 @@ impl MobjectRef {
             anim_type: AnimationType::StrokeColorTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -303,6 +412,7 @@ impl MobjectRef {
             anim_type: AnimationType::StrokeWidthTo { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -323,9 +433,18 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Write { stroke_width },
+            anim_type: AnimationType::Write {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Write {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
+            delay: 0.0,
         }
     }
 
@@ -343,9 +462,18 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Create { stroke_width },
+            anim_type: AnimationType::Create {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Create {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
+            delay: 0.0,
         }
     }
 
@@ -362,9 +490,18 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Uncreate { stroke_width },
+            anim_type: AnimationType::Uncreate {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Uncreate {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
+            delay: 0.0,
         }
     }
 
@@ -381,9 +518,18 @@ impl MobjectRef {
     ) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Unwrite { stroke_width },
+            anim_type: AnimationType::Unwrite {
+                config: DrawAnimationConfig {
+                    stroke_width,
+                    ..Default::default()
+                },
+            },
             duration,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::Unwrite {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
+            delay: 0.0,
         }
     }
 
@@ -394,6 +540,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowFromCenter,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -404,6 +551,7 @@ impl MobjectRef {
             anim_type: AnimationType::ShrinkToCenter,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -414,6 +562,7 @@ impl MobjectRef {
             anim_type: AnimationType::SpinInFromNothing,
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -427,6 +576,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -444,6 +594,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -453,6 +604,7 @@ impl MobjectRef {
             anim_type: AnimationType::FadeTransform { target },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -462,6 +614,7 @@ impl MobjectRef {
             anim_type: AnimationType::Wiggle,
             duration: 1.0,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 
@@ -471,6 +624,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowFromPoint { px, py },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -482,15 +636,22 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
     pub fn draw_border_then_fill(self) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::DrawBorderThenFill,
+            anim_type: AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default(),
+            },
             duration: 1.5,
-            rate_func: RateFunc::Smooth,
+            rate_func: AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default(),
+            }
+            .default_rate_func(),
+            delay: 0.0,
         }
     }
 
@@ -504,6 +665,7 @@ impl MobjectRef {
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -513,6 +675,7 @@ impl MobjectRef {
             anim_type: AnimationType::Circumscribe { color },
             duration: 1.5,
             rate_func: RateFunc::ThereAndBack,
+            delay: 0.0,
         }
     }
 
@@ -525,6 +688,7 @@ impl MobjectRef {
             anim_type: AnimationType::MoveAlongPath { path },
             duration: 2.0,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 
@@ -536,6 +700,7 @@ impl MobjectRef {
             anim_type: AnimationType::GrowArrow,
             duration: 1.5,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
     }
 
@@ -547,6 +712,7 @@ impl MobjectRef {
             anim_type: AnimationType::ShowPassingFlash { time_width },
             duration,
             rate_func: RateFunc::Linear,
+            delay: 0.0,
         }
     }
 }
@@ -565,6 +731,60 @@ impl ValueTrackerRef {
             anim_type: AnimationType::SignalFloat { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
+            delay: 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_animation_defaults_match_manim_style_rate_funcs() {
+        assert!(matches!(
+            AnimationType::Write {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::Linear
+        ));
+        assert!(matches!(
+            AnimationType::Create {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::Linear
+        ));
+        assert!(matches!(
+            AnimationType::DrawBorderThenFill {
+                config: DrawAnimationConfig::default()
+            }
+            .default_rate_func(),
+            RateFunc::DoubleSmooth
+        ));
+    }
+
+    #[test]
+    fn animation_builder_updates_draw_config_fields() {
+        let builder = AnimationBuilder {
+            target: ObjectId::from_parts(1, 1),
+            anim_type: AnimationType::Write {
+                config: DrawAnimationConfig::default(),
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: RateFunc::Linear,
+        }
+        .lag_ratio(0.15)
+        .stroke_width(3.5)
+        .with_pen_tip();
+
+        let AnimationType::Write { config } = builder.anim_type else {
+            panic!("expected write animation");
+        };
+        assert_eq!(config.lag_ratio, Some(0.15));
+        assert_eq!(config.stroke_width, Some(3.5));
+        assert!(config.pen_tip);
     }
 }

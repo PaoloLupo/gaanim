@@ -1,414 +1,592 @@
-# Gaanim — Roadmap to State of the Art
+# Gaanim — estado actual y plan de evolución
 
-Este documento compara Gaanim contra **Manim CE** y **Motion Canvas**, identifica las brechas
-reales y propone un roadmap para alcanzar (y superar) el estado del arte.
+Gaanim es un motor de animación vectorial 2D acelerado por GPU, escrito en Rust sobre
+Bevy ECS, Vello y wgpu. Su objetivo de producto es permitir crear videos explicativos,
+contenido educativo, piezas para redes y presentaciones animadas mediante una API
+programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 > [!NOTE]
-> Última auditoría del codebase: **2026-06-10**. Se actualizó el documento removiendo
-> todo lo que ya fue implementado. Solo queda lo que falta.
+> Última auditoría del repositorio: **2026-07-28**.
+> `Scene` es la fachada pública de Python; `scene.canvas` contiene la configuración del
+> viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. No se
+> asume que una capacidad interna de Rust esté disponible desde Python. `Transform` y
+> `ReplacementTransform` tienen pruebas y regresión visual.
 
 ---
 
-## Estado Actual V2 (`gaanim`) — Lo que ya existe ✅
+## Resumen ejecutivo
 
-### Animaciones (portadas y funcionando)
-`TranslateTo`, `TranslateBy`, `RotateTo`, `RotateBy`, `ScaleTo`, `ScaleUniform`,
-`FadeTo`, `FadeIn`, `FadeOut`, `FillColorTo`, `StrokeColorTo`, `StrokeWidthTo`,
-`Write`, `Create`, `Unwrite`, `Uncreate`, `GrowFromCenter`, `ShrinkToCenter`,
-`Indicate`, `GrowFromPoint`, `GrowFromEdge`, `GrowArrow`, `SpinInFromNothing`,
-`DrawBorderThenFill`, `Wiggle`, `Flash`, `Circumscribe`, `ShowPassingFlash`,
-`FadeTransform`, `MoveAlongPath`, `PathCompletion`.
-Composición: `parallel` y `sequence` en la línea de tiempo.
+**Estado de producto: alfa funcional (`gaanim` 0.1.0).**
 
-### Rate Functions (100% completas)
-`Linear`, `Smooth`, `DoubleSmooth`, `EaseIn/Out/InOut` con 10 curvas (Quad→Bounce),
-`Spring`, `Steps`, `Mirror`, `ThereAndBack`, `ThereAndBackWithPause`, `Lingering`,
-`RunningStart`, `ExponentialDecay`, `NotQuiteThere`, `CubicBezier`, `Custom`.
+Gaanim ya puede construir, previsualizar y exportar animaciones vectoriales 2D con
+formas, texto, fórmulas matemáticas, composición temporal, segmentos, transiciones y
+algunos comportamientos reactivos. El workspace compila completo y la arquitectura
+separa correctamente escena, animación, timeline, renderer, texto, layout, exportación,
+editor, API y bindings.
 
-### Objetos (Mobjects)
-*Primitivos:* `Circle`, `Rectangle`, `RoundedRectangle`, `Line`, `DashedLine`,
-`Polygon`, `Star`, `Ellipse`, `Dot`, `Square`, `Triangle`, `RegularPolygon`,
-`Checkmark`, `Arrow`, `DoubleArrow`, `Arc`, `ArcBetweenPoints`.
-*Texto:* `Text` (cosmic-text + HarfBuzz), `Equation`/`TypstDocument` (Typst nativo).
-*Datos:* `NumberPlane` (grilla cartesiana), `TangentLine`, `DecimalNumber`.
+La base técnica es más madura que la experiencia de librería. La API de Python actual
+expone solo una parte de lo que existe en Rust, pero `Scene` ya es la fachada pública que
+posee mobjects, timeline, reproducción y exportación. La documentación y los ejemplos
+usan `Scene`; `Canvas` queda limitado a la configuración accesible como `scene.canvas` y
+a un constructor de compatibilidad deprecado. El flujo principal también está orientado a
+ejecutar scripts dentro de la aplicación `gaanim`, no a instalar y usar el módulo como un
+paquete Python autónomo.
 
-### Posicionamiento y Layout
-`at()`, `shift()`, `scale()`, `rotate()`, `next_to()`, `align_to()`.
-Grupos: `arrange()`, `arrange_in_grid()`, `vstack()`, `hstack()`.
+En términos prácticos:
 
-### Efectos Visuales
-Gradientes (Linear, Radial, Conic) via `peniko::Brush`.
-Componentes `DropShadow`, `Glow`, `GaussianBlur` definidos (rendering parcial).
+- **Sí es viable hoy** para prototipos y piezas vectoriales programáticas: títulos,
+  diagramas simples, fórmulas, explicaciones matemáticas y animaciones cortas con audio
+  mezclado al exportar.
+- **Es beta funcional** para presentaciones interactivas: existen slides y pasos
+  semánticos, layouts, notas, Presenter View, overview, navegación por monitor y una
+  plantilla completa de sustentación.
+- **Todavía no está listo** como pipeline general de producción de contenido: faltan
+  preview de audio, video embebido, más gráficos de datos, plantillas y una distribución coherente.
+- **Todavía no está listo** como librería pública estable: API, documentación, ejemplos,
+  stubs, versionado, pruebas de integración y empaquetado deben converger.
 
-### Sistema Reactivo
-`ValueTracker` + `FloatSignal` + `DecimalNumber` + updaters (`Bob`, `Rotate`,
-`Orbit`, `Pulse`, `Follow`) + `TracedPath` + `AlwaysRedraw` (Rust-side).
+### Semáforo por caso de uso
 
-### `.animate` Syntax
-`mob.animate().shift(x,y).scale(s).fill_color(c).duration(d).smooth()` — fluent chaining completo.
-
-### Boolean Operations
-`union()`, `intersection()`, `difference()`, `exclusion()` — implementadas via `i_overlay`.
-
-### Multi-Escena (Engine API)
-`PyEngine` con `PySceneBuilder` para múltiples escenas con transiciones.
-Transiciones: `Cut`, `CrossFade`, `FadeThrough`, `Slide(dir)`, `ZoomThrough`, `Morph`.
-
-### Modo Presentación (Slides)
-`scene.slide()` inserta breakpoints. Navegación interactiva con Space/Enter/Arrows/Click.
-`export_slides()` exporta cada segmento como archivo independiente.
-
-### Exportación
-GPU-direct headless export (Vello + wgpu), encoders (Nvenc/AMF/QSV/VA-API),
-formatos WebP/WebM/MP4/GIF/PNG sequence, segmentos por rango de tiempo.
-
-### Z-Index
-`RenderOrder { z_index, creation_order }` con tiebreaker monotónico.
-
-### Cámara
-Struct `Camera` con proyección ortográfica, posición, zoom. Clips de bajo nivel
-para `CameraPosition`, `CameraRotation`, `CameraZoom` via timeline seek.
-
-### Otros
-Theming, text roles (Title, Subtitle, Body, Caption, Code), color palette,
-snapshot/seek interactivo, `@Scene("name")` segments, editor con timeline widget.
+| Caso de uso | Estado | Evaluación actual |
+|---|---:|---|
+| Animación vectorial 2D programática | 🟢 | Núcleo funcional con preview y exportación |
+| Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
+| Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
+| Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View, overview y plantilla de tesis verificadas |
+| Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
+| Motion graphics con multimedia | 🟡 | Raster, SVG vectorial avanzado y audio de exportación disponibles; falta video embebido |
+| Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
 
 ---
 
-## 🔴 Brechas Críticas — Lo que falta para State of the Art
+## Evidencia de la auditoría
 
-### 1. Animaciones Faltantes
-
-| Animación | Descripción | En Manim | Esfuerzo |
-|-----------|-------------|----------|----------|
-| `Transform` | Morph de un mobject a otro (interpolación de paths) | ✅ Core | 🔴 12h |
-| `ReplacementTransform` | Transform + reemplazar el original | ✅ Core | 🔴 4h (sobre Transform) |
-| `TransformMatchingShapes` | Morph inteligente por forma similar | ✅ Transform | 🔴 12h |
-| `TransformMatchingTex` | Morph inteligente por LaTeX submobjects | ✅ Transform | 🔴 12h |
-| `ApplyWave` | Onda que deforma el path del objeto | ✅ Indication | 🟡 5h |
-| `Homotopy` | Deformación continua con función `(x,y,z,t)→(x',y',z')` | ✅ Movement | 🔴 8h |
-
-**Prioridad:**
-1. `Transform` + `ReplacementTransform` — fundamental para contenido educativo
-2. `TransformMatchingShapes/Tex` — killer feature de Manim
-3. `ApplyWave`, `Homotopy` — variedad creativa
+- `cargo check --workspace` finaliza correctamente.
+- El workspace contiene 13 crates de gaanim más el crate de documentación.
+- El paquete declara versión Python `0.1.0`; varios crates Rust siguen en `0.1.0`.
+- La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
+  `Anchor`, `Direction` y `Updater`. `Canvas(...)` emite una deprecación y devuelve un
+  `Scene`; la configuración visual vive en `scene.canvas`.
+- Los ejemplos Python no importan `Canvas` como fachada de animación.
+- La documentación Typst usa `Scene`, listas en `scene.play([...])` y métodos expuestos
+  por los bindings actuales.
+- CI ejecuta formato, check, tests y Clippy en Windows y Linux, además de la regresión
+  visual de `transform_demo` en Windows.
+- `cargo test --workspace --jobs 2` finaliza correctamente.
 
 ---
 
-### 2. Animaciones de Cámara
+## Decisión de API: deprecar `Canvas` como fachada pública
 
-Las animaciones de alto nivel de cámara no están portadas. Solo existen clips de bajo nivel.
+**Decisión aprobada el 2026-07-13:** `Scene` será nuevamente el punto de entrada público
+de Python. `Canvas` dejará de representar toda la animación y quedará reservado para el
+viewport y su configuración visual.
 
-| Animación | Descripción | Esfuerzo |
-|-----------|-------------|----------|
-| `CameraShake` | Sacudida tipo terremoto | 🟢 3h |
-| `CameraPulse` | Zoom in/out rápido | 🟢 2h |
-| `CameraFollow` | Seguir un mobject automáticamente | 🟡 4h |
-| `CameraFrameTo` | Enfocar un rect/mobject con margin | 🟡 4h |
+La responsabilidad objetivo de cada concepto es:
 
-**Esfuerzo total:** ~13h
+| Concepto | Responsabilidad |
+|---|---|
+| `Scene` | Mobjects, animaciones, timeline, reproducción, slides y exportación |
+| `Canvas` | Dimensiones, fondo, márgenes, coordenadas, aspect ratio y safe areas |
+| `Video` | Composición futura de múltiples escenas y transiciones |
+| `Presentation` | Composición futura de slides, navegación y presenter mode |
 
----
-
-### 3. Mobjects Faltantes
-
-| Mobject | Descripción | En Manim | Esfuerzo |
-|---------|-------------|----------|----------|
-| `CurvedArrow` | Flecha con curva | ✅ Core | 🟢 3h |
-| `LabeledArrow` | Flecha con label de texto | ✅ Core | 🟡 4h |
-| `Vector` | Flecha desde el origen (alias de Arrow) | ✅ Core | 🟢 1h |
-| `Axes` | Par de ejes cartesianos con ticks y labels | ✅ Core | 🟡 6h |
-| `NumberLine` | Línea numérica con ticks | ✅ Core | 🟡 4h |
-| `Brace` | Llave decorativa con label | ✅ Core | 🟡 4h |
-| `FunctionGraph` | Gráfica de f(x) sobre Axes | ✅ Core | 🟡 4h |
-| `ParametricCurve` | Curva paramétrica | ✅ Core | 🟡 4h |
-| `PolarPlane` | Plano polar | ✅ Core | 🟡 6h |
-| `ComplexPlane` | Plano complejo | ✅ Core | 🟡 4h |
-| `ImplicitCurve` | Curva definida implícitamente | ✅ Core | 🔴 8h |
-| `Table` | Tabla con celdas y texto | ✅ Core | 🔴 12h |
-| `Matrix` | Representación visual de matrices | ✅ Core | 🔴 8h |
-| `BarChart` | Gráfico de barras animable | ✅ Core | 🟡 6h |
-| `Code` | Código con syntax highlighting | ✅ Manim + MC | 🔴 16h |
-| `ImageMobject` | Mostrar imágenes raster | ✅ Core | 🟡 6h |
-| `SvgMobject` | Importar SVG como mobject | ✅ Core | 🔴 12h |
-
-**Prioridad de implementación:**
-1. `Vector`, `CurvedArrow` — quick wins
-2. `Axes`, `NumberLine`, `FunctionGraph`, `ParametricCurve` — contenido matemático
-3. `Brace`, `LabeledArrow` — anotaciones educativas
-4. `Table`, `Matrix`, `BarChart` — contenido estructurado
-5. `Code` — contenido CS/programming
-6. `ImageMobject`, `SvgMobject` — contenido multimedia
-
----
-
-### 4. Efectos Visuales (Rendering)
-
-Los componentes ECS para `DropShadow`, `Glow` y `GaussianBlur` existen como structs,
-pero el renderer tiene TODOs explícitos — el pipeline de Vello no los renderiza.
-
-**Lo que falta:**
-- Conectar `DropShadow` al pipeline de Vello (blur + offset del path)
-- Implementar `GaussianBlur` en el render pass
-- Implementar `Glow` como bloom alrededor del path
-- Exponer gradientes en la Python API (actualmente solo disponibles via `peniko::Brush` en Rust)
-
-**Esfuerzo:** 🔴 ~16h (requiere trabajo en el render pipeline de Vello)
-
----
-
-### 5. Code Mobject (Syntax Highlighting)
-
-**Nivel 1 — Display (Manim parity):**
-- Renderizar código con syntax highlighting (via `syntect` o `tree-sitter`)
-- Soporte para ~50 lenguajes
-- Line numbers opcionales
-- Estilos de formatter (Monokai, Dracula, etc.)
-- Destacar líneas/rangos específicos
-
-**Nivel 2 — Animation (Motion Canvas parity):**
-- `code.edit("new source")` → diff animado automático
-- Inserción/eliminación de líneas con animación
-- Highlight de líneas que cambian
-- Cursor animado
-
-**Esfuerzo:** 🔴 Nivel 1: ~16h, Nivel 2: ~24h adicionales
-
----
-
-### 6. Graph Theory (Network Visualization)
-
-Manim tiene `Graph` y `DiGraph` con 10+ algoritmos de layout automático.
-
-**Lo que falta:**
-- `Graph` / `DiGraph` — grafo no dirigido y dirigido
-- Algoritmos de layout: `spring`, `circular`, `kamada_kawai`, `tree`, `planar`, `shell`, `spiral`, `partite`
-- Vertex customization (mobjects arbitrarios como nodos)
-- Edge labels
-- Auto-updaters (edges siguen a vertices al moverlos)
-- Animaciones específicas: agregar/remover vértices y aristas con animación
-
-**Esfuerzo:** 🔴 ~20h
-
----
-
-### 7. 3D Support
-
-Manim tiene 3D completo. Motion Canvas no tiene 3D. Es el gap más grande.
-
-**Nivel 1 — Pseudo-3D (proyección):**
-- Transformaciones de perspectiva en paths 2D
-- Rotación aparente de objetos planos
-- Esfuerzo: 🟡 ~8h
-
-**Nivel 2 — 3D Real:**
-- `ThreeDScene` con cámara 3D (phi, theta, focal_distance)
-- Primitivos: `Sphere`, `Cube`, `Cylinder`, `Cone`, `Torus`, `Surface`
-- `ThreeDAxes`, `Arrow3D`, `Line3D`
-- Iluminación básica (ambient + point)
-- Render via wgpu 3D pipeline o ray marching en Vello
-- Esfuerzo: 🔴🔴 ~80-120h (proyecto mayor)
-
-> [!WARNING]
-> 3D es un proyecto enorme. Manim lo hace con CPU rendering (lento). Gaanim
-> podría usar wgpu para 3D acelerado por GPU, lo cual sería una ventaja competitiva,
-> pero el esfuerzo es significativo.
-
----
-
-### 8. Audio Integration
-
-Ni Manim ni Gaanim tienen audio nativo robusto. Motion Canvas sí.
-
-**Componentes:**
-- `AudioTrack` resource con offset y sync al timeline
-- Mezcla de múltiples tracks
-- Waveform visualization en el editor
-- `on_beat(bpm, beat)` helper
-- Audio en exports (muxing con ffmpeg)
-
-**Esfuerzo:** 🔴 ~20h
-
----
-
-### 9. Interactividad (Eventos)
-
-El manejo de eventos `on_hover`, `on_click` y `on_drag` está pendiente.
-
-**Componentes:**
-- `InteractionTarget` component con bounding box hit testing
-- `on_hover(callback)`, `on_click(callback)`, `on_drag(callback)` en Python API
-- Integración con el event loop de Bevy
-- Cursor feedback visual
-
-**Esfuerzo:** 🟡 ~12h
-
----
-
-### 10. Modo Presentación — Mejoras pendientes
-
-El modo básico (`slide()` + navegación) ya funciona. Falta:
-
-- **Overview mode:** thumbnails miniatura de todas las diapositivas
-- **Slide indicator:** barra de progreso o número de slide
-- **Presenter notes:** notas visibles solo para el presentador (dual screen)
-
-**Esfuerzo:** 🟡 ~8h
-
----
-
-## 🟡 Mejoras de Calidad — Polish
-
-### 11. `always_redraw` en Python
-
-El componente `AlwaysRedraw` existe en Rust pero no tiene binding en Python.
+API objetivo mínima:
 
 ```python
-# Objetivo
-circle = scene.always_redraw(lambda: scene.circle(tracker.get()).fill(BLUE))
+scene = Scene(width=1920, height=1080, background=BLACK)
+
+title = scene.title("Gaanim")
+scene.play(title.write())
+scene.export("video.mp4")
 ```
 
-**Esfuerzo:** 🟢 ~4h
+Internamente, la relación deberá poder evolucionar hacia:
 
----
-
-### 12. Flexbox Layout Engine (Motion Canvas Style)
-
-Motion Canvas usa Flexbox CSS para layout. Gaanim ya tiene `arrange()`, `vstack()`,
-`hstack()`. Un Flexbox completo sería el siguiente nivel.
-
-```python
-with flex(direction="column", gap=20, align="center") as container:
-    text("Title", role="title").add()
-    with flex(direction="row", gap=10) as row:
-        rectangle(100, 100).color(RED).add()
-        rectangle(100, 100).color(BLUE).add()
+```text
+Video / Presentation
+└── Scene
+    ├── Canvas
+    ├── Mobjects
+    └── Timeline
 ```
 
-**Esfuerzo:** 🔴 ~16h
+No hay releases públicas ni entornos externos de prueba que requieran compatibilidad con
+la fachada `Canvas`. Por ello, no se necesita un ciclo largo de deprecación: el cambio se
+hará directamente durante 0.1.x. Si resulta útil para migrar ejemplos locales, podrá
+existir temporalmente un alias `Canvas = Scene`, marcado como deprecado y sin aparecer en
+la documentación nueva. Debe eliminarse antes de 1.0.
+
+Las menciones a `Canvas` en las secciones de estado actual describen el código que existe
+hoy; no representan el diseño objetivo de la API.
 
 ---
 
-### 13. Gradient API en Python
+## Arquitectura actual
 
-Los gradientes funcionan a nivel de Rust via `peniko::Brush`, pero no hay
-API de Python para crearlos en mobjects.
+| Capa | Crates principales | Estado |
+|---|---|---:|
+| Tipos base, color y temas | `gaanim_core` | ✅ Funcional |
+| Matemática, transforms, cámara y easing | `gaanim_math` | ✅ Funcional |
+| ECS, componentes y jerarquía | `gaanim_scene` | ✅ Funcional |
+| Tweens, escritura, señales y updaters | `gaanim_animation` | ✅ Funcional |
+| Clips, snapshots, seek, escenas y transiciones | `gaanim_timeline` | ✅ Funcional, con coste de seek por optimizar |
+| Render vectorial GPU | `gaanim_renderer` | ✅ Funcional; efectos avanzados parciales |
+| Primitivas y texto semántico | `gaanim_objects`, `gaanim_text` | ✅ Base sólida |
+| Posicionamiento y distribución | `gaanim_layout` | ✅ Funcional en Rust; exposición parcial |
+| API canónica | `gaanim_api` | 🟡 Dos superficies con distinta cobertura |
+| Binding Python embebido | `gaanim_python` | 🟡 Funcional dentro de la aplicación |
+| Preview, hot reload y timeline visual | `gaanim_editor` | 🟡 Útil, todavía no es un editor integral |
+| Exportación de frames y video | `gaanim_export` | 🟡 Implementada, necesita validación E2E |
 
-```python
-# Objetivo
-rect = scene.rectangle(200, 100).gradient(
-    type="linear", start=(0, 0), end=(200, 0),
-    stops=[(0, RED), (1, BLUE)]
-)
-```
-
-**Esfuerzo:** 🟡 ~6h
-
----
-
-## 🟢 Nice to Have — Diferenciadores
-
-### 14. Plugin System
-Custom mobjects, animations, rate functions, temas/paletas desde la comunidad.
-
-### 15. WASM Export
-Compilar animaciones a WebAssembly para reproducción en el browser sin video.
-
-### 16. SVG/Lottie Export
-Exportar animaciones como SVG animado o Lottie JSON para uso en web/mobile.
-
-### 17. AI-Assisted Animation
-Integración con LLMs para generar animaciones desde descripción en lenguaje natural.
-
-### 18. Transición Wipe
-Falta la transición `Wipe(direction)` (ya existen Cut, CrossFade, FadeThrough,
-Slide, ZoomThrough, Morph).
+La dirección arquitectónica es correcta: Python construye una descripción diferida
+(actualmente `Canvas`, próximamente `Scene`), la aplicación la recompila a ECS y el mismo
+timeline se usa para reproducción, seek y exportación. El principal riesgo ya no es la
+separación de capas, sino mantener una sola API de producto coherente sobre ellas.
 
 ---
 
-## Resumen Comparativo
+## Capacidades disponibles hoy
 
-| Categoría | Manim CE | Motion Canvas | Gaanim | Gap |
-|-----------|----------|---------------|----------|-----|
-| Rate Functions | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ✅ Superado |
-| Animaciones | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | 🟡 Faltan Transform/Morph |
-| Mobjects | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | 🔴 Faltan ~17 |
-| Posicionamiento | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Casi par |
-| Cámara | ⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | 🟡 Faltan anims de alto nivel |
-| Efectos | ⭐⭐ | ⭐⭐ | ⭐⭐ | 🟡 Componentes sin render |
-| Exportación | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐⭐ | ✅ Superado |
-| Updaters/Signals | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 🟢 Falta `always_redraw` Python |
-| 3D | ⭐⭐⭐⭐ | ❌ | ❌ | 🔴 No hay |
-| Code Highlight | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ❌ | 🔴 No hay |
-| Graph Theory | ⭐⭐⭐⭐ | ❌ | ❌ | 🔴 No hay |
-| Multi-Scene | ❌ | ❌ | ⭐⭐⭐⭐ | ✅ Superado |
-| Presentación | ⭐⭐ (plugin) | ⭐⭐⭐⭐ | ⭐⭐⭐ | 🟡 Falta overview |
-| Audio | ❌ | ⭐⭐⭐ | ❌ | 🟡 No hay |
-| Performance | ⭐⭐ (CPU) | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ (GPU) | ✅ Superado |
+### 1. Construcción de escenas desde Python
+
+La API pública actual permite:
+
+- crear un `Canvas` con tamaño, fondo y margen uniforme;
+- crear `circle`, `rect`, `rounded_rect`, `square`, `dot`, `ellipse`, `line` y `arrow`;
+- crear `text`, `title`, `subtitle`, `equation` e `image` (PNG/JPEG/WebP);
+- agrupar objetos;
+- configurar fill, stroke, opacidad y z-index;
+- posicionar con `at`, `at_anchor`, `next_to`, `align_to`, `to_edge` y `to_corner`;
+- dividir el contenido en segmentos y enlazarlos con transiciones;
+- ejecutar la escena en la aplicación o exportarla por extensión de archivo.
+
+El núcleo Rust contiene más primitivas y helpers —polígonos, estrellas, gráficas,
+braces, operaciones booleanas y layouts de grupo—. La API Python ya expone
+`polyline`, `arc`, `curved_arrow`, `dimension` y ejes; el resto no debe anunciarse
+como función de usuario hasta que esté enlazado, documentado y probado.
+
+### 2. Animación y composición temporal
+
+Desde Python están expuestas animaciones de:
+
+- movimiento, posición, escala y rotación;
+- fade in/out y cambio de opacidad;
+- `Write`, `Create`, `Unwrite` y `Uncreate`;
+- crecimiento/encogimiento desde el centro;
+- `SpinInFromNothing`, `DrawBorderThenFill`, `Indicate` y `Wiggle`;
+- `FadeTransform`;
+- `Transform` y `ReplacementTransform` en la rama de trabajo actual.
+
+`Canvas.play()` compone animaciones en paralelo y admite lag; llamadas sucesivas,
+`wait()` y delays construyen la secuencia. El motor Rust dispone de más tipos de
+animación que el binding público, por lo que la cobertura debe medirse desde Python y
+no desde el enum interno.
+
+El núcleo de easing es amplio: curvas ease-in/out/in-out, spring, steps, there-and-back,
+Bezier y otras variantes. Python ofrece accesos directos (`linear`, `smooth`, `spring`,
+`steps`) y un conjunto de nombres mediante `ease()`/`rate()`, pero no expone aún todos
+los parámetros ni las curvas custom del núcleo.
+
+### 3. Texto y matemáticas
+
+Esta es una de las áreas más fuertes del motor:
+
+- shaping de texto a paths vectoriales;
+- jerarquía por glifos para animaciones de escritura;
+- soporte de fuentes del sistema y registro interno;
+- fórmulas y documentos mediante Typst;
+- cache de jerarquías compiladas de Typst;
+- salida vectorial consistente con el renderer.
+
+Para convertir esta capacidad en una función de producción todavía hacen falta una API
+de fuentes estable, control tipográfico desde Python, manejo claro de errores de fuente y
+tests de portabilidad entre Windows, Linux y macOS.
+
+### 4. Sistema reactivo
+
+La API `Canvas` expone updaters predefinidos (`orbit`, `advance_x`, `bob`, `rotate`,
+`pulse`), bindings de posición, `tracking_line` y `traced_path`. Esto permite demos
+reactivas útiles sin callbacks Python por frame.
+
+`value_tracker()` existe, pero el objeto retornado no tiene todavía una interfaz pública
+completa para leer, modificar, enlazar o animar su valor desde Python. `AlwaysRedraw`,
+señales avanzadas y callbacks arbitrarios siguen siendo capacidades internas o de la API
+Rust anterior.
+
+### 5. Multi-escena y transiciones
+
+`Canvas.segment()` y `Canvas.link()` crean segmentos nombrados. Python expone:
+
+- `Cut`;
+- `CrossFade`;
+- `FadeThrough`;
+- `Slide` en cuatro direcciones.
+
+El timeline Rust también define `ZoomThrough` y `Morph`, pero no están expuestos por el
+binding `Transition` actual. Los segmentos ya son suficientes para organizar un video
+por capítulos o escenas. El formato mínimo de proyecto y el asset manager ya existen;
+aún falta una composición no lineal de alto nivel.
+
+### 6. Presentaciones
+
+`Scene.slide(name, notes=..., layout=...)` define paradas semánticas y `slide.step()`
+define pasos dentro de una diapositiva. Durante la reproducción, el timeline se pausa al
+alcanzarlos y permite avanzar o retroceder con teclado o mouse. El editor muestra los
+breakpoints en la barra temporal y puede iniciarse en pantalla completa con `--present`.
+
+La Presenter View abre una segunda ventana con slide/paso actual, siguiente parada, notas,
+cronómetro, navegación, overview consultable por nombre, miniaturas y salto directo a
+slides o pasos. Las miniaturas se capturan de forma asíncrona en un mundo ECS/Vello
+aislado, se invalidan con hot reload y nunca hacen seek sobre el timeline público. Sus atajos locales
+son `←`, `→`, `Espacio`, `O` (overview), `B` (pantalla negra) y `W` (pantalla blanca).
+El panel principal mantiene previews clicables del slide anterior, actual y siguiente; el
+siguiente usa su estado de entrada para no revelar anticipadamente animaciones, mientras
+el overview conserva la composición completa de cada slide.
+`gaanim check <script.py>` ejecuta además un preflight de formato 16:9, notas, pasos,
+duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
+
+Presenter View usa una interfaz oscura de alto contraste, jerarquía tipográfica ampliada
+y progreso visual del timeline. El tema público `presentation`/`thesis` unifica fondo,
+roles de texto y defaults de title cards, bullets, captions, callouts, bar charts, tablas
+y bloques de código; los bar charts muestran también el valor de cada barra.
+
+La configuración visual ya no está limitada a nombres fijos: `Theme` reúne colores
+semánticos, tipografías, tamaños y archivos TTF/OTF embebidos. Puede construirse desde
+cero, derivarse de otro tema o de esquemas conocidos como Nord, Dracula, Solarized,
+Gruvbox, Tokyo Night y Catppuccin; los componentes consumen el mismo palette.
+Los tokens también se consultan con `theme.color(...)`/`canvas.color(...)`, y
+`validate_theme()` audita contraste y tipografía antes de una presentación.
+
+Este es un **modo de presentación beta orientado a exposiciones técnicas y tesis**. El
+comando `gaanim init thesis` genera una presentación 16:9 completa con portada, agenda,
+problema, objetivos, teoría, metodología, resultados, conclusiones, cierre, notas y
+capturas de regresión. La guía operativa está en `docs/thesis-presentations.md`.
+
+El branding ya es parametrizable mediante `ThesisTemplate`: fondo, Tw Cen MT embebida,
+institución, facultad, escuela y logo se configuran una sola vez.
+
+Para convertirlo en una solución general de slides todavía faltan:
+
+- enlaces internos y navegación no lineal de presentación;
+- integración de imágenes, tablas, charts y código.
+
+### 7. Render y efectos
+
+El renderer usa Vello/wgpu, mantiene orden por `z_index` y `creation_order`, y conserva
+fragmentos renderizables en cache. Admite fill/stroke vectorial y `peniko::Brush` en la
+capa Rust. `Scene.image(path)` decodifica PNG/JPEG/WebP a RGBA, conserva la transparencia,
+participa en las transformaciones y opacidad normales, admite tamaño objetivo con `contain`,
+`cover` o `stretch`, crop en píxeles de fuente y reutiliza por proceso la textura decodificada
+para rutas repetidas.
+
+Estado de efectos:
+
+- `DropShadow`, `GaussianBlur` y `Glow` se dibujan mediante muestras vectoriales suaves
+  conservadas en la caché de fragmentos;
+- Python expone la superficie compacta `.shadow(...)`, `.blur(...)`, `.glow(...)` y
+  `.no_effects()`, compatible con fills y strokes sólidos o gradientes;
+- `Brush.linear`, `Brush.radial` y `Brush.sweep` exponen gradientes para fill y stroke
+  en Python, con ramps `pad`, `repeat` y `reflect`.
+
+No existe todavía un pipeline 3D. Los transforms usan tipos preparados para z, pero el
+producto actual debe presentarse como **2D vectorial**.
+
+### 8. Exportación
+
+El crate de exportación implementa:
+
+- MP4/H.264, WebM/VP9, WebP animado, GIF y secuencia PNG;
+- render por frames y seek determinista del timeline;
+- exportación headless directa mediante GPU;
+- fallback por CPU con libx264 y detección de NVENC, AMF, QSV y VA-API;
+- rango temporal, transparencia y presets de resolución/calidad en Rust.
+
+La API Python pública simplifica esto a `canvas.export(path, fps=None)`: selecciona el
+formato por extensión y usa el tamaño del canvas. Transparencia, presets, encoder,
+calidad y rangos no están expuestos de forma completa. La exportación depende de FFmpeg
+y aún necesita smoke tests automatizados por plataforma y formato.
+
+`scene.audio(...)` declara pistas relativas al timeline; el exportador las mezcla y
+muxea con FFmpeg en MP4 (AAC) y WebM (Opus). PNG, GIF y WebP no aceptan audio.
+Todavía no hay reproducción, waveform ni scrubbing de audio en el editor.
+
+### 9. Editor y flujo de iteración
+
+La aplicación incluye:
+
+- ejecución embebida de scripts Python;
+- hot reload al guardar;
+- preview GPU con play/pause y seek;
+- barra de transporte, velocidad y navegación entre escenas;
+- timeline expandible con tracks, clips, zoom, scroll, snap y edición de tiempos;
+- selección básica de objetos por bounds;
+- pin always-on-top y diálogo de exportación;
+- conservación del proceso gráfico durante recargas.
+
+Limitaciones actuales:
+
+- el hot reload vuelve a ejecutar el script completo;
+- la selección no tiene panel de propiedades ni manipulación visual;
+- el zoom/pan disponible corresponde al timeline, no al canvas de la escena;
+- los errores se reportan principalmente por consola/estado de recarga;
+- los cambios hechos en el timeline no constituyen todavía un formato de proyecto
+  persistente y bidireccional con el script.
 
 ---
 
-## 🗺️ Roadmap Propuesto
+## Brechas críticas para generación de contenido
 
-### Sprint 1 — Mobjects Matemáticos (1 semana) [Completado ✅ 2026-06-10]
-- [x] `Vector` (alias de Arrow desde origen)
-- [x] `CurvedArrow`
-- [x] `Axes` + `NumberLine` + ticks + labels
-- [x] `FunctionGraph` (f(x) sobre Axes)
-- [x] `ParametricCurve`
-- [x] `Brace` + `LabeledArrow`
+### P0 — Convertir el motor en una librería coherente
 
-### Sprint 2 — Transform/Morph (1 semana)
-- [ ] `Transform` (interpolación de paths entre dos mobjects)
-- [ ] `ReplacementTransform`
-- [ ] Cámara de alto nivel: `CameraShake`, `CameraPulse`, `CameraFollow`, `CameraFrameTo`
+Antes de ampliar el catálogo visual, la versión 0.3 necesita una sola superficie pública:
 
-### Sprint 3 — Contenido Educativo (1-2 semanas)
-- [ ] `Table` y `Matrix` (visualización estructurada)
-- [ ] `BarChart` (gráficos de barras dinámicos)
-- [ ] `PolarPlane`, `ComplexPlane`
-- [ ] `ImageMobject`
+1. Declarar `Scene` como API canónica y deprecar la fachada pública `Canvas`.
+2. Separar la configuración visual en un `Canvas` interno o accesible como
+   `scene.canvas`.
+3. Migrar los 18 ejemplos y la documentación a código ejecutable con `Scene`.
+4. Regenerar y validar `gaanim_core.pyi` a partir de los bindings reales.
+5. Decidir y documentar dos modos de distribución:
+   - aplicación `gaanim <script.py>` con Python embebido;
+   - paquete Python instalable, si se desea soportarlo, con extensión `cdylib` válida.
+6. Alinear versiones Rust/Python y establecer una política de compatibilidad.
+7. Añadir README, guía de instalación, tutorial mínimo y referencia de API.
+8. Añadir CI para check, fmt, clippy, tests y construcción en las plataformas soportadas.
 
-### Sprint 4 — Code & Efectos (1-2 semanas)
-- [ ] `Code` mobject con syntax highlighting (syntect/tree-sitter)
-- [ ] Conectar rendering de `DropShadow`, `Glow`, `GaussianBlur` en Vello
-- [ ] Gradient API en Python
-- [ ] `always_redraw` binding en Python
+**Criterio de salida:** un usuario nuevo puede instalar gaanim, ejecutar todos los ejemplos
+y exportar una pieza sin encontrar APIs obsoletas.
 
-### Sprint 5 — Avanzado (2-4 semanas)
-- [ ] Graph theory layouts (`Graph`, `DiGraph`, spring, circular, tree, etc.)
-- [ ] `TransformMatchingShapes` / `TransformMatchingTex`
-- [ ] Audio integration
-- [ ] Interactividad (`on_hover`, `on_click`, `on_drag`)
-- [ ] `Homotopy`, `ApplyWave`
-- [ ] `SvgMobject`
+### P0 — Validación de render y exportación
 
-### Sprint 6 — Presentación Polish
-- [ ] Overview mode (thumbnails de slides)
-- [ ] Slide indicator / progress bar
-- [ ] Presenter notes (dual screen)
-- [ ] Transición `Wipe`
+La compilación por sí sola no garantiza el resultado visual. Hace falta:
 
-### Futuro — Diferenciadores
-- [ ] 3D support (proyecto mayor, ~2-3 meses)
-- [ ] WASM export para web
-- [ ] SVG/Lottie export
-- [ ] Plugin system
-- [ ] Flexbox layout engine
+1. tests unitarios de timeline, interpolación, layout y morph;
+2. tests de integración de la API Python;
+3. golden tests o snapshots de frames representativos;
+4. smoke tests headless para MP4, WebM, WebP, GIF y PNG;
+5. validación de fuentes/Typst en Windows, Linux y macOS;
+6. pruebas de seek, hot reload y breakpoints;
+7. benchmarks reproducibles de preview y exportación.
+
+**Criterio de salida:** cada release puede demostrar que API, frames y exports siguen
+siendo correctos, no solo que el workspace compila.
+
+### P1 — Assets necesarios para contenido real
+
+Orden recomendado:
+
+1. asset manager con rutas relativas, precarga y recarga de assets;
+2. [x] ampliar SVG con grupos direccionables, clipping, gradientes, texto outlineado y
+   filtros comunes;
+3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg.
+
+Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
+parte de las piezas de contenido comercial o social.
+
+### P1 — Diagramas técnicos y mecanismos dinámicos (completado)
+
+Las figuras de física, ingeniería y matemáticas deben poder construirse como
+geometría animable, no como una imagen plana. Este bloque pasa por delante de
+los componentes editoriales generales porque también desbloquea gráficas,
+diagramas de procesos y explicaciones educativas.
+
+Capacidades completadas:
+
+1. [x] `path` unificado y `polyline`/`curve` explícitos para rieles, resortes,
+   trayectorias y contornos;
+2. [x] arcos, flechas curvas, ángulos y cotas (`arc`, `curved_arrow`, `dimension`);
+3. [x] `ValueTracker` desde Python, con animación de valor y bindings;
+4. [x] geometría reactiva nativa para arcos, resortes, etiquetas, tangentes,
+   normales, curvatura y cotas;
+5. [x] grupos y drawables con pivote de transformación para mecanismos rotatorios.
+
+**Criterio de salida:** una escena Python puede animar un mecanismo como un
+disco con resorte y masa: el conjunto rota, la masa se desplaza, el resorte se
+deforma y las cotas o ecuaciones siguen el estado sin depender de SVG externo.
+
+### P1 — Tema científico y coordenadas configurables (parcialmente completado)
+
+La escena debe tener una identidad técnica coherente por defecto y no depender
+de que cada ejemplo configure tipografías o ejes manualmente.
+
+1. [x] temas públicos `technical`/`scientific` y `paper`, con New Computer Modern para texto técnico y New Computer Modern Math para ecuaciones;
+2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para `title`, `subtitle`, `text`, `equation`, `caption` y `code`; un `.fill(...)` explícito conserva prioridad;
+3. [x] fuentes registradas por el motor para la composición técnica actual;
+4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
+5. [x] estilos separados para ejes, grilla, ticks, números y rótulos, con
+   visibilidad global o independiente por eje desde `scene.axes(...)`;
+6. [x] aliases semánticos de composición (`cover`, `content`, `comparison`,
+   `divider`, `conclusion`) y branding global reutilizable con logo, regla,
+   footer y numeración sobre el sistema de temas.
+
+**Criterio de salida:** un diagrama científico puede crear ejes numerados y una
+grilla legible con una sola llamada; texto y ecuaciones mantienen una familia
+tipográfica consistente en preview y export, tanto en fondo oscuro como en `paper`.
+
+### P1 — Componentes de contenido reutilizables
+
+Priorizar objetos de alto impacto editorial:
+
+- listas y bullets animados;
+- `Table` y `Matrix`;
+- `BarChart`, line chart y pie/donut chart;
+- `Code` con syntax highlighting, highlights y diff animado;
+- callouts, labels, braces y conectores;
+- lower thirds, title cards, captions y end cards;
+- plantillas para 16:9, 9:16 y 1:1 con safe areas.
+
+La API debe favorecer componentes semánticos y plantillas, no obligar al usuario a
+componer cada pieza desde primitivas.
+
+### P1 — Cámara y composición
+
+- [x] controlador semántico Python `scene.camera` para posición, zoom y rotación;
+- [x] `scene.camera.frame_to(mobject, margin=...)` con pan y zoom paralelos;
+- [x] cámara follow, pan, zoom, rotación y shake como animaciones de alto nivel;
+- [x] clipping/masks vectoriales públicos con `.clip(mask)` para drawables y grupos;
+- [x] gradientes y efectos vectoriales de sombra/blur/glow con caché retained;
+- soporte explícito de aspect ratios y safe areas en `scene.canvas`.
+
+### P1 — Presentaciones completas
+
+- [x] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
+- [x] Caché de miniaturas en mundo ECS/Vello aislado, publicada como texturas egui sin
+  mutar el `Timeline` de reproducción;
+- [x] previews persistentes anterior/actual/siguiente en Presenter View, con navegación
+  por clic y estado de entrada separado para el siguiente slide;
+- [x] exportación continua, por un slide nombrado o por todos los slides con una plantilla
+  de ruta desde la misma función `scene.export(...)`;
+- [x] navegación directa por nombre de slide y por nombre/índice de paso;
+- [x] plantillas semánticas, temas y branding global expuestos desde Python;
+- control remoto o protocolo simple de navegación.
+
+### P2 — Animación avanzada
+
+- terminar y validar `Transform`/`ReplacementTransform`;
+- `TransformMatchingShapes` y matching semántico para texto/math;
+- `ApplyWave`, deformaciones y homotopías;
+- animación de propiedades tipográficas;
+- callbacks/eventos seguros sin bloquear el renderer;
+- API reactiva completa para trackers, signals y `always_redraw`.
+
+### Fuera del foco inmediato
+
+3D, WASM, Lottie, plugins y generación asistida por IA pueden ser diferenciadores, pero
+no deben desplazar la estabilización 2D, los assets, el audio y el flujo de publicación.
 
 ---
 
-## Ventajas Competitivas de Gaanim (ya existentes)
+## Roadmap propuesto por releases
 
-1. **GPU-accelerated rendering** via Vello + wgpu — Manim usa CPU (Cairo), MC usa browser canvas
-2. **Exportación GPU** con múltiples encoders (Nvenc, AMF, QSV, VA-API) — Manim usa ffmpeg CPU
-3. **Rate functions completas** — Más opciones que Manim incluyendo Spring physics
-4. **Multi-escena nativa** — Engine con DAG de escenas + transiciones (Cut, CrossFade, Slide, Morph, etc.)
-5. **Modo presentación** — Slide breakpoints con navegación interactiva + export por slide
-6. **TracedPath avanzado** — Fading, smoothing, dissipation, dash patterns
-7. **Sistema de temas** — Color + text themes con roles semánticos
-8. **Boolean operations** — Union, Intersection, Difference, Exclusion sobre shapes
-9. **Snapshots + seek** — Timeline bidireccional para el editor
-10. **Typst math** — Rendering de fórmulas sin instalar LaTeX
-11. **ValueTracker + updaters** — Sistema reactivo completo con señales, bob, orbit, pulse, follow
-12. **`.animate` fluent API** — Encadenamiento ergonómico estilo Manim
+### 0.1.x — Convergencia y confiabilidad
+
+- [x] Terminar y probar el morph con regresión visual.
+- [x] Recuperar `Scene` como fachada pública y deprecar `Canvas` como punto de entrada.
+- [x] Separar el viewport/configuración visual en `scene.canvas`.
+- [x] Migrar la documentación y los ejemplos que usaban la fachada `Canvas` a `Scene`.
+- [ ] Completar la cobertura Python de las capacidades que ya son estables en Rust.
+- [x] Corregir stubs, versiones y estrategia de empaquetado.
+- [x] Añadir CI y regresión visual headless.
+- [x] Publicar un quickstart reproducible.
+
+### 0.4 — Producción de contenido vectorial
+
+- [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
+- [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
+  transforms, `viewBox` y `<use>`.
+- [x] SVG avanzado vectorial: grupos, paths y texto con `id` se preservan como
+  jerarquía animable; se importan gradientes lineales/radiales, `clipPath`, texto
+  convertido a contornos y los filtros comunes `feGaussianBlur`/`feDropShadow`.
+  Quedan fuera los patterns, masks, raster embebido y grafos arbitrarios de filtros.
+- [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
+  aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
+  reproducción/scrubbing en preview, análisis de duración y editor de pistas.
+- [x] API de fuentes y gradientes: temas pueden embeber TTF/OTF y `Brush`
+  expone gradientes lineales, radiales y angulares para fill/stroke.
+- [x] Cámara editorial: `scene.camera` expone pan, zoom, rotación, encuadre automático,
+  follow y shake determinista.
+- [x] Diagramas técnicos dinámicos: paths unificados, arcos/cotas, pivotes,
+  trackers y geometría reactiva.
+- [x] Componentes editoriales: listas, callouts, captions y title cards.
+- [x] Presets 16:9, 9:16 y 1:1 con safe areas.
+- [x] Perfil de exportación completamente accesible desde Python.
+
+### 0.5 — Datos, código y plantillas
+
+- [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
+- [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
+- [x] Sistema de temas público: esquemas integrados y custom themes configuran
+  colores, tipografía y fuentes; las plantillas semánticas heredan branding
+  global con logo, footer, regla y numeración.
+- [x] Asset manager y formato mínimo de proyecto: `gaanim init video`,
+  `gaanim init presentation` y `gaanim init thesis` generan proyectos portables con
+  `gaanim.toml`, entry point, assets, exports y documentación. El CLI abre, valida,
+  presenta y captura regresiones visuales usando la carpeta del proyecto.
+  `scene.assets_dir(...)` resuelve rutas relativas para imágenes y SVG, y
+  `scene.preload([...])` valida SVG y calienta la caché raster.
+  `scene.load_project("gaanim.toml")` adopta el `assets_dir` relativo y
+  `scene.reload_assets()` invalida la caché raster.
+- [ ] Watcher automático de assets y presets de exportación consumidos directamente
+  desde `gaanim.toml`.
+- [ ] Cache y hot reload incremental donde sea medible.
+
+### 0.6 — Presentaciones
+
+- [x] Overview con miniaturas, indicadores y navegación por slide/paso.
+- [x] Presenter view y notas.
+- [x] Exportación independiente por slide.
+- [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
+  `add(...)`, `remove(...)`, `replace(...)`, `configure(...)` y `reflow(...)`
+  desplazan y animan hijos. `LayoutRegion.layout(...)` los ancla a regiones;
+  hay límites `width`/`height`, `fit="shrink"`, filas con `wrap=True` y
+  `justify` (`start`/`center`/`end`/`between`). Faltan overflow explícito,
+  grid con spans, reflow reactivo y variantes responsive. Los presets
+  semánticos de slides ya están disponibles.
+- [ ] Interacción/picking útil para demos en vivo.
+
+### 1.0 — Librería estable
+
+- [ ] API Python y Rust versionadas y documentadas.
+- [ ] Compatibilidad de proyectos entre versiones menores.
+- [ ] Matriz de plataformas soportadas con CI y releases reproducibles.
+- [ ] Suite visual y E2E estable.
+- [ ] Performance presupuestada para preview y exportación.
+- [ ] Documentación de despliegue y troubleshooting.
+
+---
+
+## Indicadores de madurez recomendados
+
+El avance no debería medirse solo por cantidad de mobjects o animaciones. Para cada
+release conviene registrar:
+
+| Indicador | Objetivo antes de 1.0 |
+|---|---|
+| Ejemplos que ejecutan con la API pública | 100% |
+| API Python cubierta por stubs y documentación | 100% |
+| Formatos de exportación con smoke test | Todos los soportados |
+| Plataformas con CI | Todas las declaradas como soportadas |
+| Regresiones visuales cubiertas | Escenas representativas de cada subsistema |
+| Tiempo de hot reload | Medido y con presupuesto definido |
+| Exportación determinista | Mismo frame para mismo proyecto/configuración |
+| Releases instalables | Aplicación y/o wheel según la estrategia elegida |
+
+---
+
+## Ventajas técnicas que conviene preservar
+
+1. Renderer vectorial GPU con Vello/wgpu.
+2. ECS y orden de sistemas centralizado mediante `SceneSet`.
+3. Timeline con clips, seek, snapshots, escenas y breakpoints.
+4. Texto y matemáticas convertidos a geometría vectorial, con Typst integrado.
+5. Modelo diferido de construcción de escenas, adecuado para hot reload y exportación
+   determinista.
+6. Separación entre API, runtime, editor y exportación.
+7. Tipos 3D-ready sin comprometer el foco actual en 2D.
+8. Uso directo de tipos gráficos (`peniko`, `kurbo`, `glam`) sin wrappers innecesarios.
+
+La oportunidad de gaanim no está en copiar todo Manim o Motion Canvas. Está en convertir
+esta base Rust/GPU en un flujo especialmente rápido y confiable para crear, iterar,
+presentar y exportar contenido vectorial desde Python. El siguiente salto de calidad
+depende más de coherencia de producto y capacidades audiovisuales básicas que de aumentar
+el número bruto de efectos.

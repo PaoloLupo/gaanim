@@ -7,102 +7,91 @@
   updated: datetime.today().display(),
 )
 
-= Installation
+= Installation — resumen
 
-== Prerequisites
+Para la guía completa (usuario final con zip + `uv`, y desarrollo local desde fuente) ver #link("/getting-started/installation/")[Instalación].
 
-- *Rust* (edition 2024) — install via #link("https://rustup.rs", "rustup")
-- *Python* 3.10+ — with pip
-- *Vulkan-compatible GPU* — for rendering (most modern GPUs work)
+== Prerequisitos
 
-== Setup
+- *Rust* (edition 2024) — via #link("https://rustup.rs", "rustup")
+- *Python >=3.12* — 3.12 mínimo, 3.14 también soportado
+- *uv recomendado* — #link("https://docs.astral.sh/uv/")[uv] para venvs
+- *GPU con Vulkan* — para Vello/Bevy
 
-Clone the repository and bootstrap the environment:
+== Setup rápido (dev)
 
 ```bash
 git clone https://github.com/user/gaanim
 cd gaanim
+just bootstrap        # .venv + maturin
+just build            # debug: gaanim_launcher + gaanim-core
+just doctor           # verifica build y gaanim --help via launcher
 ```
 
-Create a virtual environment and install maturin (the Rust→Python build tool):
-
-```bash
-just bootstrap
-```
-
-This creates `.venv/` and installs `maturin` into it.
-
-Build the Python extension:
-
-```bash
-just build           # Debug mode (faster compile, slower runtime)
-just build-release   # Release mode (slower compile, faster runtime)
-```
+El zip de usuario final (`gaanim-v0.1.0-windows-x64.zip`) ya contiene `gaanim.exe` (launcher) + `gaanim-core.exe` y no requiere compilar. Ver detalle en #link("/getting-started/installation/")[Instalación / Usuario final].
 
 == Verify Installation
 
 ```bash
-just doctor
+just doctor           # compila y prueba launcher
+gaanim --help         # si tienes el zip en PATH
 ```
-
-This compiles the workspace and verifies the Python extension is importable.
 
 = Your First Animation
 
 Create a file `my_animation.py`:
 
 ```python
-# output: first_animation.webp
-# show-code: true
-# caption: First animation — circle and title
-from gaanim import BLUE, GOLD, Scene
+from gaanim import BLACK, BLUE, GOLD, Scene
 
-scene = Scene(1280, 720, title="My First Animation")
+scene = Scene(1280, 720, background=BLACK)
 
 circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.title("Hello World")
 
-scene.play(
-    circle.animate().grow_from_center().duration(2.0).spring(),
-    text.animate().write(duration=2.0).smooth(),
-)
+scene.play([
+    circle.grow_from_center().duration(2.0).spring(),
+    text.write().duration(2.0).smooth(),
+])
 
 scene.wait(1.0)
-scene.play(
-    circle.animate().shift(200, 0).duration(1.5).smooth(),
-    text.animate().fade_out().duration(0.5),
-)
+scene.play([
+    circle.move(200, 0).duration(1.5).smooth(),
+    text.fade_out().duration(0.5),
+])
 
-scene.export("first_animation.webp", fps=30, quality="draft")
+# Run with: gaanim my_animation.py
 ```
 
 Run it:
 
 ```bash
-python my_animation.py
+gaanim my_animation.py
 ```
 
-This opens a Vulkan GPU preview window. Press `Escape` to close.
+This opens the Gaanim preview window. Press `Escape` to close.
 
 = Exporting
 
 To export instead of previewing:
 
 ```python
-<<< # MP4 (YouTube standard)
-<<< scene.export("output.mp4", fps=60, aspect_ratio="youtube", quality="standard")
+<<< # MP4
+<<< scene.export("output.mp4", fps=60)
 <<<
-<<< # Transparent WebM
-<<< scene.export("overlay.webm", fps=30, transparent=True)
+<<< # WebM
+<<< scene.export("overlay.webm", fps=30)
 <<<
 <<< # Animated WebP
-<<< scene.export("preview.webp", fps=30, quality="draft")
+<<< scene.export("preview.webp", fps=30)
 <<<
-<<< # TikTok vertical
-<<< scene.export("tiktok.mp4", fps=30, aspect_ratio="tiktok")
+<<< # Any supported video extension
+<<< scene.export("tiktok.mp4", fps=30)
 ```
 
 = Next Steps
+
+- #link("/guides/thesis/", "Thesis presentations") - complete live-presentation workflow
 
 - #link("/api/scene/", "Scene API") — learn the core Scene class
 - #link("/api/mobjects/", "Mobjects") — all available shapes and objects

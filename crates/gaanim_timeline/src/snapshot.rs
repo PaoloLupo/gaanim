@@ -27,6 +27,11 @@ pub struct EntitySnapshot {
     pub opacity: f32,
     /// Optional fill color or gradient brush.
     pub fill: Option<gaanim_core::peniko::Brush>,
+    /// Whether the entity had a `FillBrush` component. Groups without an
+    /// explicit style must keep this false so replay does not accidentally
+    /// propagate a transparent fill to their descendants.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub has_fill_component: bool,
     /// Optional outline brush.
     pub stroke: Option<gaanim_core::peniko::Brush>,
     /// Optional outline styling parameters (width, dashes, joins).
@@ -47,6 +52,8 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
+    pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Whether the entity is a group container.
     pub is_group: bool,
     /// Propagated global spatial transform.
@@ -84,7 +91,6 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     entity_mut.insert((
         snap.transform,
         Opacity(snap.opacity),
-        FillBrush(snap.fill.clone()),
         RenderOrder {
             z_index: snap.render_order,
             creation_order: snap.creation_order,
@@ -93,6 +99,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         global_transform,
         global_opacity,
     ));
+
+    if snap.has_fill_component {
+        entity_mut.insert(FillBrush(snap.fill.clone()));
+    } else {
+        entity_mut.remove::<FillBrush>();
+    }
 
     // Handle conditional components (insert or remove)
     if let Some(ref style) = snap.stroke_style {
@@ -130,6 +142,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
     } else {
         entity_mut.remove::<gaanim_animation::FillDrawProgress>();
+    }
+
+    if let Some(points) = &snap.traced_path_points
+        && let Some(mut traced_path) = entity_mut.get_mut::<gaanim_animation::TracedPath>()
+    {
+        traced_path.points = points.clone();
     }
 
     if snap.is_group {
@@ -181,6 +199,7 @@ impl WorldSnapshot {
                 .copied()
                 .unwrap_or_default();
             let opacity = world.get::<Opacity>(entity).map(|o| o.0).unwrap_or(1.0);
+            let has_fill_component = world.get::<FillBrush>(entity).is_some();
             let fill = world.get::<FillBrush>(entity).and_then(|f| f.0.clone());
             let stroke = world
                 .get::<StrokeBrush>(entity)
@@ -209,6 +228,7 @@ impl WorldSnapshot {
                     transform,
                     opacity,
                     fill,
+                    has_fill_component,
                     stroke,
                     stroke_style,
                     render_order,
@@ -221,6 +241,9 @@ impl WorldSnapshot {
                     fill_draw_progress: world
                         .get::<gaanim_animation::FillDrawProgress>(entity)
                         .map(|p| p.0),
+                    traced_path_points: world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .map(|t| t.points.clone()),
                     is_group,
                     global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
                     local_bounds: world.get::<LocalBounds>(entity).copied(),
@@ -261,15 +284,16 @@ impl WorldSnapshot {
         // 3. Spawn any missing entities first so they exist in entity_map
         for (obj_id, snap) in &self.entities {
             if !entity_map.contains_key(obj_id) {
-                let new_entity = world
-                    .spawn((
-                        MobjectId(*obj_id),
-                        snap.transform,
-                        Opacity(snap.opacity),
-                        FillBrush(snap.fill.clone()),
-                        snap.render_layer,
-                    ))
-                    .id();
+                let mut entity = world.spawn((
+                    MobjectId(*obj_id),
+                    snap.transform,
+                    Opacity(snap.opacity),
+                    snap.render_layer,
+                ));
+                if snap.has_fill_component {
+                    entity.insert(FillBrush(snap.fill.clone()));
+                }
+                let new_entity = entity.id();
 
                 entity_map.insert(*obj_id, new_entity);
             }
@@ -358,17 +382,16 @@ impl SnapshotDiff {
         // 2. Spawn missing entities first
         for snap in &self.updates {
             entity_map.entry(snap.id).or_insert_with(|| {
-                let new_entity = world
-                    .spawn((
-                        MobjectId(snap.id),
-                        snap.transform,
-                        Opacity(snap.opacity),
-                        FillBrush(snap.fill.clone()),
-                        snap.render_layer,
-                    ))
-                    .id();
-
-                new_entity
+                let mut entity = world.spawn((
+                    MobjectId(snap.id),
+                    snap.transform,
+                    Opacity(snap.opacity),
+                    snap.render_layer,
+                ));
+                if snap.has_fill_component {
+                    entity.insert(FillBrush(snap.fill.clone()));
+                }
+                entity.id()
             });
         }
 
@@ -392,5 +415,43 @@ impl SnapshotDiff {
                 insert_snapshot_components(&mut entity_mut, snap);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::{BuildChildrenTransformExt, Schedule, World};
+
+    #[test]
+    fn restoring_an_unstyled_group_does_not_clear_child_fills() {
+        let mut world = World::new();
+        let group_id = ObjectId::from_parts(1, 1);
+        let child_id = ObjectId::from_parts(2, 1);
+        let gold = gaanim_core::peniko::Color::from_rgb8(0xff, 0xd7, 0x00);
+
+        let group = world
+            .spawn((MobjectId(group_id), gaanim_scene::GroupMarker))
+            .id();
+        let child = world
+            .spawn((MobjectId(child_id), FillBrush::color(gold)))
+            .id();
+        world.entity_mut(child).set_parent_in_place(group);
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        assert!(!snapshot.entities[&group_id].has_fill_component);
+
+        // Simulate the pre-fix replay state that injected a transparent fill
+        // into a group before restoring the timeline snapshot.
+        world.entity_mut(group).insert(FillBrush::transparent());
+        snapshot.restore(&mut world);
+
+        assert!(world.get::<FillBrush>(group).is_none());
+
+        let expected = FillBrush::color(gold);
+        let mut schedule = Schedule::default();
+        schedule.add_systems(gaanim_scene::systems::style_propagation_system);
+        schedule.run(&mut world);
+        assert_eq!(world.get::<FillBrush>(child), Some(&expected));
     }
 }

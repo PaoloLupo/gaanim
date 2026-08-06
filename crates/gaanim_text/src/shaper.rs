@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::kurbo::{Affine, Shape};
-use gaanim_core::{ObjectId, glam::DVec3};
+use gaanim_core::{ObjectId, glam::DVec3, peniko::Brush};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
-use gaanim_scene::ObjectTag;
+use gaanim_scene::{ObjectTag, StrokeBrush, components::TextSpan};
 
 use crate::font::{FontRegistry, OutlineCollector};
 
@@ -29,6 +31,22 @@ pub struct ShapedGlyph {
     pub cluster: u32,
 }
 
+#[derive(Clone, Debug)]
+pub struct HierarchyChild {
+    pub id: ObjectId,
+    pub entity: Entity,
+    pub span: TextSpan,
+    pub path: Arc<gaanim_core::kurbo::BezPath>,
+    pub bounds: Bounds3D,
+    pub transform: SpatialTransform,
+    pub fill: Option<Brush>,
+    pub stroke: StrokeBrush,
+}
+
+fn normalize_single_line_text(text: &str) -> String {
+    text.replace(['\r', '\n'], " ")
+}
+
 /// Shapes a text string using rustybuzz.
 pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     let face = match rustybuzz::Face::from_slice(font_bytes, 0) {
@@ -37,7 +55,11 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
     };
 
     let mut buffer = rustybuzz::UnicodeBuffer::new();
-    buffer.push_str(text);
+    // RustyBuzz treats a raw line-feed as a glyph in this low-level shaping
+    // path. Fonts commonly render that missing glyph as a square. Paragraph
+    // layout owns real multiline flow; plain `scene.text()` is single-line,
+    // so normalize line endings to ordinary spaces here.
+    buffer.push_str(&normalize_single_line_text(text));
 
     let output = rustybuzz::shape(&face, &[], buffer);
     let glyph_infos = output.glyph_infos();
@@ -57,6 +79,19 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
         .collect()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::normalize_single_line_text;
+
+    #[test]
+    fn single_line_text_normalizes_line_endings_before_shaping() {
+        assert_eq!(
+            normalize_single_line_text("first\nsecond\rthird\r\nfourth"),
+            "first second third  fourth"
+        );
+    }
+}
+
 /// Compiles a plain text string into a parent Mobject entity with individual child letters.
 ///
 /// This registers each letter as a fully animatable `MobjectBundle` with its own
@@ -71,7 +106,7 @@ pub fn compile_text_to_hierarchy(
     stroke: gaanim_scene::StrokeBrush,
     parent_id: ObjectId,
     mut next_id_fn: impl FnMut() -> ObjectId,
-    child_spans: &mut Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    child_spans: &mut Vec<HierarchyChild>,
 ) -> Result<(Entity, Bounds3D), TextError> {
     // 1. Fetch font bytes
     let font_bytes = font_registry
@@ -126,8 +161,8 @@ pub fn compile_text_to_hierarchy(
             let glyph_x = pen_x + glyph.x_offset;
             let glyph_y = pen_y + glyph.y_offset;
 
-            // Transform path: scale it and vertically flip the outline to correct Y-down space
-            path.apply_affine(Affine::scale_non_uniform(scale, -scale));
+            // Font outlines and gaanim world coordinates are both Y-up.
+            path.apply_affine(Affine::scale(scale));
 
             let path_bounding_rect = path.bounding_box();
             let mut glyph_local_bounds = Bounds3D::new_2d(
@@ -137,7 +172,7 @@ pub fn compile_text_to_hierarchy(
                 path_bounding_rect.y1,
             );
 
-            // Shift bounds by pen position (with positive Y to align with Bevy's Y-down space)
+            // Shift bounds by the Y-up pen position.
             glyph_local_bounds.min.x += glyph_x * scale;
             glyph_local_bounds.max.x += glyph_x * scale;
             glyph_local_bounds.min.y += glyph_y * scale;
@@ -174,8 +209,10 @@ pub fn compile_text_to_hierarchy(
             // Offset the child's local transform according to pen advances
             let local_translation =
                 gaanim_core::glam::DVec3::new(glyph_x * scale, glyph_y * scale, 0.0);
-            child_bundle.transform =
+            let child_transform =
                 SpatialTransform::new_2d(local_translation.x, local_translation.y);
+            child_bundle.transform = child_transform;
+            let child_path = child_bundle.path.0.clone();
 
             let child_entity = commands.spawn(child_bundle).id();
             spawned_children.push((child_entity, local_translation, glyph_local_bounds));
@@ -190,7 +227,16 @@ pub fn compile_text_to_hierarchy(
             };
 
             commands.entity(child_entity).insert(span);
-            child_spans.push((char_id, child_entity, span));
+            child_spans.push(HierarchyChild {
+                id: char_id,
+                entity: child_entity,
+                span,
+                path: child_path,
+                bounds: glyph_local_bounds,
+                transform: child_transform,
+                fill: fill.clone(),
+                stroke: stroke.clone(),
+            });
 
             commands
                 .entity(child_entity)
@@ -225,6 +271,12 @@ pub fn compile_text_to_hierarchy(
         commands
             .entity(child_entity)
             .insert(gaanim_scene::LocalBounds(new_bounds));
+    }
+
+    for child in child_spans.iter_mut() {
+        child.transform.translation -= text_center;
+        child.bounds.min -= text_center;
+        child.bounds.max -= text_center;
     }
 
     // Shift total_bounds to be centered at origin

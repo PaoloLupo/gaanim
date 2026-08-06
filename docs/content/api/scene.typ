@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Scene API",
-  description: "The Scene class — core of gaanim",
+  description: "The canonical public API for Gaanim animations",
   route: "/api/scene/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -10,94 +10,431 @@
 
 = Scene
 
-The `Scene` class is the main entry point for creating animations. It manages the timeline, spawns mobjects, and handles rendering/export.
+`Scene` is the public entry point for an animation. It owns mobjects, the
+timeline, rendering, export, and named segments. Create a `Scene` for every
+animation; `Canvas` is retained only as a deprecated compatibility constructor.
 
-== Constructor
+== Constructor and viewport
 
 ```python
-Scene(
-    width: int = 1920,
-    height: int = 1080,
-    title: str = "Gaanim",
-    theme: Theme = Theme.DARK,
-)
+from gaanim import BLACK, Scene
+
+scene = Scene(width=1920, height=1080, background=BLACK, margin=48)
+
+# Viewport configuration remains available from the scene.
+scene.canvas.width = 1280
+scene.canvas.height = 720
+scene.canvas.set_margin(32)
 ```
 
-Creates a new scene with the given dimensions and theme.
-
-== Spawning Mobjects
-
-All mobject-spawning methods return a `Mobject` handle that supports fluent chaining:
+`scene.canvas.set_preset(...)` configures a standard output format and a safe
+area that every layout and edge-placement operation respects:
 
 ```python
+scene.canvas.set_preset("vertical")  # 1080×1920, safe around mobile UI
+safe = scene.canvas.safe_area()
+title = safe.place(scene.title("Vertical video"), Anchor.TOP)
+```
+
+Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
+(1080×1920 / 9:16), and `"square"` (1080×1080 / 1:1). Use
+`set_safe_area(top=..., right=..., bottom=..., left=...)` when a brand or
+platform requires custom insets.
+
+== Spawning mobjects
+
+Every factory returns a `Drawable` handle with fluent style and layout methods.
+Plain text uses the bundled New Computer Modern scientific theme by default;
+equations use the matching New Computer Modern Math face.
+
+```python
+from gaanim import BLUE, GOLD, WHITE, Scene
+
 scene = Scene(1280, 720)
 
-# Shapes
-circle = scene.circle(80)
-rect = scene.rectangle(200, 120)
-square = scene.square(100)
-dot = scene.dot(12)
-ellipse = scene.ellipse(100, 60)
-
-# Lines
-line = scene.line(-200, 0, 200, 0)
-arrow = scene.arrow(0, 0, 100, 100)
-dashed = scene.dashed_line(-100, 0, 100, 0)
-
-# Polygons
-triangle = scene.regular_polygon(3, 80)
-star = scene.star(5, 80, 40)
-polygon = scene.polygon([(0,0), (100,0), (50,86)])
-
-# Text
-title = scene.title("My Title")
-body = scene.body("Some body text")
-text = scene.text("Custom text")
-
-# Math
-eq = scene.equation("E = m c^2")
+circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-160, 0)
+rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
+triangle = scene.polygon([(0, 100), (-90, -70), (90, -70)])
+star = scene.star(5, 90, 42)
+hexagon = scene.regular_polygon(6, 84)
+slice = scene.sector(0, 0, 100, 0.0, 1.8)
+ring = scene.annulus(100, 56)
+underbrace = scene.brace(-120, -100, 120, -100, 36)
+approved = scene.checkmark(32).fill(GREEN)
+rejected = scene.cross(32).stroke(WHITE, 4)
+corner = scene.right_angle(40)
+label = scene.title("Gaanim").at(0, 220)
+formula = scene.equation("E = m c^2").at(0, -180)
+arrow = scene.arrow(-80, 0, 80, 0)
+angle = scene.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
+rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
+rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
+guide = scene.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
+measure_arrow = scene.double_arrow(-140, -160, 140, -160)
+measure = scene.dimension(-80, 80, 80, 80, 24)
+spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
+axes = scene.axes(
+    x=(-5, 5, 1), y=(-3, 3, 1), grid=True, ticks=True, numbers=True,
+    x_label="x", y_label="f(x)",
+    axis_color=WHITE, grid_color="#6B7280", tick_color=GOLD,
+    number_color=WHITE, label_color=GOLD,
+    axis_width=3, grid_width=1, tick_width=2, tick_length=10,
+)
+logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
+icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
-See #link("/api/mobjects/", "Mobjects") for the full list.
+Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
+`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `path`, `axes`, `text`, `title`, `subtitle`, `equation`, and
+`group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
+and WebP files. `contain` preserves aspect ratio inside the target, `cover`
+fills and clips it, and `stretch` fills it without preserving aspect ratio.
+Pass `crop=(x, y, width, height)` in source pixels (top-left origin) to select
+a source rectangle. The regular `Drawable` methods such as `scaled`, `rotated`,
+`opacity`, and `at` remain available. Reusing the same path shares its decoded
+texture for the process.
 
-== Timeline Control
+`svg(path)` imports SVG geometry as a real hierarchy of regular vector paths
+and source groups. Named groups and paths are available through `part(id)`:
 
 ```python
-# Play animations (parallel if multiple args)
-scene.play(
-    circle.animate().write(duration=2.0),
-    rect.animate().fade_in_anim().duration(1.0),
+robot = scene.svg("assets/robot.svg")
+arm = robot.part("left-arm")
+joint = robot.part("elbow")
+
+arm.fill(BLUE)  # group styles reach every descendant path
+scene.play([joint.rotate(0.6)])
+```
+
+Part IDs are case-sensitive. Duplicate source IDs fail during import, while an
+unknown ID raises `KeyError` and lists the available names. The importer
+resolves paths and basic shapes, solid or linear/radial gradient fills and
+strokes, CSS, `viewBox`, transforms, `<use>`, outlined text, `clipPath`,
+`feGaussianBlur`, and `feDropShadow`. Patterns, masks, embedded raster images,
+and arbitrary filter graphs are intentionally omitted.
+
+`axes(x=..., y=...)` creates Cartesian axes as five independent vector layers:
+grid, axis lines, ticks, numbers, and axis labels. Ranges are
+`(minimum, maximum, step)`. The aggregate `grid`, `ticks`, `numbers`, and
+`labels` switches retain concise defaults. Per-axis overrides such as
+`x_grid=False`, `y_ticks=False`, or `x_numbers=False` hide only one component.
+Use `axis_color`, `grid_color`, `tick_color`, `number_color`, and `label_color`
+for independent colors; `axis_width`, `grid_width`, `tick_width`, and
+`tick_length` control vector geometry. `x_label` and `y_label` are optional.
+
+`function_graph(function, x=(minimum, maximum), samples=160)` samples `y =
+function(x)` once while the scene is built and returns a regular vector path.
+`parametric_curve(function, t=(minimum, maximum), samples=240)` does the same
+for a function returning `(x, y)`, which is useful for orbits and phase curves.
+
+```python
+parabola = scene.function_graph(lambda x: 0.008 * x * x - 60, x=(-250, 150))
+orbit = scene.parametric_curve(lambda t: (180 * cos(t), 120 * sin(t)), t=(0, 2 * PI))
+```
+
+`bezier(start, controls, end)` creates a native quadratic Bézier with one
+control point or a cubic Bézier with two. It remains a real Bézier path, so it
+can drive the reactive curve bindings directly.
+
+```python
+curve = scene.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
+```
+
+`path(definition)` is the compact entry point for custom technical geometry.
+Pass a sequence of `(x, y)` points for an open polyline, or cursor commands for
+a composed path. The explicit `polyline` and `curve` factories remain available
+for code that benefits from stating the exact path kind.
+
+```python
+rail = scene.path([(-180, 0), (0, 80), (180, 0)])
+profile = scene.path([
+    ("move", [(-180, -40)]),
+    ("cubic", [(-80, 100), (80, -100), (180, 40)]),
+])
+```
+
+`arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`
+connects two points with an angular deflection; `curved_arrow_arc` follows an
+explicit center/radius arc. Both use radians, while
+`dimension(x1, y1, x2, y2, offset)` draws extension lines and a perpendicular
+double-headed measurement arrow.
+
+== Reactive geometry
+
+`ValueTracker` animates a scalar independently of visible mobjects. Use
+`always_redraw_arc` to regenerate a curved arrow from that value each frame.
+
+```python
+theta = scene.value_tracker(0.2)
+rotation = scene.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
+scene.play([theta.animate_to(4.5).duration(2.0)])
+```
+
+For simple spatial relationships, `attach_to` keeps a drawable centered on
+another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
+`bind_position_from(source, axes="xy")` provide axis-level control.
+
+```python
+label = scene.text("moving label").attach_to(marker)
+marker.add_updater(Updater.orbit(0, 0, 120, 1.2))
+```
+
+Groups and drawables can rotate or scale around a scene-space point through
+`with_pivot(x, y)` (also available as `pivot`). This is useful for a mechanism
+with a physical hinge:
+
+```python
+mechanism = scene.group([rail, spring, mass]).with_pivot(0, 0)
+scene.play([mechanism.rotate(PI / 3).duration(1.0)])
+```
+
+`spring_between(from, to, coils=8, amplitude=12)` creates a native reactive
+spring. Each endpoint can be a drawable or an `(x, y)` tuple, so it follows a
+moving mass without a Python callback every frame.
+
+`callout(text, target, offset=(160, 96), width=240, height=72)` creates a
+reusable editorial label: its card, text, and connector follow the target
+natively. It returns a regular `Drawable` group, so it can be animated like any
+other mobject.
+
+```python
+mass = scene.dot(20).fill(GOLD)
+note = scene.callout("Moving mass", mass, offset=(180, 100))
+scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
+```
+
+`caption(text, position="bottom")` adds a readable lower-third card and
+automatically respects the canvas safe area. Use `position="top"` for
+headlines or translation overlays.
+
+```python
+caption = scene.caption(
+    "The callout follows the mass without a Python callback.",
+    position="bottom",
+)
+scene.play([caption.fade_in().duration(0.3)])
+```
+
+`title_card(title, subtitle=None)` returns a restrained, centered opening with
+title, optional subtitle, and an accent rule. Its elements remain a single
+animatable drawable. Pass `panel=True` for a framed version.
+
+```python
+opening = scene.title_card("Vector motion", "A short technical explanation")
+scene.play([opening.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
+```
+
+`bullets(items)` creates a vertically aligned bullet list as one drawable. The
+default gap and colors are suitable for a technical presentation; tune
+`width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
+
+```python
+agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
+scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
+```
+
+`bar_chart(values, labels=...)` creates a grouped chart with a baseline,
+labels, and bars scaled to the maximum value. It accepts finite non-negative
+values and returns a regular drawable for animation.
+
+```python
+chart = scene.bar_chart([18, 42, 31], labels=["Q1", "Q2", "Q3"])
+scene.play([chart.grow_from_center().duration(0.6)])
+```
+
+`table(headers, rows)` creates a compact table with a restrained blue header and
+thin construction rules. Each row must have exactly one non-empty cell per header.
+
+```python
+results = scene.table(
+    ["Method", "Error", "Time"],
+    [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
+)
+scene.play([results.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
+```
+
+`typst(source)` compiles full Typst document markup into a vector drawable.
+Use it for publication-style layouts such as table spans or custom mathematical
+structures; `equation(...)` remains the concise API for math-only content. The
+embedded world resolves `@preview/...` imports through the standard Typst
+Universe cache; the first use downloads the requested package.
+
+```python
+comparison = scene.typst('''
+#table(
+  columns: 2,
+  [*Method*], [*Error*],
+  [Baseline], [0.18],
+  [GPU], [0.04],
+)
+''')
+```
+
+`code(source, language=...)` creates a monospaced vector code block with a
+quiet technical frame. It is suitable for code reveals and can be animated as
+one drawable; token-level highlighting and diffs are planned separately.
+
+```python
+snippet = scene.code("result = mass * acceleration", language="python")
+scene.play([snippet.fade_in().duration(0.4)])
+```
+
+`point_on_curve(curve, tracker)` creates a dot whose position follows the
+normalized value of a `ValueTracker` along a sampled `polyline`,
+`function_graph`, `parametric_curve`, or Bézier path. The value is clamped to
+`[0, 1]` and measured by arc length, with no Python callback during playback.
+
+```python
+t = scene.value_tracker(0.0)
+curve = scene.parametric_curve(lambda u: (180 * cos(u), 100 * sin(2 * u)), t=(0, 2 * PI))
+dot = scene.point_on_curve(curve, t).fill(GOLD)
+scene.play([t.animate_to(1.0).duration(2.0)])
+```
+
+`tangent_on_curve(curve, tracker, length=80)` returns a line centered on that
+same position and rotated to the current polyline segment. It uses the same
+native arc-length sampling as `point_on_curve`.
+
+`normal_on_curve(curve, tracker, length=80)` is the perpendicular companion,
+rotated 90 degrees counter-clockwise from the tangent.
+
+`curvature_on_curve(curve, tracker, window=0.02)` returns the local osculating
+circle estimated from neighboring arc-length samples. Style it as a regular
+circle, usually with `no_fill().stroke(...)`.
+
+Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
+object without covering it. `dimension_between(from, to, offset)` similarly
+keeps a technical measurement synchronized with moving endpoints.
+
+== Timeline
+
+`play` receives a list of animations; calls are sequential and animations in a
+single list run in parallel.
+
+```python
+scene.play([
+    circle.create().duration(1.0).smooth(),
+    rect.grow_from_center().duration(1.0).spring(),
+    label.write().duration(0.8),
+])
+scene.wait(0.5)
+scene.play([circle.move(200, 0).duration(1.0)])
+scene.play([rect.fade_out().duration(0.5)])
+```
+
+Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
+connect them, and `scene.slide()` to add a presentation breakpoint.
+
+== Semantic slides and branding
+
+Configure the deck identity once before declaring slides:
+
+```python
+scene.canvas.set_theme("presentation")
+scene.brand(
+    logo="assets/university.svg",
+    footer="UNIVERSITY · MASTER THESIS · 2026",
+    slide_numbers=True,
+    rule=True,
+    show_on_cover=False,
+    logo_scale=0.75,
+)
+```
+
+The logo, theme-colored rule, footer, and current slide number are generated
+inside every semantic slide, so navigation and independent slide export remain
+correct. Cover slides omit the chrome by default.
+
+`slide(layout=...)` accepts both structural names and presentation-oriented
+aliases: `cover`, `content`, `agenda`, `comparison`, `divider`, and
+`conclusion`. A comparison exposes `before` and `after` regions as aliases for
+its two columns.
+
+```python
+slide = scene.slide("Results", layout="comparison", notes="Compare both models.")
+slide.region("before").place(baseline, Anchor.CENTER)
+slide.region("after").place(proposed, Anchor.CENTER)
+```
+
+`Transition.zoom_through(duration, center=(0, 0), max_zoom=4)` zooms into a
+scene-space point before revealing the next segment. It is useful when a detail
+of the outgoing scene introduces the following section.
+
+== Camera
+
+```python
+scene.camera.pan_to(-160, 40, duration=0.8)
+scene.camera.zoom_to(1.5, duration=0.6)
+scene.camera.frame_to(circle, margin=48, duration=0.9)
+scene.camera.rotate_to(0.15, duration=0.5)
+scene.camera.follow(circle, duration=2.0)
+scene.camera.shake(amplitude=12, frequency=8, duration=0.4)
+```
+
+`camera.frame_to` derives a pan and orthographic zoom from the target's current
+bounds and runs both in parallel, keeping it inside the safe viewport.
+`camera.follow` follows a mobject while reactive updaters are active, and
+`camera.shake` is deterministic so previews, seeks, and exports match. The
+legacy `scene.camera_*` methods remain available for existing projects.
+
+== Clipping and masks
+
+Use any vector drawable as clipping geometry for another drawable or a nested
+group. The mask keeps its own visibility; make it transparent when it should
+only constrain content:
+
+```python
+mask = scene.rounded_rect(420, 220, 28).no_fill().no_stroke()
+chart_group.clip(mask)
+```
+
+Mask and target transforms are resolved in world space, so they can be placed,
+scaled, rotated, or nested independently. `rule="evenodd"` supports paths with
+holes, and `drawable.no_clip()` removes a previously assigned mask.
+
+== Output
+
+```python
+scene.render()                         # Interactive Gaanim viewer
+scene.export("output.webp", fps=30)   # Format follows the file extension
+scene.snapshots("snapshots", [0.0, 1.0])
+```
+
+All export controls are available from Python. `quality` accepts `"draft"`,
+`"standard"`, or `"production"`; combine it with `aspect_ratio="youtube"`,
+`"tiktok"`, or `"instagram"` to use an output preset. Explicit `width`,
+`height`, and `fps` take precedence over a preset. Use `start_time` and
+`end_time` to export an interval, `transparent=True` for alpha-capable formats,
+and `encoder="auto"` (or `"libx264"`, `"nvenc"`, `"amf"`, `"qsv"`, or
+`"vaapi"`) to select encoding. `crf` ranges from 0 to 51 and `speed` accepts
+`"fast"`, `"balanced"`, or `"best"`.
+
+For semantic presentations, use `slide="Name"` to export only one slide. Use
+`slide="*"` to export every slide; the path must contain `{slide}` or `{index}`
+so files cannot overwrite each other. Parent directories are created
+automatically. `slide` is intentionally exclusive with `start_time` and
+`end_time`.
+
+```python
+scene.export(
+    "vertical.webm",
+    quality="standard",
+    aspect_ratio="tiktok",
+    transparent=True,
+    start_time=2.0,
+    end_time=12.0,
 )
 
-# Wait
-scene.wait(1.0)
-
-# Sequential: each play() call is sequential
-scene.play(circle.animate().shift(100, 0).duration(1.0))
-scene.play(circle.animate().fade_out_anim().duration(0.5))
-```
-
-== Terminal Methods
-
-```python
-scene.render()   # Open Vulkan GPU preview (blocking)
-scene.edit()     # Open interactive editor (blocking)
-scene.export(    # Headless offline render (blocking)
-    "output.mp4",
-    fps=60,
-    width=None,
-    height=None,
-    transparent=None,
-    aspect_ratio=None,  # "youtube", "tiktok", "instagram"
-    quality=None,       # "draft", "standard", "production"
+scene.export("defense/results.mp4", slide="Resultados", quality="production")
+scene.export(
+    "defense/slides/{index}-{slide}.mp4",
+    slide="*",
+    quality="production",
 )
 ```
 
-== Theme
+Run a script through the Gaanim application:
 
-```python
-scene = Scene(theme=Theme.DRACULA)
-scene.set_theme(Theme.GRUVBOX)  # Switch mid-scene
+```bash
+gaanim my_animation.py
 ```
-
-See #link("/api/themes/", "Themes") for available themes.

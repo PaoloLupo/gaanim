@@ -1,31 +1,29 @@
-"""Example: Boolean operations between shapes.
+"""Overlapping shapes with the public Scene primitives.
 
-Demonstrates union, intersection, difference, and exclusion of overlapping
-primitives. Each result is a single Mobject that you can position, animate,
-or compose with other shapes.
+Boolean union/intersection are implemented in Rust but are not yet exposed by
+the Python API, so this demo intentionally shows composition rather than
+claiming those operations are available.
 """
 
-from gaanim import BLUE, GOLD, GREEN, RED, Scene
+from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 
 
 def main():
-    scene = Scene(
-        width=1280,
-        height=720,
-        title="Gaanim - Boolean Operations",
-    )
+    scene = Scene(1280, 720, background=BLACK)
+    title = scene.title("Overlapping shapes").fill(WHITE).at(0, 230)
+    circle_a = scene.circle(80).fill(BLUE).opacity(0.7).at(-60, 60)
+    circle_b = scene.circle(80).fill(RED).opacity(0.7).at(60, 60)
+    rect_a = scene.rect(120, 120).fill(GREEN).opacity(0.7).at(-80, -150)
+    rect_b = scene.rect(120, 120).fill(GOLD).opacity(0.7).at(0, -150)
 
-    circle_a = scene.circle(radius=80.0).fill(BLUE).at(-40.0, 0.0)
-    circle_b = scene.circle(radius=80.0).fill(RED).at(40.0, 0.0)
-
-    rect_a = scene.rectangle(width=120.0, height=120.0).fill(GREEN).at(-200.0, 0.0)
-    rect_b = scene.rectangle(width=120.0, height=120.0).fill(GOLD).at(-120.0, 0.0)
-
-    scene.union(circle_a, circle_b).at(0.0, 150.0)
-    scene.intersection(rect_a, rect_b).at(-160.0, 150.0)
-    scene.difference(circle_a, circle_b).at(0.0, -120.0)
-    scene.exclusion(rect_a, rect_b).at(-160.0, -120.0)
-
+    scene.play([
+        title.write().duration(0.8),
+        circle_a.grow_from_center().duration(0.8),
+        circle_b.grow_from_center().duration(0.8),
+        rect_a.create().duration(0.8),
+        rect_b.create().duration(0.8),
+    ])
+    scene.wait(1.0)
     scene.render()
 
 

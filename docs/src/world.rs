@@ -161,7 +161,7 @@ impl DocsFiles {
 
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
         match id.root() {
-            VirtualRoot::Project => Ok(self.project.resolve(id.vpath())),
+            VirtualRoot::Project => self.project.resolve(id.vpath()),
             VirtualRoot::Package(spec) => Err(FileError::Other(Some(eco_format!(
                 "packages not supported: {spec}"
             )))),

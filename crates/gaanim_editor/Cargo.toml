@@ -2,7 +2,15 @@
 name = "gaanim_editor"
 version = "0.1.0"
 edition = "2024"
-description = "Interactive editor with inspector, timeline, and viewport controls for gaanim v2"
+description = "Gaanim application: interactive viewer with hot-reload of animation scripts"
+
+[lib]
+name = "gaanim_editor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gaanim-core"
+path = "src/main.rs"
 
 [dependencies]
 gaanim_core = { path = "../gaanim_core" }
@@ -12,11 +20,17 @@ gaanim_api = { path = "../gaanim_api" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_export = { path = "../gaanim_export" }
+gaanim_diff = { path = "../gaanim_diff", features = ["gui"] }
 gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_python = { path = "../gaanim_python" }
+gaanim_text = { path = "../gaanim_text" }
 
 bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
-bevy_egui = "0.39"
+bevy_egui = { version = "0.39", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
 bevy_vello = "0.13.1"
+pyo3 = { version = "0.28", features = ["abi3-py312"] }
+notify = { workspace = true }
+crossbeam-channel = { workspace = true }

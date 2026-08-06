@@ -1,0 +1,95 @@
+name: Release (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build gaanim.exe (Windows x64)
+    runs-on: windows-latest
+    env:
+      CARGO_BUILD_JOBS: 2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binaries
+        run: |
+          cargo build -p gaanim_launcher --release --bin gaanim
+          cargo build -p gaanim_editor --release --bin gaanim-core
+
+      - name: Verify version matches tag (if tag push)
+        shell: pwsh
+        run: |
+          $cargoVer = (Select-String -Path crates/gaanim_editor/Cargo.toml -Pattern '^version = "([^"]+)"' | ForEach-Object { $_.Matches.Groups[1].Value } | Select-Object -First 1)
+          Write-Host "Cargo version: $cargoVer"
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $tagVer = "${{ github.ref_name }}".TrimStart("v")
+            if ($cargoVer -ne $tagVer) {
+              Write-Error "Tag $tagVer does not match Cargo version $cargoVer"
+              exit 1
+            }
+          }
+          # Launcher should start without python on PATH; core is tested via launcher
+          .\target\release\gaanim.exe --help 2>&1 | Out-Host
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path crates/gaanim_editor/Cargo.toml -Pattern '^version = "([^"]+)"' | ForEach-Object { $_.Matches.Groups[1].Value } | Select-Object -First 1)
+          $zipName = "gaanim-v$ver-windows-x64.zip"
+          $stage = "dist/stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/gaanim.exe "$stage/gaanim.exe"
+          Copy-Item target/release/gaanim-core.exe "$stage/gaanim-core.exe"
+          if (Test-Path README.md) { Copy-Item README.md "$stage/" }
+          @"
+          Gaanim $ver — Windows x64
+          
+          Requisitos: Python >=3.12 (3.12 minimo, 3.14 tambien soportado) instalado via python.org / winget install Python.Python.3.12
+          Instalacion:
+            1. Extrae el zip a C:\Tools\gaanim\ o donde prefieras.
+            2. Añade esa carpeta a PATH (Panel > Sistema > Variables de entorno).
+            3. Verifica: gaanim --help  (launcher detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
+          
+          Contenido: gaanim.exe (launcher sin dependencia Python) + gaanim-core.exe (motor)
+          Uso con uv (recomendado, creas proyectos manualmente):
+            uv venv --python 3.12  (o --python 3.14)
+            .\.venv\Scripts\Activate.ps1
+            uv pip install gaanim -- o usa el wheel local
+            gaanim init video my_proj
+            gaanim my_proj
+          
+          Sin activar venv, gaanim.exe detecta automaticamente .venv/venv cercano (walk-up desde script/cwd/exe) o Python del sistema (py launcher / where python).
+          "@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/$zipName" -Force
+          Get-ChildItem dist | Format-Table Name, Length
+          # checksum
+          $hash = (Get-FileHash "dist/$zipName" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zipName" | Out-File -FilePath "dist/$zipName.sha256" -Encoding utf8
+          Write-Host "SHA256: $hash"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaanim-windows-x64
+          path: dist/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

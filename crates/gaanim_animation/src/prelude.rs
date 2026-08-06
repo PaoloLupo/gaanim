@@ -1,6 +1,10 @@
 pub use crate::GaanimAnimationPlugin;
 pub use crate::signals::{
-    AlwaysRedraw, ColorSignal, FloatSignal, MobjectSpec, Signal, SignalBinding, SpecValue,
-    Vec3Signal,
+    AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec,
+    PositionBinding, Signal, SignalBinding, SpecValue, Vec3Signal,
 };
 pub use crate::tween::{AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState};
+pub use crate::updaters::{
+    PlaybackState, TracedPath, TrackingEndpoint, TrackingLine, Updater, advance_x_updater,
+    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
+};

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "width": 1920,
+  "height": 1080,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_0_200000",
+      "time_seconds": 0.2,
+      "file": "seek_0000_t_0_200000.png"
+    },
+    {
+      "id": "seek_0001_t_0_800000",
+      "time_seconds": 0.8,
+      "file": "seek_0001_t_0_800000.png"
+    },
+    {
+      "id": "seek_0002_t_1_600000",
+      "time_seconds": 1.6,
+      "file": "seek_0002_t_1_600000.png"
+    },
+    {
+      "id": "seek_0003_t_2_150000",
+      "time_seconds": 2.15,
+      "file": "seek_0003_t_2_150000.png"
+    },
+    {
+      "id": "seek_0004_t_2_950000",
+      "time_seconds": 2.95,
+      "file": "seek_0004_t_2_950000.png"
+    },
+    {
+      "id": "seek_0005_t_3_450000",
+      "time_seconds": 3.45,
+      "file": "seek_0005_t_3_450000.png"
+    },
+    {
+      "id": "seek_0006_t_3_950000",
+      "time_seconds": 3.95,
+      "file": "seek_0006_t_3_950000.png"
+    },
+    {
+      "id": "seek_0007_t_4_500000",
+      "time_seconds": 4.5,
+      "file": "seek_0007_t_4_500000.png"
+    },
+    {
+      "id": "seek_0008_t_5_300000",
+      "time_seconds": 5.3,
+      "file": "seek_0008_t_5_300000.png"
+    }
+  ]
+}

@@ -97,6 +97,7 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
                 stiffness: 90.0,
                 damping: 12.0,
             },
+            delay: 0.0,
             label: None,
         }),
     );
@@ -113,6 +114,7 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
                 to: gaanim_core::glam::DQuat::from_rotation_z(2.0 * PI),
             },
             rate_func: RateFunc::DoubleSmooth,
+            delay: 0.0,
             label: None,
         }),
     );
@@ -129,6 +131,7 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
                 to: gaanim_core::glam::DVec3::new(1.8, 1.8, 1.0),
             },
             rate_func: RateFunc::DoubleSmooth,
+            delay: 0.0,
             label: None,
         }),
     );
@@ -143,6 +146,7 @@ fn setup_scene(mut commands: Commands, mut timeline: ResMut<Timeline>) {
             target: parent_id,
             lens: PropertyLensSpec::Opacity { from: 1.0, to: 0.0 },
             rate_func: RateFunc::DoubleSmooth,
+            delay: 0.0,
             label: None,
         }),
     );

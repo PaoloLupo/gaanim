@@ -1,26 +1,91 @@
 """Gaanim — GPU-accelerated vector animation engine."""
 
+import warnings
+
 from .gaanim_core import (
-    Scene,
-    Engine,
-    SceneBuilder,
-    Transition,
-    Mobject,
-    Selection,
-    SelectionAnim,
-    AnimSpec,
+    Anchor,
+    Direction,
+    FrameLayout,
+    Flow,
+    GridLayout,
+    LayoutRegion,
+    Layout,
+    BLACK,
+    BLUE,
+    CORAL,
+    CYAN,
+    GOLD,
+    GRAY,
+    GREEN,
+    NAVY,
+    ORANGE,
+    PINK,
+    PURPLE,
+    RED,
+    TEAL,
+    WHITE,
+    YELLOW,
+    Anim,
     Color,
-    ObjectId,
+    Brush,
+    Camera,
     Theme,
-    GOLD, CORAL, BLUE, WHITE, BLACK, RED, GREEN, YELLOW,
-    ORANGE, PURPLE, PINK, GRAY, CYAN, NAVY, TEAL,
+    ThesisTemplate,
+    Drawable,
+    Transition,
+    Updater,
+    ValueTracker,
+    Scene,
+    Slide,
 )
 
+
+def Canvas(*args, **kwargs):
+    """Deprecated compatibility constructor; use :class:`Scene` instead."""
+    warnings.warn(
+        "Canvas is deprecated as the animation facade; use Scene instead. "
+        "Use scene.canvas for viewport configuration.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return Scene(*args, **kwargs)
+
 __all__ = [
-    "Scene", "Engine", "SceneBuilder", "Transition",
-    "Mobject", "Selection", "SelectionAnim", "AnimSpec", "Color", "ObjectId", "Theme",
-    "GOLD", "CORAL", "BLUE", "WHITE", "BLACK", "RED", "GREEN", "YELLOW",
-    "ORANGE", "PURPLE", "PINK", "GRAY", "CYAN", "NAVY", "TEAL",
+    "Scene",
+    "Slide",
+    "Canvas",
+    "Drawable",
+    "Anim",
+    "Transition",
+    "Color",
+    "Brush",
+    "Camera",
+    "Theme",
+    "ThesisTemplate",
+    "Anchor",
+    "Direction",
+    "LayoutRegion",
+    "Layout",
+    "GridLayout",
+    "FrameLayout",
+    "Flow",
+    "Updater",
+    "ValueTracker",
+    "GOLD",
+    "CORAL",
+    "BLUE",
+    "WHITE",
+    "BLACK",
+    "RED",
+    "GREEN",
+    "YELLOW",
+    "ORANGE",
+    "PURPLE",
+    "PINK",
+    "GRAY",
+    "CYAN",
+    "NAVY",
+    "TEAL",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.1.0"

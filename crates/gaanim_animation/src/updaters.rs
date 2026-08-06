@@ -1,10 +1,26 @@
 use crate::tween::DeltaTime;
 use bevy::prelude::{Component, Entity, World};
 use gaanim_core::glam::DVec3;
+use gaanim_core::kurbo::BezPath;
 use gaanim_math::SpatialTransform;
 use gaanim_scene::Path2D;
 use std::sync::Arc;
 use std::sync::Mutex;
+
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy)]
+pub struct PlaybackState {
+    pub is_playing: bool,
+    pub scaled_dt: f64,
+}
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self {
+            is_playing: true,
+            scaled_dt: 0.0,
+        }
+    }
+}
 
 /// Componente que define una función de actualización continua para una entidad.
 /// Se ejecuta cada frame durante SceneSet::Updaters.
@@ -16,6 +32,8 @@ pub struct Updater {
     pub func: Arc<dyn Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync>,
     /// Tiempo total acumulado desde que se añadió este updater.
     pub elapsed: f64,
+    /// Tiempo de corte opcional: a partir de aquí el updater queda congelado.
+    pub stop_at: Option<f64>,
     /// Si es verdadero, el updater se pausa si la simulación está pausada.
     pub time_based: bool,
 }
@@ -28,6 +46,7 @@ impl Updater {
         Self {
             func: Arc::new(func),
             elapsed: 0.0,
+            stop_at: None,
             time_based: true,
         }
     }
@@ -36,23 +55,43 @@ impl Updater {
 /// Sistema Bevy que ejecuta todos los updaters activos con acceso exclusivo al World.
 pub fn updater_system(world: &mut World) {
     let dt = world
-        .get_resource::<DeltaTime>()
-        .map(|d| d.dt)
+        .get_resource::<PlaybackState>()
+        .map(|s| s.scaled_dt)
+        .filter(|dt| *dt > 0.0)
+        .or_else(|| world.get_resource::<DeltaTime>().map(|d| d.dt))
         .unwrap_or(0.0);
+    let is_playing = world
+        .get_resource::<PlaybackState>()
+        .map(|s| s.is_playing)
+        .unwrap_or(true);
 
     let mut updates = Vec::new();
 
     // Consultamos los updaters para extraer sus Arcs y ejecutarlos sin colisiones de préstamos de Bevy.
     let mut query = world.query::<(Entity, &mut Updater)>();
     for (entity, mut updater) in query.iter_mut(world) {
-        updater.elapsed += dt;
-        updates.push((entity, updater.func.clone(), updater.elapsed));
+        if updater.time_based && !is_playing {
+            continue;
+        }
+        let previous_elapsed = updater.elapsed;
+        let next_elapsed = if let Some(stop_at) = updater.stop_at {
+            (previous_elapsed + dt).min(stop_at)
+        } else {
+            previous_elapsed + dt
+        };
+        updater.elapsed = next_elapsed;
+        updates.push((
+            entity,
+            updater.func.clone(),
+            next_elapsed - previous_elapsed,
+            next_elapsed,
+        ));
     }
 
     let mut to_remove = Vec::new();
-    for (entity, func, elapsed) in updates {
+    for (entity, func, effective_dt, elapsed) in updates {
         // Ejecutar la clausura con acceso exclusivo al World.
-        let keep = func(dt, elapsed, entity, world);
+        let keep = func(effective_dt, elapsed, entity, world);
         if !keep {
             to_remove.push(entity);
         }
@@ -167,6 +206,31 @@ pub fn follow_updater(target: Entity, offset: DVec3, smoothing: f64) -> Updater 
     })
 }
 
+/// Mueve la posición X de la entidad a velocidad constante cada frame.
+/// Útil para crear un "dot proyección" que avanza horizontalmente.
+pub fn advance_x_updater(speed: f64) -> Updater {
+    let initial_x = Mutex::new(None);
+    Updater::new(move |_dt, elapsed, entity, world| {
+        let mut x_cache = initial_x.lock().unwrap();
+        let x0 = match *x_cache {
+            Some(val) => val,
+            None => {
+                let current_x = world
+                    .get::<SpatialTransform>(entity)
+                    .map(|t| t.translation.x)
+                    .unwrap_or(0.0);
+                *x_cache = Some(current_x);
+                current_x
+            }
+        };
+
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            transform.translation.x = x0 + speed * elapsed;
+        }
+        true
+    })
+}
+
 /// Componente que rastrea la posición de una entidad y genera un Path2D continuo de su trayectoria.
 #[derive(Component)]
 pub struct TracedPath {
@@ -255,5 +319,67 @@ pub fn traced_path_system(world: &mut World) {
         if let Some(mut path_comp) = world.get_mut::<Path2D>(trace_entity) {
             path_comp.0 = std::sync::Arc::new(path);
         }
+    }
+}
+
+// ==========================================
+// TRACKING LINE — línea reactiva entre dos endpoints
+// ==========================================
+
+/// Un endpoint de una `TrackingLine`: posición estática o entidad dinámica.
+#[derive(Debug, Clone)]
+pub enum TrackingEndpoint {
+    /// Posición fija en el espacio.
+    Static(DVec3),
+    /// Posición del centro de una entidad (lee SpatialTransform cada frame).
+    Entity(Entity),
+}
+
+/// Componente que regenera un `Path2D` de línea recta entre dos endpoints cada frame.
+///
+/// A diferencia de una animación de línea (que interpola de A a B en una duración),
+/// `TrackingLine` actualiza continuamente sus endpoints para seguir entidades.
+#[derive(Component)]
+pub struct TrackingLine {
+    pub from: TrackingEndpoint,
+    pub to: TrackingEndpoint,
+}
+
+impl TrackingLine {
+    pub fn new(from: TrackingEndpoint, to: TrackingEndpoint) -> Self {
+        Self { from, to }
+    }
+}
+
+/// Sistema exclusivo que resuelve los endpoints de cada TrackingLine y regenera su Path2D.
+pub fn tracking_line_system(world: &mut World) {
+    let mut updates = Vec::new();
+
+    let mut query = world.query::<(Entity, &TrackingLine)>();
+    for (entity, line) in query.iter(world) {
+        let from_pos = resolve_endpoint(&line.from, world);
+        let to_pos = resolve_endpoint(&line.to, world);
+
+        if let (Some(from), Some(to)) = (from_pos, to_pos) {
+            let mut path = BezPath::new();
+            path.move_to(gaanim_core::kurbo::Point::new(from.x, from.y));
+            path.line_to(gaanim_core::kurbo::Point::new(to.x, to.y));
+            updates.push((entity, path));
+        }
+    }
+
+    for (entity, path) in updates {
+        if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
+            path_comp.0 = std::sync::Arc::new(path);
+        }
+    }
+}
+
+fn resolve_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
+    match ep {
+        TrackingEndpoint::Static(pos) => Some(*pos),
+        TrackingEndpoint::Entity(entity) => world
+            .get::<SpatialTransform>(*entity)
+            .map(|t| t.translation),
     }
 }

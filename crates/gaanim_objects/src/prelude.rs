@@ -1,6 +1,8 @@
 pub use crate::GaanimObjectsPlugin;
 pub use crate::primitives::{
-    MobjectBundle, arc, arrow, checkmark, circle, dot, ellipse, line, polygon, rectangle,
-    regular_polygon, rounded_rect, square, star, triangle, open_path, curved_arrow, brace,
+    ImageView, MobjectBundle, arc, arrow, brace, checkmark, circle, curved_arrow, curved_arrow_arc,
+    dot, ellipse, image, line, open_path, polygon, rectangle, regular_polygon, rounded_rect,
+    square, star, triangle,
 };
+pub use crate::svg::{SvgDocument, SvgGroup, SvgLoadError, SvgNode, SvgPath};
 pub use crate::text::{MathContent, TextContent, TypstDocument};

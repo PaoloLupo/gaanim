@@ -1,16 +1,18 @@
 use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
+use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
-use gaanim_math::{Bounds3D, SpatialTransform};
+use gaanim_math::{Bounds3D, EasingCurve, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
-    FillBrush, GroupMarker, LocalBounds, MobjectId, Opacity, StrokeBrush, Visible, WorldBounds,
+    FillBrush, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, StrokeBrush, Visible,
+    WorldBounds,
 };
 use gaanim_text::font::FontRegistry;
-use gaanim_text::shaper::compile_text_to_hierarchy;
+use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
 use gaanim_timeline::{
     clip::{AnimationSpec, ClipPayload, PropertyLensSpec, SceneId, TrackId},
@@ -19,6 +21,27 @@ use gaanim_timeline::{
     transition::TransitionType,
 };
 use std::collections::HashMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DrawMode {
+    Grow,
+    BorderThenFill,
+}
+
+#[derive(Clone, Debug)]
+struct DrawSchedule {
+    mode: DrawMode,
+    reversed: bool,
+    staggered: bool,
+    lag_ratio: f64,
+    stroke_width: Option<f64>,
+    auto_stroke_width: f64,
+    fill_rate_func: gaanim_math::RateFunc,
+}
+
+fn adaptive_lag_ratio(item_count: usize) -> f64 {
+    (4.0 / item_count.max(1) as f64).min(0.2)
+}
 
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
 /// stroke color in the `Write` animation's auto-stroke fallback.
@@ -40,15 +63,26 @@ fn extract_brush_color(brush: &Brush) -> Option<Color> {
 /// their offsets and "from" properties without manual user input.
 #[derive(Debug, Clone)]
 pub struct MobjectState {
+    pub path: std::sync::Arc<gaanim_core::kurbo::BezPath>,
     pub bounds: Bounds3D,
     pub transform: SpatialTransform,
     pub opacity: f32,
     pub fill: Option<Brush>,
     pub stroke: StrokeBrush,
     pub entity: Entity,
-    pub child_spans: Vec<(ObjectId, Entity, gaanim_scene::components::TextSpan)>,
+    pub child_spans: Vec<HierarchyChild>,
     pub children: Vec<ObjectId>,
     pub parent: Option<ObjectId>,
+}
+
+fn compose_child_paths(children: &[HierarchyChild]) -> std::sync::Arc<gaanim_core::kurbo::BezPath> {
+    let mut merged = gaanim_core::kurbo::BezPath::new();
+    for child in children {
+        let mut path = (*child.path).clone();
+        path.apply_affine(child.transform.to_affine_2d());
+        merged.extend(path);
+    }
+    std::sync::Arc::new(merged)
 }
 
 /// A `Vec`-backed map from `ObjectId` to `MobjectState`.
@@ -292,6 +326,176 @@ pub struct SceneBuilder<'w, 's, 'a> {
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
+    fn register_textual_hierarchy(
+        &mut self,
+        parent_id: ObjectId,
+        entity: Entity,
+        bounds: Bounds3D,
+        fill: Option<Brush>,
+        stroke: StrokeBrush,
+        child_spans: Vec<HierarchyChild>,
+    ) -> MobjectRef {
+        let parent_path = compose_child_paths(&child_spans);
+        let child_ids = child_spans.iter().map(|child| child.id).collect();
+
+        for child in &child_spans {
+            self.tag_entity(child.entity);
+            // Text and Typst are compiled as individual glyph entities. Keep
+            // the ECS hierarchy in sync with `MobjectState::parent` so
+            // transforms, opacity, and visibility applied to the textual
+            // parent propagate to every glyph.
+            self.commands
+                .entity(child.entity)
+                .set_parent_in_place(entity);
+            let child_state = MobjectState {
+                path: child.path.clone(),
+                bounds: child.bounds,
+                transform: child.transform,
+                opacity: 1.0,
+                fill: child.fill.clone(),
+                stroke: child.stroke.clone(),
+                entity: child.entity,
+                child_spans: Vec::new(),
+                children: Vec::new(),
+                parent: Some(parent_id),
+            };
+            self.states.insert(child.id, child_state);
+        }
+
+        self.tag_entity(entity);
+        let state = MobjectState {
+            path: parent_path,
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill,
+            stroke,
+            entity,
+            child_spans,
+            children: child_ids,
+            parent: None,
+        };
+        self.states.insert(parent_id, state);
+
+        MobjectRef { id: parent_id }
+    }
+
+    fn hide_child_spans_now(&mut self, children: &[HierarchyChild]) {
+        for child in children {
+            self.commands.entity(child.entity).insert(Opacity(0.0));
+        }
+    }
+
+    pub(crate) fn hide_visuals_now(&mut self, state: &MobjectState) {
+        self.commands.entity(state.entity).insert(Opacity(0.0));
+        self.hide_child_spans_now(&state.child_spans);
+    }
+
+    pub(crate) fn schedule_show_hierarchy(
+        &mut self,
+        root_id: ObjectId,
+        state: &MobjectState,
+        parent_track: TrackId,
+        time: f64,
+    ) {
+        // Always restore parent entity opacity so that the opacity propagation
+        // system (child_global = child_local * parent_global) doesn't zero-out children.
+        self.timeline.add_clip(
+            parent_track,
+            time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: root_id,
+                lens: PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: state.opacity,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        for child in &state.child_spans {
+            let child_opacity = self
+                .states
+                .get(child.id)
+                .map(|child_state| child_state.opacity)
+                .unwrap_or(1.0);
+            self.timeline.add_clip(
+                parent_track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: child.id,
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: child_opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+    }
+
+    /// Make a previously hidden hierarchy visible at the current playhead.
+    pub(crate) fn schedule_show_now(&mut self, root_id: ObjectId) {
+        let Some(state) = self.states.get(root_id).cloned() else {
+            return;
+        };
+        let track = self.ensure_track(root_id);
+        self.schedule_show_hierarchy(root_id, &state, track, self.current_time);
+    }
+
+    /// Schedule an instantaneous hide for a root and its generated text
+    /// children. This keeps semantic slide transitions correct even though all
+    /// entities are spawned up front for timeline seeking.
+    pub(crate) fn schedule_hide_hierarchy(&mut self, root_id: ObjectId) {
+        let Some(state) = self.states.get(root_id).cloned() else {
+            return;
+        };
+        let track = self.ensure_track(root_id);
+        let time = self.current_time;
+        self.timeline.add_clip(
+            track,
+            time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: root_id,
+                lens: PropertyLensSpec::Opacity {
+                    from: state.opacity,
+                    to: 0.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        for child in state.child_spans {
+            let opacity = self
+                .states
+                .get(child.id)
+                .map(|child_state| child_state.opacity)
+                .unwrap_or(1.0);
+            self.timeline.add_clip(
+                track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: child.id,
+                    lens: PropertyLensSpec::Opacity {
+                        from: opacity,
+                        to: 0.0,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+    }
+
     /// Computes the true world-space transform of a Mobject by walking up the parent chain.
     /// This is necessary during group creation to calculate accurate world bounds for nested children.
     pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
@@ -429,7 +633,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
             AnimationType::RotateTo { .. } | AnimationType::RotateBy { .. } => "Rotate",
             AnimationType::ScaleTo { .. } | AnimationType::ScaleUniform { .. } => "Scale",
-            AnimationType::FadeTo { .. } | AnimationType::FadeIn | AnimationType::FadeOut => "Fade",
+            AnimationType::FadeTo { .. }
+            | AnimationType::FadeIn
+            | AnimationType::FadeOut
+            | AnimationType::FadeInFrom { .. } => "Fade",
             AnimationType::FillColorTo { .. } => "Fill",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -437,10 +644,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::ShrinkToCenter => "Shrink",
             AnimationType::SpinInFromNothing => "SpinIn",
             AnimationType::Indicate { .. } => "Indicate",
-            AnimationType::FadeTransform { .. } => "Morph",
+            AnimationType::FadeTransform { .. }
+            | AnimationType::Transform { .. }
+            | AnimationType::ReplacementTransform { .. } => "Morph",
             AnimationType::Wiggle => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
-            AnimationType::DrawBorderThenFill => "DrawFill",
+            AnimationType::DrawBorderThenFill { .. } => "DrawFill",
             AnimationType::Flash { .. } => "Flash",
             AnimationType::Circumscribe { .. } => "Circum",
             AnimationType::MoveAlongPath { .. } => "Follow",
@@ -462,6 +671,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_time += duration;
     }
 
+    /// Schedules removal of a continuous `Updater` component at the current
+    /// timeline time instead of applying it immediately during scene compile.
+    pub(crate) fn schedule_remove_updater(&mut self, target: ObjectId) {
+        let track = self.ensure_track(target);
+        self.timeline.add_clip(
+            track,
+            self.current_time,
+            0.0,
+            ClipPayload::RemoveUpdater { target },
+        );
+    }
+
     /// Registers an interactive breakpoint (slide transition) at the current timeline playhead.
     pub fn slide(&mut self) {
         self.timeline.add_clip(
@@ -475,7 +696,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Sequences a single animation clip on the timeline and advances the playhead.
     pub fn play(&mut self, anim: AnimationBuilder) {
-        let duration = anim.duration;
+        let duration = anim.delay.max(0.0) + anim.duration;
         self.play_internal(anim);
         self.current_time += duration;
     }
@@ -485,12 +706,166 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub fn play_parallel(&mut self, anims: Vec<AnimationBuilder>) {
         let mut max_duration = 0.0;
         for anim in anims {
-            if anim.duration > max_duration {
-                max_duration = anim.duration;
+            let total_duration = anim.delay.max(0.0) + anim.duration;
+            if total_duration > max_duration {
+                max_duration = total_duration;
             }
             self.play_internal(anim);
         }
         self.current_time += max_duration;
+    }
+
+    /// Schedule an animation at the current cursor without advancing it.
+    ///
+    /// Used for transient helpers such as cancellation marks that must fade
+    /// concurrently with the equation transition that follows them.
+    pub(crate) fn play_at_current_time(&mut self, anim: AnimationBuilder) {
+        self.play_internal(anim);
+    }
+
+    /// Schedule a glyph-copy transition while accounting for the transforms of
+    /// the two textual parent containers. Text glyph transforms are local to
+    /// their equation, so a plain child translation cannot move between
+    /// separately positioned equations by itself.
+    pub(crate) fn play_fragment_transform(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        duration: f64,
+    ) {
+        let Some((source_translation, source_center)) = self
+            .states
+            .get(source)
+            .map(|state| (state.transform.translation, state.bounds.center()))
+        else {
+            return;
+        };
+        let Some(source_parent_translation) = self
+            .states
+            .get(source_parent)
+            .map(|state| state.transform.translation)
+        else {
+            return;
+        };
+        let Some(target_parent_translation) = self
+            .states
+            .get(target_parent)
+            .map(|state| state.transform.translation)
+        else {
+            return;
+        };
+        let Some((destination, target_center)) = self
+            .states
+            .get(target)
+            .map(|state| (state.transform.translation, state.bounds.center()))
+        else {
+            return;
+        };
+        let source_position_in_target = source_translation + source_parent_translation
+            - target_parent_translation
+            + source_center
+            - target_center;
+        let Some(target_state) = self.states.get_mut(target) else {
+            return;
+        };
+        target_state.transform.translation = source_position_in_target;
+        let _ = target_state;
+
+        // A shared semantic tag represents a term that exists in both
+        // equations. Keep the source equation intact and animate the target
+        // glyph from the source's global position to its own local position.
+        // Bounds compensate for lines whose optical centers differ because of
+        // surrounding superscripts or descenders.
+        self.play_internal(AnimationBuilder {
+            target,
+            anim_type: AnimationType::TranslateTo { to: destination },
+            duration,
+            rate_func: gaanim_math::RateFunc::Smooth,
+            delay: 0.0,
+        });
+    }
+
+    /// Cross-fades two textual hierarchies, while moving the matched semantic
+    /// glyphs from the source equation into the target equation.
+    pub(crate) fn play_equation_expansion(
+        &mut self,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        duration: f64,
+    ) {
+        let source_state = self.states.get(source_parent).cloned();
+        let target_state = self.states.get(target_parent).cloned();
+        let (Some(source_state), Some(target_state)) = (source_state, target_state) else {
+            return;
+        };
+        if source_state.children.is_empty() || target_state.children.is_empty() {
+            return;
+        }
+
+        // Match the unchanged parts too. They move with the equation's new
+        // centering instead of ghosting through a cross-fade, while unmatched
+        // target glyphs (the expansion) simply fade in.
+        let source_chars: Vec<_> = source_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character))
+            .collect();
+        let target_chars: Vec<_> = target_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character))
+            .collect();
+        let mut table = vec![vec![0usize; target_chars.len() + 1]; source_chars.len() + 1];
+        for source_index in (0..source_chars.len()).rev() {
+            for target_index in (0..target_chars.len()).rev() {
+                table[source_index][target_index] = if source_chars[source_index].1
+                    == target_chars[target_index].1
+                {
+                    1 + table[source_index + 1][target_index + 1]
+                } else {
+                    table[source_index + 1][target_index].max(table[source_index][target_index + 1])
+                };
+            }
+        }
+        let mut matched_pairs = Vec::new();
+        let (mut source_index, mut target_index) = (0, 0);
+        while source_index < source_chars.len() && target_index < target_chars.len() {
+            if source_chars[source_index].1 == target_chars[target_index].1 {
+                matched_pairs.push((source_chars[source_index].0, target_chars[target_index].0));
+                source_index += 1;
+                target_index += 1;
+            } else if table[source_index + 1][target_index] >= table[source_index][target_index + 1]
+            {
+                source_index += 1;
+            } else {
+                target_index += 1;
+            }
+        }
+
+        for child in source_state.children {
+            self.play_internal(AnimationBuilder {
+                target: child,
+                anim_type: AnimationType::FadeOut,
+                duration,
+                rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+        for child in target_state.children {
+            self.play_internal(AnimationBuilder {
+                target: child,
+                anim_type: AnimationType::FadeIn,
+                duration,
+                rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+        for (source, target) in matched_pairs {
+            self.play_fragment_transform(source, target, source_parent, target_parent, duration);
+        }
+        self.current_time += duration;
     }
 
     /// Internal method to resolve and schedule a single animation clip.
@@ -502,24 +877,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // multiple staggered or parallel sub-clips, so they have their own branches
         // that access the timeline multiple times. All other variants collapse to a
         // single clip below.
-        if matches!(anim.anim_type, AnimationType::Write { .. }) {
-            self.play_draw_erase_internal(anim, false, true, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Create { .. }) {
-            self.play_draw_erase_internal(anim, false, false, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Unwrite { .. }) {
-            self.play_draw_erase_internal(anim, true, true, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Uncreate { .. }) {
-            self.play_draw_erase_internal(anim, true, false, track);
+        if matches!(
+            anim.anim_type,
+            AnimationType::Write { .. }
+                | AnimationType::Create { .. }
+                | AnimationType::Unwrite { .. }
+                | AnimationType::Uncreate { .. }
+                | AnimationType::DrawBorderThenFill { .. }
+        ) {
+            self.play_draw_animation_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::SpinInFromNothing) {
             self.play_spin_in_from_nothing_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::FadeInFrom { .. }) {
+            self.play_fade_in_from_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Indicate { .. }) {
@@ -528,6 +902,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::FadeTransform { .. }) {
             self.play_fade_transform_internal(anim, track);
+            return;
+        }
+        if matches!(
+            anim.anim_type,
+            AnimationType::Transform { .. } | AnimationType::ReplacementTransform { .. }
+        ) {
+            self.play_transform_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Wiggle) {
@@ -540,10 +921,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::GrowFromEdge { .. }) {
             self.play_grow_from_edge_internal(anim, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::DrawBorderThenFill) {
-            self.play_draw_border_then_fill_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::Flash { .. }) {
@@ -618,7 +995,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let from = 0.0;
                 let to = 1.0;
                 state.opacity = 1.0;
+                self.commands.entity(state.entity).insert(Opacity(from));
                 PropertyLensSpec::Opacity { from, to }
+            }
+            AnimationType::FadeInFrom { .. } => {
+                unreachable!("FadeInFrom expands into fade and translation clips")
             }
             AnimationType::FadeOut => {
                 let from = state.opacity;
@@ -672,10 +1053,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Wiggle
             | AnimationType::GrowFromPoint { .. }
             | AnimationType::GrowFromEdge { .. }
-            | AnimationType::DrawBorderThenFill
+            | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
             | AnimationType::MoveAlongPath { .. }
+            | AnimationType::Transform { .. }
+            | AnimationType::ReplacementTransform { .. }
             | AnimationType::GrowArrow => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
@@ -691,15 +1074,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             },
         };
 
-        // Add the resolved clip to the Timeline resource
+        // Add the resolved clip to the Timeline resource.
+        // The delay offsets the clip start within the segment but does not
+        // advance the cursor (cursor tracks segment duration, not delay).
+        let clip_start = self.current_time + anim.delay;
         self.timeline.add_clip(
             track,
-            self.current_time,
+            clip_start,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: lens_spec,
                 rate_func: anim.rate_func,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -726,22 +1113,66 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// will render an empty/invisible fill, so the user only ever sees
     /// Internal: generalize a draw/erase animation (Write, Create, Unwrite, Uncreate)
     /// as one or more staggered or parallel sub-clip sequences.
-    fn play_draw_erase_internal(
-        &mut self,
-        anim: AnimationBuilder,
-        is_erase: bool,
-        staggered: bool,
-        parent_track: TrackId,
-    ) {
-        let stroke_width = match anim.anim_type {
-            AnimationType::Write { stroke_width } => stroke_width,
-            AnimationType::Create { stroke_width } => stroke_width,
-            AnimationType::Unwrite { stroke_width } => stroke_width,
-            AnimationType::Uncreate { stroke_width } => stroke_width,
+    fn draw_schedule_for(
+        &self,
+        anim: &AnimationBuilder,
+        item_count: usize,
+    ) -> Option<DrawSchedule> {
+        let adaptive_lag = adaptive_lag_ratio(item_count);
+        match &anim.anim_type {
+            AnimationType::Write { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Create { config } => Some(DrawSchedule {
+                mode: DrawMode::Grow,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(1.0),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Unwrite { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: true,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::Uncreate { config } => Some(DrawSchedule {
+                mode: DrawMode::Grow,
+                reversed: true,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(1.0),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 1.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
+            AnimationType::DrawBorderThenFill { config } => Some(DrawSchedule {
+                mode: DrawMode::BorderThenFill,
+                reversed: false,
+                staggered: true,
+                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                stroke_width: config.stroke_width,
+                auto_stroke_width: 2.0,
+                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+            }),
             _ => None,
-        };
+        }
+    }
 
-        // Collect target ids: the target's own id plus all child spans.
+    fn play_draw_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        const DRAW_RATIO: f64 = 0.5;
+        let start_time = self.current_time + anim.delay.max(0.0);
+
         let mut items: Vec<ObjectId> = {
             let state = match self.states.get(anim.target) {
                 Some(s) => s,
@@ -756,7 +1187,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if state.child_spans.is_empty() {
                 vec![anim.target]
             } else {
-                state.child_spans.iter().map(|(id, _, _)| *id).collect()
+                let mut children: Vec<ObjectId> =
+                    state.child_spans.iter().map(|child| child.id).collect();
+                // Sort child mobjects strictly by visual X position (left-to-right)
+                children.sort_by(|a, b| {
+                    let xa = self
+                        .states
+                        .get(*a)
+                        .map(|s| s.transform.translation.x)
+                        .unwrap_or(0.0);
+                    let xb = self
+                        .states
+                        .get(*b)
+                        .map(|s| s.transform.translation.x)
+                        .unwrap_or(0.0);
+                    xa.partial_cmp(&xb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                children
             }
         };
 
@@ -765,16 +1212,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
-        // If staggered and is_erase, we reverse the items so sequential erasure happens in reverse (right-to-left)
-        if staggered && is_erase {
+        let Some(schedule) = self.draw_schedule_for(&anim, n) else {
+            return;
+        };
+
+        if schedule.staggered && schedule.reversed {
             items.reverse();
         }
 
-        // (A) Auto-stroke: entities that have no stroke brush yet get a stroke synthesized
-        // from the fill color and the user-supplied stroke_width (or 1.0) so the outline
-        // is visible during drawing/erasing.
+        let mut temporary_strokes = HashMap::new();
         for item_id in &items {
-            if let Some(state) = self.states.get_mut(*item_id)
+            if let Some(state) = self.states.get(*item_id)
                 && state.stroke.brush.is_none()
             {
                 let color = state
@@ -782,23 +1230,30 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .as_ref()
                     .and_then(extract_brush_color)
                     .unwrap_or(Color::WHITE);
-                let width = stroke_width.unwrap_or(1.0);
+                let width = schedule.stroke_width.unwrap_or(schedule.auto_stroke_width);
                 let new_stroke = StrokeBrush::new(color, width);
-                state.stroke = new_stroke.clone();
                 self.commands.entity(state.entity).insert(new_stroke);
+                temporary_strokes.insert(*item_id, width);
             }
         }
 
-        // (B) Set initial value via deferred commands to avoid flicker
         for item_id in &items {
             if let Some(state) = self.states.get(*item_id) {
-                let initial_val = if is_erase { 1.0 } else { 0.0 };
-                self.commands
-                    .entity(state.entity)
-                    .insert(gaanim_animation::FillDrawProgress(initial_val));
+                if matches!(schedule.mode, DrawMode::BorderThenFill) {
+                    let initial_fill = if schedule.reversed { 1.0 } else { 0.0 };
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_animation::FillDrawProgress(initial_fill));
+                }
 
-                // If drawing, immediately insert an empty Path2D to guarantee no first-frame flash!
-                if !is_erase {
+                // Insert pen-tip glow for forward draw animations.
+                if !schedule.reversed {
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_animation::WriteTipGlow::default());
+                }
+
+                if !schedule.reversed {
                     self.commands
                         .entity(state.entity)
                         .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
@@ -808,167 +1263,207 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        /// Lag ratio between consecutive items.
-        const LAG_RATIO: f64 = 0.25;
-        /// Fraction of item_duration spent drawing/erasing the outline vs fill fade.
-        const DRAW_RATIO: f64 = 0.7;
-
-        let item_duration = if staggered {
-            anim.duration / (1.0 + (n as f64 - 1.0) * LAG_RATIO)
-        } else {
-            anim.duration
-        };
-        let lag_step = if staggered {
-            item_duration * LAG_RATIO
+        let lag_ratio = if schedule.staggered {
+            schedule.lag_ratio
         } else {
             0.0
         };
+        let item_duration = if schedule.staggered {
+            anim.duration / (1.0 + (n as f64 - 1.0) * lag_ratio)
+        } else {
+            anim.duration
+        };
+        let lag_step = item_duration * lag_ratio;
         let min_step = 1e-6_f64.max(item_duration * 0.01);
-
         let draw_duration = (item_duration * DRAW_RATIO).max(min_step);
-        let fade_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
-
-        // (C) Global resets at self.current_time to ensure determinism during seek/rewind.
-        let reset_fill_val = if is_erase { 1.0 } else { 0.0 };
-        let reset_path_val = if is_erase { 1.0 } else { 0.0 };
+        let fill_duration = (item_duration * (1.0 - DRAW_RATIO)).max(min_step);
 
         for item_id in &items {
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
-                min_step,
-                ClipPayload::Animation(AnimationSpec {
-                    target: *item_id,
-                    lens: PropertyLensSpec::FillDrawProgress {
-                        from: reset_fill_val,
-                        to: reset_fill_val,
-                    },
-                    rate_func: anim.rate_func.clone(),
-                    label: self.current_label.clone(),
-                }),
-            );
-            self.timeline.add_clip(
-                parent_track,
-                self.current_time,
+                start_time,
                 min_step,
                 ClipPayload::Animation(AnimationSpec {
                     target: *item_id,
                     lens: PropertyLensSpec::PathCompletion {
-                        from: reset_path_val,
-                        to: reset_path_val,
+                        from: if schedule.reversed { 1.0 } else { 0.0 },
+                        to: if schedule.reversed { 1.0 } else { 0.0 },
                     },
                     rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
-        }
 
-        // (D) Schedule per-item sequence
-        for (i, item_id) in items.iter().enumerate() {
-            let item_delay = (i as f64 * lag_step).max(0.0);
-            let item_start = self.current_time + item_delay;
-
-            if !is_erase {
-                // DRAW FLOW: outline draws first, then fill fades in
-                let fade_start = item_start + draw_duration;
-
-                // 1. Fill hold at 0.0 during draw phase
+            if matches!(schedule.mode, DrawMode::BorderThenFill) {
                 self.timeline.add_clip(
                     parent_track,
-                    item_start,
-                    draw_duration,
+                    start_time,
+                    min_step,
                     ClipPayload::Animation(AnimationSpec {
                         target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                        lens: PropertyLensSpec::FillDrawProgress {
+                            from: if schedule.reversed { 1.0 } else { 0.0 },
+                            to: if schedule.reversed { 1.0 } else { 0.0 },
+                        },
                         rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 2. Outline draw: PathCompletion 0.0 -> 1.0
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 3. Fill fade-in: FillDrawProgress 0.0 -> 1.0
-                self.timeline.add_clip(
-                    parent_track,
-                    fade_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-            } else {
-                // ERASE FLOW: fill fades out first, then outline erases
-                let draw_start = item_start + fade_duration;
-
-                // 1. Fill fade-out: FillDrawProgress 1.0 -> 0.0
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 2. Outline hold at 1.0 during fade phase
-                self.timeline.add_clip(
-                    parent_track,
-                    item_start,
-                    fade_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
-                        rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 3. Outline erase: PathCompletion 1.0 -> 0.0
-                self.timeline.add_clip(
-                    parent_track,
-                    draw_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
-                        label: self.current_label.clone(),
-                    }),
-                );
-
-                // 4. Fill hold at 0.0 during erase phase
-                self.timeline.add_clip(
-                    parent_track,
-                    draw_start,
-                    draw_duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: *item_id,
-                        lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                        rate_func: anim.rate_func.clone(),
+                        delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
             }
+        }
 
-            // Stroke width override if requested
-            if let Some(width) = stroke_width {
+        for (i, item_id) in items.iter().enumerate() {
+            let item_start = start_time + i as f64 * lag_step;
+
+            match (schedule.mode, schedule.reversed) {
+                (DrawMode::Grow, false) => {
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        item_duration.max(min_step),
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::Grow, true) => {
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        item_duration.max(min_step),
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::BorderThenFill, false) => {
+                    let fill_start = item_start + draw_duration;
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        fill_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
+                            rate_func: schedule.fill_rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+                (DrawMode::BorderThenFill, true) => {
+                    let draw_start = item_start + fill_duration;
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 1.0, to: 0.0 },
+                            rate_func: schedule.fill_rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        item_start,
+                        fill_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 1.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        draw_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::PathCompletion { from: 1.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                    self.timeline.add_clip(
+                        parent_track,
+                        draw_start,
+                        draw_duration,
+                        ClipPayload::Animation(AnimationSpec {
+                            target: *item_id,
+                            lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
+                            rate_func: anim.rate_func.clone(),
+                            delay: 0.0,
+                            label: self.current_label.clone(),
+                        }),
+                    );
+                }
+            }
+
+            // The outline synthesized by Write/DrawBorderThenFill is a
+            // temporary drawing aid, not part of the object's final style.
+            // Fade its width while the fill appears so it cannot leave a
+            // bright halo or blink on later seeks/transforms.
+            if matches!(schedule.mode, DrawMode::BorderThenFill)
+                && !schedule.reversed
+                && let Some(&width) = temporary_strokes.get(item_id)
+            {
+                self.timeline.add_clip(
+                    parent_track,
+                    item_start + draw_duration,
+                    fill_duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens: PropertyLensSpec::StrokeWidth {
+                            from: width,
+                            to: 0.0,
+                        },
+                        rate_func: schedule.fill_rate_func.clone(),
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
+
+            if let Some(width) = schedule.stroke_width {
                 self.timeline.add_clip(
                     parent_track,
                     item_start,
@@ -980,6 +1475,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                             to: width,
                         },
                         rate_func: anim.rate_func.clone(),
+                        delay: 0.0,
                         label: self.current_label.clone(),
                     }),
                 );
@@ -988,6 +1484,36 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal: materialize `SpinInFromNothing` as a simultaneous scale-up and 360-degree rotation.
+    fn play_fade_in_from_internal(&mut self, anim: AnimationBuilder, _track: TrackId) {
+        let offset = match anim.anim_type {
+            AnimationType::FadeInFrom { offset } => offset,
+            _ => return,
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let final_position = state.transform.translation;
+        state.transform.translation = final_position + offset;
+        self.commands.entity(state.entity).insert(state.transform);
+
+        // Reuse the well-tested opacity and translation paths. Both are
+        // scheduled at the same cursor, so they run in parallel.
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::FadeIn,
+            duration: anim.duration,
+            rate_func: anim.rate_func.clone(),
+            delay: anim.delay,
+        });
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::TranslateTo { to: final_position },
+            duration: anim.duration,
+            rate_func: anim.rate_func,
+            delay: anim.delay,
+        });
+    }
+
     fn play_spin_in_from_nothing_internal(
         &mut self,
         anim: AnimationBuilder,
@@ -1034,6 +1560,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: initial_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1051,6 +1578,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: mid_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1067,6 +1595,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: end_rotation,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1102,17 +1631,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if state.child_spans.is_empty() {
                 vec![anim.target]
             } else {
-                state.child_spans.iter().map(|(id, _, _)| *id).collect()
+                state.child_spans.iter().map(|child| child.id).collect()
             }
         };
 
         let half = anim.duration * 0.5;
 
         // 1. Scale up on root target (first half), then scale back down (second half)
-        let root_state = match self.states.get(anim.target) {
+        let root_state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => return,
         };
+        // Textual glyph paths are positioned around their parent rather than
+        // their own origin. Scaling them around `(0, 0)` therefore looks like
+        // a diagonal translation. Use each glyph's local visual center as the
+        // pivot, while preserving an explicit pivot on normal mobjects.
+        if root_state.parent.is_some() && root_state.transform.anchor == DVec3::ZERO {
+            root_state.transform.anchor = root_state.bounds.center();
+            self.commands
+                .entity(root_state.entity)
+                .insert(root_state.transform);
+        }
         let scale_from = root_state.transform.scale;
         let scale_to = scale_from * scale_factor;
 
@@ -1127,6 +1666,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1141,6 +1681,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_from,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1161,6 +1702,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1175,6 +1717,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1191,6 +1734,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: color,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1205,6 +1749,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                                     to: *c,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
+                                delay: 0.0,
                                 label: self.current_label.clone(),
                             }),
                         );
@@ -1234,6 +1779,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     target: anim.target,
                     lens: PropertyLensSpec::Opacity { from, to: 0.0 },
                     rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1260,6 +1806,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: target_opacity,
                     },
                     rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1267,6 +1814,372 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target_state.opacity = target_opacity;
             }
             self.commands.entity(target_entity).insert(Opacity(0.0));
+        }
+    }
+
+    fn play_transform_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let (target, is_replacement) = match &anim.anim_type {
+            AnimationType::Transform { target } => (*target, false),
+            AnimationType::ReplacementTransform { target } => (*target, true),
+            _ => return,
+        };
+
+        let source_state = match self.states.get(anim.target) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        let target_state = match self.states.get(target) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+        let target_visual_opacity = target_state.opacity;
+        let source_has_children = !source_state.child_spans.is_empty();
+        let target_has_children = !target_state.child_spans.is_empty();
+        let morph_end_time = self.current_time + anim.duration;
+
+        // Carry the source into the current scene at the scene boundary. A
+        // deferred ECS command would overwrite SceneMember in the t=0 snapshot
+        // and hide it from its original segment immediately; waiting until the
+        // morph itself would instead make it blink back after the transition.
+        if let Some(scene_id) = self.current_scene {
+            let membership_time = self
+                .timeline
+                .scene_index
+                .iter()
+                .find_map(|(time, id)| (*id == scene_id).then_some(time.0))
+                .unwrap_or(self.current_time);
+            self.timeline.add_clip(
+                parent_track,
+                membership_time,
+                0.0,
+                ClipPayload::SetSceneMember {
+                    target: anim.target,
+                    scene: Some(scene_id),
+                },
+            );
+            for child in &source_state.child_spans {
+                self.timeline.add_clip(
+                    parent_track,
+                    membership_time,
+                    0.0,
+                    ClipPayload::SetSceneMember {
+                        target: child.id,
+                        scene: Some(scene_id),
+                    },
+                );
+            }
+        }
+
+        // Treat the target as a state template: it should stay hidden while
+        // the source morphs toward its final geometry and styling.
+        self.hide_visuals_now(&target_state);
+
+        // Text and math are rendered as child hierarchies. During a transform,
+        // use the source root as a temporary flattened vector proxy. Scheduling
+        // this swap on the timeline (instead of changing the initial ECS state)
+        // preserves earlier Write/Create animations on the source children.
+        if source_has_children {
+            for child in &source_state.child_spans {
+                let child_opacity = self
+                    .states
+                    .get(child.id)
+                    .map(|state| state.opacity)
+                    .unwrap_or(1.0);
+                self.timeline.add_clip(
+                    parent_track,
+                    self.current_time,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: child.id,
+                        lens: PropertyLensSpec::Opacity {
+                            from: child_opacity,
+                            to: 0.0,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
+        }
+
+        // Zero-duration clip to re-hide the target at the morph start.
+        // The seek-based playback restores a keyframe snapshot each frame
+        // which resets the target's opacity to its pre-morph value; this
+        // clip re-applies opacity 0 immediately after the restore.
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity {
+                    from: target_state.opacity,
+                    to: 0.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        for child in &target_state.child_spans {
+            let child_opacity = self.states.get(child.id).map(|s| s.opacity).unwrap_or(1.0);
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: child.id,
+                    lens: PropertyLensSpec::Opacity {
+                        from: child_opacity,
+                        to: 0.0,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+
+        // Morph the path
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathMorph {
+                    from: (*source_state.path).clone(),
+                    to: (*target_state.path).clone(),
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+
+        // Morph the translation, rotation, scale
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Translation {
+                    from: source_state.transform.translation,
+                    to: target_state.transform.translation,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Rotation {
+                    from: source_state.transform.rotation,
+                    to: target_state.transform.rotation,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Scale {
+                    from: source_state.transform.scale,
+                    to: target_state.transform.scale,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        // Morph colors
+        let source_fill = match &source_state.fill {
+            Some(Brush::Solid(c)) => *c,
+            _ => Color::WHITE,
+        };
+        let target_fill = match &target_state.fill {
+            Some(Brush::Solid(c)) => *c,
+            _ => Color::WHITE,
+        };
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::FillColor {
+                    from: source_fill,
+                    to: target_fill,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        let source_stroke = source_state
+            .stroke
+            .brush
+            .as_ref()
+            .and_then(extract_brush_color);
+        let target_stroke = target_state
+            .stroke
+            .brush
+            .as_ref()
+            .and_then(extract_brush_color);
+
+        // `StrokeColor` materializes a solid brush. Never schedule it for a
+        // no-stroke → no-stroke morph, otherwise text proxies acquire the
+        // white one-pixel halo that used to flash around the final word.
+        let stroke_colors = match (source_stroke, target_stroke) {
+            (Some(from), Some(to)) => Some((from, to)),
+            (Some(from), None) => Some((from, from)),
+            (None, Some(to)) => Some((to, to)),
+            (None, None) => None,
+        };
+        if let Some((from, to)) = stroke_colors {
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::StrokeColor { from, to },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+
+        if source_stroke.is_some() || target_stroke.is_some() {
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::StrokeWidth {
+                        from: source_stroke
+                            .map(|_| source_state.stroke.style.width)
+                            .unwrap_or(0.0),
+                        to: target_stroke
+                            .map(|_| target_state.stroke.style.width)
+                            .unwrap_or(0.0),
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Opacity {
+                    from: source_state.opacity,
+                    to: target_visual_opacity,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        // Zero-duration PathMorph at morph end: locks the source entity's path
+        // to the target geometry. Without this, the seek-based snapshot restore
+        // would reset the source path to its original shape after the morph.
+        self.timeline.add_clip(
+            parent_track,
+            morph_end_time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathMorph {
+                    from: (*target_state.path).clone(),
+                    to: (*target_state.path).clone(),
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        if is_replacement {
+            // ReplacementTransform swaps identities at the end: the source
+            // disappears and the actual target hierarchy/entity becomes visible.
+            self.timeline.add_clip(
+                parent_track,
+                morph_end_time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: source_state.opacity,
+                        to: 0.0,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            if target_has_children {
+                self.schedule_show_hierarchy(target, &target_state, parent_track, morph_end_time);
+            } else {
+                self.timeline.add_clip(
+                    parent_track,
+                    morph_end_time,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target,
+                        lens: PropertyLensSpec::Opacity {
+                            from: 0.0,
+                            to: target_visual_opacity,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
+        }
+
+        // Update hot state of source to match target
+        if let Some(state) = self.states.get_mut(anim.target) {
+            state.transform = target_state.transform;
+            state.bounds = target_state.bounds;
+            state.opacity = if is_replacement {
+                0.0
+            } else {
+                target_visual_opacity
+            };
+            state.fill = target_state.fill.clone();
+            state.stroke = target_state.stroke.clone();
+            state.path = target_state.path.clone();
+            // Transform keeps the source ObjectId/entity and leaves it as a
+            // flattened vector object. This makes subsequent transforms on the
+            // original handle deterministic. ReplacementTransform deliberately
+            // ends the source object's lifetime instead.
+            state.child_spans.clear();
+            state.children.clear();
         }
     }
 
@@ -1305,6 +2218,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: gaanim_core::glam::DVec3::new(to_x, origin.y, origin.z),
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1343,6 +2257,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1358,6 +2273,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1405,6 +2321,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_scale,
                 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1420,94 +2337,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
-                label: self.current_label.clone(),
-            }),
-        );
-    }
-
-    fn play_draw_border_then_fill_internal(
-        &mut self,
-        anim: AnimationBuilder,
-        parent_track: TrackId,
-    ) {
-        let state = match self.states.get(anim.target) {
-            Some(s) => s,
-            None => return,
-        };
-        let entity = state.entity;
-
-        let fill_color = state
-            .fill
-            .as_ref()
-            .and_then(extract_brush_color)
-            .unwrap_or(Color::WHITE);
-        let stroke_width = 2.0;
-
-        if state.stroke.brush.is_none() {
-            let new_stroke = StrokeBrush::new(fill_color, stroke_width);
-            self.commands.entity(entity).insert(new_stroke.clone());
-            if let Some(s) = self.states.get_mut(anim.target) {
-                s.stroke = new_stroke;
-            }
-        }
-
-        let draw_duration = anim.duration * 0.6;
-        let fill_duration = anim.duration * 0.4;
-        let min_step = 1e-6_f64;
-
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            min_step,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                rate_func: anim.rate_func.clone(),
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            min_step,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 0.0 },
-                rate_func: anim.rate_func.clone(),
-                label: self.current_label.clone(),
-            }),
-        );
-
-        self.commands
-            .entity(entity)
-            .insert(gaanim_animation::FillDrawProgress(0.0));
-        self.commands
-            .entity(entity)
-            .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
-                gaanim_core::kurbo::BezPath::new(),
-            )));
-
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            draw_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                rate_func: anim.rate_func.clone(),
-                label: self.current_label.clone(),
-            }),
-        );
-
-        let fill_start = self.current_time + draw_duration;
-        self.timeline.add_clip(
-            parent_track,
-            fill_start,
-            fill_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
-                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1543,6 +2373,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: 0.0,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1557,6 +2388,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_opacity,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1576,6 +2408,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1590,6 +2423,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1629,6 +2463,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1643,6 +2478,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1662,6 +2498,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: c,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1676,6 +2513,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         to: *current,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
                     label: self.current_label.clone(),
                 }),
             );
@@ -1715,6 +2553,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathFollow { path },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1763,6 +2602,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
                 rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1776,6 +2616,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1790,6 +2631,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1814,6 +2656,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: scale_to,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1828,6 +2671,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     to: original_scale,
                 },
                 rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
                 label: self.current_label.clone(),
             }),
         );
@@ -1887,8 +2731,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 WorldBounds(union_bounds),
                 gaanim_scene::RenderOrder::default(),
                 Visible,
-                FillBrush::transparent(),
-                StrokeBrush::transparent(),
             ))
             .id();
 
@@ -1925,6 +2767,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // 6. Store group state
         let group_state = MobjectState {
+            path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds: Bounds3D::new_2d(
                 union_bounds.min.x - center.x,
                 union_bounds.min.y - center.y,
@@ -2010,13 +2853,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .insert(gaanim_scene::LocalBounds(new_bounds));
             }
         }
-
-        self.ensure_track(group.id);
-        self.ensure_track(child.id);
     }
 
     /// Arranges the immediate children of a group linearly.
     pub fn arrange(&mut self, group: MobjectRef, direction: Direction, spacing: f64) {
+        self.arrange_aligned(group, direction, spacing, Anchor::Center);
+    }
+
+    /// Arranges immediate children linearly while keeping one edge aligned.
+    pub fn arrange_aligned(
+        &mut self,
+        group: MobjectRef,
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
+    ) {
         let children_ids = match self.states.get(group.id) {
             Some(state) => state.children.clone(),
             None => return,
@@ -2033,7 +2884,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         let new_translations =
-            gaanim_layout::arrange(&items, direction, spacing, Anchor::Center, true);
+            gaanim_layout::arrange(&items, direction, spacing.max(0.0), aligned_edge, true);
 
         let mut union_min =
             gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
@@ -2061,6 +2912,131 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .entity(group_state.entity)
                     .insert(gaanim_scene::LocalBounds(new_group_bounds));
             }
+        }
+    }
+
+    /// Arranges direct children left-to-right, starting a new row when the
+    /// next item would exceed `max_width`. The resulting block is centered on
+    /// the group origin, matching the other arrange helpers.
+    pub fn arrange_wrapped(&mut self, group: MobjectRef, max_width: f64, gap: f64) {
+        let children = match self.states.get(group.id) {
+            Some(state) => state.children.clone(),
+            None => return,
+        };
+        if children.is_empty() || !max_width.is_finite() || max_width <= 0.0 {
+            return;
+        }
+        let gap = gap.max(0.0);
+        let mut placements = Vec::with_capacity(children.len());
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut row_height = 0.0;
+        let mut union: Option<Bounds3D> = None;
+
+        for child in &children {
+            let Some(state) = self.states.get(*child) else {
+                continue;
+            };
+            let mut transform = state.transform;
+            transform.translation = gaanim_core::glam::DVec3::ZERO;
+            let local = gaanim_layout::transform_bounds(state.bounds, &transform);
+            let size = local.size();
+            if x > 0.0 && x + size.x > max_width {
+                x = 0.0;
+                y -= row_height + gap;
+                row_height = 0.0;
+            }
+            let translation = gaanim_core::glam::DVec3::new(x - local.min.x, y - local.max.y, 0.0);
+            let placed = Bounds3D::new(local.min + translation, local.max + translation);
+            union = Some(union.map(|bounds| bounds.union(&placed)).unwrap_or(placed));
+            placements.push((*child, translation));
+            x += size.x + gap;
+            row_height = row_height.max(size.y);
+        }
+        let Some(union) = union else { return };
+        let center = union.center();
+        let mut final_union: Option<Bounds3D> = None;
+        for (child, mut translation) in placements {
+            translation -= center;
+            if let Some(state) = self.states.get_mut(child) {
+                state.transform.translation = translation;
+                self.commands.entity(state.entity).insert(state.transform);
+                let bounds = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                final_union = Some(
+                    final_union
+                        .map(|value| value.union(&bounds))
+                        .unwrap_or(bounds),
+                );
+            }
+        }
+        if let Some(bounds) = final_union
+            && let Some(group_state) = self.states.get_mut(group.id)
+        {
+            group_state.bounds = bounds;
+            self.commands
+                .entity(group_state.entity)
+                .insert(gaanim_scene::LocalBounds(bounds));
+        }
+    }
+
+    /// Arranges a row within a fixed width using start/center/end/between.
+    pub fn arrange_justified(&mut self, group: MobjectRef, width: f64, gap: f64, justify: &str) {
+        let children = match self.states.get(group.id) {
+            Some(state) => state.children.clone(),
+            None => return,
+        };
+        if children.is_empty() {
+            return;
+        }
+        let mut items = Vec::new();
+        let mut total = 0.0;
+        for child in &children {
+            if let Some(state) = self.states.get(*child) {
+                let mut transform = state.transform;
+                transform.translation = gaanim_core::glam::DVec3::ZERO;
+                let bounds = gaanim_layout::transform_bounds(state.bounds, &transform);
+                total += bounds.width();
+                items.push((*child, bounds));
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        let width = if width.is_finite() {
+            width.max(total)
+        } else {
+            total + gap.max(0.0) * (items.len().saturating_sub(1) as f64)
+        };
+        let base_gap = gap.max(0.0);
+        let used = total + base_gap * (items.len().saturating_sub(1) as f64);
+        let (mut x, spacing) = match justify {
+            "start" => (-width * 0.5, base_gap),
+            "end" => (width * 0.5 - used, base_gap),
+            "between" if items.len() > 1 => (
+                -width * 0.5,
+                ((width - total) / (items.len() - 1) as f64).max(0.0),
+            ),
+            _ => (-used * 0.5, base_gap),
+        };
+        let mut union: Option<Bounds3D> = None;
+        for (child, bounds) in items {
+            let translation =
+                gaanim_core::glam::DVec3::new(x - bounds.min.x, -bounds.center().y, 0.0);
+            if let Some(state) = self.states.get_mut(child) {
+                state.transform.translation = translation;
+                self.commands.entity(state.entity).insert(state.transform);
+                let placed = gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                union = Some(union.map(|value| value.union(&placed)).unwrap_or(placed));
+            }
+            x += bounds.width() + spacing;
+        }
+        if let Some(bounds) = union
+            && let Some(state) = self.states.get_mut(group.id)
+        {
+            state.bounds = bounds;
+            self.commands
+                .entity(state.entity)
+                .insert(gaanim_scene::LocalBounds(bounds));
         }
     }
 
@@ -2215,6 +3191,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.tag_entity(entity);
 
         let state = MobjectState {
+            path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds: Bounds3D::default(),
             transform: SpatialTransform::default(),
             opacity: 1.0,
@@ -2247,6 +3224,44 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub fn rectangle(&mut self, width: f64, height: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::rectangle(id, width, height);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a decoded raster image using its native pixel dimensions.
+    pub fn image(
+        &mut self,
+        image: gaanim_core::peniko::ImageData,
+        view: gaanim_objects::prelude::ImageView,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::image(id, image, view);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns one resolved vector path from an imported SVG document.
+    pub fn svg_path(
+        &mut self,
+        path: &gaanim_objects::prelude::SvgPath,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let mut bundle = MobjectBundle::new(id, path.path.clone(), path.bounds);
+        bundle.fill = FillBrush(path.fill.clone());
+        bundle.stroke = path.stroke.clone();
+        bundle.tag = ObjectTag(if path.id.is_empty() {
+            "SvgPath".into()
+        } else {
+            format!("SvgPath#{}", path.id)
+        });
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -2377,6 +3392,33 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns a curved arrow from an explicit circular arc.
+    ///
+    /// The arrow tip is placed at `start_angle + sweep_angle`, allowing the
+    /// same center/radius parameters to be shared with a circle or tracker.
+    pub fn curved_arrow_arc(
+        &mut self,
+        center: kurbo::Point,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::curved_arrow_arc(
+            id,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        );
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Spawns an arrow starting at the origin.
     pub fn vector(&mut self, end: kurbo::Point) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         self.arrow(kurbo::Point::new(0.0, 0.0), end)
@@ -2404,6 +3446,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         &mut self,
         x_range: (f64, f64, f64),
         include_labels: bool,
+        include_ticks: bool,
         vertical: bool,
     ) -> MobjectRef {
         let (min, max, step) = x_range;
@@ -2415,21 +3458,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path.move_to(kurbo::Point::new(0.0, min));
             path.line_to(kurbo::Point::new(0.0, max));
 
-            let mut y = (min / step).ceil() * step;
-            while y <= max + 1e-9 {
-                path.move_to(kurbo::Point::new(-tick_len / 2.0, y));
-                path.line_to(kurbo::Point::new(tick_len / 2.0, y));
-                y += step;
+            if include_ticks {
+                let mut y = (min / step).ceil() * step;
+                while y <= max + 1e-9 {
+                    path.move_to(kurbo::Point::new(-tick_len / 2.0, y));
+                    path.line_to(kurbo::Point::new(tick_len / 2.0, y));
+                    y += step;
+                }
             }
         } else {
             path.move_to(kurbo::Point::new(min, 0.0));
             path.line_to(kurbo::Point::new(max, 0.0));
 
-            let mut x = (min / step).ceil() * step;
-            while x <= max + 1e-9 {
-                path.move_to(kurbo::Point::new(x, -tick_len / 2.0));
-                path.line_to(kurbo::Point::new(x, tick_len / 2.0));
-                x += step;
+            if include_ticks {
+                let mut x = (min / step).ceil() * step;
+                while x <= max + 1e-9 {
+                    path.move_to(kurbo::Point::new(x, -tick_len / 2.0));
+                    path.line_to(kurbo::Point::new(x, tick_len / 2.0));
+                    x += step;
+                }
             }
         }
 
@@ -2443,17 +3490,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let mut line_bundle = MobjectBundle::new(line_id, path, bounds);
         line_bundle.fill = FillBrush(None);
         line_bundle.stroke = StrokeBrush {
-            brush: Some(gaanim_core::peniko::Brush::Solid(gaanim_core::peniko::Color::WHITE)),
+            brush: Some(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::WHITE,
+            )),
             style: kurbo::Stroke::new(2.0),
         };
-        line_bundle.tag = gaanim_scene::ObjectTag(if vertical { "VerticalNumberLineBase".into() } else { "NumberLineBase".into() });
+        line_bundle.tag = gaanim_scene::ObjectTag(if vertical {
+            "VerticalNumberLineBase".into()
+        } else {
+            "NumberLineBase".into()
+        });
 
         let line_ref = MobjectSpawnBuilder {
             builder: self,
             id: line_id,
             bundle: line_bundle,
             parent_entity: None,
-        }.spawn();
+        }
+        .spawn();
 
         let mut children = vec![line_ref];
 
@@ -2466,7 +3520,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
                 if let Some(state) = self.states.get_mut(label_ref.id) {
                     if vertical {
-                        state.transform = state.transform.shift_2d(-18.0, val);
+                        // Number labels are centered on their local origin. Place the
+                        // whole bounding box to the left of the tick, rather than
+                        // applying a fixed shift that lets wide values cross the axis.
+                        let x = -tick_len * 0.5 - 8.0 - state.bounds.width() * 0.5;
+                        state.transform = state.transform.shift_2d(x, val);
                     } else {
                         state.transform = state.transform.shift_2d(val, -18.0);
                     }
@@ -2487,9 +3545,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
         include_labels: bool,
+        include_ticks: bool,
     ) -> MobjectRef {
-        let x_axis = self.number_line(x_range, include_labels, false);
-        let y_axis = self.number_line(y_range, include_labels, true);
+        let x_axis = self.number_line(x_range, include_labels, include_ticks, false);
+        let y_axis = self.number_line(y_range, include_labels, include_ticks, true);
         self.group(&[x_axis, y_axis])
     }
 
@@ -2860,10 +3919,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         text_size: Option<f64>,
         math_size: Option<f64>,
     ) -> MobjectRef {
+        let text_font = text_font.or_else(|| (!is_math).then_some("New Computer Modern"));
         let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(
-            gaanim_core::peniko::Color::BLACK,
-        ));
+        let style_color = self
+            .text_config
+            .roles
+            .get(&gaanim_text::prelude::TextRole::Body)
+            .map(|s| s.fill_color)
+            .unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let fill = Some(gaanim_core::peniko::Brush::Solid(style_color));
         let stroke = gaanim_scene::StrokeBrush::transparent();
 
         // Extract mutable counter separately to avoid borrow conflict with `self.commands`.
@@ -2884,49 +3948,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             math_font,
             text_size,
             math_size,
-            fill,
-            stroke,
+            fill.clone(),
+            stroke.clone(),
             parent_id,
             next_id_fn,
             &mut child_spans,
         );
-
-        // Register each child in self.states so they can be styled and animated
-        for (child_id, child_entity, _) in &child_spans {
-            self.tag_entity(*child_entity);
-            let child_state = MobjectState {
-                bounds: Bounds3D::default(),
-                transform: SpatialTransform::default(),
-                opacity: 1.0,
-                fill: Some(gaanim_core::peniko::Brush::Solid(
-                    gaanim_core::peniko::Color::BLACK,
-                )),
-                stroke: gaanim_scene::StrokeBrush::transparent(),
-                entity: *child_entity,
-                child_spans: Vec::new(),
-                children: Vec::new(),
-                parent: None,
-            };
-            self.states.insert(*child_id, child_state);
-        }
-
-        self.tag_entity(entity);
-        let state = MobjectState {
-            bounds,
-            transform: SpatialTransform::default(),
-            opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(
-                gaanim_core::peniko::Color::BLACK,
-            )),
-            stroke: gaanim_scene::StrokeBrush::transparent(),
-            entity,
-            child_spans,
-            children: Vec::new(),
-            parent: None,
-        };
-        self.states.insert(parent_id, state);
-
-        MobjectRef { id: parent_id }
+        self.register_textual_hierarchy(parent_id, entity, bounds, fill, stroke, child_spans)
     }
 
     /// Convenience wrapper for `typst` that uses explicit fonts for both text and math.
@@ -2950,7 +3978,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Compiles a plain text string into a hierarchy of vector character Mobjects.
     ///
     /// Shapes the text using HarfBuzz (`rustybuzz`) and extracts outlines via `ttf-parser`.
-    /// `font_family` is the font name (e.g. "Arial", "sans-serif").
+    /// `font_family` is the font name (e.g. "New Computer Modern", "sans-serif").
     /// `font_size` is the text size in pixels/points.
     ///
     /// Returns a reference to the parent container of the text.
@@ -2991,41 +4019,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 (entity, bounds)
             }
         };
-
-        // Register each child in self.states so they can be styled and animated
-        for (child_id, child_entity, _) in &child_spans {
-            self.tag_entity(*child_entity);
-            let child_state = MobjectState {
-                bounds: Bounds3D::default(),
-                transform: SpatialTransform::default(),
-                opacity: 1.0,
-                fill: fill.clone(),
-                stroke: stroke.clone(),
-                entity: *child_entity,
-                child_spans: Vec::new(),
-                children: Vec::new(),
-                parent: None,
-            };
-            self.states.insert(*child_id, child_state);
-        }
-
-        self.tag_entity(entity);
-        let state = MobjectState {
+        self.register_textual_hierarchy(
+            parent_id,
+            entity,
             bounds,
-            transform: SpatialTransform::default(),
-            opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(
+            Some(gaanim_core::peniko::Brush::Solid(
                 gaanim_core::peniko::Color::WHITE,
             )),
-            stroke: gaanim_scene::StrokeBrush::transparent(),
-            entity,
+            gaanim_scene::StrokeBrush::transparent(),
             child_spans,
-            children: Vec::new(),
-            parent: None,
-        };
-        self.states.insert(parent_id, state);
-
-        MobjectRef { id: parent_id }
+        )
     }
 
     /// Spawns a vector text Mobject using the default styling of the requested `TextRole`.
@@ -3040,7 +4043,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .get(&role)
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
-                font_family: "Arial".to_string(),
+                font_family: "New Computer Modern".to_string(),
                 size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
@@ -3078,41 +4081,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 (entity, bounds)
             }
         };
-
-        // Register each child in self.states so they can be styled and animated
-        for (child_id, child_entity, _) in &child_spans {
-            self.tag_entity(*child_entity);
-            let child_state = MobjectState {
-                bounds: Bounds3D::default(),
-                transform: SpatialTransform::default(),
-                opacity: 1.0,
-                fill: fill.clone(),
-                stroke: stroke.clone(),
-                entity: *child_entity,
-                child_spans: Vec::new(),
-                children: Vec::new(),
-                parent: None,
-            };
-            self.states.insert(*child_id, child_state);
-        }
-
-        self.tag_entity(entity);
-        let state = MobjectState {
-            bounds,
-            transform: SpatialTransform::default(),
-            opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
-            stroke: gaanim_scene::StrokeBrush::transparent(),
+        let result = self.register_textual_hierarchy(
+            parent_id,
             entity,
+            bounds,
+            Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
+            gaanim_scene::StrokeBrush::transparent(),
             child_spans,
-            children: Vec::new(),
-            parent: None,
-        };
-        self.states.insert(parent_id, state);
+        );
         self.mobject_names
             .insert(parent_id, format!("Text('{}')", content));
-
-        MobjectRef { id: parent_id }
+        result
     }
 
     /// Spawns a reactive DecimalNumber Mobject that displays and updates according to a ValueTracker signal.
@@ -3190,6 +4169,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.tag_entity(entity);
 
         let state = MobjectState {
+            path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
             opacity: 1.0,
@@ -3236,7 +4216,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
-                size: 48.0,
+                size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
 
@@ -3267,41 +4247,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             next_id_fn,
             &mut child_spans,
         );
-
-        // Register each child in self.states so they can be styled and animated
-        for (child_id, child_entity, _) in &child_spans {
-            self.tag_entity(*child_entity);
-            let child_state = MobjectState {
-                bounds: Bounds3D::default(),
-                transform: SpatialTransform::default(),
-                opacity: 1.0,
-                fill: fill.clone(),
-                stroke: stroke.clone(),
-                entity: *child_entity,
-                child_spans: Vec::new(),
-                children: Vec::new(),
-                parent: None,
-            };
-            self.states.insert(*child_id, child_state);
-        }
-
-        self.tag_entity(entity);
-        let state = MobjectState {
-            bounds,
-            transform: SpatialTransform::default(),
-            opacity: 1.0,
-            fill: Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
-            stroke: gaanim_scene::StrokeBrush::transparent(),
+        let result = self.register_textual_hierarchy(
+            parent_id,
             entity,
+            bounds,
+            Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
+            gaanim_scene::StrokeBrush::transparent(),
             child_spans,
-            children: Vec::new(),
-            parent: None,
-        };
-        self.states.insert(parent_id, state);
+        );
         self.mobject_names
             .insert(parent_id, format!("Typst('{}')", formula));
 
-        MobjectRef { id: parent_id }
+        result
     }
 
     /// Selects a subset of characters/shapes in a text or equation Mobject by exact substring.
@@ -3311,6 +4268,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         &'q mut self,
         target: MobjectRef,
         substring: &str,
+    ) -> MobjectSelection<'q, 'w, 's, 'a> {
+        self.select_occurrence(target, substring, None)
+    }
+
+    /// Selects the zero-based occurrence of a substring. Passing `None`
+    /// selects every non-overlapping occurrence.
+    pub fn select_occurrence<'q>(
+        &'q mut self,
+        target: MobjectRef,
+        substring: &str,
+        occurrence: Option<usize>,
     ) -> MobjectSelection<'q, 'w, 's, 'a> {
         // Helper function to normalize mathematical italic/bold alphanumeric characters back to standard Latin/numeric equivalents.
         fn to_standard_char(c: char) -> char {
@@ -3369,8 +4337,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let mut normalized_text = String::new();
             let mut index_mapping = Vec::new(); // maps each byte offset in normalized_text to child_spans index
 
-            for (span_idx, (_, _, span)) in state.child_spans.iter().enumerate() {
-                let raw_c = span.character;
+            for (span_idx, child) in state.child_spans.iter().enumerate() {
+                let raw_c = child.span.character;
                 // Ignore spaces, subscripts, superscripts, and generic shape markers
                 if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
                     continue;
@@ -3405,26 +4373,38 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
 
             // 3. Match normalized query against normalized text
-            if !normalized_query.is_empty()
-                && let Some(start_byte_idx) = normalized_text.find(&normalized_query)
-            {
-                let end_byte_idx = start_byte_idx + normalized_query.len();
-
-                // We gather unique child_spans indices that fall within the matched byte range
-                let mut matched_span_indices = Vec::new();
-                for byte_idx in start_byte_idx..end_byte_idx {
-                    if let Some(&span_idx) = index_mapping.get(byte_idx)
-                        && !matched_span_indices.contains(&span_idx)
-                    {
-                        matched_span_indices.push(span_idx);
+            if !normalized_query.is_empty() {
+                let mut search_from = 0;
+                let mut match_index = 0;
+                while search_from < normalized_text.len() {
+                    let Some(relative_start) =
+                        normalized_text[search_from..].find(&normalized_query)
+                    else {
+                        break;
+                    };
+                    let start_byte_idx = search_from + relative_start;
+                    let end_byte_idx = start_byte_idx + normalized_query.len();
+                    if occurrence.is_none_or(|index| index == match_index) {
+                        // Gather unique child spans that fall within this matched range.
+                        let mut matched_span_indices = Vec::new();
+                        for byte_idx in start_byte_idx..end_byte_idx {
+                            if let Some(&span_idx) = index_mapping.get(byte_idx)
+                                && !matched_span_indices.contains(&span_idx)
+                            {
+                                matched_span_indices.push(span_idx);
+                            }
+                        }
+                        for span_idx in matched_span_indices {
+                            if let Some(child) = state.child_spans.get(span_idx) {
+                                child_ids.push(child.id);
+                            }
+                        }
+                        if occurrence.is_some() {
+                            break;
+                        }
                     }
-                }
-
-                // Add the child IDs
-                for span_idx in matched_span_indices {
-                    if let Some((id, _, _)) = state.child_spans.get(span_idx) {
-                        child_ids.push(*id);
-                    }
+                    match_index += 1;
+                    search_from = end_byte_idx;
                 }
             }
         }
@@ -3447,9 +4427,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     {
         let mut child_ids = Vec::new();
         if let Some(state) = self.states.get(target.id) {
-            for (id, _, span) in &state.child_spans {
-                if predicate(span) {
-                    child_ids.push(*id);
+            for child in &state.child_spans {
+                if predicate(&child.span) {
+                    child_ids.push(child.id);
                 }
             }
         }
@@ -3469,9 +4449,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectSelection<'q, 'w, 's, 'a> {
         let mut child_ids = Vec::new();
         if let Some(state) = self.states.get(target.id) {
-            for (id, _, span) in &state.child_spans {
-                if span.char_index >= range.start && span.char_index < range.end {
-                    child_ids.push(*id);
+            for child in &state.child_spans {
+                if child.span.char_index >= range.start && child.span.char_index < range.end {
+                    child_ids.push(child.id);
                 }
             }
         }
@@ -3481,6 +4461,237 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id: target.id,
             child_ids,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::World;
+
+    fn square_path(offset: f64) -> std::sync::Arc<gaanim_core::kurbo::BezPath> {
+        let mut path = gaanim_core::kurbo::BezPath::new();
+        path.move_to((offset, 0.0));
+        path.line_to((offset + 10.0, 0.0));
+        path.line_to((offset + 10.0, 10.0));
+        path.line_to((offset, 10.0));
+        path.close_path();
+        std::sync::Arc::new(path)
+    }
+
+    fn hierarchy_child(
+        id: ObjectId,
+        entity: Entity,
+        path: std::sync::Arc<gaanim_core::kurbo::BezPath>,
+        character: char,
+    ) -> HierarchyChild {
+        HierarchyChild {
+            id,
+            entity,
+            span: gaanim_scene::components::TextSpan {
+                character,
+                char_index: 0,
+                source_range: (0..character.len_utf8()).into(),
+            },
+            path,
+            bounds: Bounds3D::default(),
+            transform: SpatialTransform::default(),
+            fill: Some(Brush::Solid(Color::WHITE)),
+            stroke: StrokeBrush::transparent(),
+        }
+    }
+
+    fn hierarchy_state(
+        entity: Entity,
+        path: std::sync::Arc<gaanim_core::kurbo::BezPath>,
+        children: Vec<HierarchyChild>,
+    ) -> MobjectState {
+        MobjectState {
+            path,
+            bounds: Bounds3D::default(),
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: Some(Brush::Solid(Color::WHITE)),
+            stroke: StrokeBrush::transparent(),
+            entity,
+            children: children.iter().map(|child| child.id).collect(),
+            child_spans: children,
+            parent: None,
+        }
+    }
+
+    #[test]
+    fn adaptive_lag_ratio_matches_manim_formula() {
+        assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
+        assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
+        assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hierarchical_transform_flattens_once_and_preserves_source_identity() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let source_id = builder.next_id();
+        let source_child_id = builder.next_id();
+        let target_id = builder.next_id();
+        let target_child_id = builder.next_id();
+        let source_entity = builder.commands.spawn_empty().id();
+        let source_child_entity = builder.commands.spawn_empty().id();
+        let target_entity = builder.commands.spawn_empty().id();
+        let target_child_entity = builder.commands.spawn_empty().id();
+        let source_path = square_path(0.0);
+        let target_path = square_path(40.0);
+        let source_child = hierarchy_child(
+            source_child_id,
+            source_child_entity,
+            source_path.clone(),
+            'A',
+        );
+        let target_child = hierarchy_child(
+            target_child_id,
+            target_child_entity,
+            target_path.clone(),
+            '∑',
+        );
+
+        builder.states.insert(
+            source_child_id,
+            hierarchy_state(source_child_entity, source_path.clone(), Vec::new()),
+        );
+        builder.states.insert(
+            target_child_id,
+            hierarchy_state(target_child_entity, target_path.clone(), Vec::new()),
+        );
+        builder.states.insert(
+            source_id,
+            hierarchy_state(source_entity, source_path, vec![source_child]),
+        );
+        builder.states.insert(
+            target_id,
+            hierarchy_state(target_entity, target_path.clone(), vec![target_child]),
+        );
+
+        builder.play(AnimationBuilder {
+            target: source_id,
+            anim_type: AnimationType::Transform { target: target_id },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        let source_after = builder.states.get(source_id).expect("source state");
+        assert_eq!(source_after.entity, source_entity);
+        assert_eq!(source_after.path, target_path);
+        assert!(source_after.child_spans.is_empty());
+
+        let animated_path_targets: Vec<_> = builder
+            .timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::PathMorph { .. },
+                    ..
+                }) if clip.duration > 0.0 => Some(*target),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(animated_path_targets, vec![source_id]);
+        assert!(!animated_path_targets.contains(&source_child_id));
+        assert!(!animated_path_targets.contains(&target_child_id));
+
+        let synthesized_stroke = builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::StrokeColor { .. }
+                        | PropertyLensSpec::StrokeWidth { .. },
+                    ..
+                }) if *target == source_id
+            )
+        });
+        assert!(
+            !synthesized_stroke,
+            "no-stroke text/math morph must not create a white outline"
+        );
+    }
+
+    #[test]
+    fn write_keeps_synthesized_outline_temporary() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let id = builder.next_id();
+        let entity = builder.commands.spawn_empty().id();
+        builder
+            .states
+            .insert(id, hierarchy_state(entity, square_path(0.0), Vec::new()));
+
+        builder.play(AnimationBuilder {
+            target: id,
+            anim_type: AnimationType::Write {
+                config: crate::anim::DrawAnimationConfig::default(),
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        assert!(builder.states.get(id).unwrap().stroke.brush.is_none());
+        assert!(builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::StrokeWidth { to, .. },
+                    ..
+                }) if *target == id && *to == 0.0
+            )
+        }));
+    }
+
+    #[test]
+    fn unstyled_group_preserves_child_fill_after_style_propagation() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let gold = Color::from_rgb8(0xff, 0xd7, 0x00);
+        let child = builder.rectangle(40.0, 30.0).fill(gold).spawn();
+        let child_entity = builder.states.get(child.id).unwrap().entity;
+        let group = builder.group(&[child]);
+        let group_entity = builder.states.get(group.id).unwrap().entity;
+
+        drop(builder);
+        drop(commands);
+        queue.apply(&mut world);
+
+        let expected = FillBrush::color(gold);
+        assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
+        assert!(world.get::<FillBrush>(group_entity).is_none());
+
+        let mut schedule = bevy::prelude::Schedule::default();
+        schedule.add_systems(gaanim_scene::systems::style_propagation_system);
+        schedule.run(&mut world);
+
+        assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
     }
 }
 
@@ -3704,11 +4915,29 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
     /// Finalizes the setup, spawning the Bevy ECS bundle and recording its tracked hot state in the SceneBuilder.
     pub fn spawn(self) -> MobjectRef {
+        self.spawn_with_effects(None, None, None)
+    }
+
+    pub(crate) fn spawn_with_effects(
+        self,
+        glow: Option<gaanim_renderer::effects::Glow>,
+        blur: Option<gaanim_renderer::effects::GaussianBlur>,
+        shadow: Option<gaanim_renderer::effects::DropShadow>,
+    ) -> MobjectRef {
         let mut entity_cmd = self.builder.commands.spawn(self.bundle.clone());
         let entity = entity_cmd.id();
 
         if let Some(parent) = self.parent_entity {
             entity_cmd.set_parent_in_place(parent);
+        }
+        if let Some(glow) = glow {
+            entity_cmd.insert(glow);
+        }
+        if let Some(blur) = blur {
+            entity_cmd.insert(blur);
+        }
+        if let Some(shadow) = shadow {
+            entity_cmd.insert(shadow);
         }
 
         // Tag entity with the current scene if inside a scene scope
@@ -3720,6 +4949,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         }
 
         let state = MobjectState {
+            path: self.bundle.path.0.clone(),
             bounds: self.bundle.bounds.0,
             transform: self.bundle.transform,
             opacity: self.bundle.opacity.0,

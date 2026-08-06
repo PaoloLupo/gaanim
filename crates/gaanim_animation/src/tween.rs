@@ -6,7 +6,7 @@ use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform, get_point_at_alpha};
 use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
 
-use crate::writing::FillDrawProgress;
+use crate::writing::{FillDrawProgress, WriteTipGlow};
 
 /// Resource containing the current simulation delta time.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -150,6 +150,14 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    CameraFollow {
+        target: gaanim_core::ObjectId,
+    },
+    CameraShake {
+        origin: gaanim_core::glam::DVec3,
+        amplitude: f64,
+        frequency: f64,
+    },
 
     // === Path Following ===
     /// Move the entity's translation along a Bézier path. The path is
@@ -202,6 +210,15 @@ impl std::fmt::Debug for PropertyLens {
                 write!(f, "CameraRotation({:?} -> {:?})", from, to)
             }
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
+            Self::CameraFollow { target } => write!(f, "CameraFollow({target:?})"),
+            Self::CameraShake {
+                amplitude,
+                frequency,
+                ..
+            } => write!(
+                f,
+                "CameraShake(amplitude {amplitude}, frequency {frequency})"
+            ),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
             Self::PathRange {
@@ -242,9 +259,10 @@ pub fn evaluate_tweens_system(
     mut opacities: Query<&mut Opacity>,
     mut fills: Query<&mut FillBrush>,
     mut strokes: Query<&mut StrokeBrush>,
-    sources: Query<&PathSource>,
+    mut sources: Query<&mut PathSource>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
+    mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
@@ -321,10 +339,14 @@ pub fn evaluate_tweens_system(
                 // `from`/`to`; the source of truth is the `PathSource`
                 // mirror seeded once at spawn.
                 let completion = *from + (*to - *from) * t;
-                if let Ok(source) = sources.get(tween.target)
+                if let Ok(source) = sources.get_mut(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
                     path.0 = std::sync::Arc::new(gaanim_math::get_subpath(&source.0, completion));
+                }
+                // Update the pen-tip glow position if the entity has one.
+                if let Ok(mut tip) = tip_glows.get_mut(tween.target) {
+                    tip.completion = completion;
                 }
             }
             PropertyLens::FillDrawProgress { from, to } => {
@@ -344,7 +366,27 @@ pub fn evaluate_tweens_system(
             }
             PropertyLens::CameraRotation { from: _, to: _ } => {}
             PropertyLens::CameraZoom { from: _, to: _ } => {}
-            PropertyLens::PathMorph { .. } => {}
+            PropertyLens::CameraFollow { .. } => {}
+            PropertyLens::CameraShake { .. } => {}
+            PropertyLens::PathMorph { from, to, table: _ } => {
+                let completed = tween.state == TweenState::Completed;
+                let morphed = if completed {
+                    to.clone()
+                } else {
+                    gaanim_math::interpolate_paths_continuous(from, to, t)
+                };
+                let morphed = std::sync::Arc::new(morphed);
+                if let Ok(mut path) = paths.get_mut(tween.target) {
+                    path.0 = morphed.clone();
+                }
+                // The renderer uses `PathSource` to clip inner strokes. Keep
+                // it synchronized with the visible morph path; otherwise a
+                // circle's old source path clips the stroke of a diamond and
+                // leaves a flashing circular halo behind.
+                if let Ok(mut source) = sources.get_mut(tween.target) {
+                    source.0 = morphed;
+                }
+            }
             PropertyLens::PathFollow { path } => {
                 // Sample the Bézier path at the eased `t` and set
                 // the entity's translation to the sampled point.
