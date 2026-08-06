@@ -1554,7 +1554,8 @@ impl PyScene {
         ))
     }
     #[pyo3(signature = (
-        x, y, *,
+        x=None, y=None, *,
+        x_range=None, y_range=None,
         grid=true, ticks=true, numbers=true, labels=true,
         x_axis=true, y_axis=true,
         x_grid=None, y_grid=None,
@@ -1569,8 +1570,10 @@ impl PyScene {
     ))]
     fn axes(
         &self,
-        x: (f64, f64, f64),
-        y: (f64, f64, f64),
+        x: Option<Bound<'_, PyAny>>,
+        y: Option<Bound<'_, PyAny>>,
+        x_range: Option<Bound<'_, PyAny>>,
+        y_range: Option<Bound<'_, PyAny>>,
         grid: bool,
         ticks: bool,
         numbers: bool,
@@ -1602,6 +1605,35 @@ impl PyScene {
         x_axis_config: Option<Bound<'_, PyAny>>,
         y_axis_config: Option<Bound<'_, PyAny>>,
     ) -> PyResult<PyDrawable> {
+        // manim compat: x/y can be (min,max) or (min,max,step), and x_range/y_range aliases
+        let parse_range = |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
+            if let Some(b) = opt {
+                if let Ok(v) = b.extract::<(f64, f64, f64)>() {
+                    Ok(v)
+                } else if let Ok(v) = b.extract::<(f64, f64)>() {
+                    Ok((v.0, v.1, 1.0))
+                } else if let Ok(v) = b.extract::<Vec<f64>>() {
+                    if v.len() == 2 {
+                        Ok((v[0], v[1], 1.0))
+                    } else if v.len() == 3 {
+                        Ok((v[0], v[1], v[2]))
+                    } else {
+                        Err(pyo3::exceptions::PyValueError::new_err(
+                            "x_range/y_range must be (min, max) or (min, max, step)",
+                        ))
+                    }
+                } else {
+                    Err(pyo3::exceptions::PyValueError::new_err(
+                        "x_range/y_range must be (min, max) or (min, max, step)",
+                    ))
+                }
+            } else {
+                Ok(default)
+            }
+        };
+        // x takes precedence over x_range if both provided (x is the gaanim name, x_range is manim)
+        let x = parse_range(x.or(x_range), (-7.11, 7.11, 1.0))?;
+        let y = parse_range(y.or(y_range), (-4.0, 4.0, 1.0))?;
         if !x.0.is_finite()
             || !x.1.is_finite()
             || !x.2.is_finite()
