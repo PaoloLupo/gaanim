@@ -593,19 +593,23 @@ impl PyDrawable {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
             return Err(PyValueError::new_err("coords_to_point() only valid on axes"));
         };
+        let (avail_w, avail_h) = (800.0, 480.0);
+        let manim_w: f64 = 14.222222222222221;
+        let manim_h: f64 = 8.0;
         let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (xl / (x_max - x_min).max(1e-9), yl / (y_max - y_min).max(1e-9)),
+            (Some(xl), Some(yl)) => (
+                xl * avail_w / manim_w / (x_max - x_min).max(1e-9),
+                yl * avail_h / manim_h / (y_max - y_min).max(1e-9),
+            ),
             (Some(xl), None) => {
-                let s = xl / (x_max - x_min).max(1e-9);
+                let s = xl * avail_w / manim_w / (x_max - x_min).max(1e-9);
                 (s, s)
             }
             (None, Some(yl)) => {
-                let s = yl / (y_max - y_min).max(1e-9);
+                let s = yl * avail_h / manim_h / (y_max - y_min).max(1e-9);
                 (s, s)
             }
             (None, None) if config.auto_fit => {
-                // default safe_frame 800x480
-                let (avail_w, avail_h) = (800.0, 480.0);
                 let s = (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
                 (s, s)
             }
@@ -626,18 +630,23 @@ impl PyDrawable {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
             return Err(PyValueError::new_err("point_to_coords() only valid on axes"));
         };
+        let (avail_w, avail_h) = (800.0, 480.0);
+        let manim_w: f64 = 14.222222222222221;
+        let manim_h: f64 = 8.0;
         let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (xl / (x_max - x_min).max(1e-9), yl / (y_max - y_min).max(1e-9)),
+            (Some(xl), Some(yl)) => (
+                xl * avail_w / manim_w / (x_max - x_min).max(1e-9),
+                yl * avail_h / manim_h / (y_max - y_min).max(1e-9),
+            ),
             (Some(xl), None) => {
-                let s = xl / (x_max - x_min).max(1e-9);
+                let s = xl * avail_w / manim_w / (x_max - x_min).max(1e-9);
                 (s, s)
             }
             (None, Some(yl)) => {
-                let s = yl / (y_max - y_min).max(1e-9);
+                let s = yl * avail_h / manim_h / (y_max - y_min).max(1e-9);
                 (s, s)
             }
             (None, None) if config.auto_fit => {
-                let (avail_w, avail_h) = (800.0, 480.0);
                 let s = (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
                 (s, s)
             }

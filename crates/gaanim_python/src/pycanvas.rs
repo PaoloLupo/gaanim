@@ -1746,14 +1746,19 @@ impl PyScene {
         drop(canvas);
         let data_w = (x_max - x_min).max(1e-9);
         let data_h = (y_max - y_min).max(1e-9);
+        let manim_frame_w: f64 = 14.222222222222221;
+        let manim_frame_h: f64 = 8.0;
         let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (xl / data_w, yl / data_h),
+            (Some(xl), Some(yl)) => (
+                xl * avail_w / manim_frame_w / data_w,
+                yl * avail_h / manim_frame_h / data_h,
+            ),
             (Some(xl), None) => {
-                let s = xl / data_w;
+                let s = xl * avail_w / manim_frame_w / data_w;
                 (s, s)
             }
             (None, Some(yl)) => {
-                let s = yl / data_h;
+                let s = yl * avail_h / manim_frame_h / data_h;
                 (s, s)
             }
             (None, None) if config.auto_fit => {
@@ -1824,14 +1829,19 @@ impl PyScene {
         drop(canvas);
         let data_w = (x_max - x_min).max(1e-9);
         let data_h = (y_max - y_min).max(1e-9);
+        let manim_frame_w: f64 = 14.222222222222221;
+        let manim_frame_h: f64 = 8.0;
         let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (xl / data_w, yl / data_h),
+            (Some(xl), Some(yl)) => (
+                xl * avail_w / manim_frame_w / data_w,
+                yl * avail_h / manim_frame_h / data_h,
+            ),
             (Some(xl), None) => {
-                let s = xl / data_w;
+                let s = xl * avail_w / manim_frame_w / data_w;
                 (s, s)
             }
             (None, Some(yl)) => {
-                let s = yl / data_h;
+                let s = yl * avail_h / manim_frame_h / data_h;
                 (s, s)
             }
             (None, None) if config.auto_fit => {

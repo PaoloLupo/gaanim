@@ -226,25 +226,32 @@ impl Canvas {
         let (x_min, x_max, x_step) = x_range;
         let (y_min, y_max, y_step) = y_range;
         // Manim-compatible sizing: x_length/y_length override auto_fit, otherwise map to safe_frame.
+        // x_length/y_length are manim units (default frame 14.222x8), convert to scene units via avail_w/h
+        let avail_w = frame_bounds.width().max(1.0);
+        let avail_h = frame_bounds.height().max(1.0);
+        let manim_frame_w: f64 = 14.222222222222221;
+        let manim_frame_h: f64 = 8.0;
         let (scale_x, scale_y, x_center, y_center) = match (config.x_length, config.y_length) {
             (Some(xl), Some(yl)) => {
-                let sx = xl / (x_max - x_min).max(1e-9);
-                let sy = yl / (y_max - y_min).max(1e-9);
+                let scene_xl = xl * avail_w / manim_frame_w;
+                let scene_yl = yl * avail_h / manim_frame_h;
+                let sx = scene_xl / (x_max - x_min).max(1e-9);
+                let sy = scene_yl / (y_max - y_min).max(1e-9);
                 (sx, sy, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
             }
             (Some(xl), None) => {
-                let s = xl / (x_max - x_min).max(1e-9);
+                let scene_xl = xl * avail_w / manim_frame_w;
+                let s = scene_xl / (x_max - x_min).max(1e-9);
                 (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
             }
             (None, Some(yl)) => {
-                let s = yl / (y_max - y_min).max(1e-9);
+                let scene_yl = yl * avail_h / manim_frame_h;
+                let s = scene_yl / (y_max - y_min).max(1e-9);
                 (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
             }
             (None, None) if config.auto_fit => {
                 let data_w = (x_max - x_min).max(1e-9);
                 let data_h = (y_max - y_min).max(1e-9);
-                let avail_w = frame_bounds.width().max(1.0);
-                let avail_h = frame_bounds.height().max(1.0);
                 let s = (avail_w / data_w).min(avail_h / data_h);
                 (s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5)
             }
