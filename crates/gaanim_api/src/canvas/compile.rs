@@ -43,7 +43,7 @@ fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'
     if luminance > 0.5 { "000000" } else { "ffffff" }
 }
 
-fn split_text_math(text: &str) -> Vec<(bool, String)> {
+pub(crate) fn split_text_math(text: &str) -> Vec<(bool, String)> {
     let mut segments: Vec<(bool, String)> = Vec::new();
     let mut buf = String::new();
     let mut in_math = false;
@@ -99,7 +99,7 @@ fn split_text_math(text: &str) -> Vec<(bool, String)> {
     segments
 }
 
-fn typst_inline_content(text: &str) -> String {
+pub(crate) fn typst_inline_content(text: &str) -> String {
     if !text.contains('$') {
         return format!("#text(\"{}\")", escape_typst_string(text));
     }
@@ -118,7 +118,7 @@ fn typst_inline_content(text: &str) -> String {
             if trimmed.is_empty() {
                 continue;
             }
-            parts.push(format!("$ {} $", trimmed));
+            parts.push(format!("${}$", trimmed));
         } else {
             parts.push(format!("#text(\"{}\")", escape_typst_string(&content)));
         }
@@ -126,15 +126,33 @@ fn typst_inline_content(text: &str) -> String {
     if parts.is_empty() {
         return format!("#text(\"{}\")", escape_typst_string(text));
     }
-    parts.join(" ")
+    parts.join("")
 }
 
-fn text_inline_typst_source(text: &str) -> String {
+fn color_to_hex(color: gaanim_core::peniko::Color) -> String {
+    let rgba = color.to_rgba8();
+    format!("{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b)
+}
+
+pub(crate) fn text_inline_typst_source(
+    text: &str,
+    color: gaanim_core::peniko::Color,
+) -> String {
     let content = typst_inline_content(text);
-    format!("#set page(width: auto, height: auto, margin: 0pt)\n#align(left)[{content}]")
+    let hex = color_to_hex(color);
+    format!(
+        "#set page(width: auto, height: auto, margin: 0pt)\n\
+         #set text(fill: rgb(\"{hex}\"))\n\
+         #align(left)[{content}]"
+    )
 }
 
-fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64) -> String {
+pub(crate) fn paragraph_typst_source(
+    text: &str,
+    options: &ParagraphOptions,
+    font_size: f64,
+    color: gaanim_core::peniko::Color,
+) -> String {
     let width = options.width.max(1.0);
     let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
     let (alignment, justify) = match options.align {
@@ -143,6 +161,7 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
         TextAlign::Right => ("right", false),
         TextAlign::Justify => ("left", true),
     };
+    let hex = color_to_hex(color);
     let content = format!("#align({alignment})[{}]", typst_inline_content(text));
     let content = if let Some(max_lines) = options.max_lines.filter(|lines| *lines > 0) {
         let height = font_size * options.line_spacing.max(1.0) * max_lines as f64;
@@ -153,6 +172,7 @@ fn paragraph_typst_source(text: &str, options: &ParagraphOptions, font_size: f64
     };
     format!(
         "#set page(width: {width}pt, height: auto, margin: 0pt)\n\
+         #set text(fill: rgb(\"{hex}\"))\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
          {content}",
     )
@@ -2445,12 +2465,18 @@ impl Canvas {
             }
             SpawnKind::Text(t) => {
                 let role = gaanim_text::prelude::TextRole::Body;
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
+                let color = match styled_spec.fill {
+                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
+                    _ => text_config.roles[&role].fill_color,
+                };
                 let has_inline_math = split_text_math(t)
                     .iter()
                     .any(|(is_math, c)| *is_math && !c.trim().is_empty());
                 let mr = if has_inline_math {
                     let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t);
+                    let source = text_inline_typst_source(t, color);
                     builder.typst(
                         &source,
                         false,
@@ -2462,8 +2488,6 @@ impl Canvas {
                 } else {
                     builder.spawn_text(t, role)
                 };
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
@@ -2472,7 +2496,16 @@ impl Canvas {
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let font_size = options.font_size.unwrap_or(body.size).max(1.0);
                 let font_family = options.font_family.as_deref().unwrap_or(&body.font_family);
-                let source = paragraph_typst_source(text, options, font_size);
+                let mut paragraph_spec = spec.clone();
+                if !paragraph_spec.fill_overridden {
+                    paragraph_spec.fill = Some(gaanim_core::peniko::Brush::Solid(body.fill_color));
+                    paragraph_spec.fill_overridden = true;
+                }
+                let color = match paragraph_spec.fill {
+                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
+                    _ => body.fill_color,
+                };
+                let source = paragraph_typst_source(text, options, font_size, color);
                 let mr = builder.typst(
                     &source,
                     false,
@@ -2481,23 +2514,24 @@ impl Canvas {
                     Some(font_size),
                     None,
                 );
-                let mut paragraph_spec = spec.clone();
-                if !paragraph_spec.fill_overridden {
-                    paragraph_spec.fill = Some(gaanim_core::peniko::Brush::Solid(body.fill_color));
-                    paragraph_spec.fill_overridden = true;
-                }
                 Self::post_apply(builder, mr.id, &paragraph_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &paragraph_spec);
                 mr
             }
             SpawnKind::Title(t) => {
                 let role = gaanim_text::prelude::TextRole::Title;
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
+                let color = match styled_spec.fill {
+                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
+                    _ => text_config.roles[&role].fill_color,
+                };
                 let has_inline_math = split_text_math(t)
                     .iter()
                     .any(|(is_math, c)| *is_math && !c.trim().is_empty());
                 let mr = if has_inline_math {
                     let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t);
+                    let source = text_inline_typst_source(t, color);
                     builder.typst(
                         &source,
                         false,
@@ -2509,20 +2543,24 @@ impl Canvas {
                 } else {
                     builder.spawn_text(t, role)
                 };
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
             SpawnKind::Subtitle(t) => {
                 let role = gaanim_text::prelude::TextRole::Subtitle;
+                let styled_spec =
+                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
+                let color = match styled_spec.fill {
+                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
+                    _ => text_config.roles[&role].fill_color,
+                };
                 let has_inline_math = split_text_math(t)
                     .iter()
                     .any(|(is_math, c)| *is_math && !c.trim().is_empty());
                 let mr = if has_inline_math {
                     let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t);
+                    let source = text_inline_typst_source(t, color);
                     builder.typst(
                         &source,
                         false,
@@ -2534,8 +2572,6 @@ impl Canvas {
                 } else {
                     builder.spawn_text(t, role)
                 };
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
@@ -3153,6 +3189,7 @@ mod tests {
                 overflow: ParagraphOverflow::Clip,
             },
             30.0,
+            gaanim_core::peniko::Color::WHITE,
         );
 
         assert!(source.contains("height: 72pt"));
@@ -3517,6 +3554,8 @@ mod tests {
     fn text_with_inline_math_compiles_to_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
         canvas.text("Energia $E = m c^2$ es famosa");
+        canvas.text("Valor $1/2$ y $sqrt(2)$");
+        canvas.text("Angulo $alpha + beta$");
         let world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
@@ -3527,8 +3566,19 @@ mod tests {
         drop(commands);
         let mut world = world;
         queue.apply(&mut world);
-        let glyphs = world.query::<&gaanim_scene::FillBrush>().iter(&world).count();
-        assert!(glyphs > 10, "text with inline math should produce vector glyphs, got {glyphs}");
+        let fills: Vec<_> = world
+            .query::<&gaanim_scene::FillBrush>()
+            .iter(&world)
+            .filter_map(|f| f.0.clone())
+            .collect();
+        assert!(fills.len() > 10, "text with inline math should produce vector glyphs, got {}", fills.len());
+        assert!(
+            fills.iter().all(|b| match b {
+                gaanim_core::peniko::Brush::Solid(c) => *c != gaanim_core::peniko::Color::BLACK,
+                _ => true,
+            }),
+            "inline math glyphs should not be black on black background"
+        );
         assert!(world.query::<&LocalBounds>().iter(&world).any(|b| b.0.width() > 50.0));
     }
 
@@ -3555,21 +3605,32 @@ mod tests {
         drop(commands);
         let mut world = world;
         queue.apply(&mut world);
-        let glyphs = world.query::<&gaanim_scene::FillBrush>().iter(&world).count();
-        assert!(glyphs > 15, "paragraph with inline math should produce vector glyphs, got {glyphs}");
+        let fills: Vec<_> = world
+            .query::<&gaanim_scene::FillBrush>()
+            .iter(&world)
+            .filter_map(|f| f.0.clone())
+            .collect();
+        assert!(fills.len() > 15, "paragraph with inline math should produce vector glyphs, got {}", fills.len());
+        assert!(
+            fills.iter().all(|b| match b {
+                gaanim_core::peniko::Brush::Solid(c) => *c != gaanim_core::peniko::Color::BLACK,
+                _ => true,
+            }),
+            "inline math paragraph glyphs should not be black on black background"
+        );
     }
 
     #[test]
     fn inline_math_helpers_handle_escapes_and_doubles() {
         assert_eq!(
             typst_inline_content("a $x$ b"),
-            "#text(\"a \") $ x $ #text(\" b\")"
+            "#text(\"a \")$x$#text(\" b\")"
         );
         assert_eq!(typst_inline_content("sin math"), "#text(\"sin math\")");
-        assert_eq!(typst_inline_content("$E=mc^2$"), "$ E=mc^2 $");
+        assert_eq!(typst_inline_content("$E=mc^2$"), "$E=mc^2$");
         assert_eq!(
             typst_inline_content("Escapado \\$ literal $x$"),
-            "#text(\"Escapado $ literal \") $ x $"
+            "#text(\"Escapado $ literal \")$x$"
         );
         assert_eq!(split_text_math("a $x$ b $y$ c").len(), 5);
         let para = paragraph_typst_source(
@@ -3580,9 +3641,14 @@ mod tests {
                 ..Default::default()
             },
             32.0,
+            gaanim_core::peniko::Color::WHITE,
         );
-        assert!(para.contains("$ x^2 $"), "paragraph source should embed math, got {para}");
+        assert!(para.contains("$x^2$"), "paragraph source should embed math, got {para}");
         assert!(para.contains("#text(\"Hola \")"));
+        let txt = text_inline_typst_source("prueba $x^2$ fin", gaanim_core::peniko::Color::WHITE);
+        assert!(txt.contains("$x^2$"));
+        let txt2 = text_inline_typst_source("$alpha + beta = 1$", gaanim_core::peniko::Color::WHITE);
+        assert!(txt2.contains("$alpha + beta = 1$"));
     }
 
     #[test]

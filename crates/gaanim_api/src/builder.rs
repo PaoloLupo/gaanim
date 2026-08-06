@@ -4083,6 +4083,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
 
+        let has_inline_math = crate::canvas::split_text_math(content)
+            .iter()
+            .any(|(is_math, c)| *is_math && !c.trim().is_empty());
+
+        if has_inline_math {
+            let source = crate::canvas::text_inline_typst_source(content, style.fill_color);
+            return self.typst(
+                &source,
+                false,
+                Some(&style.font_family),
+                None,
+                Some(style.size),
+                None,
+            );
+        }
+
         let parent_id = self.next_id();
         let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color));
         let stroke = gaanim_scene::StrokeBrush::transparent();

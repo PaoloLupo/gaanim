@@ -5,16 +5,16 @@ import os
 
 from gaanim import BLACK, BLUE, GOLD, GRAY, GREEN, RED, TEAL, WHITE, Direction, Scene
 
-scene = Scene(800, 480, background=WHITE)
+scene = Scene(1920, 1080, background=WHITE)
 
 # ── Escena 1: Auto-fit a safe_frame (gaanim idiom) ─────────────────────
 scene.segment("auto-fit")
-title1 = scene.text("Axes auto-fit — ocupa safe_frame").fill(BLACK).scaled(0.65).at(0, 210)
+title1 = scene.text("Axes auto-fit — $a^2 + alpha$ ocupa safe_frame").fill(BLACK).at(0, 210)
 try:
     axes1 = scene.axes(
         x=(-3, 3, 1),
         y=(-2, 2, 1),
-        grid=True,
+        grid=False,
         ticks=True,
         numbers=True,
         x_label="x",
@@ -50,19 +50,15 @@ except TypeError:
         tick_length=8,
     )
 # plot con estilo propio, mapeado al mismo auto_fit
-try:
-    curve1 = scene.plot(axes1, lambda x: math.sin(x), x=(-3, 3), samples=200).no_fill().stroke(BLUE, 3)
-except (TypeError, AttributeError):
-    curve1 = scene.function_graph(lambda x: math.sin(x), x=(-3, 3), samples=200).no_fill().stroke(BLUE, 3)
-scene.play([axes1.create().duration(1.4)])  # secuencial Grid→Axes→Ticks→Numbers
+curve1 = scene.plot(axes1, lambda x: math.sin(x), x=(-3, 3), samples=200).no_fill().stroke(BLACK, 1)
+scene.play([axes1.write().duration(1.4)])  # secuencial Grid→Axes→Ticks→Numbers
 scene.play([curve1.create().duration(1.0).smooth(), title1.write().duration(0.5)])
 scene.wait(0.6)
 
 # ── Escena 2: Manim x_length / y_length / tips ───────────────────────────
 scene.segment("manim-size")
 scene.play([axes1.fade_out().duration(0.4), curve1.fade_out().duration(0.4), title1.fade_out().duration(0.3)])
-try:
-    axes2 = scene.axes(
+axes2 = scene.axes(
         x=(-7, 7, 1),
         y=(-4, 4, 1),
         x_length=10,
@@ -81,30 +77,12 @@ try:
         tick_width=2,
         tick_length=8,
     )
-except TypeError:
-    axes2 = scene.axes(
-        x=(-7, 7, 1),
-        y=(-4, 4, 1),
-        grid=True,
-        ticks=True,
-        numbers=True,
-        axis_color=TEAL,
-        grid_color=GRAY,
-        tick_color=TEAL,
-        number_color=TEAL,
-        axis_width=2.5,
-        grid_width=1,
-        tick_width=2,
-        tick_length=8,
-    )
+
+
 axes2_title = scene.text("Manim x_length=10, y_length=5, tips=True").fill(BLACK).scaled(0.55).at(0, 210)
-try:
-    parabola = scene.plot(axes2, lambda x: 0.12 * x * x - 1.2, x=(-6, 6), samples=160).no_fill().stroke(GOLD, 3)
-    sine = scene.plot(axes2, lambda x: math.sin(x) * 1.2, x=(-7, 7), samples=200).no_fill().stroke(BLUE, 2.5)
-except (TypeError, AttributeError):
-    parabola = scene.function_graph(lambda x: 0.12 * x * x - 1.2, x=(-6, 6), samples=160).no_fill().stroke(GOLD, 3)
-    sine = scene.function_graph(lambda x: math.sin(x) * 1.2, x=(-7, 7), samples=200).no_fill().stroke(BLUE, 2.5)
-scene.play([axes2.create().duration(1.2)])
+parabola = scene.plot(axes2, lambda x: 0.12 * x * x - 1.2, x=(-6, 6), samples=160).no_fill().stroke(GOLD, 3)
+sine = scene.plot(axes2, lambda x: math.sin(x) * 1.2, x=(-7, 7), samples=200).no_fill().stroke(BLUE, 2.5)
+scene.play([axes2.create()])
 scene.play([parabola.create().duration(0.9), sine.create().duration(0.9), axes2_title.write().duration(0.4)])
 scene.wait(0.5)
 # coords_to_point / point_to_coords demo

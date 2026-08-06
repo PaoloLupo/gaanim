@@ -12,3 +12,4 @@ dependencies = []
 [tool.maturin]
 python-source = "."
 module-name = "gaanim.gaanim_core"
+include = ["gaanim/py.typed", "gaanim/gaanim_core.pyi"]
