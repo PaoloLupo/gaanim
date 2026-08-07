@@ -1,10 +1,9 @@
 use crate::components::{
-    Billboard, FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Mesh3DMarker,
-    Opacity, StrokeBrush, TriangleMeshData, WorldBounds,
+    FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, Opacity,
+    StrokeBrush, TriangleMeshData, WorldBounds,
 };
 use bevy::prelude::{
-    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, Res, ResMut, With,
-    Without,
+    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, ResMut, With, Without,
 };
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 
@@ -314,46 +313,125 @@ fn propagate_style_recursive(
 
 /// System: Sync `GlobalSpatialTransform::mat4` to Bevy `Transform` for 3D mesh entities.
 pub fn sync_3d_mesh_transform_system(
-    mut query: Query<(&GlobalSpatialTransform, &mut bevy::prelude::Transform), With<crate::components::Mesh3DMarker>>,
+    mut query: Query<
+        (&GlobalSpatialTransform, &mut bevy::prelude::Transform),
+        With<crate::components::Mesh3DMarker>,
+    >,
 ) {
     for (global, mut transform) in &mut query {
         let (scale, rot, trans) = global.mat4.to_scale_rotation_translation();
-        transform.translation = bevy::prelude::Vec3::new(trans.x as f32, trans.y as f32, trans.z as f32);
-        transform.rotation = bevy::prelude::Quat::from_xyzw(
-            rot.x as f32, rot.y as f32, rot.z as f32, rot.w as f32,
-        );
+        transform.translation =
+            bevy::prelude::Vec3::new(trans.x as f32, trans.y as f32, trans.z as f32);
+        transform.rotation =
+            bevy::prelude::Quat::from_xyzw(rot.x as f32, rot.y as f32, rot.z as f32, rot.w as f32);
         transform.scale = bevy::prelude::Vec3::new(scale.x as f32, scale.y as f32, scale.z as f32);
     }
 }
 
 /// System: Billboard - make entities face the camera (for 3D labels).
+///
+/// In perspective mode the Vello 2D camera is fixed at the origin (see
+/// `sync_gaanim_camera_to_bevy_system`). The billboard's Vello `affine_2d` is
+/// therefore computed by projecting the 3D world position to screen pixels via
+/// `Camera::world_to_screen` and then mapping back to the fixed Vello world
+/// through the inverse of the fixed orthographic Vello transform. This makes
+/// the label appear at the correct screen location over the 3D geometry and
+/// stay upright regardless of camera orbit.
 pub fn billboard_system(
     camera: Option<bevy::prelude::Res<gaanim_math::Camera>>,
-    mut query: Query<(&mut GlobalSpatialTransform, Option<&mut bevy::prelude::Transform>), With<crate::components::Billboard>>,
+    children_query: Query<&Children>,
+    mut query: Query<
+        (
+            Entity,
+            &mut GlobalSpatialTransform,
+            Option<&mut bevy::prelude::Transform>,
+        ),
+        With<crate::components::Billboard>,
+    >,
+    mut child_transforms: Query<
+        (&SpatialTransform, &mut GlobalSpatialTransform),
+        Without<crate::components::Billboard>,
+    >,
 ) {
     let Some(cam) = camera else { return };
     let cam_rot = cam.rotation;
-    for (mut global, transform_opt) in &mut query {
+    let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
+    for (entity, mut global, transform_opt) in &mut query {
         // Preserve world position and scale, replace rotation with camera rotation.
         let world = global.mat4;
         let (scale, _rot, trans) = world.to_scale_rotation_translation();
-        let billboard_mat = gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
+        let billboard_mat =
+            gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
         global.mat4 = billboard_mat;
-        // Also update Affine for Vello fallback (use world pos XY and camera Z angle)
-        let z_angle = cam.z_angle();
-        global.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
-            * gaanim_core::kurbo::Affine::rotate(-z_angle)
-            * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
+        if is_perspective {
+            // Project 3D world position to screen, then map to fixed Vello world.
+            let world_pos = gaanim_core::glam::DVec3::new(trans.x, trans.y, trans.z);
+            let screen = cam.world_to_screen(world_pos);
+            let eff = cam.viewport_scale.max(0.01);
+            let hw = cam.viewport_width as f64 * 0.5;
+            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport_offset_y;
+            // Fixed Vello transform: translate to center + scale (no rotation, no cam pos)
+            let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
+                * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
+            let inv = vello.inverse();
+            let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
+            global.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
+                * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
+        } else {
+            // Orthographic: previous 2D behavior (rotate to stay upright)
+            let z_angle = cam.z_angle();
+            global.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
+                * gaanim_core::kurbo::Affine::rotate(-z_angle)
+                * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
+        }
         if let Some(mut t) = transform_opt {
             let (scale_d, _, trans_d) = billboard_mat.to_scale_rotation_translation();
-            t.translation = bevy::prelude::Vec3::new(trans_d.x as f32, trans_d.y as f32, trans_d.z as f32);
+            t.translation =
+                bevy::prelude::Vec3::new(trans_d.x as f32, trans_d.y as f32, trans_d.z as f32);
             t.rotation = bevy::prelude::Quat::from_xyzw(
                 cam_rot.x as f32,
                 cam_rot.y as f32,
                 cam_rot.z as f32,
                 cam_rot.w as f32,
             );
-            t.scale = bevy::prelude::Vec3::new(scale_d.x as f32, scale_d.y as f32, scale_d.z as f32);
+            t.scale =
+                bevy::prelude::Vec3::new(scale_d.x as f32, scale_d.y as f32, scale_d.z as f32);
+        }
+        let current_global = *global;
+        drop(global);
+
+        // Propagate updated billboard transform to non-billboard child entities (e.g. text glyphs)
+        propagate_billboard_children_recursive(
+            entity,
+            &current_global,
+            &children_query,
+            &mut child_transforms,
+        );
+    }
+}
+
+fn propagate_billboard_children_recursive(
+    entity: Entity,
+    parent_global: &GlobalSpatialTransform,
+    children_query: &Query<&Children>,
+    child_transforms: &mut Query<
+        (&SpatialTransform, &mut GlobalSpatialTransform),
+        Without<crate::components::Billboard>,
+    >,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for &child in children.iter() {
+            if let Ok((child_local, mut child_global)) = child_transforms.get_mut(child) {
+                *child_global = GlobalSpatialTransform::from_parent_and_local(parent_global, child_local);
+                let current_child_global = *child_global;
+                drop(child_global);
+                propagate_billboard_children_recursive(
+                    child,
+                    &current_child_global,
+                    children_query,
+                    child_transforms,
+                );
+            }
         }
     }
 }
@@ -363,29 +441,45 @@ pub fn billboard_system(
 /// Converts `TriangleMeshData` and `LineListData` into `Mesh3d` + `MeshMaterial3d` + `Transform`.
 pub fn build_3d_meshes_system(
     mut commands: bevy::prelude::Commands,
-    mut meshes: ResMut<bevy::prelude::Assets<bevy::mesh::Mesh>>,
-    mut materials: ResMut<bevy::prelude::Assets<bevy::pbr::StandardMaterial>>,
-    query_tri: Query<(Entity, &TriangleMeshData), (Without<bevy::prelude::Mesh3d>, Without<LineListData>)>,
-    query_line: Query<(Entity, &LineListData), (Without<bevy::prelude::Mesh3d>, Without<TriangleMeshData>)>,
+    meshes: Option<ResMut<bevy::prelude::Assets<bevy::mesh::Mesh>>>,
+    materials: Option<ResMut<bevy::prelude::Assets<bevy::pbr::StandardMaterial>>>,
+    query_tri: Query<
+        (Entity, &TriangleMeshData),
+        (Without<bevy::prelude::Mesh3d>, Without<LineListData>),
+    >,
+    query_line: Query<
+        (Entity, &LineListData),
+        (Without<bevy::prelude::Mesh3d>, Without<TriangleMeshData>),
+    >,
 ) {
-    use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else { return };
     use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 
     for (entity, data) in &query_tri {
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         let positions: Vec<[f32; 3]> = data.vertices.clone();
         let indices = data.indices.clone();
         // Compute simple normals (up) if not provided
         let normals: Vec<[f32; 3]> = positions.iter().map(|_| [0.0, 1.0, 0.0]).collect();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; mesh.count_vertices()]);
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            vec![[0.0, 0.0]; mesh.count_vertices()],
+        );
         mesh.insert_indices(Indices::U32(indices));
         let mesh_handle = meshes.add(mesh);
-        let color = data.color.map(|c| {
-            let rgba = c.to_rgba8();
-            bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
-        }).unwrap_or(bevy::color::Color::WHITE);
+        let color = data
+            .color
+            .map(|c| {
+                let rgba = c.to_rgba8();
+                bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
+            })
+            .unwrap_or(bevy::color::Color::WHITE);
         let mat = materials.add(bevy::pbr::StandardMaterial {
             base_color: color,
             double_sided: true,

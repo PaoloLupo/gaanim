@@ -320,4 +320,36 @@ mod tests {
         // Ensure projection matrix is not identity and has expected structure
         assert_ne!(proj, DMat4::IDENTITY);
     }
+
+    #[test]
+    fn debug_billboard_positions() {
+        let mut cam = Camera::ortho_2d(1280, 720);
+        cam.set_perspective(0.785, 0.1, 1000.0);
+        cam.look_at(DVec3::new(8.0, 6.0, 8.0), DVec3::ZERO, DVec3::Y);
+        cam.viewport_scale = 1.0;
+        cam.viewport_offset_y = 0.0;
+        let points = [
+            DVec3::new(0.0, 0.0, 0.5),
+            DVec3::new(658.0, 0.0, 0.0),
+            DVec3::new(0.0, 658.0, 0.0),
+            DVec3::new(0.0, 0.0, 358.0),
+            DVec3::new(5.0, 0.0, 0.0),
+            DVec3::new(-5.0, 0.0, 0.0),
+            DVec3::new(0.0, 5.0, 0.0),
+            DVec3::new(0.0, -5.0, 0.0),
+            DVec3::new(0.0, 0.0, 3.0),
+            DVec3::new(0.0, 0.0, -3.0),
+        ];
+        for pt in points {
+            let screen = cam.world_to_screen(pt);
+            println!("world {:?} -> screen {:?}", pt, screen);
+            let eff = cam.viewport_scale.max(0.01);
+            let hw = cam.viewport_width as f64 * 0.5;
+            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport_offset_y;
+            let vello = gaanim_core::kurbo::Affine::translate((hw, hh)) * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
+            let inv = vello.inverse();
+            let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
+            println!("  vpos {:?}", vpos);
+        }
+    }
 }

@@ -455,32 +455,18 @@ impl Canvas {
         y_range: (f64, f64, f64),
         z_range: (f64, f64, f64),
         config: &crate::canvas::types::Axes3DConfig,
-        frame_bounds: Bounds3D,
+        _frame_bounds: Bounds3D,
     ) -> MobjectRef {
         let (x_min, x_max, x_step) = x_range;
         let (y_min, y_max, y_step) = y_range;
         let (z_min, z_max, z_step) = z_range;
-        let avail_w = frame_bounds.width().max(1.0);
-        let avail_h = frame_bounds.height().max(1.0);
-        let manim_frame_w: f64 = 14.222222222222221;
-        let manim_frame_h: f64 = 8.0;
         let (scale_x, scale_y, scale_z, x_center, y_center, z_center) =
             match (config.x_length, config.y_length, config.z_length) {
                 (Some(xl), Some(yl), Some(zl)) => {
-                    let scene_xl = xl * avail_w / manim_frame_w;
-                    let scene_yl = yl * avail_h / manim_frame_h;
-                    let scene_zl = zl * avail_w / manim_frame_w;
-                    let sx = scene_xl / (x_max - x_min).max(1e-9);
-                    let sy = scene_yl / (y_max - y_min).max(1e-9);
-                    let sz = scene_zl / (z_max - z_min).max(1e-9);
+                    let sx = xl / (x_max - x_min).max(1e-9);
+                    let sy = yl / (y_max - y_min).max(1e-9);
+                    let sz = zl / (z_max - z_min).max(1e-9);
                     (sx, sy, sz, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5, (z_min + z_max) * 0.5)
-                }
-                _ if config.auto_fit => {
-                    let data_w = (x_max - x_min).max(1e-9);
-                    let data_h = (y_max - y_min).max(1e-9);
-                    let data_d = (z_max - z_min).max(1e-9);
-                    let s = (avail_w / data_w).min(avail_h / data_h).min(avail_w / data_d);
-                    (s, s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5, (z_min + z_max) * 0.5)
                 }
                 _ => (1.0, 1.0, 1.0, 0.0, 0.0, 0.0),
             };
@@ -498,7 +484,7 @@ impl Canvas {
         let mut children = Vec::new();
 
         // Helper to push a 3D line list
-        let mut push_line_list = |points: Vec<[f32; 3]>, color: peniko::Color, tag: &str| {
+        let mut push_line_list = |points: Vec<[f32; 3]>, color: peniko::Color, _tag: &str| {
             if points.len() < 2 { return; }
             let mref = builder.spawn_line_list(points, color);
             // Tag for debugging
@@ -669,17 +655,35 @@ impl Canvas {
         // Numbers and labels as billboarded text
         let mut add_text = |text: &str, x: f64, y: f64, z: f64, color: peniko::Color| {
             let label = builder.body(text);
+            // Clone child info before mutable borrow ends
+            let child_entities: Vec<bevy::prelude::Entity> = builder
+                .states
+                .get(label.id)
+                .map(|s| s.child_spans.iter().map(|c| c.entity).collect())
+                .unwrap_or_default();
             if let Some(state) = builder.states.get_mut(label.id) {
                 // Position in 3D
                 state.transform = state.transform.shift_3d(gaanim_core::glam::DVec3::new(x, y, z));
                 builder.commands.entity(state.entity).insert(state.transform);
-                // Billboard handling
+                // Billboard handling — applied to parent mobject entity so it acts as 3D anchor
                 if config.label_mode == crate::canvas::types::LabelMode::Billboard {
                     builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
                     builder.commands.entity(state.entity).insert(gaanim_scene::Mesh3DMarker);
                 } else {
+                    // HUD labels are fixed screen-space; keep as Vello2D with high z
+                    // so they render on top of 3D after the perspective composition.
                     builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
-                    builder.commands.entity(state.entity).insert(gaanim_scene::RenderLayer::Overlay);
+                    builder.commands.entity(state.entity).insert(gaanim_scene::RenderOrder {
+                        z_index: 1000,
+                        ..Default::default()
+                    });
+                    for child in &child_entities {
+                        builder.commands.entity(*child).insert(gaanim_scene::HudOverlay);
+                        builder.commands.entity(*child).insert(gaanim_scene::RenderOrder {
+                            z_index: 1000,
+                            ..Default::default()
+                        });
+                    }
                 }
             }
             builder.select(label, text).set_fill(color);
@@ -692,7 +696,7 @@ impl Canvas {
                 while x <= x_max + 1e-9 {
                     let value = if x.abs() < 1e-9 { 0.0 } else { x };
                     let text = format!("{value}");
-                    add_text(&text, sx(x), sy(0.0) - config.tick_length * 0.5 - 14.0, sz(0.0), config.number_color);
+                    add_text(&text, sx(x), sy(0.0) - config.tick_length * 0.5 - 0.25, sz(0.0), config.number_color);
                     x += x_step;
                 }
             }
@@ -702,7 +706,7 @@ impl Canvas {
                     if y.abs() > 1e-9 || !config.x_numbers {
                         let value = if y.abs() < 1e-9 { 0.0 } else { y };
                         let text = format!("{value}");
-                        add_text(&text, sx(0.0) - config.tick_length * 0.5 - 20.0, sy(y), sz(0.0), config.number_color);
+                        add_text(&text, sx(0.0) - config.tick_length * 0.5 - 0.35, sy(y), sz(0.0), config.number_color);
                     }
                     y += y_step;
                 }
@@ -713,7 +717,7 @@ impl Canvas {
                     if z.abs() > 1e-9 {
                         let value = if z.abs() < 1e-9 { 0.0 } else { z };
                         let text = format!("{value}");
-                        add_text(&text, sx(0.0) - 20.0, sy(0.0), sz(z), config.number_color);
+                        add_text(&text, sx(0.0) - 0.35, sy(0.0), sz(z), config.number_color);
                     }
                     z += z_step;
                 }
@@ -722,13 +726,13 @@ impl Canvas {
 
         if config.labels {
             if let Some(label) = config.x_label.as_deref().filter(|_| y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
-                add_text(label, sx(x_max) + 18.0, sy(0.0), sz(0.0), config.label_color);
+                add_text(label, sx(x_max) + 0.4, sy(0.0), sz(0.0), config.label_color);
             }
             if let Some(label) = config.y_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
-                add_text(label, sx(0.0), sy(y_max) + 12.0, sz(0.0), config.label_color);
+                add_text(label, sx(0.0), sy(y_max) + 0.4, sz(0.0), config.label_color);
             }
             if let Some(label) = config.z_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0) {
-                add_text(label, sx(0.0), sy(0.0), sz(z_max) + 12.0, config.label_color);
+                add_text(label, sx(0.0), sy(0.0), sz(z_max) + 0.4, config.label_color);
             }
         }
 
@@ -755,6 +759,7 @@ impl Canvas {
                 SpatialTransform::default(),
                 GlobalSpatialTransform::default(),
                 bevy::prelude::Transform::default(),
+                bevy::prelude::GlobalTransform::default(),
                 bevy::prelude::Visibility::default(),
                 Opacity(1.0),
                 GlobalOpacity(1.0),
@@ -3498,32 +3503,18 @@ impl Canvas {
         }
         // Billboard / HUD chaining (.billboard() / .hud())
         if spec.billboard {
-            let targets = if child_spans.is_empty() {
-                builder
-                    .states
-                    .get(id)
-                    .map(|s| vec![s.entity])
-                    .unwrap_or_default()
-            } else {
-                child_spans.iter().map(|c| c.entity).collect::<Vec<_>>()
-            };
-            for entity in targets {
-                builder.commands.entity(entity).insert(gaanim_scene::Billboard);
-                builder.commands.entity(entity).insert(bevy::prelude::Transform::default());
-            }
-            // Also mark root if it has no child_spans but is a Vello entity
-            if child_spans.is_empty() {
-                if let Some(state) = builder.states.get(id) {
-                    builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
-                    builder.commands.entity(state.entity).insert(bevy::prelude::Transform::default());
-                }
-            } else if let Some(state) = builder.states.get(id) {
-                // Mark group root as billboard as well for hierarchical cases
+            if let Some(state) = builder.states.get(id) {
                 builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
                 builder.commands.entity(state.entity).insert(bevy::prelude::Transform::default());
             }
         }
         if spec.hud {
+            // HUD is screen-space fixed but still rendered via Vello2D.
+            // Keeping RenderLayer::Vello2D ensures it participates in the
+            // main Vello pass which is now drawn AFTER the 3D meshes (order
+            // 1 vs 0) and after background suppression for perspective, so
+            // HUD appears on top of 3D. HudOverlay is retained as a marker
+            // for potential future dedicated overlay pass.
             let targets = if child_spans.is_empty() {
                 builder
                     .states
@@ -3535,11 +3526,18 @@ impl Canvas {
             };
             for entity in targets {
                 builder.commands.entity(entity).insert(gaanim_scene::HudOverlay);
-                builder.commands.entity(entity).insert(gaanim_scene::RenderLayer::Overlay);
+                // Keep Vello2D so the element is rendered; ensure high z for HUD.
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_scene::RenderOrder { z_index: 1000, ..Default::default() });
             }
             if let Some(state) = builder.states.get(id) {
                 builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
-                builder.commands.entity(state.entity).insert(gaanim_scene::RenderLayer::Overlay);
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(gaanim_scene::RenderOrder { z_index: 1000, ..Default::default() });
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);

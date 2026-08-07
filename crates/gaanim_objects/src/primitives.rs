@@ -36,6 +36,8 @@ pub struct MobjectBundle {
     pub bounds: LocalBounds,
     pub transform: SpatialTransform,
     pub global_transform: GlobalSpatialTransform,
+    pub bevy_transform: Transform,
+    pub bevy_visibility: Visibility,
     pub fill: FillBrush,
     pub stroke: StrokeBrush,
     pub opacity: Opacity,
@@ -61,6 +63,8 @@ impl MobjectBundle {
             bounds: LocalBounds(bounds),
             transform: SpatialTransform::identity(),
             global_transform: GlobalSpatialTransform::default(),
+            bevy_transform: Transform::default(),
+            bevy_visibility: Visibility::default(),
             fill: FillBrush(Some(gaanim_core::peniko::Brush::Solid(
                 gaanim_core::peniko::Color::WHITE,
             ))),

@@ -261,7 +261,7 @@ impl Default for Axes3DConfig {
             axis_width: 3.0,
             grid_width: 1.0,
             tick_width: 2.0,
-            tick_length: 8.0,
+            tick_length: 0.2,
             auto_fit: true,
             x_length: None,
             y_length: None,

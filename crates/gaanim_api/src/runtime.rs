@@ -59,21 +59,27 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
 
         let mut commands = world.commands();
         commands.insert_resource(Camera::ortho_2d(width, height));
-        if !has_camera_2d {
-            commands.spawn((
-                Camera2d,
-                VelloView,
-                bevy::core_pipeline::tonemapping::Tonemapping::None,
-            ));
-        }
         if !has_camera_3d {
-            // Perspective camera for 3D meshes (PBR). Render after 2D so overlay text remains on top.
+            // Perspective camera for 3D meshes (PBR). Render BEFORE 2D so that
+            // Vello vector labels (and egui) remain on top. Previously order=1
+            // caused 3D to overwrite egui, hiding editor controls.
             // Use Tonemapping::None to avoid requiring tonemapping_luts feature (which needs zstd).
             commands.spawn((
                 Camera3d::default(),
                 bevy::prelude::Camera {
+                    order: 0,
+                    clear_color: ClearColorConfig::Default,
+                    ..default()
+                },
+                bevy::core_pipeline::tonemapping::Tonemapping::None,
+            ));
+        }
+        if !has_camera_2d {
+            commands.spawn((
+                Camera2d,
+                VelloView,
+                bevy::prelude::Camera {
                     order: 1,
-                    clear_color: ClearColorConfig::None,
                     ..default()
                 },
                 bevy::core_pipeline::tonemapping::Tonemapping::None,

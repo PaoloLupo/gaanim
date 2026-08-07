@@ -1,5 +1,7 @@
 use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
-use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
+use bevy::prelude::{
+    BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
+};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Shape};
@@ -9,9 +11,8 @@ use gaanim_math::matching::{MatchingConfig, MatchingMode, MatchItem};
 use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
-    Billboard, FillBrush, GroupMarker, HudOverlay, LineListData, LocalBounds, Mesh3DMarker,
-    MobjectId, ObjectTag, Opacity, RenderLayer, StrokeBrush, TriangleMeshData, Visible,
-    WorldBounds,
+    FillBrush, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
+    StrokeBrush, TriangleMeshData, Visible, WorldBounds,
 };
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
@@ -3324,6 +3325,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let group_transform = SpatialTransform::new_2d(center.x, center.y);
 
         // 3. Spawn the group entity with GroupMarker, Opacity, WorldBounds etc.
+        // Include Bevy Transform/Visibility so that any 3D child with GlobalTransform
+        // satisfies Bevy's B0004 hierarchy validation (parent must have GlobalTransform).
         let group_entity = self
             .commands
             .spawn((
@@ -3331,6 +3334,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 MobjectId(id),
                 group_transform,
                 gaanim_math::GlobalSpatialTransform::from_local(&group_transform),
+                Transform::default(),
+                Visibility::default(),
                 Opacity(1.0),
                 gaanim_scene::GlobalOpacity(1.0),
                 LocalBounds(Bounds3D::new_2d(
@@ -4021,13 +4026,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     color,
                 },
                 Mesh3DMarker,
-                RenderLayer::Wgpu3D,
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
                 Visible,
                 Opacity(1.0),
                 gaanim_scene::GlobalOpacity(1.0),
-                FillBrush(None),
-                StrokeBrush::transparent(),
-                ObjectTag("Surface3D".to_string()),
             ))
             .id();
         self.tag_entity(entity);
@@ -4080,13 +4084,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     color,
                 },
                 Mesh3DMarker,
-                RenderLayer::Wgpu3D,
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
                 Visible,
                 Opacity(1.0),
                 gaanim_scene::GlobalOpacity(1.0),
-                FillBrush(None),
-                StrokeBrush::transparent(),
-                ObjectTag("Line3D".to_string()),
             ))
             .id();
         self.tag_entity(entity);

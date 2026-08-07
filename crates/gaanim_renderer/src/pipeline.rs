@@ -173,34 +173,55 @@ pub fn sync_gaanim_camera_to_bevy_system(
     for (mut transform, mut projection) in &mut bevy_cameras {
         // Position — incorporate viewport_offset_y so the scene shifts up
         // when the timeline panel is visible (offset is in screen pixels).
+        // In perspective mode the Vello (2D) camera must stay fixed at the
+        // origin so that Vello world coordinates map to screen pixels via a
+        // stable orthographic transform. 3D billboard labels are then
+        // projected to screen via `world_to_screen` and placed in this fixed
+        // Vello space. Following the 3D eye with the 2D camera would shift
+        // HUD and 2D background incorrectly and break the projection.
+        let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
         let effective_zoom = match cam.projection {
             gaanim_math::Projection::Orthographic { zoom } => zoom * cam.viewport_scale,
-            _ => 1.0,
+            _ => cam.viewport_scale,
         };
         let offset_world_y = if effective_zoom > 0.0 {
             cam.viewport_offset_y / effective_zoom
         } else {
             0.0
         };
-        transform.translation.x = cam.position.x as f32;
-        transform.translation.y = (cam.position.y - offset_world_y) as f32;
-        // Rotation (2D Z-axis only) — compute directly from quaternion
-        // to avoid the three-trig overhead of full Euler decomposition.
-        let z_angle = 2.0 * f64::atan2(cam.rotation.z, cam.rotation.w);
-        transform.rotation = Quat::from_rotation_z(-z_angle as f32);
-
-        // Projection: only Orthographic is supported for 2D Vello
-        if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            // Apply viewport_scale so the scene maintains its aspect ratio
-            // when the window dimensions differ from the scene's native resolution.
-            let effective = zoom * cam.viewport_scale;
-            let scale = if effective > 0.0 {
-                1.0 / effective as f32
-            } else {
-                1.0
-            };
+        if is_perspective {
+            transform.translation.x = 0.0;
+            transform.translation.y = (-offset_world_y) as f32;
+            transform.rotation = Quat::IDENTITY;
             if let Projection::Orthographic(ortho) = projection.as_mut() {
+                let scale = if cam.viewport_scale > 0.0 {
+                    1.0 / cam.viewport_scale as f32
+                } else {
+                    1.0
+                };
                 ortho.scale = scale;
+            }
+        } else {
+            transform.translation.x = cam.position.x as f32;
+            transform.translation.y = (cam.position.y - offset_world_y) as f32;
+            // Rotation (2D Z-axis only) — compute directly from quaternion
+            // to avoid the three-trig overhead of full Euler decomposition.
+            let z_angle = 2.0 * f64::atan2(cam.rotation.z, cam.rotation.w);
+            transform.rotation = Quat::from_rotation_z(-z_angle as f32);
+
+            // Projection: only Orthographic is supported for 2D Vello
+            if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
+                // Apply viewport_scale so the scene maintains its aspect ratio
+                // when the window dimensions differ from the scene's native resolution.
+                let effective = zoom * cam.viewport_scale;
+                let scale = if effective > 0.0 {
+                    1.0 / effective as f32
+                } else {
+                    1.0
+                };
+                if let Projection::Orthographic(ortho) = projection.as_mut() {
+                    ortho.scale = scale;
+                }
             }
         }
     }
@@ -611,15 +632,22 @@ pub fn compile_scene_from_world(
 
     // Draw canvas background as a filled rectangle at the frame bounds,
     // so the canvas area is visually distinct from the window background.
-    if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-        let (rect, transform) = canvas_background_geometry(canvas_bg, camera);
-        main_scene.fill(
-            peniko::Fill::NonZero,
-            transform,
-            &canvas_bg.color,
-            None,
-            &rect,
-        );
+    // In perspective mode the 3D camera already clears to this color and the
+    // Vello scene is rendered AFTER the 3D pass (order 1 vs 0) so that labels
+    // appear on top of meshes. Skipping the opaque rect in that case prevents
+    // the 2D background from occluding the 3D meshes behind it.
+    let is_perspective = camera.is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    if !is_perspective {
+        if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
+            let (rect, transform) = canvas_background_geometry(canvas_bg, camera);
+            main_scene.fill(
+                peniko::Fill::NonZero,
+                transform,
+                &canvas_bg.color,
+                None,
+                &rect,
+            );
+        }
     }
 
     for elem in extracted {
@@ -1079,15 +1107,21 @@ pub fn gaanim_render_system(
 
     // Draw canvas background as a filled rectangle at the frame bounds,
     // so the canvas area is visually distinct from the window background.
-    if let Some(ref canvas_bg) = canvas_bg {
-        let (rect, transform) = canvas_background_geometry(canvas_bg, gaanim_camera.as_deref());
-        main_scene.fill(
-            peniko::Fill::NonZero,
-            transform,
-            &canvas_bg.color,
-            None,
-            &rect,
-        );
+    // Skip when perspective (see compile_scene_from_world comment).
+    let is_perspective = gaanim_camera
+        .as_ref()
+        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    if !is_perspective {
+        if let Some(ref canvas_bg) = canvas_bg {
+            let (rect, transform) = canvas_background_geometry(canvas_bg, gaanim_camera.as_deref());
+            main_scene.fill(
+                peniko::Fill::NonZero,
+                transform,
+                &canvas_bg.color,
+                None,
+                &rect,
+            );
+        }
     }
 
     for elem in local_extracted.drain(..) {
