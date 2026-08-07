@@ -25,7 +25,8 @@ pub enum Projection {
 /// A dimension-agnostic camera supporting both 2D Vector (Vello) and 3D Raster (wgpu) rendering.
 ///
 /// This serves as a global scene resource that defines the viewpoint, rotation, zoom/fov,
-/// and the active viewport dimensions.
+/// and the active viewport dimensions. For perspective cameras `target` is the
+/// orbit pivot / look-at point and `up` is the world up direction.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Camera {
@@ -33,6 +34,10 @@ pub struct Camera {
     pub position: DVec3,
     /// Rotation represented as a Double-Precision Quaternion.
     pub rotation: DQuat,
+    /// Orbit / look-at target in world space. Used by perspective orbit controls.
+    pub target: DVec3,
+    /// World up direction (usually Y-up).
+    pub up: DVec3,
     /// The projection settings (orthographic or perspective).
     pub projection: Projection,
     /// Pixel width of the active rendering area.
@@ -53,6 +58,8 @@ impl Camera {
         Self {
             position: DVec3::ZERO,
             rotation: DQuat::IDENTITY,
+            target: DVec3::ZERO,
+            up: DVec3::Y,
             projection: Projection::Orthographic { zoom: 1.0 },
             viewport_width: width,
             viewport_height: height,
@@ -66,6 +73,8 @@ impl Camera {
         Self {
             position: DVec3::new(0.0, 0.0, 10.0),
             rotation: DQuat::IDENTITY,
+            target: DVec3::ZERO,
+            up: DVec3::Y,
             projection: Projection::Perspective {
                 fov_y,
                 near: 0.1,
@@ -76,6 +85,74 @@ impl Camera {
             viewport_offset_y: 0.0,
             viewport_scale: 1.0,
         }
+    }
+
+    /// Sets this camera to look at `target` from `eye` with the given `up`.
+    pub fn look_at(&mut self, eye: DVec3, target: DVec3, up: DVec3) {
+        self.position = eye;
+        self.target = target;
+        self.up = up;
+        let view = DMat4::look_at_rh(eye, target, up);
+        // view = (T*R)^-1  => T*R = view.inverse()
+        let cam_to_world = view.inverse();
+        let (_scale, rot, _trans) = cam_to_world.to_scale_rotation_translation();
+        self.rotation = rot;
+    }
+
+    /// Orbits around `target` by yaw/pitch deltas (radians). Pitch clamped to +-89°.
+    pub fn orbit_around_target(&mut self, delta_yaw: f64, delta_pitch: f64) {
+        let dir = self.position - self.target;
+        let radius = dir.length().max(0.01);
+        let mut yaw = f64::atan2(dir.x, dir.z);
+        let mut pitch = (dir.y / radius).asin();
+        yaw += delta_yaw;
+        pitch = (pitch + delta_pitch).clamp(-1.5533, 1.5533); // ~89°
+        let cp = pitch.cos();
+        let sp = pitch.sin();
+        let cy = yaw.cos();
+        let sy = yaw.sin();
+        let new_dir = DVec3::new(sy * cp, sp, cy * cp) * radius;
+        self.position = self.target + new_dir;
+        self.look_at(self.position, self.target, self.up);
+    }
+
+    /// Pan in screen space (pixels scaled to world).
+    pub fn pan_screen_delta(&mut self, delta: DVec2) {
+        // Right and up vectors from rotation
+        let right = self.rotation * DVec3::X;
+        let up_dir = self.rotation * DVec3::Y;
+        // Scale delta by distance for perspective, or 1/zoom for ortho
+        let scale = match self.projection {
+            Projection::Perspective { .. } => (self.position - self.target).length() * 0.002,
+            Projection::Orthographic { zoom } => 1.0 / (zoom * self.viewport_scale).max(0.1),
+        };
+        let move_vec = -right * delta.x * scale + up_dir * delta.y * scale;
+        self.position += move_vec;
+        self.target += move_vec;
+    }
+
+    /// Dolly (move closer/further to target) by factor (<1 closer, >1 further).
+    pub fn dolly(&mut self, factor: f64) {
+        let dir = self.position - self.target;
+        let new_pos = self.target + dir * factor.clamp(0.1, 10.0);
+        // Prevent crossing target
+        if (new_pos - self.target).length() > 0.1 {
+            self.position = new_pos;
+        }
+    }
+
+    /// Set perspective projection parameters.
+    pub fn set_perspective(&mut self, fov_y: f64, near: f64, far: f64) {
+        self.projection = Projection::Perspective { fov_y, near, far };
+    }
+
+    /// Spherical coords (radius, yaw, pitch) relative to target.
+    pub fn spherical(&self) -> (f64, f64, f64) {
+        let dir = self.position - self.target;
+        let r = dir.length();
+        let yaw = f64::atan2(dir.x, dir.z);
+        let pitch = if r > 1e-9 { (dir.y / r).asin() } else { 0.0 };
+        (r, yaw, pitch)
     }
 
     /// Computes the double-precision view matrix.
@@ -153,6 +230,18 @@ impl Camera {
             let t = -near_world.z / dir_z;
             near_world + (far_world - near_world) * t
         }
+    }
+
+    /// Computes a world-space ray from a screen position (for 3D picking).
+    pub fn screen_to_ray(&self, screen: DVec2) -> (DVec3, DVec3) {
+        let view_proj = self.projection_matrix() * self.view_matrix();
+        let inv = view_proj.inverse();
+        let ndc_x = (screen.x / (self.viewport_width as f64)) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (screen.y / (self.viewport_height as f64)) * 2.0;
+        let near = inv.project_point3(DVec3::new(ndc_x, ndc_y, -1.0));
+        let far = inv.project_point3(DVec3::new(ndc_x, ndc_y, 1.0));
+        let dir = (far - near).normalize_or_zero();
+        (near, dir)
     }
 }
 

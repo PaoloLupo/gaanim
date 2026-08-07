@@ -322,6 +322,15 @@ impl PyDrawable {
     fn at(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().at(x, y))
     }
+    fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self(self.0.clone().at_3d(x, y, z))
+    }
+    fn billboard(&self) -> Self {
+        Self(self.0.clone().billboard())
+    }
+    fn hud(&self) -> Self {
+        Self(self.0.clone().hud())
+    }
     fn scaled(&self, factor: f64) -> Self {
         Self(self.0.clone().scaled(factor))
     }

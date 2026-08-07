@@ -211,6 +211,20 @@ pub enum PropertyLensSpec {
         amplitude: f64,
         frequency: f64,
     },
+    /// Tween the camera's look-at target (for orbit/look_at).
+    CameraTarget {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_core::glam::DVec3,
+    },
+    /// Tween perspective projection fov/near/far.
+    CameraPerspective {
+        from_fov: f64,
+        to_fov: f64,
+        from_near: f64,
+        to_near: f64,
+        from_far: f64,
+        to_far: f64,
+    },
     /// Move the entity's translation along a Bézier path. Sampled at
     /// the rate-function-eased `t` and applied as the entity's
     /// world-space translation.
@@ -300,6 +314,25 @@ impl PropertyLensSpec {
                 origin: *origin,
                 amplitude: *amplitude,
                 frequency: *frequency,
+            },
+            Self::CameraTarget { from, to } => PropertyLens::CameraTarget {
+                from: *from,
+                to: *to,
+            },
+            Self::CameraPerspective {
+                from_fov,
+                to_fov,
+                from_near,
+                to_near,
+                from_far,
+                to_far,
+            } => PropertyLens::CameraPerspective {
+                from_fov: *from_fov,
+                to_fov: *to_fov,
+                from_near: *from_near,
+                to_near: *to_near,
+                from_far: *from_far,
+                to_far: *to_far,
             },
             Self::PathFollow { path } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),

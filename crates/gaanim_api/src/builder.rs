@@ -6,10 +6,11 @@ use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
 use gaanim_math::matching::{MatchingConfig, MatchingMode, MatchItem};
-use gaanim_math::{Bounds3D, EasingCurve, SpatialTransform};
+use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
-    FillBrush, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, StrokeBrush, Visible,
+    Billboard, FillBrush, GroupMarker, HudOverlay, LineListData, LocalBounds, Mesh3DMarker,
+    MobjectId, ObjectTag, Opacity, RenderLayer, StrokeBrush, TriangleMeshData, Visible,
     WorldBounds,
 };
 use gaanim_text::font::FontRegistry;
@@ -549,7 +550,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Returns the per-mobject track for the given target, creating a new
     /// numbered track if this is the first time we see this ObjectId.
-    fn ensure_track(&mut self, target: ObjectId) -> TrackId {
+    pub(crate) fn ensure_track(&mut self, target: ObjectId) -> TrackId {
         let current_scene = self.current_scene;
         *self.mobject_tracks.entry(target).or_insert_with(|| {
             self.next_track += 1;
@@ -3983,6 +3984,126 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             bundle,
             parent_entity: None,
         }
+    }
+
+    /// Spawns a 3D triangle mesh (surface) from world-space vertices and indices.
+    pub fn spawn_triangle_mesh(
+        &mut self,
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        color: Option<Color>,
+    ) -> MobjectRef {
+        let id = self.next_id();
+        // Compute bounds
+        let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+        let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+        for v in &vertices {
+            let p = gaanim_core::glam::DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64);
+            min = min.min(p);
+            max = max.max(p);
+        }
+        if min.x == f64::INFINITY {
+            min = gaanim_core::glam::DVec3::ZERO;
+            max = gaanim_core::glam::DVec3::ZERO;
+        }
+        let bounds = Bounds3D::new(min, max);
+        let entity = self
+            .commands
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                LocalBounds(bounds),
+                WorldBounds::default(),
+                TriangleMeshData {
+                    vertices,
+                    indices,
+                    color,
+                },
+                Mesh3DMarker,
+                RenderLayer::Wgpu3D,
+                Visible,
+                Opacity(1.0),
+                gaanim_scene::GlobalOpacity(1.0),
+                FillBrush(None),
+                StrokeBrush::transparent(),
+                ObjectTag("Surface3D".to_string()),
+            ))
+            .id();
+        self.tag_entity(entity);
+        let state = MobjectState {
+            path: std::sync::Arc::new(kurbo::BezPath::new()),
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: color.map(|c| Brush::Solid(c)),
+            stroke: StrokeBrush::transparent(),
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+        };
+        self.states.insert(id, state);
+        MobjectRef { id }
+    }
+
+    /// Spawns a 3D line list (axes, grids) from world-space points.
+    pub fn spawn_line_list(
+        &mut self,
+        points: Vec<[f32; 3]>,
+        color: Color,
+    ) -> MobjectRef {
+        let id = self.next_id();
+        let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+        let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+        for v in &points {
+            let p = gaanim_core::glam::DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64);
+            min = min.min(p);
+            max = max.max(p);
+        }
+        if min.x == f64::INFINITY {
+            min = gaanim_core::glam::DVec3::ZERO;
+            max = gaanim_core::glam::DVec3::ZERO;
+        }
+        let bounds = Bounds3D::new(min, max);
+        let entity = self
+            .commands
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                LocalBounds(bounds),
+                WorldBounds::default(),
+                LineListData {
+                    points,
+                    indices: None,
+                    color,
+                },
+                Mesh3DMarker,
+                RenderLayer::Wgpu3D,
+                Visible,
+                Opacity(1.0),
+                gaanim_scene::GlobalOpacity(1.0),
+                FillBrush(None),
+                StrokeBrush::transparent(),
+                ObjectTag("Line3D".to_string()),
+            ))
+            .id();
+        self.tag_entity(entity);
+        let state = MobjectState {
+            path: std::sync::Arc::new(kurbo::BezPath::new()),
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: None,
+            stroke: StrokeBrush::transparent(),
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+        };
+        self.states.insert(id, state);
+        MobjectRef { id }
     }
 
     /// Spawns a curved arrow primitive.

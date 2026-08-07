@@ -1,8 +1,10 @@
 use crate::components::{
-    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, Opacity, StrokeBrush, WorldBounds,
+    Billboard, FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Mesh3DMarker,
+    Opacity, StrokeBrush, TriangleMeshData, WorldBounds,
 };
 use bevy::prelude::{
-    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, With, Without,
+    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, Res, ResMut, With,
+    Without,
 };
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 
@@ -158,7 +160,9 @@ pub fn world_bounds_propagation_system(
     mut query: Query<(&LocalBounds, &GlobalSpatialTransform, &mut WorldBounds)>,
 ) {
     for (local, global, mut world) in &mut query {
-        world.0 = local.0.transform_2d(&global.affine_2d);
+        // Use full 3D transform so that rotated/scaled 3D objects get correct AABB.
+        // For pure 2D objects mat4 == affine_2d lifted to 3D, so result is identical to 2D path.
+        world.0 = local.0.transform_mat4(&global.mat4);
     }
 }
 
@@ -170,9 +174,16 @@ pub fn world_bounds_fallback_system(
     >,
 ) {
     for (global, mut world) in &mut query {
-        // Approximate a 1x1 unit box centered at the transform's translation.
-        let pos = global.affine_2d * gaanim_core::kurbo::Point::new(0.0, 0.0);
-        world.0 = gaanim_math::Bounds3D::new_2d(pos.x - 0.5, pos.y - 0.5, pos.x + 0.5, pos.y + 0.5);
+        // Use 3D mat4 to extract true world position (supports 3D groups).
+        let pos = global.mat4.transform_point3(gaanim_core::glam::DVec3::ZERO);
+        world.0 = gaanim_math::Bounds3D::new_3d(
+            pos.x - 0.5,
+            pos.y - 0.5,
+            pos.z - 0.5,
+            pos.x + 0.5,
+            pos.y + 0.5,
+            pos.z + 0.5,
+        );
     }
 }
 
@@ -298,6 +309,121 @@ fn propagate_style_recursive(
         }
         // Recurse into children of children
         propagate_style_recursive(child, fill_val, stroke_val, children_query, style_query);
+    }
+}
+
+/// System: Sync `GlobalSpatialTransform::mat4` to Bevy `Transform` for 3D mesh entities.
+pub fn sync_3d_mesh_transform_system(
+    mut query: Query<(&GlobalSpatialTransform, &mut bevy::prelude::Transform), With<crate::components::Mesh3DMarker>>,
+) {
+    for (global, mut transform) in &mut query {
+        let (scale, rot, trans) = global.mat4.to_scale_rotation_translation();
+        transform.translation = bevy::prelude::Vec3::new(trans.x as f32, trans.y as f32, trans.z as f32);
+        transform.rotation = bevy::prelude::Quat::from_xyzw(
+            rot.x as f32, rot.y as f32, rot.z as f32, rot.w as f32,
+        );
+        transform.scale = bevy::prelude::Vec3::new(scale.x as f32, scale.y as f32, scale.z as f32);
+    }
+}
+
+/// System: Billboard - make entities face the camera (for 3D labels).
+pub fn billboard_system(
+    camera: Option<bevy::prelude::Res<gaanim_math::Camera>>,
+    mut query: Query<(&mut GlobalSpatialTransform, Option<&mut bevy::prelude::Transform>), With<crate::components::Billboard>>,
+) {
+    let Some(cam) = camera else { return };
+    let cam_rot = cam.rotation;
+    for (mut global, transform_opt) in &mut query {
+        // Preserve world position and scale, replace rotation with camera rotation.
+        let world = global.mat4;
+        let (scale, _rot, trans) = world.to_scale_rotation_translation();
+        let billboard_mat = gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
+        global.mat4 = billboard_mat;
+        // Also update Affine for Vello fallback (use world pos XY and camera Z angle)
+        let z_angle = cam.z_angle();
+        global.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
+            * gaanim_core::kurbo::Affine::rotate(-z_angle)
+            * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
+        if let Some(mut t) = transform_opt {
+            let (scale_d, _, trans_d) = billboard_mat.to_scale_rotation_translation();
+            t.translation = bevy::prelude::Vec3::new(trans_d.x as f32, trans_d.y as f32, trans_d.z as f32);
+            t.rotation = bevy::prelude::Quat::from_xyzw(
+                cam_rot.x as f32,
+                cam_rot.y as f32,
+                cam_rot.z as f32,
+                cam_rot.w as f32,
+            );
+            t.scale = bevy::prelude::Vec3::new(scale_d.x as f32, scale_d.y as f32, scale_d.z as f32);
+        }
+    }
+}
+
+/// System: Build Bevy Meshes from raw Triangle/Line data components.
+///
+/// Converts `TriangleMeshData` and `LineListData` into `Mesh3d` + `MeshMaterial3d` + `Transform`.
+pub fn build_3d_meshes_system(
+    mut commands: bevy::prelude::Commands,
+    mut meshes: ResMut<bevy::prelude::Assets<bevy::mesh::Mesh>>,
+    mut materials: ResMut<bevy::prelude::Assets<bevy::pbr::StandardMaterial>>,
+    query_tri: Query<(Entity, &TriangleMeshData), (Without<bevy::prelude::Mesh3d>, Without<LineListData>)>,
+    query_line: Query<(Entity, &LineListData), (Without<bevy::prelude::Mesh3d>, Without<TriangleMeshData>)>,
+) {
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+    use bevy::asset::RenderAssetUsages;
+
+    for (entity, data) in &query_tri {
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let positions: Vec<[f32; 3]> = data.vertices.clone();
+        let indices = data.indices.clone();
+        // Compute simple normals (up) if not provided
+        let normals: Vec<[f32; 3]> = positions.iter().map(|_| [0.0, 1.0, 0.0]).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; mesh.count_vertices()]);
+        mesh.insert_indices(Indices::U32(indices));
+        let mesh_handle = meshes.add(mesh);
+        let color = data.color.map(|c| {
+            let rgba = c.to_rgba8();
+            bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
+        }).unwrap_or(bevy::color::Color::WHITE);
+        let mat = materials.add(bevy::pbr::StandardMaterial {
+            base_color: color,
+            double_sided: true,
+            cull_mode: None,
+            ..Default::default()
+        });
+        commands.entity(entity).insert((
+            bevy::prelude::Mesh3d(mesh_handle),
+            bevy::prelude::MeshMaterial3d::<bevy::pbr::StandardMaterial>(mat),
+            bevy::prelude::Transform::default(),
+            bevy::prelude::Visibility::default(),
+            Mesh3DMarker,
+        ));
+    }
+
+    for (entity, data) in &query_line {
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default());
+        let positions = data.points.clone();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        // Bevy line meshes don't need indices if sequential, but we support them
+        if let Some(idx) = &data.indices {
+            mesh.insert_indices(Indices::U32(idx.clone()));
+        }
+        let mesh_handle = meshes.add(mesh);
+        let rgba = data.color.to_rgba8();
+        let color = bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
+        let mat = materials.add(bevy::pbr::StandardMaterial {
+            base_color: color,
+            unlit: true,
+            ..Default::default()
+        });
+        commands.entity(entity).insert((
+            bevy::prelude::Mesh3d(mesh_handle),
+            bevy::prelude::MeshMaterial3d::<bevy::pbr::StandardMaterial>(mat),
+            bevy::prelude::Transform::default(),
+            bevy::prelude::Visibility::default(),
+            Mesh3DMarker,
+        ));
     }
 }
 

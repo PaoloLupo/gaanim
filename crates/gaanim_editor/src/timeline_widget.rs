@@ -2064,7 +2064,9 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
         | PropertyLensSpec::CameraRotation { .. }
         | PropertyLensSpec::CameraZoom { .. }
         | PropertyLensSpec::CameraFollow { .. }
-        | PropertyLensSpec::CameraShake { .. } => Color32::from_rgb(100, 100, 100),
+        | PropertyLensSpec::CameraShake { .. }
+        | PropertyLensSpec::CameraTarget { .. }
+        | PropertyLensSpec::CameraPerspective { .. } => Color32::from_rgb(100, 100, 100),
         PropertyLensSpec::PathFollow { .. } => Color32::from_rgb(26, 188, 156),
         PropertyLensSpec::SignalFloat { .. } => Color32::from_rgb(180, 180, 50),
         PropertyLensSpec::PathRange { .. } => Color32::from_rgb(255, 105, 180),
@@ -2090,6 +2092,8 @@ fn clip_icon(payload: &ClipPayload) -> &'static str {
             PropertyLensSpec::CameraZoom { .. } => "🔍",
             PropertyLensSpec::CameraFollow { .. } => "🎯",
             PropertyLensSpec::CameraShake { .. } => "〰",
+            PropertyLensSpec::CameraTarget { .. } => "🎯",
+            PropertyLensSpec::CameraPerspective { .. } => "🔭",
             PropertyLensSpec::PathFollow { .. } => "➰",
             PropertyLensSpec::SignalFloat { .. } => "📈",
             PropertyLensSpec::PathRange { .. } => "⚡",
@@ -2132,6 +2136,8 @@ fn clip_label(payload: &ClipPayload) -> String {
                 PropertyLensSpec::CameraZoom { .. } => "Zoom",
                 PropertyLensSpec::CameraFollow { .. } => "CamFollow",
                 PropertyLensSpec::CameraShake { .. } => "CamShake",
+                PropertyLensSpec::CameraTarget { .. } => "CamTarget",
+                PropertyLensSpec::CameraPerspective { .. } => "CamPersp",
                 PropertyLensSpec::PathFollow { .. } => "Follow",
                 PropertyLensSpec::SignalFloat { .. } => "Signal",
                 PropertyLensSpec::PathRange { .. } => "Flash",

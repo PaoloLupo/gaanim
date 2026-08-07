@@ -46,16 +46,38 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
     canvas.register_theme_fonts(&mut font_registry);
 
     {
-        let has_camera = world
+        let has_camera_2d = world
             .query_filtered::<Entity, With<Camera2d>>()
+            .iter(world)
+            .next()
+            .is_some();
+        let has_camera_3d = world
+            .query_filtered::<Entity, With<Camera3d>>()
             .iter(world)
             .next()
             .is_some();
 
         let mut commands = world.commands();
         commands.insert_resource(Camera::ortho_2d(width, height));
-        if !has_camera {
-            commands.spawn((Camera2d, VelloView));
+        if !has_camera_2d {
+            commands.spawn((
+                Camera2d,
+                VelloView,
+                bevy::core_pipeline::tonemapping::Tonemapping::None,
+            ));
+        }
+        if !has_camera_3d {
+            // Perspective camera for 3D meshes (PBR). Render after 2D so overlay text remains on top.
+            // Use Tonemapping::None to avoid requiring tonemapping_luts feature (which needs zstd).
+            commands.spawn((
+                Camera3d::default(),
+                bevy::prelude::Camera {
+                    order: 1,
+                    clear_color: ClearColorConfig::None,
+                    ..default()
+                },
+                bevy::core_pipeline::tonemapping::Tonemapping::None,
+            ));
         }
 
         canvas.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);

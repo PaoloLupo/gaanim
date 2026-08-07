@@ -627,6 +627,42 @@ impl Canvas {
             config,
         })
     }
+
+    /// Creates 3D Cartesian axes with three grid planes and perspective support.
+    pub fn axes_3d(
+        &mut self,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        z_range: (f64, f64, f64),
+        config: crate::canvas::types::Axes3DConfig,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Axes3D {
+            x_range,
+            y_range,
+            z_range,
+            config,
+        })
+    }
+
+    /// Creates a triangulated 3D surface mesh in world space.
+    /// Vertices are expected in world coordinates (use `axes_3d` scale to compute).
+    pub fn surface_mesh(
+        &mut self,
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        color: Option<Color>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::SurfaceMesh {
+            vertices,
+            indices,
+            color,
+        })
+    }
+
+    /// Creates a 3D polyline from world-space points.
+    pub fn polyline_3d(&mut self, points: Vec<[f32; 3]>) -> DrawableHandle {
+        self.spawn(SpawnKind::Polyline3D(points))
+    }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Text(s.to_string()))
     }
@@ -1257,6 +1293,63 @@ impl Canvas {
             frequency: frequency.max(0.0),
             duration,
         });
+    }
+
+    /// Set camera to look at `target` from `eye` with `up` (3D perspective).
+    pub fn camera_look_at(
+        &mut self,
+        eye: (f64, f64, f64),
+        target: (f64, f64, f64),
+        up: Option<(f64, f64, f64)>,
+        duration: f64,
+    ) {
+        let eye = DVec3::new(eye.0, eye.1, eye.2);
+        let target = DVec3::new(target.0, target.1, target.2);
+        let up = up
+            .map(|(x, y, z)| DVec3::new(x, y, z))
+            .unwrap_or(DVec3::Y);
+        let duration = duration.max(0.0);
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraLookAt {
+            eye,
+            target,
+            up,
+            duration,
+        });
+    }
+
+    /// Orbit around current target by yaw/pitch radians.
+    pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) {
+        let duration = duration.max(0.0);
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraOrbit {
+            delta_yaw,
+            delta_pitch,
+            duration,
+        });
+    }
+
+    /// Animate perspective projection parameters.
+    pub fn camera_perspective(&mut self, fov_y: f64, near: f64, far: f64, duration: f64) {
+        let duration = duration.max(0.0);
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraPerspective {
+            fov_y,
+            near: near.max(0.01),
+            far: far.max(near + 0.1),
+            duration,
+        });
+    }
+
+    /// Dolly camera toward/away from target (factor <1 closer).
+    pub fn camera_dolly(&mut self, factor: f64, duration: f64) {
+        let duration = duration.max(0.0);
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.active_mut().cursor += duration;
+        guard.active_mut().ops.push(Op::CameraDolly { factor, duration });
     }
 
     // -- Time controls --

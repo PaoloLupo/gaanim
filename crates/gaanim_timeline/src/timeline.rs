@@ -1307,6 +1307,32 @@ fn apply_lens_spec(
                 camera.position = *origin + offset;
             }
         }
+        PropertyLensSpec::CameraTarget { from, to } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.target = from.lerp(*to, t);
+                // Keep rotation consistent with look_at
+                let eye = camera.position;
+                let up = camera.up;
+                let view = gaanim_core::glam::DMat4::look_at_rh(eye, camera.target, up);
+                let rot = view.inverse().to_scale_rotation_translation().1;
+                camera.rotation = rot;
+            }
+        }
+        PropertyLensSpec::CameraPerspective {
+            from_fov,
+            to_fov,
+            from_near,
+            to_near,
+            from_far,
+            to_far,
+        } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                let fov = from_fov + (to_fov - from_fov) * t;
+                let near = from_near + (to_near - from_near) * t;
+                let far = from_far + (to_far - from_far) * t;
+                camera.projection = gaanim_math::Projection::Perspective { fov_y: fov, near, far };
+            }
+        }
         PropertyLensSpec::PathFollow { path } => {
             // Sample the Bézier path at the eased `t` and set the
             // entity's translation to the sampled world point.

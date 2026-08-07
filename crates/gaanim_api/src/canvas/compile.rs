@@ -7,8 +7,11 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{Point, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
-use gaanim_math::Bounds3D;
-use gaanim_scene::{FillBrush, Opacity, RenderOrder, StrokeBrush, Visible};
+use gaanim_math::{Bounds3D, GlobalSpatialTransform};
+use gaanim_scene::{
+    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, RenderOrder,
+    StrokeBrush, Visible, WorldBounds,
+};
 use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::{PresentationSlide, PresentationStep, Timeline};
 
@@ -446,6 +449,352 @@ impl Canvas {
         builder.group(&children)
     }
 
+    fn styled_axes_3d(
+        builder: &mut SceneBuilder<'_, '_, '_>,
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        z_range: (f64, f64, f64),
+        config: &crate::canvas::types::Axes3DConfig,
+        frame_bounds: Bounds3D,
+    ) -> MobjectRef {
+        let (x_min, x_max, x_step) = x_range;
+        let (y_min, y_max, y_step) = y_range;
+        let (z_min, z_max, z_step) = z_range;
+        let avail_w = frame_bounds.width().max(1.0);
+        let avail_h = frame_bounds.height().max(1.0);
+        let manim_frame_w: f64 = 14.222222222222221;
+        let manim_frame_h: f64 = 8.0;
+        let (scale_x, scale_y, scale_z, x_center, y_center, z_center) =
+            match (config.x_length, config.y_length, config.z_length) {
+                (Some(xl), Some(yl), Some(zl)) => {
+                    let scene_xl = xl * avail_w / manim_frame_w;
+                    let scene_yl = yl * avail_h / manim_frame_h;
+                    let scene_zl = zl * avail_w / manim_frame_w;
+                    let sx = scene_xl / (x_max - x_min).max(1e-9);
+                    let sy = scene_yl / (y_max - y_min).max(1e-9);
+                    let sz = scene_zl / (z_max - z_min).max(1e-9);
+                    (sx, sy, sz, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5, (z_min + z_max) * 0.5)
+                }
+                _ if config.auto_fit => {
+                    let data_w = (x_max - x_min).max(1e-9);
+                    let data_h = (y_max - y_min).max(1e-9);
+                    let data_d = (z_max - z_min).max(1e-9);
+                    let s = (avail_w / data_w).min(avail_h / data_h).min(avail_w / data_d);
+                    (s, s, s, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5, (z_min + z_max) * 0.5)
+                }
+                _ => (1.0, 1.0, 1.0, 0.0, 0.0, 0.0),
+            };
+        let sx = |x: f64| (x - x_center) * scale_x;
+        let sy = |y: f64| (y - y_center) * scale_y;
+        let sz = |z: f64| (z - z_center) * scale_z;
+        let bounds = Bounds3D::new_3d(
+            sx(x_min),
+            sy(y_min),
+            sz(z_min),
+            sx(x_max),
+            sy(y_max),
+            sz(z_max),
+        );
+        let mut children = Vec::new();
+
+        // Helper to push a 3D line list
+        let mut push_line_list = |points: Vec<[f32; 3]>, color: peniko::Color, tag: &str| {
+            if points.len() < 2 { return; }
+            let mref = builder.spawn_line_list(points, color);
+            // Tag for debugging
+            if let Some(state) = builder.states.get_mut(mref.id) {
+                state.bounds = bounds;
+            }
+            children.push(mref);
+        };
+
+        // 3 grid planes
+        if config.grid {
+            // XY plane at z=0 (if z range includes 0)
+            if config.xy_grid && z_min <= 0.0 && z_max >= 0.0 {
+                let z0 = sz(0.0) as f32;
+                {
+                    let mut x = (x_min / x_step).ceil() * x_step;
+                    while x <= x_max + 1e-9 {
+                        if x.abs() > 1e-9 {
+                            let fx = sx(x) as f32;
+                            let y0 = sy(y_min) as f32;
+                            let y1 = sy(y_max) as f32;
+                            let points = vec![[fx, y0, z0], [fx, y1, z0]];
+                            push_line_list(points, config.grid_color, "Axes3DGridXY");
+                        }
+                        x += x_step;
+                    }
+                }
+                {
+                    let mut y = (y_min / y_step).ceil() * y_step;
+                    while y <= y_max + 1e-9 {
+                        if y.abs() > 1e-9 {
+                            let fy = sy(y) as f32;
+                            let x0 = sx(x_min) as f32;
+                            let x1 = sx(x_max) as f32;
+                            let points = vec![[x0, fy, z0], [x1, fy, z0]];
+                            push_line_list(points, config.grid_color, "Axes3DGridXY");
+                        }
+                        y += y_step;
+                    }
+                }
+            }
+            // XZ plane at y=0
+            if config.xz_grid && y_min <= 0.0 && y_max >= 0.0 {
+                let y0 = sy(0.0) as f32;
+                {
+                    let mut x = (x_min / x_step).ceil() * x_step;
+                    while x <= x_max + 1e-9 {
+                        if x.abs() > 1e-9 {
+                            let fx = sx(x) as f32;
+                            let z0 = sz(z_min) as f32;
+                            let z1 = sz(z_max) as f32;
+                            let points = vec![[fx, y0, z0], [fx, y0, z1]];
+                            push_line_list(points, config.grid_color, "Axes3DGridXZ");
+                        }
+                        x += x_step;
+                    }
+                }
+                {
+                    // reuse z step for grid density in XZ
+                    let mut z = (z_min / z_step).ceil() * z_step;
+                    while z <= z_max + 1e-9 {
+                        if z.abs() > 1e-9 {
+                            let fz = sz(z) as f32;
+                            let x0 = sx(x_min) as f32;
+                            let x1 = sx(x_max) as f32;
+                            let points = vec![[x0, y0, fz], [x1, y0, fz]];
+                            push_line_list(points, config.grid_color, "Axes3DGridXZ");
+                        }
+                        z += z_step;
+                    }
+                }
+            }
+            // YZ plane at x=0
+            if config.yz_grid && x_min <= 0.0 && x_max >= 0.0 {
+                let x0 = sx(0.0) as f32;
+                {
+                    let mut y = (y_min / y_step).ceil() * y_step;
+                    while y <= y_max + 1e-9 {
+                        if y.abs() > 1e-9 {
+                            let fy = sy(y) as f32;
+                            let z0 = sz(z_min) as f32;
+                            let z1 = sz(z_max) as f32;
+                            let points = vec![[x0, fy, z0], [x0, fy, z1]];
+                            push_line_list(points, config.grid_color, "Axes3DGridYZ");
+                        }
+                        y += y_step;
+                    }
+                }
+                {
+                    let mut z = (z_min / z_step).ceil() * z_step;
+                    while z <= z_max + 1e-9 {
+                        if z.abs() > 1e-9 {
+                            let fz = sz(z) as f32;
+                            let y0 = sy(y_min) as f32;
+                            let y1 = sy(y_max) as f32;
+                            let points = vec![[x0, y0, fz], [x0, y1, fz]];
+                            push_line_list(points, config.grid_color, "Axes3DGridYZ");
+                        }
+                        z += z_step;
+                    }
+                }
+            }
+        }
+
+        // Axes lines (3)
+        {
+            let mut axes_points = Vec::new();
+            if config.x_axis && y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                axes_points.push([sx(x_min) as f32, sy(0.0) as f32, sz(0.0) as f32]);
+                axes_points.push([sx(x_max) as f32, sy(0.0) as f32, sz(0.0) as f32]);
+            }
+            if config.y_axis && x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                axes_points.push([sx(0.0) as f32, sy(y_min) as f32, sz(0.0) as f32]);
+                axes_points.push([sx(0.0) as f32, sy(y_max) as f32, sz(0.0) as f32]);
+            }
+            if config.z_axis && x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0 {
+                axes_points.push([sx(0.0) as f32, sy(0.0) as f32, sz(z_min) as f32]);
+                axes_points.push([sx(0.0) as f32, sy(0.0) as f32, sz(z_max) as f32]);
+            }
+            if !axes_points.is_empty() {
+                // Each pair is a segment, need to split into separate line lists per axis to avoid connecting
+                for chunk in axes_points.chunks(2) {
+                    if chunk.len() == 2 {
+                        push_line_list(chunk.to_vec(), config.axis_color, "Axes3DLines");
+                    }
+                }
+            }
+        }
+
+        // Ticks (short segments perpendicular)
+        let tick_half = (config.tick_length * 0.5) as f32;
+        if config.ticks {
+            if config.x_ticks && y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                let mut x = (x_min / x_step).ceil() * x_step;
+                while x <= x_max + 1e-9 {
+                    let fx = sx(x) as f32;
+                    let y0 = sy(0.0) as f32;
+                    let z0 = sz(0.0) as f32;
+                    let points = vec![[fx, y0 - tick_half, z0], [fx, y0 + tick_half, z0]];
+                    push_line_list(points, config.tick_color, "Axes3DTicks");
+                    x += x_step;
+                }
+            }
+            if config.y_ticks && x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                let mut y = (y_min / y_step).ceil() * y_step;
+                while y <= y_max + 1e-9 {
+                    let fy = sy(y) as f32;
+                    let x0 = sx(0.0) as f32;
+                    let z0 = sz(0.0) as f32;
+                    let points = vec![[x0 - tick_half, fy, z0], [x0 + tick_half, fy, z0]];
+                    push_line_list(points, config.tick_color, "Axes3DTicks");
+                    y += y_step;
+                }
+            }
+            if config.z_ticks && x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0 {
+                let mut z = (z_min / z_step).ceil() * z_step;
+                while z <= z_max + 1e-9 {
+                    let fz = sz(z) as f32;
+                    let x0 = sx(0.0) as f32;
+                    let y0 = sy(0.0) as f32;
+                    let points = vec![[x0 - tick_half, y0, fz], [x0 + tick_half, y0, fz]];
+                    push_line_list(points, config.tick_color, "Axes3DTicks");
+                    z += z_step;
+                }
+            }
+        }
+
+        // Numbers and labels as billboarded text
+        let mut add_text = |text: &str, x: f64, y: f64, z: f64, color: peniko::Color| {
+            let label = builder.body(text);
+            if let Some(state) = builder.states.get_mut(label.id) {
+                // Position in 3D
+                state.transform = state.transform.shift_3d(gaanim_core::glam::DVec3::new(x, y, z));
+                builder.commands.entity(state.entity).insert(state.transform);
+                // Billboard handling
+                if config.label_mode == crate::canvas::types::LabelMode::Billboard {
+                    builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
+                    builder.commands.entity(state.entity).insert(gaanim_scene::Mesh3DMarker);
+                } else {
+                    builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
+                    builder.commands.entity(state.entity).insert(gaanim_scene::RenderLayer::Overlay);
+                }
+            }
+            builder.select(label, text).set_fill(color);
+            children.push(label);
+        };
+
+        if config.numbers {
+            if config.x_numbers && y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                let mut x = (x_min / x_step).ceil() * x_step;
+                while x <= x_max + 1e-9 {
+                    let value = if x.abs() < 1e-9 { 0.0 } else { x };
+                    let text = format!("{value}");
+                    add_text(&text, sx(x), sy(0.0) - config.tick_length * 0.5 - 14.0, sz(0.0), config.number_color);
+                    x += x_step;
+                }
+            }
+            if config.y_numbers && x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0 {
+                let mut y = (y_min / y_step).ceil() * y_step;
+                while y <= y_max + 1e-9 {
+                    if y.abs() > 1e-9 || !config.x_numbers {
+                        let value = if y.abs() < 1e-9 { 0.0 } else { y };
+                        let text = format!("{value}");
+                        add_text(&text, sx(0.0) - config.tick_length * 0.5 - 20.0, sy(y), sz(0.0), config.number_color);
+                    }
+                    y += y_step;
+                }
+            }
+            if config.z_numbers && x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0 {
+                let mut z = (z_min / z_step).ceil() * z_step;
+                while z <= z_max + 1e-9 {
+                    if z.abs() > 1e-9 {
+                        let value = if z.abs() < 1e-9 { 0.0 } else { z };
+                        let text = format!("{value}");
+                        add_text(&text, sx(0.0) - 20.0, sy(0.0), sz(z), config.number_color);
+                    }
+                    z += z_step;
+                }
+            }
+        }
+
+        if config.labels {
+            if let Some(label) = config.x_label.as_deref().filter(|_| y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
+                add_text(label, sx(x_max) + 18.0, sy(0.0), sz(0.0), config.label_color);
+            }
+            if let Some(label) = config.y_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
+                add_text(label, sx(0.0), sy(y_max) + 12.0, sz(0.0), config.label_color);
+            }
+            if let Some(label) = config.z_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0) {
+                add_text(label, sx(0.0), sy(0.0), sz(z_max) + 12.0, config.label_color);
+            }
+        }
+
+        // Ensure a light exists for PBR visibility (once per scene)
+        // Use a unique check to avoid spawning many lights if axes_3d is called multiple times
+        // For now, spawn a single directional light at world origin
+        builder.commands.spawn((
+            bevy::prelude::DirectionalLight {
+                illuminance: 10000.0,
+                shadows_enabled: false,
+                ..Default::default()
+            },
+            bevy::prelude::Transform::from_xyz(4.0, 8.0, 4.0).looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
+        ));
+
+        // Create a 3D-aware group that has both SpatialTransform and Bevy Transform
+        // to avoid B0004 hierarchy warnings for mesh children
+        let group_id = builder.next_id();
+        let group_entity = builder
+            .commands
+            .spawn((
+                GroupMarker,
+                MobjectId(group_id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                bevy::prelude::Transform::default(),
+                bevy::prelude::Visibility::default(),
+                Opacity(1.0),
+                GlobalOpacity(1.0),
+                LocalBounds(bounds),
+                WorldBounds(bounds),
+                RenderOrder::default(),
+                Visible,
+                ObjectTag("Axes3D".to_string()),
+            ))
+            .id();
+        builder.tag_entity(group_entity);
+        let state = MobjectState {
+            path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: None,
+            stroke: StrokeBrush::transparent(),
+            entity: group_entity,
+            child_spans: Vec::new(),
+            children: children.iter().map(|c| c.id).collect(),
+            parent: None,
+        };
+        builder.states.insert(group_id, state);
+        for child in &children {
+            if let Some(child_state) = builder.states.get_mut(child.id) {
+                child_state.parent = Some(group_id);
+                builder
+                    .commands
+                    .entity(child_state.entity)
+                    .set_parent_in_place(group_entity);
+            }
+        }
+        builder.ensure_track(group_id);
+        for child in &children {
+            builder.ensure_track(child.id);
+        }
+        MobjectRef { id: group_id }
+    }
+
     fn visual_leaf_ids(builder: &SceneBuilder<'_, '_, '_>, root: ObjectId) -> Vec<ObjectId> {
         let mut leaves = Vec::new();
         let mut stack = vec![root];
@@ -527,6 +876,8 @@ impl Canvas {
         let mut camera_position = DVec3::ZERO;
         let mut camera_zoom = 1.0;
         let mut camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
+        let mut camera_target = DVec3::ZERO;
+        let mut camera_fov: Option<(f64, f64, f64)> = None; // (fov_y, near, far) if perspective
         let mut cancellation_marks: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
         let mut canceled_term_children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
         // Raw bounds for the canvas background (visual, no margin).
@@ -553,6 +904,8 @@ impl Canvas {
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
+                &mut camera_target,
+                &mut camera_fov,
                 &mut cancellation_marks,
                 &mut canceled_term_children,
             );
@@ -633,6 +986,8 @@ impl Canvas {
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
+        camera_target: &mut DVec3,
+        camera_fov: &mut Option<(f64, f64, f64)>,
         cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
         canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
     ) {
@@ -1628,6 +1983,193 @@ impl Canvas {
                     );
                     builder.wait(*duration);
                 }
+                Op::CameraLookAt {
+                    eye,
+                    target,
+                    up,
+                    duration,
+                } => {
+                    let from_eye = *camera_position;
+                    let to_eye = *eye;
+                    let from_target = *camera_target;
+                    let to_target = *target;
+                    // Compute rotations via look_at
+                    let from_rot = *camera_rotation;
+                    let view_to = gaanim_core::glam::DMat4::look_at_rh(to_eye, to_target, *up);
+                    let to_rot = view_to.inverse().to_scale_rotation_translation().1;
+                    // Position clip
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
+                                    from: from_eye,
+                                    to: to_eye,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    // Target clip
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraTarget {
+                                    from: from_target,
+                                    to: to_target,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    // Rotation clip
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraRotation {
+                                    from: from_rot,
+                                    to: to_rot,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    *camera_position = to_eye;
+                    *camera_target = to_target;
+                    *camera_rotation = to_rot;
+                    builder.wait(*duration);
+                }
+                Op::CameraOrbit {
+                    delta_yaw,
+                    delta_pitch,
+                    duration,
+                } => {
+                    // Compute destination via spherical orbit around target
+                    let mut temp_cam = gaanim_math::Camera::ortho_2d(1, 1);
+                    temp_cam.position = *camera_position;
+                    temp_cam.target = *camera_target;
+                    temp_cam.rotation = *camera_rotation;
+                    temp_cam.up = gaanim_core::glam::DVec3::Y;
+                    temp_cam.projection = if let Some((fov, near, far)) = *camera_fov {
+                        gaanim_math::Projection::Perspective { fov_y: fov, near, far }
+                    } else {
+                        gaanim_math::Projection::Orthographic { zoom: *camera_zoom }
+                    };
+                    let from_pos = *camera_position;
+                    let from_rot = *camera_rotation;
+                    temp_cam.orbit_around_target(*delta_yaw, *delta_pitch);
+                    let to_pos = temp_cam.position;
+                    let to_rot = temp_cam.rotation;
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
+                                    from: from_pos,
+                                    to: to_pos,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraRotation {
+                                    from: from_rot,
+                                    to: to_rot,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    *camera_position = to_pos;
+                    *camera_rotation = to_rot;
+                    builder.wait(*duration);
+                }
+                Op::CameraPerspective {
+                    fov_y,
+                    near,
+                    far,
+                    duration,
+                } => {
+                    let (from_fov, from_near, from_far) = (*camera_fov).unwrap_or((std::f64::consts::FRAC_PI_4, 0.1, 1000.0));
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPerspective {
+                                    from_fov,
+                                    to_fov: *fov_y,
+                                    from_near,
+                                    to_near: *near,
+                                    from_far,
+                                    to_far: *far,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    *camera_fov = Some((*fov_y, *near, *far));
+                    builder.wait(*duration);
+                }
+                Op::CameraDolly { factor, duration } => {
+                    let from_pos = *camera_position;
+                    let dir = from_pos - *camera_target;
+                    let to_pos = *camera_target + dir * (*factor).clamp(0.1, 10.0);
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        *duration,
+                        gaanim_timeline::clip::ClipPayload::Animation(
+                            gaanim_timeline::clip::AnimationSpec {
+                                target: gaanim_core::ObjectId::from_parts(0, 1),
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
+                                    from: from_pos,
+                                    to: to_pos,
+                                },
+                                rate_func: gaanim_math::RateFunc::Smooth,
+                                delay: 0.0,
+                                label: None,
+                            },
+                        ),
+                    );
+                    *camera_position = to_pos;
+                    builder.wait(*duration);
+                }
                 Op::SetClip { target, mask, rule } => {
                     let Some(target) = id_map.get(target).copied() else {
                         continue;
@@ -2535,6 +3077,44 @@ impl Canvas {
                 Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
                 axes
             }
+            SpawnKind::Axes3D {
+                x_range,
+                y_range,
+                z_range,
+                config,
+            } => {
+                let axes = Self::styled_axes_3d(
+                    builder, *x_range, *y_range, *z_range, config, frame_bounds,
+                );
+                Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
+                axes
+            }
+            SpawnKind::SurfaceMesh {
+                vertices,
+                indices,
+                color,
+            } => {
+                let mref = builder.spawn_triangle_mesh(
+                    vertices.clone(),
+                    indices.clone(),
+                    *color,
+                );
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
+            SpawnKind::Polyline3D(points) => {
+                let base_color = spec
+                    .fill
+                    .as_ref()
+                    .and_then(|b| match b {
+                        gaanim_core::peniko::Brush::Solid(c) => Some(*c),
+                        _ => None,
+                    })
+                    .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
+                let mref = builder.spawn_line_list(points.clone(), base_color);
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
             SpawnKind::Text(t) => {
                 let role = gaanim_text::prelude::TextRole::Body;
                 let styled_spec =
@@ -2914,6 +3494,52 @@ impl Canvas {
             }
             if let Some(shadow) = &spec.shadow {
                 commands.insert(shadow.clone());
+            }
+        }
+        // Billboard / HUD chaining (.billboard() / .hud())
+        if spec.billboard {
+            let targets = if child_spans.is_empty() {
+                builder
+                    .states
+                    .get(id)
+                    .map(|s| vec![s.entity])
+                    .unwrap_or_default()
+            } else {
+                child_spans.iter().map(|c| c.entity).collect::<Vec<_>>()
+            };
+            for entity in targets {
+                builder.commands.entity(entity).insert(gaanim_scene::Billboard);
+                builder.commands.entity(entity).insert(bevy::prelude::Transform::default());
+            }
+            // Also mark root if it has no child_spans but is a Vello entity
+            if child_spans.is_empty() {
+                if let Some(state) = builder.states.get(id) {
+                    builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
+                    builder.commands.entity(state.entity).insert(bevy::prelude::Transform::default());
+                }
+            } else if let Some(state) = builder.states.get(id) {
+                // Mark group root as billboard as well for hierarchical cases
+                builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
+                builder.commands.entity(state.entity).insert(bevy::prelude::Transform::default());
+            }
+        }
+        if spec.hud {
+            let targets = if child_spans.is_empty() {
+                builder
+                    .states
+                    .get(id)
+                    .map(|s| vec![s.entity])
+                    .unwrap_or_default()
+            } else {
+                child_spans.iter().map(|c| c.entity).collect::<Vec<_>>()
+            };
+            for entity in targets {
+                builder.commands.entity(entity).insert(gaanim_scene::HudOverlay);
+                builder.commands.entity(entity).insert(gaanim_scene::RenderLayer::Overlay);
+            }
+            if let Some(state) = builder.states.get(id) {
+                builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
+                builder.commands.entity(state.entity).insert(gaanim_scene::RenderLayer::Overlay);
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);

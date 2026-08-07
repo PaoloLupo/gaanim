@@ -21,11 +21,15 @@ impl Plugin for GaanimRendererPlugin {
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();
 
-        // Register camera sync system in Bounds phase so the Bevy camera
-        // matches gaanim's Camera resource before Vello renders in Extraction.
+        // Register camera sync systems in Bounds phase so the Bevy cameras
+        // match gaanim's Camera resource before rendering in Extraction.
         app.add_systems(
             Update,
-            pipeline::sync_gaanim_camera_to_bevy_system.in_set(gaanim_scene::SceneSet::Bounds),
+            (
+                pipeline::sync_gaanim_camera_to_bevy_system,
+                pipeline::sync_gaanim_camera_to_bevy_3d_system,
+            )
+                .in_set(gaanim_scene::SceneSet::Bounds),
         );
 
         // Register cache cleanup systems before extraction.

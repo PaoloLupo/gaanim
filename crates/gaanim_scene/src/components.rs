@@ -208,3 +208,35 @@ pub struct TextSpan {
     /// The source span range in the original source markup text.
     pub source_range: core::range::Range<usize>,
 }
+
+/// Billboard component: makes an entity always face the camera (for 3D labels).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Billboard;
+
+/// HUD overlay marker: entity is rendered in screen-space overlay layer.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct HudOverlay;
+
+/// 3D mesh marker for PBR rendering (used to distinguish Wgpu3D meshes from Vello2D paths).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Mesh3DMarker;
+
+/// Raw triangle mesh data to be converted to Bevy `Mesh3d` at runtime.
+#[derive(Component, Debug, Clone)]
+pub struct TriangleMeshData {
+    pub vertices: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+    pub color: Option<gaanim_core::peniko::Color>,
+}
+
+/// Raw line list data (pairs of points) to be converted to Bevy `Mesh3d` line list.
+#[derive(Component, Debug, Clone)]
+pub struct LineListData {
+    pub points: Vec<[f32; 3]>,
+    /// Indices as line pairs. If None, points are sequential pairs.
+    pub indices: Option<Vec<u32>>,
+    pub color: gaanim_core::peniko::Color,
+}

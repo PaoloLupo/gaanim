@@ -114,12 +114,34 @@ impl Bounds3D {
         let min_x = p00.x.min(p01.x).min(p10.x).min(p11.x);
         let max_x = p00.x.max(p01.x).max(p10.x).max(p11.x);
         let min_y = p00.y.min(p01.y).min(p10.y).min(p11.y);
-        let max_y = p00.y.max(p01.y).max(p10.y).max(p11.y);
+        let max_y = p00.y.max(p01.y).max(p11.y);
 
         Self {
             min: DVec3::new(min_x, min_y, self.min.z),
             max: DVec3::new(max_x, max_y, self.max.z),
         }
+    }
+
+    /// Transforms the bounding box using a 4×4 double-precision matrix (for 3D).
+    pub fn transform_mat4(&self, mat: &gaanim_core::glam::DMat4) -> Self {
+        let corners = [
+            DVec3::new(self.min.x, self.min.y, self.min.z),
+            DVec3::new(self.min.x, self.min.y, self.max.z),
+            DVec3::new(self.min.x, self.max.y, self.min.z),
+            DVec3::new(self.min.x, self.max.y, self.max.z),
+            DVec3::new(self.max.x, self.min.y, self.min.z),
+            DVec3::new(self.max.x, self.min.y, self.max.z),
+            DVec3::new(self.max.x, self.max.y, self.min.z),
+            DVec3::new(self.max.x, self.max.y, self.max.z),
+        ];
+        let mut min = DVec3::splat(f64::INFINITY);
+        let mut max = DVec3::splat(f64::NEG_INFINITY);
+        for c in corners {
+            let t = mat.transform_point3(c);
+            min = min.min(t);
+            max = max.max(t);
+        }
+        Self { min, max }
     }
 }
 

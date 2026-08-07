@@ -178,6 +178,99 @@ impl Default for AxesConfig {
     }
 }
 
+/// How a 3D label should face the camera.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelMode {
+    /// Always faces the camera (billboard). Scales with distance.
+    #[default]
+    Billboard,
+    /// Fixed screen-space HUD overlay (does not scale with distance).
+    Hud,
+}
+
+/// Display and styling options for 3D Cartesian axes.
+///
+/// Extends `AxesConfig` with a third dimension, three grid planes,
+/// and perspective-aware label modes.
+#[derive(Debug, Clone)]
+pub struct Axes3DConfig {
+    pub grid: bool,
+    pub ticks: bool,
+    pub numbers: bool,
+    pub labels: bool,
+    pub x_axis: bool,
+    pub y_axis: bool,
+    pub z_axis: bool,
+    pub xy_grid: bool,
+    pub xz_grid: bool,
+    pub yz_grid: bool,
+    pub x_ticks: bool,
+    pub y_ticks: bool,
+    pub z_ticks: bool,
+    pub x_numbers: bool,
+    pub y_numbers: bool,
+    pub z_numbers: bool,
+    pub x_label: Option<String>,
+    pub y_label: Option<String>,
+    pub z_label: Option<String>,
+    pub label_mode: LabelMode,
+    pub axis_color: Color,
+    pub grid_color: Color,
+    pub tick_color: Color,
+    pub number_color: Color,
+    pub label_color: Color,
+    pub axis_width: f64,
+    pub grid_width: f64,
+    pub tick_width: f64,
+    pub tick_length: f64,
+    pub auto_fit: bool,
+    pub x_length: Option<f64>,
+    pub y_length: Option<f64>,
+    pub z_length: Option<f64>,
+    pub tips: bool,
+}
+
+impl Default for Axes3DConfig {
+    fn default() -> Self {
+        Self {
+            grid: true,
+            ticks: true,
+            numbers: true,
+            labels: true,
+            x_axis: true,
+            y_axis: true,
+            z_axis: true,
+            xy_grid: true,
+            xz_grid: true,
+            yz_grid: true,
+            x_ticks: true,
+            y_ticks: true,
+            z_ticks: true,
+            x_numbers: true,
+            y_numbers: true,
+            z_numbers: true,
+            x_label: None,
+            y_label: None,
+            z_label: None,
+            label_mode: LabelMode::Billboard,
+            axis_color: Color::from_rgb8(0x20, 0x20, 0x20),
+            grid_color: Color::from_rgb8(0xC0, 0xC0, 0xC0),
+            tick_color: Color::from_rgb8(0x20, 0x20, 0x20),
+            number_color: Color::from_rgb8(0x20, 0x20, 0x20),
+            label_color: Color::from_rgb8(0x20, 0x20, 0x20),
+            axis_width: 3.0,
+            grid_width: 1.0,
+            tick_width: 2.0,
+            tick_length: 8.0,
+            auto_fit: true,
+            x_length: None,
+            y_length: None,
+            z_length: None,
+            tips: true,
+        }
+    }
+}
+
 /// Per-side canvas margin (in the same unit as the coordinate system).
 ///
 /// Layout operations like `to_edge` and `to_corner` respect these margins
@@ -425,6 +518,21 @@ pub enum SpawnKind {
         y_range: (f64, f64, f64),
         config: AxesConfig,
     },
+    Axes3D {
+        x_range: (f64, f64, f64),
+        y_range: (f64, f64, f64),
+        z_range: (f64, f64, f64),
+        config: Axes3DConfig,
+    },
+    /// Triangulated 3D surface mesh with explicit vertices/indices in world space.
+    SurfaceMesh {
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        /// Optional base color for the material. If None, uses theme.
+        color: Option<Color>,
+    },
+    /// 3D polyline (e.g., curve) defined by world-space points.
+    Polyline3D(Vec<[f32; 3]>),
     Text(String),
     Paragraph {
         text: String,
@@ -551,6 +659,10 @@ pub struct ObjectSpec {
     pub shadow: Option<gaanim_renderer::effects::DropShadow>,
     pub opacity: f32,
     pub z_index: i32,
+    /// If true, this object should billboard (face camera) in 3D.
+    pub billboard: bool,
+    /// If true, this object is a HUD overlay (screen-space, fixed).
+    pub hud: bool,
     /// Fill overrides applied to matching glyph fragments after textual objects
     /// have been compiled into their vector hierarchy.
     pub fragment_fills: Vec<(String, Color)>,
@@ -573,6 +685,8 @@ impl ObjectSpec {
             shadow: None,
             opacity: 1.0,
             z_index: 0,
+            billboard: false,
+            hud: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
             layout_ops: Vec::new(),

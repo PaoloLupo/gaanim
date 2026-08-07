@@ -206,6 +206,54 @@ pub fn sync_gaanim_camera_to_bevy_system(
     }
 }
 
+/// System: Synchronizes the `gaanim_math::Camera` resource to any Bevy `Camera3d` (perspective).
+///
+/// Used for the hybrid 2D/3D pipeline where 3D meshes are rendered with Bevy's PBR
+/// while Vello continues to handle 2D vector content. When the camera is orthographic
+/// the 3D camera is still updated with the same position/rotation for consistency.
+pub fn sync_gaanim_camera_to_bevy_3d_system(
+    gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+) {
+    let Some(cam) = gaanim_camera else { return };
+    for (mut transform, mut projection) in &mut bevy_cameras {
+        transform.translation = Vec3::new(
+            cam.position.x as f32,
+            cam.position.y as f32,
+            cam.position.z as f32,
+        );
+        // Convert DQuat -> Quat
+        transform.rotation = Quat::from_xyzw(
+            cam.rotation.x as f32,
+            cam.rotation.y as f32,
+            cam.rotation.z as f32,
+            cam.rotation.w as f32,
+        );
+        match cam.projection {
+            gaanim_math::Projection::Perspective { fov_y, near, far } => {
+                if let Projection::Perspective(persp) = projection.as_mut() {
+                    persp.fov = fov_y as f32;
+                    persp.near = near as f32;
+                    persp.far = far as f32;
+                    // Aspect is derived from viewport dimensions automatically by Bevy,
+                    // but we set it explicitly to keep headless/export in sync.
+                    persp.aspect_ratio = if cam.viewport_height > 0 {
+                        cam.viewport_width as f32 / cam.viewport_height as f32
+                    } else {
+                        1.0
+                    };
+                }
+            }
+            gaanim_math::Projection::Orthographic { zoom } => {
+                if let Projection::Orthographic(ortho) = projection.as_mut() {
+                    let effective = zoom * cam.viewport_scale;
+                    ortho.scale = if effective > 0.0 { 1.0 / effective as f32 } else { 1.0 };
+                }
+            }
+        }
+    }
+}
+
 /// System: Cleans up stale fragment cache entries when Mobject entities are destroyed.
 ///
 /// Run this system before `gaanim_render_system` so the cache stays consistent.

@@ -65,6 +65,21 @@ impl Plugin for GaanimScenePlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
+        // 3D helpers: sync mesh transforms and billboard after hierarchy propagation.
+        app.add_systems(
+            Update,
+            (
+                crate::systems::billboard_system,
+                crate::systems::sync_3d_mesh_transform_system,
+            )
+                .in_set(SceneSet::Propagation)
+                .after(crate::systems::transform_propagation_system),
+        );
+        // Build raw mesh data into Bevy Mesh3d handles (runs before extraction).
+        app.add_systems(
+            Update,
+            crate::systems::build_3d_meshes_system.in_set(SceneSet::Bounds),
+        );
 
         // Register bounds systems in the Bounds SystemSet.
         // The entire set is guarded by `has_bounds_changes` so that on

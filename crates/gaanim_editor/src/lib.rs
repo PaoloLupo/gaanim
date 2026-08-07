@@ -1912,9 +1912,10 @@ fn preview_mode_keys_system(
 /// Pan (drag) and zoom (wheel) when interactive mode is enabled.
 /// Wheel zooms; middle/right or left drag pans (left only in interactive mode).
 /// Also updates the system cursor to Grab/Grabbing while interactive.
+/// For perspective cameras: Right-drag orbits, Middle/Shift+Left pan, Wheel dolly.
 fn preview_interactive_input_system(
     mut interactive: ResMut<PreviewInteractive>,
-    camera: Option<Res<Camera>>,
+    camera: Option<ResMut<Camera>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -1944,7 +1945,7 @@ fn preview_interactive_input_system(
     };
     commands.entity(win_entity).insert(icon);
 
-    let Some(cam) = camera else {
+    let Some(mut cam) = camera else {
         *prev_cursor = None;
         return;
     };
@@ -1953,7 +1954,9 @@ fn preview_interactive_input_system(
         return;
     };
 
-    // --- Zoom with mouse wheel (via AccumulatedMouseScroll) ---
+    let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
+
+    // --- Zoom / Dolly with mouse wheel ---
     let wheel_delta = scroll.delta.y;
     if wheel_delta.abs() > f32::EPSILON {
         let step = match scroll.unit {
@@ -1963,50 +1966,80 @@ fn preview_interactive_input_system(
         let step = step.clamp(-0.6, 0.6);
         if step.abs() > 1e-6 {
             let factor = (1.0 - step as f64).clamp(0.5, 2.0);
-            interactive.user_zoom = (interactive.user_zoom * factor).clamp(0.1, 20.0);
+            if is_perspective {
+                cam.dolly(factor);
+            } else {
+                interactive.user_zoom = (interactive.user_zoom * factor).clamp(0.1, 20.0);
+            }
         }
     }
 
-    // --- Keyboard pan fallback (arrows / WASD) when interactive ---
+    // --- Keyboard pan fallback ---
     {
-        let proj_zoom = match cam.projection {
-            gaanim_math::Projection::Orthographic { zoom } => zoom,
-            _ => 1.0,
-        };
-        let effective = (cam.viewport_scale * proj_zoom).max(0.1);
-        let speed = 400.0 / effective * time.delta_secs_f64(); // 400 px/s in world
-        let mut kdelta = glam::DVec2::ZERO;
-        if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
-            kdelta.x -= speed;
-        }
-        if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
-            kdelta.x += speed;
-        }
-        if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
-            kdelta.y += speed;
-        }
-        if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
-            kdelta.y -= speed;
-        }
-        if kdelta.length_squared() > 1e-9 {
-            interactive.pan += kdelta;
+        if is_perspective {
+            let mut kdelta = glam::DVec2::ZERO;
+            let speed = 5.0;
+            if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
+                kdelta.x -= speed;
+            }
+            if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
+                kdelta.x += speed;
+            }
+            if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
+                kdelta.y += speed;
+            }
+            if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
+                kdelta.y -= speed;
+            }
+            if kdelta.length_squared() > 1e-9 {
+                cam.pan_screen_delta(kdelta);
+            }
+        } else {
+            let proj_zoom = match cam.projection {
+                gaanim_math::Projection::Orthographic { zoom } => zoom,
+                _ => 1.0,
+            };
+            let effective = (cam.viewport_scale * proj_zoom).max(0.1);
+            let speed = 400.0 / effective * time.delta_secs_f64();
+            let mut kdelta = glam::DVec2::ZERO;
+            if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
+                kdelta.x -= speed;
+            }
+            if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
+                kdelta.x += speed;
+            }
+            if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
+                kdelta.y += speed;
+            }
+            if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
+                kdelta.y -= speed;
+            }
+            if kdelta.length_squared() > 1e-9 {
+                interactive.pan += kdelta;
+            }
         }
     }
 
-    // --- Pan with mouse drag (cursor delta + fallback to AccumulatedMouseMotion) ---
-    let is_panning = mouse_button.pressed(MouseButton::Middle)
-        || mouse_button.pressed(MouseButton::Right)
-        || mouse_button.pressed(MouseButton::Left);
-    // Always update prev when not panning to avoid jump
+    // --- Mouse drag: orbit / pan ---
     let cur = window
         .cursor_position()
         .map(|p| glam::DVec2::new(p.x as f64, p.y as f64));
 
-    if !is_panning {
+    let is_orbiting = is_perspective && mouse_button.pressed(MouseButton::Right);
+    let is_panning_3d = is_perspective
+        && (mouse_button.pressed(MouseButton::Middle)
+            || (mouse_button.pressed(MouseButton::Left)
+                && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))));
+    let is_panning_2d = !is_perspective
+        && (mouse_button.pressed(MouseButton::Middle)
+            || mouse_button.pressed(MouseButton::Right)
+            || mouse_button.pressed(MouseButton::Left));
+    let is_dragging = is_orbiting || is_panning_3d || is_panning_2d;
+
+    if !is_dragging {
         *prev_cursor = cur;
         return;
     }
-    // Prefer cursor delta, fallback to AccumulatedMouseMotion if cursor is None or delta is zero
     let mut delta_opt: Option<glam::DVec2> = None;
     if let (Some(cur_pos), Some(prev)) = (cur, *prev_cursor) {
         let d = cur_pos - prev;
@@ -2017,7 +2050,6 @@ fn preview_interactive_input_system(
     } else if let Some(cur_pos) = cur {
         *prev_cursor = Some(cur_pos);
     }
-    // Fallback: raw motion (covers cases where cursor_position is None or window not focused)
     if delta_opt.is_none() && motion.delta.length_squared() > 1e-9 {
         let m = motion.delta;
         delta_opt = Some(glam::DVec2::new(m.x as f64, m.y as f64));
@@ -2025,16 +2057,21 @@ fn preview_interactive_input_system(
     let Some(delta) = delta_opt else {
         return;
     };
-    // Convert pixel delta to world delta: world moves opposite to mouse.
-    // viewport_scale already includes fit * user_zoom, so don't multiply again.
-    let proj_zoom = match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => zoom,
-        _ => 1.0,
-    };
-    let effective = (cam.viewport_scale * proj_zoom).max(0.1);
-    // Y is inverted in screen space (Vello uses Y-down): moving mouse up (delta.y negative) should pan up (world y positive) -> invert.
-    interactive.pan.x -= delta.x / effective;
-    interactive.pan.y += delta.y / effective;
+    if is_perspective {
+        if is_orbiting {
+            cam.orbit_around_target(delta.x * 0.005, -delta.y * 0.005);
+        } else if is_panning_3d {
+            cam.pan_screen_delta(delta);
+        }
+    } else {
+        let proj_zoom = match cam.projection {
+            gaanim_math::Projection::Orthographic { zoom } => zoom,
+            _ => 1.0,
+        };
+        let effective = (cam.viewport_scale * proj_zoom).max(0.1);
+        interactive.pan.x -= delta.x / effective;
+        interactive.pan.y += delta.y / effective;
+    }
 }
 
 fn editor_picking_system(
@@ -2046,15 +2083,17 @@ fn editor_picking_system(
     mut state: ResMut<EditorState>,
     interactive: Res<PreviewInteractive>,
 ) {
-    if interactive.enabled {
-        return;
-    }
     let Some(camera) = camera else { return };
     if egui_wants.wants_any_pointer_input() {
         return;
     }
 
     if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    let is_perspective = matches!(camera.projection, gaanim_math::Projection::Perspective { .. });
+    if !is_perspective && interactive.enabled {
         return;
     }
 
@@ -2065,26 +2104,77 @@ fn editor_picking_system(
         return;
     };
 
-    let world_pos =
-        camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
-
     let mut best_z = i32::MIN;
     let mut best_entity: Option<Entity> = None;
+    let mut best_t: f64 = f64::INFINITY;
 
-    for (entity, bounds, render_order) in &entities {
-        if bounds
-            .0
-            .contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0))
-        {
-            let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
-            if z >= best_z {
-                best_z = z;
-                best_entity = Some(entity);
+    if is_perspective {
+        let (origin, dir) = camera.screen_to_ray(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+        for (entity, bounds, render_order) in &entities {
+            if let Some(t) = ray_aabb_intersect(origin, dir, bounds.0) {
+                if t < best_t {
+                    best_t = t;
+                    best_entity = Some(entity);
+                } else if (t - best_t).abs() < 1e-6 {
+                    // Tie-break by render order
+                    let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
+                    if z >= best_z {
+                        best_z = z;
+                        best_entity = Some(entity);
+                    }
+                }
+            }
+        }
+    } else {
+        let world_pos =
+            camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+        for (entity, bounds, render_order) in &entities {
+            if bounds
+                .0
+                .contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0))
+            {
+                let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
+                if z >= best_z {
+                    best_z = z;
+                    best_entity = Some(entity);
+                }
             }
         }
     }
 
     state.selected = best_entity;
+}
+
+fn ray_aabb_intersect(origin: glam::DVec3, dir: glam::DVec3, bounds: gaanim_math::Bounds3D) -> Option<f64> {
+    let mut t_min = f64::NEG_INFINITY;
+    let mut t_max = f64::INFINITY;
+    for i in 0..3 {
+        let (o, d, min, max) = match i {
+            0 => (origin.x, dir.x, bounds.min.x, bounds.max.x),
+            1 => (origin.y, dir.y, bounds.min.y, bounds.max.y),
+            2 => (origin.z, dir.z, bounds.min.z, bounds.max.z),
+            _ => unreachable!(),
+        };
+        if d.abs() < 1e-9 {
+            if o < min || o > max {
+                return None;
+            }
+        } else {
+            let t1 = (min - o) / d;
+            let t2 = (max - o) / d;
+            let t_near = t1.min(t2);
+            let t_far = t1.max(t2);
+            t_min = t_min.max(t_near);
+            t_max = t_max.min(t_far);
+            if t_min > t_max {
+                return None;
+            }
+        }
+    }
+    if t_max < 0.0 {
+        return None;
+    }
+    Some(if t_min >= 0.0 { t_min } else { t_max })
 }
 
 /// System: adjusts the [`Camera`] resource so the animation preview fits in the
@@ -2106,10 +2196,11 @@ fn viewport_adjust_system(
     let window_w = window.width() as f64;
     let available_h = window_h - inset.bottom as f64;
 
+    let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     if available_h < 1.0 {
         cam.viewport_offset_y = 0.0;
         cam.viewport_scale = 1.0;
-        if interactive.enabled {
+        if interactive.enabled && !is_perspective {
             cam.position.x += interactive.pan.x;
             cam.position.y += interactive.pan.y;
         }
@@ -2123,7 +2214,10 @@ fn viewport_adjust_system(
     let scale_y = available_h / anim_h;
     let fit_scale = scale_x.min(scale_y);
 
-    if interactive.enabled {
+    if is_perspective {
+        // For perspective, interactive orbit/pan/dolly already mutated Camera directly.
+        cam.viewport_scale = fit_scale;
+    } else if interactive.enabled {
         cam.viewport_scale = fit_scale * interactive.user_zoom.clamp(0.1, 20.0);
         cam.position.x += interactive.pan.x;
         cam.position.y += interactive.pan.y;

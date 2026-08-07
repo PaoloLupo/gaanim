@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    Anchor, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
-    CurveElement, ImageCrop, ImageFit, ImageOptions, ParagraphOptions, PresentationBrand, SlideId,
-    SlideTemplate, TextAlign, ThemeFont,
+    Anchor, Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme,
+    CurveControl, CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode,
+    ParagraphOptions, PresentationBrand, SlideId, SlideTemplate, TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_slide, export_canvas_slides,
@@ -801,6 +801,75 @@ impl PyCamera {
             .lock()
             .expect("scene canvas poisoned")
             .camera_shake(amplitude, frequency, duration);
+        Ok(())
+    }
+
+    /// Set camera to look at target from eye (3D perspective).
+    #[pyo3(signature = (eye, target, up=None, duration=1.0))]
+    fn look_at(
+        &self,
+        eye: (f64, f64, f64),
+        target: (f64, f64, f64),
+        up: Option<(f64, f64, f64)>,
+        duration: f64,
+    ) -> PyResult<()> {
+        if ![eye.0, eye.1, eye.2, target.0, target.1, target.2].iter().all(|v| v.is_finite()) {
+            return Err(pyo3::exceptions::PyValueError::new_err("eye and target must be finite"));
+        }
+        if let Some(up) = up {
+            if ![up.0, up.1, up.2].iter().all(|v| v.is_finite()) {
+                return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
+            }
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_look_at(eye, target, up, duration);
+        Ok(())
+    }
+
+    /// Orbit around current target by yaw/pitch (radians).
+    #[pyo3(signature = (delta_yaw, delta_pitch, duration=1.0))]
+    fn orbit(&self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> PyResult<()> {
+        if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
+            return Err(pyo3::exceptions::PyValueError::new_err("delta_yaw/delta_pitch must be finite"));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_orbit(delta_yaw, delta_pitch, duration);
+        Ok(())
+    }
+
+    /// Animate perspective projection (fov in radians).
+    #[pyo3(signature = (fov_y, near=0.1, far=1000.0, duration=1.0))]
+    fn perspective(&self, fov_y: f64, near: f64, far: f64, duration: f64) -> PyResult<()> {
+        if ![fov_y, near, far].iter().all(|v| v.is_finite()) || fov_y <= 0.0 || near <= 0.0 || far <= near {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "fov_y/near/far must be finite with 0 < near < far and 0 < fov_y < pi",
+            ));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_perspective(fov_y, near, far, duration);
+        Ok(())
+    }
+
+    /// Dolly camera toward/away from target (factor <1 closer).
+    #[pyo3(signature = (factor, duration=1.0))]
+    fn dolly(&self, factor: f64, duration: f64) -> PyResult<()> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err("factor must be finite and positive"));
+        }
+        let duration = require_duration(duration)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_dolly(factor, duration);
         Ok(())
     }
 }
@@ -1716,6 +1785,176 @@ impl PyScene {
         ))
     }
 
+    #[pyo3(signature = (
+        x=None, y=None, z=None,
+        x_range=None, y_range=None, z_range=None,
+        grid=true, ticks=true, numbers=true, labels=true,
+        x_axis=true, y_axis=true, z_axis=true,
+        xy_grid=None, xz_grid=None, yz_grid=None,
+        x_ticks=None, y_ticks=None, z_ticks=None,
+        x_numbers=None, y_numbers=None, z_numbers=None,
+        x_label=None, y_label=None, z_label=None,
+        label_mode="billboard",
+        axis_color=None, grid_color=None, tick_color=None,
+        number_color=None, label_color=None,
+        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
+        auto_fit=true, x_length=None, y_length=None, z_length=None, tips=true
+    ))]
+    fn axes_3d(
+        &self,
+        x: Option<Bound<'_, PyAny>>,
+        y: Option<Bound<'_, PyAny>>,
+        z: Option<Bound<'_, PyAny>>,
+        x_range: Option<Bound<'_, PyAny>>,
+        y_range: Option<Bound<'_, PyAny>>,
+        z_range: Option<Bound<'_, PyAny>>,
+        grid: bool,
+        ticks: bool,
+        numbers: bool,
+        labels: bool,
+        x_axis: bool,
+        y_axis: bool,
+        z_axis: bool,
+        xy_grid: Option<bool>,
+        xz_grid: Option<bool>,
+        yz_grid: Option<bool>,
+        x_ticks: Option<bool>,
+        y_ticks: Option<bool>,
+        z_ticks: Option<bool>,
+        x_numbers: Option<bool>,
+        y_numbers: Option<bool>,
+        z_numbers: Option<bool>,
+        x_label: Option<String>,
+        y_label: Option<String>,
+        z_label: Option<String>,
+        label_mode: &str,
+        axis_color: Option<PyColor>,
+        grid_color: Option<PyColor>,
+        tick_color: Option<PyColor>,
+        number_color: Option<PyColor>,
+        label_color: Option<PyColor>,
+        axis_width: f64,
+        grid_width: f64,
+        tick_width: f64,
+        tick_length: f64,
+        auto_fit: bool,
+        x_length: Option<f64>,
+        y_length: Option<f64>,
+        z_length: Option<f64>,
+        tips: bool,
+    ) -> PyResult<PyDrawable> {
+        let parse_range = |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
+            if let Some(b) = opt {
+                if let Ok(v) = b.extract::<(f64, f64, f64)>() {
+                    Ok(v)
+                } else if let Ok(v) = b.extract::<(f64, f64)>() {
+                    Ok((v.0, v.1, 1.0))
+                } else if let Ok(v) = b.extract::<Vec<f64>>() {
+                    if v.len() == 2 {
+                        Ok((v[0], v[1], 1.0))
+                    } else if v.len() == 3 {
+                        Ok((v[0], v[1], v[2]))
+                    } else {
+                        Err(pyo3::exceptions::PyValueError::new_err(
+                            "range must be (min, max) or (min, max, step)",
+                        ))
+                    }
+                } else {
+                    Err(pyo3::exceptions::PyValueError::new_err(
+                        "range must be (min, max) or (min, max, step)",
+                    ))
+                }
+            } else {
+                Ok(default)
+            }
+        };
+        let xr = parse_range(x.or(x_range), (-5.0, 5.0, 1.0))?;
+        let yr = parse_range(y.or(y_range), (-5.0, 5.0, 1.0))?;
+        let zr = parse_range(z.or(z_range), (-3.0, 3.0, 1.0))?;
+        if ![xr.0, xr.1, xr.2, yr.0, yr.1, yr.2, zr.0, zr.1, zr.2]
+            .iter()
+            .all(|v| v.is_finite())
+            || xr.0 >= xr.1
+            || yr.0 >= yr.1
+            || zr.0 >= zr.1
+            || xr.2 <= 0.0
+            || yr.2 <= 0.0
+            || zr.2 <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "axis ranges must be finite (min, max, step) with min < max and step > 0",
+            ));
+        }
+        if [axis_width, grid_width, tick_width, tick_length]
+            .iter()
+            .any(|v| !v.is_finite() || *v < 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "axis, grid, and tick dimensions must be finite and non-negative",
+            ));
+        }
+        for v in [x_length, y_length, z_length].into_iter().flatten() {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "length must be finite and positive",
+                ));
+            }
+        }
+        let label_mode_parsed = match label_mode.to_lowercase().as_str() {
+            "billboard" => LabelMode::Billboard,
+            "hud" => LabelMode::Hud,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "label_mode must be 'billboard' or 'hud'",
+                ))
+            }
+        };
+        let defaults = Axes3DConfig::default();
+        let axis_color = axis_color.map(|c| c.0).unwrap_or(defaults.axis_color);
+        let config = Axes3DConfig {
+            grid,
+            ticks,
+            numbers,
+            labels,
+            x_axis,
+            y_axis,
+            z_axis,
+            xy_grid: xy_grid.unwrap_or(grid),
+            xz_grid: xz_grid.unwrap_or(grid),
+            yz_grid: yz_grid.unwrap_or(grid),
+            x_ticks: x_ticks.unwrap_or(ticks),
+            y_ticks: y_ticks.unwrap_or(ticks),
+            z_ticks: z_ticks.unwrap_or(ticks),
+            x_numbers: x_numbers.unwrap_or(numbers),
+            y_numbers: y_numbers.unwrap_or(numbers),
+            z_numbers: z_numbers.unwrap_or(numbers),
+            x_label,
+            y_label,
+            z_label,
+            label_mode: label_mode_parsed,
+            axis_color,
+            grid_color: grid_color.map(|c| c.0).unwrap_or(defaults.grid_color),
+            tick_color: tick_color.map(|c| c.0).unwrap_or(axis_color),
+            number_color: number_color.map(|c| c.0).unwrap_or(axis_color),
+            label_color: label_color.map(|c| c.0).unwrap_or(axis_color),
+            axis_width,
+            grid_width,
+            tick_width,
+            tick_length,
+            auto_fit,
+            x_length,
+            y_length,
+            z_length,
+            tips,
+        };
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .axes_3d(xr, yr, zr, config),
+        ))
+    }
+
     #[pyo3(signature = (axes, function, x, samples=160))]
     fn plot(
         &self,
@@ -1875,6 +2114,93 @@ impl PyScene {
     fn text(&self, s: &str) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
     }
+
+    #[pyo3(signature = (function, x_range=(-5.0, 5.0), y_range=(-5.0, 5.0), x_samples=20, y_samples=20, color=None))]
+    fn surface(
+        &self,
+        function: Bound<'_, PyAny>,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        x_samples: usize,
+        y_samples: usize,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if ![x_range.0, x_range.1, y_range.0, y_range.1].iter().all(|v| v.is_finite())
+            || x_range.0 >= x_range.1
+            || y_range.0 >= y_range.1
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "x_range/y_range must be finite with min < max",
+            ));
+        }
+        if x_samples < 2 || y_samples < 2 || x_samples > 200 || y_samples > 200 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "x_samples/y_samples must be between 2 and 200",
+            ));
+        }
+        let mut vertices: Vec<[f32; 3]> = Vec::with_capacity(x_samples * y_samples);
+        for j in 0..y_samples {
+            let y = y_range.0 + (y_range.1 - y_range.0) * (j as f64 / (y_samples - 1) as f64);
+            for i in 0..x_samples {
+                let x = x_range.0 + (x_range.1 - x_range.0) * (i as f64 / (x_samples - 1) as f64);
+                let z: f64 = function.call1((x, y))?.extract()?;
+                if !z.is_finite() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "surface function must return finite z",
+                    ));
+                }
+                vertices.push([x as f32, y as f32, z as f32]);
+            }
+        }
+        let mut indices: Vec<u32> = Vec::with_capacity((x_samples - 1) * (y_samples - 1) * 6);
+        for j in 0..(y_samples - 1) {
+            for i in 0..(x_samples - 1) {
+                let a = (j * x_samples + i) as u32;
+                let b = (j * x_samples + i + 1) as u32;
+                let c = ((j + 1) * x_samples + i) as u32;
+                let d = ((j + 1) * x_samples + i + 1) as u32;
+                indices.extend_from_slice(&[a, b, d, a, d, c]);
+            }
+        }
+        let color = color.map(|c| c.0);
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .surface_mesh(vertices, indices, color),
+        ))
+    }
+
+    #[pyo3(signature = (points, color=None))]
+    fn polyline_3d(
+        &self,
+        points: Vec<(f64, f64, f64)>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if points.len() < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "polyline_3d requires at least 2 points",
+            ));
+        }
+        for (x, y, z) in &points {
+            if ![x, y, z].iter().all(|v| v.is_finite()) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "all points must be finite",
+                ));
+            }
+        }
+        let verts: Vec<[f32; 3]> = points.into_iter().map(|(x, y, z)| [x as f32, y as f32, z as f32]).collect();
+        let mut handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .polyline_3d(verts);
+        if let Some(c) = color {
+            handle = handle.fill(c.0);
+        }
+        Ok(PyDrawable(handle))
+    }
+
     /// Multi-line vector text constrained to a width.
     #[pyo3(signature = (s, width, *, align="left", line_spacing=1.2, font_size=None, font_family=None, max_lines=None, overflow="clip"))]
     fn paragraph(

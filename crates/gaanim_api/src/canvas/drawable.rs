@@ -401,6 +401,23 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
     }
 
+    /// 3D position in world space (perspective-aware).
+    pub fn at_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, z)))
+    }
+
+    /// Makes this drawable always face the camera (billboard) in 3D.
+    /// Chainable: `scene.text("label").at_3d(x,y,z).billboard()`
+    pub fn billboard(self) -> Self {
+        self.update_spec(|spec| spec.billboard = true)
+    }
+
+    /// Makes this drawable a fixed HUD overlay (screen-space, not affected by 3D camera).
+    /// Chainable: `scene.text("title").hud().at(0,300)`
+    pub fn hud(self) -> Self {
+        self.update_spec(|spec| spec.hud = true)
+    }
+
     pub fn scaled(self, factor: f64) -> Self {
         self.push_layout(LayoutOp::SetScale(factor))
     }

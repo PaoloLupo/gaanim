@@ -214,6 +214,27 @@ pub(crate) enum Op {
         frequency: f64,
         duration: f64,
     },
+    CameraLookAt {
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+        duration: f64,
+    },
+    CameraOrbit {
+        delta_yaw: f64,
+        delta_pitch: f64,
+        duration: f64,
+    },
+    CameraPerspective {
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        duration: f64,
+    },
+    CameraDolly {
+        factor: f64,
+        duration: f64,
+    },
     /// Clip a drawable hierarchy by another drawable's vector geometry.
     SetClip {
         target: ObjectId,

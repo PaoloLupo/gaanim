@@ -37,6 +37,12 @@ bevy = {version = "0.18", default-features = false, features = [
   "keyboard",         # KeyCode input
   "mouse",            # MouseButton input
   "default_font",     # font for egui
+  "bevy_asset",
+  "bevy_scene",
+  "bevy_gltf",
+  "bevy_pbr",
+  "bevy_render",
+  "hdr",
 ]}
 thiserror = "2.0"
 peniko = "0.6.1"
