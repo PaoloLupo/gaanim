@@ -95,7 +95,7 @@ scene.export("preview.webp", fps=30)
   signature: ".rotate(radians: float) -> Anim",
   params: ((name: "radians", type: "float", default: none, desc: [Angle in radians.]),),
   returns: (type: "Anim", desc: [Rotation anim.]),
-  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge.],
+  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge or chain `.pivot(x,y)` / `.about_point(x,y)` on the `Anim` for orbital motion (e.g. `dot.pivot(200,0).rotate(TAU)`).],
 )[
 ```python
 # show-code: true
@@ -104,6 +104,43 @@ from math import pi
 scene = Scene(480, 270, background="#0f172a")
 arm = scene.rect(80, 14).fill(BLUE).at(40, 0).with_pivot(0, 0)
 scene.play([arm.rotate(pi/2).duration(0.9)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Drawable.move_along_path",
+  kind: "method",
+  signature: ".move_along_path(target: Drawable) -> Anim",
+  params: ((name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),),
+  returns: (type: "Anim", desc: [Follow-path translation.]),
+  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Equivalent to Manim's `MoveAlongPath`. Combine with `.linear()` for uniform speed, or `.smooth()` for ease. Rotation/scale unaffected.],
+)[
+```python
+# show-code: true
+from gaanim import BLACK, BLUE, WHITE, Scene
+scene = Scene(480, 270, background=BLACK)
+circle = scene.circle(60).stroke(BLUE, 3).no_fill().at(0, 0)
+dot = scene.dot(8).fill(WHITE).at(60, 0)
+scene.play([dot.move_along_path(circle).duration(2.0).linear()])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Anim.pivot / about_point",
+  kind: "method",
+  signature: ".pivot(x: float, y: float) -> Anim / .about_point(x: float, y: float) -> Anim",
+  params: ((name: "x", type: "float", default: none, desc: [Pivot x in scene pixels.]), (name: "y", type: "float", default: none, desc: [Pivot y in scene pixels.]),),
+  returns: (type: "Anim", desc: [Same Anim with orbital pivot.]),
+  desc: [Only valid on `RotateBy` anims (`Drawable.rotate`). Replaces hinge with scene-space point; the engine builds an orbital `Arc` for translation plus a slerped `Rotation` (splits `>π`). Alias `about_point` mirrors Manim.],
+)[
+```python
+import math
+from gaanim import BLACK, WHITE, Scene
+scene = Scene(480, 270, background=BLACK)
+dot = scene.dot(10).fill(WHITE).at(60, 0)
+scene.play([dot.pivot(0, 0).rotate(math.tau).duration(1.5).linear()])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -308,16 +345,16 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Scene.transform_matching_shapes / transform_matching_tex",
+  name: "Scene.transform_matching_shapes / transform_matching_tex / transform_matching_text",
   kind: "method",
-  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / scene.transform_matching_tex(source, target, duration=1.0)",
+  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / scene.transform_matching_tex(source, target, duration=1.0) / scene.transform_matching_text(source, target, duration=1.0)",
   params: (
     (name: "source", type: "Drawable", default: none, desc: [Source object/group containing elements to match.]),
     (name: "target", type: "Drawable", default: none, desc: [Target object/group containing elements to match.]),
     (name: "duration", type: "float", default: "1.0", desc: [Duration of the transition in seconds.]),
   ),
   returns: (type: "none", desc: [Schedules the transform matching animation.]),
-  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` uses order-preserving LCS character matching for text/equations. Unmatched elements automatically fade in/out.],
+  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` (alias `transform_matching_text` for Manim compat) uses order-preserving LCS character matching for text/equations. Generic `scene.transform_matching(source, target, mode="shapes"|"tex", duration=1.0)` dispatches by mode. Unmatched elements automatically fade in/out.],
 )[
 ```python
 from gaanim import BLACK, BLUE, GOLD, GREEN, Scene
