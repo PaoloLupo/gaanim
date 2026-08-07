@@ -79,6 +79,16 @@ impl PyCanvasAnim {
             inner: self.inner.clone().with_pen_tip(),
         }
     }
+
+    fn pivot(&self, x: f64, y: f64) -> Self {
+        Self {
+            inner: self.inner.clone().pivot(x, y),
+        }
+    }
+
+    fn about_point(&self, x: f64, y: f64) -> Self {
+        self.pivot(x, y)
+    }
 }
 
 #[pyclass(name = "Drawable", module = "gaanim_core", from_py_object)]
@@ -518,6 +528,18 @@ impl PyDrawable {
     fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.wiggle(duration),
+        }
+    }
+
+    fn move_along_path(&self, target: &PyDrawable) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.move_along_drawable(&target.0),
+        }
+    }
+
+    fn move_along_drawable(&self, target: &PyDrawable) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.move_along_drawable(&target.0),
         }
     }
     fn fade_transform(&self, target: &PyDrawable) -> PyCanvasAnim {

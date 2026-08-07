@@ -2167,6 +2167,16 @@ impl PyScene {
             .transform_matching_tex(&source.0, &target.0, duration);
         Ok(())
     }
+    /// Alias for transform_matching_tex — manim TransformMatchingText compatibility.
+    #[pyo3(signature = (source, target, *, duration=1.0))]
+    fn transform_matching_text(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        duration: f64,
+    ) -> PyResult<()> {
+        self.transform_matching_tex(source, target, duration)
+    }
     /// Generic auto-matching morph. `mode` is "shapes" or "tex".
     ///
     /// Performs auto-matching transform between `source` and `target` using the specified `mode`.

@@ -637,6 +637,7 @@ impl Canvas {
         canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
     ) {
         let entry_animated = Self::entry_animated_by_slide(&seg.ops);
+        let transform_targets = Self::transform_targets(&seg.ops);
         let mut active_slide: Option<SlideId> = None;
         let mut active_slide_objects = Vec::new();
         for op in &seg.ops {
@@ -658,6 +659,12 @@ impl Canvas {
                         scene_background,
                     );
                     id_map.insert(spec.id, actual.id);
+                    if transform_targets.contains(&spec.id) {
+                        if let Some(state) = builder.states.get(actual.id).cloned() {
+                            builder.hide_visuals_now(&state);
+                            builder.schedule_hide_hierarchy(actual.id);
+                        }
+                    }
                     if let Some(slide) = active_slide {
                         let has_explicit_entry = entry_animated
                             .get(&slide)
@@ -2010,6 +2017,39 @@ impl Canvas {
         result
     }
 
+    fn transform_targets(ops: &[Op]) -> std::collections::HashSet<ObjectId> {
+        let mut targets = std::collections::HashSet::new();
+        for op in ops {
+            match op {
+                Op::Animate { anim, active } if *active => match &anim.anim_type {
+                    AnimationType::Transform { target }
+                    | AnimationType::ReplacementTransform { target }
+                    | AnimationType::FadeTransform { target } => {
+                        targets.insert(*target);
+                    }
+                    _ => {}
+                },
+                Op::Play(anims) => {
+                    for anim in anims {
+                        match &anim.anim_type {
+                            AnimationType::Transform { target }
+                            | AnimationType::ReplacementTransform { target }
+                            | AnimationType::FadeTransform { target } => {
+                                targets.insert(*target);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Op::TransformMatching { target, .. } => {
+                    targets.insert(*target);
+                }
+                _ => {}
+            }
+        }
+        targets
+    }
+
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -2024,6 +2064,10 @@ impl Canvas {
             },
             AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
+            },
+            AnimationType::MoveAlongPath { path, path_target } => AnimationType::MoveAlongPath {
+                path: path.clone(),
+                path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
             },
             other => other.clone(),
         };

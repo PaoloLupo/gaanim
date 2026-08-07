@@ -534,7 +534,23 @@ impl DrawableHandle {
     }
 
     pub fn rotate(&self, rad: f64) -> Anim {
-        self.anim(AnimationType::RotateBy { angle_radians: rad })
+        let pivot = self.spec.lock().ok().and_then(|spec| {
+            spec.layout_ops.iter().rev().find_map(|op| match op {
+                LayoutOp::SetPivot(p) => Some(*p),
+                _ => None,
+            })
+        });
+        self.anim(AnimationType::RotateBy {
+            angle_radians: rad,
+            pivot,
+        })
+    }
+
+    pub fn rotate_about_point(&self, x: f64, y: f64, rad: f64) -> Anim {
+        self.anim(AnimationType::RotateBy {
+            angle_radians: rad,
+            pivot: Some(DVec3::new(x, y, 0.0)),
+        })
     }
 
     pub fn fade_in(&self, dur: impl OptDuration) -> Anim {
@@ -656,7 +672,17 @@ impl DrawableHandle {
     }
 
     pub fn move_along_path(&self, path: BezPath) -> Anim {
-        self.anim(AnimationType::MoveAlongPath { path })
+        self.anim(AnimationType::MoveAlongPath {
+            path,
+            path_target: None,
+        })
+    }
+
+    pub fn move_along_drawable(&self, target: &DrawableHandle) -> Anim {
+        self.anim(AnimationType::MoveAlongPath {
+            path: BezPath::new(),
+            path_target: Some(target.id),
+        })
     }
 
     pub fn fade_transform(&self, target: &DrawableHandle) -> Anim {

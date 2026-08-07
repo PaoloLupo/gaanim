@@ -2,7 +2,7 @@ use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo;
+use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
 use gaanim_math::matching::{MatchingConfig, MatchingMode, MatchItem};
@@ -936,6 +936,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_move_along_path_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::RotateBy { .. }) {
+            self.play_rotate_by_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::GrowArrow) {
             self.play_grow_arrow_internal(anim, track);
             return;
@@ -970,11 +974,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.transform.rotation = to;
                 PropertyLensSpec::Rotation { from, to }
             }
-            AnimationType::RotateBy { angle_radians } => {
-                let from = state.transform.rotation;
-                let to = from * gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
-                state.transform.rotation = to;
-                PropertyLensSpec::Rotation { from, to }
+            AnimationType::RotateBy { .. } => {
+                unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::ScaleTo { to } => {
                 let from = state.transform.scale;
@@ -3013,9 +3014,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
     fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let path = match &anim.anim_type {
-            AnimationType::MoveAlongPath { path } => path.clone(),
+        let (path_arg, path_target) = match &anim.anim_type {
+            AnimationType::MoveAlongPath { path, path_target } => (path.clone(), *path_target),
             _ => unreachable!(),
+        };
+
+        let path = if let Some(target_id) = path_target {
+            if let Some(state) = self.states.get(target_id) {
+                let mut p = (*state.path).clone();
+                let world_affine = self.get_world_transform(target_id).to_affine_2d();
+                p.apply_affine(world_affine);
+                p
+            } else {
+                path_arg
+            }
+        } else {
+            path_arg
         };
 
         // Resolve and persist the final translation so subsequent
@@ -3025,11 +3039,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         if let Some(state) = self.states.get_mut(anim.target) {
             state.transform.translation = end_translation;
+            state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
+            self.commands.entity(state.entity).insert(state.transform);
         }
 
+        let clip_start = self.current_time + anim.delay;
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            clip_start,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -3039,6 +3056,117 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 label: self.current_label.clone(),
             }),
         );
+    }
+
+    fn play_rotate_by_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let (angle_radians, pivot) = match &anim.anim_type {
+            AnimationType::RotateBy { angle_radians, pivot } => (*angle_radians, *pivot),
+            _ => unreachable!(),
+        };
+
+        let state = match self.states.get_mut(anim.target) {
+            Some(s) => s,
+            None => return,
+        };
+
+        let from_rot = state.transform.rotation;
+        let to_rot = from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
+        let from_trans = state.transform.translation;
+        let to_trans = if let Some(p) = pivot {
+            let rot = gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
+            p + rot * (from_trans - p)
+        } else {
+            from_trans
+        };
+
+        state.transform.rotation = to_rot;
+        state.transform.translation = to_trans;
+
+        if pivot.is_some() {
+            state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
+            self.commands.entity(state.entity).insert(state.transform);
+        }
+
+        let clip_start = self.current_time + anim.delay;
+
+        if let Some(p) = pivot {
+            let r = (from_trans.x - p.x).hypot(from_trans.y - p.y);
+            if r > 1e-6 {
+                let theta0 = (from_trans.y - p.y).atan2(from_trans.x - p.x);
+                let arc = gaanim_core::kurbo::Arc::new(
+                    gaanim_core::kurbo::Point::new(p.x, p.y),
+                    gaanim_core::kurbo::Vec2::new(r, r),
+                    theta0,
+                    angle_radians,
+                    0.0,
+                );
+                let arc_path = arc.into_path(0.1);
+                self.timeline.add_clip(
+                    parent_track,
+                    clip_start,
+                    anim.duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: anim.target,
+                        lens: PropertyLensSpec::PathFollow { path: arc_path },
+                        rate_func: anim.rate_func.clone(),
+                        delay: 0.0,
+                        label: self.current_label.clone(),
+                    }),
+                );
+            }
+        }
+
+        if angle_radians.abs() > std::f64::consts::PI {
+            let half_dur = anim.duration * 0.5;
+            let mid_rot =
+                from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians * 0.5);
+            self.timeline.add_clip(
+                parent_track,
+                clip_start,
+                half_dur,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Rotation {
+                        from: from_rot,
+                        to: mid_rot,
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+            self.timeline.add_clip(
+                parent_track,
+                clip_start + half_dur,
+                half_dur,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Rotation {
+                        from: mid_rot,
+                        to: to_rot,
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        } else {
+            self.timeline.add_clip(
+                parent_track,
+                clip_start,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Rotation {
+                        from: from_rot,
+                        to: to_rot,
+                    },
+                    rate_func: anim.rate_func,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
     }
 
     /// Internal: schedule a `GrowArrow` animation as a Create-style

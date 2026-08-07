@@ -739,6 +739,16 @@ impl Anim {
         self
     }
 
+    pub fn pivot(mut self, x: f64, y: f64) -> Self {
+        self.inner = self.inner.pivot(x, y);
+        self.sync_queued(None);
+        self
+    }
+
+    pub fn about_point(self, x: f64, y: f64) -> Self {
+        self.pivot(x, y)
+    }
+
     pub fn delay(mut self, sec: f64) -> Self {
         let delay = sec.max(0.0);
         self.inner.delay = delay;

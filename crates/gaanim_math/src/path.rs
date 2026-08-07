@@ -7,7 +7,8 @@
 //!
 //! Ported from the reference implementation in `crabanim::engine::geometry`.
 
-use kurbo::{BezPath, ParamCurve, ParamCurveArclen, PathEl, PathSeg, Point};
+#[allow(unused_imports)]
+use kurbo::{BezPath, ParamCurve, ParamCurveArclen, PathEl, PathSeg, Point, Shape};
 
 /// Total arc length of a Bézier path, computed segment-by-segment.
 ///
@@ -737,5 +738,20 @@ mod morph_tests {
                 "hole winding collapsed at t={t}: {areas:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_circle_get_point_at_alpha() {
+        let circle_path = kurbo::Circle::new(kurbo::Point::ZERO, 100.0).to_path(0.1);
+        let p0 = get_point_at_alpha(&circle_path, 0.0);
+        let p25 = get_point_at_alpha(&circle_path, 0.25);
+        let p50 = get_point_at_alpha(&circle_path, 0.5);
+        let p75 = get_point_at_alpha(&circle_path, 0.75);
+        let p100 = get_point_at_alpha(&circle_path, 1.0);
+        assert!((p0.x - 100.0).abs() < 1e-3 && p0.y.abs() < 1e-3, "p0 should be (100,0), got {p0:?}");
+        assert!(p25.x.abs() < 1e-3 && (p25.y - 100.0).abs() < 1e-3, "p25 should be (0,100), got {p25:?}");
+        assert!((p50.x + 100.0).abs() < 1e-3 && p50.y.abs() < 1e-3, "p50 should be (-100,0), got {p50:?}");
+        assert!(p75.x.abs() < 1e-3 && (p75.y + 100.0).abs() < 1e-3, "p75 should be (0,-100), got {p75:?}");
+        assert!((p100.x - 100.0).abs() < 1e-3 && p100.y.abs() < 1e-3, "p100 should be (100,0), got {p100:?}");
     }
 }

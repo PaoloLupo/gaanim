@@ -25,6 +25,7 @@ pub enum AnimationType {
     },
     RotateBy {
         angle_radians: f64,
+        pivot: Option<DVec3>,
     },
     ScaleTo {
         to: DVec3,
@@ -148,6 +149,7 @@ pub enum AnimationType {
     /// are unaffected.
     MoveAlongPath {
         path: gaanim_core::kurbo::BezPath,
+        path_target: Option<ObjectId>,
     },
     /// Specialized Create animation for `Arrow` mobjects. Draws the
     /// outline first, then finishes with a brief scale "punch" that
@@ -247,6 +249,17 @@ impl AnimationBuilder {
         }
         self
     }
+
+    pub fn pivot(mut self, x: f64, y: f64) -> Self {
+        if let AnimationType::RotateBy { ref mut pivot, .. } = self.anim_type {
+            *pivot = Some(DVec3::new(x, y, 0.0));
+        }
+        self
+    }
+
+    pub fn about_point(self, x: f64, y: f64) -> Self {
+        self.pivot(x, y)
+    }
 }
 
 impl AnimationType {
@@ -329,7 +342,10 @@ impl MobjectRef {
     pub fn rotate_by(self, angle_radians: f64) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::RotateBy { angle_radians },
+            anim_type: AnimationType::RotateBy {
+                angle_radians,
+                pivot: None,
+            },
             duration: 1.0,
             rate_func: RateFunc::Smooth,
             delay: 0.0,
@@ -685,7 +701,10 @@ impl MobjectRef {
     pub fn move_along_path(self, path: gaanim_core::kurbo::BezPath) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::MoveAlongPath { path },
+            anim_type: AnimationType::MoveAlongPath {
+                path,
+                path_target: None,
+            },
             duration: 2.0,
             rate_func: RateFunc::Linear,
             delay: 0.0,

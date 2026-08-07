@@ -1,27 +1,34 @@
-"""Piecewise path motion and arrow creation using Scene primitives."""
+import math
+from gaanim import BLACK, BLUE, WHITE, Scene
 
-from gaanim import BLACK, BLUE, GREEN, RED, WHITE, YELLOW, Scene
+# En gaanim las coordenadas son en píxeles (ej: 100px equivale a ~1 unidad Manim)
+scene = Scene(1920, 1080, background=BLACK)
 
+# 1. Creación de objetos
+circle = scene.circle(100.0).stroke(BLUE, 4.0).no_fill().at(0, 0)
+dot = scene.dot(8.0).fill(WHITE).at(0, 0)
+dot2 = scene.dot(8.0).fill(WHITE).at(100, 0)
 
-def main():
-    scene = Scene(1920, 1080, background=BLACK)
-    corners = [(-300, -150), (300, -150), (300, 150), (-300, 150), (-300, -150)]
-    guides = [
-        scene.line(x1, y1, x2, y2).stroke(YELLOW, 2).opacity(0.45)
-        for (x1, y1), (x2, y2) in zip(corners, corners[1:])
-    ]
-    traveler = scene.circle(28).fill(BLUE).stroke(WHITE, 2).at(*corners[0])
-    second = scene.dot(14).fill(RED).at(-420, -280)
-    arrow = scene.arrow(-600, 260, 0, 260).stroke(GREEN, 4)
+line = scene.line(300, 0, 500, 0).stroke(WHITE, 3.0)
 
-    scene.play([guide.create().duration(0.5) for guide in guides], lag=0.08)
-    scene.play([traveler.grow_from_center().duration(0.5), second.grow_from_center().duration(0.5), arrow.create().duration(0.8)])
-    for start, end in zip(corners, corners[1:]):
-        scene.play([traveler.move(end[0] - start[0], end[1] - start[1]).duration(0.7).linear()])
-    scene.play([second.move(840, 0).duration(1.2).smooth()])
-    scene.wait(0.5)
+# 2. Animaciones
+# GrowFromCenter(circle)
+scene.play([circle.grow_from_center().duration(1.0).
+smooth()])
+
+# Transform(dot, dot2)
+scene.play([dot.transform(dot2).duration(1.0).smooth()])
+
+# MoveAlongPath(dot, circle)
+scene.play([dot.move_along_path(circle).duration(2.0).linear()])
+
+# Rotating(dot, about_point=[2, 0, 0])
+# En gaanim pivot(200, 0) define el punto sobre el cual rota
+scene.play([dot.pivot(200, 0).rotate(math.pi).duration(1.5).linear()])
+
+import os
+
+if snapshot_dir := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshot_dir, [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0])
+else:
     scene.render()
-
-
-if __name__ == "__main__":
-    main()
