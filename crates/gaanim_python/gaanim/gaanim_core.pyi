@@ -293,6 +293,7 @@ class Drawable:
     def opacity(self, op: float) -> Drawable: ...
     def z_index(self, z: int) -> Drawable: ...
     def at(self, x: float, y: float) -> Drawable: ...
+    def at_3d(self, x: float, y: float, z: float) -> Drawable: ...
     def scaled(self, factor: float) -> Drawable: ...
     def rotated(self, radians: float) -> Drawable: ...
     def with_pivot(self, x: float, y: float) -> Drawable: ...
@@ -431,6 +432,27 @@ class Camera:
         frequency: float = 8.0,
         duration: float = 0.5,
     ) -> None: ...
+    def look_at(
+        self,
+        eye: tuple[float, float, float],
+        target: tuple[float, float, float],
+        up: Optional[tuple[float, float, float]] = None,
+        duration: float = 1.0,
+    ) -> None: ...
+    def orbit(
+        self,
+        delta_yaw: float,
+        delta_pitch: float,
+        duration: float = 1.0,
+    ) -> None: ...
+    def perspective(
+        self,
+        fov_y: float,
+        near: float = 0.1,
+        far: float = 1000.0,
+        duration: float = 1.0,
+    ) -> None: ...
+    def dolly(self, factor: float, duration: float = 1.0) -> None: ...
 
 class Scene:
     def __init__(
@@ -528,6 +550,14 @@ class Scene:
     @overload
     def path(self, definition: Sequence[CurveCommand]) -> Drawable: ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable: ...
+    def polyline_3d(
+        self,
+        points: Sequence[tuple[float, float, float]],
+        color: Optional[Color] = None,
+        *,
+        colors: Optional[Sequence[Color]] = None,
+        colormap: Optional[str] = None,
+    ) -> Drawable: ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable: ...
     def curve(self, commands: Sequence[CurveCommand]) -> Drawable:
         """Create a composed curve from ``move``, ``line``, ``quad``, ``cubic``, and close commands.
@@ -576,6 +606,49 @@ class Scene:
         grid_width: float = 1.0,
         tick_width: float = 2.0,
         tick_length: float = 8.0,
+    ) -> Drawable: ...
+    def axes_3d(
+        self,
+        x: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        y: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        z: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        x_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        y_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        z_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
+        grid: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: bool = True,
+        y_axis: bool = True,
+        z_axis: bool = True,
+        xy_grid: Optional[bool] = None,
+        xz_grid: Optional[bool] = None,
+        yz_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        z_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        z_numbers: Optional[bool] = None,
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
+        z_label: Optional[str] = None,
+        label_mode: Literal["billboard", "hud"] = "billboard",
+        axis_color: Optional[Color] = None,
+        grid_color: Optional[Color] = None,
+        tick_color: Optional[Color] = None,
+        number_color: Optional[Color] = None,
+        label_color: Optional[Color] = None,
+        axis_width: float = 3.0,
+        grid_width: float = 1.0,
+        tick_width: float = 2.0,
+        tick_length: float = 8.0,
+        auto_fit: bool = True,
+        x_length: Optional[float] = None,
+        y_length: Optional[float] = None,
+        z_length: Optional[float] = None,
+        tips: bool = True,
     ) -> Drawable: ...
     def plot(self, axes: Drawable, func: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable: ...
     def plot_parametric_curve(self, axes: Drawable, func: Callable[[float], tuple[float, float]], t: tuple[float, float], samples: int = 160) -> Drawable: ...
@@ -790,6 +863,14 @@ class Scene:
         sweep_offset: float = 0.0,
     ) -> Drawable: ...
     def traced_path(self, source: Drawable) -> Drawable: ...
+    def traced_path_3d(
+        self,
+        source: Drawable,
+        *,
+        colormap: Optional[str] = None,
+        max_points: Optional[int] = None,
+        min_distance: float = 0.1,
+    ) -> Drawable: ...
     def tracking_line(
         self,
         from_: Drawable | tuple[float, float],
