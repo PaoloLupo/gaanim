@@ -1,4 +1,5 @@
 #import "../../components/section.typ": docs-chapter
+#import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
   title: "Scene API",
@@ -412,6 +413,64 @@ bounds and runs both in parallel, keeping it inside the safe viewport.
 `camera.follow` follows a mobject while reactive updaters are active, and
 `camera.shake` is deterministic so previews, seeks, and exports match. The
 legacy `scene.camera_*` methods remain available for existing projects.
+
+=== 3D camera
+
+The 3D camera uses world-space `(x, y, z)` coordinates. Camera operations are
+queued on the scene timeline; use `duration=0.0` for an immediate setup and a
+positive duration for an animated camera move. Angles are in radians.
+
+#api-entry(
+  name: "Camera.perspective",
+  kind: "method",
+  signature: "perspective(fov_y, near=0.1, far=1000.0, duration=1.0) -> None",
+  params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
+  returns: (type: "None", desc: [Queues a perspective projection change.]),
+  desc: [Switches the scene to perspective projection. Require `0 < near < far` and a positive finite field of view.],
+)[
+```python
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
+```
+]
+
+#api-entry(
+  name: "Camera.look_at",
+  kind: "method",
+  signature: "look_at(eye, target, up=None, duration=1.0) -> None",
+  params: ((name: "eye", type: "(float,float,float)", default: none, desc: [Camera position in world space.]), (name: "target", type: "(float,float,float)", default: none, desc: [Point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
+  returns: (type: "None", desc: [Queues a camera orientation and position change.]),
+  desc: [Positions the camera at `eye` and aims it at `target`. All coordinates must be finite.],
+)[
+```python
+scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
+```
+]
+
+#api-entry(
+  name: "Camera.orbit",
+  kind: "method",
+  signature: "orbit(delta_yaw, delta_pitch, duration=1.0) -> None",
+  params: ((name: "delta_yaw", type: "float", default: none, desc: [Horizontal orbit angle in radians.]), (name: "delta_pitch", type: "float", default: none, desc: [Vertical orbit angle in radians.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
+  returns: (type: "None", desc: [Queues an orbit around the current look-at target.]),
+  desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
+)[
+```python
+scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.0)
+```
+]
+
+#api-entry(
+  name: "Camera.dolly",
+  kind: "method",
+  signature: "dolly(factor, duration=1.0) -> None",
+  params: ((name: "factor", type: "float", default: none, desc: [Positive distance multiplier.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
+  returns: (type: "None", desc: [Queues a camera move toward or away from its target.]),
+  desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
+)[
+```python
+scene.camera.dolly(factor=0.85, duration=0.6)
+```
+]
 
 == Clipping and masks
 

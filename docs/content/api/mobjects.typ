@@ -512,6 +512,94 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
+== 3D Geometry
+
+Gaanim uses ordinary Python tuples for 3D points: `(x, y, z)`. The same
+`Drawable` handle can be styled and animated after it is placed in world space.
+This small example combines axes, a polyline, a moving point, a traced path,
+and the perspective camera:
+
+```python
+# show-code: true
+from gaanim import BLACK, BLUE, GOLD, RED, WHITE, Scene, Updater
+scene = Scene(640, 360, background=BLACK)
+
+axes = scene.axes_3d(
+    x_range=(-3, 3, 1), y_range=(-3, 3, 1), z_range=(-2, 2, 1),
+    x_label="x", y_label="y", z_label="z",
+    axis_color=WHITE, grid_color="#334155",
+).at_3d(0, 0, 0)
+path = scene.polyline_3d([(-2, -1, -1), (0, 1, 0), (2, -1, 1)], color=RED)
+dot = scene.dot(8).fill(GOLD).at_3d(1, 0, 0).billboard()
+dot.add_updater(Updater.orbit(0, 0, 1, 1.2))
+trail = scene.traced_path_3d(dot, colormap="viridis", max_points=120)
+
+scene.camera.perspective(fov_y=0.785, near=0.1, far=100.0, duration=0.0)
+scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
+scene.play([axes.create().duration(0.8), path.create().duration(0.8), dot.fade_in().duration(0.4)])
+scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=0.8)
+scene.camera.dolly(factor=0.85, duration=0.5)
+scene.wait(0.5)
+scene.export("3d-quickstart.webp", fps=30)
+```
+
+#api-entry(
+  name: "Scene.axes_3d",
+  kind: "factory",
+  signature: "axes_3d(x=None, y=None, z=None, x_range=None, y_range=None, z_range=None, grid=True, ticks=True, numbers=True, labels=True, x_axis=True, y_axis=True, z_axis=True, xy_grid=None, xz_grid=None, yz_grid=None, x_ticks=None, y_ticks=None, z_ticks=None, x_numbers=None, y_numbers=None, z_numbers=None, x_label=None, y_label=None, z_label=None, label_mode=\"billboard\", axis_color=None, grid_color=None, tick_color=None, number_color=None, label_color=None, axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0, auto_fit=True, x_length=None, y_length=None, z_length=None, tips=True) -> Drawable",
+  params: ((name: "x / y / z", type: "(min,max[,step])", default: "None", desc: [Axis ranges; each defaults to x=(-5,5,1), y=(-5,5,1), z=(-3,3,1).]), (name: "x_range / y_range / z_range", type: "(min,max[,step])", default: "None", desc: [Named aliases for the corresponding ranges.]), (name: "label_mode", type: "str", default: "\"billboard\"", desc: [Labels face the camera, or use "hud" for screen-space labels.]), (name: "auto_fit", type: "bool", default: "True", desc: [Fit ranges into the safe frame.]), (name: "x_length / y_length / z_length", type: "float", default: "None", desc: [Optional positive scene lengths.]),),
+  returns: (type: "Drawable", desc: [3D axes group with axes, grids, ticks, numbers, and labels.]),
+  desc: [Creates Cartesian axes and up to three grid planes. Ranges must be finite with minimum < maximum and a positive step. Use the aggregate switches or per-axis switches such as `xy_grid=False` and `z_numbers=False`.],
+)[
+```python
+axes = scene.axes_3d(
+    x_range=(-5, 5, 1), y_range=(-5, 5, 1), z_range=(-3, 3, 1),
+    x_label="x", y_label="y", z_label="z", label_mode="billboard",
+)
+```
+]
+
+#api-entry(
+  name: "Scene.polyline_3d",
+  kind: "factory",
+  signature: "polyline_3d(points, color=None, *, colors=None, colormap=None) -> Drawable",
+  params: ((name: "points", type: "list[(float,float,float)]", default: none, desc: [At least two finite world-space points.]), (name: "color", type: "Color", default: "None", desc: [Uniform color.]), (name: "colors", type: "list[Color]", default: "None", desc: [One color per point; takes precedence over colormap.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]),),
+  returns: (type: "Drawable", desc: [3D line strip in world space.]),
+  desc: [Use `color` for a uniform line, `colors` for explicit vertex colors, or `colormap` for a time-ordered gradient. A colors list must have exactly the same length as `points`.],
+)[
+```python
+helix = scene.polyline_3d(points, colormap="inferno")
+```
+]
+
+#api-entry(
+  name: "Drawable.at_3d",
+  kind: "method",
+  signature: ".at_3d(x, y, z) -> Drawable",
+  params: ((name: "x / y / z", type: "float", default: none, desc: [World-space position.]),),
+  returns: (type: "Drawable", desc: [The same drawable for fluent chaining.]),
+  desc: [Places a drawable in 3D world space. Add `.billboard()` to keep text or a marker facing the camera, or `.hud()` for a fixed screen-space overlay.],
+)[
+```python
+label = scene.text("origin").at_3d(0, 0, 0.5).billboard()
+```
+]
+
+#api-entry(
+  name: "Scene.traced_path_3d",
+  kind: "factory",
+  signature: "traced_path_3d(source, *, colormap=None, max_points=None, min_distance=0.1) -> Drawable",
+  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose world-space position is sampled.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "0.1", desc: [Minimum world-space distance between samples.]),),
+  returns: (type: "Drawable", desc: [Reactive 3D trail.]),
+  desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. `max_points=...` limits memory and `min_distance` filters nearly identical samples.],
+)[
+```python
+dot = scene.dot(7).at_3d(1, 0, 0)
+dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
+trail = scene.traced_path_3d(dot, colormap="viridis", max_points=600)
+```
+]
+
 == Plots
 
 #api-entry(
