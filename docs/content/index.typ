@@ -1,7 +1,7 @@
 #include "home.typ"
 #include "getting-started/index.typ"
 #include "getting-started/installation.typ"
-#include "guides/thesis.typ"
+#include "guides/slides.typ"
 #include "guides/projects.typ"
 #include "guides/visual-regression.typ"
 #include "guides/layout-proposal.typ"

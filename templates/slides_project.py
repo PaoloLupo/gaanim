@@ -1,4 +1,4 @@
-"""Starter de presentación generado por `gaanim init presentation`."""
+"""Starter de slides generado por `gaanim init slides`."""
 
 import os
 from pathlib import Path
@@ -12,7 +12,7 @@ scene = Scene(1920, 1080, margin=72)
 scene.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("presentation")
 scene.brand(
-    footer="MI PRESENTACIÓN",
+    footer="MIS SLIDES",
     slide_numbers=True,
     rule=True,
 )
@@ -22,9 +22,9 @@ opening = scene.slide(
     layout="cover",
     notes="Presenta el tema y explica por qué importa.",
 )
-opening.region("title").place(scene.title("Mi presentación"), Anchor.CENTER)
+opening.region("title").place(scene.title("Mis slides"), Anchor.CENTER)
 opening.region("subtitle").place(
-    scene.subtitle("Construida con slides semánticos"),
+    scene.subtitle("Una presentación construida con estructura semántica"),
     Anchor.CENTER,
 )
 scene.wait(0.5)

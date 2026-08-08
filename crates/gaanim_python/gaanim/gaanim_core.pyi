@@ -131,47 +131,6 @@ class Theme:
         """
         ...
 
-class ThesisTemplate:
-    def __init__(
-        self,
-        scene: Scene,
-        *,
-        font_path: Optional[str] = None,
-        logo: Optional[str] = None,
-        background: ColorLike = "#1601FC",
-        institution: str = "UNIVERSIDAD CATÓLICA SAN PABLO",
-        faculty: str = "FACULTAD DE ARQUITECTURA, COMPUTACIÓN E INGENIERÍAS",
-        school: str = "ESCUELA PROFESIONAL DE INGENIERÍA CIVIL",
-    ) -> None:
-        """Create a ThesisTemplate instance.
-
-        Example:
-            ThesisTemplate(None)
-        """
-        ...
-    def cover(
-        self,
-        title: str,
-        authors: str,
-        date: str,
-        *,
-        name: str = "Portada",
-        notes: Optional[str] = None,
-    ) -> Slide:
-        """Use cover on this ThesisTemplate or create the requested value.
-
-        Example:
-            result = template.cover("example", "example", "example")
-        """
-        ...
-    def title(self, slide: Slide, text: str) -> Drawable:
-        """Use title on this ThesisTemplate or create the requested value.
-
-        Example:
-            result = template.title(None, "example")
-        """
-        ...
-
 class Anchor:
     CENTER: ClassVar[Anchor]
     TOP: ClassVar[Anchor]

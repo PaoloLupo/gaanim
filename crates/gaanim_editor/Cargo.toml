@@ -24,6 +24,7 @@ gaanim_diff = { path = "../gaanim_diff", features = ["gui"] }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_python = { path = "../gaanim_python" }
 gaanim_text = { path = "../gaanim_text" }
+gaanim_project = { path = "../gaanim_project" }
 
 bevy = { workspace = true }
 glam = { workspace = true }
@@ -34,3 +35,4 @@ bevy_vello = "0.13.1"
 pyo3 = { version = "0.28", features = ["abi3-py312"] }
 notify = { workspace = true }
 crossbeam-channel = { workspace = true }
+rfd = "0.17"

@@ -68,6 +68,6 @@ else:
 #
 # custom = Theme(
 #     research_theme,
-#     fonts={"text": "My Thesis Sans"},
-#     font_files={"My Thesis Sans": "assets/MyThesisSans.ttf"},
+#     fonts={"text": "My Slides Sans"},
+#     font_files={"My Slides Sans": "assets/MySlidesSans.ttf"},
 # )

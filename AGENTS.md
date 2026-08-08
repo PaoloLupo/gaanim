@@ -4,7 +4,7 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 16 workspace members: 15 crates under
+- **Workspace root:** `Cargo.toml` defines 17 workspace members: 16 crates under
   `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
@@ -18,6 +18,8 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
   - `gaanim_text` — cosmic-text/HarfBuzz shaping, Typst math compilation.
   - `gaanim_api` — fluent Rust builder API; depends on most core crates.
   - `gaanim_python` — PyO3 0.28 extension (`cdylib`), thin wrapper over `gaanim_api`.
+  - `gaanim_project` — shared project scaffolding, manifests, recent-project state,
+    and side-effect-free Python/uv environment discovery.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
 - **Repository overview:** `README.md` is the current user/developer entry point.
   `engine_improvements.md` is aspirational; verify proposals against code and tests.

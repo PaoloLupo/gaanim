@@ -39,51 +39,6 @@ fn main() {
     }
 
     let launch = parse_args();
-    let script_path = launch.script_path.clone();
-    let project_paths = resolve_project_paths(&script_path);
-
-    // 1. Ensure python312.dll is on PATH by detecting a nearby uv/.venv
-    //    (VIRTUAL_ENV, walk-up from script/cwd/exe) or system Python.
-    //    No env vars required from the user.
-    let venv_root = python_home::ensure_python_available(Some(&script_path));
-
-    // 2. Register the `gaanim_core` module in the embedded interpreter's init
-    //    table BEFORE initializing Python, so `import gaanim_core` resolves to
-    //    our in-process module (no .pyd needed).
-    gaanim_python::register_inittab();
-
-    // 3. Initialize the embedded CPython interpreter.
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        python_home::inject_venv_site_packages(venv);
-    }
-
-    // 3. Set up the host<->script channels (payload + traceback).
-    let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
-    let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
-
-    // 4. Spawn the script-runner thread (holds the GIL, runs the script).
-    let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx, error_tx);
-
-    // 5. Spawn the file watcher and extract its channel endpoints.
-    let file_watcher::FileWatcher { changed_rx, stop } =
-        file_watcher::FileWatcher::spawn(script_path.clone());
-
-    // 6. Bridge watcher events -> script re-run requests in a dedicated thread.
-    std::thread::Builder::new()
-        .name("gaanim-watcher-bridge".into())
-        .spawn(move || {
-            while !stop.load(Ordering::SeqCst) {
-                match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                    Ok(()) => runner.request_rerun(),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(_) => break,
-                }
-            }
-        })
-        .expect("failed to spawn watcher bridge thread");
-
-    // 7. Build the Bevy app with the editor + renderer + reload wiring.
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -117,9 +72,6 @@ fn main() {
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
-    .insert_resource(project_paths)
-    .insert_resource(ReloadReceiver { rx: payload_rx })
-    .insert_resource(ScriptErrorReceiver { rx: error_rx })
     .insert_resource(ReloadStatus::default())
     .insert_resource(ScriptError::default())
     .add_systems(
@@ -133,80 +85,112 @@ fn main() {
     .add_systems(
         bevy_egui::EguiPrimaryContextPass,
         script_error_overlay_system,
-    );
+    )
+    .add_systems(Update, open_project_request_system);
+
+    if let Some(script_path) = launch.script_path {
+        if let Err(error) = start_script_session(app.world_mut(), script_path, launch.project) {
+            eprintln!("gaanim: {error}");
+            std::process::exit(2);
+        }
+    } else {
+        // The project Home does not replay a Canvas, so it must provide the
+        // primary 2D camera itself. bevy_egui attaches its primary context to
+        // that camera; without it the native window opens but stays blank.
+        spawn_home_camera(app.world_mut());
+        app.world_mut()
+            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
+            .show();
+    }
 
     app.run();
 }
 
-const THESIS_PRESENTATION_TEMPLATE: &str =
-    include_str!("../../../templates/thesis_presentation.py");
-const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
-const PRESENTATION_PROJECT_TEMPLATE: &str =
-    include_str!("../../../templates/presentation_project.py");
-
-const PROJECT_GITIGNORE: &str = r#"exports/*
-!exports/.gitkeep
-snapshots/
-__pycache__/
-*.mp4
-*.webm
-*.webp
-*.gif
-"#;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InitTemplate {
-    Video,
-    Presentation,
-    Thesis,
+fn spawn_home_camera(world: &mut World) {
+    world.spawn((
+        Camera2d,
+        gaanim_renderer::prelude::VelloView,
+        bevy::prelude::Camera {
+            order: 1,
+            ..default()
+        },
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
+    ));
 }
 
-impl InitTemplate {
-    fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "video" => Ok(Self::Video),
-            "presentation" | "slides" => Ok(Self::Presentation),
-            "thesis" => Ok(Self::Thesis),
-            _ => Err(format!(
-                "unknown template `{value}`; available templates: video, presentation, thesis"
-            )),
-        }
+fn start_script_session(
+    world: &mut World,
+    script_path: PathBuf,
+    project: Option<gaanim_project::ResolvedProject>,
+) -> Result<(), String> {
+    let hint = project
+        .as_ref()
+        .map(|project| project.root.as_path())
+        .unwrap_or(script_path.as_path());
+    let probe = gaanim_project::EnvironmentProbe::detect(Some(hint));
+    let venv_root = gaanim_project::activate_environment(&probe)?;
+    gaanim_python::register_inittab();
+    Python::initialize();
+    if let Some(ref venv) = venv_root {
+        python_home::inject_venv_site_packages(venv);
     }
 
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Video => "video",
-            Self::Presentation => "presentation",
-            Self::Thesis => "thesis",
+    let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
+    let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
+    let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx, error_tx);
+    let file_watcher::FileWatcher { changed_rx, stop } =
+        file_watcher::FileWatcher::spawn(script_path.clone());
+    std::thread::Builder::new()
+        .name("gaanim-watcher-bridge".into())
+        .spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                    Ok(()) => runner.request_rerun(),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(_) => break,
+                }
+            }
+        })
+        .map_err(|error| format!("failed to spawn watcher bridge: {error}"))?;
+
+    let project_paths = resolve_project_paths(&script_path, project.as_ref());
+    world.insert_resource(project_paths);
+    world.insert_resource(ReloadReceiver { rx: payload_rx });
+    world.insert_resource(ScriptErrorReceiver { rx: error_rx });
+    if let Some(project) = project {
+        let mut recents = gaanim_project::RecentProjects::load();
+        recents.record(&project);
+        let _ = recents.save();
+        if let Some(mut window) = world
+            .query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>()
+            .iter_mut(world)
+            .next()
+        {
+            window.title = format!("Gaanim — {}", project.manifest.name);
         }
     }
-
-    const fn default_directory(self) -> &'static str {
-        match self {
-            Self::Video => "gaanim-video",
-            Self::Presentation => "gaanim-presentation",
-            Self::Thesis => "gaanim-thesis",
-        }
-    }
-
-    const fn source(self) -> &'static str {
-        match self {
-            Self::Video => VIDEO_PROJECT_TEMPLATE,
-            Self::Presentation => PRESENTATION_PROJECT_TEMPLATE,
-            Self::Thesis => THESIS_PRESENTATION_TEMPLATE,
-        }
-    }
-
-    const fn is_presentation(self) -> bool {
-        matches!(self, Self::Presentation | Self::Thesis)
-    }
+    world
+        .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
+        .active = false;
+    Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InitArgs {
-    template: InitTemplate,
-    directory: PathBuf,
-    force: bool,
+fn open_project_request_system(world: &mut World) {
+    if world.contains_resource::<gaanim_editor::export::ProjectPaths>() {
+        return;
+    }
+    let request = world
+        .resource_mut::<gaanim_editor::project_hub::PendingProjectOpen>()
+        .0
+        .take();
+    let Some(project) = request else {
+        return;
+    };
+    if let Err(error) = start_script_session(world, project.entry.clone(), Some(project)) {
+        world
+            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
+            .report_open_error(error);
+    }
 }
 
 /// Generate a runnable project starter without initializing Python or Bevy.
@@ -227,23 +211,23 @@ fn dispatch_init_mode() -> bool {
         std::process::exit(2);
     });
 
-    if let Err(error) = create_project(&parsed) {
+    let project = gaanim_project::create_project(&parsed).unwrap_or_else(|error| {
         eprintln!("gaanim init: {error}");
         std::process::exit(2);
-    }
+    });
 
     println!(
         "Created {} project: {}",
-        parsed.template.name(),
-        parsed.directory.display()
+        parsed.kind.name(),
+        project.root.display()
     );
-    println!("Edit: {}", parsed.directory.join("main.py").display());
-    println!("Preview: gaanim {}", parsed.directory.display());
-    println!("Check: gaanim check {}", parsed.directory.display());
-    if parsed.template.is_presentation() {
+    println!("Edit: {}", project.entry.display());
+    println!("Preview: gaanim {}", project.root.display());
+    println!("Check: gaanim check {}", project.root.display());
+    if parsed.kind.is_slides() {
         println!(
             "Present: gaanim --present --monitor 1 {}",
-            parsed.directory.display()
+            project.root.display()
         );
     } else {
         println!("Export: set GAANIM_EXPORT=exports/video.mp4, then run the project");
@@ -251,13 +235,11 @@ fn dispatch_init_mode() -> bool {
     true
 }
 
-fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
-    let template = args
+fn parse_init_args(args: &[String]) -> Result<gaanim_project::CreateProjectOptions, String> {
+    let kind = args
         .first()
-        .ok_or_else(|| {
-            "missing template name; available templates: video, presentation, thesis".to_string()
-        })
-        .and_then(|value| InitTemplate::parse(value))?;
+        .ok_or_else(|| "missing project kind; available kinds: video, slides".to_string())
+        .and_then(|value| gaanim_project::ProjectKind::parse(value))?;
 
     let mut directory = None;
     let mut force = false;
@@ -270,79 +252,11 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
         }
     }
 
-    Ok(InitArgs {
-        template,
-        directory: directory.unwrap_or_else(|| PathBuf::from(template.default_directory())),
+    Ok(gaanim_project::CreateProjectOptions {
+        kind,
+        directory: directory.unwrap_or_else(|| PathBuf::from(kind.default_directory())),
         force,
     })
-}
-
-fn create_project(args: &InitArgs) -> Result<(), String> {
-    if args.directory.is_file() {
-        return Err(format!(
-            "{} is a file; choose a project directory",
-            args.directory.display()
-        ));
-    }
-
-    let project_name = args
-        .directory
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or(args.template.default_directory());
-    let manifest = format!(
-        "name = \"{}\"\nkind = \"{}\"\nentry = \"main.py\"\nassets_dir = \"assets\"\noutput_dir = \"exports\"\n",
-        escape_manifest_value(project_name),
-        args.template.name(),
-    );
-    let readme = project_readme(project_name, args.template);
-    let files = [
-        (args.directory.join("main.py"), args.template.source()),
-        (args.directory.join("gaanim.toml"), manifest.as_str()),
-        (args.directory.join(".gitignore"), PROJECT_GITIGNORE),
-        (args.directory.join("README.md"), readme.as_str()),
-        (args.directory.join("assets").join(".gitkeep"), ""),
-        (args.directory.join("exports").join(".gitkeep"), ""),
-    ];
-
-    if !args.force
-        && let Some((path, _)) = files.iter().find(|(path, _)| path.exists())
-    {
-        return Err(format!(
-            "{} already exists (use --force to update scaffold files)",
-            path.display()
-        ));
-    }
-
-    for (path, source) in files {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
-        }
-        std::fs::write(&path, source)
-            .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn escape_manifest_value(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn project_readme(name: &str, template: InitTemplate) -> String {
-    let presentation = if template.is_presentation() {
-        "\n## Presentar\n\n```powershell\ngaanim --present --monitor 1 .\n```\n"
-    } else {
-        "\n## Exportar\n\n```powershell\n$env:GAANIM_EXPORT = \"exports/video.mp4\"\ngaanim .\nRemove-Item Env:GAANIM_EXPORT\n```\n"
-    };
-    format!(
-        "# {name}\n\nProyecto `{}` generado por Gaanim.\n\n## Editar y previsualizar\n\n\
-         Edita `main.py` y ejecuta:\n\n```powershell\ngaanim .\n```\n\n\
-         Los recursos van en `assets/`; las salidas generadas van en `exports/`.\n\
-         {presentation}\n## Validar\n\n```powershell\ngaanim check .\n```\n",
-        template.name()
-    )
 }
 
 fn print_init_help() {
@@ -350,13 +264,12 @@ fn print_init_help() {
         r#"gaanim init - create a runnable Gaanim project
 
 USAGE:
-    gaanim init <TEMPLATE> [DIRECTORY] [--force]
+    gaanim init <KIND> [DIRECTORY] [--force]
 
 ARGUMENTS:
     video               Animated-video starter
-    presentation        Semantic slide-deck starter
-    thesis              Complete Spanish thesis-defense project
-    DIRECTORY           Project directory (defaults to gaanim-<template>)
+    slides              Semantic slides starter
+    DIRECTORY           Project directory (defaults to gaanim-<kind>)
 
 OPTIONS:
     --force             Update scaffold files without deleting user assets
@@ -386,12 +299,16 @@ fn dispatch_check_mode() -> bool {
         eprintln!("Run `gaanim check --help` for usage.");
         std::process::exit(2);
     });
-    let script = resolve_project_entry(&parsed.script).unwrap_or_else(|error| {
+    let script = gaanim_project::resolve_entry(&parsed.script).unwrap_or_else(|error| {
         eprintln!("gaanim check: {error}");
         std::process::exit(2);
     });
 
-    let venv_root = python_home::ensure_python_available(Some(&script));
+    let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
+    let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
+        eprintln!("gaanim check: {error}");
+        std::process::exit(2);
+    });
     gaanim_python::register_inittab();
     Python::initialize();
     if let Some(ref venv) = venv_root {
@@ -588,7 +505,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> Preflig
 
 fn print_check_help() {
     println!(
-        r#"gaanim check - validate a video or presentation project
+        r#"gaanim check - validate a video or slides project
 
 USAGE:
     gaanim check <SCRIPT_OR_PROJECT> [--strict]
@@ -641,7 +558,7 @@ fn dispatch_diff_mode() -> bool {
     if let Some(example) = &parsed.example
         && (parsed.capture || parsed.bless)
     {
-        let script = resolve_project_entry(example).unwrap_or_else(|error| {
+        let script = gaanim_project::resolve_entry(example).unwrap_or_else(|error| {
             eprintln!("gaanim --diff: {error}");
             std::process::exit(2);
         });
@@ -655,7 +572,11 @@ fn dispatch_diff_mode() -> bool {
             script.display(),
             capture_dir.display()
         );
-        let venv_root = python_home::ensure_python_available(Some(&script));
+        let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
+        let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
+            eprintln!("gaanim --diff: {error}");
+            std::process::exit(2);
+        });
         gaanim_python::register_inittab();
         Python::initialize();
         if let Some(ref venv) = venv_root {
@@ -847,120 +768,30 @@ OPTIONS:
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchArgs {
-    script_path: PathBuf,
+    script_path: Option<PathBuf>,
+    project: Option<gaanim_project::ResolvedProject>,
     present: bool,
     /// Zero-based monitor index used only with `--present`.
     monitor: Option<usize>,
 }
 
-fn resolve_project_entry(path: &Path) -> Result<PathBuf, String> {
-    if path.is_file() {
-        return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
-    }
-    if !path.exists() {
-        return Err(format!("script or project not found: {}", path.display()));
-    }
-    if !path.is_dir() {
-        return Err(format!(
-            "expected a Python script or project directory: {}",
-            path.display()
-        ));
-    }
-
-    let manifest = path.join("gaanim.toml");
-    let source = std::fs::read_to_string(&manifest).map_err(|error| {
-        format!(
-            "could not read project manifest {}: {error}",
-            manifest.display()
-        )
-    })?;
-    let entry = manifest_string_value(&source, "entry")
-        .ok_or_else(|| format!("{} must declare entry = \"...\"", manifest.display()))?;
-    let entry_path = PathBuf::from(&entry);
-    if entry_path.is_absolute()
-        || entry_path.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            )
-        })
-    {
-        return Err(format!(
-            "project entry must stay inside the project directory: {entry:?}"
-        ));
-    }
-    let script = path.join(entry_path);
-    if !script.is_file() {
-        return Err(format!(
-            "project entry does not exist or is not a file: {}",
-            script.display()
-        ));
-    }
-    Ok(script.canonicalize().unwrap_or(script))
-}
-
-fn manifest_string_value(source: &str, key: &str) -> Option<String> {
-    source.lines().find_map(|line| {
-        let line = line.split('#').next()?.trim();
-        let (candidate, value) = line.split_once('=')?;
-        if candidate.trim() != key {
-            return None;
-        }
-        let value = value.trim();
-        value
-            .strip_prefix('"')?
-            .strip_suffix('"')
-            .map(str::to_owned)
-    })
-}
-
-fn resolve_project_paths(script_path: &Path) -> gaanim_editor::export::ProjectPaths {
+fn resolve_project_paths(
+    script_path: &Path,
+    project: Option<&gaanim_project::ResolvedProject>,
+) -> gaanim_editor::export::ProjectPaths {
     let script_parent = script_path
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
-    // Walk up to find gaanim.toml
-    let mut cur = script_parent.clone();
-    let mut project_dir: Option<PathBuf> = None;
-    let mut manifest_path: Option<PathBuf> = None;
-    for _ in 0..5 {
-        let cand = cur.join("gaanim.toml");
-        if cand.is_file() {
-            project_dir = Some(cur.clone());
-            manifest_path = Some(cand);
-            break;
-        }
-        if let Some(parent) = cur.parent() {
-            cur = parent.to_path_buf();
+    if let Some(project) = project {
+        let output_dir = if project.manifest.output_dir.is_absolute() {
+            project.manifest.output_dir.clone()
         } else {
-            break;
-        }
-    }
-    if let Some(dir) = project_dir {
-        let output_dir_str = manifest_path
-            .and_then(|p| {
-                std::fs::read_to_string(&p)
-                    .ok()
-                    .and_then(|s| manifest_string_value(&s, "output_dir"))
-            })
-            .unwrap_or_else(|| "exports".to_string());
-        let output_dir = if Path::new(&output_dir_str).is_absolute() {
-            PathBuf::from(&output_dir_str)
-        } else {
-            dir.join(&output_dir_str)
-        };
-        // Do not canonicalize output_dir if it doesn't exist yet; keep as absolute-ish
-        let project_dir_abs = dir.canonicalize().unwrap_or(dir);
-        let output_dir_abs = if output_dir.is_absolute() {
-            output_dir
-        } else {
-            project_dir_abs.join(output_dir)
+            project.root.join(&project.manifest.output_dir)
         };
         gaanim_editor::export::ProjectPaths {
-            project_dir: project_dir_abs.clone(),
-            output_dir: output_dir_abs,
+            project_dir: project.root.clone(),
+            output_dir,
             script_path: script_path.to_path_buf(),
         }
     } else {
@@ -977,19 +808,20 @@ fn resolve_project_paths(script_path: &Path) -> gaanim_editor::export::ProjectPa
 fn parse_args() -> LaunchArgs {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        eprintln!("usage:");
-        eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
-        eprintln!("  gaanim init <video|presentation|thesis> [DIRECTORY] [--force]");
-        eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
-        eprintln!("  gaanim --diff --baseline <DIR> --current <DIR> [OPTIONS]");
-        std::process::exit(2);
+        return LaunchArgs {
+            script_path: None,
+            project: None,
+            present: false,
+            monitor: None,
+        };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         eprintln!("gaanim — GPU-accelerated vector animation engine (hot-reload viewer)");
         eprintln!();
         eprintln!("usage:");
+        eprintln!("  gaanim");
         eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
-        eprintln!("  gaanim init <video|presentation|thesis> [DIRECTORY] [--force]");
+        eprintln!("  gaanim init <video|slides> [DIRECTORY] [--force]");
         eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
         std::process::exit(0);
@@ -998,12 +830,26 @@ fn parse_args() -> LaunchArgs {
         eprintln!("gaanim: {error}");
         std::process::exit(2);
     });
-    let path = resolve_project_entry(&parsed.script_path).unwrap_or_else(|error| {
-        eprintln!("gaanim: {error}");
-        std::process::exit(2);
-    });
+    let Some(raw_path) = parsed.script_path.as_ref() else {
+        return parsed;
+    };
+    let (path, project) = if raw_path.is_dir() {
+        let project = gaanim_project::resolve_project(raw_path).unwrap_or_else(|error| {
+            eprintln!("gaanim: {error}");
+            std::process::exit(2);
+        });
+        (project.entry.clone(), Some(project))
+    } else {
+        let path = gaanim_project::resolve_entry(raw_path).unwrap_or_else(|error| {
+            eprintln!("gaanim: {error}");
+            std::process::exit(2);
+        });
+        let project = gaanim_project::find_project_for_script(&path);
+        (path, project)
+    };
     LaunchArgs {
-        script_path: path,
+        script_path: Some(path),
+        project,
         ..parsed
     }
 }
@@ -1039,9 +885,12 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if monitor.is_some() && !present {
         return Err("--monitor requires --present".to_string());
     }
-    let script_path = script_path.ok_or_else(|| "missing <SCRIPT_OR_PROJECT>".to_string())?;
+    if present && script_path.is_none() {
+        return Err("--present requires <SCRIPT_OR_PROJECT>".to_string());
+    }
     Ok(LaunchArgs {
         script_path,
+        project: None,
         present,
         monitor,
     })
@@ -1057,7 +906,8 @@ mod tests {
         assert_eq!(
             parse_launch_args(&args).unwrap(),
             LaunchArgs {
-                script_path: PathBuf::from("demo.py"),
+                script_path: Some(PathBuf::from("demo.py")),
+                project: None,
                 present: true,
                 monitor: Some(1),
             }
@@ -1071,76 +921,59 @@ mod tests {
     }
 
     #[test]
-    fn parses_thesis_template_with_safe_default_directory() {
+    fn parses_only_video_and_slides_project_kinds() {
         assert_eq!(
-            parse_init_args(&["thesis".to_string()]).unwrap(),
-            InitArgs {
-                template: InitTemplate::Thesis,
-                directory: PathBuf::from("gaanim-thesis"),
-                force: false,
+            parse_init_args(&["video".to_string()]).unwrap().kind,
+            gaanim_project::ProjectKind::Video
+        );
+        assert_eq!(
+            parse_init_args(&["slides".to_string()]).unwrap().kind,
+            gaanim_project::ProjectKind::Slides
+        );
+        assert!(parse_init_args(&["presentation".to_string()]).is_err());
+        assert!(parse_init_args(&["thesis".to_string()]).is_err());
+    }
+
+    #[test]
+    fn bare_launch_opens_home() {
+        assert_eq!(
+            parse_launch_args(&[]).unwrap(),
+            LaunchArgs {
+                script_path: None,
+                project: None,
+                present: false,
+                monitor: None,
             }
         );
     }
 
     #[test]
-    fn parses_custom_thesis_directory_and_force() {
-        let args = ["thesis", "defense", "--force"].map(str::to_string);
-        assert_eq!(
-            parse_init_args(&args).unwrap(),
-            InitArgs {
-                template: InitTemplate::Thesis,
-                directory: PathBuf::from("defense"),
-                force: true,
-            }
+    fn home_installs_a_primary_2d_camera_for_egui() {
+        let mut world = World::new();
+        spawn_home_camera(&mut world);
+        assert!(
+            world
+                .query_filtered::<Entity, With<Camera2d>>()
+                .iter(&world)
+                .next()
+                .is_some()
         );
-        assert!(THESIS_PRESENTATION_TEMPLATE.contains("scene.slide("));
-        assert!(THESIS_PRESENTATION_TEMPLATE.contains("notes="));
-        assert!(THESIS_PRESENTATION_TEMPLATE.contains("ThesisTemplate("));
-        assert!(THESIS_PRESENTATION_TEMPLATE.contains("background=\"#1601FC\""));
-        assert!(THESIS_PRESENTATION_TEMPLATE.contains("design.cover("));
-    }
-
-    #[test]
-    fn parses_video_and_presentation_project_templates() {
-        assert_eq!(
-            parse_init_args(&["video".to_string()]).unwrap().template,
-            InitTemplate::Video
-        );
-        assert_eq!(
-            parse_init_args(&["slides".to_string()]).unwrap().template,
-            InitTemplate::Presentation
-        );
-        assert!(VIDEO_PROJECT_TEMPLATE.contains("scene.render()"));
-        assert!(PRESENTATION_PROJECT_TEMPLATE.contains("scene.slide("));
-    }
-
-    #[test]
-    fn reads_project_manifest_values() {
-        let source = r#"
-            name = "demo"
-            entry = "src/presentation.py" # entry point
-        "#;
-        assert_eq!(
-            manifest_string_value(source, "entry").as_deref(),
-            Some("src/presentation.py")
-        );
-        assert_eq!(manifest_string_value(source, "missing"), None);
     }
 
     #[test]
     fn parses_strict_presentation_check() {
-        let args = ["thesis.py", "--strict"].map(str::to_string);
+        let args = ["slides.py", "--strict"].map(str::to_string);
         assert_eq!(
             parse_check_args(&args).unwrap(),
             CheckArgs {
-                script: PathBuf::from("thesis.py"),
+                script: PathBuf::from("slides.py"),
                 strict: true,
             }
         );
     }
 
     #[test]
-    fn thesis_template_preflight_finds_expected_risks() {
+    fn slides_preflight_finds_expected_risks() {
         let mut canvas = gaanim_api::canvas::Canvas::new(1920, 1080);
         let slide = canvas
             .slide(

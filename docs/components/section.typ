@@ -51,7 +51,7 @@
         ),
         "Guides": (
           "Proyectos": "guides/projects/",
-          "Tesis": "guides/thesis/",
+          "Slides": "guides/slides/",
           "Regresión visual": "guides/visual-regression/",
           "Layout proposal": "guides/layout-proposal/",
         ),

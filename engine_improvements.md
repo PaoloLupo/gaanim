@@ -52,7 +52,7 @@ En términos prácticos:
 | Animación vectorial 2D programática | 🟢 | Núcleo funcional con preview y exportación |
 | Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
-| Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View, overview y plantilla de tesis verificadas |
+| Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View y overview verificados |
 | Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
 | Motion graphics con multimedia | 🟡 | Raster, SVG vectorial avanzado y audio de exportación disponibles; falta video embebido |
 | Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
@@ -247,7 +247,7 @@ el overview conserva la composición completa de cada slide.
 duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
 
 Presenter View usa una interfaz oscura de alto contraste, jerarquía tipográfica ampliada
-y progreso visual del timeline. El tema público `presentation`/`thesis` unifica fondo,
+y progreso visual del timeline. El tema público `presentation` unifica fondo,
 roles de texto y defaults de title cards, bullets, captions, callouts, bar charts, tablas
 y bloques de código; los bar charts muestran también el valor de cada barra.
 
@@ -258,13 +258,10 @@ Gruvbox, Tokyo Night y Catppuccin; los componentes consumen el mismo palette.
 Los tokens también se consultan con `theme.color(...)`/`canvas.color(...)`, y
 `validate_theme()` audita contraste y tipografía antes de una presentación.
 
-Este es un **modo de presentación beta orientado a exposiciones técnicas y tesis**. El
-comando `gaanim init thesis` genera una presentación 16:9 completa con portada, agenda,
-problema, objetivos, teoría, metodología, resultados, conclusiones, cierre, notas y
-capturas de regresión. La guía operativa está en `docs/thesis-presentations.md`.
-
-El branding ya es parametrizable mediante `ThesisTemplate`: fondo, Tw Cen MT embebida,
-institución, facultad, escuela y logo se configuran una sola vez.
+Este es un **modo de presentación beta para slides generales**. El comando
+`gaanim init slides` genera un deck 16:9 con estructura semántica, notas y pasos.
+La identidad visual se configura con temas, `scene.brand(...)` y las regiones de
+cada slide, sin APIs ni recursos institucionales incorporados al motor.
 
 Para convertirlo en una solución general de slides todavía faltan:
 
@@ -518,8 +515,8 @@ no deben desplazar la estabilización 2D, los assets, el audio y el flujo de pub
 - [x] Sistema de temas público: esquemas integrados y custom themes configuran
   colores, tipografía y fuentes; las plantillas semánticas heredan branding
   global con logo, footer, regla y numeración.
-- [x] Asset manager y formato mínimo de proyecto: `gaanim init video`,
-  `gaanim init presentation` y `gaanim init thesis` generan proyectos portables con
+- [x] Asset manager y formato mínimo de proyecto: `gaanim init video` y
+  `gaanim init slides` generan proyectos portables con
   `gaanim.toml`, entry point, assets, exports y documentación. El CLI abre, valida,
   presenta y captura regresiones visuales usando la carpeta del proyecto.
   `scene.assets_dir(...)` resuelve rutas relativas para imágenes y SVG, y

@@ -73,7 +73,7 @@ impl CanvasTheme {
         let normalized = name.to_ascii_lowercase();
         let canonical = match normalized.as_str() {
             "scientific" => "technical",
-            "thesis" | "deck" => "presentation",
+            "deck" => "presentation",
             "light" => "paper",
             "gruvbox" => "gruvbox-dark",
             "tokyo" => "tokyo-night",
@@ -425,4 +425,15 @@ fn relative_luminance(color: Color) -> f64 {
         .zip([0.2126, 0.7152, 0.0722])
         .map(|(channel, weight)| channel * weight)
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deck_remains_generic_but_thesis_alias_is_removed() {
+        assert_eq!(CanvasTheme::builtin("deck").unwrap().name, "presentation");
+        assert!(CanvasTheme::builtin("thesis").is_err());
+    }
 }

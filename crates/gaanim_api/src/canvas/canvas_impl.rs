@@ -2442,7 +2442,7 @@ mod tests {
 
         let mut canvas = Canvas::new(1280, 720);
         canvas.set_branding(PresentationBrand {
-            footer: Some("Thesis · Research Lab".to_owned()),
+            footer: Some("Slides · Research Lab".to_owned()),
             show_on_cover: false,
             ..Default::default()
         });

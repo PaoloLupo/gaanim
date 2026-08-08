@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    Anchor, Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme,
-    CurveControl, CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
+    Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
+    CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
     PresentationBrand, SlideId, SlideTemplate, TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
@@ -488,203 +488,6 @@ pub struct PyScene {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
-/// Reusable institutional thesis identity and cover composition.
-#[pyclass(name = "ThesisTemplate", module = "gaanim_core", skip_from_py_object)]
-pub struct PyThesisTemplate {
-    inner: Arc<Mutex<ApiCanvas>>,
-    logo: Option<String>,
-    institution: String,
-    faculty: String,
-    school: String,
-}
-
-fn resolve_tw_cen_font(font_path: Option<String>) -> PyResult<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(path) = font_path {
-        candidates.push(PathBuf::from(path));
-    }
-    if let Ok(path) = std::env::var("GAANIM_TW_CEN_FONT") {
-        candidates.push(PathBuf::from(path));
-    }
-    if let Ok(windir) = std::env::var("WINDIR") {
-        candidates.push(PathBuf::from(windir).join("Fonts").join("TCM_____.TTF"));
-    }
-    candidates.extend([
-        PathBuf::from("assets").join("TwCenMT.ttf"),
-        PathBuf::from("assets").join("TCM_____.TTF"),
-    ]);
-
-    if let Some(path) = candidates.iter().find(|path| path.is_file()) {
-        return Ok(path.clone());
-    }
-    let searched = candidates
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(pyo3::exceptions::PyFileNotFoundError::new_err(format!(
-        "Tw Cen MT is required by ThesisTemplate. Pass font_path=..., set \
-         GAANIM_TW_CEN_FONT, or copy the licensed font to assets/TwCenMT.ttf. \
-         Searched: {searched}"
-    )))
-}
-
-#[pymethods]
-impl PyThesisTemplate {
-    #[new]
-    #[pyo3(signature = (
-        scene,
-        *,
-        font_path=None,
-        logo=None,
-        background=None,
-        institution="UNIVERSIDAD CATÓLICA SAN PABLO",
-        faculty="FACULTAD DE ARQUITECTURA, COMPUTACIÓN E INGENIERÍAS",
-        school="ESCUELA PROFESIONAL DE INGENIERÍA CIVIL",
-    ))]
-    fn new(
-        scene: &PyScene,
-        font_path: Option<String>,
-        logo: Option<String>,
-        background: Option<PyColor>,
-        institution: &str,
-        faculty: &str,
-        school: &str,
-    ) -> PyResult<Self> {
-        let font_path = resolve_tw_cen_font(font_path)?;
-        let bytes = std::fs::read(&font_path).map_err(|error| {
-            pyo3::exceptions::PyIOError::new_err(format!(
-                "could not read Tw Cen MT font '{}': {error}",
-                font_path.display()
-            ))
-        })?;
-        let white = gaanim_core::peniko::Color::WHITE;
-        let mut theme = CanvasTheme::builtin("presentation")
-            .expect("the built-in presentation theme must exist");
-        theme.name = "ucsp-thesis".into();
-        theme.palette.background = background
-            .map(|color| color.0)
-            .unwrap_or_else(|| gaanim_core::peniko::Color::from_rgb8(0x16, 0x01, 0xFC));
-        theme.palette.foreground = white;
-        theme.palette.muted = white;
-        theme.palette.title = white;
-        theme.palette.accent = white;
-        theme.palette.chart = white;
-        theme.palette.panel = gaanim_core::peniko::Color::from_rgb8(0x24, 0x12, 0xE8);
-        theme.palette.header = theme.palette.panel;
-        theme.palette.rule = white;
-        theme.sync_text_colors();
-        theme
-            .set_fonts(&HashMap::from([("text".into(), "Tw Cen MT".into())]))
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
-        theme
-            .set_sizes(&HashMap::from([
-                ("title".into(), 72.0),
-                ("subtitle".into(), 40.0),
-                ("body".into(), 34.0),
-                ("caption".into(), 25.0),
-            ]))
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
-        theme.fonts.push(ThemeFont {
-            family: "Tw Cen MT".into(),
-            bytes: bytes.into(),
-        });
-        scene
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .apply_theme(theme);
-
-        Ok(Self {
-            inner: scene.inner.clone(),
-            logo,
-            institution: institution.into(),
-            faculty: faculty.into(),
-            school: school.into(),
-        })
-    }
-
-    /// Create the institutional cover shown in the reference design.
-    #[pyo3(signature = (title, authors, date, *, name="Portada", notes=None))]
-    fn cover(
-        &self,
-        title: &str,
-        authors: &str,
-        date: &str,
-        name: &str,
-        notes: Option<String>,
-    ) -> PyResult<PySlide> {
-        let template = SlideTemplate::Blank;
-        let id = {
-            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
-            canvas
-                .slide(name, notes, template)
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?
-        };
-        // Keep the semantic boundary and its composition as separate canvas
-        // mutations, mirroring `scene.slide(...); scene.text(...)`.
-        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
-        let white = gaanim_core::peniko::Color::WHITE;
-
-        let paragraph = |width, font_size, line_spacing| ParagraphOptions {
-            width,
-            align: TextAlign::Center,
-            line_spacing,
-            font_size: Some(font_size),
-            font_family: Some("Tw Cen MT".into()),
-            max_lines: None,
-            overflow: gaanim_api::canvas::ParagraphOverflow::Clip,
-        };
-        canvas
-            .paragraph(title, paragraph(1580.0, 82.0, 1.02))
-            .at(0.0, 20.0);
-        canvas
-            .paragraph(
-                &format!("{}\n{}\n{}", self.institution, self.faculty, self.school),
-                paragraph(1280.0, 34.0, 1.12),
-            )
-            .at(0.0, 315.0);
-        if let Some(logo) = &self.logo {
-            canvas
-                .svg(logo)
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?
-                .scaled(0.82)
-                .at(0.0, 430.0);
-        } else {
-            canvas
-                .rounded_rect(78.0, 98.0, 18.0)
-                .no_fill()
-                .stroke(white, 4.0)
-                .at(0.0, 430.0);
-            canvas.line(0.0, 394.0, 0.0, 466.0).stroke(white, 4.0);
-            canvas.line(-19.0, 430.0, 19.0, 430.0).stroke(white, 4.0);
-        }
-        canvas
-            .paragraph(authors, paragraph(1320.0, 31.0, 1.2))
-            .at(0.0, -350.0);
-        canvas
-            .paragraph(date, paragraph(900.0, 30.0, 1.2))
-            .at(0.0, -430.0);
-        drop(canvas);
-
-        Ok(PySlide {
-            inner: self.inner.clone(),
-            id,
-            template,
-        })
-    }
-
-    /// Place a consistently styled title in any semantic slide.
-    fn title(&self, slide: &PySlide, text: &str) -> PyResult<PyDrawable> {
-        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
-        let region = canvas
-            .slide_region(slide.template, "title")
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        let title = canvas.title(text);
-        Ok(PyDrawable(region.place(title, Anchor::Center)))
-    }
-}
-
 /// Semantic camera controller exposed as ``scene.camera``.
 #[pyclass(name = "Camera", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1021,7 +824,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "kind must be 'row', 'column', or 'grid'",
-                ))
+                ));
             }
         };
         for (name, value) in [("width", width), ("height", height)] {
@@ -1039,7 +842,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "fit must be 'none' or 'shrink'",
-                ))
+                ));
             }
         };
         if !matches!(justify, "start" | "center" | "end" | "between") {
@@ -1070,7 +873,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "preset must be 'lecture', 'comparison', 'vertical_short', or 'minimal'",
-                ))
+                ));
             }
         };
         Ok(PyFrameLayout {
@@ -1194,7 +997,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "direction must be 'vertical' or 'horizontal'",
-                ))
+                ));
             }
         };
         let default_align = match direction {
@@ -1921,7 +1724,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "label_mode must be 'billboard' or 'hud'",
-                ))
+                ));
             }
         };
         let defaults = Axes3DConfig::default();
@@ -2274,7 +2077,7 @@ impl PyScene {
                 _ => {
                     return Err(pyo3::exceptions::PyValueError::new_err(
                         "colormap must be 'inferno', 'viridis' or 'plasma'",
-                    ))
+                    ));
                 }
             };
             let n = points.len();
@@ -2381,7 +2184,7 @@ impl PyScene {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "overflow must be 'visible' or 'clip'",
-                ))
+                ));
             }
         };
         let options = ParagraphOptions {

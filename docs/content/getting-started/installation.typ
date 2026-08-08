@@ -41,14 +41,8 @@ Crea tus proyectos manualmente, donde quieras. Ejemplo:
 
 ```powershell
 mkdir mi-proyecto; cd mi-proyecto
-uv venv --python 3.14          # o --python 3.12
+uv venv --python 3.12
 .\.venv\Scripts\Activate.ps1   # opcional: activa el entorno
-# Hoy aún no está en PyPI, así que instala el wheel local:
-# 1) en el repo gaanim: just wheel   -> genera target/wheels/gaanim-0.1.0-*.whl
-# 2) desde tu proyecto:
-uv pip install C:\dev\rust\gaanim\target\wheels\gaanim-0.1.0-*.whl
-# cuando esté en PyPI será simplemente:
-# uv pip install gaanim
 ```
 
 Alternativa sin `uv`:
@@ -56,15 +50,13 @@ Alternativa sin `uv`:
 ```powershell
 py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install gaanim
 ```
 
 Ahora crea el scaffold:
 
 ```powershell
 gaanim init video mi-video      # video 16:9
-gaanim init presentation mi-charla
-gaanim init thesis mi-tesis     # defensa completa
+gaanim init slides mi-charla    # slides semánticos
 # o dentro de una carpeta vacía:
 gaanim init video .
 ```
@@ -148,19 +140,13 @@ gaanim --help             # debe funcionar incluso sin .venv
 
 # 3. Crear un proyecto nuevo en cualquier lugar, con su propio entorno
 mkdir C:\proyectos\demo-hello; cd C:\proyectos\demo-hello
-uv venv --python 3.14
+uv venv --python 3.12
 # no hace falta Activate.ps1: el launcher encuentra .venv por walk-up
-# Genera el wheel una vez en el repo:
-#   cd C:\dev\rust\gaanim; just wheel  -> target/wheels/gaanim-0.1.0-*.whl
-# Luego instálalo en el proyecto:
-uv pip install C:\dev\rust\gaanim\target\wheels\gaanim-0.1.0-py3-none-win_amd64.whl
-# o, si copiaste el wheel a C:\Tools\gaanim\:
-# uv pip install C:\Tools\gaanim\gaanim-0.1.0-py3-none-win_amd64.whl
-# cuando esté en PyPI: uv pip install gaanim
+# El launcher proporciona el paquete Python embebido; no instales gaanim con pip.
 
 # 4. Generar el scaffold (yo lo hago así)
 gaanim init video .       # crea gaanim.toml, main.py, assets/, exports/
-# o: gaanim init thesis mi-tesis  /  gaanim init presentation mi-charla
+# o: gaanim init slides mi-charla
 
 # 5. Verificar y previsualizar
 gaanim check .            # 2.2 seconds · 1920x1080 · PASS
@@ -236,7 +222,7 @@ El workflow `.github/workflows/release.yml` hace lo mismo en `windows-latest` al
 
 == Troubleshooting
 
-- `exit -1073741515 / python3.dll not found`: el launcher no encontró Python. Verifica `py --version` o crea `.venv` con `uv venv --python 3.14`. El core solo (`gaanim-core.exe`) siempre fallará sin launcher si `PATH` no contiene Python.
+- `exit -1073741515 / python3.dll not found`: el launcher no encontró Python. Verifica `py --version` o crea `.venv` con `uv venv --python 3.12`. El core solo (`gaanim-core.exe`) siempre fallará sin launcher si `PATH` no contiene Python.
 - `gaanim check: could not load project`: revisa `gaanim.toml` `entry` sea relativo y exista, y que `assets/` exista si `scene.load_project` lo usa.
 - `FFmpeg not found` al exportar `mp4`: instala FFmpeg y añádelo a `PATH`, o exporta `png`/`webp`.
 - `just bootstrap` crea `.venv` con 3.14 pero el zip release exige >=3.12: es compatible, no necesitas recrear el venv.

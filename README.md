@@ -45,6 +45,19 @@ Para crear una escena nueva, guarde un script en `examples/` y ejecútelo con
 `just run nombre_del_script` (sin `.py`). Durante la previsualización, guardar
 el archivo recarga la escena.
 
+El binario de usuario también administra proyectos. `gaanim` sin argumentos
+abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez
+proyectos recientes. Los únicos scaffolds generales son:
+
+```powershell
+gaanim init video mi-video
+gaanim init slides mi-charla
+gaanim .
+```
+
+Los proyectos sin `.venv` pueden usar un Python 3.12+ detectado en el sistema;
+el Inicio muestra instrucciones copiables de uv, pero nunca las ejecuta.
+
 ## Paquete Python local
 
 El binding también puede instalarse en el entorno virtual del repositorio:

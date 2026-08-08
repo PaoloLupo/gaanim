@@ -59,8 +59,8 @@ subtitle = scene.subtitle("Frequency-domain representation")
 equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x")
 ```
 
-The aliases `scientific`, `thesis`, `deck`, and `light` map to `technical`,
-`presentation`, `presentation`, and `paper`.
+The aliases `scientific`, `deck`, and `light` map to `technical`,
+`presentation`, and `paper`. The former `thesis` alias is no longer accepted.
 
 == Known color schemes
 
@@ -91,7 +91,7 @@ from gaanim import Scene, Theme
 
 theme = Theme(
     "nord",
-    name="my-thesis",
+    name="my-slides",
     colors={
         "title": "#A3D9FF",
         "accent": "#FFB86C",

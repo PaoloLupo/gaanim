@@ -1,4 +1,4 @@
-"""Reusable thesis branding and semantic slide templates."""
+"""Reusable branding and semantic slide templates."""
 
 import os
 
@@ -8,15 +8,15 @@ from gaanim import Anchor, Scene
 scene = Scene(1280, 720, margin=48)
 scene.canvas.set_theme("presentation")
 scene.brand(
-    logo="tests/assets/thesis_brand.svg",
-    footer="UNIVERSITY · MASTER THESIS · 2026",
+    logo="tests/assets/slides_brand.svg",
+    footer="RESEARCH STUDIO · 2026",
     slide_numbers=True,
     rule=True,
     logo_scale=0.72,
 )
 
-cover = scene.slide("Cover", layout="cover", notes="Introduce the thesis.")
-cover.region("title").place(scene.title("A semantic thesis deck"), Anchor.CENTER)
+cover = scene.slide("Cover", layout="cover", notes="Introduce the topic.")
+cover.region("title").place(scene.title("A semantic slide deck"), Anchor.CENTER)
 cover.region("subtitle").place(
     scene.subtitle("One theme, one brand, every slide"),
     Anchor.CENTER,
@@ -59,7 +59,7 @@ comparison.region("after").place(
 scene.play([scene.arrow(-120, 0, 120, 0).create().duration(0.4)])
 
 closing = scene.slide("Conclusion", layout="conclusion", notes="Close and invite questions.")
-closing.region("title").place(scene.title("Ready for the defense"), Anchor.CENTER)
+closing.region("title").place(scene.title("Ready to present"), Anchor.CENTER)
 closing.region("subtitle").place(
     scene.subtitle("Brand once. Present consistently."),
     Anchor.CENTER,

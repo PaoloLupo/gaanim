@@ -65,4 +65,4 @@ scene.export("demo.mp4", fps=30)
 
 == Siguiente
 
-#link("/getting-started/", "Getting Started →") · #link("/api/scene/", "API Reference →") · #link("/examples/basic/", "Ejemplos →") · #link("/guides/thesis/", "Thesis decks →")
+#link("/getting-started/", "Getting Started →") · #link("/api/scene/", "API Reference →") · #link("/examples/basic/", "Ejemplos →") · #link("/guides/slides/", "Slides →")

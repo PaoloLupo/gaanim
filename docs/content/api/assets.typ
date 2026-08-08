@@ -31,8 +31,7 @@ Create a complete starter from the CLI:
 
 ```text
 gaanim init video my-video
-gaanim init presentation my-deck
-gaanim init thesis my-defense
+gaanim init slides my-deck
 ```
 
 Every project contains `main.py`, `gaanim.toml`, `assets/`, `exports/`, a README,
@@ -40,7 +39,7 @@ and a project `.gitignore`. The generated manifest is:
 
 ```toml
 name = "my-deck"
-kind = "presentation"
+kind = "slides"
 entry = "main.py"
 assets_dir = "assets"
 output_dir = "exports"

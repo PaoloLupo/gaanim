@@ -18,6 +18,7 @@ pub mod export;
 mod fps_overlay;
 pub mod overlays;
 mod presenter;
+pub mod project_hub;
 mod timeline_widget;
 mod vsync;
 
@@ -85,6 +86,7 @@ impl Plugin for GaanimEditorPlugin {
             enable_multipass_for_primary_context: false,
             ..default()
         })
+        .add_plugins(project_hub::ProjectHubPlugin)
         .init_resource::<EditorState>()
         .init_resource::<export::ExportState>()
         .init_resource::<export::StashedReplay>()
@@ -238,8 +240,13 @@ fn editor_ui_system(
     camera: Option<Res<Camera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     interactive: Res<PreviewInteractive>,
+    hub: Option<Res<project_hub::ProjectHubState>>,
     q: EditorQueries,
 ) {
+    if hub.is_some_and(|hub| hub.active) {
+        inset.bottom = 0.0;
+        return;
+    }
     if presentation_mode.active {
         inset.bottom = 0.0;
         return;

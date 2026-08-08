@@ -66,10 +66,12 @@ jobs:
           
           Contenido: gaanim.exe (launcher sin dependencia Python) + gaanim-core.exe (motor)
           Uso con uv (recomendado, creas proyectos manualmente):
-            uv venv --python 3.12  (o --python 3.14)
+            uv venv --python 3.12
             .\.venv\Scripts\Activate.ps1
-            uv pip install gaanim -- o usa el wheel local
+            # No instales gaanim con pip: el launcher usa el paquete embebido.
+            gaanim                    # Inicio: crear, abrir y ver recientes
             gaanim init video my_proj
+            gaanim init slides my_deck
             gaanim my_proj
           
           Sin activar venv, gaanim.exe detecta automaticamente .venv/venv cercano (walk-up desde script/cwd/exe) o Python del sistema (py launcher / where python).

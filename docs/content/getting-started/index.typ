@@ -91,7 +91,7 @@ To export instead of previewing:
 
 = Next Steps
 
-- #link("/guides/thesis/", "Thesis presentations") - complete live-presentation workflow
+- #link("/guides/slides/", "Slides") - flujo completo para presentaciones en vivo
 
 - #link("/api/scene/", "Scene API") — learn the core Scene class
 - #link("/api/mobjects/", "Mobjects") — all available shapes and objects

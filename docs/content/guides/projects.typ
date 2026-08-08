@@ -10,12 +10,15 @@
 
 Gaanim puede abrir un script Python suelto, pero para trabajos reales conviene usar un proyecto. Un proyecto mantiene código, assets y exportaciones juntos, y puede ejecutarse desde cualquier directorio. No necesitas tocar `PATH`/`VIRTUAL_ENV` manualmente: `gaanim.exe` (launcher) detecta el `.venv` cercano.
 
+Ejecuta `gaanim` sin argumentos para abrir el Inicio. Desde allí puedes crear
+un proyecto, abrir una carpeta válida o volver a uno de los diez proyectos
+recientes. Los scripts Python sueltos no se añaden a esa lista.
+
 = Crear un proyecto
 
 ```powershell
 gaanim init video mi-video
-gaanim init presentation mi-charla
-gaanim init thesis mi-tesis
+gaanim init slides mi-charla
 ```
 
 Cada comando crea un starter ejecutable:
@@ -30,13 +33,12 @@ mi-proyecto/
 ```
 
 - `video` — escena animada 16:9 y flujo de exportación.
-- `presentation` — slides semánticos, notas y pasos para Presenter View.
-- `thesis` — defensa completa con el template institucional `#1601FC`.
+- `slides` — slides semánticos, notas y pasos para Presenter View.
 
 `--force` actualiza únicamente los archivos conocidos del scaffold. No borra archivos propios dentro de `assets/` ni otras carpetas del proyecto.
 
 ```powershell
-gaanim init thesis mi_tesis --force
+gaanim init slides mi-charla --force
 ```
 
 = Trabajar con la carpeta
@@ -61,12 +63,16 @@ gaanim check .
 El visor conserva hot reload sobre el entry point resuelto. Las rutas de assets se resuelven respecto de `gaanim.toml`, por lo que no dependen del directorio desde el que se inició Gaanim. Puedes crear el `.venv` dentro del proyecto con `uv`:
 
 ```powershell
-uv venv --python 3.14
+uv venv --python 3.12
 .\.venv\Scripts\Activate.ps1
-uv pip install gaanim
 ```
 
 Sin activar, el launcher igual encuentra `mi-charla/.venv` por walk-up.
+
+Si el proyecto no tiene `.venv`, el Inicio muestra el Python compatible que
+usará y permite abrir con *Abrir de todos modos*. También genera instrucciones
+copiables para instalar uv y ejecutar `uv venv --python 3.12`; Gaanim nunca
+ejecuta esos comandos automáticamente.
 
 = Manifiesto
 
@@ -74,13 +80,13 @@ El scaffold genera:
 
 ```toml
 name = "mi-charla"
-kind = "presentation"
+kind = "slides"
 entry = "main.py"
 assets_dir = "assets"
 output_dir = "exports"
 ```
 
-`entry` debe ser una ruta relativa que permanezca dentro del proyecto. `kind` documenta la intención (`video`, `presentation` o `thesis`). El CLI usa `entry`; la escena carga `assets_dir` mediante `scene.load_project(...)`. `output_dir` es la carpeta convencional para artefactos y será la base de futuros presets de exportación.
+`entry` debe ser una ruta relativa que permanezca dentro del proyecto. `kind` solo acepta `video` o `slides`. Los valores anteriores `presentation` y `thesis` se rechazan; cambia el manifiesto a `kind = "slides"`. El CLI usa `entry`; la escena carga `assets_dir` mediante `scene.load_project(...)`. `output_dir` es la carpeta convencional para artefactos.
 
 En `main.py`:
 
