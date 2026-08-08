@@ -1,16 +1,17 @@
 # Gaanim — estado actual y plan de evolución
 
-Gaanim es un motor de animación vectorial 2D acelerado por GPU, escrito en Rust sobre
-Bevy ECS, Vello y wgpu. Su objetivo de producto es permitir crear videos explicativos,
-contenido educativo, piezas para redes y presentaciones animadas mediante una API
-programática en Python, manteniendo un núcleo reutilizable desde Rust.
+Gaanim es un motor de escenas vectoriales 2D y composiciones 3D acelerado por GPU,
+escrito en Rust sobre Bevy ECS, Vello y wgpu. Su objetivo de producto es permitir crear
+videos explicativos, contenido educativo, piezas para redes y presentaciones animadas
+mediante una API programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 > [!NOTE]
-> Última auditoría del repositorio: **2026-07-28**.
+> Última actualización basada en el repositorio: **2026-08-08**.
 > `Scene` es la fachada pública de Python; `scene.canvas` contiene la configuración del
-> viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. No se
-> asume que una capacidad interna de Rust esté disponible desde Python. `Transform` y
-> `ReplacementTransform` tienen pruebas y regresión visual.
+> viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. La
+> API pública ya cubre escenas 2D, una ruta 3D técnica y modelos glTF, pero no toda la
+> capacidad interna de Rust. `Transform`, `ReplacementTransform`, matching de formas/texto,
+> cámara 3D y acciones glTF tienen implementación y ejemplos/documentación asociados.
 
 ---
 
@@ -18,25 +19,27 @@ programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 **Estado de producto: alfa funcional (`gaanim` 0.1.0).**
 
-Gaanim ya puede construir, previsualizar y exportar animaciones vectoriales 2D con
-formas, texto, fórmulas matemáticas, composición temporal, segmentos, transiciones y
-algunos comportamientos reactivos. El workspace compila completo y la arquitectura
-separa correctamente escena, animación, timeline, renderer, texto, layout, exportación,
-editor, API y bindings.
+Gaanim ya puede construir, previsualizar y exportar animaciones vectoriales 2D y escenas
+3D con formas, texto, fórmulas matemáticas, composición temporal, segmentos, transiciones,
+assets, cámaras y comportamientos reactivos. La API Python también importa modelos glTF,
+selecciona sus nodos y programa sus acciones; el workspace separa escena, animación,
+timeline, renderer, texto, layout, exportación, proyectos, editor, API y bindings.
 
 La base técnica es más madura que la experiencia de librería. La API de Python actual
 expone solo una parte de lo que existe en Rust, pero `Scene` ya es la fachada pública que
-posee mobjects, timeline, reproducción y exportación. La documentación y los ejemplos
-usan `Scene`; `Canvas` queda limitado a la configuración accesible como `scene.canvas` y
-a un constructor de compatibilidad deprecado. El flujo principal también está orientado a
-ejecutar scripts dentro de la aplicación `gaanim`, no a instalar y usar el módulo como un
-paquete Python autónomo.
+posee mobjects, timeline, reproducción, presentación y exportación. La documentación y
+los ejemplos usan `Scene`; `Canvas` queda limitado a la configuración accesible como
+`scene.canvas` y a un constructor de compatibilidad deprecado. El flujo principal está
+orientado a ejecutar scripts dentro de la aplicación `gaanim`, aunque también existe una
+wheel local para exportaciones headless sin el visor interactivo.
 
 En términos prácticos:
 
 - **Sí es viable hoy** para prototipos y piezas vectoriales programáticas: títulos,
-  diagramas simples, fórmulas, explicaciones matemáticas y animaciones cortas con audio
-  mezclado al exportar.
+  diagramas, fórmulas, explicaciones matemáticas, assets SVG/raster y animaciones cortas
+  con audio mezclado al exportar.
+- **Es una beta técnica** para visualización 3D: superficies, ejes, polilíneas con
+  colormap, cámara perspectiva, HUD/billboards y modelos glTF con acciones animadas.
 - **Es beta funcional** para presentaciones interactivas: existen slides y pasos
   semánticos, layouts, notas, Presenter View, overview, navegación por monitor y una
   plantilla completa de sustentación.
@@ -50,10 +53,12 @@ En términos prácticos:
 | Caso de uso | Estado | Evaluación actual |
 |---|---:|---|
 | Animación vectorial 2D programática | 🟢 | Núcleo funcional con preview y exportación |
+| Visualización 3D programática | 🟡 | Ejes, superficies, líneas, cámara y transforms públicos; faltan cobertura y pulido |
+| Modelos glTF animados | 🟡 | Importación, partes, materiales PBR y acciones; faltan más formatos y E2E |
 | Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
 | Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View y overview verificados |
-| Contenido con código, tablas o datos | 🔴 | No hay mobjects públicos para esos formatos |
+| Contenido con código, tablas o datos | 🟡 | `table`, `bar_chart` y `code` existen; faltan charts, highlighting y APIs de datos más ricas |
 | Motion graphics con multimedia | 🟡 | Raster, SVG vectorial avanzado y audio de exportación disponibles; falta video embebido |
 | Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
 
@@ -62,25 +67,28 @@ En términos prácticos:
 ## Evidencia de la auditoría
 
 - `cargo check --workspace` finaliza correctamente.
-- El workspace contiene 13 crates de gaanim más el crate de documentación.
+- El workspace contiene 16 crates de gaanim más el crate de documentación (17 miembros).
 - El paquete declara versión Python `0.1.0`; varios crates Rust siguen en `0.1.0`.
 - La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
-  `Anchor`, `Direction` y `Updater`. `Canvas(...)` emite una deprecación y devuelve un
-  `Scene`; la configuración visual vive en `scene.canvas`.
+  `Brush`, `Camera`, `Theme`, layouts, `ValueTracker` y `Slide`, además de primitivas 3D
+  y glTF. `Canvas(...)` emite una deprecación y devuelve un `Scene`; la configuración
+  visual vive en `scene.canvas`.
 - Los ejemplos Python no importan `Canvas` como fachada de animación.
 - La documentación Typst usa `Scene`, listas en `scene.play([...])` y métodos expuestos
   por los bindings actuales.
-- CI ejecuta formato, check, tests y Clippy en Windows y Linux, además de la regresión
-  visual de `transform_demo` en Windows.
-- `cargo test --workspace --jobs 2` finaliza correctamente.
+- CI ejecuta formato, check, tests y Clippy en Windows y Linux, además de regresiones
+  visuales de transform, imagen, SVG y cámara en Windows, validación de ejemplos y
+  construcción de la wheel Python.
+- La auditoría heurística del repositorio no reporta hallazgos objetivos en este corte;
+  la verificación final debe volver a ejecutarse después de cada cambio de código.
 
 ---
 
 ## Decisión de API: deprecar `Canvas` como fachada pública
 
-**Decisión aprobada el 2026-07-13:** `Scene` será nuevamente el punto de entrada público
-de Python. `Canvas` dejará de representar toda la animación y quedará reservado para el
-viewport y su configuración visual.
+**Decisión aprobada el 2026-07-13 y aplicada en 0.1.x:** `Scene` es el punto de entrada
+público de Python. `Canvas` dejó de representar toda la animación y quedó reservado para
+el viewport y su configuración visual.
 
 La responsabilidad objetivo de cada concepto es:
 
@@ -97,7 +105,7 @@ API objetivo mínima:
 scene = Scene(width=1920, height=1080, background=BLACK)
 
 title = scene.title("Gaanim")
-scene.play(title.write())
+scene.play([title.write()])
 scene.export("video.mp4")
 ```
 
@@ -112,10 +120,9 @@ Video / Presentation
 ```
 
 No hay releases públicas ni entornos externos de prueba que requieran compatibilidad con
-la fachada `Canvas`. Por ello, no se necesita un ciclo largo de deprecación: el cambio se
-hará directamente durante 0.1.x. Si resulta útil para migrar ejemplos locales, podrá
-existir temporalmente un alias `Canvas = Scene`, marcado como deprecado y sin aparecer en
-la documentación nueva. Debe eliminarse antes de 1.0.
+la fachada `Canvas`. El constructor de compatibilidad sigue disponible y emite una
+deprecación para facilitar la migración de scripts locales; no debe aparecer en ejemplos
+nuevos y debe eliminarse antes de 1.0.
 
 Las menciones a `Canvas` en las secciones de estado actual describen el código que existe
 hoy; no representan el diseño objetivo de la API.
@@ -131,18 +138,22 @@ hoy; no representan el diseño objetivo de la API.
 | ECS, componentes y jerarquía | `gaanim_scene` | ✅ Funcional |
 | Tweens, escritura, señales y updaters | `gaanim_animation` | ✅ Funcional |
 | Clips, snapshots, seek, escenas y transiciones | `gaanim_timeline` | ✅ Funcional, con coste de seek por optimizar |
-| Render vectorial GPU | `gaanim_renderer` | ✅ Funcional; efectos avanzados parciales |
-| Primitivas y texto semántico | `gaanim_objects`, `gaanim_text` | ✅ Base sólida |
+| Render 2D vectorial y 3D nativo | `gaanim_renderer`, `gaanim_objects` | 🟡 Vello retained + Bevy/PBR; falta cobertura E2E |
+| Primitivas, glTF y texto semántico | `gaanim_objects`, `gaanim_text` | ✅ Base sólida; glTF es reciente |
 | Posicionamiento y distribución | `gaanim_layout` | ✅ Funcional en Rust; exposición parcial |
-| API canónica | `gaanim_api` | 🟡 Dos superficies con distinta cobertura |
+| API canónica | `gaanim_api` | 🟡 Cobertura Python creciente; contrato aún en consolidación |
 | Binding Python embebido | `gaanim_python` | 🟡 Funcional dentro de la aplicación |
+| Proyectos y detección de entornos | `gaanim_project`, `gaanim_launcher` | ✅ Scaffolds `video`/`slides`, manifiesto y diagnóstico |
 | Preview, hot reload y timeline visual | `gaanim_editor` | 🟡 Útil, todavía no es un editor integral |
 | Exportación de frames y video | `gaanim_export` | 🟡 Implementada, necesita validación E2E |
+| Comparación visual | `gaanim_diff` | ✅ Snapshots deterministas y reportes; cobertura selectiva |
 
-La dirección arquitectónica es correcta: Python construye una descripción diferida
-(actualmente `Canvas`, próximamente `Scene`), la aplicación la recompila a ECS y el mismo
-timeline se usa para reproducción, seek y exportación. El principal riesgo ya no es la
-separación de capas, sino mantener una sola API de producto coherente sobre ellas.
+La dirección arquitectónica es correcta: Python construye una descripción diferida de
+`Scene`, la aplicación la recompila a ECS y el mismo timeline se usa para reproducción,
+seek, snapshots y exportación. Las escenas 2D siguen el camino Vello retained; el contenido
+3D activa la ruta nativa de Bevy y debe convivir con overlays Vello como HUD y billboards.
+El principal riesgo ya no es la separación de capas, sino mantener una sola API de producto
+coherente y una exportación determinista para ambas rutas.
 
 ---
 
@@ -152,9 +163,12 @@ separación de capas, sino mantener una sola API de producto coherente sobre ell
 
 La API pública actual permite:
 
-- crear un `Canvas` con tamaño, fondo y margen uniforme;
+- crear un `Scene` con tamaño, fondo y margen uniforme;
 - crear `circle`, `rect`, `rounded_rect`, `square`, `dot`, `ellipse`, `line` y `arrow`;
 - crear `text`, `title`, `subtitle`, `equation` e `image` (PNG/JPEG/WebP);
+- crear paths, arcos, polilíneas, ejes 2D/3D, superficies y primitivas técnicas;
+- importar SVG vectorial y modelos glTF/GLB, consultar partes y acciones del modelo;
+- colocar objetos en 3D con cámara perspectiva, `billboard` y overlays `hud`;
 - agrupar objetos;
 - configurar fill, stroke, opacidad y z-index;
 - posicionar con `at`, `at_anchor`, `next_to`, `align_to`, `to_edge` y `to_corner`;
@@ -162,9 +176,9 @@ La API pública actual permite:
 - ejecutar la escena en la aplicación o exportarla por extensión de archivo.
 
 El núcleo Rust contiene más primitivas y helpers —polígonos, estrellas, gráficas,
-braces, operaciones booleanas y layouts de grupo—. La API Python ya expone
-`polyline`, `arc`, `curved_arrow`, `dimension` y ejes; el resto no debe anunciarse
-como función de usuario hasta que esté enlazado, documentado y probado.
+braces, operaciones booleanas y layouts de grupo—. La API Python ya expone una
+superficie amplia y documentada, pero cada capacidad nueva debe seguir validándose
+desde el binding, el stub y un ejemplo ejecutable antes de considerarse estable.
 
 ### 2. Animación y composición temporal
 
@@ -176,9 +190,12 @@ Desde Python están expuestas animaciones de:
 - crecimiento/encogimiento desde el centro;
 - `SpinInFromNothing`, `DrawBorderThenFill`, `Indicate` y `Wiggle`;
 - `FadeTransform`;
-- `Transform` y `ReplacementTransform` en la rama de trabajo actual.
+- `Transform` y `ReplacementTransform`;
+- `TransformMatchingShapes`, `TransformMatchingText` y `TransformMatchingTex`;
+- `move_along_path` y transforms 3D (`move_3d`, `move_to_3d`, `rotate_*_3d`, `scale_to_3d`);
+- acciones glTF con velocidad, loop, reverse, offset y cross-fade.
 
-`Canvas.play()` compone animaciones en paralelo y admite lag; llamadas sucesivas,
+`Scene.play()` compone animaciones en paralelo y admite lag; llamadas sucesivas,
 `wait()` y delays construyen la secuencia. El motor Rust dispone de más tipos de
 animación que el binding público, por lo que la cobertura debe medirse desde Python y
 no desde el enum interno.
@@ -205,28 +222,29 @@ tests de portabilidad entre Windows, Linux y macOS.
 
 ### 4. Sistema reactivo
 
-La API `Canvas` expone updaters predefinidos (`orbit`, `advance_x`, `bob`, `rotate`,
-`pulse`), bindings de posición, `tracking_line` y `traced_path`. Esto permite demos
-reactivas útiles sin callbacks Python por frame.
+La API de `Drawable` expone updaters predefinidos (`orbit`, `advance_x`, `bob`, `rotate`,
+`pulse`), bindings de posición, `tracking_line`, `traced_path` y `traced_path_3d`. También
+existe un callback Python por frame para casos como integración de un atractor, aunque
+debe considerarse una superficie sensible a rendimiento y a validación de stubs.
 
-`value_tracker()` existe, pero el objeto retornado no tiene todavía una interfaz pública
-completa para leer, modificar, enlazar o animar su valor desde Python. `AlwaysRedraw`,
-señales avanzadas y callbacks arbitrarios siguen siendo capacidades internas o de la API
-Rust anterior.
+`value_tracker()` ya permite leer, modificar y animar el valor desde Python, y las
+geometrías reactivas públicas cubren puntos, tangentes, normales, curvatura, arcos,
+resortes, cotas y trazas 3D. Siguen pendientes una API reactiva uniforme para cualquier
+geometría, callbacks seguros fuera del hilo de render y una superficie completa de signals.
 
 ### 5. Multi-escena y transiciones
 
-`Canvas.segment()` y `Canvas.link()` crean segmentos nombrados. Python expone:
+`Scene.segment()` y `Scene.link()` crean segmentos nombrados. Python expone:
 
 - `Cut`;
 - `CrossFade`;
 - `FadeThrough`;
 - `Slide` en cuatro direcciones.
 
-El timeline Rust también define `ZoomThrough` y `Morph`, pero no están expuestos por el
-binding `Transition` actual. Los segmentos ya son suficientes para organizar un video
-por capítulos o escenas. El formato mínimo de proyecto y el asset manager ya existen;
-aún falta una composición no lineal de alto nivel.
+El binding también expone `ZoomThrough` y `Morph`. `reuse`, `persist` y `release` permiten
+controlar qué objetos sobreviven entre segmentos, evitando que una transición automática
+los trate como contenido local. Los segmentos ya son suficientes para organizar un video
+por capítulos o escenas; aún falta una composición no lineal de alto nivel.
 
 ### 6. Presentaciones
 
@@ -255,8 +273,8 @@ La configuración visual ya no está limitada a nombres fijos: `Theme` reúne co
 semánticos, tipografías, tamaños y archivos TTF/OTF embebidos. Puede construirse desde
 cero, derivarse de otro tema o de esquemas conocidos como Nord, Dracula, Solarized,
 Gruvbox, Tokyo Night y Catppuccin; los componentes consumen el mismo palette.
-Los tokens también se consultan con `theme.color(...)`/`canvas.color(...)`, y
-`validate_theme()` audita contraste y tipografía antes de una presentación.
+Los tokens también se consultan con `theme.color(...)`/`scene.canvas.color(...)`, y
+`scene.canvas.validate_theme()` audita contraste y tipografía antes de una presentación.
 
 Este es un **modo de presentación beta para slides generales**. El comando
 `gaanim init slides` genera un deck 16:9 con estructura semántica, notas y pasos.
@@ -286,8 +304,18 @@ Estado de efectos:
 - `Brush.linear`, `Brush.radial` y `Brush.sweep` exponen gradientes para fill y stroke
   en Python, con ramps `pad`, `repeat` y `reflect`.
 
-No existe todavía un pipeline 3D. Los transforms usan tipos preparados para z, pero el
-producto actual debe presentarse como **2D vectorial**.
+La ruta 3D nativa usa Bevy para meshes y materiales PBR, mientras Vello conserva el
+render vectorial de overlays. Hoy soporta:
+
+- `axes_3d` con tres planos, ticks, números y labels billboard o HUD;
+- `surface` triangulada, `polyline_3d` con colores por vértice y colormaps;
+- cámara perspectiva con `look_at`, `orbit`, `dolly` y transforms 3D de objetos;
+- modelos glTF/GLB con jerarquía seleccionable, skins, morph targets, materiales PBR,
+  texturas y acciones muestreadas desde el timeline;
+- overlays `hud` y etiquetas `billboard` que se mantienen legibles sobre la escena.
+
+Esta ruta es funcional pero reciente: requiere ampliar pruebas visuales y E2E, documentar
+los límites de materiales/extensiones glTF y medir el coste de exportar escenas híbridas.
 
 ### 8. Exportación
 
@@ -299,10 +327,12 @@ El crate de exportación implementa:
 - fallback por CPU con libx264 y detección de NVENC, AMF, QSV y VA-API;
 - rango temporal, transparencia y presets de resolución/calidad en Rust.
 
-La API Python pública simplifica esto a `canvas.export(path, fps=None)`: selecciona el
-formato por extensión y usa el tamaño del canvas. Transparencia, presets, encoder,
-calidad y rangos no están expuestos de forma completa. La exportación depende de FFmpeg
-y aún necesita smoke tests automatizados por plataforma y formato.
+La API Python pública usa `scene.export(path, fps=None, ...)`: selecciona el formato por
+extensión y permite transparencia, calidad, aspect ratio, rango temporal, slide, CRF,
+encoder y velocidad. La exportación depende de FFmpeg y aún necesita smoke tests
+automatizados por plataforma y formato. Las escenas 3D usan la ruta híbrida nativa de
+Bevy; el editor debe mantener aislado ese proceso cuando la escena contiene recursos
+3D nativos para no contaminar el preview interactivo.
 
 `scene.audio(...)` declara pistas relativas al timeline; el exportador las mezcla y
 muxea con FFmpeg en MP4 (AAC) y WebM (Opus). PNG, GIF y WebP no aceptan audio.
@@ -319,68 +349,78 @@ La aplicación incluye:
 - timeline expandible con tracks, clips, zoom, scroll, snap y edición de tiempos;
 - selección básica de objetos por bounds;
 - pin always-on-top y diálogo de exportación;
+- Inicio de proyectos con `gaanim init`, proyectos recientes y diagnóstico de Python/uv;
+- validación `gaanim check` para proyectos de video/slides;
+- picking 2D/3D básico, interacción de cámara perspectiva y soporte de exportación híbrida;
 - conservación del proceso gráfico durante recargas.
 
 Limitaciones actuales:
 
 - el hot reload vuelve a ejecutar el script completo;
 - la selección no tiene panel de propiedades ni manipulación visual;
-- el zoom/pan disponible corresponde al timeline, no al canvas de la escena;
-- los errores se reportan principalmente por consola/estado de recarga;
+- el zoom/pan de cámara existe para preview 2D/3D, pero la edición directa de composición
+  sigue siendo limitada;
+- los errores se reportan principalmente por consola/estado de recarga y faltan paneles
+  de diagnóstico más ricos;
 - los cambios hechos en el timeline no constituyen todavía un formato de proyecto
-  persistente y bidireccional con el script.
+  persistente y bidireccional con el script;
+- audio, glTF y exportación 3D necesitan más pruebas automatizadas en el flujo del editor.
 
 ---
 
 ## Brechas críticas para generación de contenido
 
-### P0 — Convertir el motor en una librería coherente
+### P0 — Consolidar el motor como librería coherente
 
-Antes de ampliar el catálogo visual, la versión 0.3 necesita una sola superficie pública:
+La primera convergencia de API ya está aplicada; el trabajo restante es de contrato y
+distribución, no de escoger otra fachada:
 
-1. Declarar `Scene` como API canónica y deprecar la fachada pública `Canvas`.
-2. Separar la configuración visual en un `Canvas` interno o accesible como
-   `scene.canvas`.
-3. Migrar los 18 ejemplos y la documentación a código ejecutable con `Scene`.
-4. Regenerar y validar `gaanim_core.pyi` a partir de los bindings reales.
-5. Decidir y documentar dos modos de distribución:
-   - aplicación `gaanim <script.py>` con Python embebido;
-   - paquete Python instalable, si se desea soportarlo, con extensión `cdylib` válida.
-6. Alinear versiones Rust/Python y establecer una política de compatibilidad.
-7. Añadir README, guía de instalación, tutorial mínimo y referencia de API.
-8. Añadir CI para check, fmt, clippy, tests y construcción en las plataformas soportadas.
+1. [x] Declarar `Scene` como API canónica y deprecar `Canvas`.
+2. [x] Separar el viewport en `scene.canvas`.
+3. [x] Migrar ejemplos y documentación nuevas a `Scene`.
+4. [~] Mantener `gaanim_core.pyi`, binding nativo, `__init__.py` y documentación alineados;
+   la validación actual comprueba que los miembros declarados existan, pero no detecta
+   automáticamente todo miembro nativo aún no documentado.
+5. [x] Documentar la aplicación con Python embebido y la wheel local para exportación
+   headless.
+6. [ ] Alinear versiones Rust/Python y establecer una política de compatibilidad.
+7. [x] Publicar README, quickstart, instalación y referencia Typst inicial.
+8. [x] Añadir CI para formato, check, tests, Clippy, wheel y regresiones visuales selectivas.
 
-**Criterio de salida:** un usuario nuevo puede instalar gaanim, ejecutar todos los ejemplos
-y exportar una pieza sin encontrar APIs obsoletas.
+**Criterio de salida:** un usuario nuevo puede crear un proyecto, ejecutar sus ejemplos,
+usar la API pública sin importar internals y exportar una pieza sin encontrar APIs obsoletas.
 
 ### P0 — Validación de render y exportación
 
-La compilación por sí sola no garantiza el resultado visual. Hace falta:
+La compilación por sí sola no garantiza el resultado visual. El estado actual es:
 
-1. tests unitarios de timeline, interpolación, layout y morph;
-2. tests de integración de la API Python;
-3. golden tests o snapshots de frames representativos;
-4. smoke tests headless para MP4, WebM, WebP, GIF y PNG;
-5. validación de fuentes/Typst en Windows, Linux y macOS;
-6. pruebas de seek, hot reload y breakpoints;
-7. benchmarks reproducibles de preview y exportación.
+1. [x] tests unitarios de timeline, interpolación, layout y transforms;
+2. [~] tests de integración de la API Python; existe validación del stub y de ejemplos,
+   pero falta una matriz amplia de escenarios públicos;
+3. [x] snapshots visuales de transform, imagen, SVG, cámara y otros ejemplos;
+4. [~] smoke tests headless de los cinco formatos; faltan ejecuciones automatizadas de
+   todos los formatos y de audio por plataforma;
+5. [~] validación de fuentes/Typst en Windows y Linux; falta una matriz macOS declarada;
+6. [~] pruebas de seek, slides y breakpoints; hot reload y escenas 3D requieren más E2E;
+7. [ ] benchmarks reproducibles de preview, timeline y exportación.
 
-**Criterio de salida:** cada release puede demostrar que API, frames y exports siguen
-siendo correctos, no solo que el workspace compila.
+**Criterio de salida:** cada release puede demostrar que API, frames, escenas 3D y exports
+siguen siendo correctos, no solo que el workspace compila.
 
-### P1 — Assets necesarios para contenido real
+### P1 — Assets y multimedia para contenido real
 
-Orden recomendado:
+1. [x] asset manager con rutas relativas, manifiesto de proyecto, precarga y recarga;
+2. [x] SVG con grupos direccionables, clipping, gradientes, texto outlineado y filtros
+   comunes;
+3. [~] `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg; falta preview,
+   waveform, scrubbing y editor de pistas;
+4. [~] glTF/GLB con jerarquía, PBR, texturas, skins, morph targets y acciones; faltan
+   pruebas de compatibilidad por asset, extensiones y un flujo E2E estable.
 
-1. asset manager con rutas relativas, precarga y recarga de assets;
-2. [x] ampliar SVG con grupos direccionables, clipping, gradientes, texto outlineado y
-   filtros comunes;
-3. `AudioTrack`, offsets, volumen, fade, mezcla y muxing con FFmpeg.
+Sin el cierre de audio, video embebido y validación de assets, gaanim seguirá dependiendo
+de herramientas externas para una parte importante de la producción comercial o social.
 
-Sin estas capacidades, gaanim seguirá dependiendo de un editor externo para la mayor
-parte de las piezas de contenido comercial o social.
-
-### P1 — Diagramas técnicos y mecanismos dinámicos (completado)
+### P1 — Diagramas técnicos, mecanismos y primera ruta 3D
 
 Las figuras de física, ingeniería y matemáticas deben poder construirse como
 geometría animable, no como una imagen plana. Este bloque pasa por delante de
@@ -396,6 +436,12 @@ Capacidades completadas:
 4. [x] geometría reactiva nativa para arcos, resortes, etiquetas, tangentes,
    normales, curvatura y cotas;
 5. [x] grupos y drawables con pivote de transformación para mecanismos rotatorios.
+6. [x] `axes_3d`, `surface` y `polyline_3d` con perspectiva, colores por vértice y
+   colormaps públicos.
+7. [x] overlays `hud`/`billboard`, transforms 3D y callbacks de updater para demos
+   dinámicas; falta estabilizar su contrato de tipos y rendimiento.
+8. [~] modelos glTF con selección de partes y acciones reproducibles desde el timeline;
+   falta una matriz visual/E2E que cubra múltiples exporters y materiales.
 
 **Criterio de salida:** una escena Python puede animar un mecanismo como un
 disco con resorte y masa: el conjunto rota, la masa se desplaza, el resorte se
@@ -410,9 +456,11 @@ de que cada ejemplo configure tipografías o ejes manualmente.
 2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para `title`, `subtitle`, `text`, `equation`, `caption` y `code`; un `.fill(...)` explícito conserva prioridad;
 3. [x] fuentes registradas por el motor para la composición técnica actual;
 4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
-5. [x] estilos separados para ejes, grilla, ticks, números y rótulos, con
+5. [x] `scene.axes_3d(...)` con tres rangos, planos de grilla, labels billboard/HUD y
+   estilos separados;
+6. [x] estilos separados para ejes, grilla, ticks, números y rótulos, con
    visibilidad global o independiente por eje desde `scene.axes(...)`;
-6. [x] aliases semánticos de composición (`cover`, `content`, `comparison`,
+7. [x] aliases semánticos de composición (`cover`, `content`, `comparison`,
    `divider`, `conclusion`) y branding global reutilizable con logo, regla,
    footer y numeración sobre el sistema de temas.
 
@@ -422,15 +470,16 @@ tipográfica consistente en preview y export, tanto en fondo oscuro como en `pap
 
 ### P1 — Componentes de contenido reutilizables
 
-Priorizar objetos de alto impacto editorial:
+La base ya incluye varios componentes; el siguiente trabajo es ampliar cobertura y
+consistencia visual:
 
-- listas y bullets animados;
-- `Table` y `Matrix`;
-- `BarChart`, line chart y pie/donut chart;
-- `Code` con syntax highlighting, highlights y diff animado;
-- callouts, labels, braces y conectores;
-- lower thirds, title cards, captions y end cards;
-- plantillas para 16:9, 9:16 y 1:1 con safe areas.
+- [x] listas, bullets, callouts, captions, title cards y end cards;
+- [~] `Table` y `Matrix`: tabla pública y matrices Typst disponibles, falta una API
+  nativa de matriz más rica;
+- [~] `BarChart`: disponible; faltan line chart, pie/donut y escalas/configuración avanzada;
+- [~] `Code`: bloque monoespaciado disponible; faltan highlighting por token y diff animado;
+- [x] plantillas 16:9, 9:16 y 1:1 con safe areas;
+- [ ] conectores semánticos, lower thirds y componentes responsive.
 
 La API debe favorecer componentes semánticos y plantillas, no obligar al usuario a
 componer cada pieza desde primitivas.
@@ -442,7 +491,9 @@ componer cada pieza desde primitivas.
 - [x] cámara follow, pan, zoom, rotación y shake como animaciones de alto nivel;
 - [x] clipping/masks vectoriales públicos con `.clip(mask)` para drawables y grupos;
 - [x] gradientes y efectos vectoriales de sombra/blur/glow con caché retained;
-- soporte explícito de aspect ratios y safe areas en `scene.canvas`.
+- [x] soporte explícito de aspect ratios y safe areas en `scene.canvas`;
+- [x] perspectiva 3D, `look_at`, `orbit`, `dolly`, HUD y billboards;
+- [ ] encuadre, picking y composición responsive que combinen 2D y 3D de forma uniforme.
 
 ### P1 — Presentaciones completas
 
@@ -455,91 +506,59 @@ componer cada pieza desde primitivas.
   de ruta desde la misma función `scene.export(...)`;
 - [x] navegación directa por nombre de slide y por nombre/índice de paso;
 - [x] plantillas semánticas, temas y branding global expuestos desde Python;
-- control remoto o protocolo simple de navegación.
+- [ ] control remoto o protocolo simple de navegación.
 
 ### P2 — Animación avanzada
 
-- terminar y validar `Transform`/`ReplacementTransform`;
-- `TransformMatchingShapes` y matching semántico para texto/math;
-- `ApplyWave`, deformaciones y homotopías;
-- animación de propiedades tipográficas;
-- callbacks/eventos seguros sin bloquear el renderer;
-- API reactiva completa para trackers, signals y `always_redraw`.
+- [x] terminar y validar `Transform`/`ReplacementTransform`;
+- [x] `TransformMatchingShapes`, `TransformMatchingText` y `TransformMatchingTex`;
+- [ ] `ApplyWave`, deformaciones y homotopías;
+- [ ] animación de propiedades tipográficas;
+- [ ] callbacks/eventos seguros sin bloquear el renderer;
+- [~] API reactiva para trackers, updaters, señales y `always_redraw`.
 
 ### Fuera del foco inmediato
 
-3D, WASM, Lottie, plugins y generación asistida por IA pueden ser diferenciadores, pero
-no deben desplazar la estabilización 2D, los assets, el audio y el flujo de publicación.
+WASM, Lottie, plugins y generación asistida por IA pueden ser diferenciadores, pero no
+deben desplazar la estabilización 2D/3D, los assets, el audio y el flujo de publicación.
 
 ---
 
 ## Roadmap propuesto por releases
 
-### 0.1.x — Convergencia y confiabilidad
+### 0.1.x — Baseline actual (2026-08-08)
 
-- [x] Terminar y probar el morph con regresión visual.
-- [x] Recuperar `Scene` como fachada pública y deprecar `Canvas` como punto de entrada.
-- [x] Separar el viewport/configuración visual en `scene.canvas`.
-- [x] Migrar la documentación y los ejemplos que usaban la fachada `Canvas` a `Scene`.
-- [ ] Completar la cobertura Python de las capacidades que ya son estables en Rust.
-- [x] Corregir stubs, versiones y estrategia de empaquetado.
-- [x] Añadir CI y regresión visual headless.
-- [x] Publicar un quickstart reproducible.
+Este bloque describe capacidades ya presentes en la versión de trabajo `0.1.0`, no una
+promesa de release separada:
 
-### 0.4 — Producción de contenido vectorial
+- [x] `Scene` como fachada pública, `scene.canvas` como viewport y `Canvas` deprecado.
+- [x] Imágenes raster, SVG vectorial avanzado, gradientes, efectos retained y audio
+  export-only.
+- [x] Paths, geometría reactiva, diagramas técnicos, `TransformMatching*` y pivotes.
+- [x] Temas, branding, layouts, componentes editoriales y presets de aspect ratio.
+- [x] Proyectos `video`/`slides`, `gaanim.toml`, assets relativos, `gaanim check` y
+  detección side-effect-free de Python/uv.
+- [x] Slides semánticos, notas, pasos, overview, Presenter View y exportación por slide.
+- [x] Primera ruta 3D pública: ejes, superficies, polilíneas, cámara perspectiva,
+  HUD/billboards y transforms 3D.
+- [~] glTF/GLB: importación, jerarquía, materiales, skins/morphs y acciones; falta
+  endurecer compatibilidad y exportación E2E.
+- [~] layouts persistentes: reflow anidable disponible; faltan overflow, spans y
+  variantes responsive.
 
-- [x] Imágenes raster PNG/JPEG/WebP con transform, alpha y cache de textura.
-- [x] SVG vectorial básico: paths, formas, fills/strokes sólidos, CSS,
-  transforms, `viewBox` y `<use>`.
-- [x] SVG avanzado vectorial: grupos, paths y texto con `id` se preservan como
-  jerarquía animable; se importan gradientes lineales/radiales, `clipPath`, texto
-  convertido a contornos y los filtros comunes `feGaussianBlur`/`feDropShadow`.
-  Quedan fuera los patterns, masks, raster embebido y grafos arbitrarios de filtros.
-- [~] Audio: `scene.audio(...)` alinea pistas al cursor o a un tiempo absoluto,
-  aplica volumen, recorte y fades, y FFmpeg las mezcla/muxea en MP4/WebM. Falta
-  reproducción/scrubbing en preview, análisis de duración y editor de pistas.
-- [x] API de fuentes y gradientes: temas pueden embeber TTF/OTF y `Brush`
-  expone gradientes lineales, radiales y angulares para fill/stroke.
-- [x] Cámara editorial: `scene.camera` expone pan, zoom, rotación, encuadre automático,
-  follow y shake determinista.
-- [x] Diagramas técnicos dinámicos: paths unificados, arcos/cotas, pivotes,
-  trackers y geometría reactiva.
-- [x] Componentes editoriales: listas, callouts, captions y title cards.
-- [x] Presets 16:9, 9:16 y 1:1 con safe areas.
-- [x] Perfil de exportación completamente accesible desde Python.
+### Próxima entrega — Hardening de contenido y 3D (0.2/0.3)
 
-### 0.5 — Datos, código y plantillas
-
-- [~] Charts, tablas y matrices: `bar_chart`, `table`, matrices Typst y markup Typst de documento disponibles; faltan otros charts.
-- [~] Code mobject: bloque monoespaciado vectorial disponible; faltan highlighting por token y edición/diff animados.
-- [x] Sistema de temas público: esquemas integrados y custom themes configuran
-  colores, tipografía y fuentes; las plantillas semánticas heredan branding
-  global con logo, footer, regla y numeración.
-- [x] Asset manager y formato mínimo de proyecto: `gaanim init video` y
-  `gaanim init slides` generan proyectos portables con
-  `gaanim.toml`, entry point, assets, exports y documentación. El CLI abre, valida,
-  presenta y captura regresiones visuales usando la carpeta del proyecto.
-  `scene.assets_dir(...)` resuelve rutas relativas para imágenes y SVG, y
-  `scene.preload([...])` valida SVG y calienta la caché raster.
-  `scene.load_project("gaanim.toml")` adopta el `assets_dir` relativo y
-  `scene.reload_assets()` invalida la caché raster.
-- [ ] Watcher automático de assets y presets de exportación consumidos directamente
-  desde `gaanim.toml`.
-- [ ] Cache y hot reload incremental donde sea medible.
-
-### 0.6 — Presentaciones
-
-- [x] Overview con miniaturas, indicadores y navegación por slide/paso.
-- [x] Presenter view y notas.
-- [x] Exportación independiente por slide.
-- [~] Layout persistente anidable: `scene.layout("row" | "column" | "grid")`,
-  `add(...)`, `remove(...)`, `replace(...)`, `configure(...)` y `reflow(...)`
-  desplazan y animan hijos. `LayoutRegion.layout(...)` los ancla a regiones;
-  hay límites `width`/`height`, `fit="shrink"`, filas con `wrap=True` y
-  `justify` (`start`/`center`/`end`/`between`). Faltan overflow explícito,
-  grid con spans, reflow reactivo y variantes responsive. Los presets
-  semánticos de slides ya están disponibles.
-- [ ] Interacción/picking útil para demos en vivo.
+- [ ] Completar la matriz Python/API/stubs/docs y una política explícita de compatibilidad.
+- [ ] Ejecutar smoke tests de MP4, WebM, WebP, GIF y PNG, con audio donde corresponda,
+  en las plataformas soportadas.
+- [ ] Añadir regresiones visuales de `axes_3d`, `surface`, `polyline_3d` y glTF, además
+  de casos de seek, hot reload y exportación híbrida.
+- [ ] Probar materiales, extensiones y assets glTF representativos; documentar límites.
+- [ ] Añadir preview/scrubbing de audio, waveform y editor de pistas.
+- [ ] Añadir watcher de assets, presets consumidos desde `gaanim.toml` y hot reload
+  incremental donde el perfil lo justifique.
+- [ ] Completar line/pie charts, syntax highlighting y diff animado de código.
+- [ ] Mejorar picking, panel de propiedades, encuadre 2D/3D y composición responsive.
 
 ### 1.0 — Librería estable
 
@@ -579,7 +598,7 @@ release conviene registrar:
 5. Modelo diferido de construcción de escenas, adecuado para hot reload y exportación
    determinista.
 6. Separación entre API, runtime, editor y exportación.
-7. Tipos 3D-ready sin comprometer el foco actual en 2D.
+7. Tipos 3D-ready que permiten ampliar el producto sin perder el foco en composición 2D.
 8. Uso directo de tipos gráficos (`peniko`, `kurbo`, `glam`) sin wrappers innecesarios.
 
 La oportunidad de gaanim no está en copiar todo Manim o Motion Canvas. Está en convertir
