@@ -721,6 +721,28 @@ class Drawable:
             dot = scene.dot(8).fill(RED).at_3d(1.0, 2.0, 0.5)
         """
         ...
+    def billboard(self) -> Drawable:
+        """Keep a 3D drawable facing the perspective camera.
+
+        This is useful for labels and markers attached to a 3D scene. The
+        method is chainable and returns the same ``Drawable``.
+
+        Example:
+            label = scene.text("origin").at_3d(0.0, 1.0, 0.0).billboard()
+        """
+        ...
+    def hud(self) -> Drawable:
+        """Pin the drawable to the screen as a fixed HUD overlay.
+
+        HUD drawables use screen-space coordinates and are not affected by
+        the 3D camera. Use ``.at(x, y)`` after ``.hud()`` to position them in
+        the viewport. The method is chainable and returns the same
+        ``Drawable``.
+
+        Example:
+            title = scene.text("glTF demo").hud().at(0.0, 300.0)
+        """
+        ...
     def scaled(self, factor: float) -> Drawable:
         """Apply scaled to this drawable and return the result.
 
