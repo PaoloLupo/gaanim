@@ -362,6 +362,35 @@ scene.play([rect.fade_out().duration(0.5)])
 Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
 connect them, and `scene.slide()` to add a presentation breakpoint.
 
+#api-entry(
+  name: "Scene.reuse / persist / release",
+  kind: "method",
+  signature: "reuse(object, *others) / persist(object, *others) / release(object, *others) -> None",
+  params: ((name: "object", type: "Drawable", default: none, desc: [First drawable to reuse or change lifetime.]), (name: "others", type: "Drawable...", default: "()", desc: [Additional drawables from the same Scene.]),),
+  returns: (type: "None", desc: [Queues a scene-membership change at the current timeline cursor.]),
+  desc: [`reuse` adopts existing drawables into the active segment. `persist` keeps them available across future segments and outside automatic transitions. `release` returns persistent drawables to the active segment. Visual state is preserved; drawables from another Scene raise `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, Scene, Transition
+
+scene = Scene(480, 270, background="#0f172a")
+title = scene.title("Shared context").fill(GOLD).at(0, 70)
+scene.play([title.write().duration(0.5)])
+
+scene.segment("content", Transition.cross_fade(0.35))
+scene.reuse(title)
+dot = scene.dot(18).fill(BLUE).at(0, -30)
+scene.play([dot.grow_from_center().duration(0.4)])
+scene.persist(title)
+
+scene.segment("closing", Transition.slide(0.35, "left"))
+scene.release(title)
+scene.wait(0.5)
+scene.export("preview.webp", fps=30)
+```
+]
+
 == Semantic slides and branding
 
 Configure the deck identity once before declaring slides:

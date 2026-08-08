@@ -1,6 +1,6 @@
 //! Canvas — the top-level facade for building Gaanim animations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -54,6 +54,22 @@ pub enum AssetRootError {
         #[source]
         source: std::io::Error,
     },
+}
+
+/// Error returned when a scene-lifetime operation receives an incompatible drawable.
+#[derive(Debug, thiserror::Error)]
+pub enum SceneObjectError {
+    #[error("at least one drawable is required")]
+    NoObjects,
+    #[error("drawable belongs to a different Scene")]
+    ForeignScene,
+}
+
+#[derive(Clone, Copy)]
+enum SceneObjectAction {
+    Reuse,
+    Persist,
+    Release,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1620,13 +1636,72 @@ impl Canvas {
             .push(Op::Remove(o.id));
     }
 
-    pub fn reuse(&mut self, o: &DrawableHandle) {
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .mobject_ids
-            .push(o.id);
+    /// Adopt an existing drawable into the active segment at the current cursor.
+    pub fn reuse(&mut self, o: &DrawableHandle) -> Result<(), SceneObjectError> {
+        self.reuse_many(std::slice::from_ref(o))
+    }
+
+    /// Adopt several existing drawables into the active segment.
+    pub fn reuse_many(&mut self, objects: &[DrawableHandle]) -> Result<(), SceneObjectError> {
+        self.queue_scene_objects(objects, SceneObjectAction::Reuse)
+    }
+
+    /// Keep an existing drawable visible and animatable across future segments.
+    pub fn persist(&mut self, o: &DrawableHandle) -> Result<(), SceneObjectError> {
+        self.persist_many(std::slice::from_ref(o))
+    }
+
+    /// Keep several existing drawables visible and animatable across future segments.
+    pub fn persist_many(&mut self, objects: &[DrawableHandle]) -> Result<(), SceneObjectError> {
+        self.queue_scene_objects(objects, SceneObjectAction::Persist)
+    }
+
+    /// Stop persisting a drawable and attach it to the active segment.
+    pub fn release(&mut self, o: &DrawableHandle) -> Result<(), SceneObjectError> {
+        self.release_many(std::slice::from_ref(o))
+    }
+
+    /// Stop persisting several drawables and attach them to the active segment.
+    pub fn release_many(&mut self, objects: &[DrawableHandle]) -> Result<(), SceneObjectError> {
+        self.queue_scene_objects(objects, SceneObjectAction::Release)
+    }
+
+    fn queue_scene_objects(
+        &mut self,
+        objects: &[DrawableHandle],
+        action: SceneObjectAction,
+    ) -> Result<(), SceneObjectError> {
+        if objects.is_empty() {
+            return Err(SceneObjectError::NoObjects);
+        }
+        if objects
+            .iter()
+            .any(|object| !Arc::ptr_eq(&self.state, &object.state))
+        {
+            return Err(SceneObjectError::ForeignScene);
+        }
+
+        let mut seen = HashSet::new();
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let segment = guard.active_mut();
+        for object in objects {
+            if !seen.insert(object.id) {
+                continue;
+            }
+            if matches!(
+                action,
+                SceneObjectAction::Reuse | SceneObjectAction::Release
+            ) && !segment.mobject_ids.contains(&object.id)
+            {
+                segment.mobject_ids.push(object.id);
+            }
+            segment.ops.push(match action {
+                SceneObjectAction::Reuse => Op::Reuse(object.id),
+                SceneObjectAction::Persist => Op::Persist(object.id),
+                SceneObjectAction::Release => Op::Release(object.id),
+            });
+        }
+        Ok(())
     }
 
     // -- Reactive objects --
@@ -2128,6 +2203,412 @@ mod tests {
         let guard = canvas.state.lock().expect("canvas state poisoned");
         let segment = guard.active();
         assert!((segment.cursor - 1.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scene_object_commands_deduplicate_and_reject_foreign_drawables() {
+        let mut canvas = Canvas::new(1280, 720);
+        let title = canvas.title("Persistent title");
+        canvas.segment("next", None);
+        canvas
+            .reuse_many(&[title.clone(), title.clone()])
+            .expect("same-scene drawable should be reusable");
+
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        let segment = guard.active();
+        assert_eq!(
+            segment
+                .mobject_ids
+                .iter()
+                .filter(|id| **id == title.id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            segment
+                .ops
+                .iter()
+                .filter(|op| matches!(op, Op::Reuse(id) if *id == title.id))
+                .count(),
+            1
+        );
+        drop(guard);
+
+        let mut other = Canvas::new(1280, 720);
+        let foreign = other.circle(20.0);
+        assert!(matches!(
+            canvas.persist(&foreign),
+            Err(SceneObjectError::ForeignScene)
+        ));
+    }
+
+    #[test]
+    fn reuse_persist_and_release_schedule_reversible_scene_membership() {
+        let mut canvas = Canvas::new(1280, 720);
+        let title = canvas.title("Shared title");
+        canvas.wait(1.0);
+
+        canvas.segment("reused", Some(TransitionType::CrossFade { duration: 0.5 }));
+        canvas.reuse(&title).unwrap();
+        canvas.wait(0.6);
+        canvas.persist(&title).unwrap();
+        canvas.wait(0.4);
+
+        canvas.segment(
+            "released",
+            Some(TransitionType::Slide {
+                duration: 0.5,
+                direction: gaanim_timeline::transition::SlideDirection::Left,
+            }),
+        );
+        canvas.release(&title).unwrap();
+        canvas.wait(1.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let (initial_scene, reused_scene, released_scene) = {
+            let timeline = world.resource::<Timeline>();
+            let scene = |name: &str| {
+                timeline
+                    .scenes
+                    .values()
+                    .find(|scene| scene.name == name)
+                    .map(|scene| scene.id)
+                    .unwrap()
+            };
+            (scene("_default"), scene("reused"), scene("released"))
+        };
+        let title_entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == title.id).then_some(entity))
+            .expect("title entity");
+
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world
+                .get::<SceneMember>(title_entity)
+                .map(|member| member.0),
+            Some(initial_scene)
+        );
+
+        timeline.seek(&mut world, 1.25);
+        assert_eq!(world.get::<SceneMember>(title_entity), None);
+        assert!(world.get::<gaanim_scene::Visible>(title_entity).is_some());
+        assert_eq!(
+            world.get::<gaanim_scene::Opacity>(title_entity).unwrap().0,
+            1.0
+        );
+        let hierarchy_memberships: Vec<_> = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .map(|(entity, _)| world.get::<SceneMember>(entity).copied())
+            .collect();
+        assert!(
+            hierarchy_memberships.len() > 1,
+            "title should contain glyphs"
+        );
+        assert!(hierarchy_memberships.iter().all(Option::is_none));
+
+        timeline.seek(&mut world, 1.55);
+        assert_eq!(
+            world
+                .get::<SceneMember>(title_entity)
+                .map(|member| member.0),
+            Some(reused_scene)
+        );
+
+        timeline.seek(&mut world, 1.75);
+        assert_eq!(world.get::<SceneMember>(title_entity), None);
+
+        timeline.seek(&mut world, 2.0);
+        let released_start_x = world
+            .get::<gaanim_math::SpatialTransform>(title_entity)
+            .unwrap()
+            .translation
+            .x;
+        timeline.seek(&mut world, 2.25);
+        assert_eq!(world.get::<SceneMember>(title_entity), None);
+        assert_eq!(
+            world
+                .get::<gaanim_math::SpatialTransform>(title_entity)
+                .unwrap()
+                .translation
+                .x,
+            released_start_x
+        );
+
+        timeline.seek(&mut world, 2.5);
+        assert_eq!(
+            world
+                .get::<SceneMember>(title_entity)
+                .map(|member| member.0),
+            Some(released_scene)
+        );
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world
+                .get::<SceneMember>(title_entity)
+                .map(|member| member.0),
+            Some(initial_scene)
+        );
+
+        assert_ne!(reused_scene, released_scene);
+    }
+
+    #[test]
+    fn reuse_from_a_nonadjacent_segment_enters_with_the_destination() {
+        let mut canvas = Canvas::new(640, 360);
+        let marker = canvas.circle(24.0);
+        canvas.wait(0.5);
+        canvas.segment("middle", Some(TransitionType::Cut));
+        canvas.wait(0.5);
+        canvas.segment("return", Some(TransitionType::CrossFade { duration: 0.4 }));
+        canvas.reuse(&marker).unwrap();
+        canvas.wait(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let return_scene = world
+            .resource::<Timeline>()
+            .scenes
+            .values()
+            .find(|scene| scene.name == "return")
+            .map(|scene| scene.id)
+            .unwrap();
+        let marker_entity = world
+            .query::<(
+                bevy::prelude::Entity,
+                &MobjectId,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .find_map(|(entity, _, parent)| parent.is_none().then_some(entity))
+            .unwrap();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+
+        timeline.seek(&mut world, 1.2);
+        assert_eq!(
+            world
+                .get::<SceneMember>(marker_entity)
+                .map(|member| member.0),
+            Some(return_scene)
+        );
+        let opacity = world.get::<gaanim_scene::Opacity>(marker_entity).unwrap().0;
+        assert!((opacity - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn persistent_object_stays_fixed_for_the_entire_slide_transition() {
+        let mut canvas = Canvas::new(640, 360);
+        let title = canvas.title("KEEP");
+        canvas.wait(1.0);
+        canvas.persist(&title).unwrap();
+        canvas.segment(
+            "next",
+            Some(TransitionType::Slide {
+                duration: 1.0,
+                direction: gaanim_timeline::transition::SlideDirection::Left,
+            }),
+        );
+        canvas.wait(1.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let title_entity = world
+            .query::<(
+                bevy::prelude::Entity,
+                &MobjectId,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .find_map(|(entity, _, parent)| parent.is_none().then_some(entity))
+            .unwrap();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+
+        timeline.seek(&mut world, 1.25);
+        assert_eq!(world.get::<SceneMember>(title_entity), None);
+        let first_x = world
+            .get::<gaanim_math::SpatialTransform>(title_entity)
+            .unwrap()
+            .translation
+            .x;
+        timeline.seek(&mut world, 1.75);
+        assert_eq!(world.get::<SceneMember>(title_entity), None);
+        assert_eq!(
+            world
+                .get::<gaanim_math::SpatialTransform>(title_entity)
+                .unwrap()
+                .translation
+                .x,
+            first_x
+        );
+        assert!(world.get::<gaanim_scene::Visible>(title_entity).is_some());
+    }
+
+    #[test]
+    fn late_reuse_changes_membership_at_the_current_cursor() {
+        let mut canvas = Canvas::new(640, 360);
+        let marker = canvas.circle(24.0);
+        canvas.wait(1.0);
+        canvas.segment("second", Some(TransitionType::CrossFade { duration: 0.5 }));
+        canvas.wait(0.25);
+        canvas.reuse(&marker).unwrap();
+        canvas.wait(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let (first_scene, second_scene) = {
+            let timeline = world.resource::<Timeline>();
+            let scene = |name: &str| {
+                timeline
+                    .scenes
+                    .values()
+                    .find(|scene| scene.name == name)
+                    .map(|scene| scene.id)
+                    .unwrap()
+            };
+            (scene("_default"), scene("second"))
+        };
+        let marker_entity = world
+            .query::<(
+                bevy::prelude::Entity,
+                &MobjectId,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .find_map(|(entity, _, parent)| parent.is_none().then_some(entity))
+            .unwrap();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+
+        timeline.seek(&mut world, 1.2);
+        assert_eq!(
+            world
+                .get::<SceneMember>(marker_entity)
+                .map(|member| member.0),
+            Some(first_scene)
+        );
+        timeline.seek(&mut world, 1.3);
+        assert_eq!(
+            world
+                .get::<SceneMember>(marker_entity)
+                .map(|member| member.0),
+            Some(second_scene)
+        );
+    }
+
+    #[test]
+    fn persistence_covers_group_and_svg_descendants() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_persistent_svg_api_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="80" height="40" xmlns="http://www.w3.org/2000/svg">
+                <g id="assembly">
+                  <rect id="body" width="30" height="20" fill="#0000ff"/>
+                  <circle id="joint" cx="50" cy="20" r="8" fill="#00ff00"/>
+                </g>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = Canvas::new(640, 360);
+        let left = canvas.circle(20.0);
+        let right = canvas.square(40.0);
+        let group = canvas.group(&[&left, &right]);
+        let svg = canvas.svg(&temp).unwrap();
+        std::fs::remove_file(temp).unwrap();
+        canvas.persist_many(&[group, svg]).unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        timeline.seek(&mut world, 0.0);
+
+        let memberships: Vec<_> = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .map(|(entity, _)| world.get::<SceneMember>(entity).copied())
+            .collect();
+        assert!(memberships.len() >= 7, "expected group and SVG hierarchies");
+        assert!(memberships.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn persistent_transform_does_not_localize_its_source() {
+        let mut canvas = Canvas::new(1280, 720);
+        let source = canvas.title("Source");
+        canvas.persist(&source).unwrap();
+        canvas.wait(0.5);
+        canvas.segment("target", Some(TransitionType::CrossFade { duration: 0.2 }));
+        let target = canvas.title("Target");
+        source.transform(&target).duration(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.seek(&mut world, 0.8);
+        let source_entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == source.id).then_some(entity))
+            .expect("source entity");
+        assert_eq!(world.get::<SceneMember>(source_entity), None);
     }
 
     #[test]

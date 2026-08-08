@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
@@ -29,6 +30,18 @@ fn slide_export_error(error: SlideExportError) -> PyErr {
         }
         _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
     }
+}
+
+fn drawable_args(
+    first: &PyDrawable,
+    others: &Bound<'_, PyTuple>,
+) -> PyResult<Vec<gaanim_api::canvas::DrawableHandle>> {
+    let mut drawables = vec![first.0.clone()];
+    for item in others.iter() {
+        let drawable = item.extract::<PyRef<'_, PyDrawable>>()?;
+        drawables.push(drawable.0.clone());
+    }
+    Ok(drawables)
 }
 
 fn parse_quality(value: &str) -> PyResult<QualityPreset> {
@@ -3217,6 +3230,39 @@ impl PyScene {
             .lock()
             .expect("scene canvas poisoned")
             .link(from, to, transition.0.clone());
+    }
+
+    /// Reuse one or more drawables in the active segment at the current cursor.
+    #[pyo3(signature = (object, *others))]
+    fn reuse(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        let drawables = drawable_args(object, others)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .reuse_many(&drawables)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Keep one or more drawables available across future segments.
+    #[pyo3(signature = (object, *others))]
+    fn persist(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        let drawables = drawable_args(object, others)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .persist_many(&drawables)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Stop persistence and attach one or more drawables to the active segment.
+    #[pyo3(signature = (object, *others))]
+    fn release(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        let drawables = drawable_args(object, others)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .release_many(&drawables)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     fn wait(&self, duration: f64) {

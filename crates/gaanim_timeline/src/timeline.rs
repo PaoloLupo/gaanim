@@ -677,6 +677,9 @@ impl Timeline {
                             entity_mut.insert(SceneMember(scene));
                         } else {
                             entity_mut.remove::<SceneMember>();
+                            // Global objects are outside the per-scene visibility pass.
+                            // Restore render eligibility without changing authored opacity.
+                            entity_mut.insert(gaanim_scene::Visible);
                         }
                     }
                 }
@@ -1003,7 +1006,10 @@ fn capture_reactive_state(
                 traced_path_points: traced_path
                     .map(|t| t.points.clone())
                     .or_else(|| traced_3d.map(|t| t.points.clone())),
-                translation: updater.is_some().then_some(transform.map(|t| t.translation)).flatten(),
+                translation: updater
+                    .is_some()
+                    .then_some(transform.map(|t| t.translation))
+                    .flatten(),
             },
         );
     }
@@ -1064,7 +1070,10 @@ fn restore_reactive_state(
                 traced_3d.points = points.clone();
             }
             if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(entity) {
-                let pts: Vec<[f32; 3]> = points.iter().map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect();
+                let pts: Vec<[f32; 3]> = points
+                    .iter()
+                    .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+                    .collect();
                 line.points = pts.clone();
                 // Regenerate vertex colors if colormap present
                 let colormap = colormap_clone.clone();
@@ -1072,15 +1081,39 @@ fn restore_reactive_state(
                     let n = pts.len();
                     let cols: Vec<[f32; 4]> = (0..n)
                         .map(|i| {
-                            let t = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 };
+                            let t = if n > 1 {
+                                i as f32 / (n - 1) as f32
+                            } else {
+                                0.0
+                            };
                             // inline inferno/viridis/plasma
                             let palette: Vec<(u8, u8, u8)> = match name.as_str() {
                                 "inferno" => vec![
-                                    (0, 0, 4), (31, 12, 72), (85, 15, 109), (136, 34, 106), (168, 50, 88),
-                                    (210, 72, 55), (233, 100, 28), (249, 157, 87), (247, 209, 61), (252, 255, 164),
+                                    (0, 0, 4),
+                                    (31, 12, 72),
+                                    (85, 15, 109),
+                                    (136, 34, 106),
+                                    (168, 50, 88),
+                                    (210, 72, 55),
+                                    (233, 100, 28),
+                                    (249, 157, 87),
+                                    (247, 209, 61),
+                                    (252, 255, 164),
                                 ],
-                                "viridis" => vec![(68, 1, 84), (59, 82, 139), (33, 144, 140), (94, 201, 98), (253, 231, 37)],
-                                "plasma" => vec![(13, 8, 135), (126, 3, 168), (203, 70, 121), (248, 149, 64), (240, 249, 33)],
+                                "viridis" => vec![
+                                    (68, 1, 84),
+                                    (59, 82, 139),
+                                    (33, 144, 140),
+                                    (94, 201, 98),
+                                    (253, 231, 37),
+                                ],
+                                "plasma" => vec![
+                                    (13, 8, 135),
+                                    (126, 3, 168),
+                                    (203, 70, 121),
+                                    (248, 149, 64),
+                                    (240, 249, 33),
+                                ],
                                 _ => vec![(255, 255, 255), (255, 255, 255)],
                             };
                             let scaled = t * (palette.len() - 1) as f32;
@@ -1239,7 +1272,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             else {
                 continue;
             };
-            if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity) {
+            if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity)
+            {
                 let should_add = match traced.points.last() {
                     Some(last) => last.distance(source_pos) >= *min_distance,
                     None => true,
@@ -1279,21 +1313,48 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             .get::<gaanim_animation::TracedPath3D>(*trace_entity)
             .map(|t| (t.points.clone(), t.colormap.clone()))
             .unwrap_or_default();
-        let pts_f32: Vec<[f32; 3]> = points.iter().map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect();
+        let pts_f32: Vec<[f32; 3]> = points
+            .iter()
+            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+            .collect();
         if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
             line.points = pts_f32.clone();
             if let Some(name) = colormap_clone.or_else(|| colormap.clone()) {
                 let n = pts_f32.len();
                 let cols: Vec<[f32; 4]> = (0..n)
                     .map(|i| {
-                        let t = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 };
+                        let t = if n > 1 {
+                            i as f32 / (n - 1) as f32
+                        } else {
+                            0.0
+                        };
                         let palette: Vec<(u8, u8, u8)> = match name.as_str() {
                             "inferno" => vec![
-                                (0, 0, 4), (31, 12, 72), (85, 15, 109), (136, 34, 106), (168, 50, 88),
-                                (210, 72, 55), (233, 100, 28), (249, 157, 87), (247, 209, 61), (252, 255, 164),
+                                (0, 0, 4),
+                                (31, 12, 72),
+                                (85, 15, 109),
+                                (136, 34, 106),
+                                (168, 50, 88),
+                                (210, 72, 55),
+                                (233, 100, 28),
+                                (249, 157, 87),
+                                (247, 209, 61),
+                                (252, 255, 164),
                             ],
-                            "viridis" => vec![(68, 1, 84), (59, 82, 139), (33, 144, 140), (94, 201, 98), (253, 231, 37)],
-                            "plasma" => vec![(13, 8, 135), (126, 3, 168), (203, 70, 121), (248, 149, 64), (240, 249, 33)],
+                            "viridis" => vec![
+                                (68, 1, 84),
+                                (59, 82, 139),
+                                (33, 144, 140),
+                                (94, 201, 98),
+                                (253, 231, 37),
+                            ],
+                            "plasma" => vec![
+                                (13, 8, 135),
+                                (126, 3, 168),
+                                (203, 70, 121),
+                                (248, 149, 64),
+                                (240, 249, 33),
+                            ],
                             _ => vec![(255, 255, 255), (255, 255, 255)],
                         };
                         let scaled = t * (palette.len() - 1) as f32;
@@ -1513,7 +1574,11 @@ fn apply_lens_spec(
                 let fov = from_fov + (to_fov - from_fov) * t;
                 let near = from_near + (to_near - from_near) * t;
                 let far = from_far + (to_far - from_far) * t;
-                camera.projection = gaanim_math::Projection::Perspective { fov_y: fov, near, far };
+                camera.projection = gaanim_math::Projection::Perspective {
+                    fov_y: fov,
+                    near,
+                    far,
+                };
             }
         }
         PropertyLensSpec::PathFollow { path } => {
@@ -1766,6 +1831,15 @@ mod tests {
                 scene: Some(second_scene),
             },
         );
+        timeline.add_clip(
+            track,
+            2.0,
+            0.0,
+            ClipPayload::SetSceneMember {
+                target: object_id,
+                scene: None,
+            },
+        );
 
         timeline.seek(&mut world, 0.5);
         assert_eq!(
@@ -1778,6 +1852,10 @@ mod tests {
             world.get::<SceneMember>(entity).map(|s| s.0),
             Some(second_scene)
         );
+
+        timeline.seek(&mut world, 2.0);
+        assert_eq!(world.get::<SceneMember>(entity), None);
+        assert!(world.get::<gaanim_scene::Visible>(entity).is_some());
 
         timeline.seek(&mut world, 0.5);
         assert_eq!(

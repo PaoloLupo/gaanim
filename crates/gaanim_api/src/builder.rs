@@ -23,7 +23,7 @@ use gaanim_timeline::{
     timeline::Timeline,
     transition::TransitionType,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DrawMode {
@@ -326,6 +326,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
     pub float_signals: HashMap<ObjectId, f64>,
+    /// Objects whose scene membership is intentionally global at the current authoring cursor.
+    persistent_objects: HashSet<ObjectId>,
+    /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
+    membership_managed_objects: HashSet<ObjectId>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -546,7 +550,69 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_label: None,
             current_scene: None,
             float_signals: HashMap::new(),
+            persistent_objects: HashSet::new(),
+            membership_managed_objects: HashSet::new(),
         }
+    }
+
+    /// Return a root and every visual descendant in its compiled hierarchy.
+    pub(crate) fn hierarchy_ids(&self, root_id: ObjectId) -> Vec<ObjectId> {
+        let mut ids = Vec::new();
+        let mut stack = vec![root_id];
+        let mut visited = HashSet::new();
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            ids.push(id);
+            if let Some(state) = self.states.get(id) {
+                stack.extend(state.children.iter().copied());
+                stack.extend(state.child_spans.iter().map(|child| child.id));
+            }
+        }
+        ids
+    }
+
+    /// Schedule a reversible scene-membership change for a complete hierarchy.
+    pub(crate) fn schedule_scene_membership(
+        &mut self,
+        root_id: ObjectId,
+        scene: Option<SceneId>,
+        time: f64,
+    ) {
+        let track = self.ensure_track(root_id);
+        for target in self.hierarchy_ids(root_id) {
+            self.timeline.add_clip(
+                track,
+                time,
+                0.0,
+                ClipPayload::SetSceneMember { target, scene },
+            );
+        }
+    }
+
+    /// Track persistence while compiling so transforms do not localize global objects.
+    pub(crate) fn set_hierarchy_persistent(&mut self, root_id: ObjectId, persistent: bool) {
+        for id in self.hierarchy_ids(root_id) {
+            if persistent {
+                self.persistent_objects.insert(id);
+            } else {
+                self.persistent_objects.remove(&id);
+            }
+        }
+    }
+
+    pub(crate) fn is_persistent(&self, id: ObjectId) -> bool {
+        self.persistent_objects.contains(&id)
+    }
+
+    pub(crate) fn manage_hierarchy_membership(&mut self, root_id: ObjectId) {
+        self.membership_managed_objects
+            .extend(self.hierarchy_ids(root_id));
+    }
+
+    fn has_managed_membership(&self, id: ObjectId) -> bool {
+        self.membership_managed_objects.contains(&id)
     }
 
     /// Returns the per-mobject track for the given target, creating a new
@@ -572,6 +638,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Begins a new scene scope. All mobjects spawned and animations scheduled
     /// after this call will belong to the scene until `end_scene()` is called.
     pub fn begin_scene(&mut self, name: &str) -> SceneId {
+        self.membership_managed_objects.clear();
         let scene_id = self.timeline.add_scene(name);
         self.current_scene = Some(scene_id);
         // Insert SceneStart marker clip at the current time
@@ -1881,7 +1948,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // deferred ECS command would overwrite SceneMember in the t=0 snapshot
         // and hide it from its original segment immediately; waiting until the
         // morph itself would instead make it blink back after the transition.
-        if let Some(scene_id) = self.current_scene {
+        if let Some(scene_id) = self.current_scene
+            && !self.is_persistent(anim.target)
+            && !self.has_managed_membership(anim.target)
+        {
             let membership_time = self
                 .timeline
                 .scene_index

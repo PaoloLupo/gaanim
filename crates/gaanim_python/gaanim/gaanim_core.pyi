@@ -2229,6 +2229,43 @@ class Scene:
             scene.link((0.0, 0.0), (0.0, 0.0), Transition.cut())
         """
         ...
+    def reuse(self, object: Drawable, *others: Drawable) -> None:
+        """Adopt drawables into the active segment at the current timeline cursor.
+
+        At a segment boundary, a drawable visible in the preceding segment stays
+        fixed while the automatic transition runs, then becomes content of the
+        active segment. Calling this after ``play()`` or ``wait()`` takes effect
+        at that instant. Reusing a persistent drawable keeps it persistent while
+        registering it as active segment content.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def persist(self, object: Drawable, *others: Drawable) -> None:
+        """Keep drawables global, visible, and animatable across future segments.
+
+        Persistence begins at the current cursor and is not retroactive. Global
+        drawables are excluded from automatic ``cross_fade``, ``slide``, and
+        other segment transitions. An invisible drawable remains invisible until
+        an explicit entry animation changes its opacity.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def release(self, object: Drawable, *others: Drawable) -> None:
+        """End persistence and attach drawables to the active segment.
+
+        When called at the beginning of a segment, a persistent drawable stays
+        fixed during its incoming transition and becomes local when that
+        transition finishes. ``release`` never hides or removes the drawable;
+        its next segment transition treats it as ordinary outgoing content.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
     def wait(self, d: float) -> None:
         """Schedule wait on the scene timeline.
 

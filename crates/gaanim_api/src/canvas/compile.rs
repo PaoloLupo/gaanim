@@ -31,6 +31,19 @@ use gaanim_animation::{
 };
 use gaanim_math::{RateFunc, SpatialTransform};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompiledObjectScope {
+    Segment(SceneId),
+    Persistent,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SceneObjectScopeAction {
+    Reuse,
+    Persist,
+    Release,
+}
+
 fn escape_typst_string(text: &str) -> String {
     text.replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -932,6 +945,7 @@ impl Canvas {
         let mut builder = SceneBuilder::new(commands, timeline, font_registry, text_config);
         let mut scene_ids: Vec<SceneId> = Vec::new();
         let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
+        let mut object_scopes: HashMap<ObjectId, CompiledObjectScope> = HashMap::new();
         let mut camera_position = DVec3::ZERO;
         let mut camera_zoom = 1.0;
         let mut camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
@@ -952,11 +966,18 @@ impl Canvas {
         let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
 
         for seg in &segments {
-            scene_ids.push(builder.begin_scene(&seg.name));
+            let previous_scene = seg
+                .prev_segment
+                .and_then(|index| scene_ids.get(index).copied());
+            let scene_id = builder.begin_scene(&seg.name);
+            scene_ids.push(scene_id);
             Self::replay_seg(
                 &mut builder,
                 seg,
+                scene_id,
+                previous_scene,
                 &mut id_map,
+                &mut object_scopes,
                 frame_bounds,
                 text_config,
                 bg_color,
@@ -1038,7 +1059,10 @@ impl Canvas {
     fn replay_seg(
         builder: &mut SceneBuilder,
         seg: &Segment,
+        scene_id: SceneId,
+        previous_scene: Option<SceneId>,
         id_map: &mut HashMap<ObjectId, ObjectId>,
+        object_scopes: &mut HashMap<ObjectId, CompiledObjectScope>,
         frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
         scene_background: gaanim_core::peniko::Color,
@@ -1050,6 +1074,7 @@ impl Canvas {
         cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
         canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
     ) {
+        let scene_start = builder.current_time;
         let entry_animated = Self::entry_animated_by_slide(&seg.ops);
         let transform_targets = Self::transform_targets(&seg.ops);
         let mut active_slide: Option<SlideId> = None;
@@ -1073,6 +1098,7 @@ impl Canvas {
                         scene_background,
                     );
                     id_map.insert(spec.id, actual.id);
+                    object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     if transform_targets.contains(&spec.id) {
                         if let Some(state) = builder.states.get(actual.id).cloned() {
                             builder.hide_visuals_now(&state);
@@ -2292,6 +2318,39 @@ impl Canvas {
                         builder.commands.entity(st.entity).despawn();
                     }
                 }
+                Op::Reuse(target) => Self::apply_scene_object_scope(
+                    builder,
+                    *target,
+                    SceneObjectScopeAction::Reuse,
+                    scene_id,
+                    previous_scene,
+                    seg.transition.as_ref(),
+                    scene_start,
+                    id_map,
+                    object_scopes,
+                ),
+                Op::Persist(target) => Self::apply_scene_object_scope(
+                    builder,
+                    *target,
+                    SceneObjectScopeAction::Persist,
+                    scene_id,
+                    previous_scene,
+                    seg.transition.as_ref(),
+                    scene_start,
+                    id_map,
+                    object_scopes,
+                ),
+                Op::Release(target) => Self::apply_scene_object_scope(
+                    builder,
+                    *target,
+                    SceneObjectScopeAction::Release,
+                    scene_id,
+                    previous_scene,
+                    seg.transition.as_ref(),
+                    scene_start,
+                    id_map,
+                    object_scopes,
+                ),
 
                 // -- Reactive ops --
                 Op::AttachUpdater { target, preset } => {
@@ -2619,6 +2678,97 @@ impl Canvas {
                         builder.commands.entity(target_st.entity).insert(comp);
                     }
                 }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_scene_object_scope(
+        builder: &mut SceneBuilder,
+        logical_target: ObjectId,
+        action: SceneObjectScopeAction,
+        scene_id: SceneId,
+        previous_scene: Option<SceneId>,
+        transition: Option<&gaanim_timeline::transition::TransitionType>,
+        scene_start: f64,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        object_scopes: &mut HashMap<ObjectId, CompiledObjectScope>,
+    ) {
+        let Some(&target) = id_map.get(&logical_target) else {
+            return;
+        };
+        builder.manage_hierarchy_membership(target);
+        let current_time = builder.current_time;
+        let at_scene_start = (current_time - scene_start).abs() <= 1e-9;
+        let transition_duration = transition.map(|value| value.duration()).unwrap_or(0.0);
+        let current_scope = if builder.is_persistent(target) {
+            CompiledObjectScope::Persistent
+        } else {
+            object_scopes
+                .get(&logical_target)
+                .copied()
+                .unwrap_or(CompiledObjectScope::Segment(scene_id))
+        };
+        let visible_before = current_scope == CompiledObjectScope::Persistent
+            || previous_scene
+                .is_some_and(|previous| current_scope == CompiledObjectScope::Segment(previous));
+
+        let next_scope = match action {
+            SceneObjectScopeAction::Reuse if current_scope == CompiledObjectScope::Persistent => {
+                CompiledObjectScope::Persistent
+            }
+            SceneObjectScopeAction::Reuse => {
+                if at_scene_start && visible_before && transition_duration > 0.0 {
+                    builder.schedule_scene_membership(target, None, scene_start);
+                    builder.schedule_scene_membership(
+                        target,
+                        Some(scene_id),
+                        scene_start + transition_duration,
+                    );
+                } else {
+                    builder.schedule_scene_membership(target, Some(scene_id), current_time);
+                }
+                builder.set_hierarchy_persistent(target, false);
+                CompiledObjectScope::Segment(scene_id)
+            }
+            SceneObjectScopeAction::Persist => {
+                if current_scope != CompiledObjectScope::Persistent {
+                    if at_scene_start && !visible_before && transition_duration > 0.0 {
+                        builder.schedule_scene_membership(target, Some(scene_id), scene_start);
+                        builder.schedule_scene_membership(
+                            target,
+                            None,
+                            scene_start + transition_duration,
+                        );
+                    } else {
+                        builder.schedule_scene_membership(target, None, current_time);
+                    }
+                    builder.set_hierarchy_persistent(target, true);
+                }
+                CompiledObjectScope::Persistent
+            }
+            SceneObjectScopeAction::Release => {
+                if at_scene_start
+                    && current_scope == CompiledObjectScope::Persistent
+                    && transition_duration > 0.0
+                {
+                    builder.schedule_scene_membership(
+                        target,
+                        Some(scene_id),
+                        scene_start + transition_duration,
+                    );
+                } else if current_scope != CompiledObjectScope::Segment(scene_id) {
+                    builder.schedule_scene_membership(target, Some(scene_id), current_time);
+                }
+                builder.set_hierarchy_persistent(target, false);
+                CompiledObjectScope::Segment(scene_id)
+            }
+        };
+
+        let hierarchy: HashSet<ObjectId> = builder.hierarchy_ids(target).into_iter().collect();
+        for (logical, actual) in id_map {
+            if hierarchy.contains(actual) {
+                object_scopes.insert(*logical, next_scope);
             }
         }
     }

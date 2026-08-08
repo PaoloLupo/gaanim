@@ -253,6 +253,12 @@ pub(crate) enum Op {
     Hide(ObjectId),
     /// Remove an object completely.
     Remove(ObjectId),
+    /// Adopt an existing drawable into the active segment.
+    Reuse(ObjectId),
+    /// Make an existing drawable global from the current cursor onward.
+    Persist(ObjectId),
+    /// Return a global drawable to the active segment.
+    Release(ObjectId),
     /// Recompute a layout container and optionally animate every affected child
     /// into its new position.
     LayoutReflow {
