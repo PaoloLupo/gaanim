@@ -179,6 +179,8 @@ pub struct EditorState {
     bar_visibility: f32,
     /// Whether the cursor is currently hovering the playback bar.
     bar_hovered: bool,
+    /// Interaction target selected when a seek-bar drag starts.
+    seek_bar_drag_target: Option<SeekBarDragTarget>,
 }
 
 impl Default for EditorState {
@@ -191,6 +193,7 @@ impl Default for EditorState {
             seek_bar_hover: None,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
+            seek_bar_drag_target: None,
         }
     }
 }
@@ -564,8 +567,15 @@ fn editor_ui_system(
                             })
                             .collect();
 
-                        let seek_resp =
-                            paint_seek_bar(ui, frac, loop_frac, &bp_fracs, &scene_segs, total);
+                        let seek_resp = paint_seek_bar(
+                            ui,
+                            frac,
+                            loop_frac,
+                            &bp_fracs,
+                            &scene_segs,
+                            &mut state.seek_bar_drag_target,
+                            total,
+                        );
                         if let Some(new_frac) = seek_resp.seek_to {
                             // snapping visual magnético: imán suave a bordes de escena / breakpoints
                             let mut snapped_frac = new_frac;
@@ -1162,6 +1172,28 @@ struct SeekBarResponse {
     loop_toggle: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeekBarDragTarget {
+    Seek,
+    LoopStart,
+    LoopEnd,
+}
+
+const LOOP_HANDLE_HIT_RADIUS: f32 = 12.0;
+
+fn seek_bar_drag_target(origin_x: f32, left_x: f32, right_x: f32) -> SeekBarDragTarget {
+    let dist_left = (origin_x - left_x).abs();
+    let dist_right = (origin_x - right_x).abs();
+
+    if dist_left < LOOP_HANDLE_HIT_RADIUS && dist_left <= dist_right {
+        SeekBarDragTarget::LoopStart
+    } else if dist_right < LOOP_HANDLE_HIT_RADIUS {
+        SeekBarDragTarget::LoopEnd
+    } else {
+        SeekBarDragTarget::Seek
+    }
+}
+
 /// Paint a custom seek bar with progress fill, loop region, breakpoint markers,
 /// scene sections, playhead handle, and hover time tooltip.
 ///
@@ -1175,6 +1207,7 @@ fn paint_seek_bar(
     loop_frac: Option<(f32, f32)>,
     bp_fracs: &[f32],
     scenes: &[SceneSegment],
+    drag_target: &mut Option<SeekBarDragTarget>,
     total: f64,
 ) -> SeekBarResponse {
     let bar_h = 6.0_f32;
@@ -1722,34 +1755,53 @@ fn paint_seek_bar(
             }
         }
     } else if response.dragged() {
-        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+        let pos = response
+            .interact_pointer_pos()
+            .or_else(|| ui.input(|i| i.pointer.interact_pos()));
+        if response.drag_started() {
+            let target = match (loop_frac, pos) {
+                (Some((ls, le)), Some(pos)) => {
+                    let lx0 = bar_rect.min.x + ls * bar_rect.width();
+                    let lx1 = bar_rect.min.x + le * bar_rect.width();
+                    let origin = pos - response.total_drag_delta().unwrap_or(egui::Vec2::ZERO);
+                    seek_bar_drag_target(origin.x, lx0, lx1)
+                }
+                _ => SeekBarDragTarget::Seek,
+            };
+            *drag_target = Some(target);
+        }
+        if let Some(pos) = pos {
             let new_frac = ((pos.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
-            // si hay loop y el drag está cerca de un handle, interpreta como ajuste de loop
+            // El destino ya quedó fijado al comenzar el drag; no lo recalculamos
+            // cuando el cursor cruza un extremo del playback.
             if let Some((ls, le)) = loop_frac {
                 let lx0 = bar_rect.min.x + ls * bar_rect.width();
                 let lx1 = bar_rect.min.x + le * bar_rect.width();
-                // decide handle por proximidad inicial: elige el más cercano al cursor
-                let dist_left = (pos.x - lx0).abs();
-                let dist_right = (pos.x - lx1).abs();
-                // heurística: cerca del borde → loop, resto → seek
-                let near_edge = dist_left < 12.0 || dist_right < 12.0;
-                if near_edge {
-                    // ajusta el handle más cercano
-                    if dist_left < dist_right {
+                let target = (*drag_target).unwrap_or_else(|| {
+                    let origin = pos - response.total_drag_delta().unwrap_or(egui::Vec2::ZERO);
+                    seek_bar_drag_target(origin.x, lx0, lx1)
+                });
+                match target {
+                    SeekBarDragTarget::LoopStart => {
                         let clamped = new_frac.clamp(0.0, le - 0.005);
                         loop_drag = Some((clamped, le));
-                    } else {
+                    }
+                    SeekBarDragTarget::LoopEnd => {
                         let clamped = new_frac.clamp(ls + 0.005, 1.0);
                         loop_drag = Some((ls, clamped));
                     }
-                } else {
-                    // arrastre general → seek continuo (con snapping visual abajo)
-                    seek_to = Some(new_frac);
+                    SeekBarDragTarget::Seek => {
+                        seek_to = Some(new_frac);
+                    }
                 }
             } else {
                 seek_to = Some(new_frac);
             }
         }
+    }
+
+    if response.drag_stopped() || ui.input(|i| !i.pointer.primary_down()) {
+        *drag_target = None;
     }
 
     SeekBarResponse {
@@ -2339,6 +2391,14 @@ mod tests {
         assert_eq!(
             *app.world().resource::<AudienceBlank>(),
             AudienceBlank::None
+        );
+    }
+
+    #[test]
+    fn seek_drag_keeps_timeline_target_when_reaching_loop_handle() {
+        assert_eq!(
+            seek_bar_drag_target(50.0, 0.0, 100.0),
+            SeekBarDragTarget::Seek
         );
     }
 }
