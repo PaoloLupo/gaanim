@@ -26,8 +26,20 @@ fn main() {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("gaanim-core.exe"));
     let core_exe = exe
         .parent()
-        .map(|p| p.join(if cfg!(windows) { "gaanim-core.exe" } else { "gaanim-core" }))
-        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "gaanim-core.exe" } else { "gaanim-core" }));
+        .map(|p| {
+            p.join(if cfg!(windows) {
+                "gaanim-core.exe"
+            } else {
+                "gaanim-core"
+            })
+        })
+        .unwrap_or_else(|| {
+            PathBuf::from(if cfg!(windows) {
+                "gaanim-core.exe"
+            } else {
+                "gaanim-core"
+            })
+        });
 
     // If core doesn't exist, try `gaanim.exe` in same dir (dev fallback where launcher not used)
     let core_exe = if core_exe.is_file() {
@@ -41,7 +53,10 @@ fn main() {
         // If we're in dev and core is actually `gaanim.exe` itself (no launcher built), try to run with current PATH
         // Check if this launcher IS the core (avoid recursion)
         if exe.is_file() && is_core_binary(&exe) {
-            eprintln!("gaanim launcher: core binary not found at {}", core_exe.display());
+            eprintln!(
+                "gaanim launcher: core binary not found at {}",
+                core_exe.display()
+            );
             std::process::exit(1);
         }
     }
@@ -373,7 +388,8 @@ fn find_script_hint(args: &[String]) -> Option<PathBuf> {
             // Return it even if not exists yet (for init where project doesn't exist)
             // But for venv walk, we need existing dir. So check if parent exists?
             // For now return path if it looks like a file path
-            if arg.ends_with(".py") || arg.contains('/') || arg.contains('\\') || !arg.contains('.') {
+            if arg.ends_with(".py") || arg.contains('/') || arg.contains('\\') || !arg.contains('.')
+            {
                 return Some(p);
             }
         }
@@ -502,11 +518,7 @@ fn probe_python_exe_home(exe: &Path) -> Option<PathBuf> {
         return None;
     }
     let p = PathBuf::from(s);
-    if p.is_dir() {
-        Some(p)
-    } else {
-        None
-    }
+    if p.is_dir() { Some(p) } else { None }
 }
 
 #[cfg(windows)]
@@ -558,9 +570,18 @@ fn find_venv_walk(script_hint: Option<&Path>) -> Option<PathBuf> {
 #[cfg(windows)]
 fn fallback_system_python_home() -> Option<PathBuf> {
     for (prog, args) in [
-        ("py", vec!["-3.14", "-c", "import sys; print(sys.base_prefix)"]),
-        ("py", vec!["-3.13", "-c", "import sys; print(sys.base_prefix)"]),
-        ("py", vec!["-3.12", "-c", "import sys; print(sys.base_prefix)"]),
+        (
+            "py",
+            vec!["-3.14", "-c", "import sys; print(sys.base_prefix)"],
+        ),
+        (
+            "py",
+            vec!["-3.13", "-c", "import sys; print(sys.base_prefix)"],
+        ),
+        (
+            "py",
+            vec!["-3.12", "-c", "import sys; print(sys.base_prefix)"],
+        ),
         ("py", vec!["-3", "-c", "import sys; print(sys.base_prefix)"]),
         ("python", vec!["-c", "import sys; print(sys.base_prefix)"]),
         ("python3", vec!["-c", "import sys; print(sys.base_prefix)"]),
@@ -616,6 +637,8 @@ fn prepend_to_path(dir: impl AsRef<Path>) {
     let mut new_paths = vec![PathBuf::from(&dir_str)];
     new_paths.extend(paths);
     if let Ok(new_var) = std::env::join_paths(new_paths) {
-        unsafe { std::env::set_var("PATH", new_var); }
+        unsafe {
+            std::env::set_var("PATH", new_var);
+        }
     }
 }

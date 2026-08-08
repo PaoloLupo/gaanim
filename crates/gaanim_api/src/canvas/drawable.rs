@@ -121,7 +121,9 @@ impl DrawableHandle {
     }
 
     /// If this drawable is an axes, return its x/y ranges and full config.
-    pub fn axes_info(&self) -> Option<((f64, f64, f64), (f64, f64, f64), crate::canvas::AxesConfig)> {
+    pub fn axes_info(
+        &self,
+    ) -> Option<((f64, f64, f64), (f64, f64, f64), crate::canvas::AxesConfig)> {
         let spec = self.spec.lock().ok()?;
         if let crate::canvas::SpawnKind::Axes {
             x_range,
@@ -728,6 +730,19 @@ impl DrawableHandle {
             .push(Op::AttachUpdater {
                 target: self.id,
                 preset,
+            });
+    }
+
+    /// Attach a generic Python callback updater (key must be registered via `register_python_updater`).
+    pub fn add_python_updater(&self, key: u64) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPythonUpdater {
+                target: self.id,
+                key,
             });
     }
 

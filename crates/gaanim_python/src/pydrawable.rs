@@ -1,5 +1,7 @@
 //! Thin PyDrawable wrapper over gaanim_api DrawableHandle.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 
@@ -7,6 +9,8 @@ use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pylayout::{PyAnchor, PyDirection};
 use crate::updater::PyUpdater;
+
+static PYTHON_UPDATER_KEY_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
@@ -574,6 +578,82 @@ impl PyDrawable {
         self.0.add_updater(updater.0.clone());
     }
 
+    /// Attach a generic Python callback updater.
+    ///
+    /// `callback` must be a callable with signature `callback(pos, dt, elapsed) -> (x,y,z)`
+    /// where `pos` is a `(x,y,z)` tuple of the current world position and `dt`/`elapsed`
+    /// are frame delta and total elapsed seconds. The callback should return the new
+    /// world position. This is fully generic — use it for Lorenz, spirals, fields, etc.
+    ///
+    /// Example Lorenz:
+    /// ```python
+    /// def lorenz(pos, dt, t):
+    ///     x,y,z = pos
+    ///     dx = 10*(y-x); dy = x*(28-z)-y; dz = x*y - 8/3*z
+    ///     # fixed integration step 0.01, repeat 3 substeps per frame for speed
+    ///     for _ in range(3):
+    ///         x += 0.01*dx; y += 0.01*dy; z += 0.01*dz
+    ///         dx = 10*(y-x); dy = x*(28-z)-y; dz = x*y - 8/3*z
+    ///     return (x,y,z)
+    /// dot.add_updater_fn(lorenz)
+    /// ```
+    fn add_updater_fn(&self, callback: Py<PyAny>) -> PyResult<()> {
+        if Python::attach(|py| callback.bind(py).is_callable()) == false {
+            return Err(PyValueError::new_err("callback must be callable"));
+        }
+        let key = PYTHON_UPDATER_KEY_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let callback_clone = callback.clone();
+        let updater = gaanim_animation::Updater::new(move |dt, elapsed, entity, world| {
+            let current = world
+                .get::<gaanim_math::SpatialTransform>(entity)
+                .map(|t| t.translation);
+            let current = match current {
+                Some(p) => p,
+                None => return true,
+            };
+            let result: PyResult<(f64, f64, f64)> = Python::attach(|py| {
+                let func = callback_clone.bind(py);
+                let pos = (current.x, current.y, current.z);
+                // Preferred signature: callback(pos, dt, elapsed)
+                let v = func.call1((pos, dt, elapsed))?;
+                // Accept either (x,y,z) tuple or list
+                if let Ok(tup) = v.extract::<(f64, f64, f64)>() {
+                    Ok(tup)
+                } else if let Ok(vec) = v.extract::<Vec<f64>>() {
+                    if vec.len() == 3 {
+                        Ok((vec[0], vec[1], vec[2]))
+                    } else {
+                        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "callback must return (x,y,z) tuple of 3 floats",
+                        ))
+                    }
+                } else {
+                    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "callback must return (x,y,z) tuple",
+                    ))
+                }
+            });
+            match result {
+                Ok((nx, ny, nz)) => {
+                    if nx.is_finite() && ny.is_finite() && nz.is_finite() {
+                        if let Some(mut t) = world.get_mut::<gaanim_math::SpatialTransform>(entity)
+                        {
+                            t.translation = gaanim_core::glam::DVec3::new(nx, ny, nz);
+                        }
+                    }
+                    true
+                }
+                Err(e) => {
+                    Python::attach(|py| e.print(py));
+                    true
+                }
+            }
+        });
+        gaanim_api::canvas::ops::register_python_updater(key, updater);
+        self.0.add_python_updater(key);
+        Ok(())
+    }
+
     /// Remove any updater attached to this entity.
     fn remove_updater(&self) {
         self.0.remove_updater();
@@ -622,7 +702,9 @@ impl PyDrawable {
     /// manim `coords_to_point` — data coords → scene point (respects auto_fit/x_length).
     fn coords_to_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
-            return Err(PyValueError::new_err("coords_to_point() only valid on axes"));
+            return Err(PyValueError::new_err(
+                "coords_to_point() only valid on axes",
+            ));
         };
         let (avail_w, avail_h) = (800.0, 480.0);
         let manim_w: f64 = 14.222222222222221;
@@ -641,14 +723,16 @@ impl PyDrawable {
                 (s, s)
             }
             (None, None) if config.auto_fit => {
-                let s = (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
+                let s =
+                    (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
                 (s, s)
             }
             _ => (1.0, 1.0),
         };
         let x_center = (x_min + x_max) * 0.5;
         let y_center = (y_min + y_max) * 0.5;
-        let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+        let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some()
+        {
             ((x - x_center) * scale_x, (y - y_center) * scale_y)
         } else {
             (x, y)
@@ -659,7 +743,9 @@ impl PyDrawable {
     /// manim `point_to_coords` — scene point → data coords (inverse of coords_to_point).
     fn point_to_coords(&self, point: (f64, f64)) -> PyResult<(f64, f64)> {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
-            return Err(PyValueError::new_err("point_to_coords() only valid on axes"));
+            return Err(PyValueError::new_err(
+                "point_to_coords() only valid on axes",
+            ));
         };
         let (avail_w, avail_h) = (800.0, 480.0);
         let manim_w: f64 = 14.222222222222221;
@@ -678,7 +764,8 @@ impl PyDrawable {
                 (s, s)
             }
             (None, None) if config.auto_fit => {
-                let s = (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
+                let s =
+                    (avail_w / (x_max - x_min).max(1e-9)).min(avail_h / (y_max - y_min).max(1e-9));
                 (s, s)
             }
             _ => (1.0, 1.0),

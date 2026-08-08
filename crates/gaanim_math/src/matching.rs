@@ -91,7 +91,10 @@ pub fn shape_hash(path: &BezPath) -> u64 {
         y.hash(&mut hasher);
     }
     // Also hash closed-ness and element count class.
-    let closed = path.elements().iter().any(|el| *el == kurbo::PathEl::ClosePath);
+    let closed = path
+        .elements()
+        .iter()
+        .any(|el| *el == kurbo::PathEl::ClosePath);
     closed.hash(&mut hasher);
     hasher.finish()
 }
@@ -112,8 +115,14 @@ pub fn shape_distance(a: &BezPath, b: &BezPath) -> f64 {
     if sa.is_empty() || sb.is_empty() {
         return 1.0;
     }
-    let closed_a = a.elements().iter().any(|el| *el == kurbo::PathEl::ClosePath);
-    let closed_b = b.elements().iter().any(|el| *el == kurbo::PathEl::ClosePath);
+    let closed_a = a
+        .elements()
+        .iter()
+        .any(|el| *el == kurbo::PathEl::ClosePath);
+    let closed_b = b
+        .elements()
+        .iter()
+        .any(|el| *el == kurbo::PathEl::ClosePath);
     let closed = closed_a || closed_b;
 
     // If either is open, distance is min of forward vs reversed.
@@ -139,7 +148,13 @@ pub fn shape_distance(a: &BezPath, b: &BezPath) -> f64 {
     let mut sb_rev = sb.clone();
     sb_rev.reverse();
     for offset in 0..n {
-        let rotated: Vec<Point> = sb_rev.iter().cycle().skip(offset).take(n).copied().collect();
+        let rotated: Vec<Point> = sb_rev
+            .iter()
+            .cycle()
+            .skip(offset)
+            .take(n)
+            .copied()
+            .collect();
         let d = avg_point_distance(&sa, &rotated);
         if d < best {
             best = d;
@@ -178,7 +193,9 @@ fn normalized_samples(path: &BezPath, n: usize) -> Vec<Point> {
         .collect();
 
     // Compute center
-    let (sx, sy) = samples.iter().fold((0.0, 0.0), |(x, y), p| (x + p.x, y + p.y));
+    let (sx, sy) = samples
+        .iter()
+        .fold((0.0, 0.0), |(x, y), p| (x + p.x, y + p.y));
     let cx = sx / n as f64;
     let cy = sy / n as f64;
 
@@ -517,7 +534,11 @@ pub fn match_items(
             let si = rem_src[ri];
             let di = rem_dst[rj];
             // Threshold: for tex, only pair if cost is reasonable; for shapes, always pair
-            let threshold = if config.mode == MatchingMode::Tex { 2.0 } else { 3.0 };
+            let threshold = if config.mode == MatchingMode::Tex {
+                2.0
+            } else {
+                3.0
+            };
             if cost[ri][rj] > threshold {
                 continue;
             }
@@ -561,10 +582,26 @@ mod tests {
     fn circle_path(cx: f64, cy: f64, r: f64) -> BezPath {
         let mut p = BezPath::new();
         p.move_to((cx + r, cy));
-        p.curve_to((cx + r, cy + r * 0.552), (cx + r * 0.552, cy + r), (cx, cy + r));
-        p.curve_to((cx - r * 0.552, cy + r), (cx - r, cy + r * 0.552), (cx - r, cy));
-        p.curve_to((cx - r, cy - r * 0.552), (cx - r * 0.552, cy - r), (cx, cy - r));
-        p.curve_to((cx + r * 0.552, cy - r), (cx + r, cy - r * 0.552), (cx + r, cy));
+        p.curve_to(
+            (cx + r, cy + r * 0.552),
+            (cx + r * 0.552, cy + r),
+            (cx, cy + r),
+        );
+        p.curve_to(
+            (cx - r * 0.552, cy + r),
+            (cx - r, cy + r * 0.552),
+            (cx - r, cy),
+        );
+        p.curve_to(
+            (cx - r, cy - r * 0.552),
+            (cx - r * 0.552, cy - r),
+            (cx, cy - r),
+        );
+        p.curve_to(
+            (cx + r * 0.552, cy - r),
+            (cx + r, cy - r * 0.552),
+            (cx + r, cy),
+        );
         p.close_path();
         p
     }

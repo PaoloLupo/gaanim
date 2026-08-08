@@ -15,6 +15,7 @@ struct ReactiveEntityState {
     updater_elapsed: Option<f64>,
     updater_stop_at: Option<f64>,
     traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
+    translation: Option<gaanim_core::glam::DVec3>,
 }
 
 /// A named reveal pause inside a presentation slide.
@@ -987,9 +988,11 @@ fn capture_reactive_state(
         &gaanim_scene::MobjectId,
         Option<&gaanim_animation::Updater>,
         Option<&gaanim_animation::TracedPath>,
+        Option<&gaanim_animation::TracedPath3D>,
+        Option<&SpatialTransform>,
     )>();
-    for (_entity, mobject_id, updater, traced_path) in query.iter(world) {
-        if updater.is_none() && traced_path.is_none() {
+    for (_entity, mobject_id, updater, traced_path, traced_3d, transform) in query.iter(world) {
+        if updater.is_none() && traced_path.is_none() && traced_3d.is_none() {
             continue;
         }
         state.insert(
@@ -997,7 +1000,10 @@ fn capture_reactive_state(
             ReactiveEntityState {
                 updater_elapsed: updater.map(|u| u.elapsed),
                 updater_stop_at: updater.and_then(|u| u.stop_at),
-                traced_path_points: traced_path.map(|t| t.points.clone()),
+                traced_path_points: traced_path
+                    .map(|t| t.points.clone())
+                    .or_else(|| traced_3d.map(|t| t.points.clone())),
+                translation: updater.is_some().then_some(transform.map(|t| t.translation)).flatten(),
             },
         );
     }
@@ -1030,6 +1036,11 @@ fn restore_reactive_state(
                 updater.stop_at = state.updater_stop_at;
             }
         }
+        if let Some(pos) = state.translation {
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                transform.translation = pos;
+            }
+        }
 
         if let Some(points) = &state.traced_path_points {
             if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(entity) {
@@ -1044,6 +1055,69 @@ fn restore_reactive_state(
                     }
                 }
                 path_comp.0 = std::sync::Arc::new(path);
+            }
+            // 3D traced path restore (generic)
+            let colormap_clone = world
+                .get::<gaanim_animation::TracedPath3D>(entity)
+                .and_then(|t| t.colormap.clone());
+            if let Some(mut traced_3d) = world.get_mut::<gaanim_animation::TracedPath3D>(entity) {
+                traced_3d.points = points.clone();
+            }
+            if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(entity) {
+                let pts: Vec<[f32; 3]> = points.iter().map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect();
+                line.points = pts.clone();
+                // Regenerate vertex colors if colormap present
+                let colormap = colormap_clone.clone();
+                if let Some(name) = colormap {
+                    let n = pts.len();
+                    let cols: Vec<[f32; 4]> = (0..n)
+                        .map(|i| {
+                            let t = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 };
+                            // inline inferno/viridis/plasma
+                            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
+                                "inferno" => vec![
+                                    (0, 0, 4), (31, 12, 72), (85, 15, 109), (136, 34, 106), (168, 50, 88),
+                                    (210, 72, 55), (233, 100, 28), (249, 157, 87), (247, 209, 61), (252, 255, 164),
+                                ],
+                                "viridis" => vec![(68, 1, 84), (59, 82, 139), (33, 144, 140), (94, 201, 98), (253, 231, 37)],
+                                "plasma" => vec![(13, 8, 135), (126, 3, 168), (203, 70, 121), (248, 149, 64), (240, 249, 33)],
+                                _ => vec![(255, 255, 255), (255, 255, 255)],
+                            };
+                            let scaled = t * (palette.len() - 1) as f32;
+                            let idx = scaled.floor() as usize;
+                            let f = scaled - idx as f32;
+                            let (r, g, b) = if idx >= palette.len() - 1 {
+                                palette[palette.len() - 1]
+                            } else {
+                                let (r0, g0, b0) = palette[idx];
+                                let (r1, g1, b1) = palette[idx + 1];
+                                (
+                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
+                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
+                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
+                                )
+                            };
+                            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+                        })
+                        .collect();
+                    line.colors = Some(cols);
+                } else {
+                    line.colors = None;
+                }
+            }
+            if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
+                if points.is_empty() {
+                    bounds.0 = gaanim_math::Bounds3D::default();
+                } else {
+                    let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+                    let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+                    for p in points {
+                        let v = *p;
+                        min = min.min(v);
+                        max = max.max(v);
+                    }
+                    bounds.0 = gaanim_math::Bounds3D::new(min, max);
+                }
             }
         }
     }
@@ -1073,8 +1147,23 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             .map(|(entity, trace)| (entity, trace.source, trace.min_distance, trace.max_points))
             .collect()
     };
+    let traces_3d: Vec<(Entity, Entity, f64, Option<usize>, Option<String>)> = {
+        let mut query = world.query::<(Entity, &gaanim_animation::TracedPath3D)>();
+        query
+            .iter(world)
+            .map(|(entity, trace)| {
+                (
+                    entity,
+                    trace.source,
+                    trace.min_distance,
+                    trace.max_points,
+                    trace.colormap.clone(),
+                )
+            })
+            .collect()
+    };
 
-    if traces.is_empty() {
+    if traces.is_empty() && traces_3d.is_empty() {
         return;
     }
 
@@ -1085,6 +1174,18 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         }
         if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
             path_comp.0 = std::sync::Arc::new(gaanim_core::kurbo::BezPath::new());
+        }
+    }
+    for (trace_entity, _, _, _, _) in &traces_3d {
+        if let Some(mut t) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity) {
+            t.points.clear();
+        }
+        if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
+            line.points.clear();
+            line.colors = None;
+        }
+        if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(*trace_entity) {
+            bounds.0 = gaanim_math::Bounds3D::default();
         }
     }
 
@@ -1131,6 +1232,29 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
                 }
             }
         }
+        for (trace_entity, source_entity, min_distance, max_points, _colormap) in &traces_3d {
+            let Some(source_pos) = world
+                .get::<SpatialTransform>(*source_entity)
+                .map(|t| t.translation)
+            else {
+                continue;
+            };
+            if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity) {
+                let should_add = match traced.points.last() {
+                    Some(last) => last.distance(source_pos) >= *min_distance,
+                    None => true,
+                };
+                if should_add {
+                    traced.points.push(source_pos);
+                    if let Some(max) = max_points {
+                        if traced.points.len() > *max {
+                            let overflow = traced.points.len() - *max;
+                            traced.points.drain(0..overflow);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     for (trace_entity, _, _, _) in &traces {
@@ -1147,6 +1271,65 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
                 }
             }
             path_comp.0 = std::sync::Arc::new(path);
+        }
+    }
+    // Rebuild 3D traced paths (LineList + vertex colors + bounds)
+    for (trace_entity, _, _, _, colormap) in &traces_3d {
+        let (points, colormap_clone) = world
+            .get::<gaanim_animation::TracedPath3D>(*trace_entity)
+            .map(|t| (t.points.clone(), t.colormap.clone()))
+            .unwrap_or_default();
+        let pts_f32: Vec<[f32; 3]> = points.iter().map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect();
+        if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
+            line.points = pts_f32.clone();
+            if let Some(name) = colormap_clone.or_else(|| colormap.clone()) {
+                let n = pts_f32.len();
+                let cols: Vec<[f32; 4]> = (0..n)
+                    .map(|i| {
+                        let t = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 };
+                        let palette: Vec<(u8, u8, u8)> = match name.as_str() {
+                            "inferno" => vec![
+                                (0, 0, 4), (31, 12, 72), (85, 15, 109), (136, 34, 106), (168, 50, 88),
+                                (210, 72, 55), (233, 100, 28), (249, 157, 87), (247, 209, 61), (252, 255, 164),
+                            ],
+                            "viridis" => vec![(68, 1, 84), (59, 82, 139), (33, 144, 140), (94, 201, 98), (253, 231, 37)],
+                            "plasma" => vec![(13, 8, 135), (126, 3, 168), (203, 70, 121), (248, 149, 64), (240, 249, 33)],
+                            _ => vec![(255, 255, 255), (255, 255, 255)],
+                        };
+                        let scaled = t * (palette.len() - 1) as f32;
+                        let idx = scaled.floor() as usize;
+                        let f = scaled - idx as f32;
+                        let (r, g, b) = if idx >= palette.len() - 1 {
+                            palette[palette.len() - 1]
+                        } else {
+                            let (r0, g0, b0) = palette[idx];
+                            let (r1, g1, b1) = palette[idx + 1];
+                            (
+                                (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
+                                (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
+                                (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
+                            )
+                        };
+                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+                    })
+                    .collect();
+                line.colors = Some(cols);
+            } else {
+                line.colors = None;
+            }
+        }
+        if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(*trace_entity) {
+            if points.is_empty() {
+                bounds.0 = gaanim_math::Bounds3D::default();
+            } else {
+                let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+                let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+                for p in &points {
+                    min = min.min(*p);
+                    max = max.max(*p);
+                }
+                bounds.0 = gaanim_math::Bounds3D::new(min, max);
+            }
         }
     }
 }

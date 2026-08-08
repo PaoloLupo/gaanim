@@ -16,9 +16,9 @@ pub use tween::{
     evaluate_custom_tweens_system, evaluate_tweens_system, sync_delta_time_system,
 };
 pub use updaters::{
-    PlaybackState, TracedPath, TrackingEndpoint, TrackingLine, Updater, advance_x_updater,
-    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater, traced_path_system,
-    tracking_line_system, updater_system,
+    PlaybackState, TracedPath, TracedPath3D, TrackingEndpoint, TrackingLine, Updater,
+    advance_x_updater, bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
+    traced_path_3d_system, traced_path_system, tracking_line_system, updater_system,
 };
 pub use writing::{FillDrawProgress, PathSource, WriteTipGlow, path_source_seed_added_system};
 
@@ -73,7 +73,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 always_redraw_regen_system.after(position_binding_system),
                 tracking_line_system.after(always_redraw_regen_system),
                 traced_path_system.after(tracking_line_system),
-                point_on_curve_system.after(traced_path_system),
+                traced_path_3d_system.after(traced_path_system),
+                point_on_curve_system.after(traced_path_3d_system),
                 tangent_on_curve_system.after(point_on_curve_system),
                 normal_on_curve_system.after(tangent_on_curve_system),
                 curvature_on_curve_system.after(normal_on_curve_system),

@@ -239,4 +239,7 @@ pub struct LineListData {
     /// Indices as line pairs. If None, points are sequential pairs.
     pub indices: Option<Vec<u32>>,
     pub color: gaanim_core::peniko::Color,
+    /// Optional per-vertex RGBA colors (linear, 0..1). If Some, length must match `points`.
+    /// When present the renderer uses vertex colors instead of the uniform `color`.
+    pub colors: Option<Vec<[f32; 4]>>,
 }

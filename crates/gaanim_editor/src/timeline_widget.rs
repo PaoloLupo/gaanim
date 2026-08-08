@@ -340,12 +340,18 @@ impl TimelineWidget {
         self.paint_vertical_scrollbar(&p, tracks_rect, content_height);
         // Empty state placeholder (Premiere-like)
         if timeline.clips.is_empty() && self.scene_expanded {
-            let msg_rect = Rect::from_center_size(
-                clips_rect.center(),
-                Vec2::new(280.0, 40.0),
+            let msg_rect = Rect::from_center_size(clips_rect.center(), Vec2::new(280.0, 40.0));
+            p.rect_filled(
+                msg_rect,
+                6u8,
+                Color32::from_rgba_premultiplied(40, 40, 46, 220),
             );
-            p.rect_filled(msg_rect, 6u8, Color32::from_rgba_premultiplied(40, 40, 46, 220));
-            p.rect_stroke(msg_rect, 6u8, Stroke::new(1.0, Color32::from_rgb(70, 70, 80)), StrokeKind::Inside);
+            p.rect_stroke(
+                msg_rect,
+                6u8,
+                Stroke::new(1.0, Color32::from_rgb(70, 70, 80)),
+                StrokeKind::Inside,
+            );
             p.text(
                 msg_rect.center(),
                 Align2::CENTER_CENTER,
@@ -479,10 +485,7 @@ impl TimelineWidget {
         // ── Left: transport ───────────────────────────────────────────────
         let play_active = timeline.is_playing;
         if ui
-            .add(mk_btn(
-                if play_active { "⏸" } else { "▶" },
-                play_active,
-            ))
+            .add(mk_btn(if play_active { "⏸" } else { "▶" }, play_active))
             .on_hover_text("Play / Pause (Space)")
             .clicked()
         {
@@ -508,11 +511,7 @@ impl TimelineWidget {
         let loop_active = timeline.loop_range.is_some();
         if ui
             .add(mk_btn(if loop_active { "🔁" } else { "↻" }, loop_active))
-            .on_hover_text(if loop_active {
-                "Loop: ON"
-            } else {
-                "Loop: OFF"
-            })
+            .on_hover_text(if loop_active { "Loop: ON" } else { "Loop: OFF" })
             .clicked()
         {
             if loop_active {
@@ -588,7 +587,10 @@ impl TimelineWidget {
         // Background with bottom border
         p.rect_filled(rect, 0u8, RULER_BG);
         p.line_segment(
-            [Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)],
+            [
+                Pos2::new(rect.min.x, rect.max.y),
+                Pos2::new(rect.max.x, rect.max.y),
+            ],
             Stroke::new(1.0, Color32::from_rgb(55, 55, 60)),
         );
 
@@ -640,7 +642,10 @@ impl TimelineWidget {
         }
         // Top highlight
         p.line_segment(
-            [Pos2::new(rect.min.x, rect.min.y), Pos2::new(rect.max.x, rect.min.y)],
+            [
+                Pos2::new(rect.min.x, rect.min.y),
+                Pos2::new(rect.max.x, rect.min.y),
+            ],
             Stroke::new(1.0, Color32::from_white_alpha(8)),
         );
     }
@@ -667,7 +672,10 @@ impl TimelineWidget {
             // Subtle header with bottom border
             p.rect_filled(hdr, 0u8, Color32::from_rgb(32, 32, 36));
             p.line_segment(
-                [Pos2::new(hdr.min.x, hdr.max.y), Pos2::new(hdr.max.x, hdr.max.y)],
+                [
+                    Pos2::new(hdr.min.x, hdr.max.y),
+                    Pos2::new(hdr.max.x, hdr.max.y),
+                ],
                 Stroke::new(1.0, Color32::from_rgb(50, 50, 56)),
             );
         }
@@ -700,7 +708,12 @@ impl TimelineWidget {
             );
             p.rect_filled(lb, 2u8, bg);
             if is_selected {
-                p.rect_stroke(lb, 2u8, Stroke::new(2.0, SELECTION_ACCENT), StrokeKind::Inside);
+                p.rect_stroke(
+                    lb,
+                    2u8,
+                    Stroke::new(2.0, SELECTION_ACCENT),
+                    StrokeKind::Inside,
+                );
                 // Left accent bar
                 p.rect_filled(
                     Rect::from_min_size(lb.min, Vec2::new(3.0, lb.height())),
@@ -708,7 +721,12 @@ impl TimelineWidget {
                     SELECTION_ACCENT,
                 );
             } else if is_hovered {
-                p.rect_stroke(lb, 2u8, Stroke::new(1.0, Color32::from_rgb(60, 60, 70)), StrokeKind::Inside);
+                p.rect_stroke(
+                    lb,
+                    2u8,
+                    Stroke::new(1.0, Color32::from_rgb(60, 60, 70)),
+                    StrokeKind::Inside,
+                );
             }
 
             let cb = Rect::from_min_size(
@@ -717,7 +735,12 @@ impl TimelineWidget {
             );
             p.rect_filled(cb, 2u8, bg);
             if is_selected {
-                p.rect_stroke(cb, 2u8, Stroke::new(1.0, SELECTION_ACCENT.linear_multiply(0.6)), StrokeKind::Inside);
+                p.rect_stroke(
+                    cb,
+                    2u8,
+                    Stroke::new(1.0, SELECTION_ACCENT.linear_multiply(0.6)),
+                    StrokeKind::Inside,
+                );
             }
 
             for i in 0..layout.prop_count {
@@ -744,9 +767,13 @@ impl TimelineWidget {
                 );
             }
             // Bottom hairline
-            let bottom_y = y + self.track_height + layout.prop_count as f32 * self.property_row_height;
+            let bottom_y =
+                y + self.track_height + layout.prop_count as f32 * self.property_row_height;
             p.line_segment(
-                [Pos2::new(rect.min.x, bottom_y), Pos2::new(rect.max.x, bottom_y)],
+                [
+                    Pos2::new(rect.min.x, bottom_y),
+                    Pos2::new(rect.max.x, bottom_y),
+                ],
                 Stroke::new(0.5, Color32::from_rgb(45, 45, 50)),
             );
         }
@@ -786,9 +813,7 @@ impl TimelineWidget {
         for (track_id, layout) in track_layouts {
             let y = label_rect.min.y + layout.header_y - self.scroll_y;
             // Cull offscreen
-            if y + self.track_height < label_rect.min.y - 10.0
-                || y > label_rect.max.y + 10.0
-            {
+            if y + self.track_height < label_rect.min.y - 10.0 || y > label_rect.max.y + 10.0 {
                 continue;
             }
             let Some(t) = timeline.tracks.get(*track_id) else {
@@ -850,7 +875,11 @@ impl TimelineWidget {
                     Align2::RIGHT_CENTER,
                     "№",
                     FontId::proportional(9.0),
-                    if is_selected { Color32::WHITE } else { CLR_DECIMAL_ACCENT },
+                    if is_selected {
+                        Color32::WHITE
+                    } else {
+                        CLR_DECIMAL_ACCENT
+                    },
                 );
                 badge_x -= 16.0;
             }
@@ -860,7 +889,11 @@ impl TimelineWidget {
                     Align2::RIGHT_CENTER,
                     "◷",
                     FontId::proportional(10.0),
-                    if is_selected { Color32::WHITE } else { CLR_UPDATER_BADGE },
+                    if is_selected {
+                        Color32::WHITE
+                    } else {
+                        CLR_UPDATER_BADGE
+                    },
                 );
                 badge_x -= 16.0;
             }
@@ -870,7 +903,11 @@ impl TimelineWidget {
                     Align2::RIGHT_CENTER,
                     "◆",
                     FontId::proportional(8.0),
-                    if is_selected { Color32::WHITE } else { CLR_SIGNAL_ACCENT },
+                    if is_selected {
+                        Color32::WHITE
+                    } else {
+                        CLR_SIGNAL_ACCENT
+                    },
                 );
                 badge_x -= 16.0;
             }
@@ -1062,7 +1099,12 @@ impl TimelineWidget {
             Vec2::new(bar_w - 2.0, thumb_h),
         );
         p.rect_filled(thumb_rect, 3u8, Color32::from_rgb(90, 90, 100));
-        p.rect_stroke(thumb_rect, 3u8, Stroke::new(1.0, Color32::from_rgb(120, 120, 130)), StrokeKind::Inside);
+        p.rect_stroke(
+            thumb_rect,
+            3u8,
+            Stroke::new(1.0, Color32::from_rgb(120, 120, 130)),
+            StrokeKind::Inside,
+        );
     }
 
     // ── Grid ────────────────────────────────────────────────────────────
@@ -1140,7 +1182,12 @@ impl TimelineWidget {
             let top_strip = Rect::from_min_size(cr.min, Vec2::new(cr.width(), 3.0));
             p.rect_filled(top_strip, 2u8, accent);
             // Inner highlight
-            p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::from_white_alpha(22)), StrokeKind::Inside);
+            p.rect_stroke(
+                cr,
+                4u8,
+                Stroke::new(1.0, Color32::from_white_alpha(22)),
+                StrokeKind::Inside,
+            );
 
             // ── Value ramp indicator for SignalFloat clips ──────────
             if let ClipPayload::Animation(anim) = &clip.payload {
@@ -1242,10 +1289,25 @@ impl TimelineWidget {
 
             if is_selected {
                 // Outer glow + stroke
-                p.rect_stroke(cr.expand(1.0), 5u8, Stroke::new(2.0, SELECTION), StrokeKind::Inside);
-                p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::WHITE), StrokeKind::Inside);
+                p.rect_stroke(
+                    cr.expand(1.0),
+                    5u8,
+                    Stroke::new(2.0, SELECTION),
+                    StrokeKind::Inside,
+                );
+                p.rect_stroke(
+                    cr,
+                    4u8,
+                    Stroke::new(1.0, Color32::WHITE),
+                    StrokeKind::Inside,
+                );
             } else if is_hovered {
-                p.rect_stroke(cr, 4u8, Stroke::new(1.0, Color32::from_white_alpha(90)), StrokeKind::Inside);
+                p.rect_stroke(
+                    cr,
+                    4u8,
+                    Stroke::new(1.0, Color32::from_white_alpha(90)),
+                    StrokeKind::Inside,
+                );
             }
         }
 
@@ -1301,7 +1363,12 @@ impl TimelineWidget {
     fn paint_zoom_bar(&self, p: &egui::Painter, rect: Rect, clips_rect: Rect, timeline: &Timeline) {
         // Track background
         p.rect_filled(rect, 2u8, Color32::from_rgb(28, 28, 32));
-        p.rect_stroke(rect, 2u8, Stroke::new(1.0, Color32::from_rgb(45, 45, 50)), StrokeKind::Inside);
+        p.rect_stroke(
+            rect,
+            2u8,
+            Stroke::new(1.0, Color32::from_rgb(45, 45, 50)),
+            StrokeKind::Inside,
+        );
         // Subtle ticks in background
         let total = timeline.cached_duration.max(0.01);
         let bar_w = rect.width();
@@ -1322,7 +1389,10 @@ impl TimelineWidget {
         // Window gradient-like fill
         p.rect_filled(win_rect, 3u8, Color32::from_rgb(75, 75, 85));
         p.rect_filled(
-            Rect::from_min_size(win_rect.min, Vec2::new(win_rect.width(), win_rect.height() * 0.5)),
+            Rect::from_min_size(
+                win_rect.min,
+                Vec2::new(win_rect.width(), win_rect.height() * 0.5),
+            ),
             3u8,
             Color32::from_rgb(95, 95, 105),
         );
@@ -1337,7 +1407,11 @@ impl TimelineWidget {
             let cx = win_rect.center().x;
             let cy = win_rect.center().y;
             for dx in [-6.0, 0.0, 6.0] {
-                p.circle_filled(Pos2::new(cx + dx as f32, cy), 1.5, Color32::from_rgb(200, 200, 210));
+                p.circle_filled(
+                    Pos2::new(cx + dx as f32, cy),
+                    1.5,
+                    Color32::from_rgb(200, 200, 210),
+                );
             }
         }
         // Handles
@@ -1367,7 +1441,13 @@ impl TimelineWidget {
         let font = FontId::proportional(9.0);
         let text_color = Color32::from_rgb(220, 220, 230);
         if win_rect.width() > 70.0 {
-            p.text(win_rect.center(), Align2::CENTER_CENTER, label, font, text_color);
+            p.text(
+                win_rect.center(),
+                Align2::CENTER_CENTER,
+                label,
+                font,
+                text_color,
+            );
         } else if win_r + 4.0 < rect.max.x - 20.0 {
             p.text(
                 Pos2::new(win_r + 6.0, win_rect.center().y),
@@ -1424,7 +1504,12 @@ impl TimelineWidget {
             Vec2::new(cap_w, cap_h),
         );
         p.rect_filled(cap_rect, 2u8, PLAYHEAD);
-        p.rect_stroke(cap_rect, 2u8, Stroke::new(1.0, Color32::WHITE), StrokeKind::Inside);
+        p.rect_stroke(
+            cap_rect,
+            2u8,
+            Stroke::new(1.0, Color32::WHITE),
+            StrokeKind::Inside,
+        );
         // Inner dot
         p.circle_filled(Pos2::new(x, ruler_top + cap_h / 2.0), 2.2, Color32::WHITE);
         // Time label just below handle when not overlapping ruler text
@@ -1544,7 +1629,12 @@ impl TimelineWidget {
         }
         response.context_menu(|ui| {
             ui.set_min_width(180.0);
-            ui.label(egui::RichText::new("CLIP").weak().size(9.0).color(TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("CLIP")
+                    .weak()
+                    .size(9.0)
+                    .color(TEXT_MUTED),
+            );
             let has_sel = self.selected_clip.is_some();
             if ui
                 .add_enabled(has_sel, egui::Button::new("🗑  Delete  (Del)"))
@@ -1565,7 +1655,12 @@ impl TimelineWidget {
                 ui.close();
             }
             ui.separator();
-            ui.label(egui::RichText::new("TIMELINE").weak().size(9.0).color(TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("TIMELINE")
+                    .weak()
+                    .size(9.0)
+                    .color(TEXT_MUTED),
+            );
             if ui.button("◧  Split at playhead").clicked() {
                 ui.close();
             }

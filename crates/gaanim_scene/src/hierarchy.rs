@@ -80,6 +80,12 @@ impl Plugin for GaanimScenePlugin {
             Update,
             crate::systems::build_3d_meshes_system.in_set(SceneSet::Bounds),
         );
+        app.add_systems(
+            Update,
+            crate::systems::update_3d_line_meshes_system
+                .in_set(SceneSet::Bounds)
+                .after(crate::systems::build_3d_meshes_system),
+        );
 
         // Register bounds systems in the Bounds SystemSet.
         // The entire set is guarded by `has_bounds_changes` so that on

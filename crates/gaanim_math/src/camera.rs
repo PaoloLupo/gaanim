@@ -346,7 +346,8 @@ mod tests {
             let eff = cam.viewport_scale.max(0.01);
             let hw = cam.viewport_width as f64 * 0.5;
             let hh = cam.viewport_height as f64 * 0.5 + cam.viewport_offset_y;
-            let vello = gaanim_core::kurbo::Affine::translate((hw, hh)) * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
+            let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
+                * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
             let inv = vello.inverse();
             let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
             println!("  vpos {:?}", vpos);

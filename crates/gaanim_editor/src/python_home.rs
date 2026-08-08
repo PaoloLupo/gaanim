@@ -37,10 +37,22 @@ pub fn inject_venv_site_packages(venv_root: &Path) {
     use pyo3::prelude::*;
     let candidates = [
         venv_root.join("Lib").join("site-packages"),
-        venv_root.join("lib").join("python3.12").join("site-packages"),
-        venv_root.join("lib").join("python3.13").join("site-packages"),
-        venv_root.join("lib").join("python3.14").join("site-packages"),
-        venv_root.join("lib").join("python3.15").join("site-packages"),
+        venv_root
+            .join("lib")
+            .join("python3.12")
+            .join("site-packages"),
+        venv_root
+            .join("lib")
+            .join("python3.13")
+            .join("site-packages"),
+        venv_root
+            .join("lib")
+            .join("python3.14")
+            .join("site-packages"),
+        venv_root
+            .join("lib")
+            .join("python3.15")
+            .join("site-packages"),
         venv_root.join("lib").join("site-packages"),
     ];
     let site_packages = candidates.iter().find(|p| p.is_dir());
@@ -187,11 +199,7 @@ fn probe_python_exe_home(exe: &Path) -> Option<PathBuf> {
         return None;
     }
     let p = PathBuf::from(s);
-    if p.is_dir() {
-        Some(p)
-    } else {
-        None
-    }
+    if p.is_dir() { Some(p) } else { None }
 }
 
 #[cfg(windows)]
@@ -247,9 +255,18 @@ fn find_venv_walk(script_hint: Option<&Path>) -> Option<PathBuf> {
 fn fallback_system_python_home() -> Option<PathBuf> {
     // Try `py` launcher with versioned args first (3.12 is minimum, try newer first).
     for (prog, args) in [
-        ("py", vec!["-3.14", "-c", "import sys; print(sys.base_prefix)"]),
-        ("py", vec!["-3.13", "-c", "import sys; print(sys.base_prefix)"]),
-        ("py", vec!["-3.12", "-c", "import sys; print(sys.base_prefix)"]),
+        (
+            "py",
+            vec!["-3.14", "-c", "import sys; print(sys.base_prefix)"],
+        ),
+        (
+            "py",
+            vec!["-3.13", "-c", "import sys; print(sys.base_prefix)"],
+        ),
+        (
+            "py",
+            vec!["-3.12", "-c", "import sys; print(sys.base_prefix)"],
+        ),
         ("py", vec!["-3", "-c", "import sys; print(sys.base_prefix)"]),
         ("python", vec!["-c", "import sys; print(sys.base_prefix)"]),
         ("python3", vec!["-c", "import sys; print(sys.base_prefix)"]),
@@ -310,6 +327,8 @@ fn prepend_to_path(dir: impl AsRef<Path>) {
     new_paths.extend(paths);
     if let Ok(new_var) = std::env::join_paths(new_paths) {
         // SAFETY: single-threaded at startup before Python init.
-        unsafe { std::env::set_var("PATH", new_var); }
+        unsafe {
+            std::env::set_var("PATH", new_var);
+        }
     }
 }

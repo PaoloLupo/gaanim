@@ -268,7 +268,11 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
             gaanim_math::Projection::Orthographic { zoom } => {
                 if let Projection::Orthographic(ortho) = projection.as_mut() {
                     let effective = zoom * cam.viewport_scale;
-                    ortho.scale = if effective > 0.0 { 1.0 / effective as f32 } else { 1.0 };
+                    ortho.scale = if effective > 0.0 {
+                        1.0 / effective as f32
+                    } else {
+                        1.0
+                    };
                 }
             }
         }
@@ -550,7 +554,8 @@ pub fn compile_scene_from_world(
                     scene.pop_layer();
                 }
             }
-        } else if !blurred_vector && let Some(fill_brush) = elem_fill
+        } else if !blurred_vector
+            && let Some(fill_brush) = elem_fill
             && !is_trimmed_closed
         {
             scene.fill(
@@ -636,7 +641,8 @@ pub fn compile_scene_from_world(
     // Vello scene is rendered AFTER the 3D pass (order 1 vs 0) so that labels
     // appear on top of meshes. Skipping the opaque rect in that case prevents
     // the 2D background from occluding the 3D meshes behind it.
-    let is_perspective = camera.is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let is_perspective = camera
+        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
             let (rect, transform) = canvas_background_geometry(canvas_bg, camera);
@@ -1002,7 +1008,8 @@ pub fn gaanim_render_system(
                         scene.pop_layer();
                     }
                 }
-            } else if !blurred_vector && let Some(fill_brush) = elem_fill
+            } else if !blurred_vector
+                && let Some(fill_brush) = elem_fill
                 && !is_trimmed_closed
             {
                 scene.fill(

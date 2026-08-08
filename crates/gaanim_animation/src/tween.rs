@@ -233,9 +233,7 @@ impl std::fmt::Debug for PropertyLens {
             ),
             Self::CameraTarget { from, to } => write!(f, "CameraTarget({:?} -> {:?})", from, to),
             Self::CameraPerspective {
-                from_fov,
-                to_fov,
-                ..
+                from_fov, to_fov, ..
             } => write!(f, "CameraPerspective({} -> {})", from_fov, to_fov),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),

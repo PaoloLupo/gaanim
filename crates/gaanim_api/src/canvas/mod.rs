@@ -1,4 +1,4 @@
-mod ops;
+pub mod ops;
 mod presentation;
 pub use gaanim_animation::AxisMask;
 pub use ops::{CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
@@ -6,8 +6,8 @@ mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop,
-    ImageFit, ImageOptions, ImageOptionsError, LabelMode, LayoutKind, LayoutOp, Margin,
-    ObjectSpec, OptDuration, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
+    ImageFit, ImageOptions, ImageOptionsError, LabelMode, LayoutKind, LayoutOp, Margin, ObjectSpec,
+    OptDuration, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
 };
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};

@@ -661,7 +661,23 @@ impl Canvas {
 
     /// Creates a 3D polyline from world-space points.
     pub fn polyline_3d(&mut self, points: Vec<[f32; 3]>) -> DrawableHandle {
-        self.spawn(SpawnKind::Polyline3D(points))
+        self.spawn(SpawnKind::Polyline3D {
+            points,
+            colors: None,
+        })
+    }
+
+    /// Creates a 3D polyline with per-vertex colors (e.g. colormap).
+    /// `colors` must have the same length as `points`; otherwise a uniform color fallback is used.
+    pub fn polyline_3d_with_colors(
+        &mut self,
+        points: Vec<[f32; 3]>,
+        colors: Vec<Color>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Polyline3D {
+            points,
+            colors: Some(colors),
+        })
     }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
         self.spawn(SpawnKind::Text(s.to_string()))
@@ -1305,9 +1321,7 @@ impl Canvas {
     ) {
         let eye = DVec3::new(eye.0, eye.1, eye.2);
         let target = DVec3::new(target.0, target.1, target.2);
-        let up = up
-            .map(|(x, y, z)| DVec3::new(x, y, z))
-            .unwrap_or(DVec3::Y);
+        let up = up.map(|(x, y, z)| DVec3::new(x, y, z)).unwrap_or(DVec3::Y);
         let duration = duration.max(0.0);
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.active_mut().cursor += duration;
@@ -1349,7 +1363,10 @@ impl Canvas {
         let duration = duration.max(0.0);
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraDolly { factor, duration });
+        guard
+            .active_mut()
+            .ops
+            .push(Op::CameraDolly { factor, duration });
     }
 
     // -- Time controls --
@@ -1765,6 +1782,47 @@ impl Canvas {
                 max_points: None,
             });
         handle
+    }
+
+    /// Spawn a 3D traced path that accumulates the 3D trajectory of `source` as a `LineList`.
+    /// Supports optional colormap (`"inferno"`, `"viridis"`, `"plasma"`) for time-based coloring.
+    pub fn traced_path_3d(
+        &mut self,
+        source: &DrawableHandle,
+        colormap: Option<String>,
+        max_points: Option<usize>,
+        min_distance: f64,
+    ) -> DrawableHandle {
+        let handle = self.spawn(SpawnKind::TracedPath3DLine);
+        let source_id = source.id;
+        let id = handle.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTracedPath3D {
+                target: id,
+                source: source_id,
+                min_distance: min_distance.max(0.0),
+                max_points,
+                colormap,
+            });
+        handle
+    }
+
+    /// Attach a generic Python callback updater to `target`.
+    /// `key` must have been registered via `register_python_updater`.
+    pub fn attach_python_updater(&mut self, target: &DrawableHandle, key: u64) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachPythonUpdater {
+                target: target.id,
+                key,
+            });
     }
 
     /// Spawn a tracking line — a reactive line whose endpoints follow entities

@@ -317,10 +317,12 @@ pub fn script_error_overlay_system(
                 });
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Corrige el archivo y guarda — el editor reintentará automáticamente.")
-                    .color(egui::Color32::from_rgb(180, 160, 160))
-                    .size(10.0)
-                    .italics(),
+                egui::RichText::new(
+                    "Corrige el archivo y guarda — el editor reintentará automáticamente.",
+                )
+                .color(egui::Color32::from_rgb(180, 160, 160))
+                .size(10.0)
+                .italics(),
             );
         });
 }

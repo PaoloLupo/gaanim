@@ -352,6 +352,19 @@ pub(crate) enum Op {
         tracker: ObjectId,
         window: f64,
     },
+    /// Generic Python callback updater (generic ODE / custom motion). Handled via registry.
+    AttachPythonUpdater {
+        target: ObjectId,
+        key: u64,
+    },
+    /// 3D traced path that accumulates source position as a LineList with optional colormap.
+    AttachTracedPath3D {
+        target: ObjectId,
+        source: ObjectId,
+        min_distance: f64,
+        max_points: Option<usize>,
+        colormap: Option<String>,
+    },
 }
 
 /// Visual preset used by [`Op::FragmentReveal`].
@@ -418,6 +431,33 @@ impl UpdaterPreset {
             } => gaanim_animation::pulse_updater(min_scale, max_scale, frequency),
         }
     }
+}
+
+// -----------------------------------------------------------------------
+// Python custom updater registry
+// -----------------------------------------------------------------------
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+static PYTHON_UPDATER_REGISTRY: OnceLock<Mutex<HashMap<u64, gaanim_animation::Updater>>> =
+    OnceLock::new();
+
+/// Register a custom Python-driven Updater under `key`. Called from `gaanim_python`.
+pub fn register_python_updater(key: u64, updater: gaanim_animation::Updater) {
+    let registry = PYTHON_UPDATER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    registry
+        .lock()
+        .expect("python updater registry poisoned")
+        .insert(key, updater);
+}
+
+/// Take a previously registered custom updater (consumes it).
+pub fn take_python_updater(key: u64) -> Option<gaanim_animation::Updater> {
+    let registry = PYTHON_UPDATER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    registry
+        .lock()
+        .expect("python updater registry poisoned")
+        .remove(&key)
 }
 
 // -----------------------------------------------------------------------

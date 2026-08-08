@@ -422,7 +422,8 @@ fn propagate_billboard_children_recursive(
     if let Ok(children) = children_query.get(entity) {
         for &child in children.iter() {
             if let Ok((child_local, mut child_global)) = child_transforms.get_mut(child) {
-                *child_global = GlobalSpatialTransform::from_parent_and_local(parent_global, child_local);
+                *child_global =
+                    GlobalSpatialTransform::from_parent_and_local(parent_global, child_local);
                 let current_child_global = *child_global;
                 drop(child_global);
                 propagate_billboard_children_recursive(
@@ -452,7 +453,9 @@ pub fn build_3d_meshes_system(
         (Without<bevy::prelude::Mesh3d>, Without<TriangleMeshData>),
     >,
 ) {
-    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else { return };
+    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else {
+        return;
+    };
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 
@@ -496,18 +499,38 @@ pub fn build_3d_meshes_system(
     }
 
     for (entity, data) in &query_line {
-        let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(PrimitiveTopology::LineStrip, RenderAssetUsages::default());
         let positions = data.points.clone();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         // Bevy line meshes don't need indices if sequential, but we support them
         if let Some(idx) = &data.indices {
             mesh.insert_indices(Indices::U32(idx.clone()));
         }
+        // Per-vertex colors (colormap) — if present, use vertex colors instead of uniform material tint.
+        // StandardMaterial will multiply base_color * vertex_color, so we set base to WHITE.
+        let has_vertex_colors = data.colors.as_ref().is_some_and(|c| !c.is_empty());
+        if let Some(cols) = &data.colors {
+            if cols.len() == mesh.count_vertices() {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
+            }
+        }
         let mesh_handle = meshes.add(mesh);
-        let rgba = data.color.to_rgba8();
-        let color = bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
+        let (base_color, alpha_mode) = if has_vertex_colors {
+            // Vertex colors carry the gradient; keep base white and enable alpha blending for transparency.
+            (
+                bevy::color::Color::WHITE,
+                bevy::render::alpha::AlphaMode::Blend,
+            )
+        } else {
+            let rgba = data.color.to_rgba8();
+            (
+                bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a),
+                bevy::render::alpha::AlphaMode::Opaque,
+            )
+        };
         let mat = materials.add(bevy::pbr::StandardMaterial {
-            base_color: color,
+            base_color,
+            alpha_mode,
             unlit: true,
             ..Default::default()
         });
@@ -518,6 +541,85 @@ pub fn build_3d_meshes_system(
             bevy::prelude::Visibility::default(),
             Mesh3DMarker,
         ));
+    }
+}
+
+/// System: Update existing 3D line meshes when `LineListData` changes (e.g. traced path growing).
+pub fn update_3d_line_meshes_system(
+    mut commands: bevy::prelude::Commands,
+    meshes: Option<bevy::prelude::ResMut<bevy::asset::Assets<bevy::mesh::Mesh>>>,
+    materials: Option<bevy::prelude::ResMut<bevy::asset::Assets<bevy::pbr::StandardMaterial>>>,
+    mut query: bevy::prelude::Query<
+        (
+            bevy::prelude::Entity,
+            &LineListData,
+            &bevy::prelude::Mesh3d,
+            &bevy::prelude::MeshMaterial3d<bevy::pbr::StandardMaterial>,
+            Option<&mut LocalBounds>,
+        ),
+        bevy::prelude::Changed<LineListData>,
+    >,
+) {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else {
+        return;
+    };
+    if query.is_empty() {
+        return;
+    }
+    for (entity, data, mesh_handle, mat_handle, local_bounds_opt) in &mut query {
+        // Rebuild mesh from current points/colors
+        let mut mesh = Mesh::new(PrimitiveTopology::LineStrip, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.points.clone());
+        if let Some(idx) = &data.indices {
+            mesh.insert_indices(Indices::U32(idx.clone()));
+        }
+        let has_vertex_colors = data
+            .colors
+            .as_ref()
+            .is_some_and(|c| c.len() == data.points.len());
+        if let Some(cols) = &data.colors {
+            if cols.len() == data.points.len() {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
+            }
+        }
+        let new_handle = meshes.add(mesh);
+        commands
+            .entity(entity)
+            .insert(bevy::prelude::Mesh3d(new_handle));
+
+        // Update material alpha mode to match vertex-color presence (transparency)
+        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+            mat.alpha_mode = if has_vertex_colors {
+                bevy::render::alpha::AlphaMode::Blend
+            } else {
+                bevy::render::alpha::AlphaMode::Opaque
+            };
+            if has_vertex_colors {
+                mat.base_color = bevy::color::Color::WHITE;
+            } else {
+                let rgba = data.color.to_rgba8();
+                mat.base_color = bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
+            }
+        }
+
+        // Keep LocalBounds in sync for correct frustum culling
+        if let Some(mut bounds) = local_bounds_opt {
+            if data.points.is_empty() {
+                bounds.0 = gaanim_math::Bounds3D::default();
+            } else {
+                let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+                let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+                for p in &data.points {
+                    let v = gaanim_core::glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+                    min = min.min(v);
+                    max = max.max(v);
+                }
+                bounds.0 = gaanim_math::Bounds3D::new(min, max);
+            }
+        }
+        let _ = mesh_handle; // suppress unused warning if needed
     }
 }
 

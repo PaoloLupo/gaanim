@@ -1039,9 +1039,8 @@ fn editor_ui_system(
              });
         // Keep bar visible while pointer is over overlay (no desaparece si cursor está encima)
         let hover_pos = ctx.input(|i| i.pointer.hover_pos());
-        state.bar_hovered =
-                hover_pos.is_some_and(|p| area_resp.response.rect.contains(p));
-        }
+        state.bar_hovered = hover_pos.is_some_and(|p| area_resp.response.rect.contains(p));
+    }
 
     if let Some(track_id) = state.timeline_widget.selected_track {
         if let Some(track) = timeline.tracks.get(track_id)
@@ -1229,7 +1228,11 @@ fn paint_seek_bar(
             egui::pos2(rect.max.x, rect.min.y + scene_lane_h - 2.0),
         );
         // Subtle lane background so scene chips stand out even for very short scenes
-        painter.rect_filled(lane_rect, 6.0, egui::Color32::from_rgba_premultiplied(28, 28, 36, 180));
+        painter.rect_filled(
+            lane_rect,
+            6.0,
+            egui::Color32::from_rgba_premultiplied(28, 28, 36, 180),
+        );
         painter.rect_stroke(
             lane_rect,
             6.0,
@@ -1279,7 +1282,11 @@ fn paint_seek_bar(
                         egui::pos2(chip_rect.min.x + prog_w, chip_rect.max.y),
                     );
                     // usamos un rect con mismo radio; el exceso se recorta visualmente
-                    painter.rect_filled(prog_rect, 5.0, egui::Color32::from_rgba_premultiplied(120, 180, 255, 45));
+                    painter.rect_filled(
+                        prog_rect,
+                        5.0,
+                        egui::Color32::from_rgba_premultiplied(120, 180, 255, 45),
+                    );
                 }
                 painter.rect_stroke(
                     chip_rect,
@@ -1305,16 +1312,27 @@ fn paint_seek_bar(
                 let dot_y = lane_rect.center().y;
                 let dot_pos = egui::pos2(ex, dot_y);
                 // sombra suave
-                painter.circle_filled(dot_pos + egui::vec2(0.7, 0.7), 4.2, egui::Color32::from_black_alpha(45));
+                painter.circle_filled(
+                    dot_pos + egui::vec2(0.7, 0.7),
+                    4.2,
+                    egui::Color32::from_black_alpha(45),
+                );
                 // anillo exterior
-                painter.circle_filled(dot_pos, 4.0, egui::Color32::from_rgba_premultiplied(38, 42, 58, 210));
+                painter.circle_filled(
+                    dot_pos,
+                    4.0,
+                    egui::Color32::from_rgba_premultiplied(38, 42, 58, 210),
+                );
                 // perla interior
                 painter.circle_filled(dot_pos, 2.4, egui::Color32::from_rgb(215, 222, 240));
                 painter.circle(
                     dot_pos,
                     4.0,
                     egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(90, 100, 130, 130)),
+                    egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_premultiplied(90, 100, 130, 130),
+                    ),
                 );
             }
 
@@ -1395,7 +1413,15 @@ fn paint_seek_bar(
         );
         painter.rect_filled(loop_rect, 2.0, loop_color);
         // borde sutil
-        painter.rect_stroke(loop_rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 180, 140, 110)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            loop_rect,
+            2.0,
+            egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_premultiplied(100, 180, 140, 110),
+            ),
+            egui::StrokeKind::Inside,
+        );
         // handles: pills verticales en los bordes
         let handle_w = 6.0;
         let handle_h = bar_rect.height() + 8.0;
@@ -1406,20 +1432,37 @@ fn paint_seek_bar(
                 egui::pos2(hx + handle_w / 2.0, hy + handle_h),
             );
             // fondo
-            painter.rect_filled(hrect, 3.0, egui::Color32::from_rgba_premultiplied(45, 55, 65, 210));
-            painter.rect_stroke(hrect, 3.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 140)), egui::StrokeKind::Inside);
+            painter.rect_filled(
+                hrect,
+                3.0,
+                egui::Color32::from_rgba_premultiplied(45, 55, 65, 210),
+            );
+            painter.rect_stroke(
+                hrect,
+                3.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 140)),
+                egui::StrokeKind::Inside,
+            );
             // grip lines
             for dy in [-3.0, 0.0, 3.0] {
                 painter.line_segment(
-                    [egui::pos2(hx - 2.0, bar_rect.center().y + dy), egui::pos2(hx + 2.0, bar_rect.center().y + dy)],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(180, 220, 200, 170)),
+                    [
+                        egui::pos2(hx - 2.0, bar_rect.center().y + dy),
+                        egui::pos2(hx + 2.0, bar_rect.center().y + dy),
+                    ],
+                    egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_premultiplied(180, 220, 200, 170),
+                    ),
                 );
             }
         }
         // cursor feedback sobre handles
         if let Some(hover_pos) = response.hover_pos() {
-            let near_left = (hover_pos.x - lx0).abs() < 8.0 && (hover_pos.y - bar_rect.center().y).abs() < 12.0;
-            let near_right = (hover_pos.x - lx1).abs() < 8.0 && (hover_pos.y - bar_rect.center().y).abs() < 12.0;
+            let near_left =
+                (hover_pos.x - lx0).abs() < 8.0 && (hover_pos.y - bar_rect.center().y).abs() < 12.0;
+            let near_right =
+                (hover_pos.x - lx1).abs() < 8.0 && (hover_pos.y - bar_rect.center().y).abs() < 12.0;
             if near_left || near_right {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
@@ -1542,8 +1585,14 @@ fn paint_seek_bar(
             if let Some(sf) = snap_frac {
                 let sx = bar_rect.min.x + sf * bar_rect.width();
                 painter.line_segment(
-                    [egui::pos2(sx, bar_rect.min.y - 6.0), egui::pos2(sx, bar_rect.max.y + 6.0)],
-                    egui::Stroke::new(1.6, egui::Color32::from_rgba_premultiplied(255, 210, 110, 200)),
+                    [
+                        egui::pos2(sx, bar_rect.min.y - 6.0),
+                        egui::pos2(sx, bar_rect.max.y + 6.0),
+                    ],
+                    egui::Stroke::new(
+                        1.6,
+                        egui::Color32::from_rgba_premultiplied(255, 210, 110, 200),
+                    ),
                 );
                 // pequeño imán
                 painter.text(
@@ -1558,7 +1607,10 @@ fn paint_seek_bar(
             }
 
             // texto del tooltip: "Escena · m:ss"
-            let hover_scene = scenes.iter().find(|s| hover_frac >= s.start_frac && hover_frac < s.end_frac + 0.001).map(|s| s.name.as_str());
+            let hover_scene = scenes
+                .iter()
+                .find(|s| hover_frac >= s.start_frac && hover_frac < s.end_frac + 0.001)
+                .map(|s| s.name.as_str());
             let tooltip_text = if let Some(name) = hover_scene {
                 // truncar nombre si es muy largo
                 let short = truncate_with_ellipsis(name, 16);
@@ -1579,9 +1631,21 @@ fn paint_seek_bar(
                 egui::Color32::WHITE,
             );
             let pad = egui::vec2(8.0, 4.0);
-            let bg_rect = egui::Rect::from_center_size(tooltip_pos + egui::vec2(0.0, -galley.size().y / 2.0), galley.size() + pad * 2.0);
-            painter.rect_filled(bg_rect, 5.0, egui::Color32::from_rgba_premultiplied(20, 20, 28, 230));
-            painter.rect_stroke(bg_rect, 5.0, egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(70, 70, 85, 160)), egui::StrokeKind::Inside);
+            let bg_rect = egui::Rect::from_center_size(
+                tooltip_pos + egui::vec2(0.0, -galley.size().y / 2.0),
+                galley.size() + pad * 2.0,
+            );
+            painter.rect_filled(
+                bg_rect,
+                5.0,
+                egui::Color32::from_rgba_premultiplied(20, 20, 28, 230),
+            );
+            painter.rect_stroke(
+                bg_rect,
+                5.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(70, 70, 85, 160)),
+                egui::StrokeKind::Inside,
+            );
             painter.text(
                 tooltip_pos,
                 egui::Align2::CENTER_BOTTOM,
@@ -1640,7 +1704,8 @@ fn paint_seek_bar(
                     if let Some(s) = snapped {
                         seek_to = Some(s);
                     } else {
-                        let new_frac = ((pos.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+                        let new_frac =
+                            ((pos.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
                         seek_to = Some(new_frac);
                     }
                 } else {
@@ -1931,7 +1996,9 @@ fn preview_interactive_input_system(
         return;
     };
     if !interactive.enabled {
-        commands.entity(win_entity).remove::<bevy::window::CursorIcon>();
+        commands
+            .entity(win_entity)
+            .remove::<bevy::window::CursorIcon>();
         *prev_cursor = None;
         return;
     }
@@ -2092,7 +2159,10 @@ fn editor_picking_system(
         return;
     }
 
-    let is_perspective = matches!(camera.projection, gaanim_math::Projection::Perspective { .. });
+    let is_perspective = matches!(
+        camera.projection,
+        gaanim_math::Projection::Perspective { .. }
+    );
     if !is_perspective && interactive.enabled {
         return;
     }
@@ -2109,7 +2179,8 @@ fn editor_picking_system(
     let mut best_t: f64 = f64::INFINITY;
 
     if is_perspective {
-        let (origin, dir) = camera.screen_to_ray(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+        let (origin, dir) =
+            camera.screen_to_ray(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
         for (entity, bounds, render_order) in &entities {
             if let Some(t) = ray_aabb_intersect(origin, dir, bounds.0) {
                 if t < best_t {
@@ -2145,7 +2216,11 @@ fn editor_picking_system(
     state.selected = best_entity;
 }
 
-fn ray_aabb_intersect(origin: glam::DVec3, dir: glam::DVec3, bounds: gaanim_math::Bounds3D) -> Option<f64> {
+fn ray_aabb_intersect(
+    origin: glam::DVec3,
+    dir: glam::DVec3,
+    bounds: gaanim_math::Bounds3D,
+) -> Option<f64> {
     let mut t_min = f64::NEG_INFINITY;
     let mut t_max = f64::INFINITY;
     for i in 0..3 {

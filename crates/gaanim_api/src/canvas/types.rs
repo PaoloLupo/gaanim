@@ -532,7 +532,11 @@ pub enum SpawnKind {
         color: Option<Color>,
     },
     /// 3D polyline (e.g., curve) defined by world-space points.
-    Polyline3D(Vec<[f32; 3]>),
+    /// If `colors` is Some and length matches `points`, per-vertex colors are used (colormap).
+    Polyline3D {
+        points: Vec<[f32; 3]>,
+        colors: Option<Vec<Color>>,
+    },
     Text(String),
     Paragraph {
         text: String,
@@ -560,6 +564,8 @@ pub enum SpawnKind {
     TracedPathLine,
     /// Placeholder line entity whose Path2D will be overwritten by TrackingLine.
     TrackingLine,
+    /// Placeholder 3D line (LineList) that will be fed by TracedPath3D.
+    TracedPath3DLine,
 }
 
 /// A control point for a curve segment.

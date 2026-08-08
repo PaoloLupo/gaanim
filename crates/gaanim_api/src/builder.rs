@@ -7,7 +7,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
-use gaanim_math::matching::{MatchingConfig, MatchingMode, MatchItem};
+use gaanim_math::matching::{MatchItem, MatchingConfig, MatchingMode};
 use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
@@ -2234,10 +2234,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     fn build_match_item(&self, id: ObjectId, key: Option<String>) -> Option<MatchItem> {
         let state = self.states.get(id)?;
         let center = self.world_center_for_match(id);
-        let fill = state
-            .fill
-            .as_ref()
-            .and_then(extract_brush_color);
+        let fill = state.fill.as_ref().and_then(extract_brush_color);
         Some(MatchItem {
             index: 0, // caller sets
             path: (*state.path).clone(),
@@ -2257,7 +2254,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let mut ids = Vec::new();
         let mut items = Vec::new();
         for (pos, child) in state.child_spans.iter().enumerate() {
-            if let Some(item) = self.build_match_item(child.id, Some(child.span.character.to_string())) {
+            if let Some(item) =
+                self.build_match_item(child.id, Some(child.span.character.to_string()))
+            {
                 ids.push(child.id);
                 let mut it = item;
                 it.index = pos;
@@ -2305,10 +2304,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let cb = self.world_center_for_match(*b);
                 ca.0.partial_cmp(&cb.0)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(
-                        ca.1.partial_cmp(&cb.1)
-                            .unwrap_or(std::cmp::Ordering::Equal),
-                    )
+                    .then(ca.1.partial_cmp(&cb.1).unwrap_or(std::cmp::Ordering::Equal))
             });
         }
         let mut items = Vec::new();
@@ -2404,10 +2400,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     0.0,
                     ClipPayload::Animation(AnimationSpec {
                         target: dst_id,
-                        lens: PropertyLensSpec::Opacity {
-                            from,
-                            to: 0.0,
-                        },
+                        lens: PropertyLensSpec::Opacity { from, to: 0.0 },
                         rate_func: gaanim_math::RateFunc::Linear,
                         delay: 0.0,
                         label: None,
@@ -2538,8 +2531,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }),
             );
             // Stroke
-            let src_stroke = src_state.stroke.brush.as_ref().and_then(extract_brush_color);
-            let dst_stroke = dst_state.stroke.brush.as_ref().and_then(extract_brush_color);
+            let src_stroke = src_state
+                .stroke
+                .brush
+                .as_ref()
+                .and_then(extract_brush_color);
+            let dst_stroke = dst_state
+                .stroke
+                .brush
+                .as_ref()
+                .and_then(extract_brush_color);
             let stroke_colors = match (src_stroke, dst_stroke) {
                 (Some(f), Some(t)) => Some((f, t)),
                 (Some(f), None) => Some((f, f)),
@@ -3062,7 +3063,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn play_rotate_by_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (angle_radians, pivot) = match &anim.anim_type {
-            AnimationType::RotateBy { angle_radians, pivot } => (*angle_radians, *pivot),
+            AnimationType::RotateBy {
+                angle_radians,
+                pivot,
+            } => (*angle_radians, *pivot),
             _ => unreachable!(),
         };
 
@@ -3120,8 +3124,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         if angle_radians.abs() > std::f64::consts::PI {
             let half_dur = anim.duration * 0.5;
-            let mid_rot =
-                from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians * 0.5);
+            let mid_rot = from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians * 0.5);
             self.timeline.add_clip(
                 parent_track,
                 clip_start,
@@ -4052,10 +4055,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Spawns a 3D line list (axes, grids) from world-space points.
-    pub fn spawn_line_list(
+    /// If `colors` is Some and length matches `points`, per-vertex colors are used.
+    pub fn spawn_line_list(&mut self, points: Vec<[f32; 3]>, color: Color) -> MobjectRef {
+        self.spawn_line_list_with_colors(points, color, None)
+    }
+
+    /// Spawns a 3D line list with optional per-vertex colors (colormap).
+    pub fn spawn_line_list_with_colors(
         &mut self,
         points: Vec<[f32; 3]>,
         color: Color,
+        colors: Option<Vec<[f32; 4]>>,
     ) -> MobjectRef {
         let id = self.next_id();
         let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
@@ -4082,6 +4092,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     points,
                     indices: None,
                     color,
+                    colors,
                 },
                 Mesh3DMarker,
                 Transform::default(),

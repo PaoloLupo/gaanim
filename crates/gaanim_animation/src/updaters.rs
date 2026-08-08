@@ -323,6 +323,158 @@ pub fn traced_path_system(world: &mut World) {
 }
 
 // ==========================================
+// TRACED PATH 3D — trail reactivo en 3D (LineList)
+// ==========================================
+
+/// Componente que acumula la trayectoria 3D de una entidad como `LineListData`.
+///
+/// A diferencia de `TracedPath` (2D `Path2D`), este componente actualiza directamente
+/// `LineListData` + `colors` por vértice, permitiendo colormap tipo Makie.
+#[derive(Component)]
+pub struct TracedPath3D {
+    pub source: Entity,
+    pub points: Vec<DVec3>,
+    pub max_points: Option<usize>,
+    pub min_distance: f64,
+    pub colormap: Option<String>,
+}
+
+impl TracedPath3D {
+    pub fn new(
+        source: Entity,
+        min_distance: f64,
+        max_points: Option<usize>,
+        colormap: Option<String>,
+    ) -> Self {
+        Self {
+            source,
+            points: Vec::new(),
+            max_points,
+            min_distance,
+            colormap,
+        }
+    }
+}
+
+fn colormap_rgba(name: &str, t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    // Palettes as u8 RGB
+    let palette: Vec<(u8, u8, u8)> = match name {
+        "inferno" => vec![
+            (0, 0, 4),
+            (31, 12, 72),
+            (85, 15, 109),
+            (136, 34, 106),
+            (168, 50, 88),
+            (210, 72, 55),
+            (233, 100, 28),
+            (249, 157, 87),
+            (247, 209, 61),
+            (252, 255, 164),
+        ],
+        "viridis" => vec![
+            (68, 1, 84),
+            (59, 82, 139),
+            (33, 144, 140),
+            (94, 201, 98),
+            (253, 231, 37),
+        ],
+        "plasma" => vec![
+            (13, 8, 135),
+            (126, 3, 168),
+            (203, 70, 121),
+            (248, 149, 64),
+            (240, 249, 33),
+        ],
+        _ => vec![(255, 255, 255), (255, 255, 255)],
+    };
+    let scaled = t * (palette.len() - 1) as f32;
+    let idx = scaled.floor() as usize;
+    let f = scaled - idx as f32;
+    let (r, g, b) = if idx >= palette.len() - 1 {
+        palette[palette.len() - 1]
+    } else {
+        let (r0, g0, b0) = palette[idx];
+        let (r1, g1, b1) = palette[idx + 1];
+        (
+            (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
+            (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
+            (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
+        )
+    };
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+}
+
+/// Sistema que actualiza `LineListData` para cada `TracedPath3D`.
+pub fn traced_path_3d_system(world: &mut World) {
+    // Snapshot jobs
+    let mut jobs: Vec<(Entity, Entity, f64, Option<usize>)> = Vec::new();
+    let mut query = world.query::<(Entity, &TracedPath3D)>();
+    for (e, t) in query.iter(world) {
+        jobs.push((e, t.source, t.min_distance, t.max_points));
+    }
+    for (trace_entity, source_entity, min_distance, max_points) in jobs {
+        let source_pos = world
+            .get::<SpatialTransform>(source_entity)
+            .map(|t| t.translation);
+        if let Some(pos) = source_pos {
+            // Check and push
+            let should_push = {
+                if let Some(tp) = world.get::<TracedPath3D>(trace_entity) {
+                    match tp.points.last() {
+                        Some(last) => last.distance(pos) >= min_distance,
+                        None => true,
+                    }
+                } else {
+                    false
+                }
+            };
+            if !should_push {
+                continue;
+            }
+            // Mutate TracedPath3D points
+            let (points_snapshot, colormap_clone) = {
+                if let Some(mut tp) = world.get_mut::<TracedPath3D>(trace_entity) {
+                    tp.points.push(pos);
+                    if let Some(max) = max_points {
+                        if tp.points.len() > max {
+                            let overflow = tp.points.len() - max;
+                            tp.points.drain(0..overflow);
+                        }
+                    }
+                    (tp.points.clone(), tp.colormap.clone())
+                } else {
+                    continue;
+                }
+            };
+            // Build LineList points and optional vertex colors
+            let line_points: Vec<[f32; 3]> = points_snapshot
+                .iter()
+                .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+                .collect();
+            let vertex_colors: Option<Vec<[f32; 4]>> = colormap_clone.as_deref().map(|name| {
+                let n = line_points.len();
+                (0..n)
+                    .map(|i| {
+                        let t = if n > 1 {
+                            i as f32 / (n - 1) as f32
+                        } else {
+                            0.0
+                        };
+                        colormap_rgba(name, t)
+                    })
+                    .collect()
+            });
+
+            if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(trace_entity) {
+                line.points = line_points;
+                line.colors = vertex_colors;
+            }
+        }
+    }
+}
+
+// ==========================================
 // TRACKING LINE — línea reactiva entre dos endpoints
 // ==========================================
 

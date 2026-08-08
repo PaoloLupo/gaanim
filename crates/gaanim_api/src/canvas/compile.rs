@@ -137,10 +137,7 @@ fn color_to_hex(color: gaanim_core::peniko::Color) -> String {
     format!("{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b)
 }
 
-pub(crate) fn text_inline_typst_source(
-    text: &str,
-    color: gaanim_core::peniko::Color,
-) -> String {
+pub(crate) fn text_inline_typst_source(text: &str, color: gaanim_core::peniko::Color) -> String {
     let content = typst_inline_content(text);
     let hex = color_to_hex(color);
     format!(
@@ -466,7 +463,14 @@ impl Canvas {
                     let sx = xl / (x_max - x_min).max(1e-9);
                     let sy = yl / (y_max - y_min).max(1e-9);
                     let sz = zl / (z_max - z_min).max(1e-9);
-                    (sx, sy, sz, (x_min + x_max) * 0.5, (y_min + y_max) * 0.5, (z_min + z_max) * 0.5)
+                    (
+                        sx,
+                        sy,
+                        sz,
+                        (x_min + x_max) * 0.5,
+                        (y_min + y_max) * 0.5,
+                        (z_min + z_max) * 0.5,
+                    )
                 }
                 _ => (1.0, 1.0, 1.0, 0.0, 0.0, 0.0),
             };
@@ -485,7 +489,9 @@ impl Canvas {
 
         // Helper to push a 3D line list
         let mut push_line_list = |points: Vec<[f32; 3]>, color: peniko::Color, _tag: &str| {
-            if points.len() < 2 { return; }
+            if points.len() < 2 {
+                return;
+            }
             let mref = builder.spawn_line_list(points, color);
             // Tag for debugging
             if let Some(state) = builder.states.get_mut(mref.id) {
@@ -663,26 +669,49 @@ impl Canvas {
                 .unwrap_or_default();
             if let Some(state) = builder.states.get_mut(label.id) {
                 // Position in 3D
-                state.transform = state.transform.shift_3d(gaanim_core::glam::DVec3::new(x, y, z));
-                builder.commands.entity(state.entity).insert(state.transform);
+                state.transform = state
+                    .transform
+                    .shift_3d(gaanim_core::glam::DVec3::new(x, y, z));
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(state.transform);
                 // Billboard handling — applied to parent mobject entity so it acts as 3D anchor
                 if config.label_mode == crate::canvas::types::LabelMode::Billboard {
-                    builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
-                    builder.commands.entity(state.entity).insert(gaanim_scene::Mesh3DMarker);
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::Billboard);
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::Mesh3DMarker);
                 } else {
                     // HUD labels are fixed screen-space; keep as Vello2D with high z
                     // so they render on top of 3D after the perspective composition.
-                    builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
-                    builder.commands.entity(state.entity).insert(gaanim_scene::RenderOrder {
-                        z_index: 1000,
-                        ..Default::default()
-                    });
-                    for child in &child_entities {
-                        builder.commands.entity(*child).insert(gaanim_scene::HudOverlay);
-                        builder.commands.entity(*child).insert(gaanim_scene::RenderOrder {
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::HudOverlay);
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::RenderOrder {
                             z_index: 1000,
                             ..Default::default()
                         });
+                    for child in &child_entities {
+                        builder
+                            .commands
+                            .entity(*child)
+                            .insert(gaanim_scene::HudOverlay);
+                        builder
+                            .commands
+                            .entity(*child)
+                            .insert(gaanim_scene::RenderOrder {
+                                z_index: 1000,
+                                ..Default::default()
+                            });
                     }
                 }
             }
@@ -696,7 +725,13 @@ impl Canvas {
                 while x <= x_max + 1e-9 {
                     let value = if x.abs() < 1e-9 { 0.0 } else { x };
                     let text = format!("{value}");
-                    add_text(&text, sx(x), sy(0.0) - config.tick_length * 0.5 - 0.25, sz(0.0), config.number_color);
+                    add_text(
+                        &text,
+                        sx(x),
+                        sy(0.0) - config.tick_length * 0.5 - 0.25,
+                        sz(0.0),
+                        config.number_color,
+                    );
                     x += x_step;
                 }
             }
@@ -706,7 +741,13 @@ impl Canvas {
                     if y.abs() > 1e-9 || !config.x_numbers {
                         let value = if y.abs() < 1e-9 { 0.0 } else { y };
                         let text = format!("{value}");
-                        add_text(&text, sx(0.0) - config.tick_length * 0.5 - 0.35, sy(y), sz(0.0), config.number_color);
+                        add_text(
+                            &text,
+                            sx(0.0) - config.tick_length * 0.5 - 0.35,
+                            sy(y),
+                            sz(0.0),
+                            config.number_color,
+                        );
                     }
                     y += y_step;
                 }
@@ -725,13 +766,25 @@ impl Canvas {
         }
 
         if config.labels {
-            if let Some(label) = config.x_label.as_deref().filter(|_| y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
+            if let Some(label) = config
+                .x_label
+                .as_deref()
+                .filter(|_| y_min <= 0.0 && y_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0)
+            {
                 add_text(label, sx(x_max) + 0.4, sy(0.0), sz(0.0), config.label_color);
             }
-            if let Some(label) = config.y_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0) {
+            if let Some(label) = config
+                .y_label
+                .as_deref()
+                .filter(|_| x_min <= 0.0 && x_max >= 0.0 && z_min <= 0.0 && z_max >= 0.0)
+            {
                 add_text(label, sx(0.0), sy(y_max) + 0.4, sz(0.0), config.label_color);
             }
-            if let Some(label) = config.z_label.as_deref().filter(|_| x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0) {
+            if let Some(label) = config
+                .z_label
+                .as_deref()
+                .filter(|_| x_min <= 0.0 && x_max >= 0.0 && y_min <= 0.0 && y_max >= 0.0)
+            {
                 add_text(label, sx(0.0), sy(0.0), sz(z_max) + 0.4, config.label_color);
             }
         }
@@ -745,7 +798,8 @@ impl Canvas {
                 shadows_enabled: false,
                 ..Default::default()
             },
-            bevy::prelude::Transform::from_xyz(4.0, 8.0, 4.0).looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
+            bevy::prelude::Transform::from_xyz(4.0, 8.0, 4.0)
+                .looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
         ));
 
         // Create a 3D-aware group that has both SpatialTransform and Bevy Transform
@@ -2073,7 +2127,11 @@ impl Canvas {
                     temp_cam.rotation = *camera_rotation;
                     temp_cam.up = gaanim_core::glam::DVec3::Y;
                     temp_cam.projection = if let Some((fov, near, far)) = *camera_fov {
-                        gaanim_math::Projection::Perspective { fov_y: fov, near, far }
+                        gaanim_math::Projection::Perspective {
+                            fov_y: fov,
+                            near,
+                            far,
+                        }
                     } else {
                         gaanim_math::Projection::Orthographic { zoom: *camera_zoom }
                     };
@@ -2126,7 +2184,8 @@ impl Canvas {
                     far,
                     duration,
                 } => {
-                    let (from_fov, from_near, from_far) = (*camera_fov).unwrap_or((std::f64::consts::FRAC_PI_4, 0.1, 1000.0));
+                    let (from_fov, from_near, from_far) =
+                        (*camera_fov).unwrap_or((std::f64::consts::FRAC_PI_4, 0.1, 1000.0));
                     builder.timeline.add_clip(
                         builder.default_track,
                         builder.current_time,
@@ -2528,6 +2587,36 @@ impl Canvas {
                                 tracker_st.entity,
                                 *window,
                             ));
+                    }
+                }
+                Op::AttachPythonUpdater { target, key } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        if let Some(updater) = crate::canvas::ops::take_python_updater(*key) {
+                            builder.commands.entity(state.entity).insert(updater);
+                        }
+                    }
+                }
+                Op::AttachTracedPath3D {
+                    target,
+                    source,
+                    min_distance,
+                    max_points,
+                    colormap,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                        && let Some(source_st) = builder.states.get(source_id)
+                    {
+                        let comp = gaanim_animation::TracedPath3D::new(
+                            source_st.entity,
+                            *min_distance,
+                            *max_points,
+                            colormap.clone(),
+                        );
+                        builder.commands.entity(target_st.entity).insert(comp);
                     }
                 }
             }
@@ -3089,7 +3178,12 @@ impl Canvas {
                 config,
             } => {
                 let axes = Self::styled_axes_3d(
-                    builder, *x_range, *y_range, *z_range, config, frame_bounds,
+                    builder,
+                    *x_range,
+                    *y_range,
+                    *z_range,
+                    config,
+                    frame_bounds,
                 );
                 Self::post_apply(builder, axes.id, spec, id_map, frame_bounds);
                 axes
@@ -3099,15 +3193,11 @@ impl Canvas {
                 indices,
                 color,
             } => {
-                let mref = builder.spawn_triangle_mesh(
-                    vertices.clone(),
-                    indices.clone(),
-                    *color,
-                );
+                let mref = builder.spawn_triangle_mesh(vertices.clone(), indices.clone(), *color);
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
-            SpawnKind::Polyline3D(points) => {
+            SpawnKind::Polyline3D { points, colors } => {
                 let base_color = spec
                     .fill
                     .as_ref()
@@ -3116,7 +3206,33 @@ impl Canvas {
                         _ => None,
                     })
                     .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
-                let mref = builder.spawn_line_list(points.clone(), base_color);
+                let mref = if let Some(cols) = colors {
+                    // Convert peniko::Color Vec to linear RGBA f32 for vertex colors
+                    let cols_f32: Vec<[f32; 4]> = cols
+                        .iter()
+                        .map(|c| {
+                            let rgba = c.to_rgba8();
+                            [
+                                rgba.r as f32 / 255.0,
+                                rgba.g as f32 / 255.0,
+                                rgba.b as f32 / 255.0,
+                                rgba.a as f32 / 255.0,
+                            ]
+                        })
+                        .collect();
+                    if cols_f32.len() == points.len() {
+                        builder.spawn_line_list_with_colors(
+                            points.clone(),
+                            base_color,
+                            Some(cols_f32),
+                        )
+                    } else {
+                        // Mismatched lengths: fallback to uniform color (ignore per-vertex)
+                        builder.spawn_line_list(points.clone(), base_color)
+                    }
+                } else {
+                    builder.spawn_line_list(points.clone(), base_color)
+                };
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -3323,6 +3439,12 @@ impl Canvas {
                 let mr = Self::finish_spawn_builder(b, spec);
                 mr
             }
+            SpawnKind::TracedPath3DLine => {
+                // Empty 3D line placeholder; TracedPath3D will fill its LineListData.
+                let mref = builder.spawn_line_list(vec![], gaanim_core::peniko::Color::WHITE);
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
         }
     }
 
@@ -3504,8 +3626,14 @@ impl Canvas {
         // Billboard / HUD chaining (.billboard() / .hud())
         if spec.billboard {
             if let Some(state) = builder.states.get(id) {
-                builder.commands.entity(state.entity).insert(gaanim_scene::Billboard);
-                builder.commands.entity(state.entity).insert(bevy::prelude::Transform::default());
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(gaanim_scene::Billboard);
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(bevy::prelude::Transform::default());
             }
         }
         if spec.hud {
@@ -3525,19 +3653,31 @@ impl Canvas {
                 child_spans.iter().map(|c| c.entity).collect::<Vec<_>>()
             };
             for entity in targets {
-                builder.commands.entity(entity).insert(gaanim_scene::HudOverlay);
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_scene::HudOverlay);
                 // Keep Vello2D so the element is rendered; ensure high z for HUD.
                 builder
                     .commands
                     .entity(entity)
-                    .insert(gaanim_scene::RenderOrder { z_index: 1000, ..Default::default() });
+                    .insert(gaanim_scene::RenderOrder {
+                        z_index: 1000,
+                        ..Default::default()
+                    });
             }
             if let Some(state) = builder.states.get(id) {
-                builder.commands.entity(state.entity).insert(gaanim_scene::HudOverlay);
                 builder
                     .commands
                     .entity(state.entity)
-                    .insert(gaanim_scene::RenderOrder { z_index: 1000, ..Default::default() });
+                    .insert(gaanim_scene::HudOverlay);
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(gaanim_scene::RenderOrder {
+                        z_index: 1000,
+                        ..Default::default()
+                    });
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
@@ -4267,7 +4407,11 @@ mod tests {
             .iter(&world)
             .filter_map(|f| f.0.clone())
             .collect();
-        assert!(fills.len() > 10, "text with inline math should produce vector glyphs, got {}", fills.len());
+        assert!(
+            fills.len() > 10,
+            "text with inline math should produce vector glyphs, got {}",
+            fills.len()
+        );
         assert!(
             fills.iter().all(|b| match b {
                 gaanim_core::peniko::Brush::Solid(c) => *c != gaanim_core::peniko::Color::BLACK,
@@ -4275,7 +4419,12 @@ mod tests {
             }),
             "inline math glyphs should not be black on black background"
         );
-        assert!(world.query::<&LocalBounds>().iter(&world).any(|b| b.0.width() > 50.0));
+        assert!(
+            world
+                .query::<&LocalBounds>()
+                .iter(&world)
+                .any(|b| b.0.width() > 50.0)
+        );
     }
 
     #[test]
@@ -4306,7 +4455,11 @@ mod tests {
             .iter(&world)
             .filter_map(|f| f.0.clone())
             .collect();
-        assert!(fills.len() > 15, "paragraph with inline math should produce vector glyphs, got {}", fills.len());
+        assert!(
+            fills.len() > 15,
+            "paragraph with inline math should produce vector glyphs, got {}",
+            fills.len()
+        );
         assert!(
             fills.iter().all(|b| match b {
                 gaanim_core::peniko::Brush::Solid(c) => *c != gaanim_core::peniko::Color::BLACK,
@@ -4339,11 +4492,15 @@ mod tests {
             32.0,
             gaanim_core::peniko::Color::WHITE,
         );
-        assert!(para.contains("$x^2$"), "paragraph source should embed math, got {para}");
+        assert!(
+            para.contains("$x^2$"),
+            "paragraph source should embed math, got {para}"
+        );
         assert!(para.contains("#text(\"Hola \")"));
         let txt = text_inline_typst_source("prueba $x^2$ fin", gaanim_core::peniko::Color::WHITE);
         assert!(txt.contains("$x^2$"));
-        let txt2 = text_inline_typst_source("$alpha + beta = 1$", gaanim_core::peniko::Color::WHITE);
+        let txt2 =
+            text_inline_typst_source("$alpha + beta = 1$", gaanim_core::peniko::Color::WHITE);
         assert!(txt2.contains("$alpha + beta = 1$"));
     }
 

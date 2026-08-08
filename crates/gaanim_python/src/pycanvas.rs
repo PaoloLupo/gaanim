@@ -8,8 +8,8 @@ use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
     Anchor, Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme,
-    CurveControl, CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode,
-    ParagraphOptions, PresentationBrand, SlideId, SlideTemplate, TextAlign, ThemeFont,
+    CurveControl, CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
+    PresentationBrand, SlideId, SlideTemplate, TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_slide, export_canvas_slides,
@@ -813,8 +813,13 @@ impl PyCamera {
         up: Option<(f64, f64, f64)>,
         duration: f64,
     ) -> PyResult<()> {
-        if ![eye.0, eye.1, eye.2, target.0, target.1, target.2].iter().all(|v| v.is_finite()) {
-            return Err(pyo3::exceptions::PyValueError::new_err("eye and target must be finite"));
+        if ![eye.0, eye.1, eye.2, target.0, target.1, target.2]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "eye and target must be finite",
+            ));
         }
         if let Some(up) = up {
             if ![up.0, up.1, up.2].iter().all(|v| v.is_finite()) {
@@ -833,7 +838,9 @@ impl PyCamera {
     #[pyo3(signature = (delta_yaw, delta_pitch, duration=1.0))]
     fn orbit(&self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> PyResult<()> {
         if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
-            return Err(pyo3::exceptions::PyValueError::new_err("delta_yaw/delta_pitch must be finite"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "delta_yaw/delta_pitch must be finite",
+            ));
         }
         let duration = require_duration(duration)?;
         self.inner
@@ -846,7 +853,11 @@ impl PyCamera {
     /// Animate perspective projection (fov in radians).
     #[pyo3(signature = (fov_y, near=0.1, far=1000.0, duration=1.0))]
     fn perspective(&self, fov_y: f64, near: f64, far: f64, duration: f64) -> PyResult<()> {
-        if ![fov_y, near, far].iter().all(|v| v.is_finite()) || fov_y <= 0.0 || near <= 0.0 || far <= near {
+        if ![fov_y, near, far].iter().all(|v| v.is_finite())
+            || fov_y <= 0.0
+            || near <= 0.0
+            || far <= near
+        {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "fov_y/near/far must be finite with 0 < near < far and 0 < fov_y < pi",
             ));
@@ -863,7 +874,9 @@ impl PyCamera {
     #[pyo3(signature = (factor, duration=1.0))]
     fn dolly(&self, factor: f64, duration: f64) -> PyResult<()> {
         if !factor.is_finite() || factor <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err("factor must be finite and positive"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "factor must be finite and positive",
+            ));
         }
         let duration = require_duration(duration)?;
         self.inner
@@ -1675,31 +1688,32 @@ impl PyScene {
         y_axis_config: Option<Bound<'_, PyAny>>,
     ) -> PyResult<PyDrawable> {
         // manim compat: x/y can be (min,max) or (min,max,step), and x_range/y_range aliases
-        let parse_range = |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
-            if let Some(b) = opt {
-                if let Ok(v) = b.extract::<(f64, f64, f64)>() {
-                    Ok(v)
-                } else if let Ok(v) = b.extract::<(f64, f64)>() {
-                    Ok((v.0, v.1, 1.0))
-                } else if let Ok(v) = b.extract::<Vec<f64>>() {
-                    if v.len() == 2 {
-                        Ok((v[0], v[1], 1.0))
-                    } else if v.len() == 3 {
-                        Ok((v[0], v[1], v[2]))
+        let parse_range =
+            |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
+                if let Some(b) = opt {
+                    if let Ok(v) = b.extract::<(f64, f64, f64)>() {
+                        Ok(v)
+                    } else if let Ok(v) = b.extract::<(f64, f64)>() {
+                        Ok((v.0, v.1, 1.0))
+                    } else if let Ok(v) = b.extract::<Vec<f64>>() {
+                        if v.len() == 2 {
+                            Ok((v[0], v[1], 1.0))
+                        } else if v.len() == 3 {
+                            Ok((v[0], v[1], v[2]))
+                        } else {
+                            Err(pyo3::exceptions::PyValueError::new_err(
+                                "x_range/y_range must be (min, max) or (min, max, step)",
+                            ))
+                        }
                     } else {
                         Err(pyo3::exceptions::PyValueError::new_err(
                             "x_range/y_range must be (min, max) or (min, max, step)",
                         ))
                     }
                 } else {
-                    Err(pyo3::exceptions::PyValueError::new_err(
-                        "x_range/y_range must be (min, max) or (min, max, step)",
-                    ))
+                    Ok(default)
                 }
-            } else {
-                Ok(default)
-            }
-        };
+            };
         // x takes precedence over x_range if both provided (x is the gaanim name, x_range is manim)
         let x = parse_range(x.or(x_range), (-7.11, 7.11, 1.0))?;
         let y = parse_range(y.or(y_range), (-4.0, 4.0, 1.0))?;
@@ -1843,31 +1857,32 @@ impl PyScene {
         z_length: Option<f64>,
         tips: bool,
     ) -> PyResult<PyDrawable> {
-        let parse_range = |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
-            if let Some(b) = opt {
-                if let Ok(v) = b.extract::<(f64, f64, f64)>() {
-                    Ok(v)
-                } else if let Ok(v) = b.extract::<(f64, f64)>() {
-                    Ok((v.0, v.1, 1.0))
-                } else if let Ok(v) = b.extract::<Vec<f64>>() {
-                    if v.len() == 2 {
-                        Ok((v[0], v[1], 1.0))
-                    } else if v.len() == 3 {
-                        Ok((v[0], v[1], v[2]))
+        let parse_range =
+            |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
+                if let Some(b) = opt {
+                    if let Ok(v) = b.extract::<(f64, f64, f64)>() {
+                        Ok(v)
+                    } else if let Ok(v) = b.extract::<(f64, f64)>() {
+                        Ok((v.0, v.1, 1.0))
+                    } else if let Ok(v) = b.extract::<Vec<f64>>() {
+                        if v.len() == 2 {
+                            Ok((v[0], v[1], 1.0))
+                        } else if v.len() == 3 {
+                            Ok((v[0], v[1], v[2]))
+                        } else {
+                            Err(pyo3::exceptions::PyValueError::new_err(
+                                "range must be (min, max) or (min, max, step)",
+                            ))
+                        }
                     } else {
                         Err(pyo3::exceptions::PyValueError::new_err(
                             "range must be (min, max) or (min, max, step)",
                         ))
                     }
                 } else {
-                    Err(pyo3::exceptions::PyValueError::new_err(
-                        "range must be (min, max) or (min, max, step)",
-                    ))
+                    Ok(default)
                 }
-            } else {
-                Ok(default)
-            }
-        };
+            };
         let xr = parse_range(x.or(x_range), (-5.0, 5.0, 1.0))?;
         let yr = parse_range(y.or(y_range), (-5.0, 5.0, 1.0))?;
         let zr = parse_range(z.or(z_range), (-3.0, 3.0, 1.0))?;
@@ -1980,8 +1995,16 @@ impl PyScene {
         }
         // Compute same scale as in compile.rs styled_axes (manim x_length/y_length or auto_fit)
         let canvas = self.inner.lock().expect("scene canvas poisoned");
-        let avail_w = if canvas.width == 0 { 800.0 } else { canvas.width as f64 - canvas.margin.left - canvas.margin.right };
-        let avail_h = if canvas.height == 0 { 480.0 } else { canvas.height as f64 - canvas.margin.top - canvas.margin.bottom };
+        let avail_w = if canvas.width == 0 {
+            800.0
+        } else {
+            canvas.width as f64 - canvas.margin.left - canvas.margin.right
+        };
+        let avail_h = if canvas.height == 0 {
+            480.0
+        } else {
+            canvas.height as f64 - canvas.margin.top - canvas.margin.bottom
+        };
         drop(canvas);
         let data_w = (x_max - x_min).max(1e-9);
         let data_h = (y_max - y_min).max(1e-9);
@@ -2016,11 +2039,12 @@ impl PyScene {
             let sx = (xv - x_center) * scale_x;
             let sy = (yv - y_center) * scale_y;
             // When neither auto_fit nor explicit length, keep raw data coords (manim-like no scaling)
-            let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
-                (sx, sy)
-            } else {
-                (xv, yv)
-            };
+            let (sx, sy) =
+                if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+                    (sx, sy)
+                } else {
+                    (xv, yv)
+                };
             points.push((sx, sy));
         }
         Ok(PyDrawable(
@@ -2063,8 +2087,16 @@ impl PyScene {
             ));
         }
         let canvas = self.inner.lock().expect("scene canvas poisoned");
-        let avail_w = if canvas.width == 0 { 800.0 } else { canvas.width as f64 - canvas.margin.left - canvas.margin.right };
-        let avail_h = if canvas.height == 0 { 480.0 } else { canvas.height as f64 - canvas.margin.top - canvas.margin.bottom };
+        let avail_w = if canvas.width == 0 {
+            800.0
+        } else {
+            canvas.width as f64 - canvas.margin.left - canvas.margin.right
+        };
+        let avail_h = if canvas.height == 0 {
+            480.0
+        } else {
+            canvas.height as f64 - canvas.margin.top - canvas.margin.bottom
+        };
         drop(canvas);
         let data_w = (x_max - x_min).max(1e-9);
         let data_h = (y_max - y_min).max(1e-9);
@@ -2096,11 +2128,12 @@ impl PyScene {
             let tt = i as f64 / (samples - 1) as f64;
             let tv = t.0 + (t.1 - t.0) * tt;
             let (xv, yv): (f64, f64) = function.call1((tv,))?.extract()?;
-            let (sx, sy) = if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
-                ((xv - x_center) * scale_x, (yv - y_center) * scale_y)
-            } else {
-                (xv, yv)
-            };
+            let (sx, sy) =
+                if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
+                    ((xv - x_center) * scale_x, (yv - y_center) * scale_y)
+                } else {
+                    (xv, yv)
+                };
             points.push((sx, sy));
         }
         Ok(PyDrawable(
@@ -2125,7 +2158,9 @@ impl PyScene {
         y_samples: usize,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
-        if ![x_range.0, x_range.1, y_range.0, y_range.1].iter().all(|v| v.is_finite())
+        if ![x_range.0, x_range.1, y_range.0, y_range.1]
+            .iter()
+            .all(|v| v.is_finite())
             || x_range.0 >= x_range.1
             || y_range.0 >= y_range.1
         {
@@ -2171,11 +2206,13 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (points, color=None))]
+    #[pyo3(signature = (points, color=None, *, colors=None, colormap=None))]
     fn polyline_3d(
         &self,
         points: Vec<(f64, f64, f64)>,
         color: Option<PyColor>,
+        colors: Option<Vec<PyColor>>,
+        colormap: Option<String>,
     ) -> PyResult<PyDrawable> {
         if points.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -2189,15 +2226,108 @@ impl PyScene {
                 ));
             }
         }
-        let verts: Vec<[f32; 3]> = points.into_iter().map(|(x, y, z)| [x as f32, y as f32, z as f32]).collect();
-        let mut handle = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .polyline_3d(verts);
-        if let Some(c) = color {
-            handle = handle.fill(c.0);
-        }
+        let verts: Vec<[f32; 3]> = points
+            .iter()
+            .map(|(x, y, z)| [*x as f32, *y as f32, *z as f32])
+            .collect();
+
+        // Resolve per-vertex colors: explicit list > colormap > uniform color
+        let per_vertex: Option<Vec<gaanim_core::peniko::Color>> = if let Some(cols) = colors {
+            if cols.len() != points.len() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "colors length {} must match points length {}",
+                    cols.len(),
+                    points.len()
+                )));
+            }
+            Some(cols.into_iter().map(|c| c.0).collect())
+        } else if let Some(name) = colormap {
+            let name = name.to_lowercase();
+            // Supported colormaps: inferno (Makie default), viridis, plasma
+            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
+                "inferno" => vec![
+                    (0, 0, 4),
+                    (31, 12, 72),
+                    (85, 15, 109),
+                    (136, 34, 106),
+                    (168, 50, 88),
+                    (210, 72, 55),
+                    (233, 100, 28),
+                    (249, 157, 87),
+                    (247, 209, 61),
+                    (252, 255, 164),
+                ],
+                "viridis" => vec![
+                    (68, 1, 84),
+                    (59, 82, 139),
+                    (33, 144, 140),
+                    (94, 201, 98),
+                    (253, 231, 37),
+                ],
+                "plasma" => vec![
+                    (13, 8, 135),
+                    (126, 3, 168),
+                    (203, 70, 121),
+                    (248, 149, 64),
+                    (240, 249, 33),
+                ],
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "colormap must be 'inferno', 'viridis' or 'plasma'",
+                    ))
+                }
+            };
+            let n = points.len();
+            let mut out = Vec::with_capacity(n);
+            for i in 0..n {
+                let t = if n > 1 {
+                    i as f32 / (n - 1) as f32
+                } else {
+                    0.0
+                };
+                let scaled = t * (palette.len() - 1) as f32;
+                let idx = scaled.floor() as usize;
+                let f = scaled - idx as f32;
+                let (r, g, b) = if idx >= palette.len() - 1 {
+                    palette[palette.len() - 1]
+                } else {
+                    let (r0, g0, b0) = palette[idx];
+                    let (r1, g1, b1) = palette[idx + 1];
+                    (
+                        (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
+                        (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
+                        (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
+                    )
+                };
+                out.push(gaanim_core::peniko::Color::from_rgb8(r, g, b));
+            }
+            Some(out)
+        } else {
+            None
+        };
+
+        let handle = if let Some(cols) = per_vertex {
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline_3d_with_colors(verts, cols)
+        } else {
+            let verts2 = verts.clone();
+            let mut h = self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .polyline_3d(verts2);
+            if let Some(c) = color.clone() {
+                h = h.fill(c.0);
+            }
+            // If we have uniform color via fill fallback, the per-vertex path is not needed.
+            // We already handled colormap case above, so just return uniform.
+            return Ok(PyDrawable(h));
+        };
+        // For per-vertex case, uniform `color` is still allowed as tint? ignore, vertex colors dominate.
+        // But we allow `color` to override base if provided and no vertex? already handled.
+        // If both per-vertex and uniform color provided, we respect per-vertex.
         Ok(PyDrawable(handle))
     }
 
@@ -3583,6 +3713,44 @@ impl PyScene {
                 .expect("scene canvas poisoned")
                 .traced_path(&source.0),
         )
+    }
+
+    /// 3D traced path — accumulates the 3D world position of `source` as a `LineList`.
+    /// `colormap` may be "inferno", "viridis" or "plasma" to color by time (like Makie).
+    #[pyo3(signature = (source, *, colormap=None, max_points=None, min_distance=0.1))]
+    fn traced_path_3d(
+        &self,
+        source: &PyDrawable,
+        colormap: Option<String>,
+        max_points: Option<usize>,
+        min_distance: f64,
+    ) -> PyResult<PyDrawable> {
+        if !min_distance.is_finite() || min_distance < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "min_distance must be finite and non-negative",
+            ));
+        }
+        if let Some(n) = max_points {
+            if n == 0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "max_points must be positive when provided",
+                ));
+            }
+        }
+        if let Some(ref name) = colormap {
+            let low = name.to_lowercase();
+            if !["inferno", "viridis", "plasma"].contains(&low.as_str()) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "colormap must be 'inferno', 'viridis' or 'plasma'",
+                ));
+            }
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .traced_path_3d(&source.0, colormap, max_points, min_distance),
+        ))
     }
 
     fn tracking_line(&self, from: Bound<'_, PyAny>, to: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
