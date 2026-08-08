@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agregar funcion a Gaanim"
+  short_description: "Implementa funciones completas en Gaanim"
+  default_prompt: "Usa $gaanim-add-feature para implementar esta funcion de extremo a extremo."

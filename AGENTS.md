@@ -4,7 +4,8 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 12 crates under `crates/`.
+- **Workspace root:** `Cargo.toml` defines 16 workspace members: 15 crates under
+  `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
   - `gaanim_math` — `SpatialTransform`, `Camera`, `RateFunc`, `Bounds3D`.
@@ -13,10 +14,13 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
   - `gaanim_timeline` — BTree-indexed clips, snapshot seek.
   - `gaanim_renderer` — Vello 0.7 backend, `bevy_vello` 0.13.1, fragment retain caching.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
+  - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_text` — cosmic-text/HarfBuzz shaping, Typst math compilation.
   - `gaanim_api` — fluent Rust builder API; depends on most core crates.
   - `gaanim_python` — PyO3 0.28 extension (`cdylib`), thin wrapper over `gaanim_api`.
-- **No README exists.** Design/roadmap docs are `implementation_plan.md` and `engine_improvements.md` (Spanish; aspirational — verify against actual code).
+  - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
+- **Repository overview:** `README.md` is the current user/developer entry point.
+  `engine_improvements.md` is aspirational; verify proposals against code and tests.
 
 ## Developer commands
 
@@ -26,22 +30,27 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 |------|---------|
 | Type-check workspace | `just check` (alias: `cargo check --workspace`) |
 | Lint workspace | `just clippy` |
-| Build Python extension (debug) | `just build` → runs `maturin develop` inside `crates/gaanim_python` |
-| Build Python extension (release) | `just build-release` |
+| Build application binaries (debug) | `just build` |
+| Build application binaries (release) | `just build-release` |
+| Install Python extension in `.venv` | `just python-develop` |
 | Build wheel | `just wheel` → outputs to `target/wheels/` |
 | Run example by name | `just run <name>` (e.g., `just run math_animation`) |
-| Sanity check | `just doctor` — compiles workspace + imports extension |
+| Validate installed Python API | `just validate-python-api` |
+| Build documentation | `just docs` |
+| Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
 | Bootstrap venv | `just bootstrap` — creates `.venv` and installs `maturin` |
 | Full clean | `just clean` — deletes `.venv` and `cargo clean` |
 
-**Required order:** `just bootstrap` (once) → `just build` (or `build-release`) before running any Python example.
+**Python bridge order:** `just bootstrap` (once) → `just python-develop` before
+directly importing `gaanim` or running `just validate-python-api`. `just run`
+builds and launches an example through the application host.
 
 ## Python bridge specifics
 
 - **Python package name:** `gaanim`
 - **Native module name:** `gaanim.gaanim_core` (maps to `#[pymodule] fn gaanim_core` in `crates/gaanim_python/src/lib.rs`)
 - **Maturin config:** `crates/gaanim_python/pyproject.toml` (`module-name = "gaanim.gaanim_core"`)
-- The `.venv` is gitignored but expected locally. It already exists in this checkout.
+- The `.venv` is gitignored and expected locally after `just bootstrap`.
 
 ## Build / toolchain quirks
 
@@ -53,9 +62,26 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 
 ## Testing
 
-- No dedicated `tests/` directories exist yet. Inline unit tests are present in a few crates (e.g., `gaanim_math`).
+- Inline unit tests are present in several crates. Repository-level Python/API
+  and visual fixtures live under `tests/`; per-crate Rust integration-test
+  directories are not yet common.
 - Run per-crate tests: `cargo test -p <crate>`
-- The `just doctor` command is the fastest verification that the Rust→Python bridge is intact.
+- Run workspace tests: `cargo test --workspace`.
+- Verify the Rust→Python bridge with `just python-develop` followed by
+  `just validate-python-api`.
+- Use `just doctor` for a fast application/toolchain sanity check.
+
+## Agent plugin
+
+- `plugins/gaanim-dev` packages repository-aware skills for adding features,
+  synchronizing Typst docs, fixing bugs, testing changes, and maintenance.
+- Inspect change impact with
+  `python plugins/gaanim-dev/scripts/impact.py --format json`.
+- Audit objective contracts with `python plugins/gaanim-dev/scripts/audit.py`.
+- Preview change-aware validation with
+  `python plugins/gaanim-dev/scripts/verify.py fast --dry-run`.
+- Audit warnings are heuristic by default. Objective invariant failures return
+  a nonzero status; pass `--strict` only when warnings should also fail.
 
 ## Visual regression diffs
 

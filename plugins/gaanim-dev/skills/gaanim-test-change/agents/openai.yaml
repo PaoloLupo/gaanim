@@ -1,0 +1,4 @@
+interface:
+  display_name: "Probar cambios de Gaanim"
+  short_description: "Valida cambios con pruebas enfocadas"
+  default_prompt: "Usa $gaanim-test-change para probar estos cambios de Gaanim."

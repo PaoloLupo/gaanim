@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sincronizar docs de Gaanim"
+  short_description: "Sincroniza la API con documentacion Typst"
+  default_prompt: "Usa $gaanim-sync-docs para actualizar la documentacion de esta API."

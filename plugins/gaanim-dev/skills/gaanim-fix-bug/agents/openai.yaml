@@ -1,0 +1,4 @@
+interface:
+  display_name: "Corregir error en Gaanim"
+  short_description: "Reproduce y corrige errores de Gaanim"
+  default_prompt: "Usa $gaanim-fix-bug para reproducir y corregir este error."

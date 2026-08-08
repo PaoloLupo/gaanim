@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gaanim-dev",
+  "version": "0.1.0",
+  "description": "Repository-aware workflows for adding, documenting, fixing, testing, and maintaining Gaanim.",
+  "author": {
+    "name": "Gaanim contributors"
+  },
+  "keywords": [
+    "gaanim",
+    "rust",
+    "pyo3",
+    "typst",
+    "visual-testing"
+  ]
+}

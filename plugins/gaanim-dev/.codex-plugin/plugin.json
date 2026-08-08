@@ -1,0 +1,18 @@
+{
+  "name": "gaanim-dev",
+  "version": "0.1.0",
+  "description": "Repository-aware development workflows for Gaanim",
+  "author": {
+    "name": "Gaanim contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Gaanim Dev",
+    "shortDescription": "Desarrolla y valida Gaanim con flujos seguros.",
+    "longDescription": "Añade funciones, sincroniza la API con Typst, corrige errores, selecciona pruebas y audita el repositorio Gaanim.",
+    "developerName": "Gaanim contributors",
+    "category": "Developer Tools",
+    "capabilities": ["Write"],
+    "defaultPrompt": "Ayúdame a desarrollar y validar este cambio en Gaanim."
+  }
+}

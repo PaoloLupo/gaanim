@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mantener repositorio Gaanim"
+  short_description: "Audita y mantiene el repositorio Gaanim"
+  default_prompt: "Usa $gaanim-maintain-repo para auditar y mantener este repositorio."

@@ -30,6 +30,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Test agent plugin utilities
+        run: python -m unittest discover -s plugins/gaanim-dev/tests -v
+
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
