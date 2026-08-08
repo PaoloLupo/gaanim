@@ -232,12 +232,59 @@ pub fn sync_gaanim_camera_to_bevy_system(
 /// Used for the hybrid 2D/3D pipeline where 3D meshes are rendered with Bevy's PBR
 /// while Vello continues to handle 2D vector content. When the camera is orthographic
 /// the 3D camera is still updated with the same position/rotation for consistency.
+fn fitted_canvas_viewport(
+    cam: &gaanim_math::Camera,
+    window: &Window,
+) -> Option<bevy::camera::Viewport> {
+    let fit = cam.viewport_scale;
+    if !fit.is_finite() || fit <= 0.0 || cam.viewport_width == 0 || cam.viewport_height == 0 {
+        return None;
+    }
+
+    let window_width = window.width() as f64;
+    let window_height = window.height() as f64;
+    if window_width <= 0.0 || window_height <= 0.0 {
+        return None;
+    }
+
+    let viewport_width = (cam.viewport_width as f64 * fit).min(window_width);
+    let viewport_height = (cam.viewport_height as f64 * fit).min(window_height);
+    let left = ((window_width - viewport_width) * 0.5).max(0.0);
+    let center_y = window_height * 0.5 + cam.viewport_offset_y * fit;
+    let top =
+        (center_y - viewport_height * 0.5).clamp(0.0, (window_height - viewport_height).max(0.0));
+    let scale_factor = window.scale_factor() as f64;
+
+    Some(bevy::camera::Viewport {
+        physical_position: UVec2::new(
+            (left * scale_factor).round() as u32,
+            (top * scale_factor).round() as u32,
+        ),
+        physical_size: UVec2::new(
+            (viewport_width * scale_factor).round().max(1.0) as u32,
+            (viewport_height * scale_factor).round().max(1.0) as u32,
+        ),
+        depth: 0.0..1.0,
+    })
+}
+
 pub fn sync_gaanim_camera_to_bevy_3d_system(
     gaanim_camera: Option<Res<gaanim_math::Camera>>,
-    mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    mut bevy_cameras: Query<
+        (
+            &mut Camera,
+            &bevy::camera::RenderTarget,
+            &mut Transform,
+            &mut Projection,
+        ),
+        With<Camera3d>,
+    >,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     let Some(cam) = gaanim_camera else { return };
-    for (mut transform, mut projection) in &mut bevy_cameras {
+    let primary_window = primary_window.single().ok();
+    for (mut bevy_camera, render_target, mut transform, mut projection) in &mut bevy_cameras {
         transform.translation = Vec3::new(
             cam.position.x as f32,
             cam.position.y as f32,
@@ -252,6 +299,18 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
         );
         match cam.projection {
             gaanim_math::Projection::Perspective { fov_y, near, far } => {
+                let target_window = match render_target {
+                    bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Primary) => {
+                        primary_window
+                    }
+                    bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(entity)) => {
+                        Some(*entity)
+                    }
+                    _ => None,
+                };
+                if let Some(window) = target_window.and_then(|entity| windows.get(entity).ok()) {
+                    bevy_camera.viewport = fitted_canvas_viewport(&cam, window);
+                }
                 if let Projection::Perspective(persp) = projection.as_mut() {
                     persp.fov = fov_y as f32;
                     persp.near = near as f32;
@@ -1223,4 +1282,40 @@ fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Bru
     }
     let alpha = alpha.max(0.0);
     Some(brush.clone().multiply_alpha(alpha))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn window(width: u32, height: u32) -> Window {
+        Window {
+            resolution: (width, height).into(),
+            ..default()
+        }
+    }
+
+    #[test]
+    fn perspective_viewport_keeps_canvas_size_in_taller_window() {
+        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
+        cam.viewport_scale = 1.0;
+
+        let original = fitted_canvas_viewport(&cam, &window(1280, 720)).unwrap();
+        let taller = fitted_canvas_viewport(&cam, &window(1280, 1000)).unwrap();
+
+        assert_eq!(original.physical_size, UVec2::new(1280, 720));
+        assert_eq!(taller.physical_size, original.physical_size);
+        assert_eq!(taller.physical_position, UVec2::new(0, 140));
+    }
+
+    #[test]
+    fn perspective_viewport_scales_with_the_fitted_logical_canvas() {
+        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
+        cam.viewport_scale = 0.5;
+
+        let viewport = fitted_canvas_viewport(&cam, &window(640, 500)).unwrap();
+
+        assert_eq!(viewport.physical_size, UVec2::new(640, 360));
+        assert_eq!(viewport.physical_position, UVec2::new(0, 70));
+    }
 }

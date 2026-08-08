@@ -125,7 +125,8 @@ impl Plugin for GaanimEditorPlugin {
             Update,
             viewport_adjust_system
                 .in_set(gaanim_scene::hierarchy::SceneSet::Bounds)
-                .before(gaanim_renderer::pipeline::sync_gaanim_camera_to_bevy_system),
+                .before(gaanim_renderer::pipeline::sync_gaanim_camera_to_bevy_system)
+                .before(gaanim_renderer::pipeline::sync_gaanim_camera_to_bevy_3d_system),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
         .add_systems(
