@@ -6,6 +6,7 @@ use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
+use std::path::PathBuf;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::ops::{Op, SharedCanvasState};
@@ -537,6 +538,20 @@ pub enum SpawnKind {
         points: Vec<[f32; 3]>,
         colors: Option<Vec<Color>>,
     },
+    /// Stable manual-animation wrapper for one native glTF node.
+    GltfNode {
+        node_index: usize,
+        path: String,
+        bounds: Bounds3D,
+    },
+    /// Root of a native Bevy glTF scene instance.
+    GltfModel {
+        path: PathBuf,
+        scene_index: usize,
+        bounds: Bounds3D,
+        nodes: Vec<(usize, Option<usize>, String, ObjectId)>,
+        animation_names: Vec<String>,
+    },
     Text(String),
     Paragraph {
         text: String,
@@ -607,7 +622,9 @@ pub enum CurveElement {
 pub enum LayoutOp {
     SetTranslation(DVec3),
     SetScale(f64),
+    SetScale3D(DVec3),
     SetRotation(f64),
+    SetRotation3D(DVec3),
     /// Scene-space point around which rotation and scaling are performed.
     SetPivot(DVec3),
     MoveAnchorTo {

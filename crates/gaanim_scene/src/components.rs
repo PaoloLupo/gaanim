@@ -1,7 +1,9 @@
-use bevy::prelude::Component;
+use bevy::animation::graph::{AnimationGraph, AnimationNodeIndex};
+use bevy::prelude::{Component, Entity, Handle};
 use gaanim_core::kurbo::{Affine, BezPath, Stroke};
 use gaanim_core::peniko::{Brush, ImageBrush};
 use gaanim_math::Bounds3D;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Represents the fill style of a visual Mobject.
@@ -223,6 +225,59 @@ pub struct HudOverlay;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mesh3DMarker;
+
+/// Stable Gaanim wrapper placed immediately above a native glTF node.
+///
+/// Blender-authored transforms remain on the native node while manual Gaanim
+/// transforms are written to this wrapper, so both layers compose.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct GltfNodeWrapper {
+    pub node_index: usize,
+    pub path: String,
+}
+
+/// One stable wrapper binding belonging to an imported glTF model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GltfNodeBinding {
+    pub node_index: usize,
+    pub path: String,
+    pub wrapper: Entity,
+}
+
+/// Deferred source metadata for a native Bevy glTF scene instance.
+#[derive(Component, Debug, Clone)]
+pub struct GltfModelRoot {
+    pub path: PathBuf,
+    pub scene_index: usize,
+    pub nodes: Vec<GltfNodeBinding>,
+    pub animation_names: Vec<String>,
+}
+
+/// Bevy handle used while a glTF asset is loaded asynchronously.
+#[derive(Component, Debug, Clone)]
+pub struct GltfAssetHandle(pub Handle<bevy::gltf::Gltf>);
+
+/// Animation graph and player entities created for a ready glTF instance.
+#[derive(Component, Debug, Clone)]
+pub struct GltfAnimationState {
+    pub graph: Handle<AnimationGraph>,
+    pub nodes: Vec<AnimationNodeIndex>,
+    pub players: Vec<Entity>,
+}
+
+/// Marker indicating that native nodes, wrappers and animations are linked.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct GltfModelReady;
+
+/// Marker for the single neutral light supplied by Gaanim to imported models.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct GaanimDefault3dLight;
+
+/// Original material properties retained while wrapper opacity is animated.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GltfMaterialBaseline {
+    pub alpha: f32,
+}
 
 /// Raw triangle mesh data to be converted to Bevy `Mesh3d` at runtime.
 #[derive(Component, Debug, Clone)]

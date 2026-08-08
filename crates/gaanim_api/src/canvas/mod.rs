@@ -16,7 +16,9 @@ pub use presentation::{
     SlideTemplate,
 };
 mod drawable;
-pub use drawable::{DrawableHandle, FragmentSelection, SvgPartError};
+pub use drawable::{
+    DrawableHandle, FragmentSelection, GltfAnimationError, RotationAxisError, SvgPartError,
+};
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{

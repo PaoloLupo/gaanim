@@ -12,7 +12,8 @@ pub mod prelude {
         detect_best_encoder,
     };
     pub use crate::exporter::{
-        CapturedFrame, capture_scene_direct, export_scene, export_scene_direct,
+        CapturedFrame, capture_scene_direct, capture_scene_hybrid, export_scene,
+        export_scene_direct,
     };
     pub use crate::gpu::GpuContext;
 }

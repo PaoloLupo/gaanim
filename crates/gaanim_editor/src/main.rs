@@ -40,28 +40,32 @@ fn main() {
 
     let launch = parse_args();
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: if launch.present {
-                "Gaanim — Presentation".to_string()
-            } else {
-                "Gaanim".to_string()
-            },
-            resolution: (1280, 720).into(),
-            mode: if launch.present {
-                bevy::window::WindowMode::BorderlessFullscreen(
-                    launch
-                        .monitor
-                        .map(bevy::window::MonitorSelection::Index)
-                        .unwrap_or(bevy::window::MonitorSelection::Primary),
-                )
-            } else {
-                bevy::window::WindowMode::Windowed
-            },
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: if launch.present {
+                        "Gaanim — Presentation".to_string()
+                    } else {
+                        "Gaanim".to_string()
+                    },
+                    resolution: (1280, 720).into(),
+                    mode: if launch.present {
+                        bevy::window::WindowMode::BorderlessFullscreen(
+                            launch
+                                .monitor
+                                .map(bevy::window::MonitorSelection::Index)
+                                .unwrap_or(bevy::window::MonitorSelection::Primary),
+                        )
+                    } else {
+                        bevy::window::WindowMode::Windowed
+                    },
+                    ..default()
+                }),
+                ..default()
+            })
+            .set(gaanim_scene::gaanim_asset_plugin()),
+    )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
     .add_plugins(gaanim_timeline::GaanimTimelinePlugin)

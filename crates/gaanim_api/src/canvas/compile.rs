@@ -9,8 +9,9 @@ use gaanim_core::kurbo::{Point, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, GroupMarker, LocalBounds, MobjectId, ObjectTag, Opacity, RenderOrder,
-    StrokeBrush, Visible, WorldBounds,
+    FillBrush, GlobalOpacity, GltfModelRoot, GltfNodeBinding, GltfNodeWrapper, GroupMarker,
+    LocalBounds, MobjectId, ObjectTag, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible,
+    WorldBounds,
 };
 use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::{PresentationSlide, PresentationStep, Timeline};
@@ -3386,6 +3387,152 @@ impl Canvas {
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
+            SpawnKind::GltfNode {
+                node_index,
+                path,
+                bounds,
+            } => {
+                let id = builder.next_id();
+                let transform = SpatialTransform::identity();
+                let entity = builder
+                    .commands
+                    .spawn((
+                        GltfNodeWrapper {
+                            node_index: *node_index,
+                            path: path.clone(),
+                        },
+                        GroupMarker,
+                        MobjectId(id),
+                        transform,
+                        GlobalSpatialTransform::from_local(&transform),
+                        Transform::default(),
+                        Visibility::default(),
+                        Opacity::default(),
+                        GlobalOpacity::default(),
+                        LocalBounds(*bounds),
+                        WorldBounds(*bounds),
+                        RenderLayer::Wgpu3D,
+                        RenderOrder::default(),
+                        Visible,
+                    ))
+                    .id();
+                builder.tag_entity(entity);
+                builder.states.insert(
+                    id,
+                    MobjectState {
+                        path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+                        bounds: *bounds,
+                        transform,
+                        opacity: 1.0,
+                        fill: None,
+                        stroke: StrokeBrush::transparent(),
+                        entity,
+                        child_spans: Vec::new(),
+                        children: Vec::new(),
+                        parent: None,
+                    },
+                );
+                let mref = MobjectRef { id };
+                Self::post_apply(builder, id, spec, id_map, frame_bounds);
+                mref
+            }
+            SpawnKind::GltfModel {
+                path,
+                scene_index,
+                bounds,
+                nodes,
+                animation_names,
+            } => {
+                let id = builder.next_id();
+                let transform = SpatialTransform::identity();
+                let entity = builder
+                    .commands
+                    .spawn((
+                        GroupMarker,
+                        MobjectId(id),
+                        transform,
+                        GlobalSpatialTransform::from_local(&transform),
+                        Transform::default(),
+                        Visibility::default(),
+                        Opacity::default(),
+                        GlobalOpacity::default(),
+                        LocalBounds(*bounds),
+                        WorldBounds(*bounds),
+                        RenderLayer::Wgpu3D,
+                        RenderOrder::default(),
+                        Visible,
+                    ))
+                    .id();
+                builder.tag_entity(entity);
+
+                let mapped = nodes
+                    .iter()
+                    .filter_map(|(index, _, node_path, canvas_id)| {
+                        let compiled_id = id_map.get(canvas_id).copied()?;
+                        let wrapper = builder.states.get(compiled_id)?.entity;
+                        Some((*index, node_path.clone(), compiled_id, wrapper))
+                    })
+                    .collect::<Vec<_>>();
+                let node_entities = mapped
+                    .iter()
+                    .map(|(index, _, _, wrapper)| (*index, *wrapper))
+                    .collect::<HashMap<_, _>>();
+                let canvas_ids = mapped
+                    .iter()
+                    .map(|(index, _, canvas_id, _)| (*index, *canvas_id))
+                    .collect::<HashMap<_, _>>();
+                for (node_index, parent_index, _, canvas_id) in nodes {
+                    let Some(compiled_id) = id_map.get(canvas_id).copied() else {
+                        continue;
+                    };
+                    let Some(state) = builder.states.get_mut(compiled_id) else {
+                        continue;
+                    };
+                    let parent_entity = parent_index
+                        .and_then(|parent| node_entities.get(&parent).copied())
+                        .unwrap_or(entity);
+                    state.parent = parent_index
+                        .and_then(|parent| canvas_ids.get(&parent).copied())
+                        .or(Some(id));
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(ChildOf(parent_entity));
+                    let _ = node_index;
+                }
+                builder.commands.entity(entity).insert(GltfModelRoot {
+                    path: path.clone(),
+                    scene_index: *scene_index,
+                    nodes: mapped
+                        .iter()
+                        .map(|(node_index, node_path, _, wrapper)| GltfNodeBinding {
+                            node_index: *node_index,
+                            path: node_path.clone(),
+                            wrapper: *wrapper,
+                        })
+                        .collect(),
+                    animation_names: animation_names.clone(),
+                });
+                let child_ids = mapped.iter().map(|(_, _, id, _)| *id).collect::<Vec<_>>();
+                builder.states.insert(
+                    id,
+                    MobjectState {
+                        path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+                        bounds: *bounds,
+                        transform,
+                        opacity: 1.0,
+                        fill: None,
+                        stroke: StrokeBrush::transparent(),
+                        entity,
+                        child_spans: Vec::new(),
+                        children: child_ids,
+                        parent: None,
+                    },
+                );
+                let mref = MobjectRef { id };
+                Self::post_apply(builder, id, spec, id_map, frame_bounds);
+                mref
+            }
             SpawnKind::Text(t) => {
                 let role = gaanim_text::prelude::TextRole::Body;
                 let styled_spec =
@@ -3861,8 +4008,19 @@ impl Canvas {
                 LayoutOp::SetScale(factor) => {
                     transform.scale = original_transform.scale * *factor;
                 }
+                LayoutOp::SetScale3D(scale) => {
+                    transform.scale = original_transform.scale * *scale;
+                }
                 LayoutOp::SetRotation(radians) => {
                     transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(*radians);
+                }
+                LayoutOp::SetRotation3D(euler) => {
+                    transform.rotation = gaanim_core::glam::DQuat::from_euler(
+                        gaanim_core::glam::EulerRot::XYZ,
+                        euler.x,
+                        euler.y,
+                        euler.z,
+                    );
                 }
                 LayoutOp::SetPivot(pivot) => {
                     pivot_in_scene = Some(*pivot);

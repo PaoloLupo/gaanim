@@ -2130,6 +2130,7 @@ fn lighten(c: Color32) -> Color32 {
 fn clip_color(payload: &ClipPayload) -> Color32 {
     match payload {
         ClipPayload::Animation(anim) => lens_color(&anim.lens),
+        ClipPayload::GltfAnimation(_) => Color32::from_rgb(90, 170, 220),
         ClipPayload::Audio { .. } => CLR_AUDIO,
         ClipPayload::Wait => CLR_WAIT,
         ClipPayload::Marker(_) => CLR_MARKER,
@@ -2195,6 +2196,7 @@ fn clip_icon(payload: &ClipPayload) -> &'static str {
             PropertyLensSpec::PathMorph { .. } => "⬡",
             PropertyLensSpec::Custom { .. } => "★",
         },
+        ClipPayload::GltfAnimation(_) => "3D",
         ClipPayload::Audio { .. } => "♪",
         ClipPayload::Wait => "⏳",
         ClipPayload::Marker(_) => "⚑",
@@ -2241,6 +2243,7 @@ fn clip_label(payload: &ClipPayload) -> String {
             };
             n.to_string()
         }
+        ClipPayload::GltfAnimation(action) => format!("Action:{}", action.animation_index),
         ClipPayload::Audio { source, .. } => {
             if source.len() > 18 {
                 format!("Audio:{}…", &source[..15])

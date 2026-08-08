@@ -13,7 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use gaanim_api::canvas::Canvas;
-use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, ExportError, capture_scene_direct};
+use gaanim_export::prelude::{
+    AspectRatioPreset, ExportConfig, ExportError, capture_scene_direct, capture_scene_hybrid,
+};
 use image::{DynamicImage, ImageEncoder, Rgba, RgbaImage};
 use thiserror::Error;
 
@@ -73,9 +75,15 @@ pub fn capture_canvas(
 
     let width = config.width;
     let height = config.height;
-    let frames = capture_scene_direct(config, times, move |world| {
-        gaanim_api::runtime::replay_canvas_into(world, canvas)
-    })?;
+    let frames = if canvas.has_native_3d_content() {
+        capture_scene_hybrid(config, times, move |world| {
+            gaanim_api::runtime::replay_canvas_into(world, canvas)
+        })?
+    } else {
+        capture_scene_direct(config, times, move |world| {
+            gaanim_api::runtime::replay_canvas_into(world, canvas)
+        })?
+    };
 
     let mut snapshots = Vec::with_capacity(frames.len());
     for (index, frame) in frames.into_iter().enumerate() {

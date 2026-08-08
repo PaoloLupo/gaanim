@@ -14,6 +14,16 @@ pub struct DrawAnimationConfig {
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
 pub enum AnimationType {
+    /// A Blender Action embedded in an imported glTF model.
+    GltfAnimation {
+        animation_index: usize,
+        source_duration: f64,
+        speed: f64,
+        looped: bool,
+        reverse: bool,
+        transition: f64,
+        start_time: f64,
+    },
     TranslateTo {
         to: DVec3,
     },
@@ -26,6 +36,9 @@ pub enum AnimationType {
     RotateBy {
         angle_radians: f64,
         pivot: Option<DVec3>,
+    },
+    RotateBy3D {
+        delta: DQuat,
     },
     ScaleTo {
         to: DVec3,
@@ -279,7 +292,8 @@ impl AnimationType {
 
     pub fn default_rate_func(&self) -> RateFunc {
         match self {
-            Self::Write { .. }
+            Self::GltfAnimation { .. }
+            | Self::Write { .. }
             | Self::Create { .. }
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }

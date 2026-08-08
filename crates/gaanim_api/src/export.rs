@@ -36,7 +36,7 @@ pub enum SlideExportError {
 /// Export a Canvas using the supplied `gaanim_export::ExportConfig`.
 pub fn export_canvas(canvas: Canvas, mut config: ExportConfig) -> Result<(), ExportError> {
     config.audio_tracks.extend(canvas.audio_tracks.clone());
-    if config.headless {
+    if config.headless && !canvas.has_native_3d_content() {
         export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
     } else {
         export_scene(config, move |world| replay_canvas_into(world, canvas))

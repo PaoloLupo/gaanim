@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::Shape;
 use gaanim_core::peniko::Color;
-use gaanim_objects::prelude::SvgLoadError;
+use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
@@ -85,6 +85,12 @@ pub enum AssetPreloadError {
         path: PathBuf,
         #[source]
         source: SvgLoadError,
+    },
+    #[error("could not preload glTF '{path}': {source}")]
+    Gltf {
+        path: PathBuf,
+        #[source]
+        source: GltfLoadError,
     },
 }
 
@@ -169,6 +175,26 @@ impl Canvas {
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
+    }
+
+    /// Whether replay requires Bevy's native 3D render graph.
+    pub fn has_native_3d_content(&self) -> bool {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .segments
+            .iter()
+            .flat_map(|segment| segment.ops.iter())
+            .any(|op| {
+                matches!(
+                    op,
+                    Op::Spawn(spec)
+                        if matches!(
+                            spec.lock().expect("object spec poisoned").kind,
+                            SpawnKind::GltfModel { .. }
+                        )
+                )
+            })
     }
 
     pub fn background(mut self, c: Color) -> Self {
@@ -326,12 +352,22 @@ impl Canvas {
     pub fn preload(&self, paths: &[PathBuf]) -> Result<(), AssetPreloadError> {
         for path in paths {
             let resolved = self.resolve_asset_path(path);
-            if resolved
+            let extension = resolved
                 .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
-            {
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default();
+            if extension.eq_ignore_ascii_case("svg") {
                 gaanim_objects::prelude::SvgDocument::load(&resolved).map_err(|source| {
                     AssetPreloadError::Svg {
+                        path: resolved.clone(),
+                        source,
+                    }
+                })?;
+            } else if extension.eq_ignore_ascii_case("gltf")
+                || extension.eq_ignore_ascii_case("glb")
+            {
+                GltfDocument::load(&resolved, &GltfSceneSelector::Default).map_err(|source| {
+                    AssetPreloadError::Gltf {
                         path: resolved.clone(),
                         source,
                     }
@@ -352,6 +388,7 @@ impl Canvas {
         if let Some(cache) = IMAGE_CACHE.get() {
             cache.lock().expect("image cache poisoned").clear();
         }
+        gaanim_objects::prelude::clear_gltf_cache();
     }
 
     fn safe_frame(&self) -> gaanim_math::Bounds3D {
@@ -1139,6 +1176,71 @@ impl Canvas {
             parts.insert(document.root.id.clone(), root.clone());
         }
         Ok(root.with_svg_parts(parts))
+    }
+
+    /// Import the default scene of a local glTF 2.0 `.gltf` or `.glb` model.
+    pub fn gltf(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, GltfLoadError> {
+        self.gltf_scene(path, GltfSceneSelector::Default)
+    }
+
+    /// Import a selected glTF scene by name or index.
+    pub fn gltf_scene(
+        &mut self,
+        path: impl AsRef<Path>,
+        selector: GltfSceneSelector,
+    ) -> Result<DrawableHandle, GltfLoadError> {
+        let document = GltfDocument::load(self.resolve_asset_path(path), &selector)?;
+        let mut handles = HashMap::<usize, DrawableHandle>::new();
+        for node in &document.nodes {
+            let handle = self.spawn_registered(
+                SpawnKind::GltfNode {
+                    node_index: node.index,
+                    path: node.path.clone(),
+                    bounds: node.bounds,
+                },
+                false,
+            );
+            handles.insert(node.index, handle);
+        }
+
+        let bindings = document
+            .nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.index,
+                    node.parent,
+                    node.path.clone(),
+                    handles[&node.index].id,
+                )
+            })
+            .collect();
+        let animation_names = document
+            .animations
+            .iter()
+            .map(|animation| animation.name.clone())
+            .collect::<Vec<_>>();
+        let root = self.spawn(SpawnKind::GltfModel {
+            path: document.path,
+            scene_index: document.scene_index,
+            bounds: document.bounds,
+            nodes: bindings,
+            animation_names: animation_names.clone(),
+        });
+
+        let mut parts = HashMap::new();
+        let mut short_counts = HashMap::<String, usize>::new();
+        for node in &document.nodes {
+            *short_counts.entry(node.name.clone()).or_default() += 1;
+        }
+        for node in &document.nodes {
+            let handle = handles[&node.index].clone();
+            parts.insert(node.path.clone(), handle.clone());
+            if short_counts.get(&node.name) == Some(&1) {
+                parts.insert(node.name.clone(), handle);
+            }
+        }
+        Ok(root.with_gltf_metadata(parts, document.animations))
     }
 
     fn spawn_svg_group(

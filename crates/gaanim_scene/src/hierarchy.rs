@@ -69,8 +69,23 @@ impl Plugin for GaanimScenePlugin {
         app.add_systems(
             Update,
             (
+                crate::systems::request_gltf_assets_system,
+                crate::systems::ensure_gltf_default_light_system,
+                crate::systems::attach_gltf_scenes_system,
+                crate::systems::finalize_gltf_instances_system,
+            )
+                .chain()
+                .run_if(resource_exists::<AssetServer>)
+                .in_set(SceneSet::Input),
+        );
+        app.add_systems(
+            Update,
+            (
                 crate::systems::billboard_system,
                 crate::systems::sync_3d_mesh_transform_system,
+                crate::systems::sync_gltf_wrapper_transform_system,
+                crate::systems::sync_gltf_visibility_system,
+                crate::systems::sync_gltf_material_opacity_system,
             )
                 .in_set(SceneSet::Propagation)
                 .after(crate::systems::transform_propagation_system),

@@ -18,7 +18,7 @@ use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
 use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
 use gaanim_timeline::{
-    clip::{AnimationSpec, ClipPayload, PropertyLensSpec, SceneId, TrackId},
+    clip::{AnimationSpec, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, TrackId},
     scene::SceneMember,
     timeline::Timeline,
     transition::TransitionType,
@@ -696,12 +696,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
+            AnimationType::GltfAnimation { .. } => "Action",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
             AnimationType::Unwrite { .. } => "Unwrite",
             AnimationType::Uncreate { .. } => "Uncreate",
             AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
-            AnimationType::RotateTo { .. } | AnimationType::RotateBy { .. } => "Rotate",
+            AnimationType::RotateTo { .. }
+            | AnimationType::RotateBy { .. }
+            | AnimationType::RotateBy3D { .. } => "Rotate",
             AnimationType::ScaleTo { .. } | AnimationType::ScaleUniform { .. } => "Scale",
             AnimationType::FadeTo { .. }
             | AnimationType::FadeIn
@@ -943,6 +946,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
         let track = self.ensure_track(anim.target);
 
+        if let AnimationType::GltfAnimation {
+            animation_index,
+            source_duration,
+            speed,
+            looped,
+            reverse,
+            transition,
+            start_time,
+        } = &anim.anim_type
+        {
+            self.timeline.add_clip(
+                track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::GltfAnimation(GltfAnimationSpec {
+                    target: anim.target,
+                    animation_index: *animation_index,
+                    source_duration: *source_duration,
+                    speed: *speed,
+                    looped: *looped,
+                    reverse: *reverse,
+                    transition: *transition,
+                    start_time: *start_time,
+                }),
+            );
+            return;
+        }
+
         // The Write/Create/Uncreate/Unwrite/SpinIn/Indicate animations expand into
         // multiple staggered or parallel sub-clips, so they have their own branches
         // that access the timeline multiple times. All other variants collapse to a
@@ -1046,6 +1077,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::RotateBy { .. } => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
+            AnimationType::RotateBy3D { delta } => {
+                let from = state.transform.rotation;
+                let to = (from * delta).normalize();
+                state.transform.rotation = to;
+                PropertyLensSpec::Rotation { from, to }
+            }
             AnimationType::ScaleTo { to } => {
                 let from = state.transform.scale;
                 state.transform.scale = to;
@@ -1114,7 +1151,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.transform.scale = to;
                 PropertyLensSpec::Scale { from, to }
             }
-            AnimationType::Write { .. }
+            AnimationType::GltfAnimation { .. }
+            | AnimationType::Write { .. }
             | AnimationType::Create { .. }
             | AnimationType::Unwrite { .. }
             | AnimationType::Uncreate { .. }

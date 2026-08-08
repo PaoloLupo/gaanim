@@ -1,9 +1,12 @@
+use bevy::animation::AnimationPlayer;
 use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Resource, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
 use std::collections::{BTreeMap, HashMap};
 
-use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
+use crate::clip::{
+    Clip, ClipId, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, Track, TrackId,
+};
 use crate::scene::{SceneMember, SceneMetadata};
 use crate::snapshot::WorldSnapshot;
 use crate::transition::{SceneConnection, TransitionType};
@@ -16,6 +19,57 @@ struct ReactiveEntityState {
     updater_stop_at: Option<f64>,
     traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     translation: Option<gaanim_core::glam::DVec3>,
+}
+
+#[cfg(test)]
+mod gltf_action_tests {
+    use super::*;
+
+    #[test]
+    fn sampling_supports_loop_reverse_and_resume_offsets() {
+        let base = GltfAnimationSpec {
+            target: gaanim_core::ObjectId::from_parts(1, 1),
+            animation_index: 0,
+            source_duration: 2.0,
+            speed: 2.0,
+            looped: false,
+            reverse: false,
+            transition: 0.0,
+            start_time: 0.5,
+        };
+        assert_eq!(sample_gltf_action(&base, 0.25), 1.0);
+        assert_eq!(sample_gltf_action(&base, 10.0), 2.0);
+
+        let looped = GltfAnimationSpec {
+            looped: true,
+            ..base.clone()
+        };
+        assert!((sample_gltf_action(&looped, 1.25) - 1.0).abs() < 1e-9);
+
+        let reversed = GltfAnimationSpec {
+            reverse: true,
+            ..base
+        };
+        assert_eq!(sample_gltf_action(&reversed, 0.25), 1.0);
+        assert_eq!(sample_gltf_action(&reversed, 10.0), 0.0);
+    }
+}
+
+fn sample_gltf_action(spec: &GltfAnimationSpec, elapsed: f64) -> f64 {
+    if spec.source_duration <= f64::EPSILON {
+        return 0.0;
+    }
+    let authored = spec.start_time + elapsed * spec.speed;
+    let sampled = if spec.looped {
+        authored.rem_euclid(spec.source_duration)
+    } else {
+        authored.clamp(0.0, spec.source_duration)
+    };
+    if spec.reverse {
+        (spec.source_duration - sampled).clamp(0.0, spec.source_duration)
+    } else {
+        sampled
+    }
 }
 
 /// A named reveal pause inside a presentation slide.
@@ -825,6 +879,10 @@ impl Timeline {
             }
         }
 
+        // Native glTF players are never advanced by wall-clock time. Sample
+        // every Action directly from this absolute playhead after snapshot replay.
+        self.evaluate_gltf_animations(world, &entity_map);
+
         // 4. Scene visibility post-pass.
         //    Determine which scene is active and toggle visibility on SceneMember entities.
         if !self.scenes.is_empty() {
@@ -879,6 +937,79 @@ impl Timeline {
 
         self.update_presentation_position();
         self.restore_followed_shake_origin(world);
+    }
+
+    fn evaluate_gltf_animations(
+        &self,
+        world: &mut World,
+        entity_map: &HashMap<gaanim_core::ObjectId, Entity>,
+    ) {
+        let mut actions =
+            HashMap::<gaanim_core::ObjectId, Vec<(f64, f64, GltfAnimationSpec)>>::new();
+        for clip in self.clips.values() {
+            if let ClipPayload::GltfAnimation(spec) = &clip.payload {
+                actions.entry(spec.target).or_default().push((
+                    clip.start,
+                    clip.duration,
+                    spec.clone(),
+                ));
+            }
+        }
+
+        for (target, clips) in &mut actions {
+            clips.sort_by(|left, right| left.0.total_cmp(&right.0));
+            let Some(&root) = entity_map.get(target) else {
+                continue;
+            };
+            let Some(state) = world.get::<gaanim_scene::GltfAnimationState>(root).cloned() else {
+                continue;
+            };
+            let current_index = clips
+                .iter()
+                .rposition(|(start, _, _)| *start <= self.current_time);
+            for player_entity in &state.players {
+                let Some(mut player) = world.get_mut::<AnimationPlayer>(*player_entity) else {
+                    continue;
+                };
+                for node in &state.nodes {
+                    player.play(*node).pause().set_weight(0.0);
+                }
+                let Some(index) = current_index else { continue };
+                let (start, duration, current) = &clips[index];
+                let Some(&node) = state.nodes.get(current.animation_index) else {
+                    continue;
+                };
+                let elapsed = (self.current_time - *start).clamp(0.0, *duration);
+                let sample = sample_gltf_action(current, elapsed);
+                let transition = current.transition.min(*duration).max(0.0);
+                let blend = if index > 0 && transition > 0.0 {
+                    (elapsed / transition).clamp(0.0, 1.0) as f32
+                } else {
+                    1.0
+                };
+                player
+                    .play(node)
+                    .pause()
+                    .set_seek_time(sample as f32)
+                    .set_weight(blend);
+
+                if blend < 1.0 {
+                    let (previous_start, previous_duration, previous) = &clips[index - 1];
+                    if previous.animation_index != current.animation_index
+                        && let Some(&previous_node) = state.nodes.get(previous.animation_index)
+                    {
+                        let previous_elapsed =
+                            (self.current_time - *previous_start).clamp(0.0, *previous_duration);
+                        let previous_sample = sample_gltf_action(previous, previous_elapsed);
+                        player
+                            .play(previous_node)
+                            .pause()
+                            .set_seek_time(previous_sample as f32)
+                            .set_weight(1.0 - blend);
+                    }
+                }
+            }
+        }
     }
 
     /// A shake immediately after a follow must be based on the target's position

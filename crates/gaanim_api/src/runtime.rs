@@ -69,6 +69,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
                 VelloView,
                 bevy::prelude::Camera {
                     order: 1,
+                    clear_color: ClearColorConfig::None,
                     ..default()
                 },
                 bevy::core_pipeline::tonemapping::Tonemapping::None,

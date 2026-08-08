@@ -1,4 +1,5 @@
 use bevy::app::AppExit;
+use bevy::camera::Viewport;
 use bevy::ecs::observer::On;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
@@ -7,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::time::Instant;
 
+use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::ExportConfig;
@@ -64,12 +66,29 @@ struct ExportPipeline {
 #[derive(Resource)]
 struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
 
+#[derive(Resource, Clone, Copy)]
+struct WindowRenderSize {
+    width: u32,
+    height: u32,
+}
+
 fn export_pipeline_system(
     mut commands: Commands,
     mut pipeline_res: ResMut<ExportPipeline>,
     mut timeline: ResMut<Timeline>,
     mut exit: MessageWriter<'_, AppExit>,
+    gltf_models: Query<(), With<gaanim_scene::GltfModelRoot>>,
+    ready_gltf_models: Query<
+        (),
+        (
+            With<gaanim_scene::GltfModelRoot>,
+            With<gaanim_scene::GltfModelReady>,
+        ),
+    >,
 ) {
+    if gltf_models.iter().count() != ready_gltf_models.iter().count() {
+        return;
+    }
     let pipeline = &mut *pipeline_res;
     if pipeline.waiting_for_gpu {
         let rx = pipeline.rx.lock().unwrap();
@@ -190,6 +209,26 @@ fn setup_scene_system(world: &mut World) {
     }
 }
 
+/// Replay a window-backed scene before Vello creates its render target, then
+/// give the Vello camera an explicit physical viewport. This removes the
+/// startup race between WindowPlugin and bevy_vello's render-target setup.
+fn setup_window_scene_system(world: &mut World) {
+    setup_scene_system(world);
+    world.flush();
+
+    let Some(size) = world.get_resource::<WindowRenderSize>().copied() else {
+        return;
+    };
+    let mut cameras = world.query_filtered::<&mut Camera, With<VelloView>>();
+    for mut camera in cameras.iter_mut(world) {
+        camera.viewport = Some(Viewport {
+            physical_position: UVec2::ZERO,
+            physical_size: UVec2::new(size.width, size.height),
+            depth: 0.0..1.0,
+        });
+    }
+}
+
 fn filter_for_quality(speed: crate::encoder::EncodingSpeed) -> image::imageops::FilterType {
     match speed {
         crate::encoder::EncodingSpeed::Fast => image::imageops::FilterType::Nearest,
@@ -222,23 +261,35 @@ where
 
     let mut app = App::new();
 
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            visible: true,
-            title: "Gaanim Render Engine — Export Viewport".to_string(),
-            resolution: (config.width, config.height).into(),
-            resizable: false,
-            resize_constraints: bevy::window::WindowResizeConstraints {
-                min_width: config.width as f32,
-                min_height: config.height as f32,
-                max_width: config.width as f32,
-                max_height: config.height as f32,
-            },
-            ..default()
-        }),
-        exit_condition: bevy::window::ExitCondition::DontExit,
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    visible: true,
+                    position: if config.headless {
+                        bevy::window::WindowPosition::At(bevy::prelude::IVec2::new(
+                            -32_000, -32_000,
+                        ))
+                    } else {
+                        bevy::window::WindowPosition::Automatic
+                    },
+                    decorations: !config.headless,
+                    title: "Gaanim Render Engine — Export Viewport".to_string(),
+                    resolution: (config.width, config.height).into(),
+                    resizable: false,
+                    resize_constraints: bevy::window::WindowResizeConstraints {
+                        min_width: config.width as f32,
+                        min_height: config.height as f32,
+                        max_width: config.width as f32,
+                        max_height: config.height as f32,
+                    },
+                    ..default()
+                }),
+                exit_condition: bevy::window::ExitCondition::DontExit,
+                ..default()
+            })
+            .set(gaanim_scene::gaanim_asset_plugin()),
+    )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
     .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
@@ -246,7 +297,11 @@ where
     .add_plugins(gaanim_renderer::GaanimRendererPlugin);
 
     app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
-    app.add_systems(Startup, setup_scene_system);
+    app.insert_resource(WindowRenderSize {
+        width: config.width,
+        height: config.height,
+    });
+    app.add_systems(PreStartup, setup_window_scene_system);
 
     app.finish();
     app.cleanup();
@@ -566,4 +621,259 @@ where
     }
 
     Ok(frames)
+}
+
+#[derive(Resource)]
+struct HybridCapturePipeline {
+    times: Vec<f64>,
+    index: usize,
+    phase: u8,
+    frames: Vec<CapturedFrame>,
+    tx: SyncSender<Vec<u8>>,
+    rx: Mutex<Receiver<Vec<u8>>>,
+    width: u32,
+    height: u32,
+    result_tx: SyncSender<Vec<CapturedFrame>>,
+    result_sent: bool,
+}
+
+fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
+    if pipeline.result_sent {
+        return;
+    }
+    let frames = core::mem::take(&mut pipeline.frames);
+    let _ = pipeline.result_tx.send(frames);
+    pipeline.result_sent = true;
+}
+
+fn hybrid_capture_system(
+    mut commands: Commands,
+    mut pipeline: ResMut<HybridCapturePipeline>,
+    mut timeline: ResMut<Timeline>,
+    mut exit: MessageWriter<'_, AppExit>,
+    gltf_models: Query<(), With<gaanim_scene::GltfModelRoot>>,
+    ready_gltf_models: Query<
+        (),
+        (
+            With<gaanim_scene::GltfModelRoot>,
+            With<gaanim_scene::GltfModelReady>,
+        ),
+    >,
+) {
+    if gltf_models.iter().count() != ready_gltf_models.iter().count() {
+        return;
+    }
+    if pipeline.index >= pipeline.times.len() {
+        publish_hybrid_capture_result(&mut pipeline);
+        exit.write(AppExit::Success);
+        return;
+    }
+    match pipeline.phase {
+        0 => {
+            timeline.seek_request = Some(pipeline.times[pipeline.index]);
+            pipeline.phase = 1;
+        }
+        1 => {
+            let tx = pipeline.tx.clone();
+            let width = pipeline.width;
+            let height = pipeline.height;
+            commands.spawn(Screenshot::primary_window()).observe(
+                move |mut trigger: On<ScreenshotCaptured>| {
+                    let format = trigger.event().image.texture_descriptor.format;
+                    let size = trigger.event().image.texture_descriptor.size;
+                    let Some(mut data) = core::mem::take(&mut trigger.event_mut().image.data)
+                    else {
+                        return;
+                    };
+                    if matches!(
+                        format,
+                        bevy::render::render_resource::TextureFormat::Bgra8Unorm
+                            | bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb
+                    ) {
+                        for pixel in data.chunks_exact_mut(4) {
+                            pixel.swap(0, 2);
+                        }
+                    }
+                    if size.width != width || size.height != height {
+                        let image = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
+                            size.width,
+                            size.height,
+                            data,
+                        )
+                        .expect("Bevy screenshot buffer size mismatch");
+                        data = image::imageops::resize(
+                            &image,
+                            width,
+                            height,
+                            image::imageops::FilterType::CatmullRom,
+                        )
+                        .into_raw();
+                    }
+                    let _ = tx.send(data);
+                },
+            );
+            pipeline.phase = 2;
+        }
+        _ => {
+            let received = pipeline.rx.lock().unwrap().try_recv();
+            match received {
+                Ok(rgba) => {
+                    let time = pipeline.times[pipeline.index];
+                    let width = pipeline.width;
+                    let height = pipeline.height;
+                    pipeline.frames.push(CapturedFrame {
+                        time,
+                        width,
+                        height,
+                        rgba,
+                    });
+                    pipeline.index += 1;
+                    pipeline.phase = 0;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    exit.write(AppExit::Success);
+                }
+            }
+        }
+    }
+}
+
+/// Capture exact seeks through Bevy's shared PBR + Vello camera stack.
+/// Used for scenes containing native 3D assets; the window stays hidden.
+pub fn capture_scene_hybrid<F>(
+    config: ExportConfig,
+    times: &[f64],
+    setup_world_fn: F,
+) -> Result<Vec<CapturedFrame>>
+where
+    F: FnOnce(&mut World) + Send + Sync + 'static,
+{
+    if times.is_empty() {
+        return Err(ExportError::Capture(
+            "at least one snapshot timestamp is required".to_string(),
+        ));
+    }
+    let (tx, rx) = sync_channel(1);
+    let (result_tx, result_rx) = sync_channel(1);
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    // Winit does not render fully hidden windows on every platform.
+                    // Keep the swapchain alive outside the visible desktop instead.
+                    visible: true,
+                    position: bevy::window::WindowPosition::At(bevy::prelude::IVec2::new(
+                        -32_000, -32_000,
+                    )),
+                    decorations: false,
+                    resolution: (config.width, config.height).into(),
+                    resizable: false,
+                    ..default()
+                }),
+                exit_condition: bevy::window::ExitCondition::DontExit,
+                ..default()
+            })
+            .set(gaanim_scene::gaanim_asset_plugin()),
+    )
+    .add_plugins(gaanim_scene::GaanimScenePlugin)
+    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+    .add_plugins(gaanim_text::GaanimTextPlugin)
+    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
+    .insert_resource(SetupCallback(Some(Box::new(setup_world_fn))))
+    .insert_resource(WindowRenderSize {
+        width: config.width,
+        height: config.height,
+    })
+    .insert_resource(HybridCapturePipeline {
+        times: times.to_vec(),
+        index: 0,
+        phase: 0,
+        frames: Vec::with_capacity(times.len()),
+        tx,
+        rx: Mutex::new(rx),
+        width: config.width,
+        height: config.height,
+        result_tx,
+        result_sent: false,
+    })
+    .add_systems(PreStartup, setup_window_scene_system)
+    .add_systems(
+        Update,
+        hybrid_capture_system.after(gaanim_scene::SceneSet::Extraction),
+    );
+
+    app.run();
+    let frames = result_rx.recv().map_err(|_| {
+        ExportError::Capture("hybrid capture exited before returning its frames".to_string())
+    })?;
+    if frames.len() != times.len() {
+        return Err(ExportError::Capture(format!(
+            "captured {} of {} requested hybrid frames",
+            frames.len(),
+            times.len()
+        )));
+    }
+    Ok(frames)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_scene_setup_assigns_vello_viewport_before_startup() {
+        let mut app = App::new();
+        app.insert_resource(SetupCallback(Some(Box::new(|world| {
+            world.spawn((Camera2d, Camera::default(), VelloView));
+        }))));
+        app.insert_resource(WindowRenderSize {
+            width: 640,
+            height: 360,
+        });
+
+        setup_window_scene_system(app.world_mut());
+
+        let mut query = app.world_mut().query_filtered::<&Camera, With<VelloView>>();
+        let viewport = query
+            .single(app.world())
+            .expect("Vello camera")
+            .viewport
+            .as_ref()
+            .expect("explicit viewport");
+        assert_eq!(viewport.physical_position, UVec2::ZERO);
+        assert_eq!(viewport.physical_size, UVec2::new(640, 360));
+    }
+
+    #[test]
+    fn hybrid_result_survives_world_cleanup() {
+        let (frame_tx, frame_rx) = sync_channel(1);
+        let (result_tx, result_rx) = sync_channel(1);
+        let mut pipeline = HybridCapturePipeline {
+            times: vec![0.25],
+            index: 1,
+            phase: 0,
+            frames: vec![CapturedFrame {
+                time: 0.25,
+                width: 1,
+                height: 1,
+                rgba: vec![1, 2, 3, 4],
+            }],
+            tx: frame_tx,
+            rx: Mutex::new(frame_rx),
+            width: 1,
+            height: 1,
+            result_tx,
+            result_sent: false,
+        };
+
+        publish_hybrid_capture_result(&mut pipeline);
+        drop(pipeline);
+
+        let frames = result_rx.recv().expect("external capture result");
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].rgba, vec![1, 2, 3, 4]);
+    }
 }

@@ -544,7 +544,22 @@ class Updater:
 
 class Drawable:
     def part(self, id: str) -> Drawable:
-        """Return a named source group or path from an imported SVG."""
+        """Return a named SVG part or glTF node by unique name/canonical path."""
+        ...
+    def parts(self) -> tuple[str, ...]: ...
+    def animations(self) -> tuple[str, ...]: ...
+    def animation(
+        self,
+        name: str,
+        *,
+        duration: Optional[float] = None,
+        speed: float = 1.0,
+        loop: bool = False,
+        reverse: bool = False,
+        transition: float = 0.0,
+        start_time: float = 0.0,
+    ) -> Anim:
+        """Sample a Blender Action deterministically on the scene timeline."""
         ...
     def fill(self, paint: Paint) -> Drawable:
         """Apply fill to this drawable and return the result.
@@ -713,6 +728,7 @@ class Drawable:
             result = drawable.scaled(1.0)
         """
         ...
+    def scaled_3d(self, x: float, y: float, z: float) -> Drawable: ...
     def rotated(self, radians: float) -> Drawable:
         """Apply rotated to this drawable and return the result.
 
@@ -720,6 +736,7 @@ class Drawable:
             result = drawable.rotated(1.0)
         """
         ...
+    def rotated_3d(self, x: float, y: float, z: float) -> Drawable: ...
     def with_pivot(self, x: float, y: float) -> Drawable:
         """Apply with pivot to this drawable and return the result.
 
@@ -727,6 +744,7 @@ class Drawable:
             result = drawable.with_pivot(1.0, 1.0)
         """
         ...
+    def with_pivot_3d(self, x: float, y: float, z: float) -> Drawable: ...
     def pivot(self, x: float, y: float) -> Drawable:
         """Apply pivot to this drawable and return the result.
 
@@ -808,6 +826,8 @@ class Drawable:
             result = drawable.move_to(1.0, 1.0)
         """
         ...
+    def move_3d(self, dx: float, dy: float, dz: float) -> Anim: ...
+    def move_to_3d(self, x: float, y: float, z: float) -> Anim: ...
     def glide_to(self, x: float, y: float) -> Anim:
         """Create a glide to animation for this drawable.
 
@@ -822,6 +842,7 @@ class Drawable:
             result = drawable.scale(1.0)
         """
         ...
+    def scale_to_3d(self, x: float, y: float, z: float) -> Anim: ...
     def rotate(self, rad: float) -> Anim:
         """Create a rotate animation for this drawable.
 
@@ -829,6 +850,8 @@ class Drawable:
             result = drawable.rotate(1.0)
         """
         ...
+    def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Anim: ...
+    def rotate_to_3d(self, x: float, y: float, z: float) -> Anim: ...
     def fade_in(self, duration: Optional[float] = None) -> Anim:
         """Create a fade in animation for this drawable.
 
@@ -2046,6 +2069,9 @@ class Scene:
         Example:
             result = scene.svg("assets/example.svg")
         """
+        ...
+    def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
+        """Import a local glTF 2.0 ``.gltf`` or ``.glb`` model."""
         ...
     def camera_pan_to(self, x: float, y: float, duration: float = 1.0) -> None:
         """Configure or query the scene with camera pan to.

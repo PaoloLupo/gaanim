@@ -63,6 +63,8 @@ impl Clip {
 pub enum ClipPayload {
     /// An animation that runs programmatically on one or more Mobjects.
     Animation(AnimationSpec),
+    /// Deterministically sampled Blender Action on a native glTF instance.
+    GltfAnimation(GltfAnimationSpec),
     /// A wait period (empty space in timeline, but blocks cursor flow).
     Wait,
     /// An audio source synchronized at a specific start offset.
@@ -120,6 +122,20 @@ pub enum ClipPayload {
         /// The transition effect to apply.
         transition_type: crate::transition::TransitionType,
     },
+}
+
+/// Timeline-owned sampling parameters for one glTF Action.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GltfAnimationSpec {
+    pub target: ObjectId,
+    pub animation_index: usize,
+    pub source_duration: f64,
+    pub speed: f64,
+    pub looped: bool,
+    pub reverse: bool,
+    pub transition: f64,
+    pub start_time: f64,
 }
 
 /// Specification of a property tween animation suitable for storage and serialization.

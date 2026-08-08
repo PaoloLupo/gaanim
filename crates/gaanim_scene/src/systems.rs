@@ -2,10 +2,18 @@ use crate::components::{
     FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, Opacity,
     StrokeBrush, TriangleMeshData, WorldBounds,
 };
+use bevy::animation::AnimationPlayer;
+use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
+use bevy::color::Alpha;
 use bevy::prelude::{
-    Added, Changed, ChildOf, Children, Entity, Local, Or, ParamSet, Query, ResMut, With, Without,
+    Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
+    DirectionalLight, Entity, Handle, Local, MeshMaterial3d, Name, Or, ParamSet, PointLight, Query,
+    Res, ResMut, SceneRoot, SceneSpawner, SpotLight, StandardMaterial, Transform, Visibility, With,
+    Without,
 };
+use bevy::scene::SceneInstance;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
+use std::collections::HashSet;
 
 /// Run condition: skip transform propagation when no local transform has changed.
 ///
@@ -325,6 +333,275 @@ pub fn sync_3d_mesh_transform_system(
         transform.rotation =
             bevy::prelude::Quat::from_xyzw(rot.x as f32, rot.y as f32, rot.z as f32, rot.w as f32);
         transform.scale = bevy::prelude::Vec3::new(scale.x as f32, scale.y as f32, scale.z as f32);
+    }
+}
+
+/// Request native Bevy assets for newly compiled glTF model roots.
+pub fn request_gltf_assets_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    query: Query<
+        (Entity, &crate::components::GltfModelRoot),
+        Added<crate::components::GltfModelRoot>,
+    >,
+) {
+    for (entity, model) in &query {
+        let handle: Handle<bevy::gltf::Gltf> = asset_server.load_override(model.path.clone());
+        commands
+            .entity(entity)
+            .insert(crate::components::GltfAssetHandle(handle));
+    }
+}
+
+pub fn ensure_gltf_default_light_system(
+    mut commands: Commands,
+    models: Query<(), With<crate::components::GltfModelRoot>>,
+    lights: Query<(), With<crate::components::GaanimDefault3dLight>>,
+) {
+    if !models.is_empty() && lights.is_empty() {
+        commands.spawn((
+            crate::components::GaanimDefault3dLight,
+            DirectionalLight {
+                illuminance: 10_000.0,
+                shadows_enabled: true,
+                ..Default::default()
+            },
+            Transform::from_xyz(4.0, 8.0, 4.0)
+                .looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
+        ));
+    }
+}
+
+/// Attach the selected scene once Bevy has decoded the glTF container.
+pub fn attach_gltf_scenes_system(
+    mut commands: Commands,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    query: Query<
+        (
+            Entity,
+            &crate::components::GltfModelRoot,
+            &crate::components::GltfAssetHandle,
+        ),
+        Without<SceneRoot>,
+    >,
+) {
+    for (entity, model, source) in &query {
+        let Some(gltf) = gltfs.get(&source.0) else {
+            continue;
+        };
+        if let Some(scene) = gltf.scenes.get(model.scene_index) {
+            commands.entity(entity).insert(SceneRoot(scene.clone()));
+        }
+    }
+}
+
+/// Link stable Gaanim wrappers to native glTF nodes and prepare deterministic
+/// paused animation players. Imported lights and cameras are deliberately removed.
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_gltf_instances_system(
+    mut commands: Commands,
+    spawner: Res<SceneSpawner>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    roots: Query<
+        (
+            Entity,
+            &crate::components::GltfModelRoot,
+            &crate::components::GltfAssetHandle,
+            &SceneInstance,
+        ),
+        Without<crate::components::GltfModelReady>,
+    >,
+    names: Query<&Name>,
+    parents: Query<&ChildOf>,
+    mut animation_players: Query<&mut AnimationPlayer>,
+    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+) {
+    for (root_entity, model, source, instance) in &roots {
+        if !spawner.instance_is_ready(**instance) {
+            continue;
+        }
+        let Some(gltf) = gltfs.get(&source.0) else {
+            continue;
+        };
+        let mut entities = spawner
+            .iter_instance_entities(**instance)
+            .collect::<Vec<_>>();
+        entities.sort_by_key(|entity| entity.to_bits());
+        let instance_entities = entities.iter().copied().collect::<HashSet<_>>();
+
+        let mut by_path = std::collections::HashMap::<String, Vec<Entity>>::new();
+        for entity in entities.iter().copied() {
+            if let Some(path) =
+                gltf_instance_path(entity, root_entity, &instance_entities, &names, &parents)
+            {
+                by_path.entry(path).or_default().push(entity);
+            }
+        }
+        for candidates in by_path.values_mut() {
+            candidates.sort_by_key(|entity| entity.to_bits());
+        }
+
+        let mut used = HashSet::<Entity>::new();
+        for binding in &model.nodes {
+            let path = binding
+                .path
+                .rsplit_once('#')
+                .map_or(binding.path.as_str(), |(base, _)| base);
+            let Some(native) = by_path
+                .get(path)
+                .and_then(|items| items.iter().copied().find(|entity| used.insert(*entity)))
+            else {
+                continue;
+            };
+            let original_parent = parents
+                .get(native)
+                .ok()
+                .map(ChildOf::parent)
+                .unwrap_or(root_entity);
+            commands
+                .entity(binding.wrapper)
+                .insert(ChildOf(original_parent));
+            commands.entity(native).insert(ChildOf(binding.wrapper));
+        }
+
+        let (graph, graph_nodes) = AnimationGraph::from_clips(gltf.animations.iter().cloned());
+        let graph_handle = graphs.add(graph);
+        let mut players = Vec::new();
+        for entity in entities.iter().copied() {
+            if let Ok(mut player) = animation_players.get_mut(entity) {
+                for node in &graph_nodes {
+                    player
+                        .start(*node)
+                        .pause()
+                        .set_weight(0.0)
+                        .set_seek_time(0.0);
+                }
+                commands
+                    .entity(entity)
+                    .insert(AnimationGraphHandle(graph_handle.clone()));
+                players.push(entity);
+            }
+
+            commands.entity(entity).remove::<Camera>();
+            commands.entity(entity).remove::<Camera3d>();
+            commands.entity(entity).remove::<DirectionalLight>();
+            commands.entity(entity).remove::<PointLight>();
+            commands.entity(entity).remove::<SpotLight>();
+
+            if let Ok(material_handle) = mesh_materials.get(entity)
+                && let Some(source_material) = materials.get(&material_handle.0).cloned()
+            {
+                let alpha = source_material.base_color.alpha();
+                let clone_handle = materials.add(source_material);
+                commands.entity(entity).insert((
+                    MeshMaterial3d(clone_handle),
+                    Opacity::default(),
+                    GlobalOpacity::default(),
+                    crate::components::GltfMaterialBaseline { alpha },
+                ));
+            }
+        }
+        commands.entity(root_entity).insert((
+            crate::components::GltfAnimationState {
+                graph: graph_handle,
+                nodes: graph_nodes,
+                players,
+            },
+            crate::components::GltfModelReady,
+        ));
+    }
+}
+
+fn gltf_instance_path(
+    mut entity: Entity,
+    root: Entity,
+    instance_entities: &HashSet<Entity>,
+    names: &Query<&Name>,
+    parents: &Query<&ChildOf>,
+) -> Option<String> {
+    let mut segments = Vec::new();
+    while entity != root && instance_entities.contains(&entity) {
+        let name = names.get(entity).ok()?;
+        segments.push(name.as_str().to_owned());
+        entity = parents.get(entity).ok()?.parent();
+    }
+    segments.reverse();
+    (!segments.is_empty()).then(|| segments.join("/"))
+}
+
+/// Manual Gaanim transforms are local to wrappers and therefore compose with
+/// the authored Bevy transform retained on each native glTF node.
+pub fn sync_gltf_wrapper_transform_system(
+    mut query: Query<
+        (&SpatialTransform, &mut Transform),
+        Or<(
+            With<crate::components::GltfNodeWrapper>,
+            With<crate::components::GltfModelRoot>,
+        )>,
+    >,
+) {
+    for (local, mut transform) in &mut query {
+        transform.translation = bevy::prelude::Vec3::new(
+            local.translation.x as f32,
+            local.translation.y as f32,
+            local.translation.z as f32,
+        );
+        transform.rotation = bevy::prelude::Quat::from_xyzw(
+            local.rotation.x as f32,
+            local.rotation.y as f32,
+            local.rotation.z as f32,
+            local.rotation.w as f32,
+        );
+        transform.scale = bevy::prelude::Vec3::new(
+            local.scale.x as f32,
+            local.scale.y as f32,
+            local.scale.z as f32,
+        );
+    }
+}
+
+/// Apply propagated wrapper opacity to per-instance cloned PBR materials.
+pub fn sync_gltf_material_opacity_system(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<
+        (
+            &GlobalOpacity,
+            &crate::components::GltfMaterialBaseline,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
+        Changed<GlobalOpacity>,
+    >,
+) {
+    for (opacity, baseline, handle) in &query {
+        if let Some(material) = materials.get_mut(&handle.0) {
+            material
+                .base_color
+                .set_alpha((baseline.alpha * opacity.0).clamp(0.0, 1.0));
+            if opacity.0 < 0.999 {
+                material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+            }
+        }
+    }
+}
+
+/// Mirror Gaanim's marker visibility onto Bevy hierarchy visibility.
+pub fn sync_gltf_visibility_system(
+    mut query: Query<
+        (Option<&crate::components::Visible>, &mut Visibility),
+        Or<(
+            With<crate::components::GltfNodeWrapper>,
+            With<crate::components::GltfModelRoot>,
+        )>,
+    >,
+) {
+    for (visible, mut bevy_visibility) in &mut query {
+        *bevy_visibility = if visible.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 

@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
@@ -153,20 +154,52 @@ impl PyFragmentSelection {
 
 #[pymethods]
 impl PyDrawable {
-    /// Return a named source group or path from an imported SVG.
+    /// Return a named source group or path from an imported SVG or glTF.
     fn part(&self, id: &str) -> PyResult<Self> {
         if id.is_empty() {
-            return Err(PyKeyError::new_err("SVG part id must not be empty"));
+            return Err(PyKeyError::new_err("part selector must not be empty"));
         }
         match self.0.part(id) {
             Ok(part) => Ok(Self(part)),
             Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
-                "this drawable has no named SVG parts",
+                "this drawable has no named SVG or glTF parts",
             )),
             Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
                 Err(PyKeyError::new_err(error.to_string()))
             }
         }
+    }
+
+    fn parts(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+        Ok(PyTuple::new(py, self.0.parts())?.unbind())
+    }
+
+    fn animations(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+        Ok(PyTuple::new(py, self.0.animations())?.unbind())
+    }
+
+    #[pyo3(signature = (name, *, duration=None, speed=1.0, r#loop=false, reverse=false, transition=0.0, start_time=0.0))]
+    fn animation(
+        &self,
+        name: &str,
+        duration: Option<f64>,
+        speed: f64,
+        r#loop: bool,
+        reverse: bool,
+        transition: f64,
+        start_time: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        self.0
+            .animation(
+                name, duration, speed, r#loop, reverse, transition, start_time,
+            )
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(|error| match error {
+                gaanim_api::canvas::GltfAnimationError::Unknown { .. } => {
+                    PyKeyError::new_err(error.to_string())
+                }
+                _ => PyValueError::new_err(error.to_string()),
+            })
     }
 
     fn fill(&self, paint: PyPaint) -> Self {
@@ -338,11 +371,20 @@ impl PyDrawable {
     fn scaled(&self, factor: f64) -> Self {
         Self(self.0.clone().scaled(factor))
     }
+    fn scaled_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self(self.0.clone().scaled_3d(x, y, z))
+    }
     fn rotated(&self, radians: f64) -> Self {
         Self(self.0.clone().rotated(radians))
     }
+    fn rotated_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self(self.0.clone().rotated_3d(x, y, z))
+    }
     fn with_pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().with_pivot(x, y))
+    }
+    fn with_pivot_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self(self.0.clone().with_pivot_3d(x, y, z))
     }
     fn pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().pivot(x, y))
@@ -424,6 +466,16 @@ impl PyDrawable {
             inner: self.0.move_to(x, y),
         }
     }
+    fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.move_3d(dx, dy, dz),
+        }
+    }
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.move_to_3d(x, y, z),
+        }
+    }
     fn glide_to(&self, x: f64, y: f64) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.glide_to(x, y),
@@ -434,9 +486,25 @@ impl PyDrawable {
             inner: self.0.scale(factor),
         }
     }
+    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.scale_to_3d(x, y, z),
+        }
+    }
     fn rotate(&self, rad: f64) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.rotate(rad),
+        }
+    }
+    fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<PyCanvasAnim> {
+        self.0
+            .rotate_by_3d(axis, radians)
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.rotate_to_3d(x, y, z),
         }
     }
     #[pyo3(signature = (duration=None))]

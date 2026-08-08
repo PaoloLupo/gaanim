@@ -1,4 +1,5 @@
 pub mod boolean;
+pub mod gltf;
 pub mod prelude;
 pub mod primitives;
 pub mod svg;

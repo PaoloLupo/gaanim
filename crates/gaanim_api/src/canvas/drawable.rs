@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use gaanim_animation::AxisMask;
 use gaanim_core::ObjectId;
-use gaanim_core::glam::{DVec2, DVec3};
+use gaanim_core::glam::{DQuat, DVec2, DVec3, EulerRot};
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::RateFunc;
+use gaanim_objects::prelude::GltfAnimationMetadata;
 
 use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
 use crate::canvas::ops::{
@@ -32,16 +33,33 @@ pub struct DrawableHandle {
     pub(crate) spec: SharedObjectSpec,
     pub(crate) state: SharedCanvasState,
     pub(crate) segment_idx: usize,
-    svg_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
+    named_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
+    gltf_animations: Option<Arc<Vec<GltfAnimationMetadata>>>,
     style_targets: Arc<Vec<SharedObjectSpec>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SvgPartError {
-    #[error("this drawable has no named SVG parts")]
+    #[error("this drawable has no named SVG or glTF parts")]
     NotSvg,
     #[error("unknown SVG part '{id}'; available ids: {available}")]
     Unknown { id: String, available: String },
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum GltfAnimationError {
+    #[error("this drawable has no glTF Actions")]
+    NotGltf,
+    #[error("unknown glTF Action '{name}'; available Actions: {available}")]
+    Unknown { name: String, available: String },
+    #[error("glTF Action speed must be finite and greater than zero")]
+    InvalidSpeed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid 3D rotation axis '{axis}'; expected x, y, or z")]
+pub struct RotationAxisError {
+    pub axis: String,
 }
 
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
@@ -92,7 +110,8 @@ impl DrawableHandle {
             spec: std::sync::Arc::new(std::sync::Mutex::new(ObjectSpec::new(id, kind))),
             state,
             segment_idx,
-            svg_parts: None,
+            named_parts: None,
+            gltf_animations: None,
             style_targets: Arc::new(Vec::new()),
         }
     }
@@ -116,7 +135,17 @@ impl DrawableHandle {
     }
 
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
-        self.svg_parts = Some(Arc::new(parts));
+        self.named_parts = Some(Arc::new(parts));
+        self
+    }
+
+    pub(crate) fn with_gltf_metadata(
+        mut self,
+        parts: HashMap<String, DrawableHandle>,
+        animations: Vec<GltfAnimationMetadata>,
+    ) -> Self {
+        self.named_parts = Some(Arc::new(parts));
+        self.gltf_animations = Some(Arc::new(animations));
         self
     }
 
@@ -139,7 +168,7 @@ impl DrawableHandle {
 
     /// Resolve a named source group or path from an imported SVG.
     pub fn part(&self, id: &str) -> Result<DrawableHandle, SvgPartError> {
-        let Some(parts) = &self.svg_parts else {
+        let Some(parts) = &self.named_parts else {
             return Err(SvgPartError::NotSvg);
         };
         parts.get(id).cloned().ok_or_else(|| {
@@ -150,6 +179,71 @@ impl DrawableHandle {
                 available: available.join(", "),
             }
         })
+    }
+
+    /// Stable selectors available through [`DrawableHandle::part`].
+    pub fn parts(&self) -> Vec<String> {
+        let mut result = self
+            .named_parts
+            .as_ref()
+            .map(|parts| parts.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        result.sort();
+        result
+    }
+
+    /// Blender Action names embedded in an imported glTF model.
+    pub fn animations(&self) -> Vec<String> {
+        self.gltf_animations
+            .as_ref()
+            .map(|items| items.iter().map(|item| item.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Schedule a Blender Action using absolute timeline sampling.
+    #[allow(clippy::too_many_arguments)]
+    pub fn animation(
+        &self,
+        name: &str,
+        duration: Option<f64>,
+        speed: f64,
+        looped: bool,
+        reverse: bool,
+        transition: f64,
+        start_time: f64,
+    ) -> Result<Anim, GltfAnimationError> {
+        if !speed.is_finite() || speed <= 0.0 {
+            return Err(GltfAnimationError::InvalidSpeed);
+        }
+        let Some(animations) = &self.gltf_animations else {
+            return Err(GltfAnimationError::NotGltf);
+        };
+        let Some(metadata) = animations.iter().find(|animation| animation.name == name) else {
+            return Err(GltfAnimationError::Unknown {
+                name: name.to_owned(),
+                available: animations
+                    .iter()
+                    .map(|animation| animation.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        };
+        let authored_duration = (metadata.duration / speed).max(0.0);
+        Ok(Anim::queued(
+            self.id,
+            AnimationType::GltfAnimation {
+                animation_index: metadata.index,
+                source_duration: metadata.duration,
+                speed,
+                looped,
+                reverse,
+                transition: transition.max(0.0),
+                start_time: start_time.max(0.0),
+            },
+            self.state.clone(),
+            self.segment_idx,
+        )
+        .duration(duration.unwrap_or(authored_duration)))
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {
@@ -424,8 +518,17 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetScale(factor))
     }
 
+    pub fn scaled_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.push_layout(LayoutOp::SetScale3D(DVec3::new(x, y, z)))
+    }
+
     pub fn rotated(self, radians: f64) -> Self {
         self.push_layout(LayoutOp::SetRotation(radians))
+    }
+
+    /// Set XYZ Euler rotation in radians.
+    pub fn rotated_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
     /// Set the scene-space pivot used by rotations and uniform scaling.
@@ -435,6 +538,10 @@ impl DrawableHandle {
     /// after all initial layout has been resolved.
     pub fn with_pivot(self, x: f64, y: f64) -> Self {
         self.push_layout(LayoutOp::SetPivot(DVec3::new(x, y, 0.0)))
+    }
+
+    pub fn with_pivot_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.push_layout(LayoutOp::SetPivot(DVec3::new(x, y, z)))
     }
 
     /// Alias for [`Self::with_pivot`].
@@ -544,12 +651,30 @@ impl DrawableHandle {
         })
     }
 
+    pub fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> Anim {
+        self.anim(AnimationType::TranslateBy {
+            delta: DVec3::new(dx, dy, dz),
+        })
+    }
+
+    pub fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+        self.anim(AnimationType::TranslateTo {
+            to: DVec3::new(x, y, z),
+        })
+    }
+
     pub fn glide_to(&self, x: f64, y: f64) -> Anim {
         self.move_to(x, y)
     }
 
     pub fn scale(&self, factor: f64) -> Anim {
         self.anim(AnimationType::ScaleUniform { factor })
+    }
+
+    pub fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+        self.anim(AnimationType::ScaleTo {
+            to: DVec3::new(x, y, z),
+        })
     }
 
     pub fn rotate(&self, rad: f64) -> Anim {
@@ -562,6 +687,27 @@ impl DrawableHandle {
         self.anim(AnimationType::RotateBy {
             angle_radians: rad,
             pivot,
+        })
+    }
+
+    pub fn rotate_by_3d(&self, axis: &str, radians: f64) -> Result<Anim, RotationAxisError> {
+        let delta = match axis.to_ascii_lowercase().as_str() {
+            "x" => DQuat::from_rotation_x(radians),
+            "y" => DQuat::from_rotation_y(radians),
+            "z" => DQuat::from_rotation_z(radians),
+            _ => {
+                return Err(RotationAxisError {
+                    axis: axis.to_owned(),
+                });
+            }
+        };
+        Ok(self.anim(AnimationType::RotateBy3D { delta }))
+    }
+
+    /// Animate to an XYZ Euler orientation in radians.
+    pub fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+        self.anim(AnimationType::RotateTo {
+            to: DQuat::from_euler(EulerRot::XYZ, x, y, z),
         })
     }
 
