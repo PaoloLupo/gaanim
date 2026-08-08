@@ -532,76 +532,81 @@ fn require_duration(duration: f64) -> PyResult<f64> {
 impl PyCamera {
     /// Pan to a world-space point.
     #[pyo3(signature = (x, y, duration=1.0))]
-    fn pan_to(&self, x: f64, y: f64, duration: f64) -> PyResult<()> {
+    fn pan_to(&self, x: f64, y: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         let (x, y, duration) = (
             require_finite(x, "x")?,
             require_finite(y, "y")?,
             require_duration(duration)?,
         );
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_pan_to(x, y, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Set the orthographic zoom. Values above one zoom in.
     #[pyo3(signature = (zoom, duration=1.0))]
-    fn zoom_to(&self, zoom: f64, duration: f64) -> PyResult<()> {
+    fn zoom_to(&self, zoom: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         if !zoom.is_finite() || zoom <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "zoom must be finite and positive",
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_zoom_to(zoom, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Pan and zoom in parallel so the target fits inside the safe viewport.
     #[pyo3(signature = (target, margin=40.0, duration=1.0))]
-    fn frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) -> PyResult<()> {
+    fn frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         if !margin.is_finite() || margin < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "margin must be finite and non-negative",
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_frame_to(&target.0, margin, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Rotate the camera around the viewport center, in radians.
     #[pyo3(signature = (angle, duration=1.0))]
-    fn rotate_to(&self, angle: f64, duration: f64) -> PyResult<()> {
+    fn rotate_to(&self, angle: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         let (angle, duration) = (require_finite(angle, "angle")?, require_duration(duration)?);
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_rotate_to(angle, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Keep the camera centered on a drawable while it moves.
     #[pyo3(signature = (target, duration=1.0))]
-    fn follow(&self, target: &PyDrawable, duration: f64) -> PyResult<()> {
+    fn follow(&self, target: &PyDrawable, duration: f64) -> PyResult<PyCanvasAnim> {
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_follow(&target.0, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Apply a deterministic shake that settles at the original position.
     #[pyo3(signature = (amplitude=12.0, frequency=8.0, duration=0.5))]
-    fn shake(&self, amplitude: f64, frequency: f64, duration: f64) -> PyResult<()> {
+    fn shake(&self, amplitude: f64, frequency: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         if !amplitude.is_finite() || amplitude < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "amplitude must be finite and non-negative",
@@ -613,11 +618,12 @@ impl PyCamera {
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_shake(amplitude, frequency, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Set camera to look at target from eye (3D perspective).
@@ -628,7 +634,7 @@ impl PyCamera {
         target: (f64, f64, f64),
         up: Option<(f64, f64, f64)>,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyCanvasAnim> {
         if ![eye.0, eye.1, eye.2, target.0, target.1, target.2]
             .iter()
             .all(|v| v.is_finite())
@@ -643,32 +649,40 @@ impl PyCamera {
             }
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_look_at(eye, target, up, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Orbit around current target by yaw/pitch (radians).
     #[pyo3(signature = (delta_yaw, delta_pitch, duration=1.0))]
-    fn orbit(&self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> PyResult<()> {
+    fn orbit(&self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "delta_yaw/delta_pitch must be finite",
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_orbit(delta_yaw, delta_pitch, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Animate perspective projection (fov in radians).
     #[pyo3(signature = (fov_y, near=0.1, far=1000.0, duration=1.0))]
-    fn perspective(&self, fov_y: f64, near: f64, far: f64, duration: f64) -> PyResult<()> {
+    fn perspective(
+        &self,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        duration: f64,
+    ) -> PyResult<PyCanvasAnim> {
         if ![fov_y, near, far].iter().all(|v| v.is_finite())
             || fov_y <= 0.0
             || near <= 0.0
@@ -679,27 +693,29 @@ impl PyCamera {
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_perspective(fov_y, near, far, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 
     /// Dolly camera toward/away from target (factor <1 closer).
     #[pyo3(signature = (factor, duration=1.0))]
-    fn dolly(&self, factor: f64, duration: f64) -> PyResult<()> {
+    fn dolly(&self, factor: f64, duration: f64) -> PyResult<PyCanvasAnim> {
         if !factor.is_finite() || factor <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "factor must be finite and positive",
             ));
         }
         let duration = require_duration(duration)?;
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .camera_dolly(factor, duration);
-        Ok(())
+        Ok(PyCanvasAnim { inner })
     }
 }
 

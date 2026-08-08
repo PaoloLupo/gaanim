@@ -85,7 +85,8 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::sync_3d_mesh_transform_system,
                 crate::systems::sync_gltf_wrapper_transform_system,
                 crate::systems::sync_gltf_visibility_system,
-                crate::systems::sync_gltf_material_opacity_system,
+                crate::systems::sync_gltf_material_opacity_system
+                    .run_if(resource_exists::<Assets<StandardMaterial>>),
             )
                 .in_set(SceneSet::Propagation)
                 .after(crate::systems::transform_propagation_system),
@@ -116,5 +117,18 @@ impl Plugin for GaanimScenePlugin {
                 .run_if(crate::systems::has_bounds_changes)
                 .in_set(SceneSet::Bounds),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_plugin_runs_without_pbr_asset_resources() {
+        let mut app = App::new();
+        app.add_plugins(GaanimScenePlugin);
+
+        app.update();
     }
 }

@@ -188,53 +188,50 @@ pub(crate) enum Op {
     },
     /// Advance the cursor by a duration (no animation).
     Wait(f64),
-    CameraPosition {
-        to: DVec3,
-        duration: f64,
-    },
-    CameraZoom {
-        to: f64,
-        duration: f64,
-    },
-    CameraRotation {
-        to: DQuat,
-        duration: f64,
-    },
+    // Retained as a replay compatibility path for previously queued internal
+    // camera operations. New camera methods use AnimationType camera payloads.
+    #[allow(dead_code)]
+    CameraPosition { to: DVec3, duration: f64 },
+    #[allow(dead_code)]
+    CameraZoom { to: f64, duration: f64 },
+    #[allow(dead_code)]
+    CameraRotation { to: DQuat, duration: f64 },
+    #[allow(dead_code)]
     CameraFrame {
         target: ObjectId,
         margin: f64,
         duration: f64,
     },
-    CameraFollow {
-        target: ObjectId,
-        duration: f64,
-    },
+    #[allow(dead_code)]
+    CameraFollow { target: ObjectId, duration: f64 },
+    #[allow(dead_code)]
     CameraShake {
         amplitude: f64,
         frequency: f64,
         duration: f64,
     },
+    #[allow(dead_code)]
     CameraLookAt {
         eye: DVec3,
         target: DVec3,
         up: DVec3,
         duration: f64,
     },
+    #[allow(dead_code)]
     CameraOrbit {
         delta_yaw: f64,
         delta_pitch: f64,
         duration: f64,
     },
+    #[allow(dead_code)]
     CameraPerspective {
         fov_y: f64,
         near: f64,
         far: f64,
         duration: f64,
     },
-    CameraDolly {
-        factor: f64,
-        duration: f64,
-    },
+    #[allow(dead_code)]
+    CameraDolly { factor: f64, duration: f64 },
     /// Clip a drawable hierarchy by another drawable's vector geometry.
     SetClip {
         target: ObjectId,
@@ -359,10 +356,7 @@ pub(crate) enum Op {
         window: f64,
     },
     /// Generic Python callback updater (generic ODE / custom motion). Handled via registry.
-    AttachPythonUpdater {
-        target: ObjectId,
-        key: u64,
-    },
+    AttachPythonUpdater { target: ObjectId, key: u64 },
     /// 3D traced path that accumulates source position as a LineList with optional colormap.
     AttachTracedPath3D {
         target: ObjectId,

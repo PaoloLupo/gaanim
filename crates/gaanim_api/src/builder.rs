@@ -696,6 +696,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
+            AnimationType::CameraPosition { .. }
+            | AnimationType::CameraZoom { .. }
+            | AnimationType::CameraRotation { .. }
+            | AnimationType::CameraFrame { .. }
+            | AnimationType::CameraFollow { .. }
+            | AnimationType::CameraShake { .. }
+            | AnimationType::CameraLookAt { .. }
+            | AnimationType::CameraOrbit { .. }
+            | AnimationType::CameraPerspective { .. }
+            | AnimationType::CameraDolly { .. } => "Camera",
             AnimationType::GltfAnimation { .. } => "Action",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
@@ -1151,7 +1161,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.transform.scale = to;
                 PropertyLensSpec::Scale { from, to }
             }
-            AnimationType::GltfAnimation { .. }
+            AnimationType::CameraPosition { .. }
+            | AnimationType::CameraZoom { .. }
+            | AnimationType::CameraRotation { .. }
+            | AnimationType::CameraFrame { .. }
+            | AnimationType::CameraFollow { .. }
+            | AnimationType::CameraShake { .. }
+            | AnimationType::CameraLookAt { .. }
+            | AnimationType::CameraOrbit { .. }
+            | AnimationType::CameraPerspective { .. }
+            | AnimationType::CameraDolly { .. }
+            | AnimationType::GltfAnimation { .. }
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
             | AnimationType::Unwrite { .. }

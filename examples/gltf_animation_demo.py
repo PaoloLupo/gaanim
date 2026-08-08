@@ -4,7 +4,6 @@ import os
 
 from gaanim import BLACK, CYAN, GOLD, GRAY, WHITE, Scene
 
-
 scene = Scene(1920, 1080, background=BLACK)
 scene.assets_dir("examples/assets")
 
@@ -32,12 +31,12 @@ survey_label = scene.text("SURVEY").fill(CYAN).hud().at(-505, -300)
 walk_label = scene.text("WALK").fill(GOLD).hud().at(-35, -300)
 run_label = scene.text("RUN").fill(WHITE).hud().at(410, -300)
 
-scene.camera.perspective(fov_y=1, near=0.1, far=500.0, duration=0.0)
-scene.camera.look_at(eye=(3.8, 2.4, 5.8), target=(0.0, 0.15, 0.0), duration=0.0)
 
 # Survey is deliberately short: it establishes the character before the
 # locomotion cycles begin. Each transition overlaps the previous action.
 scene.play([
+    scene.camera.perspective(fov_y=1, near=0.1, far=500.0, duration=0.0),
+    scene.camera.look_at(eye=(3.8, 2.4, 5.8), target=(0.0, 0.15, 0.0), duration=0.0),
     fox.animation("Survey", duration=2.4),
     title.write(duration=0.8),
     caption.fade_in(0.5),
@@ -48,15 +47,15 @@ scene.play([
     survey_label.fade_out(0.25),
     walk_label.fade_in(0.35),
 ])
-scene.camera.orbit(delta_yaw=0.32, delta_pitch=0.04, duration=3.6)
 scene.play([
     fox.animation("Run", duration=3.0, loop=True, transition=0.45),
+    scene.camera.orbit(delta_yaw=0.32, delta_pitch=0.04, duration=3.6),
     walk_label.fade_out(0.25),
     run_label.fade_in(0.35),
 ])
-scene.camera.orbit(delta_yaw=-0.18, delta_pitch=-0.02, duration=3.0)
 scene.play([
     fox.animation("Survey", duration=1.8, reverse=True, transition=0.45),
+    scene.camera.orbit(delta_yaw=-0.18, delta_pitch=-0.02, duration=3.0),
     run_label.fade_out(0.25),
     survey_label.fade_in(0.35),
 ])

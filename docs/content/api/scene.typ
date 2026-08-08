@@ -435,12 +435,22 @@ scene.camera.frame_to(circle, margin=48, duration=0.9)
 scene.camera.rotate_to(0.15, duration=0.5)
 scene.camera.follow(circle, duration=2.0)
 scene.camera.shake(amplitude=12, frequency=8, duration=0.4)
+
+# Camera animations return Anim and can run beside drawable animations.
+scene.play([
+    circle.move_to(180, 0).duration(1.2),
+    scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.2),
+])
 ```
 
 `camera.frame_to` derives a pan and orthographic zoom from the target's current
 bounds and runs both in parallel, keeping it inside the safe viewport.
 `camera.follow` follows a mobject while reactive updaters are active, and
 `camera.shake` is deterministic so previews, seeks, and exports match. The
+camera methods return `Anim`: discarded results retain the existing sequential
+behavior, while passing them to `scene.play` regroups them with drawable or
+glTF Action animations at the same timeline start. Fluent `Anim` controls such
+as `.duration()`, `.delay()`, `.smooth()`, and `.linear()` also apply. The
 legacy `scene.camera_*` methods remain available for existing projects.
 
 === 3D camera
@@ -452,9 +462,9 @@ positive duration for an animated camera move. Angles are in radians.
 #api-entry(
   name: "Camera.perspective",
   kind: "method",
-  signature: "perspective(fov_y, near=0.1, far=1000.0, duration=1.0) -> None",
+  signature: "perspective(fov_y, near=0.1, far=1000.0, duration=1.0) -> Anim",
   params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "None", desc: [Queues a perspective projection change.]),
+  returns: (type: "Anim", desc: [A composable perspective projection animation.]),
   desc: [Switches the scene to perspective projection. Require `0 < near < far` and a positive finite field of view.],
 )[
 ```python
@@ -465,9 +475,9 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
 #api-entry(
   name: "Camera.look_at",
   kind: "method",
-  signature: "look_at(eye, target, up=None, duration=1.0) -> None",
+  signature: "look_at(eye, target, up=None, duration=1.0) -> Anim",
   params: ((name: "eye", type: "(float,float,float)", default: none, desc: [Camera position in world space.]), (name: "target", type: "(float,float,float)", default: none, desc: [Point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "None", desc: [Queues a camera orientation and position change.]),
+  returns: (type: "Anim", desc: [A composable camera orientation and position animation.]),
   desc: [Positions the camera at `eye` and aims it at `target`. All coordinates must be finite.],
 )[
 ```python
@@ -478,22 +488,26 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
 #api-entry(
   name: "Camera.orbit",
   kind: "method",
-  signature: "orbit(delta_yaw, delta_pitch, duration=1.0) -> None",
+  signature: "orbit(delta_yaw, delta_pitch, duration=1.0) -> Anim",
   params: ((name: "delta_yaw", type: "float", default: none, desc: [Horizontal orbit angle in radians.]), (name: "delta_pitch", type: "float", default: none, desc: [Vertical orbit angle in radians.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "None", desc: [Queues an orbit around the current look-at target.]),
+  returns: (type: "Anim", desc: [A composable orbit around the current look-at target.]),
   desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
 )[
 ```python
-scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.0)
+marker = scene.dot(6)
+scene.play([
+    marker.fade_in(1.0),
+    scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.0),
+])
 ```
 ]
 
 #api-entry(
   name: "Camera.dolly",
   kind: "method",
-  signature: "dolly(factor, duration=1.0) -> None",
+  signature: "dolly(factor, duration=1.0) -> Anim",
   params: ((name: "factor", type: "float", default: none, desc: [Positive distance multiplier.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "None", desc: [Queues a camera move toward or away from its target.]),
+  returns: (type: "Anim", desc: [A composable camera move toward or away from its target.]),
   desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
 )[
 ```python

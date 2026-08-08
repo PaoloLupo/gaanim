@@ -1358,75 +1358,63 @@ impl Canvas {
             });
     }
 
+    fn camera_anim(&self, ty: AnimationType, duration: f64) -> Anim {
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::queued(
+            gaanim_core::ObjectId::from_raw(u64::MAX),
+            ty,
+            self.state.clone(),
+            active_idx,
+        )
+        .duration(duration.max(0.0))
+    }
+
     /// Pan the orthographic camera to a world-space point.
-    pub fn camera_pan_to(&mut self, x: f64, y: f64, duration: f64) {
+    pub fn camera_pan_to(&mut self, x: f64, y: f64, duration: f64) -> Anim {
         let to = gaanim_core::glam::DVec3::new(x, y, self.camera_position.z);
         self.camera_position = to;
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard
-            .active_mut()
-            .ops
-            .push(Op::CameraPosition { to, duration });
+        self.camera_anim(AnimationType::CameraPosition { to }, duration)
     }
 
     /// Animate orthographic zoom. Values above one zoom in.
-    pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) {
+    pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) -> Anim {
         let to = zoom.max(0.01);
         self.camera_zoom = to;
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraZoom { to, duration });
+        self.camera_anim(AnimationType::CameraZoom { to }, duration)
     }
 
     /// Pan and zoom to keep `target` inside the viewport with a uniform margin.
-    pub fn camera_frame_to(&mut self, target: &DrawableHandle, margin: f64, duration: f64) {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraFrame {
-            target: target.id,
-            margin: margin.max(0.0),
+    pub fn camera_frame_to(&mut self, target: &DrawableHandle, margin: f64, duration: f64) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraFrame {
+                target: target.id,
+                margin: margin.max(0.0),
+            },
             duration,
-        });
+        )
     }
 
     /// Rotate the 2D camera around the viewport center, in radians.
-    pub fn camera_rotate_to(&mut self, angle: f64, duration: f64) {
+    pub fn camera_rotate_to(&mut self, angle: f64, duration: f64) -> Anim {
         let to = gaanim_core::glam::DQuat::from_rotation_z(angle);
         self.camera_rotation = to;
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard
-            .active_mut()
-            .ops
-            .push(Op::CameraRotation { to, duration });
+        self.camera_anim(AnimationType::CameraRotation { to }, duration)
     }
 
     /// Keep the camera centered on `target` while its updaters run.
-    pub fn camera_follow(&mut self, target: &DrawableHandle, duration: f64) {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraFollow {
-            target: target.id,
-            duration,
-        });
+    pub fn camera_follow(&mut self, target: &DrawableHandle, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraFollow { target: target.id }, duration)
     }
 
     /// Apply a deterministic camera shake that settles back at its start position.
-    pub fn camera_shake(&mut self, amplitude: f64, frequency: f64, duration: f64) {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let duration = duration.max(0.0);
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraShake {
-            amplitude: amplitude.max(0.0),
-            frequency: frequency.max(0.0),
+    pub fn camera_shake(&mut self, amplitude: f64, frequency: f64, duration: f64) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraShake {
+                amplitude: amplitude.max(0.0),
+                frequency: frequency.max(0.0),
+            },
             duration,
-        });
+        )
     }
 
     /// Set camera to look at `target` from `eye` with `up` (3D perspective).
@@ -1436,55 +1424,39 @@ impl Canvas {
         target: (f64, f64, f64),
         up: Option<(f64, f64, f64)>,
         duration: f64,
-    ) {
+    ) -> Anim {
         let eye = DVec3::new(eye.0, eye.1, eye.2);
         let target = DVec3::new(target.0, target.1, target.2);
         let up = up.map(|(x, y, z)| DVec3::new(x, y, z)).unwrap_or(DVec3::Y);
-        let duration = duration.max(0.0);
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraLookAt {
-            eye,
-            target,
-            up,
-            duration,
-        });
+        self.camera_anim(AnimationType::CameraLookAt { eye, target, up }, duration)
     }
 
     /// Orbit around current target by yaw/pitch radians.
-    pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) {
-        let duration = duration.max(0.0);
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraOrbit {
-            delta_yaw,
-            delta_pitch,
+    pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraOrbit {
+                delta_yaw,
+                delta_pitch,
+            },
             duration,
-        });
+        )
     }
 
     /// Animate perspective projection parameters.
-    pub fn camera_perspective(&mut self, fov_y: f64, near: f64, far: f64, duration: f64) {
-        let duration = duration.max(0.0);
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        guard.active_mut().cursor += duration;
-        guard.active_mut().ops.push(Op::CameraPerspective {
-            fov_y,
-            near: near.max(0.01),
-            far: far.max(near + 0.1),
+    pub fn camera_perspective(&mut self, fov_y: f64, near: f64, far: f64, duration: f64) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraPerspective {
+                fov_y,
+                near: near.max(0.01),
+                far: far.max(near + 0.1),
+            },
             duration,
-        });
+        )
     }
 
     /// Dolly camera toward/away from target (factor <1 closer).
-    pub fn camera_dolly(&mut self, factor: f64, duration: f64) {
-        let duration = duration.max(0.0);
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        guard.active_mut().cursor += duration;
-        guard
-            .active_mut()
-            .ops
-            .push(Op::CameraDolly { factor, duration });
+    pub fn camera_dolly(&mut self, factor: f64, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraDolly { factor }, duration)
     }
 
     // -- Time controls --
@@ -2289,6 +2261,30 @@ mod tests {
         assert_eq!(anims.len(), 2);
         assert!((anims[0].delay - 0.0).abs() < 1e-9);
         assert!((anims[1].delay - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn camera_animation_can_be_regrouped_with_drawables() {
+        let mut canvas = Canvas::new(1280, 720);
+        let marker = canvas.circle(20.0);
+        let marker_anim = marker.fade_in(2.0);
+        let camera_anim = canvas.camera_orbit(0.5, 0.1, 2.0).linear().delay(0.25);
+
+        canvas.play(vec![marker_anim, camera_anim]);
+
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        let segment = guard.active();
+        assert!((segment.cursor - 2.25).abs() < 1e-9);
+        let Some(Op::Play(anims)) = segment.ops.last() else {
+            panic!("expected parallel play op");
+        };
+        assert_eq!(anims.len(), 2);
+        let camera = anims
+            .iter()
+            .find(|anim| matches!(anim.anim_type, AnimationType::CameraOrbit { .. }))
+            .expect("camera orbit in parallel batch");
+        assert!(matches!(camera.rate_func, gaanim_math::RateFunc::Linear));
+        assert!((camera.delay - 0.25).abs() < 1e-9);
     }
 
     #[test]

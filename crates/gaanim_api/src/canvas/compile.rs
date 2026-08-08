@@ -1122,7 +1122,23 @@ impl Canvas {
                 Op::Animate { anim, active } => {
                     if *active {
                         if let Some(anim) = Self::remap_anim(anim, id_map) {
-                            builder.play(anim);
+                            if anim.anim_type.is_camera() {
+                                let start = builder.current_time;
+                                Self::schedule_camera_animation(
+                                    builder,
+                                    frame_bounds,
+                                    camera_position,
+                                    camera_zoom,
+                                    camera_rotation,
+                                    camera_target,
+                                    camera_fov,
+                                    &anim,
+                                    start,
+                                );
+                                builder.wait(anim.delay.max(0.0) + anim.duration.max(0.0));
+                            } else {
+                                builder.play(anim);
+                            }
                         }
                     }
                 }
@@ -1131,7 +1147,29 @@ impl Canvas {
                         .iter()
                         .filter_map(|anim| Self::remap_anim(anim, id_map))
                         .collect();
-                    builder.play_parallel(remapped);
+                    let start = builder.current_time;
+                    let max_duration = remapped
+                        .iter()
+                        .map(|anim| anim.delay.max(0.0) + anim.duration.max(0.0))
+                        .fold(0.0, f64::max);
+                    for anim in remapped {
+                        if anim.anim_type.is_camera() {
+                            Self::schedule_camera_animation(
+                                builder,
+                                frame_bounds,
+                                camera_position,
+                                camera_zoom,
+                                camera_rotation,
+                                camera_target,
+                                camera_fov,
+                                &anim,
+                                start,
+                            );
+                        } else {
+                            builder.play_at_current_time(anim);
+                        }
+                    }
+                    builder.current_time = start + max_duration;
                 }
                 Op::FragmentFill {
                     target,
@@ -2837,12 +2875,261 @@ impl Canvas {
         targets
     }
 
+    fn add_camera_lens(
+        builder: &mut SceneBuilder,
+        start: f64,
+        anim: &AnimationBuilder,
+        lens: gaanim_timeline::clip::PropertyLensSpec,
+    ) {
+        builder.timeline.add_clip(
+            builder.default_track,
+            start + anim.delay.max(0.0),
+            anim.duration.max(0.0),
+            gaanim_timeline::clip::ClipPayload::Animation(gaanim_timeline::clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_parts(0, 1),
+                lens,
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: Some("Camera".to_string()),
+            }),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn schedule_camera_animation(
+        builder: &mut SceneBuilder,
+        frame_bounds: Bounds3D,
+        camera_position: &mut DVec3,
+        camera_zoom: &mut f64,
+        camera_rotation: &mut gaanim_core::glam::DQuat,
+        camera_target: &mut DVec3,
+        camera_fov: &mut Option<(f64, f64, f64)>,
+        anim: &AnimationBuilder,
+        start: f64,
+    ) {
+        use gaanim_timeline::clip::PropertyLensSpec;
+
+        match &anim.anim_type {
+            AnimationType::CameraPosition { to } => {
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: *camera_position,
+                        to: *to,
+                    },
+                );
+                *camera_position = *to;
+            }
+            AnimationType::CameraZoom { to } => {
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraZoom {
+                        from: *camera_zoom,
+                        to: *to,
+                    },
+                );
+                *camera_zoom = *to;
+            }
+            AnimationType::CameraRotation { to } => {
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraRotation {
+                        from: *camera_rotation,
+                        to: *to,
+                    },
+                );
+                *camera_rotation = *to;
+            }
+            AnimationType::CameraFrame { target, margin } => {
+                let Some(state) = builder.states.get(*target) else {
+                    return;
+                };
+                let bounds = state
+                    .bounds
+                    .transform_2d(&builder.get_world_transform(*target).to_affine_2d());
+                let width = (bounds.width() + margin * 2.0).max(1.0);
+                let height = (bounds.height() + margin * 2.0).max(1.0);
+                let zoom = (frame_bounds.width() / width)
+                    .min(frame_bounds.height() / height)
+                    .max(0.01);
+                let center = bounds.center();
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: *camera_position,
+                        to: center,
+                    },
+                );
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraZoom {
+                        from: *camera_zoom,
+                        to: zoom,
+                    },
+                );
+                *camera_position = center;
+                *camera_zoom = zoom;
+            }
+            AnimationType::CameraFollow { target } => {
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraFollow { target: *target },
+                );
+                if let Some(state) = builder.states.get(*target) {
+                    camera_position.x = state.transform.translation.x;
+                    camera_position.y = state.transform.translation.y;
+                }
+            }
+            AnimationType::CameraShake {
+                amplitude,
+                frequency,
+            } => Self::add_camera_lens(
+                builder,
+                start,
+                anim,
+                PropertyLensSpec::CameraShake {
+                    origin: *camera_position,
+                    amplitude: *amplitude,
+                    frequency: *frequency,
+                },
+            ),
+            AnimationType::CameraLookAt { eye, target, up } => {
+                let to_rotation = gaanim_core::glam::DMat4::look_at_rh(*eye, *target, *up)
+                    .inverse()
+                    .to_scale_rotation_translation()
+                    .1;
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: *camera_position,
+                        to: *eye,
+                    },
+                );
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraTarget {
+                        from: *camera_target,
+                        to: *target,
+                    },
+                );
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraRotation {
+                        from: *camera_rotation,
+                        to: to_rotation,
+                    },
+                );
+                *camera_position = *eye;
+                *camera_target = *target;
+                *camera_rotation = to_rotation;
+            }
+            AnimationType::CameraOrbit {
+                delta_yaw,
+                delta_pitch,
+            } => {
+                let mut camera = gaanim_math::Camera::ortho_2d(1, 1);
+                camera.position = *camera_position;
+                camera.target = *camera_target;
+                camera.rotation = *camera_rotation;
+                camera.up = DVec3::Y;
+                camera.projection = if let Some((fov_y, near, far)) = *camera_fov {
+                    gaanim_math::Projection::Perspective { fov_y, near, far }
+                } else {
+                    gaanim_math::Projection::Orthographic { zoom: *camera_zoom }
+                };
+                camera.orbit_around_target(*delta_yaw, *delta_pitch);
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: *camera_position,
+                        to: camera.position,
+                    },
+                );
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraRotation {
+                        from: *camera_rotation,
+                        to: camera.rotation,
+                    },
+                );
+                *camera_position = camera.position;
+                *camera_rotation = camera.rotation;
+            }
+            AnimationType::CameraPerspective { fov_y, near, far } => {
+                let (from_fov, from_near, from_far) =
+                    camera_fov.unwrap_or((std::f64::consts::FRAC_PI_4, 0.1, 1000.0));
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPerspective {
+                        from_fov,
+                        to_fov: *fov_y,
+                        from_near,
+                        to_near: *near,
+                        from_far,
+                        to_far: *far,
+                    },
+                );
+                *camera_fov = Some((*fov_y, *near, *far));
+            }
+            AnimationType::CameraDolly { factor } => {
+                let direction = *camera_position - *camera_target;
+                let destination = *camera_target + direction * factor.clamp(0.1, 10.0);
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: *camera_position,
+                        to: destination,
+                    },
+                );
+                *camera_position = destination;
+            }
+            _ => {}
+        }
+    }
+
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
     ) -> Option<AnimationBuilder> {
-        let target = *id_map.get(&anim.target)?;
+        let target = if anim.anim_type.is_camera() {
+            anim.target
+        } else {
+            *id_map.get(&anim.target)?
+        };
         let anim_type = match &anim.anim_type {
+            AnimationType::CameraFrame { target, margin } => AnimationType::CameraFrame {
+                target: *id_map.get(target)?,
+                margin: *margin,
+            },
+            AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
+                target: *id_map.get(target)?,
+            },
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
                 target: *id_map.get(target)?,
             },
@@ -4154,6 +4441,32 @@ mod tests {
     use gaanim_layout::Anchor;
     use gaanim_scene::LocalBounds;
     use gaanim_timeline::snapshot::WorldSnapshot;
+
+    #[test]
+    fn camera_and_drawable_play_compile_at_the_same_start_time() {
+        let mut canvas = Canvas::new(640, 360);
+        let marker = canvas.circle(20.0);
+        let marker_anim = marker.fade_in(2.0);
+        let camera_anim = canvas.camera_orbit(0.4, 0.1, 2.0);
+        canvas.play(vec![marker_anim, camera_anim]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let parallel_clips: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| (clip.duration - 2.0).abs() < 1e-9)
+            .collect();
+        assert_eq!(parallel_clips.len(), 3); // fade + orbit position + orbit rotation
+        assert!(parallel_clips.iter().all(|clip| clip.start.abs() < 1e-9));
+        assert!((timeline.cached_duration - 2.0).abs() < 1e-9);
+    }
 
     #[test]
     fn visual_effects_are_attached_to_compiled_drawables() {

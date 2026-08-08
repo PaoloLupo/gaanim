@@ -1281,14 +1281,14 @@ class Slide:
         ...
 
 class Camera:
-    def pan_to(self, x: float, y: float, duration: float = 1.0) -> None:
+    def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
         """Configure the camera with pan to.
 
         Example:
             scene.camera.pan_to(1.0, 1.0)
         """
         ...
-    def zoom_to(self, zoom: float, duration: float = 1.0) -> None:
+    def zoom_to(self, zoom: float, duration: float = 1.0) -> Anim:
         """Configure the camera with zoom to.
 
         Example:
@@ -1300,21 +1300,21 @@ class Camera:
         target: Drawable,
         margin: float = 40.0,
         duration: float = 1.0,
-    ) -> None:
+    ) -> Anim:
         """Configure the camera with frame to.
 
         Example:
             scene.camera.frame_to(target)
         """
         ...
-    def rotate_to(self, angle: float, duration: float = 1.0) -> None:
+    def rotate_to(self, angle: float, duration: float = 1.0) -> Anim:
         """Configure the camera with rotate to.
 
         Example:
             scene.camera.rotate_to(1.0)
         """
         ...
-    def follow(self, target: Drawable, duration: float = 1.0) -> None:
+    def follow(self, target: Drawable, duration: float = 1.0) -> Anim:
         """Configure the camera with follow.
 
         Example:
@@ -1326,7 +1326,7 @@ class Camera:
         amplitude: float = 12.0,
         frequency: float = 8.0,
         duration: float = 0.5,
-    ) -> None:
+    ) -> Anim:
         """Configure the camera with shake.
 
         Example:
@@ -1339,7 +1339,7 @@ class Camera:
         target: tuple[float, float, float],
         up: Optional[tuple[float, float, float]] = None,
         duration: float = 1.0,
-    ) -> None:
+    ) -> Anim:
         """Aim the camera from ``eye`` toward ``target``.
 
         Args:
@@ -1358,7 +1358,7 @@ class Camera:
         delta_yaw: float,
         delta_pitch: float,
         duration: float = 1.0,
-    ) -> None:
+    ) -> Anim:
         """Orbit around the current look-at target.
 
         ``delta_yaw`` and ``delta_pitch`` are radians. Positive duration
@@ -1375,7 +1375,7 @@ class Camera:
         near: float = 0.1,
         far: float = 1000.0,
         duration: float = 1.0,
-    ) -> None:
+    ) -> Anim:
         """Use perspective projection with a vertical field of view.
 
         ``fov_y`` is in radians and must be positive. ``near`` and ``far``
@@ -1386,7 +1386,7 @@ class Camera:
         """
         ...
 
-    def dolly(self, factor: float, duration: float = 1.0) -> None:
+    def dolly(self, factor: float, duration: float = 1.0) -> Anim:
         """Move toward or away from the current target.
 
         A factor below ``1`` moves closer; a factor above ``1`` moves farther.

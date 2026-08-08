@@ -14,6 +14,43 @@ pub struct DrawAnimationConfig {
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
 pub enum AnimationType {
+    CameraPosition {
+        to: DVec3,
+    },
+    CameraZoom {
+        to: f64,
+    },
+    CameraRotation {
+        to: DQuat,
+    },
+    CameraFrame {
+        target: ObjectId,
+        margin: f64,
+    },
+    CameraFollow {
+        target: ObjectId,
+    },
+    CameraShake {
+        amplitude: f64,
+        frequency: f64,
+    },
+    CameraLookAt {
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+    },
+    CameraOrbit {
+        delta_yaw: f64,
+        delta_pitch: f64,
+    },
+    CameraPerspective {
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    },
+    CameraDolly {
+        factor: f64,
+    },
     /// A Blender Action embedded in an imported glTF model.
     GltfAnimation {
         animation_index: usize,
@@ -276,6 +313,22 @@ impl AnimationBuilder {
 }
 
 impl AnimationType {
+    pub(crate) fn is_camera(&self) -> bool {
+        matches!(
+            self,
+            Self::CameraPosition { .. }
+                | Self::CameraZoom { .. }
+                | Self::CameraRotation { .. }
+                | Self::CameraFrame { .. }
+                | Self::CameraFollow { .. }
+                | Self::CameraShake { .. }
+                | Self::CameraLookAt { .. }
+                | Self::CameraOrbit { .. }
+                | Self::CameraPerspective { .. }
+                | Self::CameraDolly { .. }
+        )
+    }
+
     /// Whether this animation establishes an object by animating its opacity
     /// from an initially hidden state. Semantic presentation slides use this
     /// to avoid auto-showing an object immediately before that entrance.
@@ -292,7 +345,9 @@ impl AnimationType {
 
     pub fn default_rate_func(&self) -> RateFunc {
         match self {
-            Self::GltfAnimation { .. }
+            Self::CameraFollow { .. }
+            | Self::CameraShake { .. }
+            | Self::GltfAnimation { .. }
             | Self::Write { .. }
             | Self::Create { .. }
             | Self::Unwrite { .. }
