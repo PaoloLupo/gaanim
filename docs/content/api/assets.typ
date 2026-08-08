@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Assets",
-  description: "Portable image and SVG paths, manifests, and preloading",
+  description: "Portable image, SVG, and glTF paths, manifests, and preloading",
   route: "/api/assets/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -10,7 +10,7 @@
 
 = Assets
 
-Set one asset directory per scene so relative image and SVG paths remain
+Set one asset directory per scene so relative image, SVG, and glTF paths remain
 portable when a project is moved or rendered from another working directory.
 
 ```python
@@ -21,6 +21,7 @@ scene.assets_dir("assets")
 
 logo = scene.svg("logo.svg")
 cover = scene.image("cover.png")
+robot = scene.gltf("robot.glb")
 ```
 
 Absolute paths continue to work and take precedence over `assets_dir`.
@@ -59,7 +60,7 @@ an explicit manifest path.
 
 == Preloading
 
-Use `preload` to validate raster and SVG files before playback. Raster images
+Use `preload` to validate raster, SVG, and glTF files before playback. Raster images
 are decoded into the same cache used by `scene.image`.
 
 ```python
@@ -81,6 +82,41 @@ cover = scene.image("cover.png")
 ```
 
 SVG files are parsed again whenever `scene.svg(...)` creates a drawable.
+
+glTF metadata is cached by canonical path and modification time. `reload_assets()`
+also clears this cache; the editor then removes the old native scene instance and
+all of its descendants before rebuilding it.
+
+== glTF 3D models
+
+`Scene.gltf(path, *, scene=None) -> Drawable` imports local glTF 2.0 `.gltf`
+and `.glb` files. `scene` accepts a scene name, a zero-based index, or `None`
+for the file's default scene.
+
+```python
+model = scene.gltf("robot.glb", scene="Presentation")
+arm = model.part("Robot/Rig/Arm")
+
+print(model.parts())       # tuple of stable selectors
+print(model.animations())  # Blender Action names
+```
+
+A short node name is available only when it is unique. A hierarchical path
+disambiguates repeated names; duplicate full paths receive the stable suffix
+`#<node-index>`. Lookup errors list the candidate selectors.
+
+Gaanim preserves the exported units, orientation, node hierarchy, PBR
+metallic-roughness materials, normals, UVs, textures, skins, bones, and morph
+targets. One glTF unit is one Gaanim world unit; models are not centered or
+scaled automatically. Imported cameras and lights are removed in favor of the
+Gaanim camera and neutral default light. Unsupported glTF extensions or missing
+external buffers/textures fail with the source path in the error.
+
+The visual payload is loaded through Bevy's native glTF loader. Gaanim creates
+one stable wrapper for each node: manual wrapper transforms compose above the
+Blender-authored node transform and skeletal/morph animation instead of
+overwriting it. Materials are cloned per instance so opacity animation cannot
+mutate another import of the same file.
 
 == Advanced SVG
 

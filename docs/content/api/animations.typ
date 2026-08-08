@@ -13,6 +13,43 @@
 
 Every method on `Drawable` returns an `Anim`. Pass them to `Scene.play([...])` — calls are sequential, lists run in parallel.
 
+== glTF Actions
+
+```python
+model.animation(
+  "Walk",
+  duration=None,
+  speed=1.0,
+  loop=False,
+  reverse=False,
+  transition=0.0,
+  start_time=0.0,
+) -> Anim
+```
+
+Without an explicit `duration`, the Action uses its authored duration divided
+by `speed`. `loop=True` repeats within the timeline clip; otherwise the final
+pose is retained. `reverse` samples backwards, `start_time` resumes at an
+authored offset, and `transition` cross-fades from the preceding Action. Only
+the current and outgoing Actions are weighted during that transition.
+
+Animation players remain paused and are sampled from the timeline's absolute
+time. Forward seeks, backwards scrubbing, export frames, and snapshots therefore
+resolve the same Action pose.
+
+== 3D transforms
+
+```python
+part.move_3d(dx, dy, dz) -> Anim
+part.move_to_3d(x, y, z) -> Anim
+part.rotate_by_3d(axis, radians) -> Anim
+part.rotate_to_3d(x, y, z) -> Anim
+part.scale_to_3d(x, y, z) -> Anim
+```
+
+Euler triples use XYZ order and radians. `rotate_by_3d` accepts only `"x"`,
+`"y"`, or `"z"`; other axes raise `ValueError`.
+
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 22 ANIMS · ALL ON Drawable —])
 
 == Motion

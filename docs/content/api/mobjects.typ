@@ -13,6 +13,19 @@
 
 Every factory on `Scene` returns a `Drawable`. Chain style, layout and animation fluently.
 
+== Imported glTF models
+
+```python
+Scene.gltf(path: str, *, scene: str | int | None = None) -> Drawable
+Drawable.part(selector: str) -> Drawable
+Drawable.parts() -> tuple[str, ...]
+Drawable.animations() -> tuple[str, ...]
+```
+
+The model and every selected node support the complete 3D transform surface:
+`at_3d(x,y,z)`, `scaled_3d(x,y,z)`, `rotated_3d(x,y,z)`, and
+`with_pivot_3d(x,y,z)`. Euler rotations use XYZ order and radians.
+
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 40+ FACTORIES · ALL RETURN Drawable —])
 
 == Primitives
