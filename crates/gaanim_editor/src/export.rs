@@ -40,6 +40,7 @@ pub struct ExportProgress {
     pub current_frame: u64,
     pub total_frames: u64,
     pub started_at: Instant,
+    pub result: Option<Result<(), String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,20 @@ pub enum ExportQuality {
 }
 
 impl ExportQuality {
+    fn preset(self) -> QualityPreset {
+        match self {
+            Self::Draft => QualityPreset::Draft,
+            Self::Standard => QualityPreset::Standard,
+            Self::Production => QualityPreset::Production,
+        }
+    }
+    fn arg(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Standard => "standard",
+            Self::Production => "production",
+        }
+    }
     fn fps(self) -> u32 {
         match self {
             Self::Draft => 30,
@@ -155,6 +170,14 @@ pub fn export_dialog_system(
         };
 
         if prog_done {
+            state.message = {
+                let lock = state.progress_shared.lock().unwrap();
+                match lock.as_ref().and_then(|progress| progress.result.as_ref()) {
+                    Some(Ok(())) => "Export completed successfully".to_string(),
+                    Some(Err(error)) => format!("Export failed: {error}"),
+                    None => "Export finished without a result".to_string(),
+                }
+            };
             state.show_complete = true;
             state.active = false;
             *state.progress_shared.lock().unwrap() = None;
@@ -290,6 +313,10 @@ pub fn export_dialog_system(
             let qual = state.quality;
             let progress = state.progress_shared.clone();
             let canvas = replay_stash.canvas.clone().unwrap();
+            let worker_paths = project_paths
+                .as_ref()
+                .map(|paths| (paths.script_path.clone(), paths.project_dir.clone()));
+            let needs_worker = canvas.has_native_3d_content();
 
             state.active = true;
             state.dialog_open = false;
@@ -298,29 +325,67 @@ pub fn export_dialog_system(
                 current_frame: 0,
                 total_frames: total,
                 started_at: Instant::now(),
+                result: None,
             });
 
             let progress_clone = progress.clone();
             std::thread::spawn(move || {
-                let mut config = ExportConfig::new(&out).with_quality(match qual {
-                    ExportQuality::Draft => QualityPreset::Draft,
-                    ExportQuality::Standard => QualityPreset::Standard,
-                    ExportQuality::Production => QualityPreset::Production,
-                });
-                config.fps = fps;
-                config.crf = qual.crf();
-                config.encoding_speed = qual.encoding_speed();
-                config.format = fmt;
-                config.headless = true;
-
-                let _ = export_canvas(canvas, config);
+                let result = if needs_worker {
+                    match worker_paths {
+                        Some((script_path, project_dir)) => run_export_worker(
+                            &script_path,
+                            &project_dir,
+                            &out,
+                            qual,
+                            fmt,
+                        ),
+                        None => Err(
+                            "3D export requires an open project script so it can run in an isolated process"
+                                .to_string(),
+                        ),
+                    }
+                } else {
+                    let mut config = ExportConfig::new(&out).with_quality(qual.preset());
+                    config.fps = fps;
+                    config.crf = qual.crf();
+                    config.encoding_speed = qual.encoding_speed();
+                    config.format = fmt;
+                    config.headless = true;
+                    export_canvas(canvas, config).map_err(|error| error.to_string())
+                };
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
+                        p.result = Some(result);
                         p.current_frame = p.total_frames;
                     }
                 }
             });
         }
+    }
+}
+
+fn run_export_worker(
+    script_path: &std::path::Path,
+    project_dir: &std::path::Path,
+    output_path: &str,
+    quality: ExportQuality,
+    format: ExportFormat,
+) -> Result<(), String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("could not locate the Gaanim executable: {error}"))?;
+    let status = std::process::Command::new(executable)
+        .arg("--export-worker")
+        .arg(script_path)
+        .arg(output_path)
+        .arg(quality.arg())
+        .arg(export_format_arg(format))
+        .current_dir(project_dir)
+        .status()
+        .map_err(|error| format!("could not start the isolated export worker: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("export worker exited with {status}"))
     }
 }
 
@@ -331,6 +396,16 @@ fn export_format_label(f: ExportFormat) -> &'static str {
         ExportFormat::Webp => "WebP",
         ExportFormat::Gif => "GIF",
         ExportFormat::PngSequence => "PNG",
+    }
+}
+
+fn export_format_arg(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Mp4 => "mp4",
+        ExportFormat::Webm => "webm",
+        ExportFormat::Webp => "webp",
+        ExportFormat::Gif => "gif",
+        ExportFormat::PngSequence => "png",
     }
 }
 

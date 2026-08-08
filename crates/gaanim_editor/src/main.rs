@@ -28,6 +28,9 @@ use hot_reload::{
 };
 
 fn main() {
+    if dispatch_export_worker_mode() {
+        return;
+    }
     if dispatch_init_mode() {
         return;
     }
@@ -108,6 +111,82 @@ fn main() {
     }
 
     app.run();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExportWorkerArgs {
+    script: PathBuf,
+    output: String,
+    quality: String,
+    format: String,
+}
+
+fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
+    if args.len() != 4 {
+        return Err(
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png>"
+                .to_string(),
+        );
+    }
+    if !matches!(args[2].as_str(), "draft" | "standard" | "production") {
+        return Err(format!("unknown export quality '{}'", args[2]));
+    }
+    if !matches!(args[3].as_str(), "mp4" | "webm" | "webp" | "gif" | "png") {
+        return Err(format!("unknown export format '{}'", args[3]));
+    }
+    Ok(ExportWorkerArgs {
+        script: PathBuf::from(&args[0]),
+        output: args[1].clone(),
+        quality: args[2].clone(),
+        format: args[3].clone(),
+    })
+}
+
+fn dispatch_export_worker_mode() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) != Some("--export-worker") {
+        return false;
+    }
+    let worker = parse_export_worker_args(&args[1..]).unwrap_or_else(|error| {
+        eprintln!("gaanim export worker: {error}");
+        std::process::exit(2);
+    });
+    if let Err(error) = run_export_worker(worker) {
+        eprintln!("gaanim export worker: {error}");
+        std::process::exit(1);
+    }
+    true
+}
+
+fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
+    let probe = gaanim_project::EnvironmentProbe::detect(Some(&worker.script));
+    let venv_root = gaanim_project::activate_environment(&probe)?;
+    gaanim_python::register_inittab();
+    Python::initialize();
+    if let Some(ref venv) = venv_root {
+        python_home::inject_venv_site_packages(venv);
+    }
+
+    let canvas = script_runner::load_script_canvas(&worker.script)?;
+    let quality = match worker.quality.as_str() {
+        "draft" => gaanim_export::prelude::QualityPreset::Draft,
+        "standard" => gaanim_export::prelude::QualityPreset::Standard,
+        "production" => gaanim_export::prelude::QualityPreset::Production,
+        _ => unreachable!("validated export quality"),
+    };
+    let format = match worker.format.as_str() {
+        "mp4" => gaanim_export::encoder::ExportFormat::Mp4,
+        "webm" => gaanim_export::encoder::ExportFormat::Webm,
+        "webp" => gaanim_export::encoder::ExportFormat::Webp,
+        "gif" => gaanim_export::encoder::ExportFormat::Gif,
+        "png" => gaanim_export::encoder::ExportFormat::PngSequence,
+        _ => unreachable!("validated export format"),
+    };
+    let mut config =
+        gaanim_export::prelude::ExportConfig::new(&worker.output).with_quality(quality);
+    config.format = format;
+    config.headless = true;
+    gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
 fn spawn_home_camera(world: &mut World) {
@@ -903,6 +982,28 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_isolated_export_worker_arguments() {
+        let args = ["scene.py", "exports/output.mp4", "standard", "mp4"].map(str::to_string);
+        assert_eq!(
+            parse_export_worker_args(&args).unwrap(),
+            ExportWorkerArgs {
+                script: PathBuf::from("scene.py"),
+                output: "exports/output.mp4".to_string(),
+                quality: "standard".to_string(),
+                format: "mp4".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_export_worker_quality_and_format() {
+        let quality = ["scene.py", "out.mp4", "ultra", "mp4"].map(str::to_string);
+        assert!(parse_export_worker_args(&quality).is_err());
+        let format = ["scene.py", "out.avi", "draft", "avi"].map(str::to_string);
+        assert!(parse_export_worker_args(&format).is_err());
+    }
 
     #[test]
     fn parses_presentation_launch_options_in_any_order() {
