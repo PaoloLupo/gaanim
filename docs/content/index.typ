@@ -7,6 +7,7 @@
 #include "guides/layout-proposal.typ"
 #include "api/index.typ"
 #include "api/scene.typ"
+#include "api/visualization.typ"
 #include "api/layout.typ"
 #include "api/assets.typ"
 #include "api/audio.typ"

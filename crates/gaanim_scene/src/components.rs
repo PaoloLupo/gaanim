@@ -286,6 +286,7 @@ pub struct TriangleMeshData {
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
     pub color: Option<gaanim_core::peniko::Color>,
+    pub colors: Option<Vec<[f32; 4]>>,
 }
 
 /// Raw line list data (pairs of points) to be converted to Bevy `Mesh3d` line list.
@@ -294,6 +295,8 @@ pub struct LineListData {
     pub points: Vec<[f32; 3]>,
     /// Indices as line pairs. If None, points are sequential pairs.
     pub indices: Option<Vec<u32>>,
+    /// `true` connects every point as a strip; `false` consumes point pairs.
+    pub strip: bool,
     pub color: gaanim_core::peniko::Color,
     /// Optional per-vertex RGBA colors (linear, 0..1). If Some, length must match `points`.
     /// When present the renderer uses vertex colors instead of the uniform `color`.

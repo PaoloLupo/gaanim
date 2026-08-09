@@ -4,7 +4,10 @@ import os
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
-curve = scene.parametric_curve(lambda t: (180 * math.cos(t), 100 * math.sin(2 * t)), t=(0, 2 * math.pi)).no_fill().stroke(BLUE, 4)
+curve = scene.polyline([
+    (180 * math.cos(t), 100 * math.sin(2 * t))
+    for t in (2 * math.pi * index / 240 for index in range(241))
+]).no_fill().stroke(BLUE, 4)
 tracker = scene.value_tracker(0.15)
 circle = scene.curvature_on_curve(curve, tracker).no_fill().stroke(GOLD, 3)
 title = scene.text("osculating circle").fill(BLACK).at(0, 190)

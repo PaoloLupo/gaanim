@@ -1,6 +1,7 @@
 //! Compile — replay Canvas ops into SceneBuilder/Bevy.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
@@ -2459,6 +2460,35 @@ impl Canvas {
                         builder.commands.entity(st.entity).despawn();
                     }
                 }
+                Op::AttachToGroup { group, child } => {
+                    if let (Some(group), Some(child)) =
+                        (id_map.get(group).copied(), id_map.get(child).copied())
+                        && builder.states.get(group).is_some()
+                        && builder.states.get(child).is_some()
+                    {
+                        builder.add_to_group(MobjectRef { id: group }, MobjectRef { id: child });
+                    }
+                }
+                Op::PlaceAtCoordinate {
+                    space,
+                    target,
+                    local,
+                } => {
+                    if let (Some(space), Some(target)) =
+                        (id_map.get(space).copied(), id_map.get(target).copied())
+                        && builder.states.get(space).is_some()
+                        && builder.states.get(target).is_some()
+                    {
+                        builder.add_to_group(MobjectRef { id: space }, MobjectRef { id: target });
+                        if let Some(state) = builder.states.get_mut(target) {
+                            state.transform.translation = *local;
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(state.transform);
+                        }
+                    }
+                }
                 Op::Reuse(target) => Self::apply_scene_object_scope(
                     builder,
                     *target,
@@ -3733,6 +3763,115 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::ExpressionPlot {
+                map,
+                expression,
+                variable,
+                domain,
+                sampling,
+            } => {
+                let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
+                    expression
+                        .parameter_ids()
+                        .into_iter()
+                        .filter_map(|logical| {
+                            let actual = id_map.get(&logical).copied()?;
+                            let entity = builder.states.get(actual)?.entity;
+                            Some((logical, entity))
+                        })
+                        .collect();
+                let mut context = gaanim_expr::EvalContext::new();
+                for (logical, _) in &parameter_entities {
+                    if let Some(actual) = id_map.get(logical).copied()
+                        && let Some(value) = builder.float_signals.get(&actual).copied()
+                    {
+                        context.set_parameter(*logical, value);
+                    }
+                }
+                let path = gaanim_visualization::sample_expression(
+                    map, expression, variable, *domain, *sampling, &context,
+                )
+                .map(|sampled| sampled.to_bez_path())
+                .unwrap_or_default();
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "ExpressionPlot".to_owned(),
+                    path,
+                    bounds: map.frame.bounds(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if !parameter_entities.is_empty()
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let map = map.clone();
+                    let expression = expression.clone();
+                    let variable = variable.clone();
+                    let domain = *domain;
+                    let sampling = *sampling;
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                        let mut context = gaanim_expr::EvalContext::new();
+                        for (logical, entity) in &parameter_entities {
+                            if let Some(signal) =
+                                world.get::<gaanim_animation::FloatSignal>(*entity)
+                            {
+                                context.set_parameter(*logical, signal.value);
+                            }
+                        }
+                        gaanim_visualization::sample_expression(
+                            &map,
+                            &expression,
+                            &variable,
+                            domain,
+                            sampling,
+                            &context,
+                        )
+                        .map(|sampled| sampled.to_bez_path())
+                        .unwrap_or_default()
+                    });
+                    builder.commands.entity(state.entity).insert(redraw);
+                }
+                mr
+            }
+            SpawnKind::DataMark { map, source, kind } => {
+                let path = gaanim_visualization::data_mark_path(map, &source.snapshot(), kind)
+                    .unwrap_or_default();
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "DataMark".to_owned(),
+                    path: path.clone(),
+                    bounds: map.frame.bounds(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(state) = builder.states.get(mr.id) {
+                    let map = map.clone();
+                    let source = source.clone();
+                    let kind = kind.clone();
+                    let initial_version = source.version();
+                    let cache = Arc::new(Mutex::new((initial_version, path)));
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |_world| {
+                        let version = source.version();
+                        let mut cached = cache.lock().expect("data mark cache poisoned");
+                        if cached.0 != version {
+                            cached.1 = gaanim_visualization::data_mark_path(
+                                &map,
+                                &source.snapshot(),
+                                &kind,
+                            )
+                            .unwrap_or_default();
+                            cached.0 = version;
+                        }
+                        cached.1.clone()
+                    });
+                    builder.commands.entity(state.entity).insert(redraw);
+                }
+                mr
+            }
             SpawnKind::Axes {
                 x_range,
                 y_range,
@@ -3763,18 +3902,44 @@ impl Canvas {
                 vertices,
                 indices,
                 color,
+                colors,
             } => {
-                let mref = builder.spawn_triangle_mesh(vertices.clone(), indices.clone(), *color);
+                let colors = colors.as_ref().map(|colors| {
+                    colors
+                        .iter()
+                        .map(|color| {
+                            let rgba = color.to_rgba8();
+                            [
+                                rgba.r as f32 / 255.0,
+                                rgba.g as f32 / 255.0,
+                                rgba.b as f32 / 255.0,
+                                rgba.a as f32 / 255.0,
+                            ]
+                        })
+                        .collect()
+                });
+                let mref = builder.spawn_triangle_mesh_with_colors(
+                    vertices.clone(),
+                    indices.clone(),
+                    *color,
+                    colors,
+                );
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
             SpawnKind::Polyline3D { points, colors } => {
                 let base_color = spec
-                    .fill
+                    .stroke
                     .as_ref()
-                    .and_then(|b| match b {
-                        gaanim_core::peniko::Brush::Solid(c) => Some(*c),
+                    .and_then(|(brush, _)| match brush {
+                        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
                         _ => None,
+                    })
+                    .or_else(|| {
+                        spec.fill.as_ref().and_then(|brush| match brush {
+                            gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                            _ => None,
+                        })
                     })
                     .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
                 let mref = if let Some(cols) = colors {
@@ -3792,18 +3957,55 @@ impl Canvas {
                         })
                         .collect();
                     if cols_f32.len() == points.len() {
-                        builder.spawn_line_list_with_colors(
+                        builder.spawn_line_strip_with_colors(
                             points.clone(),
                             base_color,
                             Some(cols_f32),
                         )
                     } else {
                         // Mismatched lengths: fallback to uniform color (ignore per-vertex)
-                        builder.spawn_line_list(points.clone(), base_color)
+                        builder.spawn_line_strip(points.clone(), base_color)
                     }
                 } else {
-                    builder.spawn_line_list(points.clone(), base_color)
+                    builder.spawn_line_strip(points.clone(), base_color)
                 };
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
+            SpawnKind::LineSegments3D { points, colors } => {
+                let base_color = spec
+                    .stroke
+                    .as_ref()
+                    .and_then(|(brush, _)| match brush {
+                        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        spec.fill.as_ref().and_then(|brush| match brush {
+                            gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
+                let colors = colors.as_ref().map(|colors| {
+                    colors
+                        .iter()
+                        .map(|color| {
+                            let rgba = color.to_rgba8();
+                            [
+                                rgba.r as f32 / 255.0,
+                                rgba.g as f32 / 255.0,
+                                rgba.b as f32 / 255.0,
+                                rgba.a as f32 / 255.0,
+                            ]
+                        })
+                        .collect::<Vec<_>>()
+                });
+                let mref = builder.spawn_line_list_with_colors(
+                    points.clone(),
+                    base_color,
+                    colors.filter(|colors| colors.len() == points.len()),
+                );
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -4158,7 +4360,7 @@ impl Canvas {
             }
             SpawnKind::TracedPath3DLine => {
                 // Empty 3D line placeholder; TracedPath3D will fill its LineListData.
-                let mref = builder.spawn_line_list(vec![], gaanim_core::peniko::Color::WHITE);
+                let mref = builder.spawn_line_strip(vec![], gaanim_core::peniko::Color::WHITE);
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }

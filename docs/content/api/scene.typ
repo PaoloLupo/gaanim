@@ -49,7 +49,7 @@ Plain text uses the bundled New Computer Modern scientific theme by default;
 equations use the matching New Computer Modern Math face.
 
 ```python
-from gaanim import BLUE, GOLD, WHITE, Scene
+from gaanim import Axis, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720)
 
@@ -75,11 +75,8 @@ measure_arrow = scene.double_arrow(-140, -160, 140, -160)
 measure = scene.dimension(-80, 80, 80, 80, 24)
 spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
 axes = scene.axes(
-    x=(-5, 5, 1), y=(-3, 3, 1), grid=True, ticks=True, numbers=True,
-    x_label="x", y_label="f(x)",
-    axis_color=WHITE, grid_color="#6B7280", tick_color=GOLD,
-    number_color=WHITE, label_color=GOLD,
-    axis_width=3, grid_width=1, tick_width=2, tick_length=10,
+    Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
+    Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
 )
 logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
 icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
@@ -114,60 +111,28 @@ strokes, CSS, `viewBox`, transforms, `<use>`, outlined text, `clipPath`,
 `feGaussianBlur`, and `feDropShadow`. Patterns, masks, embedded raster images,
 and arbitrary filter graphs are intentionally omitted.
 
-`axes(x=..., y=...)` creates Cartesian axes as five independent vector layers:
-grid, axis lines, ticks, numbers, and axis labels — fully compatible with
-`manim.mobject.graphing.coordinate_systems.Axes` (`x_range`/`y_range` as
-`(min, max, step)`, `x_length`/`y_length` como en Manim, `tips=True`,
-`axis_config`/`x_axis_config`/`y_axis_config` dicts aceptados para compat).
-
-Ranges are `(minimum, maximum, step)`. The aggregate `grid`, `ticks`, `numbers`, and
-`labels` switches retain concise defaults. Per-axis overrides such as
-`x_grid=False`, `y_ticks=False`, or `x_numbers=False` hide only one component.
-Use `axis_color`, `grid_color`, `tick_color`, `number_color`, and `label_color`
-for independent colors; `axis_width`, `grid_width`, `tick_width`, and
-`tick_length` control vector geometry. `x_label` and `y_label` are optional.
-
-Manim-style sizing: `x_length=12, y_length=6` fija tamaño escena (no uniforme si
-difieren); `auto_fit=True` (default) escala el rango de datos a `safe_frame`
-(gaanim layout, ocupa `safe_frame` manteniendo aspecto, ticks sin escalar). Con
-`auto_fit=False` el rango se interpreta 1:1 en unidades escena.
+Coordinate systems, plots, data marks, and calculus constructions use the
+typed visualization API. Build immutable `Axis` specifications, create a
+`CoordinateSpace`, then call methods on that space:
 
 ```python
-# gaanim idiom — auto-fit a safe_frame
-axes = scene.axes(x=(-3, 3, 1), y=(-2, 2, 1), grid=True, auto_fit=True)
-# manim compat — tamaño explícito
-axes = scene.axes(x_range=(-7, 7, 1), y_range=(-4, 4, 1), x_length=10, y_length=6, tips=True)
+from gaanim import Axis, BLUE, Expr
+
+space = scene.number_plane(
+    Axis.linear(-3, 3).ticks(1).label("x"),
+    Axis.linear(-2, 2).ticks(1).label("f(x)"),
+    width=900,
+    height=480,
+)
+x = Expr.var("x")
+curve = space.plot(x.sin()).stroke(BLUE, 3)
+marker = scene.dot(6).at_coordinate(space.coord(1, 1))
 ```
 
-`axes` es animable: `axes.create()` dibuja secuencialmente `Grid → Axes → Ticks → Numbers/Labels`
-(vía leaves `crates/gaanim_api/src/builder.rs:1172`), no el `Path2D` vacío del grupo.
-
-Manim `CoordinateSystem` helpers disponibles en el `Drawable` de ejes:
-`axes.coords_to_point(x, y) → (sx, sy)`, `axes.point_to_coords((sx,sy)) → (x,y)`,
-`axes.get_x_axis()`/`get_y_axis()`/`get_axes()`, `axes.add_coordinates()`,
-y creación de gráficas:
-
-```python
-# y = f(x) — estilo propio via .stroke()
-curve = scene.plot(axes, lambda x: math.sin(x), x=(-3, 3), samples=200).stroke(BLUE, 3)
-# o manim-like: axes.plot(lambda x: ..., x_range=(-3,3))
-curve = axes.plot(lambda x: x**2, x_range=(-3, 3))
-
-# paramétrico t → (x,y)
-heart = scene.plot_parametric_curve(axes, lambda t: (16*math.sin(t)**3, 13*math.cos(t)-5*math.cos(2*t)-2*math.cos(3*t)-math.cos(4*t)), t=(0, 2*math.pi))
-# alias manim
-graph = axes.get_graph(lambda x: math.cos(x), x_range=(-3,3))
-```
-
-`function_graph(function, x=(minimum, maximum), samples=160)` samples `y =
-function(x)` once while the scene is built and returns a regular vector path.
-`parametric_curve(function, t=(minimum, maximum), samples=240)` does the same
-for a function returning `(x, y)`, which is useful for orbits and phase curves.
-
-```python
-parabola = scene.function_graph(lambda x: 0.008 * x * x - 60, x=(-250, 150))
-orbit = scene.parametric_curve(lambda t: (180 * cos(t), 120 * sin(t)), t=(0, 2 * PI))
-```
+The old `scene.plot`, `get_graph`, `function_graph`, Manim monkey patches, and
+fixed-canvas coordinate conversions are not public API. See
+#link("/api/visualization/", "Visualization API") for scales, polar/complex/3D
+spaces, native expressions, data/statistics, and educational helpers.
 
 `bezier(start, controls, end)` creates a native quadratic Bézier with one
 control point or a cubic Bézier with two. It remains a real Bézier path, so it
@@ -281,13 +246,14 @@ agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
 scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
 ```
 
-`bar_chart(values, labels=...)` creates a grouped chart with a baseline,
-labels, and bars scaled to the maximum value. It accepts finite non-negative
-values and returns a regular drawable for animation.
+Charts are data marks owned by a coordinate space. This gives them the same
+scales, conversions, layout, and native updates as function plots.
 
 ```python
-chart = scene.bar_chart([18, 42, 31], labels=["Q1", "Q2", "Q3"])
-scene.play([chart.grow_from_center().duration(0.6)])
+data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
+space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
+chart = space.bars(data, "x", "value")
+scene.play([space.create(), chart.grow_from_center().duration(0.6)])
 ```
 
 `table(headers, rows)` creates a compact table with a restrained blue header and
@@ -328,13 +294,16 @@ scene.play([snippet.fade_in().duration(0.4)])
 ```
 
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
-normalized value of a `ValueTracker` along a sampled `polyline`,
-`function_graph`, `parametric_curve`, or Bézier path. The value is clamped to
+normalized value of a `ValueTracker` along a sampled `polyline` or Bézier
+path. The value is clamped to
 `[0, 1]` and measured by arc length, with no Python callback during playback.
 
 ```python
 t = scene.value_tracker(0.0)
-curve = scene.parametric_curve(lambda u: (180 * cos(u), 100 * sin(2 * u)), t=(0, 2 * PI))
+curve = scene.polyline([
+  (180 * cos(u), 100 * sin(2 * u))
+  for u in (2 * PI * index / 240 for index in range(241))
+])
 dot = scene.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(2.0)])
 ```

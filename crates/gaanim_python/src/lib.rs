@@ -9,6 +9,7 @@ mod pylayout;
 mod transition;
 mod updater;
 mod value_tracker;
+mod visualization;
 
 /// Register the `gaanim_core` builtin module.
 pub fn register_inittab() {
@@ -37,6 +38,16 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pydrawable::PyFragmentSelection>()?;
     m.add_class::<updater::PyUpdater>()?;
     m.add_class::<value_tracker::PyValueTracker>()?;
+    m.add_class::<visualization::PyAxis>()?;
+    m.add_class::<visualization::PyExpr>()?;
+    m.add_class::<visualization::PyParameter>()?;
+    m.add_class::<visualization::PyCoordinateRef>()?;
+    m.add_class::<visualization::PyCoordinateSpace>()?;
+    m.add_class::<visualization::PyCoordinateSpace3D>()?;
+    m.add_class::<visualization::PyNumberLine>()?;
+    m.add_class::<visualization::PyPolarSpace>()?;
+    m.add_class::<visualization::PyDataTable>()?;
+    m.add_class::<visualization::PyDataSource>()?;
 
     m.add(
         "GOLD",

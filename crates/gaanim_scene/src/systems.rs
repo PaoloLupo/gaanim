@@ -750,6 +750,15 @@ pub fn build_3d_meshes_system(
         let normals: Vec<[f32; 3]> = positions.iter().map(|_| [0.0, 1.0, 0.0]).collect();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        let has_vertex_colors = data
+            .colors
+            .as_ref()
+            .is_some_and(|colors| colors.len() == mesh.count_vertices());
+        if let Some(colors) = &data.colors
+            && colors.len() == mesh.count_vertices()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors.clone());
+        }
         mesh.insert_attribute(
             Mesh::ATTRIBUTE_UV_0,
             vec![[0.0, 0.0]; mesh.count_vertices()],
@@ -764,7 +773,12 @@ pub fn build_3d_meshes_system(
             })
             .unwrap_or(bevy::color::Color::WHITE);
         let mat = materials.add(bevy::pbr::StandardMaterial {
-            base_color: color,
+            base_color: if has_vertex_colors {
+                bevy::color::Color::WHITE
+            } else {
+                color
+            },
+            unlit: true,
             double_sided: true,
             cull_mode: None,
             ..Default::default()
@@ -779,7 +793,14 @@ pub fn build_3d_meshes_system(
     }
 
     for (entity, data) in &query_line {
-        let mut mesh = Mesh::new(PrimitiveTopology::LineStrip, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            if data.strip {
+                PrimitiveTopology::LineStrip
+            } else {
+                PrimitiveTopology::LineList
+            },
+            RenderAssetUsages::default(),
+        );
         let positions = data.points.clone();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         // Bevy line meshes don't need indices if sequential, but we support them
@@ -789,10 +810,10 @@ pub fn build_3d_meshes_system(
         // Per-vertex colors (colormap) — if present, use vertex colors instead of uniform material tint.
         // StandardMaterial will multiply base_color * vertex_color, so we set base to WHITE.
         let has_vertex_colors = data.colors.as_ref().is_some_and(|c| !c.is_empty());
-        if let Some(cols) = &data.colors {
-            if cols.len() == mesh.count_vertices() {
-                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
-            }
+        if let Some(cols) = &data.colors
+            && cols.len() == mesh.count_vertices()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
         }
         let mesh_handle = meshes.add(mesh);
         let (base_color, alpha_mode) = if has_vertex_colors {
@@ -850,7 +871,14 @@ pub fn update_3d_line_meshes_system(
     }
     for (entity, data, mesh_handle, mat_handle, local_bounds_opt) in &mut query {
         // Rebuild mesh from current points/colors
-        let mut mesh = Mesh::new(PrimitiveTopology::LineStrip, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            if data.strip {
+                PrimitiveTopology::LineStrip
+            } else {
+                PrimitiveTopology::LineList
+            },
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.points.clone());
         if let Some(idx) = &data.indices {
             mesh.insert_indices(Indices::U32(idx.clone()));
@@ -859,10 +887,10 @@ pub fn update_3d_line_meshes_system(
             .colors
             .as_ref()
             .is_some_and(|c| c.len() == data.points.len());
-        if let Some(cols) = &data.colors {
-            if cols.len() == data.points.len() {
-                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
-            }
+        if let Some(cols) = &data.colors
+            && cols.len() == data.points.len()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
         }
         let new_handle = meshes.add(mesh);
         commands

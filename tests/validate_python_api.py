@@ -33,6 +33,62 @@ def declared_members(node: ast.ClassDef) -> set[str]:
     return members
 
 
+def validate_visualization_contract(module: object) -> list[str]:
+    """Exercise the native builders without starting the renderer."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    x_axis = module.Axis.linear(-4.0, 4.0).ticks(1.0).label("x")
+    y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y")
+    space = scene.number_plane(x_axis, y_axis, width=520.0, height=280.0)
+
+    x = module.Expr.var("x")
+    amplitude = scene.parameter(1.0)
+    space.plot(amplitude.expr() * x.sin())
+    space.parametric(lambda t: (t, t * t), (-1.0, 1.0), samples=32)
+    space.implicit(lambda px, py: px * px + py * py - 1.0, resolution=(16, 16))
+    space.vector_field(lambda px, py: (-py, px), resolution=(4, 4))
+    space.tangent(lambda value: value * value, 1.0)
+    space.riemann_sum(lambda value: value * value, (0.0, 2.0), rectangles=4)
+
+    source = module.DataSource(
+        {"id": ["a", "b"], "x": [0.0, 1.0], "y": [1.0, 2.0]},
+        key="id",
+    )
+    space.line(source, "x", "y")
+    source.replace({"id": ["a", "b"], "x": [0.0, 1.0], "y": [2.0, 3.0]})
+    if source.version != 1:
+        failures.append("DataSource.version did not advance after replace")
+
+    coordinate = space.coord(1.0, 2.0)
+    coordinate.place(scene.dot(3.0))
+    local = space.data_to_local(1.0, 2.0)
+    round_trip = space.local_to_data(*local)
+    if abs(round_trip[0] - 1.0) > 1e-9 or abs(round_trip[1] - 2.0) > 1e-9:
+        failures.append("CoordinateSpace data/local round trip failed")
+
+    linear_space = scene.axes(
+        module.Axis.linear(-4.0, 4.0),
+        module.Axis.linear(-3.0, 3.0),
+    )
+    if len(linear_space.animate_view((-2.0, 2.0), (-1.5, 1.5))) != 2:
+        failures.append("CoordinateSpace.animate_view did not return pan/zoom animations")
+
+    space_3d = scene.axes_3d(
+        module.Axis.linear(-2.0, 2.0),
+        module.Axis.linear(-2.0, 2.0),
+        module.Axis.linear(-2.0, 2.0),
+        size=(4.0, 4.0, 4.0),
+    )
+    space_3d.surface(lambda px, py: px * px - py * py, resolution=(8, 8))
+    space_3d.parametric(lambda t: (t, t * t, t * t * t), (-1.0, 1.0), samples=16)
+    space_3d.vector_field(lambda px, py, pz: (-py, px, -pz), resolution=(2, 2, 2))
+
+    for removed in ("plot", "get_graph", "function_graph", "parametric_curve", "bar_chart"):
+        if hasattr(module.Scene, removed):
+            failures.append(f"legacy Scene.{removed} remains public")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -54,6 +110,8 @@ def main() -> int:
             and not hasattr(module, node.target.id)
         ):
             missing.append(node.target.id)
+
+    missing.extend(validate_visualization_contract(module))
 
     if missing:
         print("Stub declarations missing from gaanim.gaanim_core:", file=sys.stderr)

@@ -13,15 +13,17 @@ pub enum SceneSet {
     Animation,
     /// Phase 3: Applying custom Mobject updaters (e.g. rotate updater, orbit updaters, tracked paths).
     Updaters,
-    /// Phase 4: Resolving layout constraints (e.g. flexbox, pins, coordinate alignments).
+    /// Phase 4: Regenerating coordinate spaces, plots, and data-driven marks.
+    Visualization,
+    /// Phase 5: Resolving layout constraints (e.g. flexbox, pins, coordinate alignments).
     Layout,
-    /// Phase 5: Propagating child-parent hierarchies (e.g. spatial transforms and opacity cascade).
+    /// Phase 6: Propagating child-parent hierarchies (e.g. spatial transforms and opacity cascade).
     Propagation,
-    /// Phase 6: Computing local and world bounding boxes (AABBs) for culling and clipping.
+    /// Phase 7: Computing local and world bounding boxes (AABBs) for culling and clipping.
     Bounds,
-    /// Phase 7: Extracting visible Mobjects into the Vello or 3D rendering cache.
+    /// Phase 8: Extracting visible Mobjects into the Vello or 3D rendering cache.
     Extraction,
-    /// Phase 8: Performing pointer hover, click, drag hit testing and dispatching event callbacks.
+    /// Phase 9: Performing pointer hover, click, drag hit testing and dispatching event callbacks.
     Interaction,
 }
 
@@ -33,13 +35,15 @@ pub struct GaanimScenePlugin;
 impl Plugin for GaanimScenePlugin {
     fn build(&self, app: &mut App) {
         // Enforce deterministic execution order:
-        // Input -> Animation -> Updaters -> Layout -> Propagation -> Bounds -> Extraction -> Interaction
+        // Input -> Animation -> Updaters -> Visualization -> Layout ->
+        // Propagation -> Bounds -> Extraction -> Interaction
         app.configure_sets(
             Update,
             (
                 SceneSet::Input,
                 SceneSet::Animation,
                 SceneSet::Updaters,
+                SceneSet::Visualization,
                 SceneSet::Layout,
                 SceneSet::Propagation,
                 SceneSet::Bounds,

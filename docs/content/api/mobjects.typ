@@ -534,14 +534,15 @@ and the perspective camera:
 
 ```python
 # show-code: true
-from gaanim import BLACK, BLUE, GOLD, RED, WHITE, Scene, Updater
+from gaanim import Axis, BLACK, BLUE, GOLD, RED, WHITE, Scene, Updater
 scene = Scene(640, 360, background=BLACK)
 
 axes = scene.axes_3d(
-    x_range=(-3, 3, 1), y_range=(-3, 3, 1), z_range=(-2, 2, 1),
-    x_label="x", y_label="y", z_label="z",
-    axis_color=WHITE, grid_color="#334155",
-).at_3d(0, 0, 0)
+    Axis.linear(-3, 3).ticks(1).label("x").style(color=WHITE),
+    Axis.linear(-3, 3).ticks(1).label("y").style(color=WHITE),
+    Axis.linear(-2, 2).ticks(1).label("z").style(color=WHITE),
+    size=(6, 6, 4),
+)
 path = scene.polyline_3d([(-2, -1, -1), (0, 1, 0), (2, -1, 1)], color=RED)
 dot = scene.dot(8).fill(GOLD).at_3d(1, 0, 0).billboard()
 dot.add_updater(Updater.orbit(0, 0, 1, 1.2))
@@ -564,15 +565,16 @@ scene.export("3d-quickstart.webp", fps=30)
 #api-entry(
   name: "Scene.axes_3d",
   kind: "factory",
-  signature: "axes_3d(x=None, y=None, z=None, x_range=None, y_range=None, z_range=None, grid=True, ticks=True, numbers=True, labels=True, x_axis=True, y_axis=True, z_axis=True, xy_grid=None, xz_grid=None, yz_grid=None, x_ticks=None, y_ticks=None, z_ticks=None, x_numbers=None, y_numbers=None, z_numbers=None, x_label=None, y_label=None, z_label=None, label_mode=\"billboard\", axis_color=None, grid_color=None, tick_color=None, number_color=None, label_color=None, axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0, auto_fit=True, x_length=None, y_length=None, z_length=None, tips=True) -> Drawable",
-  params: ((name: "x / y / z", type: "(min,max[,step])", default: "None", desc: [Axis ranges; each defaults to x=(-5,5,1), y=(-5,5,1), z=(-3,3,1).]), (name: "x_range / y_range / z_range", type: "(min,max[,step])", default: "None", desc: [Named aliases for the corresponding ranges.]), (name: "label_mode", type: "str", default: "\"billboard\"", desc: [Labels face the camera, or use "hud" for screen-space labels.]), (name: "auto_fit", type: "bool", default: "True", desc: [Fit ranges into the safe frame.]), (name: "x_length / y_length / z_length", type: "float", default: "None", desc: [Optional positive scene lengths.]),),
-  returns: (type: "Drawable", desc: [3D axes group with axes, grids, ticks, numbers, and labels.]),
-  desc: [Creates Cartesian axes and up to three grid planes. Ranges must be finite with minimum < maximum and a positive step. Use the aggregate switches or per-axis switches such as `xy_grid=False` and `z_numbers=False`.],
+  signature: "axes_3d(x: Axis, y: Axis, z: Axis, *, size=(10,8,6), grid=True) -> CoordinateSpace3D",
+  params: ((name: "x / y / z", type: "Axis", default: none, desc: [Reusable linear or temporal axis specifications.]), (name: "size", type: "(float,float,float)", default: "(10,8,6)", desc: [Positive world-space size; choose it relative to the camera distance.]), (name: "grid", type: "bool", default: "True", desc: [Show the three grid planes.]),),
+  returns: (type: "CoordinateSpace3D", desc: [Typed space with surface and parametric methods.]),
+  desc: [Creates Cartesian axes and up to three grid planes. Use `surface` and `parametric` on the returned space so data coordinates share the same mapping.],
 )[
 ```python
 axes = scene.axes_3d(
-    x_range=(-5, 5, 1), y_range=(-5, 5, 1), z_range=(-3, 3, 1),
-    x_label="x", y_label="y", z_label="z", label_mode="billboard",
+    Axis.linear(-5, 5).ticks(1).label("x"),
+    Axis.linear(-5, 5).ticks(1).label("y"),
+    Axis.linear(-3, 3).ticks(1).label("z"),
 )
 ```
 ]
@@ -640,60 +642,21 @@ scene.play([trail.fade_in()])
 
 == Plots
 
-#api-entry(
-  name: "Scene.function_graph",
-  kind: "factory",
-  signature: "function_graph(function, x=(min,max), samples=160) -> Drawable",
-  params: ((name: "function", type: "callable", default: none, desc: [y = f(x).]), (name: "x", type: "(float,float)", default: none, desc: [X range.]), (name: "samples", type: "int", default: "160", desc: [≥2 samples.]),),
-  returns: (type: "Drawable", desc: [Sampled polyline.]),
-  desc: [Plot y = f(x). Sampled once at build time.],
-)[
-```python
-# show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
-parabola = scene.function_graph(lambda x: 0.008*x*x - 40, x=(-160, 160), samples=90).no_fill().stroke(GOLD, 3)
-scene.play([parabola.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
-```
-]
+Plots are no longer free `Scene` factories. They are children of a typed
+coordinate space, which owns scales, conversions, clipping, and sampling.
+See #link("/api/visualization/", "Visualization API") for Cartesian,
+polar, complex, and 3D spaces; native expressions; data marks; statistics;
+and calculus helpers.
 
-#api-entry(
-  name: "Scene.parametric_curve",
-  kind: "factory",
-  signature: "parametric_curve(function, t=(min,max), samples=240) -> Drawable",
-  params: ((name: "function", type: "callable", default: none, desc: [(x,y) = f(t).]), (name: "t", type: "(float,float)", default: none, desc: [Parameter range.]), (name: "samples", type: "int", default: "240", desc: [≥2.]),),
-  returns: (type: "Drawable", desc: [Parametric polyline.]),
-  desc: [Orbits, phase plots.],
-)[
 ```python
-# show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-from math import cos, sin, pi
-scene = Scene(480, 270, background="#0f172a")
-orbit = scene.parametric_curve(lambda t: (90*cos(t), 55*sin(t)), t=(0, 2*pi)).no_fill().stroke(BLUE, 3)
-scene.play([orbit.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
-```
-]
+from gaanim import Axis, BLUE, Expr, Scene
 
-#api-entry(
-  name: "Scene.axes",
-  kind: "factory",
-  signature: "axes(x, y, *, grid, ticks, labels, colors, widths) -> Drawable",
-  params: ((name: "x", type: "(min,max,step)", default: none, desc: [X range + step.]), (name: "y", type: "(min,max,step)", default: none, desc: [Y range + step.]), (name: "grid", type: "bool", default: "True", desc: [Show grid.]), (name: "x_label", type: "str", default: "None", desc: [Axis label.]),),
-  returns: (type: "Drawable", desc: [Five-layer axes group.]),
-  desc: [Grid, axes, ticks, numbers, labels as independent layers. Per-axis overrides: `x_grid`, `y_ticks`, etc. Colors: `axis_color`, `grid_color`, `tick_color`, `number_color`, `label_color`.],
-)[
-```python
-# show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
-axes = scene.axes(x=(-4, 4, 1), y=(-2, 2, 1), grid=True, x_label="x", y_label="f(x)", axis_color=WHITE, grid_color="#334155")
-scene.play([axes.create().duration(0.9)])
-scene.export("preview.webp", fps=30)
+space = scene.number_plane(Axis.linear(-4, 4), Axis.linear(-2, 2))
+x = Expr.var("x")
+curve = space.plot(x.sin()).stroke(BLUE, 3)
+scene.play([space.create(), curve.create()])
 ```
-]
 
 == Text & Math
 
@@ -967,20 +930,18 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Scene.bar_chart",
+  name: "CoordinateSpace.bars",
   kind: "factory",
-  signature: "bar_chart(values, *, labels, width, height, gap, color) -> Drawable",
-  params: ((name: "values", type: "list[float]", default: none, desc: [Finite ≥0, scaled to max.]), (name: "labels", type: "list[str]", default: "auto 1..n", desc: [One per value.]),),
-  returns: (type: "Drawable", desc: [Chart with baseline + bars + labels.]),
-  desc: [Grouped chart. Bars are rounded rects, animatable as group or individually.],
+  signature: "bars(source: DataSource, x: str, y: str, *, width=0.8, baseline=0) -> Drawable",
+  params: ((name: "source", type: "DataSource", default: none, desc: [Replaceable tabular data.]), (name: "x / y", type: "str", default: none, desc: [Numeric column names.]),),
+  returns: (type: "Drawable", desc: [Batched bars parented to the coordinate space.]),
+  desc: [Use a categorical `Axis` for labels. The mark regenerates natively after data replacement or append.],
 )[
 ```python
-# show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
-chart = scene.bar_chart([18, 42, 31], labels=["Q1","Q2","Q3"], color=BLUE).at(0, -10)
-scene.play([chart.grow_from_center().duration(0.8)])
-scene.export("preview.webp", fps=30)
+from gaanim import Axis, BLUE, DataSource
+data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
+space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
+chart = space.bars(data, "x", "value").fill(BLUE)
 ```
 ]
 
@@ -1037,7 +998,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.0)
-curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(2*u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
+curve = scene.polyline([(110*cos(u), 60*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 dot = scene.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(1.6)])
 scene.export("preview.webp", fps=30)
@@ -1058,7 +1019,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.35)
-curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
+curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 tangent = scene.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
 scene.play([tangent.fade_in().duration(0.3), t.animate_to(0.9).duration(1.4)])
 scene.export("preview.webp", fps=30)
@@ -1079,7 +1040,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.25)
-curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
+curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 circle = scene.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
 scene.play([circle.fade_in().duration(0.3), t.animate_to(0.7).duration(1.4)])
 scene.export("preview.webp", fps=30)

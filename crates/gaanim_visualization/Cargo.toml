@@ -1,0 +1,18 @@
+[package]
+name = "gaanim_visualization"
+version = "0.1.0"
+edition = "2024"
+description = "Coordinate spaces, sampling, data tables, and statistical geometry for Gaanim"
+
+[dependencies]
+gaanim_core = { path = "../gaanim_core" }
+gaanim_expr = { path = "../gaanim_expr" }
+gaanim_math = { path = "../gaanim_math" }
+glam = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+default = []
+serde = ["gaanim_core/serde", "gaanim_math/serde", "glam/serde", "kurbo/serde", "peniko/serde"]

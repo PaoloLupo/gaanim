@@ -60,6 +60,7 @@
           "API Reference": (
             "Overview": "api/",
             "Scene": "api/scene/",
+            "Visualization": "api/visualization/",
             "Layouts": "api/layout/",
             "Mobjects": "api/mobjects/",
             "Animations": "api/animations/",

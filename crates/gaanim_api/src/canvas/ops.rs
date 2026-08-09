@@ -256,6 +256,14 @@ pub(crate) enum Op {
     Hide(ObjectId),
     /// Remove an object completely.
     Remove(ObjectId),
+    /// Reparent a drawable into an existing group while retaining its local transform.
+    AttachToGroup { group: ObjectId, child: ObjectId },
+    /// Reparent and place a drawable at a coordinate-space local point.
+    PlaceAtCoordinate {
+        space: ObjectId,
+        target: ObjectId,
+        local: DVec3,
+    },
     /// Adopt an existing drawable into the active segment.
     Reuse(ObjectId),
     /// Make an existing drawable global from the current cursor onward.

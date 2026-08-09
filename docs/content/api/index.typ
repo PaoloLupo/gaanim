@@ -65,6 +65,7 @@ Copiar, pegar, `gaanim archivo.py`.
 == Mapa rápido
 
 - #link("/api/scene/", "Scene — viewport, factories, timeline, slides, cámara, export")
+- #link("/api/visualization/", "Visualization — ejes, funciones, datos, estadística y cálculo")
 - #link("/api/mobjects/", "Mobjects — 40+ factories por categoría")
 - #link("/api/animations/", "Animations — 22 anims + timing/easing")
 - #link("/api/themes/", "Themes — colores y brushes")

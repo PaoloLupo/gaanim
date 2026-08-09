@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Scene, Theme
+from gaanim import Axis, DataSource, Scene, Theme
 
 
 scene = Scene(1280, 720, margin=54)
@@ -44,12 +44,14 @@ scene.bullets(
     gap=64,
 ).at(-320, -30)
 
-scene.bar_chart(
-    [38, 64, 91],
-    labels=["Baseline", "Pilot", "Final"],
+chart_data = DataSource({"x": [0, 1, 2], "value": [38, 64, 91]})
+chart_space = scene.axes(
+    Axis.category(["Baseline", "Pilot", "Final"]),
+    Axis.linear(0, 100).ticks(25),
     width=500,
     height=310,
 ).at(330, -35)
+chart_space.bars(chart_data, "x", "value", width=0.7).fill(scene.canvas.color("accent"))
 
 scene.caption(
     "Use Theme(...) to start from scratch, or derive any built-in scheme.",

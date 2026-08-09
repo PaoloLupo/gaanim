@@ -820,7 +820,8 @@ impl PyDrawable {
 
     // --- manim Axes compatibility ---
     /// manim `coords_to_point` — data coords → scene point (respects auto_fit/x_length).
-    fn coords_to_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
+    #[pyo3(name = "_legacy_coords_to_point")]
+    fn legacy_coords_to_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
             return Err(PyValueError::new_err(
                 "coords_to_point() only valid on axes",
@@ -861,7 +862,8 @@ impl PyDrawable {
     }
 
     /// manim `point_to_coords` — scene point → data coords (inverse of coords_to_point).
-    fn point_to_coords(&self, point: (f64, f64)) -> PyResult<(f64, f64)> {
+    #[pyo3(name = "_legacy_point_to_coords")]
+    fn legacy_point_to_coords(&self, point: (f64, f64)) -> PyResult<(f64, f64)> {
         let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = self.0.axes_info() else {
             return Err(PyValueError::new_err(
                 "point_to_coords() only valid on axes",
@@ -901,30 +903,35 @@ impl PyDrawable {
     }
 
     /// manim `get_x_axis` / `get_y_axis` — return the axes itself (group) for compatibility.
-    fn get_x_axis(&self) -> PyResult<Self> {
+    #[pyo3(name = "_legacy_get_x_axis")]
+    fn legacy_get_x_axis(&self) -> PyResult<Self> {
         if self.0.axes_info().is_none() {
             return Err(PyValueError::new_err("get_x_axis() only valid on axes"));
         }
         Ok(Self(self.0.clone()))
     }
-    fn get_y_axis(&self) -> PyResult<Self> {
+    #[pyo3(name = "_legacy_get_y_axis")]
+    fn legacy_get_y_axis(&self) -> PyResult<Self> {
         if self.0.axes_info().is_none() {
             return Err(PyValueError::new_err("get_y_axis() only valid on axes"));
         }
         Ok(Self(self.0.clone()))
     }
-    fn get_axes(&self) -> PyResult<Self> {
-        self.get_x_axis()
+    #[pyo3(name = "_legacy_get_axes")]
+    fn legacy_get_axes(&self) -> PyResult<Self> {
+        self.legacy_get_x_axis()
     }
 
     /// manim `add_coordinates` — no-op in gaanim (numbers already via config), kept for compat.
-    fn add_coordinates(&self) -> Self {
+    #[pyo3(name = "_legacy_add_coordinates")]
+    fn legacy_add_coordinates(&self) -> Self {
         Self(self.0.clone())
     }
 
     /// manim `get_graph` / `plot` alias — note: use `scene.plot(axes, func, ...)` for actual graph creation.
     /// This is a compatibility shim that creates an empty polyline.
-    fn get_graph(&self) -> PyResult<Self> {
+    #[pyo3(name = "_legacy_get_graph")]
+    fn legacy_get_graph(&self) -> PyResult<Self> {
         if self.0.axes_info().is_none() {
             return Err(PyValueError::new_err("get_graph() only valid on axes"));
         }

@@ -4614,6 +4614,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         indices: Vec<u32>,
         color: Option<Color>,
     ) -> MobjectRef {
+        self.spawn_triangle_mesh_with_colors(vertices, indices, color, None)
+    }
+
+    pub fn spawn_triangle_mesh_with_colors(
+        &mut self,
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        color: Option<Color>,
+        colors: Option<Vec<[f32; 4]>>,
+    ) -> MobjectRef {
         let id = self.next_id();
         // Compute bounds
         let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
@@ -4640,6 +4650,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     vertices,
                     indices,
                     color,
+                    colors,
                 },
                 Mesh3DMarker,
                 Transform::default(),
@@ -4670,7 +4681,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Spawns a 3D line list (axes, grids) from world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used.
     pub fn spawn_line_list(&mut self, points: Vec<[f32; 3]>, color: Color) -> MobjectRef {
-        self.spawn_line_list_with_colors(points, color, None)
+        self.spawn_lines(points, color, None, false)
     }
 
     /// Spawns a 3D line list with optional per-vertex colors (colormap).
@@ -4679,6 +4690,29 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         points: Vec<[f32; 3]>,
         color: Color,
         colors: Option<Vec<[f32; 4]>>,
+    ) -> MobjectRef {
+        self.spawn_lines(points, color, colors, false)
+    }
+
+    pub fn spawn_line_strip(&mut self, points: Vec<[f32; 3]>, color: Color) -> MobjectRef {
+        self.spawn_lines(points, color, None, true)
+    }
+
+    pub fn spawn_line_strip_with_colors(
+        &mut self,
+        points: Vec<[f32; 3]>,
+        color: Color,
+        colors: Option<Vec<[f32; 4]>>,
+    ) -> MobjectRef {
+        self.spawn_lines(points, color, colors, true)
+    }
+
+    fn spawn_lines(
+        &mut self,
+        points: Vec<[f32; 3]>,
+        color: Color,
+        colors: Option<Vec<[f32; 4]>>,
+        strip: bool,
     ) -> MobjectRef {
         let id = self.next_id();
         let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
@@ -4704,6 +4738,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 LineListData {
                     points,
                     indices: None,
+                    strip,
                     color,
                     colors,
                 },

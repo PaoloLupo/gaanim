@@ -8,8 +8,9 @@ name = "gaanim_python"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["abi3-py312", "py-clone"] }
+pyo3 = { version = "0.28", features = ["abi3-py312", "multiple-pymethods", "py-clone"] }
 gaanim_core = { path = "../gaanim_core" }
+gaanim_expr = { path = "../gaanim_expr" }
 gaanim_api = { path = "../gaanim_api" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_math = { path = "../gaanim_math" }
@@ -17,3 +18,4 @@ gaanim_objects = { path = "../gaanim_objects" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_diff = { path = "../gaanim_diff", default-features = false }
 gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_visualization = { path = "../gaanim_visualization" }

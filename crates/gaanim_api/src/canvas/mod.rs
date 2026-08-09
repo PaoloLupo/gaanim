@@ -5,8 +5,8 @@ pub use ops::{CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use types::{
-    Anim, Axes3DConfig, AxesConfig, CoordinateSystem, CurveControl, CurveElement, ImageCrop,
-    ImageFit, ImageOptions, ImageOptionsError, LabelMode, LayoutKind, LayoutOp, Margin, ObjectSpec,
+    Anim, Axes3DConfig, AxesConfig, CanvasUnits, CurveControl, CurveElement, ImageCrop, ImageFit,
+    ImageOptions, ImageOptionsError, LabelMode, LayoutKind, LayoutOp, Margin, ObjectSpec,
     OptDuration, ParagraphOptions, ParagraphOverflow, SpawnKind, TextAlign,
 };
 mod layout;
@@ -18,6 +18,11 @@ pub use segment::{
 mod drawable;
 pub use drawable::{
     DrawableHandle, FragmentSelection, GltfAnimationError, RotationAxisError, SvgPartError,
+};
+mod visualization;
+pub use visualization::{
+    CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle, Parameter,
+    PolarSpaceHandle, VisualizationError,
 };
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};

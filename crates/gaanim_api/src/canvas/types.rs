@@ -12,18 +12,18 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::ops::{Op, SharedCanvasState};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CoordinateSystem {
+pub enum CanvasUnits {
     Pixels,
     Scene { frame_width: f64, frame_height: f64 },
 }
 
-impl Default for CoordinateSystem {
+impl Default for CanvasUnits {
     fn default() -> Self {
         Self::Pixels
     }
 }
 
-impl CoordinateSystem {
+impl CanvasUnits {
     pub fn frame_bounds(&self, canvas_width: u32, canvas_height: u32) -> Bounds3D {
         match self {
             Self::Pixels => {
@@ -514,6 +514,20 @@ pub enum SpawnKind {
     },
     /// A native path with Typst-style cursor commands.
     Curve(Vec<CurveElement>),
+    /// A natively evaluated expression sampled in a coordinate space.
+    ExpressionPlot {
+        map: gaanim_visualization::CoordinateMap2D,
+        expression: gaanim_expr::Expr,
+        variable: String,
+        domain: (f64, f64),
+        sampling: gaanim_visualization::Sampling,
+    },
+    /// One table-backed mark regenerated natively when its DataSource changes.
+    DataMark {
+        map: gaanim_visualization::CoordinateMap2D,
+        source: gaanim_visualization::DataSource,
+        kind: gaanim_visualization::DataMarkKind,
+    },
     Axes {
         x_range: (f64, f64, f64),
         y_range: (f64, f64, f64),
@@ -531,10 +545,17 @@ pub enum SpawnKind {
         indices: Vec<u32>,
         /// Optional base color for the material. If None, uses theme.
         color: Option<Color>,
+        /// Optional per-vertex colors.
+        colors: Option<Vec<Color>>,
     },
     /// 3D polyline (e.g., curve) defined by world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used (colormap).
     Polyline3D {
+        points: Vec<[f32; 3]>,
+        colors: Option<Vec<Color>>,
+    },
+    /// Independent 3D line segments stored in one retained mesh.
+    LineSegments3D {
         points: Vec<[f32; 3]>,
         colors: Option<Vec<Color>>,
     },

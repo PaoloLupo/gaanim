@@ -1,26 +1,32 @@
-"""A restrained bar chart for technical and scientific explainers."""
+"""A reactive, table-backed bar chart for educational videos."""
 
 import os
 
-from gaanim import BLACK, BLUE, GRAY, WHITE, Direction, Scene
+from gaanim import Axis, BLACK, BLUE, DataSource, GRAY, WHITE, Direction, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
+labels = ["Baseline", "Cached", "GPU", "Optimized"]
+data = DataSource(
+    {"method": labels, "x": [0, 1, 2, 3], "elapsed": [48, 32, 21, 15]},
+    key="method",
+)
+
+space = scene.axes(
+    Axis.category(labels).style(color=WHITE, number_color=WHITE),
+    Axis.linear(0, 55).ticks(10).label("ms").style(color=WHITE, number_color=WHITE),
+    width=780,
+    height=340,
+).at(0, -35)
+bars = space.bars(data, "x", "elapsed", width=0.72).fill(BLUE)
 
 title = scene.title("Convergence benchmark").fill(WHITE).at(0, 245)
 subtitle = scene.subtitle("Elapsed time (ms) — lower is better").fill(GRAY).at(0, 190)
-chart = scene.bar_chart(
-    [48, 32, 21, 15],
-    labels=["Baseline", "Cached", "GPU", "Optimized"],
-    width=780,
-    height=340,
-    color=BLUE,
-).at(0, -35)
-
 scene.play([
     title.write().duration(0.55),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
-    chart.grow_from_center().duration(0.7),
+    space.create().duration(0.7),
+    bars.grow_from_center().duration(0.7),
 ])
 scene.wait(0.3)
 

@@ -17,7 +17,7 @@ use crate::canvas::ops::{
     CanvasEndpoint, CanvasState, LocalSegmentStop, Op, Segment, SharedCanvasState,
 };
 use crate::canvas::types::{
-    Anim, CoordinateSystem, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
+    Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
     SpawnKind,
 };
 use crate::canvas::{
@@ -140,7 +140,7 @@ pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub background: Option<Color>,
-    pub units: CoordinateSystem,
+    pub units: CanvasUnits,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
@@ -165,7 +165,7 @@ impl Canvas {
             background: None,
             theme: None,
             theme_style: None,
-            units: CoordinateSystem::Pixels,
+            units: CanvasUnits::Pixels,
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
@@ -192,6 +192,11 @@ impl Canvas {
                         if matches!(
                             spec.lock().expect("object spec poisoned").kind,
                             SpawnKind::GltfModel { .. }
+                                | SpawnKind::Axes3D { .. }
+                                | SpawnKind::SurfaceMesh { .. }
+                                | SpawnKind::Polyline3D { .. }
+                                | SpawnKind::LineSegments3D { .. }
+                                | SpawnKind::TracedPath3DLine
                         )
                 )
             })
@@ -253,7 +258,7 @@ impl Canvas {
         }
     }
 
-    pub fn with_units(mut self, u: CoordinateSystem) -> Self {
+    pub fn with_units(mut self, u: CanvasUnits) -> Self {
         self.units = u;
         self
     }
@@ -391,7 +396,7 @@ impl Canvas {
         gaanim_objects::prelude::clear_gltf_cache();
     }
 
-    fn safe_frame(&self) -> gaanim_math::Bounds3D {
+    pub(crate) fn safe_frame(&self) -> gaanim_math::Bounds3D {
         let raw = self.units.frame_bounds(self.width, self.height);
         gaanim_math::Bounds3D::new_2d(
             raw.min.x + self.margin.left,
@@ -419,7 +424,7 @@ impl Canvas {
             .len()
     }
 
-    fn spawn(&mut self, kind: SpawnKind) -> DrawableHandle {
+    pub(crate) fn spawn(&mut self, kind: SpawnKind) -> DrawableHandle {
         self.spawn_registered(kind, true)
     }
 
@@ -783,6 +788,21 @@ impl Canvas {
             vertices,
             indices,
             color,
+            colors: None,
+        })
+    }
+
+    pub fn surface_mesh_with_colors(
+        &mut self,
+        vertices: Vec<[f32; 3]>,
+        indices: Vec<u32>,
+        colors: Vec<Color>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::SurfaceMesh {
+            vertices,
+            indices,
+            color: None,
+            colors: Some(colors),
         })
     }
 
@@ -802,6 +822,24 @@ impl Canvas {
         colors: Vec<Color>,
     ) -> DrawableHandle {
         self.spawn(SpawnKind::Polyline3D {
+            points,
+            colors: Some(colors),
+        })
+    }
+
+    pub(crate) fn line_segments_3d(&mut self, points: Vec<[f32; 3]>) -> DrawableHandle {
+        self.spawn(SpawnKind::LineSegments3D {
+            points,
+            colors: None,
+        })
+    }
+
+    pub(crate) fn line_segments_3d_with_colors(
+        &mut self,
+        points: Vec<[f32; 3]>,
+        colors: Vec<Color>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::LineSegments3D {
             points,
             colors: Some(colors),
         })

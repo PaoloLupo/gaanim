@@ -607,7 +607,7 @@ impl PyCanvas {
 /// Top-level public facade for building a Gaanim animation.
 #[pyclass(name = "Scene", module = "gaanim_core")]
 pub struct PyScene {
-    inner: Arc<Mutex<ApiCanvas>>,
+    pub(crate) inner: Arc<Mutex<ApiCanvas>>,
 }
 
 /// Semantic camera controller exposed as ``scene.camera``.
@@ -1511,8 +1511,8 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (function, x, samples=160))]
-    fn function_graph(
+    #[pyo3(name = "_legacy_function_graph", signature = (function, x, samples=160))]
+    fn legacy_function_graph(
         &self,
         function: Bound<'_, PyAny>,
         x: (f64, f64),
@@ -1538,8 +1538,8 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (function, t, samples=240))]
-    fn parametric_curve(
+    #[pyo3(name = "_legacy_parametric_curve", signature = (function, t, samples=240))]
+    fn legacy_parametric_curve(
         &self,
         function: Bound<'_, PyAny>,
         t: (f64, f64),
@@ -1564,7 +1564,7 @@ impl PyScene {
                 .polyline(&points),
         ))
     }
-    #[pyo3(signature = (
+    #[pyo3(name = "_legacy_axes", signature = (
         x=None, y=None, *,
         x_range=None, y_range=None,
         grid=true, ticks=true, numbers=true, labels=true,
@@ -1579,7 +1579,7 @@ impl PyScene {
         auto_fit=true, x_length=None, y_length=None, tips=true,
         axis_config=None, x_axis_config=None, y_axis_config=None
     ))]
-    fn axes(
+    fn legacy_axes(
         &self,
         x: Option<Bound<'_, PyAny>>,
         y: Option<Bound<'_, PyAny>>,
@@ -1728,7 +1728,7 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (
+    #[pyo3(name = "_legacy_axes_3d", signature = (
         x=None, y=None, z=None,
         x_range=None, y_range=None, z_range=None,
         grid=true, ticks=true, numbers=true, labels=true,
@@ -1743,7 +1743,7 @@ impl PyScene {
         axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
         auto_fit=true, x_length=None, y_length=None, z_length=None, tips=true
     ))]
-    fn axes_3d(
+    fn legacy_axes_3d(
         &self,
         x: Option<Bound<'_, PyAny>>,
         y: Option<Bound<'_, PyAny>>,
@@ -1899,8 +1899,8 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (axes, function, x, samples=160))]
-    fn plot(
+    #[pyo3(name = "_legacy_plot", signature = (axes, function, x, samples=160))]
+    fn legacy_plot(
         &self,
         axes: &PyDrawable,
         function: Bound<'_, PyAny>,
@@ -1985,20 +1985,20 @@ impl PyScene {
     }
 
     /// manim `get_graph` — alias to `plot`
-    #[pyo3(signature = (axes, function, x, samples=160))]
-    fn get_graph(
+    #[pyo3(name = "_legacy_get_graph", signature = (axes, function, x, samples=160))]
+    fn legacy_get_graph(
         &self,
         axes: &PyDrawable,
         function: Bound<'_, PyAny>,
         x: (f64, f64),
         samples: usize,
     ) -> PyResult<PyDrawable> {
-        self.plot(axes, function, x, samples)
+        self.legacy_plot(axes, function, x, samples)
     }
 
     /// manim `plot_parametric_curve` — (t -> (x,y)) with t_range, respects auto_fit/x_length
-    #[pyo3(signature = (axes, function, t, samples=160))]
-    fn plot_parametric_curve(
+    #[pyo3(name = "_legacy_plot_parametric_curve", signature = (axes, function, t, samples=160))]
+    fn legacy_plot_parametric_curve(
         &self,
         axes: &PyDrawable,
         function: Bound<'_, PyAny>,
@@ -3052,8 +3052,8 @@ impl PyScene {
     }
 
     /// Create a labeled bar chart for finite non-negative values.
-    #[pyo3(signature = (values, *, labels=None, width=640.0, height=320.0, gap=20.0, color=None))]
-    fn bar_chart(
+    #[pyo3(name = "_legacy_bar_chart", signature = (values, *, labels=None, width=640.0, height=320.0, gap=20.0, color=None))]
+    fn legacy_bar_chart(
         &self,
         values: Vec<f64>,
         labels: Option<Vec<String>>,

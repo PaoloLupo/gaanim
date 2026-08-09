@@ -294,9 +294,11 @@ scene.export("preview.webp", fps=30)
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, Scene
+from gaanim import Axis, BLUE, DataSource, Scene
 scene = Scene(480, 270, background="#0f172a")
-chart = scene.bar_chart([18, 42, 31], labels=["Q1","Q2","Q3"], color=BLUE).at(0, -10)
+data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
+space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
+chart = space.bars(data, "x", "value").fill(BLUE)
 scene.play([chart.grow_from_center().duration(0.7).spring()])
 scene.play([chart.shrink_to_center().duration(0.5)])
 scene.export("preview.webp", fps=30)

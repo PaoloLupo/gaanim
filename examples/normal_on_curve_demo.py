@@ -6,10 +6,10 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = (
-    scene.parametric_curve(
-        lambda t: (210 * math.cos(t), 120 * math.sin(2 * t)),
-        t=(0, 2 * math.pi),
-    )
+    scene.polyline([
+        (210 * math.cos(t), 120 * math.sin(2 * t))
+        for t in (2 * math.pi * index / 240 for index in range(241))
+    ])
     .no_fill()
     .stroke(BLUE, 4)
 )
