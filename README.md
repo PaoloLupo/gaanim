@@ -82,8 +82,9 @@ el script. Presenter Mode siempre respeta los stops. Durante una presentación,
 blanking. Cerrar Presenter View mantiene la audiencia activa y `P` vuelve a
 abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.
   El encabezado incluye un cronómetro de exposición reiniciable y la hora local.
-  La pantalla fullscreen muestra un dock compacto con Previous, Advance/Pause,
-  inicio, fin y progreso solo mientras esa ventana tiene foco. Presenter View
+  La pantalla fullscreen revela un dock compacto con Previous, Advance/Pause,
+  inicio, fin y progreso al llevar el cursor a su zona inferior; se oculta al
+  retirar el cursor o perder foco. Presenter View
   identifica el cue activo sin repetir el nombre del segmento y mantiene Up Next
   por encima de las notas con scroll independiente.
 

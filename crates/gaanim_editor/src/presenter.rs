@@ -311,8 +311,31 @@ fn audience_controls_visible(
     presentation_active: bool,
     audience_blank: AudienceBlank,
     audience_focused: bool,
+    pointer_over_controls: bool,
+    cursor_in_dock_zone: bool,
 ) -> bool {
-    presentation_active && audience_blank == AudienceBlank::None && audience_focused
+    presentation_active
+        && audience_blank == AudienceBlank::None
+        && audience_focused
+        && (pointer_over_controls || cursor_in_dock_zone)
+}
+
+fn cursor_in_audience_dock_zone(
+    cursor_position: Option<Vec2>,
+    window_width: f32,
+    window_height: f32,
+) -> bool {
+    let Some(cursor) = cursor_position else {
+        return false;
+    };
+    let content_width = (window_width - 48.0).clamp(280.0, 920.0);
+    let dock_width = content_width + 32.0;
+    let left = (window_width - dock_width) * 0.5;
+    let right = left + dock_width;
+    cursor.x >= left
+        && cursor.x <= right
+        && cursor.y >= (window_height - 100.0).max(0.0)
+        && cursor.y <= window_height
 }
 
 fn representative_segment_time(start_time: f64, end_time: f64) -> f64 {
@@ -615,9 +638,27 @@ pub(crate) fn audience_playback_controls_system(
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
 ) {
-    audience_controls.pointer_over = false;
-    let audience_focused = primary_window.single().is_ok_and(|window| window.focused);
-    if !audience_controls_visible(presentation_mode.active, *audience_blank, audience_focused) {
+    let (audience_focused, cursor_in_dock_zone) = primary_window
+        .single()
+        .map(|window| {
+            (
+                window.focused,
+                cursor_in_audience_dock_zone(
+                    window.cursor_position(),
+                    window.width(),
+                    window.height(),
+                ),
+            )
+        })
+        .unwrap_or((false, false));
+    if !audience_controls_visible(
+        presentation_mode.active,
+        *audience_blank,
+        audience_focused,
+        audience_controls.pointer_over,
+        cursor_in_dock_zone,
+    ) {
+        audience_controls.pointer_over = false;
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else {
@@ -1474,10 +1515,10 @@ mod tests {
         AudienceControlsState, PresentationAction, PresentationTimer, PresenterCamera,
         PresenterOverviewState, PresenterThumbnailCache, PresenterWindow, ThumbnailMoment,
         ThumbnailPixels, apply_presentation_action, audience_controls_visible,
-        cleanup_presenter_before_window_close_system, cue_label, desired_thumbnail_edge,
-        entry_segment_time, format_stopwatch, next_cue_label, presentation_input_system,
-        representative_segment_time, sync_presentation_timer_system, thumbnail_dimensions,
-        thumbnail_upload_required,
+        cleanup_presenter_before_window_close_system, cue_label, cursor_in_audience_dock_zone,
+        desired_thumbnail_edge, entry_segment_time, format_stopwatch, next_cue_label,
+        presentation_input_system, representative_segment_time, sync_presentation_timer_system,
+        thumbnail_dimensions, thumbnail_upload_required,
     };
     use crate::{AudienceBlank, PresentationMode};
     use bevy::{
@@ -1579,10 +1620,68 @@ mod tests {
 
     #[test]
     fn audience_controls_require_the_fullscreen_window_to_have_focus() {
-        assert!(audience_controls_visible(true, AudienceBlank::None, true));
-        assert!(!audience_controls_visible(true, AudienceBlank::None, false));
-        assert!(!audience_controls_visible(true, AudienceBlank::Black, true));
-        assert!(!audience_controls_visible(false, AudienceBlank::None, true));
+        assert!(audience_controls_visible(
+            true,
+            AudienceBlank::None,
+            true,
+            false,
+            true
+        ));
+        assert!(audience_controls_visible(
+            true,
+            AudienceBlank::None,
+            true,
+            true,
+            false
+        ));
+        assert!(!audience_controls_visible(
+            true,
+            AudienceBlank::None,
+            true,
+            false,
+            false
+        ));
+        assert!(!audience_controls_visible(
+            true,
+            AudienceBlank::None,
+            false,
+            true,
+            true
+        ));
+        assert!(!audience_controls_visible(
+            true,
+            AudienceBlank::Black,
+            true,
+            true,
+            true
+        ));
+        assert!(!audience_controls_visible(
+            false,
+            AudienceBlank::None,
+            true,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn audience_dock_reveals_only_inside_its_bottom_hover_zone() {
+        assert!(cursor_in_audience_dock_zone(
+            Some(Vec2::new(960.0, 1040.0)),
+            1920.0,
+            1080.0
+        ));
+        assert!(!cursor_in_audience_dock_zone(
+            Some(Vec2::new(960.0, 700.0)),
+            1920.0,
+            1080.0
+        ));
+        assert!(!cursor_in_audience_dock_zone(
+            Some(Vec2::new(100.0, 1040.0)),
+            1920.0,
+            1080.0
+        ));
+        assert!(!cursor_in_audience_dock_zone(None, 1920.0, 1080.0));
     }
 
     #[test]

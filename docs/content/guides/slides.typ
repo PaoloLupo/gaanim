@@ -73,8 +73,9 @@ conservan al reabrir Presenter View y se renderizan a una resolución adaptada a
 tamaño y DPI de la ventana. El encabezado muestra un cronómetro reiniciable para
   medir la exposición y, en menor tamaño, la hora local.
   La pantalla fullscreen muestra un dock compacto de reproducción con navegación
-  anterior, avance o pausa, inicio, fin y progreso mientras esa ventana tiene
-  foco; al cambiar el foco al cockpit, el dock desaparece de la audiencia. Sus
+  anterior, avance o pausa, inicio, fin y progreso al llevar el cursor a su zona
+  inferior. El dock se oculta al retirar el cursor o cambiar el foco al cockpit.
+  Sus
   botones y los atajos pasan por las mismas acciones, por lo que un clic en el
   dock no avanza dos veces. Presenter View titula el cue activo, evita repetir el
   nombre del segmento y mantiene Up Next por encima de las notas con scroll
