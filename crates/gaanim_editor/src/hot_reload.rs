@@ -114,14 +114,9 @@ pub fn reload_listener_system(world: &mut World) {
     let payload = payloads.last().expect("checked non-empty").clone();
 
     // Snapshot playback state before tearing down entities.
-    let (saved_time, saved_segment_position, was_playing, had_previous_timeline) = {
+    let (saved_time, was_playing, had_previous_timeline) = {
         let tl = world.resource::<Timeline>();
-        (
-            tl.current_time,
-            tl.segment_position,
-            tl.is_playing,
-            tl.cached_duration > 0.0,
-        )
+        (tl.current_time, tl.is_playing, tl.cached_duration > 0.0)
     };
 
     let width = payload.canvas.width;
@@ -131,9 +126,7 @@ pub fn reload_listener_system(world: &mut World) {
 
     // Restore playback position after rebuild.
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
-        let target = saved_segment_position
-            .and_then(|position| tl.segment_time(position))
-            .unwrap_or_else(|| saved_time.min(tl.cached_duration.max(0.0)));
+        let target = reload_target_time(saved_time, &tl);
         tl.seek_request = Some(target);
         tl.is_playing = if had_previous_timeline {
             was_playing
@@ -158,6 +151,10 @@ pub fn reload_listener_system(world: &mut World) {
     }
 }
 
+fn reload_target_time(saved_time: f64, timeline: &Timeline) -> f64 {
+    saved_time.clamp(0.0, timeline.cached_duration.max(0.0))
+}
+
 /// Rebuild the scene in `world` from a fresh set of ops, then schedule the
 /// t=0 keyframe capture for the next frame (after deferred Commands flush).
 pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
@@ -173,6 +170,38 @@ pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
     // Defer keyframe capture to the next frame so that deferred Commands
     // (entity spawns, SceneMember inserts, etc.) are flushed first.
     world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_timeline::timeline::SegmentMetadata;
+
+    #[test]
+    fn reload_keeps_fractional_time_inside_the_current_segment() {
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 8.0;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 7,
+            name: "segment".to_owned(),
+            notes: None,
+            start_time: 3.0,
+            end_time: 8.0,
+            stops: Vec::new(),
+        }]);
+
+        let saved_time = 4.75;
+
+        assert_eq!(reload_target_time(saved_time, &timeline), saved_time);
+    }
+
+    #[test]
+    fn reload_clamps_time_when_the_new_script_is_shorter() {
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 4.0;
+
+        assert_eq!(reload_target_time(4.75, &timeline), 4.0);
+    }
 }
 
 /// How long the reload badge stays fully visible (seconds).
