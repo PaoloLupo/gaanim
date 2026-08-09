@@ -20,6 +20,7 @@ pub struct ReloadReceiver {
 #[derive(Resource)]
 pub struct ReloadStatus {
     pub last_message: String,
+    pub compile_duration_seconds: Option<f64>,
     /// `Some(seconds_since_startup)` when the message was set.
     pub shown_at: Option<f64>,
 }
@@ -28,6 +29,7 @@ impl Default for ReloadStatus {
     fn default() -> Self {
         Self {
             last_message: String::new(),
+            compile_duration_seconds: None,
             shown_at: None,
         }
     }
@@ -124,6 +126,7 @@ pub fn reload_listener_system(world: &mut World) {
 
     let width = payload.canvas.width;
     let height = payload.canvas.height;
+    let compile_duration = payload.compile_duration.as_secs_f64();
     reload_with(world, payload.canvas);
 
     // Restore playback position after rebuild.
@@ -141,7 +144,11 @@ pub fn reload_listener_system(world: &mut World) {
 
     let now = world.resource::<Time>().elapsed_secs_f64();
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
-        status.last_message = format!("Reloaded scene ({}x{})", width, height);
+        status.compile_duration_seconds = Some(compile_duration);
+        status.last_message = format!(
+            "Hot reload · {:.2}s · {}x{}",
+            compile_duration, width, height
+        );
         status.shown_at = Some(now);
     }
     // Éxito limpia el error previo
@@ -222,7 +229,7 @@ pub fn reload_status_overlay_system(
                             .color(egui::Color32::from_rgba_premultiplied(
                                 255, 255, 255, text_alpha,
                             ))
-                            .small(),
+                            .size(14.0),
                     );
                 });
         });

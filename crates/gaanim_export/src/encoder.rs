@@ -103,10 +103,10 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
 pub fn detect_best_encoder() -> VideoEncoder {
     let available = detect_available_encoders();
     for &candidate in &[
-        VideoEncoder::H264Vaapi,
-        VideoEncoder::H264Amf,
         VideoEncoder::H264Nvenc,
+        VideoEncoder::H264Amf,
         VideoEncoder::H264Qsv,
+        VideoEncoder::H264Vaapi,
     ] {
         if available.contains(&candidate) && probe_encoder(candidate) {
             return candidate;
@@ -128,7 +128,9 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
         .arg("-pix_fmt")
         .arg("rgba")
         .arg("-s")
-        .arg("128x128")
+        // NVENC rejects 128x128 on some drivers even though it supports all
+        // resolutions used by the editor. Probe with a normal video size.
+        .arg("640x360")
         .arg("-r")
         .arg("1")
         .arg("-i")
@@ -178,9 +180,9 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
         .stderr(Stdio::null());
 
     if let Ok(mut child) = cmd.spawn() {
-        // Feed one empty RGBA frame (64x64x4 = 16384 zero bytes)
+        // Feed one empty RGBA frame (640x360x4 bytes).
         if let Some(mut stdin) = child.stdin.take() {
-            let blank = vec![0u8; 128 * 128 * 4];
+            let blank = vec![0u8; 640 * 360 * 4];
             let _ = stdin.write_all(&blank);
         }
         child.wait().map(|s| s.success()).unwrap_or(false)

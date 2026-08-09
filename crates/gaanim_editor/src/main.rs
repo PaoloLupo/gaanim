@@ -195,6 +195,7 @@ fn spawn_home_camera(world: &mut World) {
         gaanim_renderer::prelude::VelloView,
         bevy::prelude::Camera {
             order: 1,
+            clear_color: bevy::camera::ClearColorConfig::None,
             ..default()
         },
         bevy::core_pipeline::tonemapping::Tonemapping::None,

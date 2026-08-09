@@ -5,7 +5,9 @@ use gaanim_api::export::export_canvas;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -32,6 +34,8 @@ pub struct ExportState {
     pub active: bool,
     pub show_complete: bool,
     pub message: String,
+    pub elapsed_seconds: Option<f64>,
+    pub encoder_label: Option<String>,
     pub progress_shared: Arc<Mutex<Option<ExportProgress>>>,
 }
 
@@ -41,6 +45,7 @@ pub struct ExportProgress {
     pub total_frames: u64,
     pub started_at: Instant,
     pub result: Option<Result<(), String>>,
+    pub telemetry: ExportTelemetry,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,6 +109,8 @@ impl Default for ExportState {
             active: false,
             show_complete: false,
             message: String::new(),
+            elapsed_seconds: None,
+            encoder_label: None,
             progress_shared: Arc::new(Mutex::new(None)),
         }
     }
@@ -138,17 +145,33 @@ pub fn export_dialog_system(
     let mut trigger_ok = false;
 
     if state.show_complete {
+        let mut complete_open = true;
         egui::Window::new("Export Complete")
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .open(&mut complete_open)
             .collapsible(false)
             .resizable(false)
+            .default_width(480.0)
             .show(ctx, |ui| {
-                ui.label(&state.message);
+                ui.label(egui::RichText::new(&state.message).size(16.0).strong());
+                if let Some(elapsed) = state.elapsed_seconds {
+                    ui.label(format!("Elapsed: {:.2}s", elapsed));
+                }
+                if let Some(encoder) = &state.encoder_label {
+                    ui.label(format!("Encoder: {encoder}"));
+                }
+                ui.add(
+                    egui::Label::new(format!("Output: {}", state.output_path))
+                        .wrap_mode(egui::TextWrapMode::Truncate),
+                );
                 ui.add_space(8.0);
-                if ui.button("OK").clicked() {
+                if ui.button(egui::RichText::new("OK").size(14.0)).clicked() {
                     trigger_ok = true;
                 }
             });
+        if !complete_open {
+            trigger_ok = true;
+        }
     }
 
     if trigger_ok {
@@ -156,28 +179,50 @@ pub fn export_dialog_system(
     }
 
     if state.active {
-        let (prog_frame, prog_total, prog_done) = {
+        let (prog_frame, prog_total, prog_done, encoder_label, elapsed_seconds) = {
             let lock = state.progress_shared.lock().unwrap();
             if let Some(ref prog) = *lock {
+                let (telemetry_frame, telemetry_total) = prog.telemetry.progress();
+                let current_frame = telemetry_frame.max(prog.current_frame);
+                let total_frames = telemetry_total.max(prog.total_frames);
+                let result_ready = prog.result.is_some();
                 (
-                    prog.current_frame,
-                    prog.total_frames,
-                    prog.current_frame >= prog.total_frames,
+                    current_frame,
+                    total_frames,
+                    current_frame >= total_frames && result_ready,
+                    prog.telemetry.encoder(),
+                    prog.started_at.elapsed().as_secs_f64(),
                 )
             } else {
-                (0, 1, false)
+                (0, 1, false, None, 0.0)
             }
         };
 
         if prog_done {
-            state.message = {
+            let (message, encoder_label, elapsed_seconds) = {
                 let lock = state.progress_shared.lock().unwrap();
-                match lock.as_ref().and_then(|progress| progress.result.as_ref()) {
-                    Some(Ok(())) => "Export completed successfully".to_string(),
-                    Some(Err(error)) => format!("Export failed: {error}"),
-                    None => "Export finished without a result".to_string(),
+                if let Some(progress) = lock.as_ref() {
+                    let message = match progress.result.as_ref() {
+                        Some(Ok(())) => "Export completed successfully".to_string(),
+                        Some(Err(error)) => format!("Export failed: {error}"),
+                        None => "Export finished without a result".to_string(),
+                    };
+                    (
+                        message,
+                        progress.telemetry.encoder(),
+                        progress.started_at.elapsed().as_secs_f64(),
+                    )
+                } else {
+                    (
+                        "Export finished without a result".to_string(),
+                        encoder_label,
+                        0.0,
+                    )
                 }
             };
+            state.message = message;
+            state.elapsed_seconds = Some(elapsed_seconds);
+            state.encoder_label = encoder_label;
             state.show_complete = true;
             state.active = false;
             *state.progress_shared.lock().unwrap() = None;
@@ -187,24 +232,50 @@ pub fn export_dialog_system(
             } else {
                 0.0
             };
+            let eta_seconds = if prog_frame > 0 && prog_total > prog_frame {
+                elapsed_seconds * (prog_total - prog_frame) as f64 / prog_frame as f64
+            } else {
+                0.0
+            };
+            let mut active_open = true;
             egui::Window::new("Exporting...")
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut active_open)
                 .collapsible(false)
                 .resizable(false)
+                .default_width(480.0)
                 .show(ctx, |ui| {
-                    ui.label(format!("Frame {}/{}", prog_frame, prog_total));
+                    ui.label(egui::RichText::new("Exporting video").size(16.0).strong());
+                    ui.label(
+                        egui::RichText::new(format!("Frame {}/{}", prog_frame, prog_total))
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.label(format!(
+                        "Encoder: {}",
+                        encoder_label.as_deref().unwrap_or("detecting...")
+                    ));
+                    ui.add(
+                        egui::Label::new(format!("Output: {}", state.output_path))
+                            .wrap_mode(egui::TextWrapMode::Truncate),
+                    );
                     ui.add_space(8.0);
                     ui.add(
                         egui::ProgressBar::new(progress)
-                            .desired_width(300.0)
-                            .text(format!("{:.0}%", progress * 100.0)),
+                            .desired_width(420.0)
+                            .desired_height(24.0)
+                            .text(format!("{:.1}%", progress * 100.0)),
                     );
+                    ui.label(format!(
+                        "Elapsed: {:.1}s · ETA: {:.1}s",
+                        elapsed_seconds, eta_seconds
+                    ));
                     ui.add_space(8.0);
                     if ui.button("Cancel").clicked() {
                         trigger_cancel = true;
                     }
                 });
-            if trigger_cancel {
+            if trigger_cancel || !active_open {
                 state.active = false;
                 *state.progress_shared.lock().unwrap() = None;
             }
@@ -312,6 +383,7 @@ pub fn export_dialog_system(
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
+            let telemetry = ExportTelemetry::new();
             let canvas = replay_stash.canvas.clone().unwrap();
             let worker_paths = project_paths
                 .as_ref()
@@ -320,12 +392,15 @@ pub fn export_dialog_system(
 
             state.active = true;
             state.dialog_open = false;
+            state.elapsed_seconds = None;
+            state.encoder_label = None;
 
             *progress.lock().unwrap() = Some(ExportProgress {
                 current_frame: 0,
                 total_frames: total,
                 started_at: Instant::now(),
                 result: None,
+                telemetry: telemetry.clone(),
             });
 
             let progress_clone = progress.clone();
@@ -338,6 +413,7 @@ pub fn export_dialog_system(
                             &out,
                             qual,
                             fmt,
+                            telemetry.clone(),
                         ),
                         None => Err(
                             "3D export requires an open project script so it can run in an isolated process"
@@ -351,6 +427,7 @@ pub fn export_dialog_system(
                     config.encoding_speed = qual.encoding_speed();
                     config.format = fmt;
                     config.headless = true;
+                    config.telemetry = Some(telemetry.clone());
                     export_canvas(canvas, config).map_err(|error| error.to_string())
                 };
                 if let Ok(mut lock) = progress_clone.lock() {
@@ -364,24 +441,79 @@ pub fn export_dialog_system(
     }
 }
 
+fn forward_worker_line(line: &str, telemetry: &ExportTelemetry) {
+    for fragment in line.split('\r') {
+        let fragment = fragment.trim();
+        if fragment.is_empty() {
+            continue;
+        }
+        if let Some(progress) = fragment.strip_prefix("GAANIM_EXPORT_PROGRESS ") {
+            let mut values = progress.split_whitespace();
+            if let (Some(current), Some(total)) = (values.next(), values.next())
+                && let (Ok(current), Ok(total)) = (current.parse::<u64>(), total.parse::<u64>())
+            {
+                telemetry.set_progress(current, total);
+                continue;
+            }
+        }
+        if let Some(encoder) = fragment.strip_prefix("Encoder:") {
+            telemetry.set_encoder(encoder.trim());
+            continue;
+        }
+        telemetry.push_log(fragment);
+    }
+}
+
+fn forward_worker_stream<R>(reader: R, telemetry: ExportTelemetry) -> std::thread::JoinHandle<()>
+where
+    R: std::io::Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            forward_worker_line(&line, &telemetry);
+        }
+    })
+}
+
 fn run_export_worker(
     script_path: &std::path::Path,
     project_dir: &std::path::Path,
     output_path: &str,
     quality: ExportQuality,
     format: ExportFormat,
+    telemetry: ExportTelemetry,
 ) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the Gaanim executable: {error}"))?;
-    let status = std::process::Command::new(executable)
+    let mut child = std::process::Command::new(executable)
         .arg("--export-worker")
         .arg(script_path)
         .arg(output_path)
         .arg(quality.arg())
         .arg(export_format_arg(format))
+        .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("could not start the isolated export worker: {error}"))?;
+    let stdout_thread = child
+        .stdout
+        .take()
+        .map(|stdout| forward_worker_stream(stdout, telemetry.clone()));
+    let stderr_thread = child
+        .stderr
+        .take()
+        .map(|stderr| forward_worker_stream(stderr, telemetry.clone()));
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not wait for the isolated export worker: {error}"))?;
+    if let Some(thread) = stdout_thread {
+        let _ = thread.join();
+    }
+    if let Some(thread) = stderr_thread {
+        let _ = thread.join();
+    }
     if status.success() {
         Ok(())
     } else {
@@ -410,3 +542,32 @@ fn export_format_arg(format: ExportFormat) -> &'static str {
 }
 
 pub fn export_per_frame_system() {}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExportTelemetry, forward_worker_line};
+
+    #[test]
+    fn worker_progress_markers_update_shared_telemetry_without_polluting_log() {
+        let telemetry = ExportTelemetry::new();
+
+        forward_worker_line("GAANIM_EXPORT_PROGRESS 936 1200", &telemetry);
+        forward_worker_line("Encoder: NVIDIA (NVENC)", &telemetry);
+
+        assert_eq!(telemetry.progress(), (936, 1200));
+        assert_eq!(telemetry.encoder().as_deref(), Some("NVIDIA (NVENC)"));
+        assert!(telemetry.logs().is_empty());
+    }
+
+    #[test]
+    fn worker_output_is_preserved_for_the_editor_log() {
+        let telemetry = ExportTelemetry::new();
+
+        forward_worker_line("INFO export initialized\r  Frame 1/2", &telemetry);
+
+        assert_eq!(
+            telemetry.logs(),
+            vec!["INFO export initialized", "Frame 1/2"]
+        );
+    }
+}

@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 
@@ -98,6 +100,78 @@ impl QualityPreset {
     }
 }
 
+/// Thread- and process-agnostic progress information for an export.
+///
+/// The editor owns one instance and passes a clone through `ExportConfig`.
+/// The exporter updates it from its render loop while the UI reads snapshots
+/// from the Bevy/Egui thread.
+#[derive(Clone, Debug, Default)]
+pub struct ExportTelemetry {
+    current_frame: Arc<AtomicU64>,
+    total_frames: Arc<AtomicU64>,
+    encoder: Arc<Mutex<Option<String>>>,
+    logs: Arc<Mutex<Vec<String>>>,
+}
+
+impl ExportTelemetry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_total_frames(&self, total_frames: u64) {
+        self.total_frames.store(total_frames, Ordering::Relaxed);
+        self.current_frame.store(0, Ordering::Relaxed);
+    }
+
+    pub fn set_current_frame(&self, current_frame: u64) {
+        self.current_frame.store(current_frame, Ordering::Relaxed);
+    }
+
+    pub fn set_progress(&self, current_frame: u64, total_frames: u64) {
+        self.total_frames.store(total_frames, Ordering::Relaxed);
+        self.current_frame.store(current_frame, Ordering::Relaxed);
+    }
+
+    pub fn progress(&self) -> (u64, u64) {
+        (
+            self.current_frame.load(Ordering::Relaxed),
+            self.total_frames.load(Ordering::Relaxed),
+        )
+    }
+
+    pub fn set_encoder(&self, encoder: impl Into<String>) {
+        *self
+            .encoder
+            .lock()
+            .expect("export telemetry encoder poisoned") = Some(encoder.into());
+    }
+
+    pub fn encoder(&self) -> Option<String> {
+        self.encoder
+            .lock()
+            .expect("export telemetry encoder poisoned")
+            .clone()
+    }
+
+    pub fn push_log(&self, line: impl Into<String>) {
+        let mut logs = self.logs.lock().expect("export telemetry log poisoned");
+        logs.push(line.into());
+        // Keep a runaway FFmpeg/Bevy stream from growing the editor forever.
+        const MAX_LOG_LINES: usize = 2_000;
+        if logs.len() > MAX_LOG_LINES {
+            let remove = logs.len() - MAX_LOG_LINES;
+            logs.drain(..remove);
+        }
+    }
+
+    pub fn logs(&self) -> Vec<String> {
+        self.logs
+            .lock()
+            .expect("export telemetry log poisoned")
+            .clone()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExportConfig {
     pub output_path: String,
@@ -118,6 +192,7 @@ pub struct ExportConfig {
     pub video_encoder: VideoEncoder,
     pub headless: bool,
     pub audio_tracks: Vec<AudioTrack>,
+    pub telemetry: Option<ExportTelemetry>,
 }
 
 impl Default for ExportConfig {
@@ -138,6 +213,7 @@ impl Default for ExportConfig {
             video_encoder: VideoEncoder::Libx264,
             headless: false,
             audio_tracks: Vec::new(),
+            telemetry: None,
         }
     }
 }
@@ -257,5 +333,25 @@ impl ExportConfig {
         self.start_time = Some(start);
         self.end_time = Some(end);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExportTelemetry;
+
+    #[test]
+    fn telemetry_clones_share_progress_and_logs() {
+        let telemetry = ExportTelemetry::new();
+        let worker_view = telemetry.clone();
+
+        worker_view.set_total_frames(12);
+        worker_view.set_current_frame(7);
+        worker_view.set_encoder("NVIDIA (NVENC)");
+        worker_view.push_log("frame progress");
+
+        assert_eq!(telemetry.progress(), (7, 12));
+        assert_eq!(telemetry.encoder().as_deref(), Some("NVIDIA (NVENC)"));
+        assert_eq!(telemetry.logs(), vec!["frame progress"]);
     }
 }

@@ -277,6 +277,7 @@ pub struct GaanimDefault3dLight;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GltfMaterialBaseline {
     pub alpha: f32,
+    pub alpha_mode: bevy::render::alpha::AlphaMode,
 }
 
 /// Raw triangle mesh data to be converted to Bevy `Mesh3d` at runtime.

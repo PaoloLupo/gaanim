@@ -1100,6 +1100,17 @@ impl Canvas {
                     );
                     id_map.insert(spec.id, actual.id);
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
+                    // Compilation creates every entity up front so arbitrary timeline seeks
+                    // remain possible. An object declared after earlier animations must still
+                    // stay hidden until the playhead reaches its declaration point.
+                    if active_slide.is_none()
+                        && !transform_targets.contains(&spec.id)
+                        && builder.current_time > scene_start + 1e-9
+                        && let Some(state) = builder.states.get(actual.id).cloned()
+                    {
+                        builder.hide_visuals_now(&state);
+                        builder.schedule_show_now(actual.id);
+                    }
                     if transform_targets.contains(&spec.id) {
                         if let Some(state) = builder.states.get(actual.id).cloned() {
                             builder.hide_visuals_now(&state);
@@ -4466,6 +4477,44 @@ mod tests {
         assert_eq!(parallel_clips.len(), 3); // fade + orbit position + orbit rotation
         assert!(parallel_clips.iter().all(|clip| clip.start.abs() < 1e-9));
         assert!((timeline.cached_duration - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn object_declared_after_wait_stays_hidden_until_its_declaration_time() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.wait(1.0);
+        canvas.circle(20.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        timeline.seek(&mut world, 0.5);
+        assert!(
+            world
+                .query::<&Opacity>()
+                .iter(&world)
+                .all(|opacity| opacity.0 == 0.0),
+            "late-declared object leaked before its declaration time"
+        );
+
+        timeline.seek(&mut world, 1.0);
+        assert!(
+            world
+                .query::<&Opacity>()
+                .iter(&world)
+                .any(|opacity| opacity.0 == 1.0),
+            "late-declared object did not become visible at its declaration time"
+        );
     }
 
     #[test]

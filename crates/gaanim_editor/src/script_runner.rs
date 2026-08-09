@@ -12,6 +12,7 @@ use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use gaanim_api::host::{self, ReloadPayload};
 
@@ -126,7 +127,9 @@ fn run_script_thread(
             break;
         }
 
+        host::set_compile_started_at(Some(Instant::now()));
         let result = Python::attach(|py| run_script_file(py, &script_path));
+        host::set_compile_started_at(None);
         if let Err(e) = result {
             Python::attach(|py| {
                 let tb = format_py_traceback(py, &e);

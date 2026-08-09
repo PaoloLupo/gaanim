@@ -5,7 +5,8 @@ pub mod gpu;
 
 pub mod prelude {
     pub use crate::config::{
-        AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, QualityPreset,
+        AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportTelemetry,
+        QualityPreset,
     };
     pub use crate::encoder::{
         EncodingSpeed, ExportError, ExportFormat, VideoEncoder, detect_available_encoders,

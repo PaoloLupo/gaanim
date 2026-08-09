@@ -7,6 +7,17 @@ use gaanim_timeline::timeline::Timeline;
 
 use crate::canvas::Canvas;
 
+/// Full-target color clear performed before the fitted PBR viewport.
+///
+/// A camera only clears inside its viewport. Keeping this pass separate avoids
+/// stale 3D pixels when editor chrome changes the fitted canvas viewport.
+#[derive(Component)]
+struct GaanimFullWindowClearCamera;
+
+/// The primary PBR camera owned by the Gaanim scene runtime.
+#[derive(Component)]
+struct GaanimPbrCamera;
+
 /// Replay a [`Canvas`] into a Bevy world.
 ///
 /// This is the canonical runtime bridge used by the editor/hot-reload host and
@@ -51,11 +62,25 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
             .iter(world)
             .next()
             .is_some();
-        let has_camera_3d = world
-            .query_filtered::<Entity, With<Camera3d>>()
+        let has_clear_camera = world
+            .query_filtered::<Entity, With<GaanimFullWindowClearCamera>>()
             .iter(world)
             .next()
             .is_some();
+        let has_camera_3d = world
+            .query_filtered::<Entity, With<GaanimPbrCamera>>()
+            .iter(world)
+            .next()
+            .is_some();
+
+        // A Camera2d retained by the project hub must use the same overlay
+        // policy as a camera spawned directly for a script.
+        let mut vello_cameras =
+            world.query_filtered::<&mut bevy::prelude::Camera, (With<Camera2d>, With<VelloView>)>();
+        for mut camera in vello_cameras.iter_mut(world) {
+            camera.order = 1;
+            camera.clear_color = ClearColorConfig::None;
+        }
 
         let mut commands = world.commands();
         commands.insert_resource(Camera::ortho_2d(width, height));
@@ -75,6 +100,20 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
                 bevy::core_pipeline::tonemapping::Tonemapping::None,
             ));
         }
+        if !has_clear_camera {
+            // Clear the complete render target before the fitted PBR viewport.
+            // RenderLayers::none keeps this camera color-only.
+            commands.spawn((
+                Camera2d,
+                GaanimFullWindowClearCamera,
+                bevy::prelude::Camera {
+                    order: -1,
+                    clear_color: ClearColorConfig::Default,
+                    ..default()
+                },
+                bevy::camera::visibility::RenderLayers::none(),
+            ));
+        }
         if !has_camera_3d {
             // Perspective camera for 3D meshes (PBR). Render BEFORE 2D so
             // Vello vector content and egui remain on top.
@@ -82,9 +121,10 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
             // (which needs zstd).
             commands.spawn((
                 Camera3d::default(),
+                GaanimPbrCamera,
                 bevy::prelude::Camera {
                     order: 0,
-                    clear_color: ClearColorConfig::Default,
+                    clear_color: ClearColorConfig::None,
                     ..default()
                 },
                 bevy::core_pipeline::tonemapping::Tonemapping::None,
@@ -120,12 +160,51 @@ mod tests {
         world.insert_resource(Timeline::new());
         world.insert_resource(gaanim_text::font::FontRegistry::new());
         world.insert_resource(gaanim_text::prelude::TextConfig::default());
-
         replay_canvas_into(&mut world, canvas);
 
         assert_eq!(
             world.resource::<gaanim_text::prelude::TextConfig>().roles[&TextRole::Body].fill_color,
             gaanim_core::peniko::Color::BLACK
         );
+    }
+
+    #[test]
+    fn hybrid_camera_stack_clears_full_target_before_pbr_and_vello() {
+        let canvas = Canvas::new(640, 360);
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        world.spawn((
+            Camera2d,
+            VelloView,
+            bevy::prelude::Camera {
+                clear_color: ClearColorConfig::Default,
+                ..default()
+            },
+        ));
+
+        replay_canvas_into(&mut world, canvas);
+        world.flush();
+
+        let mut clear_query =
+            world.query_filtered::<&bevy::prelude::Camera, With<GaanimFullWindowClearCamera>>();
+        let clear = clear_query
+            .single(&world)
+            .expect("full-window clear camera");
+        assert_eq!(clear.order, -1);
+        assert!(matches!(clear.clear_color, ClearColorConfig::Default));
+        assert!(clear.viewport.is_none());
+
+        let mut pbr_query = world.query_filtered::<&bevy::prelude::Camera, With<GaanimPbrCamera>>();
+        let pbr = pbr_query.single(&world).expect("PBR camera");
+        assert_eq!(pbr.order, 0);
+        assert!(matches!(pbr.clear_color, ClearColorConfig::None));
+
+        let mut vello_query =
+            world.query_filtered::<&bevy::prelude::Camera, (With<Camera2d>, With<VelloView>)>();
+        let vello = vello_query.single(&world).expect("Vello camera");
+        assert_eq!(vello.order, 1);
+        assert!(matches!(vello.clear_color, ClearColorConfig::None));
     }
 }

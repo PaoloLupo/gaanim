@@ -11,7 +11,7 @@ use std::time::Instant;
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
-use crate::config::ExportConfig;
+use crate::config::{ExportConfig, ExportTelemetry};
 use crate::encoder::{EncoderConfig, ExportError, ParallelEncoder, Result};
 use crate::gpu::GpuContext;
 
@@ -45,6 +45,35 @@ fn format_label(format: &crate::encoder::ExportFormat) -> &str {
     }
 }
 
+fn encoder_label(config: &ExportConfig) -> &'static str {
+    match config.format {
+        crate::encoder::ExportFormat::Mp4 => config.video_encoder.display_name(),
+        crate::encoder::ExportFormat::Webm => "CPU (libvpx-vp9)",
+        crate::encoder::ExportFormat::Webp => "CPU (libwebp)",
+        crate::encoder::ExportFormat::Gif => "CPU (GIF palette)",
+        crate::encoder::ExportFormat::PngSequence => "CPU (PNG sequence)",
+    }
+}
+
+fn export_log(telemetry: &Option<ExportTelemetry>, line: impl Into<String>) {
+    let line = line.into();
+    if let Some(telemetry) = telemetry {
+        telemetry.push_log(line.clone());
+    }
+    println!("{line}");
+}
+
+fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64) {
+    if let Some(telemetry) = telemetry {
+        telemetry.set_current_frame(current);
+    }
+    // The isolated 3D worker forwards this marker to the editor over stdout.
+    // Normal exports use the shared telemetry directly and stay human-readable.
+    if std::env::var_os("GAANIM_EXPORT_WORKER").is_some() {
+        println!("GAANIM_EXPORT_PROGRESS {current} {total}");
+    }
+}
+
 #[derive(Resource)]
 struct ExportPipeline {
     pub encoder: ParallelEncoder,
@@ -61,6 +90,7 @@ struct ExportPipeline {
     pub export_width: u32,
     pub export_height: u32,
     pub resize_filter: image::imageops::FilterType,
+    pub telemetry: Option<ExportTelemetry>,
 }
 
 #[derive(Resource)]
@@ -101,6 +131,11 @@ fn export_pipeline_system(
                 }
 
                 pipeline.rendered_frames += 1;
+                export_progress(
+                    &pipeline.telemetry,
+                    pipeline.rendered_frames,
+                    pipeline.total_frames,
+                );
 
                 // Throttle progress bar updates: only refresh speed every 10 frames
                 if pipeline.rendered_frames.is_multiple_of(10)
@@ -117,18 +152,28 @@ fn export_pipeline_system(
 
                 if pipeline.rendered_frames >= pipeline.total_frames {
                     pipeline.progress_bar.finish_with_message("Done!");
-                    println!("  Finalizing video file...");
+                    export_log(&pipeline.telemetry, "  Finalizing video file...");
                     if let Err(e) = pipeline.encoder.finalize() {
+                        export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
                         bevy::prelude::error!("Encoder finalization error: {}", e);
                     }
 
                     let duration = pipeline.start_time.elapsed();
-                    println!("------------------------------------------------------------");
-                    println!(
-                        "✓ Export successfully completed in {:.2}s!",
-                        duration.as_secs_f64()
+                    export_log(
+                        &pipeline.telemetry,
+                        "------------------------------------------------------------",
                     );
-                    println!("------------------------------------------------------------");
+                    export_log(
+                        &pipeline.telemetry,
+                        format!(
+                            "✓ Export successfully completed in {:.2}s!",
+                            duration.as_secs_f64()
+                        ),
+                    );
+                    export_log(
+                        &pipeline.telemetry,
+                        "------------------------------------------------------------",
+                    );
 
                     exit.write(AppExit::Success);
                     return;
@@ -242,20 +287,49 @@ where
     F: FnOnce(&mut World) + Send + Sync + 'static,
 {
     let start_time = Instant::now();
+    let telemetry = config.telemetry.clone();
     let config = config.apply_presets();
-
-    println!("------------------------------------------------------------");
-    println!("🦀 gaanim — Export");
-    println!("------------------------------------------------------------");
-    println!("  Output file:   {}", config.output_path);
-    println!("  Resolution:    {}x{}", config.width, config.height);
-    println!("  Framerate:     {} FPS", config.fps);
-    println!("  Format:        {}", format_label(&config.format));
-    println!("  Transparent:   {}", config.transparent);
-    if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
-        println!("  Segment:       {:.2}s to {:.2}s", s, e);
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_encoder(encoder_label(&config));
     }
-    println!("------------------------------------------------------------");
+
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
+    export_log(&telemetry, "🦀 gaanim — Export");
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
+    export_log(
+        &telemetry,
+        format!("  Output file:   {}", config.output_path),
+    );
+    export_log(
+        &telemetry,
+        format!("  Resolution:    {}x{}", config.width, config.height),
+    );
+    export_log(&telemetry, format!("  Framerate:     {} FPS", config.fps));
+    export_log(
+        &telemetry,
+        format!("  Format:        {}", format_label(&config.format)),
+    );
+    export_log(
+        &telemetry,
+        format!("  Encoder:       {}", encoder_label(&config)),
+    );
+    export_log(
+        &telemetry,
+        format!("  Transparent:   {}", config.transparent),
+    );
+    if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
+        export_log(&telemetry, format!("  Segment:       {s:.2}s to {e:.2}s"));
+    }
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
 
     let resize_filter = filter_for_quality(config.encoding_speed);
 
@@ -331,6 +405,9 @@ where
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_total_frames(total_frames);
+    }
     let pb = create_progress_bar(total_frames);
 
     // Bounded channel: at most 4 pending GPU frames to prevent memory blow-up
@@ -351,6 +428,7 @@ where
         export_width: config.width,
         export_height: config.height,
         resize_filter,
+        telemetry,
     });
 
     app.add_systems(Update, export_pipeline_system);
@@ -371,23 +449,49 @@ where
     F: FnOnce(&mut World) + Send + Sync + 'static,
 {
     let start_time = Instant::now();
+    let telemetry = config.telemetry.clone();
     let config = config.apply_presets();
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_encoder(encoder_label(&config));
+    }
 
-    println!("------------------------------------------------------------");
-    println!("🦀 gaanim v2 — Headless GPU-Direct Export");
-    println!("------------------------------------------------------------");
-    println!("  Output file:   {}", config.output_path);
-    println!("  Resolution:    {}x{}", config.width, config.height);
-    println!("  Framerate:     {} FPS", config.fps);
-    println!("  Format:        {}", format_label(&config.format));
-    if matches!(config.format, crate::encoder::ExportFormat::Mp4) {
-        println!("  Encoder:       {}", config.video_encoder.display_name());
-    }
-    println!("  Transparent:   {}", config.transparent);
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
+    export_log(&telemetry, "🦀 gaanim v2 — Headless GPU-Direct Export");
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
+    export_log(
+        &telemetry,
+        format!("  Output file:   {}", config.output_path),
+    );
+    export_log(
+        &telemetry,
+        format!("  Resolution:    {}x{}", config.width, config.height),
+    );
+    export_log(&telemetry, format!("  Framerate:     {} FPS", config.fps));
+    export_log(
+        &telemetry,
+        format!("  Format:        {}", format_label(&config.format)),
+    );
+    export_log(
+        &telemetry,
+        format!("  Encoder:       {}", encoder_label(&config)),
+    );
+    export_log(
+        &telemetry,
+        format!("  Transparent:   {}", config.transparent),
+    );
     if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
-        println!("  Segment:       {:.2}s to {:.2}s", s, e);
+        export_log(&telemetry, format!("  Segment:       {s:.2}s to {e:.2}s"));
     }
-    println!("------------------------------------------------------------");
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
 
     let mut gpu = GpuContext::new(config.width, config.height)
         .map_err(crate::encoder::ExportError::General)?;
@@ -430,6 +534,9 @@ where
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_total_frames(total_frames);
+    }
     let frame_time_step = 1.0 / config.fps as f64;
     let pb = create_progress_bar(total_frames);
 
@@ -500,24 +607,35 @@ where
             last_report = Instant::now();
         }
         pb.inc(1);
+        export_progress(&telemetry, frame_idx + 1, total_frames);
 
         current_time += frame_time_step;
     }
 
     pb.finish_with_message("Done!");
-    println!("  Finalizing video file...");
+    export_log(&telemetry, "  Finalizing video file...");
 
     if let Err(e) = encoder.finalize() {
+        export_log(&telemetry, format!("  ERROR: {e}"));
         bevy::prelude::error!("Encoder finalization error: {}", e);
     }
 
     let duration = start_time.elapsed();
-    println!("------------------------------------------------------------");
-    println!(
-        "✓ Export successfully completed in {:.2}s!",
-        duration.as_secs_f64()
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
     );
-    println!("------------------------------------------------------------");
+    export_log(
+        &telemetry,
+        format!(
+            "✓ Export successfully completed in {:.2}s!",
+            duration.as_secs_f64()
+        ),
+    );
+    export_log(
+        &telemetry,
+        "------------------------------------------------------------",
+    );
 
     Ok(())
 }

@@ -494,12 +494,13 @@ pub fn finalize_gltf_instances_system(
                 && let Some(source_material) = materials.get(&material_handle.0).cloned()
             {
                 let alpha = source_material.base_color.alpha();
+                let alpha_mode = source_material.alpha_mode;
                 let clone_handle = materials.add(source_material);
                 commands.entity(entity).insert((
                     MeshMaterial3d(clone_handle),
                     Opacity::default(),
                     GlobalOpacity::default(),
-                    crate::components::GltfMaterialBaseline { alpha },
+                    crate::components::GltfMaterialBaseline { alpha, alpha_mode },
                 ));
             }
         }
@@ -581,6 +582,8 @@ pub fn sync_gltf_material_opacity_system(
                 .set_alpha((baseline.alpha * opacity.0).clamp(0.0, 1.0));
             if opacity.0 < 0.999 {
                 material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+            } else {
+                material.alpha_mode = baseline.alpha_mode;
             }
         }
     }
@@ -966,5 +969,45 @@ mod tests {
             (opacity - 0.2).abs() < f32::EPSILON,
             "expected propagated opacity 0.2, got {opacity}"
         );
+    }
+
+    #[test]
+    fn gltf_material_restores_authored_alpha_mode_after_fade() {
+        let mut world = World::new();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let handle = materials.add(StandardMaterial {
+            alpha_mode: bevy::render::alpha::AlphaMode::Opaque,
+            ..Default::default()
+        });
+        world.insert_resource(materials);
+        let entity = world
+            .spawn((
+                GlobalOpacity(0.5),
+                crate::components::GltfMaterialBaseline {
+                    alpha: 1.0,
+                    alpha_mode: bevy::render::alpha::AlphaMode::Opaque,
+                },
+                MeshMaterial3d(handle.clone()),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(sync_gltf_material_opacity_system);
+
+        schedule.run(&mut world);
+        assert_eq!(
+            world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&handle)
+                .unwrap()
+                .alpha_mode,
+            bevy::render::alpha::AlphaMode::Blend
+        );
+
+        world.entity_mut(entity).insert(GlobalOpacity(1.0));
+        schedule.run(&mut world);
+        let materials = world.resource::<Assets<StandardMaterial>>();
+        let material = materials.get(&handle).unwrap();
+        assert_eq!(material.alpha_mode, bevy::render::alpha::AlphaMode::Opaque);
+        assert!((material.base_color.alpha() - 1.0).abs() < f32::EPSILON);
     }
 }
