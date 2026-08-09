@@ -5,3 +5,4 @@ pub use crate::components::{
     RasterImage, RenderLayer, RenderOrder, StrokeBrush, TextSpan, Visible, WorldBounds,
 };
 pub use crate::hierarchy::{GaanimScenePlugin, SceneSet};
+pub use bevy::prelude::{Entity, World};

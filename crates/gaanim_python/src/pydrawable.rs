@@ -1,7 +1,5 @@
 //! Thin PyDrawable wrapper over gaanim_api DrawableHandle.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
@@ -10,8 +8,6 @@ use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pylayout::{PyAnchor, PyDirection};
 use crate::updater::PyUpdater;
-
-static PYTHON_UPDATER_KEY_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
@@ -646,12 +642,15 @@ impl PyDrawable {
         self.0.add_updater(updater.0.clone());
     }
 
-    /// Attach a generic Python callback updater.
+    /// Attach a generic Python callback updater or deterministic simulation.
     ///
     /// `callback` must be a callable with signature `callback(pos, dt, elapsed) -> (x,y,z)`
-    /// where `pos` is a `(x,y,z)` tuple of the current world position and `dt`/`elapsed`
-    /// are frame delta and total elapsed seconds. The callback should return the new
-    /// world position. This is fully generic — use it for Lorenz, spirals, fields, etc.
+    /// where `pos` is the current local `(x,y,z)` position and `dt`/`elapsed` are
+    /// seconds. The callback returns the new local position.
+    ///
+    /// For stateful simulations, pass both `reset` and `fixed_dt`. `reset()` must
+    /// restore all Python state captured by `callback`; Gaanim then replays fixed
+    /// substeps after timeline seeks and during export.
     ///
     /// Example Lorenz:
     /// ```python
@@ -663,15 +662,44 @@ impl PyDrawable {
     ///         x += 0.01*dx; y += 0.01*dy; z += 0.01*dz
     ///         dx = 10*(y-x); dy = x*(28-z)-y; dz = x*y - 8/3*z
     ///     return (x,y,z)
-    /// dot.add_updater_fn(lorenz)
+    /// def reset_lorenz():
+    ///     pass  # position is restored by Gaanim
+    /// dot.add_updater_fn(lorenz, reset=reset_lorenz, fixed_dt=1/600)
     /// ```
-    fn add_updater_fn(&self, callback: Py<PyAny>) -> PyResult<()> {
-        if Python::attach(|py| callback.bind(py).is_callable()) == false {
+    #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
+    fn add_updater_fn(
+        &self,
+        callback: Py<PyAny>,
+        reset: Option<Py<PyAny>>,
+        fixed_dt: Option<f64>,
+    ) -> PyResult<Self> {
+        if !Python::attach(|py| callback.bind(py).is_callable()) {
             return Err(PyValueError::new_err("callback must be callable"));
         }
-        let key = PYTHON_UPDATER_KEY_COUNTER.fetch_add(1, Ordering::Relaxed);
+        if let Some(reset) = reset.as_ref() {
+            if !Python::attach(|py| reset.bind(py).is_callable()) {
+                return Err(PyValueError::new_err("reset must be callable"));
+            }
+        }
+        match (reset.is_some(), fixed_dt.is_some()) {
+            (true, false) => {
+                return Err(PyValueError::new_err(
+                    "reset requires fixed_dt for deterministic replay",
+                ));
+            }
+            (false, true) => {
+                return Err(PyValueError::new_err(
+                    "fixed_dt requires reset so seeks and exports can rebuild simulation state",
+                ));
+            }
+            _ => {}
+        }
+
         let callback_clone = callback.clone();
-        let updater = gaanim_animation::Updater::new(move |dt, elapsed, entity, world| {
+        let updater_fn = move |dt: f64,
+                               elapsed: f64,
+                               entity: gaanim_scene::prelude::Entity,
+                               world: &mut gaanim_scene::prelude::World| {
             let current = world
                 .get::<gaanim_math::SpatialTransform>(entity)
                 .map(|t| t.translation);
@@ -703,23 +731,47 @@ impl PyDrawable {
             });
             match result {
                 Ok((nx, ny, nz)) => {
-                    if nx.is_finite() && ny.is_finite() && nz.is_finite() {
-                        if let Some(mut t) = world.get_mut::<gaanim_math::SpatialTransform>(entity)
-                        {
-                            t.translation = gaanim_core::glam::DVec3::new(nx, ny, nz);
-                        }
+                    if !nx.is_finite() || !ny.is_finite() || !nz.is_finite() {
+                        Python::attach(|py| {
+                            PyValueError::new_err("callback must return three finite coordinates")
+                                .print(py)
+                        });
+                        return false;
+                    }
+                    if let Some(mut t) = world.get_mut::<gaanim_math::SpatialTransform>(entity) {
+                        t.translation = gaanim_core::glam::DVec3::new(nx, ny, nz);
                     }
                     true
                 }
                 Err(e) => {
                     Python::attach(|py| e.print(py));
-                    true
+                    false
                 }
             }
-        });
-        gaanim_api::canvas::ops::register_python_updater(key, updater);
-        self.0.add_python_updater(key);
-        Ok(())
+        };
+
+        let updater = if let (Some(reset), Some(fixed_dt)) = (reset, fixed_dt) {
+            let reset_clone = reset.clone();
+            let reset_fn =
+                move |_entity: gaanim_scene::prelude::Entity,
+                      _world: &mut gaanim_scene::prelude::World| {
+                    match Python::attach(|py| reset_clone.bind(py).call0().map(|_| ())) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            Python::attach(|py| e.print(py));
+                            false
+                        }
+                    }
+                };
+            gaanim_animation::Updater::new_simulation(updater_fn, reset_fn, fixed_dt).map_err(
+                |_| PyValueError::new_err("fixed_dt must be finite and greater than zero"),
+            )?
+        } else {
+            gaanim_animation::Updater::new(updater_fn)
+        };
+
+        self.0.add_custom_updater(updater);
+        Ok(self.clone())
     }
 
     /// Remove any updater attached to this entity.

@@ -402,6 +402,49 @@ scene.transform_matching_tex(e1, e2, duration=1.6)
 ```
 ]
 
+== Reactive simulation
+
+#api-entry(
+  name: "Drawable.add_updater_fn",
+  kind: "method",
+  signature: "add_updater_fn(callback, *, reset=None, fixed_dt=None) -> Drawable",
+  params: (
+    (name: "callback", type: "callable", default: none, desc: [`callback((x, y, z), dt, elapsed)` returns the new local position.]),
+    (name: "reset", type: "callable | None", default: "None", desc: [Restores all Python state captured by a stateful simulation.]),
+    (name: "fixed_dt", type: "float | None", default: "None", desc: [Positive simulation step in seconds.]),
+  ),
+  returns: (type: "Drawable", desc: [The same drawable for fluent chaining.]),
+  desc: [Pass `reset` and `fixed_dt` together for physics or any incremental state. Gaanim restores the drawable's initial local position, calls `reset()`, and replays constant substeps after random seeks and during export. A callback without that pair is intended for lightweight frame or absolute-time behavior. Invalid coordinates or callback exceptions stop the updater.],
+)[
+```python
+# show-code: true
+from gaanim import BLACK, GOLD, Scene
+
+scene = Scene(480, 270, background=BLACK)
+ball = scene.dot(12).fill(GOLD).at(0, 90)
+state = {"velocity": 0.0}
+
+def reset():
+    state["velocity"] = 0.0
+
+def step(pos, dt, elapsed):
+    x, y, z = pos
+    state["velocity"] -= 240.0 * dt
+    y += state["velocity"] * dt
+    if y < -90:
+        y = -90
+        state["velocity"] *= -0.8
+    return (x, y, z)
+
+ball.add_updater_fn(step, reset=reset, fixed_dt=1 / 240)
+scene.wait(3.0)
+scene.export("simulation.webp", fps=30)
+```
+]
+
+For a coupled example with a tracking rod, dimension and trail, see
+`examples/pendulum_simulation.py`.
+
 == Timing & Easing
 
 Configure any `Anim` fluently before passing to `play`:

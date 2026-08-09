@@ -625,9 +625,17 @@ impl Timeline {
             .map(|s| s.scaled_dt)
             .unwrap_or(0.0);
         let forward_delta = (clamped_target - previous_time).max(0.0);
-        let preserve_reactive_state = self.is_playing
-            && clamped_target >= previous_time
+        let realtime_forward = expected_forward_dt > 0.0
             && forward_delta <= (expected_forward_dt * 1.5).max(1.0 / 120.0);
+        // Exporters and paused scrubbing drive the timeline through explicit
+        // monotonic seeks. Preserve the already reconstructed simulation for
+        // nearby frames and advance it by the exact seek delta instead of
+        // replaying from t=0 for every exported frame.
+        let explicit_forward =
+            expected_forward_dt <= 0.0 && forward_delta > 0.0 && forward_delta <= 0.25;
+        let preserve_reactive_state =
+            clamped_target >= previous_time && (realtime_forward || explicit_forward);
+        let advance_reactive_during_seek = preserve_reactive_state && explicit_forward;
         let reactive_state = if preserve_reactive_state {
             capture_reactive_state(world)
         } else {
@@ -930,8 +938,10 @@ impl Timeline {
 
         if preserve_reactive_state {
             restore_reactive_state(world, &reactive_state);
+            if advance_reactive_during_seek {
+                gaanim_animation::advance_updaters_by(world, forward_delta);
+            }
         } else {
-            resync_updaters(world, self.current_time);
             rebuild_traced_paths(world, self.current_time);
         }
 
@@ -1288,19 +1298,7 @@ fn restore_reactive_state(
 }
 
 fn resync_updaters(world: &mut World, target_time: f64) {
-    let mut updater_jobs = Vec::new();
-    let mut updater_query = world.query::<(Entity, &mut gaanim_animation::Updater)>();
-    for (entity, mut updater) in updater_query.iter_mut(world) {
-        let elapsed = updater
-            .stop_at
-            .map(|stop_at| target_time.min(stop_at))
-            .unwrap_or(target_time);
-        updater.elapsed = elapsed;
-        updater_jobs.push((entity, updater.func.clone(), elapsed));
-    }
-    for (entity, func, elapsed) in updater_jobs {
-        let _ = func(0.0, elapsed, entity, world);
-    }
+    gaanim_animation::seek_updaters(world, target_time);
 }
 
 fn rebuild_traced_paths(world: &mut World, target_time: f64) {
@@ -1328,6 +1326,7 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
     };
 
     if traces.is_empty() && traces_3d.is_empty() {
+        resync_updaters(world, target_time);
         return;
     }
 
@@ -1353,9 +1352,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         }
     }
 
-    if target_time <= 0.0 {
-        return;
-    }
+    // Restore callback state and source positions before collecting samples.
+    resync_updaters(world, 0.0);
 
     let mut sample_time = 0.0;
     let step = 1.0 / 60.0;
@@ -1366,8 +1364,10 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
     }
     sample_times.push(target_time);
 
+    let mut previous_sample_time = 0.0;
     for sample_time in sample_times {
-        resync_updaters(world, sample_time);
+        gaanim_animation::advance_updaters_by(world, sample_time - previous_sample_time);
+        previous_sample_time = sample_time;
         gaanim_animation::position_binding_system(world);
 
         for (trace_entity, source_entity, min_distance, max_points) in &traces {
@@ -1888,6 +1888,50 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn fixed_step_simulation_moves_during_explicit_export_seeks_and_rewinds() {
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState {
+            is_playing: false,
+            scaled_dt: 0.0,
+        });
+        let object_id = ObjectId::from_raw(0);
+        let updater = gaanim_animation::Updater::new_simulation(
+            |dt, _elapsed, entity, world| {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x += dt;
+                }
+                true
+            },
+            |_entity, _world| true,
+            1.0 / 240.0,
+        )
+        .unwrap();
+        let mut initial_transform = SpatialTransform::default();
+        initial_transform.translation.x = 3.0;
+        let entity = world
+            .spawn((MobjectId(object_id), initial_transform, updater))
+            .id();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 1.0;
+        timeline.add_keyframe(0.0, snapshot);
+
+        timeline.seek(&mut world, 0.0);
+        timeline.seek(&mut world, 0.1);
+        let first = world.get::<SpatialTransform>(entity).unwrap().translation.x;
+        assert!((first - 3.1).abs() < 1e-12);
+
+        timeline.seek(&mut world, 0.2);
+        let second = world.get::<SpatialTransform>(entity).unwrap().translation.x;
+        assert!((second - 3.2).abs() < 1e-12);
+
+        timeline.seek(&mut world, 0.1);
+        let rewound = world.get::<SpatialTransform>(entity).unwrap().translation.x;
+        assert!((rewound - first).abs() < 1e-12);
+    }
 
     #[test]
     fn remove_updater_clip_removes_component_after_timestamp() {

@@ -16,9 +16,10 @@ pub use tween::{
     evaluate_custom_tweens_system, evaluate_tweens_system, sync_delta_time_system,
 };
 pub use updaters::{
-    PlaybackState, TracedPath, TracedPath3D, TrackingEndpoint, TrackingLine, Updater,
-    advance_x_updater, bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
-    traced_path_3d_system, traced_path_system, tracking_line_system, updater_system,
+    InvalidFixedStep, PlaybackState, TracedPath, TracedPath3D, TrackingEndpoint, TrackingLine,
+    Updater, advance_updaters_by, advance_x_updater, bob_updater, follow_updater, orbit_updater,
+    pulse_updater, rotate_updater, seek_updaters, traced_path_3d_system, traced_path_system,
+    tracking_line_system, updater_system,
 };
 pub use writing::{FillDrawProgress, PathSource, WriteTipGlow, path_source_seed_added_system};
 

@@ -1025,6 +1025,27 @@ class Drawable:
             drawable.add_updater(Updater.orbit(0.0, 0.0, 100.0, 1.0))
         """
         ...
+    def add_updater_fn(
+        self,
+        callback: Callable[
+            [tuple[float, float, float], float, float],
+            tuple[float, float, float] | Sequence[float],
+        ],
+        *,
+        reset: Callable[[], None] | None = None,
+        fixed_dt: float | None = None,
+    ) -> Drawable:
+        """Attach a Python position updater or a deterministic simulation.
+
+        ``callback(position, dt, elapsed)`` returns the new local ``(x, y, z)``
+        position. For stateful simulations, provide both ``reset`` and a positive
+        ``fixed_dt``. Gaanim calls ``reset()`` before replaying fixed substeps for
+        timeline seeks and exports.
+
+        Example:
+            bob.add_updater_fn(step, reset=reset_state, fixed_dt=1 / 240)
+        """
+        ...
     def remove_updater(self) -> None:
         """Use remove updater on this Drawable or create the requested value.
 

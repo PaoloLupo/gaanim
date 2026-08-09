@@ -2698,13 +2698,14 @@ impl Canvas {
                             ));
                     }
                 }
-                Op::AttachPythonUpdater { target, key } => {
+                Op::AttachCustomUpdater { target, updater } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
-                        if let Some(updater) = crate::canvas::ops::take_python_updater(*key) {
-                            builder.commands.entity(state.entity).insert(updater);
-                        }
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert(updater.clone());
                     }
                 }
                 Op::AttachTracedPath3D {

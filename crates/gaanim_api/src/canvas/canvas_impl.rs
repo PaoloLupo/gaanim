@@ -1960,17 +1960,21 @@ impl Canvas {
         handle
     }
 
-    /// Attach a generic Python callback updater to `target`.
-    /// `key` must have been registered via `register_python_updater`.
-    pub fn attach_python_updater(&mut self, target: &DrawableHandle, key: u64) {
+    /// Attach a retained custom updater to `target`.
+    #[doc(hidden)]
+    pub fn attach_custom_updater(
+        &mut self,
+        target: &DrawableHandle,
+        updater: gaanim_animation::Updater,
+    ) {
         self.state
             .lock()
             .expect("canvas state poisoned")
             .active_mut()
             .ops
-            .push(Op::AttachPythonUpdater {
+            .push(Op::AttachCustomUpdater {
                 target: target.id,
-                key,
+                updater,
             });
     }
 
@@ -2071,6 +2075,31 @@ mod tests {
     use gaanim_scene::MobjectId;
     use gaanim_timeline::scene::SceneMember;
     use gaanim_timeline::timeline::Timeline;
+
+    fn compile_updater_count(canvas: &Canvas) -> usize {
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        world
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<gaanim_animation::Updater>>()
+            .iter(&world)
+            .count()
+    }
+
+    #[test]
+    fn custom_updater_survives_preview_and_export_recompilation() {
+        let mut canvas = Canvas::new(320, 180);
+        let dot = canvas.dot(8.0);
+        dot.add_custom_updater(gaanim_animation::Updater::new(
+            |_dt, _elapsed, _entity, _world| true,
+        ));
+
+        assert_eq!(compile_updater_count(&canvas), 1);
+        assert_eq!(compile_updater_count(&canvas), 1);
+    }
 
     #[test]
     fn paper_theme_uses_dark_text_fills() {

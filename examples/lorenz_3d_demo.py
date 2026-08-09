@@ -77,24 +77,25 @@ static_trail.opacity(0.0)  # aparece al final como referencia tenue
 # ---------------------------------------------------------------------------
 dot = scene.dot(7).fill(WHITE).at_3d(1, 1, 1).billboard()
 
+def reset_lorenz():
+    # El estado está en la posición del dot, que Gaanim restaura automáticamente.
+    pass
+
+
 def lorenz_step(pos, dt, elapsed):
-    """Callback genérico: pos=(x,y,z), dt=frame delta, elapsed=tiempo total.
-    No es Lorenz-específico: cualquier (x,y,z)->(x,y,z) sirve (espirales, campos, etc.).
-    Usamos dt fijo 0.01 y 6 substeps por frame para ~6000 pasos en 8s a 60fps.
-    """
+    """Un paso Lorenz; Gaanim controla su frecuencia independientemente del FPS."""
     x, y, z = pos
     sigma, rho, beta = 10.0, 28.0, 8.0/3.0
-    # substeps hacen la integración independiente del framerate
-    for _ in range(6):
-        dx = sigma*(y - x)
-        dy = x*(rho - z) - y
-        dz = x*y - beta*z
-        x += 0.01*dx
-        y += 0.01*dy
-        z += 0.01*dz
+    integration_dt = 0.01
+    dx = sigma*(y - x)
+    dy = x*(rho - z) - y
+    dz = x*y - beta*z
+    x += integration_dt*dx
+    y += integration_dt*dy
+    z += integration_dt*dz
     return (x, y, z)
 
-dot.add_updater_fn(lorenz_step)
+dot.add_updater_fn(lorenz_step, reset=reset_lorenz, fixed_dt=1.0/600.0)
 
 # Trail reactivo 3D con colormap inferno por tiempo (como Makie `color=colors`)
 # max_points ~6000, min_distance filtra puntos muy cercanos para performance

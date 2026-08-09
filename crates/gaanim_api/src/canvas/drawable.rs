@@ -879,16 +879,21 @@ impl DrawableHandle {
             });
     }
 
-    /// Attach a generic Python callback updater (key must be registered via `register_python_updater`).
-    pub fn add_python_updater(&self, key: u64) {
+    /// Queue a custom updater while retaining it with the deferred canvas.
+    ///
+    /// This is primarily used by language bindings. Keeping the updater in the
+    /// operation makes repeated canvas compilation (preview followed by export)
+    /// deterministic and avoids process-global callback registries.
+    #[doc(hidden)]
+    pub fn add_custom_updater(&self, updater: gaanim_animation::Updater) {
         self.state
             .lock()
             .expect("canvas state poisoned")
             .active_mut()
             .ops
-            .push(Op::AttachPythonUpdater {
+            .push(Op::AttachCustomUpdater {
                 target: self.id,
-                key,
+                updater,
             });
     }
 

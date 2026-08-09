@@ -7,6 +7,9 @@ use gaanim_scene::Path2D;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+type UpdaterFn = Arc<dyn Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync>;
+type UpdaterResetFn = Arc<dyn Fn(Entity, &mut World) -> bool + Send + Sync>;
+
 #[derive(bevy::prelude::Resource, Debug, Clone, Copy)]
 pub struct PlaybackState {
     pub is_playing: bool,
@@ -24,19 +27,49 @@ impl Default for PlaybackState {
 
 /// Componente que define una función de actualización continua para una entidad.
 /// Se ejecuta cada frame durante SceneSet::Updaters.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Updater {
     /// La función de actualización que recibe delta time, tiempo total transcurrido,
     /// la entidad del updater y acceso exclusivo al World de Bevy.
     /// Retorna `true` para seguir ejecutándose, `false` para ser removido automáticamente.
-    pub func: Arc<dyn Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync>,
+    pub func: UpdaterFn,
     /// Tiempo total acumulado desde que se añadió este updater.
     pub elapsed: f64,
     /// Tiempo de corte opcional: a partir de aquí el updater queda congelado.
     pub stop_at: Option<f64>,
     /// Si es verdadero, el updater se pausa si la simulación está pausada.
     pub time_based: bool,
+    /// Paso fijo de una simulación determinista. `None` conserva el updater
+    /// tradicional, evaluado una vez por frame.
+    fixed_dt: Option<f64>,
+    /// Tiempo efectivamente integrado por una simulación de paso fijo.
+    simulation_elapsed: f64,
+    /// Fracción de tiempo pendiente, menor que `fixed_dt`.
+    accumulator: f64,
+    /// Reinicia el estado externo antes de reconstruir una simulación en un seek.
+    reset: Option<UpdaterResetFn>,
+    /// Posición local inicial restaurada antes de reproducir una simulación.
+    initial_translation: Option<DVec3>,
 }
+
+impl std::fmt::Debug for Updater {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Updater")
+            .field("elapsed", &self.elapsed)
+            .field("stop_at", &self.stop_at)
+            .field("time_based", &self.time_based)
+            .field("fixed_dt", &self.fixed_dt)
+            .field("simulation_elapsed", &self.simulation_elapsed)
+            .field("accumulator", &self.accumulator)
+            .field("has_reset", &self.reset.is_some())
+            .field("initial_translation", &self.initial_translation)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[error("fixed_dt must be finite and greater than zero")]
+pub struct InvalidFixedStep;
 
 impl Updater {
     /// Crea una nueva instancia de Updater a partir de un closure.
@@ -48,8 +81,198 @@ impl Updater {
             elapsed: 0.0,
             stop_at: None,
             time_based: true,
+            fixed_dt: None,
+            simulation_elapsed: 0.0,
+            accumulator: 0.0,
+            reset: None,
+            initial_translation: None,
         }
     }
+
+    /// Crea un updater de simulación determinista.
+    ///
+    /// La función `func` se ejecuta en subpasos constantes de `fixed_dt`,
+    /// independientemente del frame rate. `reset` debe restaurar cualquier estado
+    /// externo capturado por `func`; se invoca antes de reproducir desde cero
+    /// durante un seek de la timeline.
+    pub fn new_simulation(
+        func: impl Fn(f64, f64, Entity, &mut World) -> bool + Send + Sync + 'static,
+        reset: impl Fn(Entity, &mut World) -> bool + Send + Sync + 'static,
+        fixed_dt: f64,
+    ) -> Result<Self, InvalidFixedStep> {
+        if !fixed_dt.is_finite() || fixed_dt <= 0.0 {
+            return Err(InvalidFixedStep);
+        }
+
+        Ok(Self {
+            func: Arc::new(func),
+            elapsed: 0.0,
+            stop_at: None,
+            time_based: true,
+            fixed_dt: Some(fixed_dt),
+            simulation_elapsed: 0.0,
+            accumulator: 0.0,
+            reset: Some(Arc::new(reset)),
+            initial_translation: None,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct UpdaterJob {
+    entity: Entity,
+    func: UpdaterFn,
+    reset: Option<UpdaterResetFn>,
+    reset_translation: Option<DVec3>,
+    dt: f64,
+    first_elapsed: f64,
+    steps: usize,
+}
+
+fn fixed_step_count(total: f64, fixed_dt: f64) -> usize {
+    // La tolerancia evita perder un subpaso exacto por error de representación.
+    ((total + fixed_dt * 1e-9) / fixed_dt).floor() as usize
+}
+
+fn run_updater_jobs(world: &mut World, jobs: Vec<UpdaterJob>) {
+    let mut to_remove = Vec::new();
+    for job in jobs {
+        if let Some(initial_translation) = job.reset_translation {
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(job.entity) {
+                transform.translation = initial_translation;
+            }
+        }
+        if let Some(reset) = job.reset
+            && !reset(job.entity, world)
+        {
+            to_remove.push(job.entity);
+            continue;
+        }
+
+        let mut keep = true;
+        for step in 0..job.steps {
+            let elapsed = job.first_elapsed + step as f64 * job.dt;
+            if !(job.func)(job.dt, elapsed, job.entity, world) {
+                keep = false;
+                break;
+            }
+        }
+        if !keep {
+            to_remove.push(job.entity);
+        }
+    }
+
+    for entity in to_remove {
+        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+            entity_mut.remove::<Updater>();
+        }
+    }
+}
+
+/// Avanza todos los updaters por una cantidad explícita de tiempo.
+///
+/// Los updaters tradicionales se evalúan una vez. Las simulaciones usan tantos
+/// subpasos fijos como correspondan y conservan el residuo para el siguiente frame.
+pub fn advance_updaters_by(world: &mut World, dt: f64) {
+    let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
+    let mut jobs = Vec::new();
+    let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
+    for (entity, mut updater, transform) in query.iter_mut(world) {
+        if updater.fixed_dt.is_some() && updater.initial_translation.is_none() {
+            updater.initial_translation = transform.map(|transform| transform.translation);
+        }
+        let previous_elapsed = updater.elapsed;
+        let next_elapsed = if let Some(stop_at) = updater.stop_at {
+            (previous_elapsed + dt).min(stop_at)
+        } else {
+            previous_elapsed + dt
+        };
+        let effective_dt = (next_elapsed - previous_elapsed).max(0.0);
+        updater.elapsed = next_elapsed;
+
+        if let Some(fixed_dt) = updater.fixed_dt {
+            let total = updater.accumulator + effective_dt;
+            let steps = fixed_step_count(total, fixed_dt);
+            updater.accumulator = (total - steps as f64 * fixed_dt).max(0.0);
+            let first_elapsed = updater.simulation_elapsed + fixed_dt;
+            updater.simulation_elapsed += steps as f64 * fixed_dt;
+            if steps > 0 {
+                jobs.push(UpdaterJob {
+                    entity,
+                    func: updater.func.clone(),
+                    reset: None,
+                    reset_translation: None,
+                    dt: fixed_dt,
+                    first_elapsed,
+                    steps,
+                });
+            }
+        } else {
+            jobs.push(UpdaterJob {
+                entity,
+                func: updater.func.clone(),
+                reset: None,
+                reset_translation: None,
+                dt: effective_dt,
+                first_elapsed: next_elapsed,
+                steps: 1,
+            });
+        }
+    }
+
+    run_updater_jobs(world, jobs);
+}
+
+/// Reconstruye todos los updaters en un instante absoluto de la timeline.
+///
+/// Los updaters de simulación ejecutan `reset` y reproducen desde cero con su
+/// paso fijo. Los updaters tradicionales conservan la semántica histórica:
+/// una evaluación con `dt = 0` y el tiempo absoluto solicitado.
+pub fn seek_updaters(world: &mut World, target_time: f64) {
+    let target_time = if target_time.is_finite() {
+        target_time.max(0.0)
+    } else {
+        0.0
+    };
+    let mut jobs = Vec::new();
+    let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
+    for (entity, mut updater, transform) in query.iter_mut(world) {
+        let elapsed = updater
+            .stop_at
+            .map(|stop_at| target_time.min(stop_at))
+            .unwrap_or(target_time);
+        updater.elapsed = elapsed;
+
+        if let Some(fixed_dt) = updater.fixed_dt {
+            if updater.initial_translation.is_none() {
+                updater.initial_translation = transform.map(|transform| transform.translation);
+            }
+            let steps = fixed_step_count(elapsed, fixed_dt);
+            updater.simulation_elapsed = steps as f64 * fixed_dt;
+            updater.accumulator = (elapsed - updater.simulation_elapsed).max(0.0);
+            jobs.push(UpdaterJob {
+                entity,
+                func: updater.func.clone(),
+                reset: updater.reset.clone(),
+                reset_translation: updater.initial_translation,
+                dt: fixed_dt,
+                first_elapsed: fixed_dt,
+                steps,
+            });
+        } else {
+            jobs.push(UpdaterJob {
+                entity,
+                func: updater.func.clone(),
+                reset: None,
+                reset_translation: None,
+                dt: 0.0,
+                first_elapsed: elapsed,
+                steps: 1,
+            });
+        }
+    }
+
+    run_updater_jobs(world, jobs);
 }
 
 /// Sistema Bevy que ejecuta todos los updaters activos con acceso exclusivo al World.
@@ -65,44 +288,10 @@ pub fn updater_system(world: &mut World) {
         .map(|s| s.is_playing)
         .unwrap_or(true);
 
-    let mut updates = Vec::new();
-
-    // Consultamos los updaters para extraer sus Arcs y ejecutarlos sin colisiones de préstamos de Bevy.
-    let mut query = world.query::<(Entity, &mut Updater)>();
-    for (entity, mut updater) in query.iter_mut(world) {
-        if updater.time_based && !is_playing {
-            continue;
-        }
-        let previous_elapsed = updater.elapsed;
-        let next_elapsed = if let Some(stop_at) = updater.stop_at {
-            (previous_elapsed + dt).min(stop_at)
-        } else {
-            previous_elapsed + dt
-        };
-        updater.elapsed = next_elapsed;
-        updates.push((
-            entity,
-            updater.func.clone(),
-            next_elapsed - previous_elapsed,
-            next_elapsed,
-        ));
+    if !is_playing {
+        return;
     }
-
-    let mut to_remove = Vec::new();
-    for (entity, func, effective_dt, elapsed) in updates {
-        // Ejecutar la clausura con acceso exclusivo al World.
-        let keep = func(effective_dt, elapsed, entity, world);
-        if !keep {
-            to_remove.push(entity);
-        }
-    }
-
-    // Remover los updaters que terminaron su ciclo
-    for entity in to_remove {
-        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
-            entity_mut.remove::<Updater>();
-        }
-    }
+    advance_updaters_by(world, dt);
 }
 
 // ==========================================
@@ -533,5 +722,85 @@ fn resolve_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
         TrackingEndpoint::Entity(entity) => world
             .get::<SpatialTransform>(*entity)
             .map(|t| t.translation),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_accelerating_simulation(world: &mut World, fixed_dt: f64) -> Entity {
+        let velocity = Arc::new(Mutex::new(0.0));
+        let step_velocity = velocity.clone();
+        let reset_velocity = velocity.clone();
+        let updater = Updater::new_simulation(
+            move |dt, _elapsed, entity, world| {
+                let mut velocity = step_velocity.lock().unwrap();
+                *velocity += dt;
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x += *velocity * dt;
+                }
+                true
+            },
+            move |_entity, _world| {
+                *reset_velocity.lock().unwrap() = 0.0;
+                true
+            },
+            fixed_dt,
+        )
+        .unwrap();
+        world.spawn((SpatialTransform::default(), updater)).id()
+    }
+
+    fn x(world: &World, entity: Entity) -> f64 {
+        world.get::<SpatialTransform>(entity).unwrap().translation.x
+    }
+
+    #[test]
+    fn fixed_step_simulation_is_independent_of_render_frame_partitioning() {
+        let mut one_frame = World::new();
+        let one_frame_entity = spawn_accelerating_simulation(&mut one_frame, 1.0 / 240.0);
+        advance_updaters_by(&mut one_frame, 1.0 / 30.0);
+
+        let mut four_frames = World::new();
+        let four_frames_entity = spawn_accelerating_simulation(&mut four_frames, 1.0 / 240.0);
+        for _ in 0..4 {
+            advance_updaters_by(&mut four_frames, 1.0 / 120.0);
+        }
+
+        assert!(
+            (x(&one_frame, one_frame_entity) - x(&four_frames, four_frames_entity)).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn simulation_seek_resets_and_replays_external_state() {
+        let mut world = World::new();
+        let entity = spawn_accelerating_simulation(&mut world, 0.01);
+
+        advance_updaters_by(&mut world, 1.0);
+        let at_one_second = x(&world, entity);
+
+        seek_updaters(&mut world, 0.5);
+        let first_half_second = x(&world, entity);
+        assert!(first_half_second < at_one_second);
+
+        seek_updaters(&mut world, 1.0);
+        assert!((x(&world, entity) - at_one_second).abs() < 1e-12);
+
+        seek_updaters(&mut world, 0.5);
+        assert!((x(&world, entity) - first_half_second).abs() < 1e-12);
+    }
+
+    #[test]
+    fn simulation_rejects_invalid_fixed_steps() {
+        for fixed_dt in [0.0, -0.01, f64::NAN, f64::INFINITY] {
+            let result = Updater::new_simulation(
+                |_dt, _elapsed, _entity, _world| true,
+                |_entity, _world| true,
+                fixed_dt,
+            );
+            assert_eq!(result.unwrap_err(), InvalidFixedStep);
+        }
     }
 }
