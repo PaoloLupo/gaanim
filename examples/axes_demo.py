@@ -9,7 +9,7 @@ from gaanim import Axis, BLACK, BLUE, Expr, GOLD, RED, TEAL, Scene
 scene = Scene(1920, 1080)
 scene.canvas.set_theme("paper")
 
-x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(1).label("x").style(color=BLACK)
+x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(2).label("x").style(color=BLACK)
 y_axis = Axis.linear(-3, 4).ticks(1).label("f(x)").style(color=BLACK)
 plane = scene.number_plane(x_axis, y_axis, width=1500, height=760)
 
