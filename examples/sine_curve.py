@@ -56,7 +56,12 @@ sine_curve = scene.traced_path(proj_dot)
 sine_curve.stroke(Color(200, 180, 50), 3.0).no_fill()
 
 # --- Run ---
-scene.play([sine_curve.fade_in().duration(0.3)])
+scene.play([
+    proj_dot.fade_in().duration(0.3),
+    radius_line.fade_in().duration(0.3),
+    proj_line.fade_in().duration(0.3),
+    sine_curve.fade_in().duration(0.3),
+])
 scene.wait(8.5)
 dot.remove_updater()
 scene.render()

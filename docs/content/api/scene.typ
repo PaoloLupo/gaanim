@@ -200,11 +200,18 @@ double-headed measurement arrow.
 
 `ValueTracker` animates a scalar independently of visible mobjects. Use
 `always_redraw_arc` to regenerate a curved arrow from that value each frame.
+Reactive visual helpers are hidden when declared. Add their entry animation to
+`scene.play(...)`—for example `arc.fade_in()`, `trail.fade_in()`, or
+`spring.create()`—before or alongside the animation that drives them. The
+`ValueTracker` itself is a non-visual signal and does not need an entry.
 
 ```python
 theta = scene.value_tracker(0.2)
 rotation = scene.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
-scene.play([theta.animate_to(4.5).duration(2.0)])
+scene.play([
+    rotation.fade_in().duration(0.3),
+    theta.animate_to(4.5).duration(2.0),
+])
 ```
 
 For simple spatial relationships, `attach_to` keeps a drawable centered on
@@ -212,8 +219,10 @@ another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
 `bind_position_from(source, axes="xy")` provide axis-level control.
 
 ```python
-label = scene.text("moving label").attach_to(marker)
+label = scene.text("moving label")
+label.attach_to(marker)
 marker.add_updater(Updater.orbit(0, 0, 120, 1.2))
+scene.play([label.fade_in().duration(0.3)])
 ```
 
 Groups and drawables can rotate or scale around a scene-space point through
@@ -327,7 +336,7 @@ normalized value of a `ValueTracker` along a sampled `polyline`,
 t = scene.value_tracker(0.0)
 curve = scene.parametric_curve(lambda u: (180 * cos(u), 100 * sin(2 * u)), t=(0, 2 * PI))
 dot = scene.point_on_curve(curve, t).fill(GOLD)
-scene.play([t.animate_to(1.0).duration(2.0)])
+scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(2.0)])
 ```
 
 `tangent_on_curve(curve, tracker, length=80)` returns a line centered on that
@@ -343,7 +352,10 @@ circle, usually with `no_fill().stroke(...)`.
 
 Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
 object without covering it. `dimension_between(from, to, offset)` similarly
-keeps a technical measurement synchronized with moving endpoints.
+keeps a technical measurement synchronized with moving endpoints. These
+generated visuals, including `attach_to`, `bind_*`, curve markers, tracking
+lines, springs, dimensions, and traced paths, remain hidden until their own
+entry animation is included in `scene.play(...)`.
 
 == Timeline
 

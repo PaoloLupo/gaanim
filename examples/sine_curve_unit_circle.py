@@ -177,7 +177,12 @@ def move_dot_and_draw_curve():
 
 
 dot, proj_dot, radius_line, proj_line, sine_curve = move_dot_and_draw_curve()
-scene.play([sine_curve.fade_in().duration(0.3)])
+scene.play([
+    proj_dot.fade_in().duration(0.3),
+    radius_line.fade_in().duration(0.3),
+    proj_line.fade_in().duration(0.3),
+    sine_curve.fade_in().duration(0.3),
+])
 
 # ---------------------------------------------------------------------------
 # Playback — Manim: self.wait(8.5) + remove_updater

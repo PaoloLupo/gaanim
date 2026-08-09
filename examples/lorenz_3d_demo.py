@@ -122,7 +122,12 @@ scene.play([subtitle.fade_in(0.6)])
 
 # El trail dinámico ya está creciendo vía updater+traced_path_3d;
 # inicialmente solo se ve el trail reactivo creciendo; el estático aparece al final.
-scene.play([dot.fade_in(0.4), head_glow.fade_in(0.4), origin_tag.fade_in(0.5)])
+scene.play([
+    dot.fade_in(0.4),
+    trail.fade_in(0.4),
+    head_glow.fade_to(0.35).duration(0.4),
+    origin_tag.fade_in(0.5),
+])
 scene.wait(1.0)  # deja que el atractor se despliegue 1s (dot ya traza)
 
 # Azimuth Makie: 1.7π ±0.3 sin(2π*frame/120) → lo aproximamos con órbitas

@@ -372,7 +372,7 @@ scene.export("preview.webp", fps=30)
     (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),
   ),
   returns: (type: "Drawable", desc: [The target equation, ready for another step.]),
-  desc: [Semantic tags are paired first; remaining identical glyphs are matched automatically. Paired terms move and morph without fading. Removed terms collapse toward the nearest surviving term and new terms emerge from it. Unknown explicit tags and invalid durations raise `ValueError`.],
+  desc: [Semantic tags are paired first; remaining identical glyphs are matched automatically. Paired terms move and morph without fading. Removed terms shrink into their own visual centers and new terms grow outward from their centers. Unknown explicit tags and invalid durations raise `ValueError`.],
 )[
 ```python
 # show-code: true

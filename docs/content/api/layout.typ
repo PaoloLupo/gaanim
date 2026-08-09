@@ -207,4 +207,5 @@ overlay = layout.frame.inset(32).place(
 
 label = scene.text("maximum").z_index(100)
 label.follow_to(point, offset=(0, 36))
+scene.play([label.fade_in().duration(0.3)])
 ```

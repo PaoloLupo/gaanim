@@ -170,8 +170,8 @@ pub(crate) enum Op {
         duration: f64,
     },
     /// Replace one equation state with another while using a semantic tag as
-    /// the moving anchor. Residual glyphs collapse toward or emerge from the
-    /// nearest matched term.
+    /// the moving anchor. Residual glyphs shrink into or grow from their own
+    /// visual centers.
     ExpandEquation {
         source: ObjectId,
         target: ObjectId,

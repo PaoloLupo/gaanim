@@ -129,6 +129,15 @@ impl DrawableHandle {
         self.clone()
     }
 
+    /// Keep a generated reactive visual hidden until it is included in a
+    /// `Canvas::play` animation.
+    pub(crate) fn defer_visibility_until_play(&self) {
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .defer_visibility_until_play = true;
+    }
+
     pub(crate) fn with_style_targets(mut self, targets: Vec<SharedObjectSpec>) -> Self {
         self.style_targets = Arc::new(targets);
         self
@@ -909,6 +918,7 @@ impl DrawableHandle {
 
     /// Copy the source entity's Y position each frame (after updaters run).
     pub fn bind_y_from(&self, source: &DrawableHandle) {
+        self.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -926,7 +936,8 @@ impl DrawableHandle {
         self.bind_position_from(source, AxisMask::X);
     }
 
-    /// Keep this drawable centered on `source` each frame.
+    /// Keep this drawable centered on `source` each frame. The drawable is
+    /// deferred until an entry animation is included in `Canvas::play`.
     ///
     /// This is an exact XY position binding. It is useful for labels, markers,
     /// and accents that should travel with an independently animated object.
@@ -934,8 +945,11 @@ impl DrawableHandle {
         self.bind_position_from(source, AxisMask::XY);
     }
 
-    /// Follow `source` while preserving a scene-space `(x, y)` offset.
+    /// Follow `source` while preserving a scene-space `(x, y)` offset. The
+    /// drawable is deferred until an entry animation is included in
+    /// `Canvas::play`.
     pub fn follow_to(&self, source: &DrawableHandle, offset_x: f64, offset_y: f64) {
+        self.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -950,6 +964,7 @@ impl DrawableHandle {
 
     /// Copy the source entity's position on specified axes each frame.
     pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
+        self.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")

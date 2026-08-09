@@ -553,6 +553,7 @@ scene.play([
     axes.create().duration(0.8),
     path.create().duration(0.8),
     dot.fade_in().duration(0.4),
+    trail.fade_in().duration(0.4),
 ])
 scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=0.8)
 scene.camera.dolly(factor=0.85, duration=0.5)
@@ -624,8 +625,8 @@ scene.play([trail.fade_in()])
   kind: "factory",
   signature: "traced_path_3d(source, *, colormap=None, dissipating_time=None, max_points=None, min_distance=0.1) -> Drawable",
   params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose world-space position is sampled.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "0.1", desc: [Minimum world-space distance between samples.]),),
-  returns: (type: "Drawable", desc: [Reactive 3D trail.]),
-  desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. Sampling starts where the trail is declared. `dissipating_time` expires the old tail, `max_points` limits memory, and `min_distance` filters nearly identical samples.],
+  returns: (type: "Drawable", desc: [Reactive 3D trail, hidden until its entry animation.]),
+  desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. Sampling starts where the trail is declared. Add `trail.fade_in()` or `trail.create()` to `scene.play(...)` to reveal it. `dissipating_time` expires the old tail, `max_points` limits memory, and `min_distance` filters nearly identical samples.],
 )[
 ```python
 dot = scene.dot(7).at_3d(1, 0, 0)
@@ -633,6 +634,7 @@ dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
 trail = scene.traced_path_3d(
     dot, colormap="viridis", dissipating_time=2.0, max_points=600
 )
+scene.play([trail.fade_in()])
 ```
 ]
 
@@ -1008,7 +1010,7 @@ scene.export("preview.webp", fps=30)
   signature: "value_tracker(initial: float) -> ValueTracker",
   params: ((name: "initial", type: "float", default: none, desc: [Starting value.]),),
   returns: (type: "ValueTracker", desc: [Scalar animated independently.]),
-  desc: [Drive `always_redraw_arc`, `point_on_curve`, etc. Use `tracker.animate_to(v).duration(t)`.],
+  desc: [Drive `always_redraw_arc`, `point_on_curve`, etc. Use `tracker.animate_to(v).duration(t)`. Reactive visuals need their own entry animation in `scene.play(...)`.],
 )[
 ```python
 # show-code: true
@@ -1016,7 +1018,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 theta = scene.value_tracker(0.2)
 arc = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
-scene.play([theta.animate_to(4.5).duration(1.6)])
+scene.play([arc.fade_in().duration(0.3), theta.animate_to(4.5).duration(1.6)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1037,7 +1039,7 @@ scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.0)
 curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(2*u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
 dot = scene.point_on_curve(curve, t).fill(GOLD)
-scene.play([t.animate_to(1.0).duration(1.6)])
+scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(1.6)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1058,7 +1060,7 @@ scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.35)
 curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
 tangent = scene.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
-scene.play([t.animate_to(0.9).duration(1.4)])
+scene.play([tangent.fade_in().duration(0.3), t.animate_to(0.9).duration(1.4)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1079,7 +1081,7 @@ scene = Scene(480, 270, background="#0f172a")
 t = scene.value_tracker(0.25)
 curve = scene.parametric_curve(lambda u: (110*cos(u), 60*sin(u)), t=(0, 2*pi)).no_fill().stroke(WHITE, 2)
 circle = scene.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
-scene.play([t.animate_to(0.7).duration(1.4)])
+scene.play([circle.fade_in().duration(0.3), t.animate_to(0.7).duration(1.4)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1098,7 +1100,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 theta = scene.value_tracker(0.3)
 rot = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
-scene.play([theta.animate_to(5.0).duration(1.6)])
+scene.play([rot.fade_in().duration(0.3), theta.animate_to(5.0).duration(1.6)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1117,7 +1119,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(10).fill(GOLD).at(70, 0)
 spring = scene.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0).no_fill().stroke(WHITE, 3)
-scene.play([mass.move(40, 0).duration(1.0)])
+scene.play([spring.fade_in().duration(0.3), mass.move(40, 0).duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1137,7 +1139,7 @@ scene = Scene(480, 270, background="#0f172a")
 a = scene.dot(8).at(-60, 0)
 b = scene.dot(8).at(60, 0)
 dim = scene.dimension_between(a, b, 22).stroke(WHITE, 2)
-scene.play([b.move(30, 0).duration(0.9)])
+scene.play([dim.fade_in().duration(0.3), b.move(30, 0).duration(0.9)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1221,7 +1223,7 @@ scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(12).fill(GOLD).at(-60, 0)
 label = scene.text("follower").at(0, 45)
 label.attach_to(mass)
-scene.play([mass.move(120, 0).duration(1.2)])
+scene.play([label.fade_in().duration(0.3), mass.move(120, 0).duration(1.2)])
 scene.export("preview.webp", fps=30)
 ```
 ]

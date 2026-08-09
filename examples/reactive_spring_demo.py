@@ -17,8 +17,12 @@ rail = scene.line(-285, -48, 245, -48).stroke(GRAY, 4)
 label = scene.text("reactive helical spring").fill(GRAY).at(0, 120)
 
 scene.play([
+    anchor.fade_in(),
     rail.create().duration(0.4),
     mass.create().duration(0.5),
+    spring.fade_in().duration(0.3),
+    measurement.fade_in().duration(0.3),
+    mass_label.fade_in().duration(0.3),
     label.write().duration(0.4),
 ])
 scene.play([mass.move(180, 0).duration(1.2).smooth()])

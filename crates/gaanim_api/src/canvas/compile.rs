@@ -951,6 +951,8 @@ impl Canvas {
         let mut camera_fov: Option<(f64, f64, f64)> = None; // (fov_y, near, far) if perspective
         let mut cancellation_marks: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
         let mut canceled_term_children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+        let mut deferred_visibility: HashSet<ObjectId> = HashSet::new();
+        let mut revealed_deferred: HashSet<ObjectId> = HashSet::new();
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.units.frame_bounds(self.width, self.height);
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
@@ -986,6 +988,8 @@ impl Canvas {
                 &mut camera_fov,
                 &mut cancellation_marks,
                 &mut canceled_term_children,
+                &mut deferred_visibility,
+                &mut revealed_deferred,
             );
             builder.end_scene();
         }
@@ -1071,6 +1075,8 @@ impl Canvas {
         camera_fov: &mut Option<(f64, f64, f64)>,
         cancellation_marks: &mut HashMap<ObjectId, Vec<ObjectId>>,
         canceled_term_children: &mut HashMap<ObjectId, Vec<ObjectId>>,
+        deferred_visibility: &mut HashSet<ObjectId>,
+        revealed_deferred: &mut HashSet<ObjectId>,
     ) {
         let scene_start = builder.current_time;
         let transform_targets = Self::transform_targets(&seg.ops);
@@ -1078,7 +1084,9 @@ impl Canvas {
             match op {
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
-                    let requires_explicit_entry = matches!(&spec.kind, SpawnKind::TracedPathLine);
+                    if spec.defer_visibility_until_play {
+                        deferred_visibility.insert(spec.id);
+                    }
                     let actual = Self::spawn_one(
                         builder,
                         &spec,
@@ -1092,7 +1100,7 @@ impl Canvas {
                     // Compilation creates every entity up front so arbitrary timeline seeks
                     // remain possible. An object declared after earlier animations must still
                     // stay hidden until the playhead reaches its declaration point.
-                    if requires_explicit_entry {
+                    if spec.defer_visibility_until_play {
                         if let Some(state) = builder.states.get(actual.id).cloned() {
                             builder.hide_visuals_now(&state);
                         }
@@ -1112,6 +1120,13 @@ impl Canvas {
                 }
                 Op::Animate { anim, active } => {
                     if *active {
+                        Self::reveal_deferred_on_play(
+                            builder,
+                            deferred_visibility,
+                            revealed_deferred,
+                            anim,
+                            id_map,
+                        );
                         if let Some(anim) = Self::remap_anim(anim, id_map) {
                             if anim.anim_type.is_camera() {
                                 let start = builder.current_time;
@@ -1134,6 +1149,15 @@ impl Canvas {
                     }
                 }
                 Op::Play(anims) => {
+                    for anim in anims {
+                        Self::reveal_deferred_on_play(
+                            builder,
+                            deferred_visibility,
+                            revealed_deferred,
+                            anim,
+                            id_map,
+                        );
+                    }
                     let remapped: Vec<AnimationBuilder> = anims
                         .iter()
                         .filter_map(|anim| Self::remap_anim(anim, id_map))
@@ -2936,6 +2960,48 @@ impl Canvas {
             }
         }
         targets
+    }
+
+    fn reveal_deferred_on_play(
+        builder: &mut SceneBuilder,
+        deferred_visibility: &HashSet<ObjectId>,
+        revealed_deferred: &mut HashSet<ObjectId>,
+        anim: &AnimationBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+    ) {
+        if !deferred_visibility.contains(&anim.target)
+            || !Self::animation_reveals_deferred(&anim.anim_type)
+            || !revealed_deferred.insert(anim.target)
+        {
+            return;
+        }
+
+        let Some(&actual) = id_map.get(&anim.target) else {
+            return;
+        };
+
+        // FadeIn/FadeInFrom already author their own opacity lens. Other
+        // animations need an instantaneous reveal so Create/Write/movement
+        // animations can be used directly in scene.play as the entry point.
+        if matches!(
+            &anim.anim_type,
+            AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
+        ) {
+            return;
+        }
+
+        builder.schedule_show_at(actual, builder.current_time + anim.delay.max(0.0));
+    }
+
+    fn animation_reveals_deferred(anim_type: &AnimationType) -> bool {
+        match anim_type {
+            AnimationType::FadeOut
+            | AnimationType::Unwrite { .. }
+            | AnimationType::Uncreate { .. }
+            | AnimationType::ShrinkToCenter => false,
+            AnimationType::FadeTo { to } => *to > 0.0,
+            _ => true,
+        }
     }
 
     fn add_camera_lens(
@@ -5013,11 +5079,26 @@ mod tests {
                 &clip.payload,
                 gaanim_timeline::clip::ClipPayload::Animation(
                     gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Scale { from, to },
+                        label: Some(label),
+                        ..
+                    }
+                ) if label == "EquationEmerge"
+                    && (clip.start - 0.16).abs() < 1e-9
+                    && *from == gaanim_core::glam::DVec3::ZERO
+                    && *to != gaanim_core::glam::DVec3::ZERO
+            )
+        }));
+        assert!(timeline.clips.values().all(|clip| {
+            !matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
                         lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
                         label: Some(label),
                         ..
                     }
-                ) if label == "EquationEmerge" && (clip.start - 0.16).abs() < 1e-9
+                ) if label == "EquationEmerge" && clip.duration > 0.0
             )
         }));
     }
@@ -5079,6 +5160,31 @@ mod tests {
             })
             .count();
         assert!(handoffs >= semantic_morphs * 2);
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Scale { to, .. },
+                        label: Some(label),
+                        ..
+                    }
+                ) if label == "EquationCollapse"
+                    && *to == gaanim_core::glam::DVec3::ZERO
+            )
+        }));
+        assert!(timeline.clips.values().all(|clip| {
+            !matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                        label: Some(label),
+                        ..
+                    }
+                ) if label == "EquationCollapse" && clip.duration > 0.0
+            )
+        }));
     }
 
     #[test]

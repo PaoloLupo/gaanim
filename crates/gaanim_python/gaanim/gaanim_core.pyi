@@ -877,6 +877,9 @@ class Drawable:
     def fade_in(self, duration: Optional[float] = None) -> Anim:
         """Create a fade in animation for this drawable.
 
+        Use this animation in ``scene.play(...)`` to reveal a generated
+        reactive visual.
+
         Example:
             result = drawable.fade_in()
         """
@@ -1054,35 +1057,35 @@ class Drawable:
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
-        """Use bind y from on this Drawable or create the requested value.
+        """Bind Y and defer this visual until its entry animation is played.
 
         Example:
             drawable.bind_y_from(source)
         """
         ...
     def bind_x_from(self, source: Drawable) -> None:
-        """Use bind x from on this Drawable or create the requested value.
+        """Bind X and defer this visual until its entry animation is played.
 
         Example:
             drawable.bind_x_from(source)
         """
         ...
     def attach_to(self, source: Drawable) -> None:
-        """Use attach to on this Drawable or create the requested value.
+        """Attach and defer this visual until its entry animation is played.
 
         Example:
             drawable.attach_to(source)
         """
         ...
     def follow_to(self, source: Drawable, offset: tuple[float, float]) -> None:
-        """Use follow to on this Drawable or create the requested value.
+        """Follow and defer this visual until its entry animation is played.
 
         Example:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
     def bind_position_from(self, source: Drawable, axes: str = "xy") -> None:
-        """Use bind position from on this Drawable or create the requested value.
+        """Bind position and defer this visual until its entry animation is played.
 
         Example:
             drawable.bind_position_from(source)
@@ -2427,28 +2430,28 @@ class Scene:
         """
         ...
     def point_on_curve(self, curve: Drawable, tracker: ValueTracker) -> Drawable:
-        """Create a point on curve drawable in the scene.
+        """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
 
         Example:
             result = scene.point_on_curve(curve, None)
         """
         ...
     def tangent_on_curve(self, curve: Drawable, tracker: ValueTracker, length: float = 80.0) -> Drawable:
-        """Create a tangent on curve drawable in the scene.
+        """Create a hidden tangent drawable; reveal it in ``scene.play``.
 
         Example:
             result = scene.tangent_on_curve(curve, None)
         """
         ...
     def normal_on_curve(self, curve: Drawable, tracker: ValueTracker, length: float = 80.0) -> Drawable:
-        """Create a normal on curve drawable in the scene.
+        """Create a hidden normal drawable; reveal it in ``scene.play``.
 
         Example:
             result = scene.normal_on_curve(curve, None)
         """
         ...
     def curvature_on_curve(self, curve: Drawable, tracker: ValueTracker, window: float = 0.02) -> Drawable:
-        """Create a curvature on curve drawable in the scene.
+        """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
 
         Example:
             result = scene.curvature_on_curve(curve, None)
@@ -2464,7 +2467,7 @@ class Scene:
         sweep_scale: float = 1.0,
         sweep_offset: float = 0.0,
     ) -> Drawable:
-        """Create a always redraw arc drawable in the scene.
+        """Create a hidden always-redrawn arc; reveal it in ``scene.play``.
 
         Example:
             result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
@@ -2478,7 +2481,7 @@ class Scene:
         max_points: Optional[int] = None,
         min_distance: float = 1.0,
     ) -> Drawable:
-        """Trace a moving drawable's position.
+        """Trace a moving drawable's position; reveal the trail in ``scene.play``.
 
         ``dissipating_time`` makes samples expire after the given number of
         seconds. ``max_points`` caps retained samples and ``min_distance``
@@ -2498,7 +2501,7 @@ class Scene:
         max_points: Optional[int] = None,
         min_distance: float = 0.1,
     ) -> Drawable:
-        """Trace a moving drawable's 3D world-space position.
+        """Trace a moving drawable's 3D world-space position; reveal it in ``scene.play``.
 
         ``dissipating_time`` makes samples expire after the given number of
         seconds. ``max_points`` limits retained samples. ``min_distance`` ignores
@@ -2517,7 +2520,7 @@ class Scene:
         from_: Drawable | tuple[float, float],
         to: Drawable | tuple[float, float],
     ) -> Drawable:
-        """Create a tracking line drawable in the scene.
+        """Create a hidden tracking line; reveal it in ``scene.play``.
 
         Example:
             result = scene.tracking_line(drawable, drawable)
@@ -2531,7 +2534,7 @@ class Scene:
         amplitude: float = 12.0,
         crossing: float = 0.0,
     ) -> Drawable:
-        """Create a reactive helical spring between two endpoints.
+        """Create a hidden reactive helical spring; reveal it in ``scene.play``.
 
         The endpoints may be drawables or fixed ``(x, y)`` positions. When a
         drawable endpoint moves, the native helix is regenerated every frame,
@@ -2549,7 +2552,7 @@ class Scene:
         to: Drawable | tuple[float, float],
         offset: float,
     ) -> Drawable:
-        """Create a dimension between drawable in the scene.
+        """Create a hidden reactive dimension; reveal it in ``scene.play``.
 
         Example:
             result = scene.dimension_between(drawable, drawable, 1.0)

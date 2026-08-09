@@ -681,6 +681,8 @@ pub struct ObjectSpec {
     pub blur: Option<gaanim_renderer::effects::GaussianBlur>,
     pub shadow: Option<gaanim_renderer::effects::DropShadow>,
     pub opacity: f32,
+    /// If true, keep this reactive visual hidden until an animation targets it.
+    pub defer_visibility_until_play: bool,
     pub z_index: i32,
     /// If true, this object should billboard (face camera) in 3D.
     pub billboard: bool,
@@ -707,6 +709,7 @@ impl ObjectSpec {
             blur: None,
             shadow: None,
             opacity: 1.0,
+            defer_visibility_until_play: false,
             z_index: 0,
             billboard: false,
             hud: false,

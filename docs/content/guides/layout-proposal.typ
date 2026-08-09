@@ -144,6 +144,7 @@ Para una etiqueta que sigue a un objeto animado:
 ```python
 label = scene.text("máximo local").z_index(100)
 label.follow_to(point, offset=(0, 36))
+scene.play([label.fade_in().duration(0.3)])
 ```
 
 == Stacks y Flow

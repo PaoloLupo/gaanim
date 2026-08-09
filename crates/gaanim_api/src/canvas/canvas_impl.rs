@@ -1048,8 +1048,8 @@ impl Canvas {
     }
 
     /// Transitions from one equation step to another. Shared glyphs move to
-    /// their new positions; removed glyphs collapse and introduced glyphs
-    /// emerge from the nearest matched term.
+    /// their new positions; removed glyphs shrink around their own visual
+    /// centers and introduced glyphs grow from their centers.
     pub fn step_equation(
         &mut self,
         source: &DrawableHandle,
@@ -1890,7 +1890,8 @@ impl Canvas {
         self.spawn(SpawnKind::ValueTracker(initial))
     }
 
-    /// Spawn a dot that follows `curve` at the normalized value of `tracker`.
+    /// Spawn a hidden dot that follows `curve` at the normalized value of
+    /// `tracker`; reveal it with an entry animation in `Canvas::play`.
     ///
     /// The tracker is clamped to `[0, 1]` and sampled by native arc length, so
     /// `0` is the first polyline point and `1` is the last one.
@@ -1900,6 +1901,7 @@ impl Canvas {
         tracker: &DrawableHandle,
     ) -> DrawableHandle {
         let handle = self.dot(8.0);
+        handle.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -1913,7 +1915,7 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a line centered and aligned with the tangent of `curve`.
+    /// Spawn a hidden line centered and aligned with the tangent of `curve`.
     pub fn tangent_on_curve(
         &mut self,
         curve: &DrawableHandle,
@@ -1922,6 +1924,7 @@ impl Canvas {
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
         let handle = self.line(-half_length, 0.0, half_length, 0.0);
+        handle.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -1935,7 +1938,7 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a line centered and perpendicular to the tangent of `curve`.
+    /// Spawn a hidden line centered and perpendicular to the tangent of `curve`.
     pub fn normal_on_curve(
         &mut self,
         curve: &DrawableHandle,
@@ -1944,6 +1947,7 @@ impl Canvas {
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
         let handle = self.line(-half_length, 0.0, half_length, 0.0);
+        handle.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -1957,7 +1961,7 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a unit circle scaled to the local osculating circle of `curve`.
+    /// Spawn a hidden unit circle scaled to the local osculating circle of `curve`.
     pub fn curvature_on_curve(
         &mut self,
         curve: &DrawableHandle,
@@ -1965,6 +1969,7 @@ impl Canvas {
         window: f64,
     ) -> DrawableHandle {
         let handle = self.circle(1.0);
+        handle.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -1979,8 +1984,8 @@ impl Canvas {
         handle
     }
 
-    /// Creates a curved arrow whose sweep is regenerated from `tracker` on
-    /// every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
+    /// Creates a hidden curved arrow whose sweep is regenerated from `tracker`
+    /// on every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
     pub fn always_redraw_arc(
         &mut self,
         tracker: &DrawableHandle,
@@ -1999,6 +2004,7 @@ impl Canvas {
             start_angle,
             initial_value * sweep_scale + sweep_offset,
         );
+        handle.defer_visibility_until_play();
         let target = handle.id;
         self.state
             .lock()
@@ -2017,8 +2023,9 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a traced path that accumulates the trajectory of `source` as a
-    /// continuous line. The returned drawable's Path2D is regenerated every frame.
+    /// Spawn a hidden traced path that accumulates the trajectory of `source`
+    /// as a continuous line. The returned drawable's Path2D is regenerated
+    /// every frame and revealed by an entry animation in `Canvas::play`.
     pub fn traced_path(&mut self, source: &DrawableHandle) -> DrawableHandle {
         self.traced_path_with_options(source, None, None, 1.0)
     }
@@ -2032,6 +2039,7 @@ impl Canvas {
         min_distance: f64,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TracedPathLine);
+        handle.defer_visibility_until_play();
         let source_id = source.id;
         let id = handle.id;
         self.state
@@ -2049,7 +2057,8 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a 3D traced path that accumulates the 3D trajectory of `source` as a `LineList`.
+    /// Spawn a hidden 3D traced path that accumulates the 3D trajectory of
+    /// `source` as a `LineList`.
     /// Supports optional colormap (`"inferno"`, `"viridis"`, `"plasma"`) for time-based coloring.
     pub fn traced_path_3d(
         &mut self,
@@ -2071,6 +2080,7 @@ impl Canvas {
         dissipating_time: Option<f64>,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TracedPath3DLine);
+        handle.defer_visibility_until_play();
         let source_id = source.id;
         let id = handle.id;
         self.state
@@ -2107,13 +2117,15 @@ impl Canvas {
             });
     }
 
-    /// Spawn a tracking line — a reactive line whose endpoints follow entities
-    /// or remain at fixed positions. Updated every frame.
+    /// Spawn a hidden tracking line — a reactive line whose endpoints follow
+    /// entities or remain at fixed positions. Updated every frame and revealed
+    /// by an entry animation in `Canvas::play`.
     ///
     /// Endpoints can be `DrawableHandle` references (their `.id` is used) or
     /// static `(f64, f64)` positions passed as tuples.
     pub fn tracking_line(&mut self, from: CanvasEndpoint, to: CanvasEndpoint) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
+        handle.defer_visibility_until_play();
         let id = handle.id;
         self.state
             .lock()
@@ -2128,7 +2140,7 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a reactive helical spring between two endpoints.
+    /// Spawn a hidden reactive helical spring between two endpoints.
     ///
     /// Each endpoint can be static or follow a drawable. The path is rebuilt
     /// natively after updaters and position bindings have run, changing the
@@ -2156,6 +2168,7 @@ impl Canvas {
         crossing: f64,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
+        handle.defer_visibility_until_play();
         let id = handle.id;
         self.state
             .lock()
@@ -2173,7 +2186,7 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a reactive dimension line between two endpoints.
+    /// Spawn a hidden reactive dimension line between two endpoints.
     pub fn dimension_between(
         &mut self,
         from: CanvasEndpoint,
@@ -2181,6 +2194,7 @@ impl Canvas {
         offset: f64,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
+        handle.defer_visibility_until_play();
         let id = handle.id;
         self.state
             .lock()
@@ -2364,6 +2378,69 @@ mod tests {
             .unwrap()
             .0;
         assert!(halfway > 0.0 && halfway < 1.0);
+    }
+
+    #[test]
+    fn reactive_visuals_require_their_own_play_entry() {
+        let mut canvas = Canvas::new(320, 180);
+        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
+        let mass = canvas.dot(8.0).at(60.0, 0.0);
+        let spring = canvas.spring_between_with_crossing(
+            CanvasEndpoint::Entity(anchor.id),
+            CanvasEndpoint::Entity(mass.id),
+            6,
+            10.0,
+            1.0,
+        );
+        let dimension = canvas.dimension_between(
+            CanvasEndpoint::Entity(anchor.id),
+            CanvasEndpoint::Entity(mass.id),
+            -24.0,
+        );
+        let label = canvas.text("mass");
+        label.follow_to(&mass, 0.0, 28.0);
+        canvas.play(vec![
+            spring.fade_in(1.0),
+            dimension.create(1.0),
+            label.fade_in(1.0),
+        ]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let opacity_for = |world: &mut World, id: gaanim_core::ObjectId| {
+            // SceneBuilder's id counter starts at zero while Canvas ids start
+            // at one; the test resolves the corresponding compiled root.
+            let compiled_id = gaanim_core::ObjectId::from_raw(id.as_raw() - 1);
+            let mut query = world.query::<(&gaanim_scene::MobjectId, &Opacity)>();
+            query
+                .iter(world)
+                .find(|(object_id, _)| object_id.0 == compiled_id)
+                .map(|(_, opacity)| opacity.0)
+                .expect("reactive visual should compile into a mobject")
+        };
+
+        assert_eq!(opacity_for(&mut world, anchor.id), 1.0);
+        assert_eq!(opacity_for(&mut world, spring.id), 0.0);
+        assert_eq!(opacity_for(&mut world, dimension.id), 0.0);
+        assert_eq!(opacity_for(&mut world, label.id), 0.0);
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut world, 0.5);
+
+        let spring_opacity = opacity_for(&mut world, spring.id);
+        let dimension_opacity = opacity_for(&mut world, dimension.id);
+        let label_opacity = opacity_for(&mut world, label.id);
+        assert!(spring_opacity > 0.0);
+        assert!(dimension_opacity > 0.0);
+        assert!(label_opacity > 0.0);
     }
 
     #[test]

@@ -20,6 +20,7 @@ scene.play([
     title.write(),
     disk.create().duration(0.6),
     marker.fade_in().duration(0.3),
+    rotation.fade_in().duration(0.3),
     theta.animate_to(4.8).duration(2.4).smooth(),
 ])
 

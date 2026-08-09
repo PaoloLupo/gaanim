@@ -51,8 +51,8 @@ pub(crate) enum EquationTransitionMode {
 #[derive(Clone, Debug, Default)]
 struct EquationTransitionPlan {
     pairs: Vec<(ObjectId, ObjectId)>,
-    leaving: Vec<(ObjectId, Option<(ObjectId, ObjectId)>)>,
-    entering: Vec<(ObjectId, Option<(ObjectId, ObjectId)>)>,
+    leaving: Vec<ObjectId>,
+    entering: Vec<ObjectId>,
 }
 
 fn adaptive_lag_ratio(item_count: usize) -> f64 {
@@ -461,11 +461,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Make a previously hidden hierarchy visible at the current playhead.
     pub(crate) fn schedule_show_now(&mut self, root_id: ObjectId) {
+        self.schedule_show_at(root_id, self.current_time);
+    }
+
+    /// Make a previously hidden hierarchy visible at an authored timeline time.
+    pub(crate) fn schedule_show_at(&mut self, root_id: ObjectId, time: f64) {
         let Some(state) = self.states.get(root_id).cloned() else {
             return;
         };
         let track = self.ensure_track(root_id);
-        self.schedule_show_hierarchy(root_id, &state, track, self.current_time);
+        self.schedule_show_hierarchy(root_id, &state, track, time);
     }
 
     /// Schedule an instantaneous hide for a root and its generated text
@@ -834,24 +839,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         ))
     }
 
-    fn nearest_equation_pair(
-        &self,
-        id: ObjectId,
-        pairs: &[(ObjectId, ObjectId)],
-        target_side: bool,
-    ) -> Option<(ObjectId, ObjectId)> {
-        let center = self.world_center_for_match(id);
-        pairs.iter().copied().min_by(|a, b| {
-            let a_id = if target_side { a.1 } else { a.0 };
-            let b_id = if target_side { b.1 } else { b.0 };
-            let a_center = self.world_center_for_match(a_id);
-            let b_center = self.world_center_for_match(b_id);
-            let a_distance = (center.0 - a_center.0).powi(2) + (center.1 - a_center.1).powi(2);
-            let b_distance = (center.0 - b_center.0).powi(2) + (center.1 - b_center.1).powi(2);
-            a_distance.total_cmp(&b_distance)
-        })
-    }
-
     fn plan_equation_transition(
         &self,
         source_parent: ObjectId,
@@ -891,8 +878,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let mut used_target = HashSet::new();
         let mut considered_source = HashSet::new();
         let mut considered_target = HashSet::new();
-        let mut source_candidates: HashMap<ObjectId, Vec<(ObjectId, ObjectId)>> = HashMap::new();
-        let mut target_candidates: HashMap<ObjectId, Vec<(ObjectId, ObjectId)>> = HashMap::new();
 
         for (group_source, group_target) in semantic_groups {
             let group_source: Vec<_> = group_source
@@ -969,12 +954,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 group_pairs.push(pair);
             }
 
-            for id in &group_source {
-                source_candidates.insert(*id, group_pairs.clone());
-            }
-            for id in &group_target {
-                target_candidates.insert(*id, group_pairs.clone());
-            }
             pairs.extend(group_pairs);
         }
 
@@ -1035,26 +1014,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let leaving = considered_source
             .into_iter()
             .filter(|id| !used_source.contains(id))
-            .map(|id| {
-                let candidates = source_candidates
-                    .get(&id)
-                    .filter(|candidates| !candidates.is_empty())
-                    .map(Vec::as_slice)
-                    .unwrap_or(&pairs);
-                (id, self.nearest_equation_pair(id, candidates, false))
-            })
             .collect();
         let entering = considered_target
             .into_iter()
             .filter(|id| !used_target.contains(id))
-            .map(|id| {
-                let candidates = target_candidates
-                    .get(&id)
-                    .filter(|candidates| !candidates.is_empty())
-                    .map(Vec::as_slice)
-                    .unwrap_or(&pairs);
-                (id, self.nearest_equation_pair(id, candidates, true))
-            })
             .collect();
 
         EquationTransitionPlan {
@@ -1226,23 +1189,30 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    fn schedule_equation_leaving(
-        &mut self,
-        source: ObjectId,
-        anchor: Option<(ObjectId, ObjectId)>,
-        start: f64,
-        duration: f64,
-    ) {
+    fn equation_center_collapsed_transform(state: &MobjectState) -> SpatialTransform {
+        let local_center = if state.path.elements().is_empty() {
+            let center = state.bounds.center();
+            gaanim_core::kurbo::Point::new(center.x, center.y)
+        } else {
+            let bounds = state.path.bounding_box();
+            gaanim_core::kurbo::Point::new(
+                (bounds.x0 + bounds.x1) * 0.5,
+                (bounds.y0 + bounds.y1) * 0.5,
+            )
+        };
+        let center_in_parent = state.transform.to_affine_2d() * local_center;
+        let mut collapsed = state.transform;
+        collapsed.scale = DVec3::ZERO;
+        collapsed.translation.x = center_in_parent.x - collapsed.anchor.x;
+        collapsed.translation.y = center_in_parent.y - collapsed.anchor.y;
+        collapsed
+    }
+
+    fn schedule_equation_leaving(&mut self, source: ObjectId, start: f64, duration: f64) {
         let Some(state) = self.states.get(source).cloned() else {
             return;
         };
-        let mut destination = state.transform;
-        if let Some((_, target_anchor)) = anchor
-            && let Some(anchor_transform) = self.equation_pair_destination(source, target_anchor)
-        {
-            destination.translation = anchor_transform.translation;
-        }
-        destination.scale *= 0.78;
+        let destination = Self::equation_center_collapsed_transform(&state);
         let track = self.ensure_track(source);
         for lens in [
             PropertyLensSpec::Translation {
@@ -1252,10 +1222,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             PropertyLensSpec::Scale {
                 from: state.transform.scale,
                 to: destination.scale,
-            },
-            PropertyLensSpec::Opacity {
-                from: state.opacity,
-                to: 0.0,
             },
         ] {
             self.timeline.add_clip(
@@ -1271,31 +1237,49 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }),
             );
         }
+        self.timeline.add_clip(
+            track,
+            start + duration,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: source,
+                lens: PropertyLensSpec::Opacity {
+                    from: state.opacity,
+                    to: 0.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("EquationCollapseHandoff".to_string()),
+            }),
+        );
         if let Some(state) = self.states.get_mut(source) {
             state.opacity = 0.0;
             state.transform = destination;
         }
     }
 
-    fn schedule_equation_entering(
-        &mut self,
-        target: ObjectId,
-        anchor: Option<(ObjectId, ObjectId)>,
-        start: f64,
-        duration: f64,
-    ) {
+    fn schedule_equation_entering(&mut self, target: ObjectId, start: f64, duration: f64) {
         let Some(state) = self.states.get(target).cloned() else {
             return;
         };
         let destination = state.transform;
-        let mut origin = destination;
-        if let Some((source_anchor, _)) = anchor
-            && let Some(anchor_transform) = self.equation_pair_destination(target, source_anchor)
-        {
-            origin.translation = anchor_transform.translation;
-        }
-        origin.scale *= 0.78;
+        let origin = Self::equation_center_collapsed_transform(&state);
         let track = self.ensure_track(target);
+        self.timeline.add_clip(
+            track,
+            start,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: state.opacity,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("EquationEmergeHandoff".to_string()),
+            }),
+        );
         for lens in [
             PropertyLensSpec::Translation {
                 from: origin.translation,
@@ -1304,10 +1288,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             PropertyLensSpec::Scale {
                 from: origin.scale,
                 to: destination.scale,
-            },
-            PropertyLensSpec::Opacity {
-                from: 0.0,
-                to: state.opacity,
             },
         ] {
             self.timeline.add_clip(
@@ -1350,7 +1330,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .pairs
             .iter()
             .map(|(_, target)| *target)
-            .chain(plan.entering.iter().map(|(target, _)| *target))
+            .chain(plan.entering.iter().copied())
             .collect();
         for target in target_ids {
             if let Some(state) = self.states.get(target) {
@@ -1363,12 +1343,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.schedule_equation_pair_morph(source, target, start, duration, mode);
         }
         if mode == EquationTransitionMode::Replace {
-            for (source, anchor) in plan.leaving {
-                self.schedule_equation_leaving(source, anchor, start, duration * 0.55);
+            for source in plan.leaving {
+                self.schedule_equation_leaving(source, start, duration * 0.55);
             }
         }
-        for (target, anchor) in plan.entering {
-            self.schedule_equation_entering(target, anchor, start + duration * 0.2, duration * 0.8);
+        for target in plan.entering {
+            self.schedule_equation_entering(target, start + duration * 0.2, duration * 0.8);
         }
         self.current_time += duration;
     }
@@ -5894,6 +5874,22 @@ mod tests {
         assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn equation_residual_collapses_into_its_visual_center() {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let state = hierarchy_state(entity, square_path(40.0), Vec::new());
+        let collapsed = SceneBuilder::equation_center_collapsed_transform(&state);
+        let visual_center = gaanim_core::kurbo::Point::new(45.0, 5.0);
+        let before = state.transform.to_affine_2d() * visual_center;
+        let after = collapsed.to_affine_2d() * visual_center;
+
+        assert_eq!(collapsed.scale, DVec3::ZERO);
+        assert!((before.x - after.x).abs() < 1e-9);
+        assert!((before.y - after.y).abs() < 1e-9);
+        assert_eq!(after, visual_center);
     }
 
     #[test]
