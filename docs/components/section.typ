@@ -35,9 +35,11 @@
       html.link(href: prefix + "assets/base.css", rel: "stylesheet")
       html.title(title + " — Gaanim")
       // Inline script to prevent FOUC — runs before first paint
-      html.elem("script", attrs: (type: "text/javascript"), {
-        [if(localStorage.getItem("theme"))document.documentElement.setAttribute("data-theme",localStorage.getItem("theme"))]
-      })
+      html.elem(
+        "script",
+        attrs: (type: "text/javascript"),
+        "if(localStorage.getItem('theme'))document.documentElement.setAttribute('data-theme',localStorage.getItem('theme'))",
+      )
     })
 
     html.body({
@@ -55,14 +57,16 @@
           "Regresión visual": "guides/visual-regression/",
           "Layout proposal": "guides/layout-proposal/",
         ),
-        "API Reference": (
-          "Overview": "api/",
-          "Scene": "api/scene/",
-          "Layouts": "api/layout/",
-          "Mobjects": "api/mobjects/",
-          "Animations": "api/animations/",
-          "Colors": "api/themes/",
-        ),
+          "API Reference": (
+            "Overview": "api/",
+            "Scene": "api/scene/",
+            "Layouts": "api/layout/",
+            "Mobjects": "api/mobjects/",
+            "Animations": "api/animations/",
+            "Colors": "api/themes/",
+            "Assets": "api/assets/",
+            "Audio": "api/audio/",
+          ),
         "Examples": (
           "Basic": "examples/basic/",
           "Advanced": "examples/advanced/",
@@ -72,6 +76,21 @@
       html.div(class: "layout-container", {
         html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
           html.h3("GaanIm")
+          html.div(class: "docs-search", {
+            html.div(class: "docs-search-label", "SEARCH DOCUMENTATION")
+            html.elem(
+              "input",
+              attrs: (
+                id: "docs-search-input",
+                type: "search",
+                placeholder: "Buscar en la documentación",
+                autocomplete: "off",
+                spellcheck: "false",
+              ),
+            )
+            html.div(class: "docs-search-hint", "Escribe para buscar · / para enfocar")
+            html.div(id: "docs-search-results", class: "docs-search-results", [])
+          })
           html.ul({
             for (key, val) in site-map.pairs() {
               if type(val) == str {

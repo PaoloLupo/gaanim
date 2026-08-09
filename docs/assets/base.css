@@ -270,6 +270,103 @@ body { border-top: 3px solid var(--accent-blue); }
 .nav-sidebar details[open] > summary { color: var(--accent-blue); background: #f1f5f9; }
 :root[data-theme="dark"] .nav-sidebar details[open] > summary { background: #1e293b; }
 
+/* ── Documentation search ── */
+.docs-search {
+    margin: 0 0 16px;
+    padding: 10px;
+    background: var(--bg-card);
+    border: var(--border-w) solid var(--code-border);
+    white-space: normal;
+}
+.docs-search-label {
+    margin-bottom: 7px;
+    color: var(--accent-blue);
+    font-family: var(--font-code);
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.09em;
+}
+#docs-search-input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 9px;
+    border: var(--border-w) solid var(--code-border);
+    background: var(--bg-main);
+    color: var(--text-main);
+    font-family: var(--font-code);
+    font-size: 0.73rem;
+    outline: none;
+}
+#docs-search-input::placeholder { color: var(--text-muted); opacity: 0.85; }
+#docs-search-input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+.docs-search-hint {
+    margin-top: 7px;
+    color: var(--text-muted);
+    font-family: var(--font-code);
+    font-size: 0.58rem;
+    line-height: 1.35;
+}
+.docs-search-results {
+    max-height: 48vh;
+    margin-top: 8px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+.docs-search-results:empty { display: none; }
+.docs-search-result {
+    display: block;
+    margin-top: 5px;
+    padding: 8px 9px;
+    border-left: 2px solid var(--accent-blue);
+    background: var(--bg-main);
+    color: var(--text-main) !important;
+    text-decoration: none !important;
+}
+.docs-search-result:hover {
+    background: #eff6ff;
+    border-left-color: var(--accent-violet);
+}
+:root[data-theme="dark"] .docs-search-result:hover { background: #1e293b; }
+.docs-search-result-title {
+    display: block;
+    overflow: hidden;
+    color: var(--accent-blue);
+    font-family: var(--font-code);
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.docs-search-result-section {
+    display: block;
+    margin-top: 2px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-code);
+    font-size: 0.59rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.docs-search-result-snippet {
+    display: block;
+    margin-top: 5px;
+    color: var(--text-muted);
+    font-size: 0.67rem;
+    line-height: 1.35;
+}
+.docs-search-message {
+    display: block;
+    padding: 8px 9px;
+    color: var(--text-muted);
+    font-family: var(--font-code);
+    font-size: 0.63rem;
+    line-height: 1.4;
+}
+
 /* ── Toggles ── */
 .nav-toggle-btn, .theme-toggle-btn {
     position: fixed;

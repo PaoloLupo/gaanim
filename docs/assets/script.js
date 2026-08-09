@@ -236,3 +236,218 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 });
+
+// ============================================================================
+// Búsqueda global de documentación
+// ============================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("docs-search-input");
+    const resultsBox = document.getElementById("docs-search-results");
+    const nav = document.getElementById("global-nav-sidebar");
+    if (!input || !resultsBox || !nav) return;
+
+    let indexPromise = null;
+    let searchVersion = 0;
+
+    const normalize = (value) => value
+        .toLocaleLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    const canonicalUrl = (value) => {
+        const url = new URL(value, window.location.href);
+        url.hash = "";
+        if (url.pathname.endsWith("/index.html")) {
+            url.pathname = url.pathname.slice(0, -"index.html".length);
+        }
+        return url.href;
+    };
+
+    const pageLinks = () => {
+        const seen = new Set();
+        return Array.from(nav.querySelectorAll("a[href]"))
+            .map((link) => {
+                const url = canonicalUrl(link.href);
+                return { url, label: link.textContent.trim() };
+            })
+            .filter((page) => {
+                if (seen.has(page.url)) return false;
+                seen.add(page.url);
+                return true;
+            });
+    };
+
+    const pageFromDocument = (doc, url, fallbackTitle) => {
+        const main = doc.querySelector("main") || doc.body;
+        const title = main.querySelector("h1")?.textContent.trim()
+            || doc.title.replace(/\s+—\s+Gaanim\s*$/, "").trim()
+            || fallbackTitle;
+        const description = doc.querySelector('meta[name="description"]')?.content || "";
+        const headings = Array.from(main.querySelectorAll("h2, h3, h4"))
+            .map((heading) => ({
+                id: heading.id,
+                text: heading.textContent.trim(),
+            }))
+            .filter((heading) => heading.text.length > 0);
+        const text = main.textContent.replace(/\s+/g, " ").trim();
+
+        return {
+            url,
+            title,
+            description,
+            headings,
+            text,
+            normalizedText: normalize(`${title} ${description} ${text}`),
+        };
+    };
+
+    const loadPage = async (page) => {
+        if (canonicalUrl(window.location.href) === page.url) {
+            return pageFromDocument(document, page.url, page.label);
+        }
+
+        try {
+            const response = await fetch(page.url, { credentials: "same-origin" });
+            if (!response.ok) return null;
+            const html = await response.text();
+            const doc = new DOMParser().parseFromString(html, "text/html");
+            return pageFromDocument(doc, page.url, page.label);
+        } catch (_error) {
+            // A local file opened directly may block fetch; current-page search
+            // still works and the failed page is simply omitted.
+            return null;
+        }
+    };
+
+    const buildIndex = () => Promise.all(pageLinks().map(loadPage));
+
+    const snippetFor = (page, query) => {
+        const source = page.text || page.description;
+        const sourceNormalized = normalize(source);
+        const firstToken = normalize(query).split(/\s+/).find(Boolean);
+        const matchAt = firstToken ? sourceNormalized.indexOf(firstToken) : -1;
+        if (matchAt < 0) return source.slice(0, 170);
+
+        const start = Math.max(0, matchAt - 58);
+        const end = Math.min(source.length, start + 178);
+        return `${start > 0 ? "…" : ""}${source.slice(start, end)}${end < source.length ? "…" : ""}`;
+    };
+
+    const rankedResults = (pages, query) => {
+        const normalizedQuery = normalize(query).trim();
+        const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+        if (tokens.length === 0) return [];
+
+        return pages
+            .filter(Boolean)
+            .map((page) => {
+                const title = normalize(page.title);
+                const headings = normalize(page.headings.map((heading) => heading.text).join(" "));
+                const matchesEveryToken = tokens.every((token) => page.normalizedText.includes(token));
+                if (!matchesEveryToken) return null;
+
+                let score = normalizedQuery.length > 2 && page.normalizedText.includes(normalizedQuery) ? 4 : 0;
+                tokens.forEach((token) => {
+                    if (title.includes(token)) score += 10;
+                    if (headings.includes(token)) score += 5;
+                    if (page.normalizedText.includes(token)) score += 1;
+                });
+
+                const section = page.headings.find((heading) => {
+                    const headingText = normalize(heading.text);
+                    return tokens.some((token) => headingText.includes(token));
+                });
+                const target = section?.id ? `#${section.id}` : "";
+
+                return {
+                    page,
+                    section,
+                    score,
+                    href: `${page.url}${target}`,
+                    snippet: snippetFor(page, query),
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score || a.page.title.localeCompare(b.page.title))
+            .slice(0, 8);
+    };
+
+    const showMessage = (message) => {
+        resultsBox.replaceChildren();
+        const element = document.createElement("span");
+        element.className = "docs-search-message";
+        element.textContent = message;
+        resultsBox.appendChild(element);
+    };
+
+    const renderResults = (results) => {
+        resultsBox.replaceChildren();
+        if (results.length === 0) {
+            showMessage("No se encontraron resultados.");
+            return;
+        }
+
+        results.forEach((result) => {
+            const link = document.createElement("a");
+            link.className = "docs-search-result";
+            link.href = result.href;
+
+            const title = document.createElement("span");
+            title.className = "docs-search-result-title";
+            title.textContent = result.page.title;
+            link.appendChild(title);
+
+            if (result.section) {
+                const section = document.createElement("span");
+                section.className = "docs-search-result-section";
+                section.textContent = `§ ${result.section.text}`;
+                link.appendChild(section);
+            }
+
+            const snippet = document.createElement("span");
+            snippet.className = "docs-search-result-snippet";
+            snippet.textContent = result.snippet;
+            link.appendChild(snippet);
+            resultsBox.appendChild(link);
+        });
+    };
+
+    const search = async (query, version) => {
+        if (!query.trim()) {
+            resultsBox.replaceChildren();
+            return;
+        }
+
+        showMessage("Buscando…");
+        if (!indexPromise) indexPromise = buildIndex();
+        const pages = await indexPromise;
+        if (version !== searchVersion) return;
+        renderResults(rankedResults(pages, query));
+    };
+
+    input.addEventListener("input", () => {
+        searchVersion += 1;
+        search(input.value, searchVersion);
+    });
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            input.value = "";
+            searchVersion += 1;
+            resultsBox.replaceChildren();
+            input.blur();
+        }
+    });
+
+    document.addEventListener("keydown", (event) => {
+        const target = event.target;
+        const isTyping = target instanceof HTMLInputElement
+            || target instanceof HTMLTextAreaElement
+            || target.isContentEditable;
+        if (event.key === "/" && !isTyping) {
+            event.preventDefault();
+            input.focus();
+            input.select();
+        }
+    });
+});
