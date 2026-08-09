@@ -1428,7 +1428,18 @@ impl Canvas {
     }
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
-        self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+        let defer_visibility = members.iter().any(|member| {
+            member
+                .spec
+                .lock()
+                .expect("object spec poisoned")
+                .defer_visibility_until_play
+        });
+        let handle = self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()));
+        if defer_visibility {
+            handle.defer_visibility_until_play();
+        }
+        handle
     }
 
     /// Updates the direct children of a group created by [`Self::group`].
@@ -2441,6 +2452,45 @@ mod tests {
         assert!(spring_opacity > 0.0);
         assert!(dimension_opacity > 0.0);
         assert!(label_opacity > 0.0);
+    }
+
+    #[test]
+    fn deferred_group_fade_in_reveals_deferred_children() {
+        let mut canvas = Canvas::new(320, 180);
+        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
+        let child = canvas.dot(8.0);
+        child.follow_to(&anchor, 0.0, 24.0);
+        let group = canvas.group(&[&child]);
+        canvas.play(vec![group.fade_in(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let opacity_for = |world: &mut World, id: gaanim_core::ObjectId| {
+            let compiled_id = gaanim_core::ObjectId::from_raw(id.as_raw() - 1);
+            let mut query = world.query::<(&gaanim_scene::MobjectId, &Opacity)>();
+            query
+                .iter(world)
+                .find(|(object_id, _)| object_id.0 == compiled_id)
+                .map(|(_, opacity)| opacity.0)
+                .expect("group member should compile into a mobject")
+        };
+
+        assert_eq!(opacity_for(&mut world, group.id), 0.0);
+        assert_eq!(opacity_for(&mut world, child.id), 0.0);
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut world, 0.5);
+
+        assert!(opacity_for(&mut world, group.id) > 0.0);
+        assert!(opacity_for(&mut world, child.id) > 0.0);
     }
 
     #[test]

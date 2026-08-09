@@ -26,7 +26,7 @@ scene.play([
     rail.create().duration(0.6),
     mass.grow_from_center().duration(0.5),
 ])
-scene.play([mass.move(600, 0).duration(2.0).smooth()])
+scene.play([mass.move(600, 0).duration(2.0).smooth(), callout.fade_in()])
 scene.wait(0.4)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -2980,13 +2980,17 @@ impl Canvas {
             return;
         };
 
-        // FadeIn/FadeInFrom already author their own opacity lens. Other
-        // animations need an instantaneous reveal so Create/Write/movement
-        // animations can be used directly in scene.play as the entry point.
+        // FadeIn/FadeInFrom already author their own root opacity lens, but
+        // composite deferred objects still need their descendants restored.
+        // Other animations need an instantaneous reveal so Create/Write/
+        // movement animations can be used directly in scene.play as the entry
+        // point.
         if matches!(
             &anim.anim_type,
             AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
         ) {
+            builder
+                .schedule_show_descendants_at(actual, builder.current_time + anim.delay.max(0.0));
             return;
         }
 

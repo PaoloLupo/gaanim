@@ -418,38 +418,28 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         parent_track: TrackId,
         time: f64,
     ) {
-        // Always restore parent entity opacity so that the opacity propagation
-        // system (child_global = child_local * parent_global) doesn't zero-out children.
-        self.timeline.add_clip(
-            parent_track,
-            time,
-            0.0,
-            ClipPayload::Animation(AnimationSpec {
-                target: root_id,
-                lens: PropertyLensSpec::Opacity {
-                    from: 0.0,
-                    to: state.opacity,
-                },
-                rate_func: gaanim_math::RateFunc::Linear,
-                delay: 0.0,
-                label: None,
-            }),
-        );
-        for child in &state.child_spans {
-            let child_opacity = self
-                .states
-                .get(child.id)
-                .map(|child_state| child_state.opacity)
-                .unwrap_or(1.0);
+        // Restore every visual descendant. This matters for composite reactive
+        // objects: their children may have been hidden individually before the
+        // group itself receives its entry animation.
+        let hierarchy = self.hierarchy_ids(root_id);
+        for target in hierarchy {
+            let opacity = if target == root_id {
+                state.opacity
+            } else {
+                self.states
+                    .get(target)
+                    .map(|child_state| child_state.opacity)
+                    .unwrap_or(1.0)
+            };
             self.timeline.add_clip(
                 parent_track,
                 time,
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
-                    target: child.id,
+                    target,
                     lens: PropertyLensSpec::Opacity {
                         from: 0.0,
-                        to: child_opacity,
+                        to: opacity,
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,
@@ -471,6 +461,42 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let track = self.ensure_track(root_id);
         self.schedule_show_hierarchy(root_id, &state, track, time);
+    }
+
+    /// Schedule visibility for every descendant except the root. The root is
+    /// omitted when its entry animation owns the root opacity, for example
+    /// `FadeIn` and `FadeInFrom`.
+    pub(crate) fn schedule_show_descendants_at(&mut self, root_id: ObjectId, time: f64) {
+        if !self.states.contains_key(root_id) {
+            return;
+        }
+        let track = self.ensure_track(root_id);
+        for target in self
+            .hierarchy_ids(root_id)
+            .into_iter()
+            .filter(|id| *id != root_id)
+        {
+            let opacity = self
+                .states
+                .get(target)
+                .map(|child_state| child_state.opacity)
+                .unwrap_or(1.0);
+            self.timeline.add_clip(
+                track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
     }
 
     /// Schedule an instantaneous hide for a root and its generated text
