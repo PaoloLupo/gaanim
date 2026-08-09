@@ -10,13 +10,6 @@ pub mod transition;
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::Timeline;
 
-/// Keep playback just inside the outgoing semantic slide at a boundary.
-///
-/// Seeking exactly to the next slide's start applies its visibility changes,
-/// so a presentation would appear to advance without a new input. This small
-/// guard preserves the completed outgoing slide until the presenter advances.
-const PRESENTATION_BOUNDARY_GUARD: f64 = 1e-5;
-
 /// Marker resource: inserted by `reload_with` to signal that the t=0 keyframe
 /// snapshot should be captured on the next frame — after deferred Commands from
 /// `replay_into` have been flushed.
@@ -34,7 +27,7 @@ impl Plugin for GaanimTimelinePlugin {
                 Update,
                 (
                     timeline_playback_system.in_set(SceneSet::Input),
-                    presentation_input_system
+                    interactive_stop_input_system
                         .in_set(SceneSet::Input)
                         .after(timeline_playback_system),
                     deferred_keyframe_capture_system
@@ -117,13 +110,13 @@ pub fn timeline_playback_system(
         let delta = scaled_dt;
         let next_time = timeline.current_time + delta;
 
-        // Check whether we crossed an authored reveal breakpoint or the guard
-        // immediately before a semantic slide boundary.
+        // Segment boundaries are continuous. Only explicitly authored stops
+        // pause real-time playback.
         let current = timeline.current_time;
-        let hit_breakpoint = timeline.next_playback_stop(current, next_time);
+        let hit_stop = timeline.next_playback_stop(current, next_time);
 
-        if let Some(bp) = hit_breakpoint {
-            timeline.seek_request = Some(bp);
+        if let Some(stop) = hit_stop {
+            timeline.seek_request = Some(stop);
             timeline.is_playing = false;
         } else if let Some((start, end)) = timeline.loop_range {
             if next_time >= end {
@@ -145,13 +138,16 @@ pub fn timeline_playback_system(
     }
 }
 
-/// System: Handles user input (keyboard, mouse) to navigate slide breakpoints in presentation mode.
-pub fn presentation_input_system(
+/// System: Handles user input (keyboard, mouse) to navigate explicit stops.
+pub fn interactive_stop_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     mut timeline: ResMut<Timeline>,
 ) {
-    if (timeline.breakpoints.is_empty() && timeline.presentation.is_empty())
+    if timeline
+        .segments
+        .iter()
+        .all(|segment| segment.stops.is_empty())
         || timeline.ignore_input
     {
         return;
@@ -196,25 +192,9 @@ pub fn presentation_input_system(
     if should_advance {
         if !timeline.is_playing {
             timeline.is_playing = true;
-        } else if !timeline.presentation.is_empty() {
-            if let Some(stop) = timeline.next_presentation_stop(timeline.current_time) {
-                timeline.seek_request = Some(stop);
-                timeline.is_playing = false;
-            } else {
-                timeline.seek_request = Some(timeline.cached_duration);
-                timeline.is_playing = false;
-            }
         } else {
-            let current = timeline.current_time;
-            let mut next_bp = None;
-            for &bp in &timeline.breakpoints {
-                if bp > current + 1e-5 {
-                    next_bp = Some(bp);
-                    break;
-                }
-            }
-            if let Some(bp) = next_bp {
-                timeline.seek_request = Some(bp);
+            if let Some(stop) = timeline.next_stop(timeline.current_time) {
+                timeline.seek_request = Some(stop);
                 timeline.is_playing = false;
             } else {
                 timeline.seek_request = Some(timeline.cached_duration);
@@ -222,20 +202,7 @@ pub fn presentation_input_system(
             }
         }
     } else if should_go_back {
-        let target = if timeline.presentation.is_empty() {
-            let current = timeline.current_time;
-            timeline
-                .breakpoints
-                .iter()
-                .rev()
-                .find(|&&bp| bp < current - 0.2)
-                .copied()
-                .unwrap_or(0.0)
-        } else {
-            timeline
-                .previous_presentation_stop(timeline.current_time)
-                .unwrap_or(0.0)
-        };
+        let target = timeline.previous_stop(timeline.current_time).unwrap_or(0.0);
         timeline.seek_request = Some(target);
         timeline.is_playing = false;
     }
@@ -299,37 +266,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn presentation_controls_are_optional_in_headless_apps() {
+    fn interactive_stop_controls_are_optional_in_headless_apps() {
         let mut app = App::new();
         app.init_resource::<Timeline>()
-            .add_systems(Update, presentation_input_system);
+            .add_systems(Update, interactive_stop_input_system);
 
         assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
         assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
         app.update();
     }
     #[test]
-    fn playback_pauses_before_entering_the_next_semantic_slide() {
+    fn playback_crosses_segment_boundaries_and_pauses_only_at_explicit_stops() {
         let mut timeline = Timeline::new();
         timeline.current_time = 0.4;
         timeline.cached_duration = 2.0;
         timeline.is_playing = true;
-        timeline.set_presentation(vec![
-            timeline::PresentationSlide {
+        timeline.set_segments(vec![
+            timeline::SegmentMetadata {
                 id: 1,
                 name: "first".to_owned(),
                 notes: None,
                 start_time: 0.0,
                 end_time: 1.0,
-                steps: Vec::new(),
+                stops: Vec::new(),
             },
-            timeline::PresentationSlide {
+            timeline::SegmentMetadata {
                 id: 2,
                 name: "second".to_owned(),
                 notes: None,
                 start_time: 1.0,
                 end_time: 2.0,
-                steps: Vec::new(),
+                stops: vec![timeline::SegmentStop {
+                    name: Some("pause".to_owned()),
+                    time: 1.2,
+                }],
             },
         ]);
 
@@ -340,10 +310,7 @@ mod tests {
         app.update();
 
         let timeline = app.world().resource::<Timeline>();
-        assert_eq!(
-            timeline.seek_request,
-            Some(1.0 - PRESENTATION_BOUNDARY_GUARD)
-        );
+        assert_eq!(timeline.seek_request, Some(1.2));
         assert!(!timeline.is_playing);
     }
 }

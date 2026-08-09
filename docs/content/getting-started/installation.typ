@@ -80,7 +80,7 @@ Sin necesidad de escribir `main.py`:
 
 ```powershell
 gaanim mi-video          # preview con hot reload (guardar recarga)
-gaanim check mi-video    # preflight 16:9, notas, steps, placeholders
+gaanim check mi-video    # preflight 16:9, notas, stops, placeholders
 gaanim check mi-video --strict  # falla también con warnings
 gaanim --present --monitor 1 mi-video  # presentación en proyector 1
 ```

@@ -473,7 +473,7 @@ fn editor_ui_system(
         .and_then(|id| timeline.scenes.get(id))
         .map(|s| s.name.clone())
         .unwrap_or_default();
-    let presentation_name = timeline.presentation_label();
+    let presentation_name = timeline.segment_label();
     let total = timeline.cached_duration.max(0.0);
     let current = timeline.current_time.clamp(0.0, total);
 
@@ -549,9 +549,10 @@ fn editor_ui_system(
                             .loop_range
                             .map(|(s, e)| (s as f32 / total_f32, e as f32 / total_f32));
                         let bp_fracs: Vec<f32> = timeline
-                            .breakpoints
+                            .segments
                             .iter()
-                            .map(|&bp| bp as f32 / total_f32)
+                            .flat_map(|segment| segment.stops.iter())
+                            .map(|stop| stop.time as f32 / total_f32)
                             .collect();
 
                         let scene_segs: Vec<SceneSegment> = timeline
@@ -578,7 +579,7 @@ fn editor_ui_system(
                             total,
                         );
                         if let Some(new_frac) = seek_resp.seek_to {
-                            // snapping visual magnético: imán suave a bordes de escena / breakpoints
+                            // snapping visual magnético: imán suave a bordes de escena / stops
                             let mut snapped_frac = new_frac;
                             let snap_frac = 0.015; // ~10px en ancho típico
                             for seg in &scene_segs {
@@ -1195,7 +1196,7 @@ fn seek_bar_drag_target(origin_x: f32, left_x: f32, right_x: f32) -> SeekBarDrag
     }
 }
 
-/// Paint a custom seek bar with progress fill, loop region, breakpoint markers,
+/// Paint a custom seek bar with progress fill, loop region, stop markers,
 /// scene sections, playhead handle, and hover time tooltip.
 ///
 /// When scenes exist, a dedicated scene lane is rendered **encima de la
@@ -1526,7 +1527,7 @@ fn paint_seek_bar(
         painter.rect_filled(highlight_rect, bar_h / 2.0, fill_color_light);
     }
 
-    // Breakpoint markers
+    // Explicit stop markers
     for &bp in bp_fracs {
         let bx = bar_rect.min.x + bp * bar_rect.width();
         let marker_size = 3.0;
@@ -1847,9 +1848,12 @@ fn global_playback_keys_system(
         return;
     }
 
-    // Presentation navigation is owned by `presentation_input_system`, which
-    // advances by semantic slides and reveal steps rather than raw scenes.
-    if !timeline.presentation.is_empty() {
+    // Explicit stop navigation is owned by `interactive_stop_input_system`.
+    if timeline
+        .segments
+        .iter()
+        .any(|segment| !segment.stops.is_empty())
+    {
         return;
     }
 

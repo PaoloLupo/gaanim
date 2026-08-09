@@ -26,7 +26,7 @@
 
 *Tipografía de verdad.* Texto y ecuaciones como vectores via Typst. Selección por glifo, `write` animado, `color_by` y tags semánticos.
 
-*Export listo para publicar.* MP4/WebM/WebP/GIF/PNG, presets `youtube`/`tiktok`/`instagram`, slides semánticas con `slide()` y export por slide.
+*Export listo para publicar.* MP4/WebM/WebP/GIF/PNG, presets `youtube`/`tiktok`/`instagram`, segmentos semánticos con `segment()` + `stop()` y export por segmento.
 
 == En 30 segundos
 
@@ -59,7 +59,7 @@ scene.export("demo.mp4", fps=30)
   #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
     #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-cyan); margin-bottom: 8px;", [TIMELINE])
     #html.div(style: "font-weight: 700; margin-bottom: 6px;", [Control total])
-    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [play, wait, segment, link, slide, camera pan/zoom/follow/shake.])
+    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [play, wait, segment, stop, link, camera pan/zoom/follow/shake.])
   ])
 ])
 

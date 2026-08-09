@@ -33,7 +33,7 @@ mi-proyecto/
 ```
 
 - `video` — escena animada 16:9 y flujo de exportación.
-- `slides` — slides semánticos, notas y pasos para Presenter View.
+- `slides` — segmentos semánticos, notas y paradas para Presenter View.
 
 `--force` actualiza únicamente los archivos conocidos del scaffold. No borra archivos propios dentro de `assets/` ni otras carpetas del proyecto.
 

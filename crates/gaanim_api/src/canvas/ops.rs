@@ -9,8 +9,8 @@ use gaanim_core::peniko::Color;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
-use crate::canvas::SlideId;
 use crate::canvas::types::{LayoutKind, ObjectSpec};
+use crate::canvas::{SegmentId, SegmentLayout};
 
 // -----------------------------------------------------------------------
 // Shared state
@@ -24,15 +24,17 @@ pub(crate) struct CanvasState {
     pub segments: Vec<Segment>,
     pub active_idx: usize,
     pub next_id: u32,
+    pub next_segment_id: u32,
     pub all_drawables: Vec<ObjectId>,
 }
 
 impl CanvasState {
     pub fn new() -> Self {
         Self {
-            segments: vec![Segment::new("_default")],
+            segments: vec![Segment::implicit()],
             active_idx: 0,
             next_id: 1,
+            next_segment_id: 1,
             all_drawables: Vec::new(),
         }
     }
@@ -49,6 +51,12 @@ impl CanvasState {
         let id = self.next_id;
         self.next_id += 1;
         ObjectId::from_parts(id, 1)
+    }
+
+    pub fn next_segment_id(&mut self) -> SegmentId {
+        let id = self.next_segment_id;
+        self.next_segment_id += 1;
+        SegmentId(id)
     }
 }
 
@@ -238,12 +246,8 @@ pub(crate) enum Op {
         mask: Option<ObjectId>,
         rule: gaanim_core::peniko::Fill,
     },
-    /// Insert a slide breakpoint.
-    Slide,
-    /// Begin a semantic slide. Unlike [`Self::Slide`], this is not a
-    /// breakpoint: it scopes the objects that follow so the compiler can keep
-    /// future slides hidden and retire the preceding slide automatically.
-    PresentationSlideStart(SlideId),
+    /// Insert an explicit zero-duration interactive stop.
+    Stop,
     /// Set an object visible (instant).
     Show(ObjectId),
     /// Set an object invisible (instant).
@@ -439,10 +443,22 @@ impl UpdaterPreset {
 // Segment
 // -----------------------------------------------------------------------
 
+/// Stop stored in authoring-local time until the segment manifest is compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalSegmentStop {
+    pub name: Option<String>,
+    pub time: f64,
+}
+
 /// A named segment (≈ scene) within a [`Canvas`](super::Canvas).
 #[derive(Debug, Clone)]
 pub struct Segment {
+    pub id: SegmentId,
     pub name: String,
+    pub notes: Option<String>,
+    pub layout: SegmentLayout,
+    pub(crate) stops: Vec<LocalSegmentStop>,
+    pub explicit: bool,
     pub(crate) cursor: f64,
     pub(crate) ops: Vec<Op>,
     /// Transition from the previous segment into this one (if any).
@@ -454,14 +470,48 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub(crate) fn new(name: &str) -> Self {
+    pub(crate) fn implicit() -> Self {
         Self {
-            name: name.to_string(),
+            id: SegmentId(0),
+            name: "_default".to_string(),
+            notes: None,
+            layout: SegmentLayout::Blank,
+            stops: Vec::new(),
+            explicit: false,
             cursor: 0.0,
             ops: Vec::new(),
             transition: None,
             prev_segment: None,
             mobject_ids: Vec::new(),
         }
+    }
+
+    pub(crate) fn new(
+        id: SegmentId,
+        name: String,
+        notes: Option<String>,
+        layout: SegmentLayout,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            notes,
+            layout,
+            stops: Vec::new(),
+            explicit: true,
+            cursor: 0.0,
+            ops: Vec::new(),
+            transition: None,
+            prev_segment: None,
+            mobject_ids: Vec::new(),
+        }
+    }
+
+    pub(crate) fn is_untouched_implicit(&self) -> bool {
+        !self.explicit
+            && self.cursor.abs() <= f64::EPSILON
+            && self.ops.is_empty()
+            && self.mobject_ids.is_empty()
+            && self.stops.is_empty()
     }
 }

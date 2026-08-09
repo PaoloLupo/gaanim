@@ -1,5 +1,5 @@
 pub mod ops;
-mod presentation;
+mod segment;
 pub use gaanim_animation::AxisMask;
 pub use ops::{CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
 mod types;
@@ -11,9 +11,9 @@ pub use types::{
 };
 mod layout;
 pub use layout::{FrameLayout, GridLayout, GridTrack, LayoutPreset, LayoutRegion};
-pub use presentation::{
-    PresentationBrand, PresentationError, PresentationManifest, SlideId, SlideSpec, SlideStep,
-    SlideTemplate,
+pub use segment::{
+    PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentLayout, SegmentManifest,
+    SegmentSpec, SegmentStop,
 };
 mod drawable;
 pub use drawable::{

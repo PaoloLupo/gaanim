@@ -95,16 +95,18 @@ fn main() {
     )
     .add_systems(Update, open_project_request_system);
 
+    // bevy_egui creates its primary context when the application starts. Keep
+    // this camera alive for both the project hub and script launches, so a
+    // script payload can reuse it instead of creating the egui camera after
+    // the first frame.
+    spawn_host_camera(app.world_mut());
+
     if let Some(script_path) = launch.script_path {
         if let Err(error) = start_script_session(app.world_mut(), script_path, launch.project) {
             eprintln!("gaanim: {error}");
             std::process::exit(2);
         }
     } else {
-        // The project Home does not replay a Canvas, so it must provide the
-        // primary 2D camera itself. bevy_egui attaches its primary context to
-        // that camera; without it the native window opens but stays blank.
-        spawn_home_camera(app.world_mut());
         app.world_mut()
             .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
             .show();
@@ -189,7 +191,11 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
-fn spawn_home_camera(world: &mut World) {
+/// Install the persistent primary camera before the Bevy event loop begins.
+///
+/// Canvas replay reuses this Vello camera; creating it during replay is too
+/// late for `bevy_egui` to attach its primary context on script launches.
+fn spawn_host_camera(world: &mut World) {
     world.spawn((
         Camera2d,
         gaanim_renderer::prelude::VelloView,
@@ -352,7 +358,7 @@ USAGE:
 
 ARGUMENTS:
     video               Animated-video starter
-    slides              Semantic slides starter
+    slides              Presentation segments starter
     DIRECTORY           Project directory (defaults to gaanim-<kind>)
 
 OPTIONS:
@@ -403,7 +409,7 @@ fn dispatch_check_mode() -> bool {
         std::process::exit(2);
     });
     let source = std::fs::read_to_string(&script).unwrap_or_default();
-    let is_presentation = !canvas.presentation_manifest().slides.is_empty();
+    let is_presentation = canvas.has_presentation_features();
     let report = if is_presentation {
         presentation_preflight(&canvas, &source)
     } else {
@@ -421,8 +427,8 @@ fn dispatch_check_mode() -> bool {
     );
     if is_presentation {
         println!(
-            "  {} slides · {} stops · {:.1} seconds · {}x{}",
-            report.slide_count, report.stop_count, report.duration, canvas.width, canvas.height
+            "  {} segments · {} stops · {:.1} seconds · {}x{}",
+            report.segment_count, report.stop_count, report.duration, canvas.width, canvas.height
         );
     } else {
         println!(
@@ -477,7 +483,7 @@ fn parse_check_args(args: &[String]) -> Result<CheckArgs, String> {
 
 #[derive(Debug, Default, PartialEq)]
 struct PreflightReport {
-    slide_count: usize,
+    segment_count: usize,
     stop_count: usize,
     duration: f64,
     errors: Vec<String>,
@@ -485,22 +491,22 @@ struct PreflightReport {
 }
 
 fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> PreflightReport {
-    let manifest = canvas.presentation_manifest();
+    let manifest = canvas.segment_manifest();
     let mut report = PreflightReport {
-        slide_count: manifest.slides.len(),
+        segment_count: manifest.segments.len(),
         stop_count: manifest
-            .slides
+            .segments
             .iter()
-            .map(|slide| 1 + slide.steps.len())
+            .map(|segment| segment.stops.len())
             .sum(),
-        duration: canvas.current_time(),
+        duration: manifest.duration(),
         ..default()
     };
 
-    if manifest.slides.is_empty() {
+    if manifest.segments.is_empty() {
         report
             .errors
-            .push("no semantic slides; use `scene.slide(...)`".to_string());
+            .push("no segments; use `scene.segment(...)`".to_string());
         return report;
     }
     let aspect_ratio = canvas.width as f64 / canvas.height.max(1) as f64;
@@ -511,32 +517,26 @@ fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> 
         ));
     }
 
-    for slide in &manifest.slides {
-        if slide
+    for segment in &manifest.segments {
+        if segment
             .notes
             .as_deref()
             .is_none_or(|notes| notes.trim().is_empty())
         {
             report
                 .warnings
-                .push(format!("slide `{}` has no speaker notes", slide.name));
+                .push(format!("segment `{}` has no speaker notes", segment.name));
         }
-        if slide.steps.is_empty() {
-            report
-                .warnings
-                .push(format!("slide `{}` has no `step()` pause", slide.name));
-        }
-        if slide.steps.iter().any(|step| step.name.is_none()) {
+        if segment.stops.iter().any(|stop| stop.name.is_none()) {
             report.warnings.push(format!(
-                "slide `{}` contains unnamed steps; names improve Presenter View",
-                slide.name
+                "segment `{}` contains unnamed stops; names improve Presenter View",
+                segment.name
             ));
         }
-        let end = slide.end_time.unwrap_or(report.duration);
-        if end - slide.start_time <= 1e-5 {
+        if segment.end_time - segment.start_time <= 1e-5 {
             report
                 .errors
-                .push(format!("slide `{}` has zero duration", slide.name));
+                .push(format!("segment `{}` has zero duration", segment.name));
         }
     }
 
@@ -596,7 +596,7 @@ USAGE:
 
 CHECKS:
     entry script and timeline duration
-    semantic slides, notes and named reveal steps when present
+    semantic segments, notes and named stops when present
     16:9 projector aspect ratio for presentations
     unresolved template placeholders
 
@@ -1054,9 +1054,9 @@ mod tests {
     }
 
     #[test]
-    fn home_installs_a_primary_2d_camera_for_egui() {
+    fn host_installs_a_primary_2d_camera_for_egui_before_script_replay() {
         let mut world = World::new();
-        spawn_home_camera(&mut world);
+        spawn_host_camera(&mut world);
         assert!(
             world
                 .query_filtered::<Entity, With<Camera2d>>()
@@ -1079,22 +1079,23 @@ mod tests {
     }
 
     #[test]
-    fn slides_preflight_finds_expected_risks() {
+    fn segment_preflight_finds_expected_risks() {
         let mut canvas = gaanim_api::canvas::Canvas::new(1920, 1080);
-        let slide = canvas
-            .slide(
+        canvas
+            .segment_with(
                 "Opening",
+                None,
                 Some("Introduce the topic".to_string()),
-                gaanim_api::canvas::SlideTemplate::Title,
+                gaanim_api::canvas::SegmentLayout::Title,
             )
             .unwrap();
         canvas.wait(1.0);
-        canvas.slide_step(slide, Some("ready".to_string())).unwrap();
+        canvas.stop(Some("ready".to_string())).unwrap();
         let report = presentation_preflight(&canvas, "title = \"[TITLE]\"");
 
         assert!(report.errors.is_empty());
-        assert_eq!(report.slide_count, 1);
-        assert_eq!(report.stop_count, 2);
+        assert_eq!(report.segment_count, 1);
+        assert_eq!(report.stop_count, 1);
         assert!(
             report
                 .warnings

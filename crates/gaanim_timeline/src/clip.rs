@@ -78,8 +78,8 @@ pub enum ClipPayload {
     },
     /// A custom event marker (e.g. for syncing external hooks or triggers).
     Marker(String),
-    /// A slide presentation breakpoint (interactive slide transition).
-    Breakpoint,
+    /// An explicit zero-duration interactive playback stop.
+    Stop,
     /// Named segment start marker for dividing long sequences.
     SegmentStart(String),
     /// A structural change to ungroup a group and reparent its children.

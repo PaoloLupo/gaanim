@@ -107,9 +107,13 @@ def _visual(
         print("SKIP: cargo is unavailable, so the visual runner cannot be built", file=sys.stderr)
         return 2
 
-    build = ["cargo", "build", "-p", "gaanim_editor", "--bin", "gaanim"]
-    if _run(repo, build, dry_run) != 0:
-        return 1
+    builds = [
+        ["cargo", "build", "-p", "gaanim_editor", "--bin", "gaanim-core"],
+        ["cargo", "build", "-p", "gaanim_launcher", "--bin", "gaanim"],
+    ]
+    for build in builds:
+        if _run(repo, build, dry_run) != 0:
+            return 1
 
     runner = repo / "target" / "debug" / ("gaanim.exe" if os.name == "nt" else "gaanim")
     if not dry_run and not runner.is_file():

@@ -25,7 +25,7 @@ const TEXT_LABEL: Color32 = Color32::from_rgb(240, 240, 240);
 const CLR_AUDIO: Color32 = Color32::from_rgb(70, 180, 90);
 const CLR_WAIT: Color32 = Color32::from_rgb(100, 100, 100);
 const CLR_MARKER: Color32 = Color32::from_rgb(220, 200, 60);
-const CLR_BREAKPOINT: Color32 = Color32::from_rgb(220, 80, 80);
+const CLR_STOP: Color32 = Color32::from_rgb(220, 80, 80);
 const CLR_SEGMENT: Color32 = Color32::from_rgb(180, 100, 200);
 const CLR_KEYFRAME: Color32 = Color32::from_rgb(255, 200, 80);
 const CLR_UNGROUP: Color32 = Color32::from_rgb(230, 100, 50);
@@ -2134,7 +2134,7 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
         ClipPayload::Audio { .. } => CLR_AUDIO,
         ClipPayload::Wait => CLR_WAIT,
         ClipPayload::Marker(_) => CLR_MARKER,
-        ClipPayload::Breakpoint => CLR_BREAKPOINT,
+        ClipPayload::Stop => CLR_STOP,
         ClipPayload::SegmentStart(_) => CLR_SEGMENT,
         ClipPayload::Ungroup { .. } => Color32::from_rgb(230, 100, 50),
         ClipPayload::SceneStart(_) => Color32::from_rgb(50, 180, 100),
@@ -2200,7 +2200,7 @@ fn clip_icon(payload: &ClipPayload) -> &'static str {
         ClipPayload::Audio { .. } => "♪",
         ClipPayload::Wait => "⏳",
         ClipPayload::Marker(_) => "⚑",
-        ClipPayload::Breakpoint => "🔴",
+        ClipPayload::Stop => "🔴",
         ClipPayload::SegmentStart(_) => "▶",
         ClipPayload::Ungroup { .. } => "⧉",
         ClipPayload::SceneStart(_) => "🎬",
@@ -2253,7 +2253,7 @@ fn clip_label(payload: &ClipPayload) -> String {
         }
         ClipPayload::Wait => "Wait".into(),
         ClipPayload::Marker(s) => format!("Marker:{}", s),
-        ClipPayload::Breakpoint => "BP".into(),
+        ClipPayload::Stop => "Stop".into(),
         ClipPayload::SegmentStart(s) => format!("Seg:{}", s),
         ClipPayload::Ungroup { .. } => "Ungroup".into(),
         ClipPayload::SceneStart(_) => "Scene▶".into(),

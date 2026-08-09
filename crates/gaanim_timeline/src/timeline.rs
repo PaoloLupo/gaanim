@@ -73,33 +73,33 @@ fn sample_gltf_action(spec: &GltfAnimationSpec, elapsed: f64) -> f64 {
     }
 }
 
-/// A named reveal pause inside a presentation slide.
+/// A named interactive pause inside a segment.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PresentationStep {
+pub struct SegmentStop {
     pub name: Option<String>,
     pub time: f64,
 }
 
-/// Semantic metadata for a slide, independent of the API crate that authored it.
+/// Semantic metadata for one authored segment.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PresentationSlide {
+pub struct SegmentMetadata {
     pub id: u32,
     pub name: String,
     pub notes: Option<String>,
     pub start_time: f64,
     pub end_time: f64,
-    pub steps: Vec<PresentationStep>,
+    pub stops: Vec<SegmentStop>,
 }
 
-/// The current semantic location in a presentation.
+/// The current semantic location in the authored segment sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PresentationPosition {
-    pub slide_id: u32,
-    /// `None` means the slide's initial state; otherwise this is a zero-based reveal step.
-    pub step_index: Option<usize>,
+pub struct SegmentPosition {
+    pub segment_id: u32,
+    /// `None` means the segment's initial state; otherwise this is a zero-based stop.
+    pub stop_index: Option<usize>,
 }
 
 /// The primary Timeline manager, stored as a Bevy ECS resource.
@@ -127,13 +127,11 @@ pub struct Timeline {
     pub is_playing: bool,
     /// Playback speed multiplier (e.g. 1.0 for real-time).
     pub playback_rate: f64,
-    /// Interactive slide presentation breakpoints.
-    pub breakpoints: Vec<f64>,
-    /// Semantic presentation structure, when the canvas used `scene.slide(...)`.
-    pub presentation: Vec<PresentationSlide>,
-    /// Cached semantic position matching [`Self::current_time`].
-    pub presentation_position: Option<PresentationPosition>,
-    /// Flag to ignore interactive presentation inputs (e.g. when GUI has focus).
+    /// Semantic structure compiled from the canvas segments.
+    pub segments: Vec<SegmentMetadata>,
+    /// Cached segment position matching [`Self::current_time`].
+    pub segment_position: Option<SegmentPosition>,
+    /// Flag to ignore interactive stop inputs (e.g. when GUI has focus).
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ignore_input: bool,
     /// Active loop range (start_time, end_time) if loop playback is enabled.
@@ -168,9 +166,8 @@ impl Default for Timeline {
             cached_duration: 0.0,
             is_playing: false,
             playback_rate: 1.0,
-            breakpoints: Vec::new(),
-            presentation: Vec::new(),
-            presentation_position: None,
+            segments: Vec::new(),
+            segment_position: None,
             ignore_input: false,
             loop_range: None,
             seek_request: None,
@@ -188,184 +185,160 @@ impl Timeline {
         Self::default()
     }
 
-    /// Replace the semantic presentation metadata compiled from the current canvas.
-    pub fn set_presentation(&mut self, mut slides: Vec<PresentationSlide>) {
-        slides.sort_by(|left, right| left.start_time.total_cmp(&right.start_time));
-        for slide in &mut slides {
-            slide
-                .steps
+    /// Replace the semantic segment metadata compiled from the current canvas.
+    pub fn set_segments(&mut self, mut segments: Vec<SegmentMetadata>) {
+        segments.sort_by(|left, right| left.start_time.total_cmp(&right.start_time));
+        for segment in &mut segments {
+            segment
+                .stops
                 .sort_by(|left, right| left.time.total_cmp(&right.time));
         }
-        self.presentation = slides;
-        self.update_presentation_position();
+        self.segments = segments;
+        self.update_segment_position();
     }
 
-    /// Find the semantic slide and reveal step at `time`.
-    pub fn presentation_position_at(&self, time: f64) -> Option<PresentationPosition> {
+    /// Find the semantic segment and most recent stop at `time`.
+    pub fn segment_position_at(&self, time: f64) -> Option<SegmentPosition> {
         const EPSILON: f64 = 1e-5;
-        let slide =
-            self.presentation.iter().rev().find(|slide| {
-                slide.start_time <= time + EPSILON && time <= slide.end_time + EPSILON
-            })?;
-        let step_index = slide
-            .steps
+        let segment = self.segments.iter().rev().find(|segment| {
+            segment.start_time <= time + EPSILON && time <= segment.end_time + EPSILON
+        })?;
+        let stop_index = segment
+            .stops
             .iter()
             .enumerate()
             .rev()
-            .find_map(|(index, step)| (step.time <= time + EPSILON).then_some(index));
-        Some(PresentationPosition {
-            slide_id: slide.id,
-            step_index,
+            .find_map(|(index, stop)| (stop.time <= time + EPSILON).then_some(index));
+        Some(SegmentPosition {
+            segment_id: segment.id,
+            stop_index,
         })
     }
 
-    /// Return the timestamp for a semantic position in the current presentation.
-    pub fn presentation_time(&self, position: PresentationPosition) -> Option<f64> {
-        let slide = self
-            .presentation
+    /// Return the timestamp for a semantic position in the segment sequence.
+    pub fn segment_time(&self, position: SegmentPosition) -> Option<f64> {
+        let segment = self
+            .segments
             .iter()
-            .find(|slide| slide.id == position.slide_id)?;
-        match position.step_index {
-            Some(index) => slide.steps.get(index).map(|step| step.time),
-            None => Some(slide.start_time),
+            .find(|segment| segment.id == position.segment_id)?;
+        match position.stop_index {
+            Some(index) => segment.stops.get(index).map(|stop| stop.time),
+            None => Some(segment.start_time),
         }
     }
 
-    /// Resolve a slide by its semantic name and return its initial timestamp.
+    /// Resolve a segment by name and return its initial timestamp.
     ///
-    /// Names are matched exactly first, then ASCII case-insensitively. This keeps
+    /// Names are matched exactly first, then Unicode case-insensitively. This keeps
     /// authored identifiers deterministic while making presenter navigation
     /// forgiving when driven from a search field.
-    pub fn presentation_time_named(&self, slide_name: &str) -> Option<f64> {
-        self.presentation_slide_named(slide_name)
-            .map(|slide| slide.start_time)
+    pub fn segment_time_named(&self, segment_name: &str) -> Option<f64> {
+        self.segment_named(segment_name)
+            .map(|segment| segment.start_time)
     }
 
-    /// Resolve a named slide and one of its reveal steps.
+    /// Resolve a named segment and one of its named stops.
     ///
-    /// `step_name` follows the same exact-then-case-insensitive matching rule as
-    /// slide names. Unnamed steps intentionally cannot be addressed by this
-    /// method; use [`Self::presentation_time_indexed`] for those.
-    pub fn presentation_step_time_named(&self, slide_name: &str, step_name: &str) -> Option<f64> {
-        let slide = self.presentation_slide_named(slide_name)?;
-        slide
-            .steps
+    /// `stop_name` follows the same exact-then-case-insensitive matching rule as
+    /// segment names. Unnamed stops intentionally cannot be addressed by this
+    /// method; use [`Self::segment_time_indexed`] for those.
+    pub fn segment_stop_time_named(&self, segment_name: &str, stop_name: &str) -> Option<f64> {
+        let segment = self.segment_named(segment_name)?;
+        let normalized_stop_name = stop_name.to_lowercase();
+        segment
+            .stops
             .iter()
-            .find(|step| step.name.as_deref() == Some(step_name))
+            .find(|stop| stop.name.as_deref() == Some(stop_name))
             .or_else(|| {
-                slide.steps.iter().find(|step| {
-                    step.name
+                segment.stops.iter().find(|stop| {
+                    stop.name
                         .as_deref()
-                        .is_some_and(|name| name.eq_ignore_ascii_case(step_name))
+                        .is_some_and(|name| name.to_lowercase() == normalized_stop_name)
                 })
             })
-            .map(|step| step.time)
+            .map(|stop| stop.time)
     }
 
-    /// Resolve a slide and zero-based reveal step index.
-    pub fn presentation_time_indexed(
+    /// Resolve a segment and zero-based stop index.
+    pub fn segment_time_indexed(
         &self,
-        slide_name: &str,
-        step_index: Option<usize>,
+        segment_name: &str,
+        stop_index: Option<usize>,
     ) -> Option<f64> {
-        let slide = self.presentation_slide_named(slide_name)?;
-        match step_index {
-            Some(index) => slide.steps.get(index).map(|step| step.time),
-            None => Some(slide.start_time),
+        let segment = self.segment_named(segment_name)?;
+        match stop_index {
+            Some(index) => segment.stops.get(index).map(|stop| stop.time),
+            None => Some(segment.start_time),
         }
     }
 
-    fn presentation_slide_named(&self, slide_name: &str) -> Option<&PresentationSlide> {
-        self.presentation
+    fn segment_named(&self, segment_name: &str) -> Option<&SegmentMetadata> {
+        let normalized_name = segment_name.to_lowercase();
+        self.segments
             .iter()
-            .find(|slide| slide.name == slide_name)
+            .find(|segment| segment.name == segment_name)
             .or_else(|| {
-                self.presentation
+                self.segments
                     .iter()
-                    .find(|slide| slide.name.eq_ignore_ascii_case(slide_name))
+                    .find(|segment| segment.name.to_lowercase() == normalized_name)
             })
     }
 
-    /// Return the previous meaningful presentation stop before `time`.
-    pub fn previous_presentation_stop(&self, time: f64) -> Option<f64> {
-        self.presentation_stops()
+    /// Return the previous explicit interactive stop before `time`.
+    pub fn previous_stop(&self, time: f64) -> Option<f64> {
+        self.interactive_stops()
             .into_iter()
-            .filter(|stop| *stop < time - 0.2)
+            .filter(|stop| *stop < time - 1e-5)
             .last()
     }
 
-    /// Return the next meaningful presentation stop after `time`.
-    pub fn next_presentation_stop(&self, time: f64) -> Option<f64> {
-        self.presentation_stops()
+    /// Return the next explicit interactive stop after `time`.
+    pub fn next_stop(&self, time: f64) -> Option<f64> {
+        self.interactive_stops()
             .into_iter()
             .find(|stop| *stop > time + 1e-5)
     }
 
-    /// Return the earliest authored breakpoint or semantic boundary guard
-    /// crossed while playing from `current` to `next`.
-    ///
-    /// Presentation boundaries are guarded just before the incoming slide's
-    /// start time. At the exact start, seeking applies that slide's visibility
-    /// changes, which would make it appear to advance automatically.
+    /// Return the earliest explicit interactive stop crossed during playback.
     pub(crate) fn next_playback_stop(&self, current: f64, next: f64) -> Option<f64> {
         const EPSILON: f64 = 1e-5;
-        let authored =
-            self.breakpoints.iter().copied().find(|breakpoint| {
-                *breakpoint > current + EPSILON && *breakpoint <= next + EPSILON
-            });
-        let boundary = self
-            .presentation
-            .iter()
-            .skip(1)
-            .map(|slide| slide.start_time - super::PRESENTATION_BOUNDARY_GUARD)
-            .find(|guard| *guard > current && *guard <= next + EPSILON);
-
-        match (authored, boundary) {
-            (Some(authored), Some(boundary)) => Some(authored.min(boundary)),
-            (Some(stop), None) | (None, Some(stop)) => Some(stop),
-            (None, None) => None,
-        }
+        self.interactive_stops()
+            .into_iter()
+            .find(|stop| *stop > current + EPSILON && *stop <= next + EPSILON)
     }
 
     /// A compact label suitable for editor transport controls.
-    pub fn presentation_label(&self) -> Option<String> {
-        let position = self.presentation_position?;
+    pub fn segment_label(&self) -> Option<String> {
+        let position = self.segment_position?;
         let index = self
-            .presentation
+            .segments
             .iter()
-            .position(|slide| slide.id == position.slide_id)?;
-        let slide = &self.presentation[index];
-        let step = position.step_index.map(|step| step + 1).unwrap_or(0);
-        Some(if step == 0 {
-            format!(
-                "{} / {} · {}",
-                index + 1,
-                self.presentation.len(),
-                slide.name
-            )
+            .position(|segment| segment.id == position.segment_id)?;
+        let segment = &self.segments[index];
+        let stop = position.stop_index.map(|stop| stop + 1).unwrap_or(0);
+        Some(if stop == 0 {
+            format!("{} / {} · {}", index + 1, self.segments.len(), segment.name)
         } else {
             format!(
-                "{} / {} · {} · step {}",
+                "{} / {} · {} · stop {}",
                 index + 1,
-                self.presentation.len(),
-                slide.name,
-                step
+                self.segments.len(),
+                segment.name,
+                stop
             )
         })
     }
 
-    /// Update the cached semantic position after a seek or metadata change.
-    pub fn update_presentation_position(&mut self) {
-        self.presentation_position = self.presentation_position_at(self.current_time);
+    /// Update the cached segment position after a seek or metadata change.
+    pub fn update_segment_position(&mut self) {
+        self.segment_position = self.segment_position_at(self.current_time);
     }
 
-    fn presentation_stops(&self) -> Vec<f64> {
+    fn interactive_stops(&self) -> Vec<f64> {
         let mut stops = self
-            .presentation
+            .segments
             .iter()
-            .flat_map(|slide| {
-                std::iter::once(slide.start_time).chain(slide.steps.iter().map(|step| step.time))
-            })
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
             .collect::<Vec<_>>();
         stops.sort_by(|left, right| left.total_cmp(right));
         stops.dedup_by(|left, right| (*left - *right).abs() < 1e-5);
@@ -946,7 +919,7 @@ impl Timeline {
             rebuild_traced_paths(world, self.current_time);
         }
 
-        self.update_presentation_position();
+        self.update_segment_position();
         self.restore_followed_shake_origin(world);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
@@ -2240,65 +2213,69 @@ mod tests {
     }
 
     #[test]
-    fn semantic_presentation_positions_and_stops_follow_slides_and_steps() {
+    fn semantic_segment_positions_and_stops_are_explicit() {
         let mut timeline = Timeline::default();
-        timeline.set_presentation(vec![
-            PresentationSlide {
+        timeline.set_segments(vec![
+            SegmentMetadata {
                 id: 10,
                 name: "intro".to_string(),
                 notes: Some("Opening".to_string()),
                 start_time: 0.0,
                 end_time: 3.0,
-                steps: vec![PresentationStep {
-                    name: Some("reveal".to_string()),
+                stops: vec![SegmentStop {
+                    name: Some("señal".to_string()),
                     time: 1.0,
                 }],
             },
-            PresentationSlide {
+            SegmentMetadata {
                 id: 20,
-                name: "details".to_string(),
+                name: "Área".to_string(),
                 notes: None,
                 start_time: 3.0,
                 end_time: 5.0,
-                steps: vec![PresentationStep {
-                    name: None,
-                    time: 4.0,
-                }],
+                stops: vec![
+                    SegmentStop {
+                        name: None,
+                        time: 4.0,
+                    },
+                    SegmentStop {
+                        name: Some("nearby".to_string()),
+                        time: 4.1,
+                    },
+                ],
             },
         ]);
 
         assert_eq!(
-            timeline.presentation_position_at(1.5),
-            Some(PresentationPosition {
-                slide_id: 10,
-                step_index: Some(0),
+            timeline.segment_position_at(1.5),
+            Some(SegmentPosition {
+                segment_id: 10,
+                stop_index: Some(0),
             })
         );
-        assert_eq!(timeline.next_presentation_stop(1.0), Some(3.0));
-        assert_eq!(timeline.previous_presentation_stop(3.0), Some(1.0));
+        assert_eq!(timeline.next_stop(1.0), Some(4.0));
+        assert_eq!(timeline.previous_stop(3.0), Some(1.0));
+        assert_eq!(timeline.previous_stop(4.1), Some(4.0));
         assert_eq!(
-            timeline.presentation_time(PresentationPosition {
-                slide_id: 20,
-                step_index: Some(0),
+            timeline.segment_time(SegmentPosition {
+                segment_id: 20,
+                stop_index: Some(0),
             }),
             Some(4.0)
         );
-        assert_eq!(timeline.presentation_time_named("DETAILS"), Some(3.0));
+        assert_eq!(timeline.segment_time_named("ÁREA"), Some(3.0));
         assert_eq!(
-            timeline.presentation_step_time_named("INTRO", "REVEAL"),
+            timeline.segment_stop_time_named("INTRO", "SEÑAL"),
             Some(1.0)
         );
-        assert_eq!(
-            timeline.presentation_time_indexed("details", Some(0)),
-            Some(4.0)
-        );
-        assert_eq!(timeline.presentation_time_indexed("details", Some(1)), None);
+        assert_eq!(timeline.segment_time_indexed("área", Some(0)), Some(4.0));
+        assert_eq!(timeline.segment_time_indexed("área", Some(2)), None);
 
         timeline.current_time = 4.0;
-        timeline.update_presentation_position();
+        timeline.update_segment_position();
         assert_eq!(
-            timeline.presentation_label().as_deref(),
-            Some("2 / 2 · details · step 1")
+            timeline.segment_label().as_deref(),
+            Some("2 / 2 · Área · stop 1")
         );
     }
 }

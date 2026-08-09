@@ -329,20 +329,6 @@ impl AnimationType {
         )
     }
 
-    /// Whether this animation establishes an object by animating its opacity
-    /// from an initially hidden state. Semantic presentation slides use this
-    /// to avoid auto-showing an object immediately before that entrance.
-    ///
-    /// `Write` and `Create` deliberately do not belong here: they reveal an
-    /// already-visible hierarchy by animating its path/fill progress. Hiding
-    /// that hierarchy by opacity would keep it invisible for the whole draw.
-    pub(crate) fn is_entry(&self) -> bool {
-        matches!(
-            self,
-            Self::FadeIn | Self::FadeInFrom { .. } | Self::GrowFromCenter | Self::SpinInFromNothing
-        )
-    }
-
     pub fn default_rate_func(&self) -> RateFunc {
         match self {
             Self::CameraFollow { .. }

@@ -13,14 +13,16 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
-use crate::canvas::ops::{CanvasEndpoint, CanvasState, Op, Segment, SharedCanvasState};
+use crate::canvas::ops::{
+    CanvasEndpoint, CanvasState, LocalSegmentStop, Op, Segment, SharedCanvasState,
+};
 use crate::canvas::types::{
     Anim, CoordinateSystem, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
     SpawnKind,
 };
 use crate::canvas::{
-    Anchor, CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationBrand,
-    PresentationError, PresentationManifest, SlideId, SlideTemplate,
+    Anchor, CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationBrand, SegmentError,
+    SegmentHandle, SegmentLayout, SegmentManifest, SegmentSpec, SegmentStop,
 };
 use crate::export::{AudioTrack, AudioTrackError};
 
@@ -147,9 +149,8 @@ pub struct Canvas {
     pub asset_root: Option<PathBuf>,
     /// Audio sources mixed by FFmpeg when this canvas is exported.
     pub audio_tracks: Vec<AudioTrack>,
-    /// Reusable logo/footer treatment generated for every semantic slide.
+    /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
-    presentation: Arc<Mutex<PresentationManifest>>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
     pub(crate) camera_rotation: gaanim_core::glam::DQuat,
@@ -169,7 +170,6 @@ impl Canvas {
             asset_root: None,
             audio_tracks: Vec::new(),
             branding: None,
-            presentation: Arc::new(Mutex::new(PresentationManifest::default())),
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
@@ -405,8 +405,10 @@ impl Canvas {
         self.state
             .lock()
             .expect("canvas state poisoned")
-            .active()
-            .cursor
+            .segments
+            .iter()
+            .map(|segment| segment.cursor)
+            .sum()
     }
 
     pub fn segment_count(&self) -> usize {
@@ -440,27 +442,99 @@ impl Canvas {
 
     // -- Segment management --
 
-    /// Create a named segment and switch to it. If `transition` is `Some`, it is
-    /// linked from the previously active segment.
-    pub fn segment(&mut self, name: &str, transition: Option<TransitionType>) -> usize {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let prev = guard.active_idx;
-        let mut seg = Segment::new(name);
-        seg.transition = transition;
-        seg.prev_segment = Some(prev);
-        let idx = guard.segments.len();
-        guard.segments.push(seg);
-        guard.active_idx = idx;
-        idx
+    /// Create a named segment and switch to it.
+    ///
+    /// The first explicit segment replaces the untouched implicit segment. A
+    /// transition therefore requires an existing authored predecessor.
+    pub fn segment(
+        &mut self,
+        name: impl Into<String>,
+        transition: Option<TransitionType>,
+    ) -> Result<SegmentHandle, SegmentError> {
+        self.segment_with(name, transition, None, SegmentLayout::Blank)
     }
 
-    /// Explicitly link two segments by index.
-    pub fn link(&mut self, from: usize, to: usize, transition: TransitionType) {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        if from < guard.segments.len() && to < guard.segments.len() {
-            guard.segments[to].transition = Some(transition);
-            guard.segments[to].prev_segment = Some(from);
+    /// Create a segment with presentation metadata and a built-in layout.
+    pub fn segment_with(
+        &mut self,
+        name: impl Into<String>,
+        transition: Option<TransitionType>,
+        notes: Option<String>,
+        layout: SegmentLayout,
+    ) -> Result<SegmentHandle, SegmentError> {
+        let name = name.into().trim().to_string();
+        if name.is_empty() {
+            return Err(SegmentError::EmptyName);
         }
+        let frame = self.safe_frame();
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let normalized_name = name.to_lowercase();
+        if guard
+            .segments
+            .iter()
+            .any(|segment| segment.explicit && segment.name.to_lowercase() == normalized_name)
+        {
+            return Err(SegmentError::DuplicateName { name });
+        }
+
+        let replace_implicit = guard.segments.len() == 1
+            && guard.active_idx == 0
+            && guard.segments[0].is_untouched_implicit();
+        if replace_implicit && transition.is_some() {
+            return Err(SegmentError::FirstTransition);
+        }
+
+        let id = guard.next_segment_id();
+        let mut segment = Segment::new(id, name, notes, layout);
+        if replace_implicit {
+            guard.segments[0] = segment;
+            guard.active_idx = 0;
+        } else {
+            let previous = guard.active_idx;
+            segment.transition = transition;
+            segment.prev_segment = Some(previous);
+            let index = guard.segments.len();
+            guard.segments.push(segment);
+            guard.active_idx = index;
+        }
+        let segment_number = guard
+            .segments
+            .iter()
+            .filter(|segment| segment.explicit)
+            .count();
+        drop(guard);
+
+        self.spawn_segment_branding(layout, segment_number)?;
+        Ok(SegmentHandle::new(id, layout, frame, self.state.clone()))
+    }
+
+    /// Explicitly link two segments created by this canvas.
+    pub fn link(
+        &mut self,
+        from: &SegmentHandle,
+        to: &SegmentHandle,
+        transition: TransitionType,
+    ) -> Result<(), SegmentError> {
+        if !from.belongs_to(&self.state) || !to.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let from_index = guard
+            .segments
+            .iter()
+            .position(|segment| segment.id == from.id())
+            .ok_or(SegmentError::UnknownSegment { id: from.id() })?;
+        let to_index = guard
+            .segments
+            .iter()
+            .position(|segment| segment.id == to.id())
+            .ok_or(SegmentError::UnknownSegment { id: to.id() })?;
+        if from_index >= to_index {
+            return Err(SegmentError::InvalidLink);
+        }
+        guard.segments[to_index].transition = Some(transition);
+        guard.segments[to_index].prev_segment = Some(from_index);
+        Ok(())
     }
 
     // -- Object factories --
@@ -1503,20 +1577,20 @@ impl Canvas {
         guard.active_mut().ops.push(Op::Play(anims));
     }
 
-    /// Configure reusable branding generated automatically for semantic slides.
+    /// Configure reusable branding generated automatically for explicit segments.
     pub fn set_branding(&mut self, branding: PresentationBrand) {
         self.branding = Some(branding);
     }
 
-    fn spawn_slide_branding(
+    fn spawn_segment_branding(
         &mut self,
-        template: SlideTemplate,
-        slide_number: usize,
-    ) -> Result<(), PresentationError> {
+        layout: SegmentLayout,
+        segment_number: usize,
+    ) -> Result<(), SegmentError> {
         let Some(branding) = self.branding.clone() else {
             return Ok(());
         };
-        if template == SlideTemplate::Title && !branding.show_on_cover {
+        if layout == SegmentLayout::Title && !branding.show_on_cover {
             return Ok(());
         }
 
@@ -1538,9 +1612,9 @@ impl Canvas {
                 .z_index(100);
         }
         let footer = match (branding.footer.as_deref(), branding.slide_numbers) {
-            (Some(footer), true) => Some(format!("{footer}    ·    {slide_number:02}")),
+            (Some(footer), true) => Some(format!("{footer}    ·    {segment_number:02}")),
             (Some(footer), false) => Some(footer.to_owned()),
-            (None, true) => Some(format!("{slide_number:02}")),
+            (None, true) => Some(format!("{segment_number:02}")),
             (None, false) => None,
         };
         if let Some(footer) = footer {
@@ -1557,15 +1631,13 @@ impl Canvas {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let logo = if extension == "svg" {
-                self.svg(logo)
-                    .map_err(|error| PresentationError::BrandAsset {
-                        message: error.to_string(),
-                    })?
+                self.svg(logo).map_err(|error| SegmentError::BrandAsset {
+                    message: error.to_string(),
+                })?
             } else {
-                self.image(logo)
-                    .map_err(|error| PresentationError::BrandAsset {
-                        message: error.to_string(),
-                    })?
+                self.image(logo).map_err(|error| SegmentError::BrandAsset {
+                    message: error.to_string(),
+                })?
             };
             logo.scaled(branding.logo_scale)
                 .at_anchor(frame.max.x, frame.max.y, Anchor::TopRight)
@@ -1574,88 +1646,73 @@ impl Canvas {
         Ok(())
     }
 
-    /// Begin a named presentation slide at the current timeline cursor.
-    ///
-    /// Starting a later slide closes the preceding slide. Slide boundaries
-    /// deliberately do not create a pause: advancing from the preceding
-    /// reveal continues into this slide's first animation, like PowerPoint.
-    pub fn slide(
-        &mut self,
-        name: impl Into<String>,
-        notes: Option<String>,
-        template: SlideTemplate,
-    ) -> Result<SlideId, PresentationError> {
-        let start_time = self
-            .state
-            .lock()
-            .expect("canvas state poisoned")
-            .active()
-            .cursor;
-        let mut presentation = self.presentation.lock().expect("presentation poisoned");
-        let id = presentation.start_slide(name.into(), notes, template, start_time)?;
-        let slide_number = presentation.slides.len();
-        drop(presentation);
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::PresentationSlideStart(id));
-        self.spawn_slide_branding(template, slide_number)?;
-        Ok(id)
-    }
-
-    /// Resolve a named region supplied by a built-in slide template.
-    pub fn slide_region(
-        &self,
-        template: SlideTemplate,
-        region: &str,
-    ) -> Result<LayoutRegion, PresentationError> {
-        template
-            .region(self.safe_frame(), region)
-            .ok_or_else(|| PresentationError::UnknownRegion {
-                template: template.name().to_string(),
-                region: region.to_string(),
-            })
-    }
-
-    /// Insert a named or anonymous reveal pause inside the active slide.
-    pub fn slide_step(
-        &mut self,
-        id: SlideId,
-        name: Option<String>,
-    ) -> Result<(), PresentationError> {
-        let time = self
-            .state
-            .lock()
-            .expect("canvas state poisoned")
-            .active()
-            .cursor;
-        self.presentation
-            .lock()
-            .expect("presentation poisoned")
-            .add_step(id, name, time)?;
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::Slide);
+    /// Insert a named or anonymous interactive stop in the active segment.
+    pub fn stop(&mut self, name: Option<String>) -> Result<(), SegmentError> {
+        let name = match name {
+            Some(name) => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(SegmentError::EmptyStopName);
+                }
+                Some(name)
+            }
+            None => None,
+        };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let segment = state.active_mut();
+        let time = segment.cursor;
+        if segment
+            .stops
+            .iter()
+            .any(|stop| (stop.time - time).abs() < 1e-9)
+        {
+            return Err(SegmentError::DuplicateStopTime { time });
+        }
+        segment.stops.push(LocalSegmentStop { name, time });
+        segment.ops.push(Op::Stop);
         Ok(())
     }
 
-    /// Return the presentation metadata, closing the final slide at the
-    /// canvas cursor when necessary.
-    pub fn presentation_manifest(&self) -> PresentationManifest {
-        let end_time = self
-            .state
-            .lock()
-            .expect("canvas state poisoned")
-            .active()
-            .cursor;
-        let mut presentation = self.presentation.lock().expect("presentation poisoned");
-        presentation.finalize(end_time);
-        presentation.clone()
+    /// Return all segment metadata with local cursors converted to absolute time.
+    pub fn segment_manifest(&self) -> SegmentManifest {
+        let state = self.state.lock().expect("canvas state poisoned");
+        let mut start_time = 0.0;
+        let segments = state
+            .segments
+            .iter()
+            .map(|segment| {
+                let end_time = start_time + segment.cursor;
+                let spec = SegmentSpec {
+                    id: segment.id,
+                    name: segment.name.clone(),
+                    notes: segment.notes.clone(),
+                    layout: segment.layout,
+                    start_time,
+                    end_time,
+                    stops: segment
+                        .stops
+                        .iter()
+                        .map(|stop| SegmentStop {
+                            name: stop.name.clone(),
+                            time: start_time + stop.time,
+                        })
+                        .collect(),
+                };
+                start_time = end_time;
+                spec
+            })
+            .collect();
+        SegmentManifest { segments }
+    }
+
+    /// Whether the canvas uses presentation-oriented segment features.
+    pub fn has_presentation_features(&self) -> bool {
+        self.branding.is_some()
+            || self.segment_manifest().segments.iter().any(|segment| {
+                segment.notes.is_some()
+                    || segment.layout != SegmentLayout::Blank
+                    || !segment.stops.is_empty()
+            })
     }
 
     pub fn fade_out_all(&mut self, dur: f64) {
@@ -2450,7 +2507,7 @@ mod tests {
     fn scene_object_commands_deduplicate_and_reject_foreign_drawables() {
         let mut canvas = Canvas::new(1280, 720);
         let title = canvas.title("Persistent title");
-        canvas.segment("next", None);
+        canvas.segment("next", None).unwrap();
         canvas
             .reuse_many(&[title.clone(), title.clone()])
             .expect("same-scene drawable should be reusable");
@@ -2489,19 +2546,23 @@ mod tests {
         let title = canvas.title("Shared title");
         canvas.wait(1.0);
 
-        canvas.segment("reused", Some(TransitionType::CrossFade { duration: 0.5 }));
+        canvas
+            .segment("reused", Some(TransitionType::CrossFade { duration: 0.5 }))
+            .unwrap();
         canvas.reuse(&title).unwrap();
         canvas.wait(0.6);
         canvas.persist(&title).unwrap();
         canvas.wait(0.4);
 
-        canvas.segment(
-            "released",
-            Some(TransitionType::Slide {
-                duration: 0.5,
-                direction: gaanim_timeline::transition::SlideDirection::Left,
-            }),
-        );
+        canvas
+            .segment(
+                "released",
+                Some(TransitionType::Slide {
+                    duration: 0.5,
+                    direction: gaanim_timeline::transition::SlideDirection::Left,
+                }),
+            )
+            .unwrap();
         canvas.release(&title).unwrap();
         canvas.wait(1.0);
 
@@ -2614,9 +2675,11 @@ mod tests {
         let mut canvas = Canvas::new(640, 360);
         let marker = canvas.circle(24.0);
         canvas.wait(0.5);
-        canvas.segment("middle", Some(TransitionType::Cut));
+        canvas.segment("middle", Some(TransitionType::Cut)).unwrap();
         canvas.wait(0.5);
-        canvas.segment("return", Some(TransitionType::CrossFade { duration: 0.4 }));
+        canvas
+            .segment("return", Some(TransitionType::CrossFade { duration: 0.4 }))
+            .unwrap();
         canvas.reuse(&marker).unwrap();
         canvas.wait(0.5);
 
@@ -2666,13 +2729,15 @@ mod tests {
         let title = canvas.title("KEEP");
         canvas.wait(1.0);
         canvas.persist(&title).unwrap();
-        canvas.segment(
-            "next",
-            Some(TransitionType::Slide {
-                duration: 1.0,
-                direction: gaanim_timeline::transition::SlideDirection::Left,
-            }),
-        );
+        canvas
+            .segment(
+                "next",
+                Some(TransitionType::Slide {
+                    duration: 1.0,
+                    direction: gaanim_timeline::transition::SlideDirection::Left,
+                }),
+            )
+            .unwrap();
         canvas.wait(1.0);
 
         let mut world = World::new();
@@ -2722,7 +2787,9 @@ mod tests {
         let mut canvas = Canvas::new(640, 360);
         let marker = canvas.circle(24.0);
         canvas.wait(1.0);
-        canvas.segment("second", Some(TransitionType::CrossFade { duration: 0.5 }));
+        canvas
+            .segment("second", Some(TransitionType::CrossFade { duration: 0.5 }))
+            .unwrap();
         canvas.wait(0.25);
         canvas.reuse(&marker).unwrap();
         canvas.wait(0.5);
@@ -2831,7 +2898,9 @@ mod tests {
         let source = canvas.title("Source");
         canvas.persist(&source).unwrap();
         canvas.wait(0.5);
-        canvas.segment("target", Some(TransitionType::CrossFade { duration: 0.2 }));
+        canvas
+            .segment("target", Some(TransitionType::CrossFade { duration: 0.2 }))
+            .unwrap();
         let target = canvas.title("Target");
         source.transform(&target).duration(0.5);
 
@@ -2855,15 +2924,17 @@ mod tests {
     #[test]
     fn cross_segment_transform_does_not_retag_source_in_initial_snapshot() {
         let mut canvas = Canvas::new(1280, 720);
-        canvas.segment("first", None);
+        canvas.segment("first", None).unwrap();
         let circle = canvas.circle(40.0);
         let diamond = canvas.rect(80.0, 80.0);
         circle.transform(&diamond).duration(1.0);
 
-        canvas.segment(
-            "second",
-            Some(gaanim_timeline::transition::TransitionType::CrossFade { duration: 0.2 }),
-        );
+        canvas
+            .segment(
+                "second",
+                Some(gaanim_timeline::transition::TransitionType::CrossFade { duration: 0.2 }),
+            )
+            .unwrap();
         let replacement = canvas.rect(120.0, 40.0);
         circle.replacement_transform(&replacement).duration(1.0);
 
@@ -3050,111 +3121,131 @@ mod tests {
     }
 
     #[test]
-    fn semantic_slides_close_at_boundaries_and_steps_add_breakpoints() {
+    fn segments_use_absolute_ranges_and_only_explicit_stops_pause() {
         let mut canvas = Canvas::new(1280, 720);
         let intro = canvas
-            .slide("intro", Some("Opening".to_string()), SlideTemplate::Blank)
+            .segment_with(
+                "intro",
+                None,
+                Some("Opening".to_string()),
+                SegmentLayout::Blank,
+            )
             .unwrap();
         canvas.wait(1.0);
-        canvas
-            .slide_step(intro, Some("reveal".to_string()))
-            .unwrap();
+        canvas.stop(Some("reveal".to_string())).unwrap();
         canvas.wait(2.0);
         let details = canvas
-            .slide("details", None, SlideTemplate::TwoColumns)
+            .segment_with("details", None, None, SegmentLayout::TwoColumns)
             .unwrap();
         canvas.wait(0.5);
 
-        let manifest = canvas.presentation_manifest();
-        assert_eq!(manifest.slides.len(), 2);
-        assert_eq!(manifest.slides[0].name, "intro");
-        assert_eq!(manifest.slides[0].notes.as_deref(), Some("Opening"));
-        assert_eq!(manifest.slides[0].start_time, 0.0);
-        assert_eq!(manifest.slides[0].end_time, Some(3.0));
-        assert_eq!(manifest.slides[0].steps[0].time, 1.0);
-        assert_eq!(manifest.slides[1].id, details);
-        assert_eq!(manifest.slides[1].end_time, Some(3.5));
+        let manifest = canvas.segment_manifest();
+        assert_eq!(manifest.segments.len(), 2);
+        assert_eq!(manifest.segments[0].id, intro.id());
+        assert_eq!(manifest.segments[0].name, "intro");
+        assert_eq!(manifest.segments[0].notes.as_deref(), Some("Opening"));
+        assert_eq!(manifest.segments[0].start_time, 0.0);
+        assert_eq!(manifest.segments[0].end_time, 3.0);
+        assert_eq!(manifest.segments[0].stops[0].time, 1.0);
+        assert_eq!(manifest.segments[1].id, details.id());
+        assert_eq!(manifest.segments[1].start_time, 3.0);
+        assert_eq!(manifest.segments[1].end_time, 3.5);
+        assert_eq!(canvas.current_time(), 3.5);
 
         let state = canvas.state.lock().expect("canvas state poisoned");
-        let breakpoints = state
-            .active()
-            .ops
+        let stops = state
+            .segments
             .iter()
-            .filter(|op| matches!(op, Op::Slide))
+            .flat_map(|segment| segment.ops.iter())
+            .filter(|op| matches!(op, Op::Stop))
             .count();
-        assert_eq!(breakpoints, 1, "only explicit slide steps pause playback");
-        assert_eq!(
-            state
-                .active()
-                .ops
-                .iter()
-                .filter(|op| matches!(op, Op::PresentationSlideStart(_)))
-                .count(),
-            2,
-            "each semantic slide starts an automatic visibility scope"
-        );
+        assert_eq!(stops, 1);
     }
 
     #[test]
-    fn semantic_slides_validate_names_and_active_handles() {
+    fn segments_validate_names_links_and_duplicate_stops() {
         let mut canvas = Canvas::new(1280, 720);
         assert!(matches!(
-            canvas.slide("  ", None, SlideTemplate::Blank),
-            Err(PresentationError::EmptySlideName)
+            canvas.segment("  ", None),
+            Err(SegmentError::EmptyName)
         ));
 
-        let first = canvas.slide("first", None, SlideTemplate::Blank).unwrap();
+        let first = canvas.segment("first", None).unwrap();
         assert!(matches!(
-            canvas.slide("first", None, SlideTemplate::Blank),
-            Err(PresentationError::DuplicateSlideName { .. })
+            canvas.segment("FIRST", None),
+            Err(SegmentError::DuplicateName { .. })
         ));
-        let second = canvas.slide("second", None, SlideTemplate::Blank).unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
         assert!(matches!(
-            canvas.slide_step(first, None),
-            Err(PresentationError::InactiveSlide { .. })
+            canvas.stop(None),
+            Err(SegmentError::DuplicateStopTime { .. })
         ));
-        assert!(canvas.slide_step(second, None).is_ok());
+        let second = canvas.segment("second", None).unwrap();
+        assert!(
+            canvas
+                .link(&first, &second, TransitionType::CrossFade { duration: 0.2 })
+                .is_ok()
+        );
+
+        let mut foreign_canvas = Canvas::new(1280, 720);
+        let foreign = foreign_canvas.segment("foreign", None).unwrap();
+        assert!(matches!(
+            canvas.link(&foreign, &second, TransitionType::Cut),
+            Err(SegmentError::ForeignSegment)
+        ));
+
+        let mut unicode_canvas = Canvas::new(1280, 720);
+        unicode_canvas.segment("ÁREA", None).unwrap();
+        assert!(matches!(
+            unicode_canvas.segment("área", None),
+            Err(SegmentError::DuplicateName { .. })
+        ));
     }
 
     #[test]
-    fn slide_templates_resolve_named_regions_inside_the_safe_area() {
+    fn segment_layouts_resolve_named_regions_inside_the_safe_area() {
         let mut canvas = Canvas::new(1000, 600);
         canvas.margin = Margin::all(50.0);
 
-        let title = canvas
-            .slide_region(SlideTemplate::TitleContent, "title")
+        let content_segment = canvas
+            .segment_with("content", None, None, SegmentLayout::TitleContent)
             .unwrap();
-        let content = canvas
-            .slide_region(SlideTemplate::TitleContent, "content")
+        let title = content_segment.region("title").unwrap();
+        let content = content_segment.region("content").unwrap();
+        canvas.wait(0.1);
+        let columns = canvas
+            .segment_with("columns", None, None, SegmentLayout::TwoColumns)
             .unwrap();
-        let left = canvas
-            .slide_region(SlideTemplate::TwoColumns, "left")
-            .unwrap();
-        let right = canvas
-            .slide_region(SlideTemplate::TwoColumns, "right")
-            .unwrap();
+        let left = columns.region("left").unwrap();
+        let right = columns.region("right").unwrap();
 
         assert!(title.bounds.min.y >= content.bounds.max.y);
         assert!(content.height() > title.height());
         assert!(left.bounds.max.x < right.bounds.min.x);
         assert!(matches!(
-            canvas.slide_region(SlideTemplate::Blank, "title"),
-            Err(PresentationError::UnknownRegion { .. })
+            SegmentLayout::Blank
+                .region(canvas.safe_frame(), "title")
+                .ok_or_else(|| SegmentError::UnknownRegion {
+                    layout: "blank".to_string(),
+                    region: "title".to_string(),
+                }),
+            Err(SegmentError::UnknownRegion { .. })
         ));
     }
 
     #[test]
-    fn semantic_template_aliases_and_branding_are_reusable() {
+    fn segment_layout_aliases_and_branding_are_reusable() {
         assert_eq!(
-            SlideTemplate::parse("cover").expect("cover alias"),
-            SlideTemplate::Title
+            SegmentLayout::parse("cover").expect("cover alias"),
+            SegmentLayout::Title
         );
         assert_eq!(
-            SlideTemplate::parse("comparison").expect("comparison alias"),
-            SlideTemplate::TwoColumns
+            SegmentLayout::parse("comparison").expect("comparison alias"),
+            SegmentLayout::TwoColumns
         );
         assert!(
-            SlideTemplate::TwoColumns
+            SegmentLayout::TwoColumns
                 .region(
                     gaanim_math::Bounds3D::new_2d(-100.0, -50.0, 100.0, 50.0),
                     "before",
@@ -3176,8 +3267,8 @@ mod tests {
             .ops
             .len();
         canvas
-            .slide("cover", None, SlideTemplate::Title)
-            .expect("cover slide");
+            .segment_with("cover", None, None, SegmentLayout::Title)
+            .expect("cover segment");
         let after_cover = canvas
             .state
             .lock()
@@ -3185,11 +3276,12 @@ mod tests {
             .active()
             .ops
             .len();
-        assert_eq!(after_cover, before + 1, "cover branding is opt-in");
+        assert_eq!(after_cover, before, "cover branding is opt-in");
 
+        canvas.wait(0.1);
         canvas
-            .slide("content", None, SlideTemplate::TitleContent)
-            .expect("content slide");
+            .segment_with("content", None, None, SegmentLayout::TitleContent)
+            .expect("content segment");
         let after_content = canvas
             .state
             .lock()
@@ -3198,9 +3290,8 @@ mod tests {
             .ops
             .len();
         assert_eq!(
-            after_content,
-            after_cover + 3,
-            "slide start plus rule and numbered footer"
+            after_content, 2,
+            "rule and numbered footer are added to the active segment"
         );
     }
 }

@@ -58,6 +58,22 @@ gaanim .
 Los proyectos sin `.venv` pueden usar un Python 3.12+ detectado en el sistema;
 el Inicio muestra instrucciones copiables de uv, pero nunca las ejecuta.
 
+Las presentaciones usan el mismo concepto de segmento que los videos. Los
+límites son continuos y solo `stop()` solicita input durante la reproducción:
+
+```python
+from gaanim import Anchor, Scene
+
+scene = Scene(1280, 720)
+intro = scene.segment("Introducción", notes="Presenta el objetivo", layout="cover")
+intro.region("title").place(scene.title("Una idea clara"), Anchor.CENTER)
+scene.play([scene.text("Resultado").write().duration(0.5)])
+scene.stop("resultado")
+```
+
+La exportación ignora los stops. Para exportar un segmento concreto use
+`scene.export("intro.mp4", segment="Introducción")`.
+
 ## Paquete Python local
 
 El binding también puede instalarse en el entorno virtual del repositorio:

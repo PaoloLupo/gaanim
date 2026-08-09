@@ -47,7 +47,7 @@ fn setup_scene(
     let mut canvas = Canvas::new(1280, 720);
 
     // Segment 1: Intro
-    let _s1 = canvas.segment("intro", None);
+    let _s1 = canvas.segment("intro", None).expect("intro segment");
     let title = canvas
         .title("Multi-Segment Demo")
         .fill(Color::WHITE)
@@ -58,7 +58,9 @@ fn setup_scene(
     canvas.wait(0.3);
 
     // Segment 2: Content with auto cross-fade
-    let _s2 = canvas.segment("content", Some(TransitionType::CrossFade { duration: 0.5 }));
+    let _s2 = canvas
+        .segment("content", Some(TransitionType::CrossFade { duration: 0.5 }))
+        .expect("content segment");
     let circle = canvas
         .circle(60.0)
         .fill(Color::from_rgb8(0xE5, 0x4B, 0x4B))
@@ -71,19 +73,21 @@ fn setup_scene(
     canvas.wait(0.3);
 
     // Segment 3: Conclusion with slide transition
-    let _s3 = canvas.segment(
-        "conclusion",
-        Some(TransitionType::Slide {
-            duration: 0.6,
-            direction: gaanim_timeline::transition::SlideDirection::Left,
-        }),
-    );
+    let _s3 = canvas
+        .segment(
+            "conclusion",
+            Some(TransitionType::Slide {
+                duration: 0.6,
+                direction: gaanim_timeline::transition::SlideDirection::Left,
+            }),
+        )
+        .expect("conclusion segment");
     let thanks = canvas.title("Thank You!").fill(Color::WHITE).at(0.0, 0.0);
     thanks.fade_in(1.0);
     canvas.wait(2.0);
 
     info!(
-        "Canvas: {} segs, {:.1}s active segment",
+        "Canvas: {} segments, {:.1}s total",
         canvas.segment_count(),
         canvas.current_time()
     );

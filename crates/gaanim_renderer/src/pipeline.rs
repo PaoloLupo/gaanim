@@ -717,7 +717,7 @@ pub fn compile_scene_from_world(
 
     for elem in extracted {
         // Do not emit transparent retained fragments. Semantic presentations
-        // keep the contents of future slides in the World at opacity zero so
+        // keep the contents of future segments in the World at opacity zero so
         // exact timeline seeks remain possible. Wrapping every hidden glyph in
         // an enormous Vello opacity layer can exhaust/overflow the compositor
         // and make the entire frame render black.
@@ -1191,7 +1191,7 @@ pub fn gaanim_render_system(
     }
 
     for elem in local_extracted.drain(..) {
-        // Objects from inactive semantic slides intentionally remain spawned
+        // Objects from inactive segments intentionally remain spawned
         // with zero global opacity. Skipping them is both cheaper and avoids
         // feeding Vello thousands of transparent full-scene layers.
         if !elem.opacity.is_finite() || elem.opacity <= 0.0 {

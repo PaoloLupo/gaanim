@@ -166,7 +166,7 @@ USAGE:
 
 ARGUMENTS:
     video               Animated-video starter
-    slides              Semantic slides starter
+    slides              Presentation segments starter
     DIRECTORY           Project directory (defaults to gaanim-<kind>)
 
 OPTIONS:

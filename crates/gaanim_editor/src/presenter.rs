@@ -26,7 +26,7 @@ pub(crate) struct PresenterCamera {
     window: Entity,
 }
 
-/// Ephemeral controls for navigating a semantic presentation by slide name.
+/// Ephemeral controls for navigating a presentation by segment name.
 #[derive(Default)]
 pub(crate) struct PresenterOverviewState {
     open: bool,
@@ -43,7 +43,7 @@ enum ThumbnailMoment {
 
 #[derive(Debug)]
 struct ThumbnailPixels {
-    slide_id: u32,
+    segment_id: u32,
     moment: ThumbnailMoment,
     width: u32,
     height: u32,
@@ -65,7 +65,7 @@ impl PresenterThumbnailCache {
     fn request(&mut self, stash: &StashedReplay, timeline: &Timeline) {
         if stash.revision == 0
             || stash.revision == self.requested_revision
-            || timeline.presentation.is_empty()
+            || timeline.segments.is_empty()
         {
             return;
         }
@@ -75,19 +75,19 @@ impl PresenterThumbnailCache {
 
         let revision = stash.revision;
         let requests = timeline
-            .presentation
+            .segments
             .iter()
-            .flat_map(|slide| {
+            .flat_map(|segment| {
                 [
                     (
-                        slide.id,
+                        segment.id,
                         ThumbnailMoment::Entry,
-                        entry_slide_time(slide.start_time, slide.end_time),
+                        entry_segment_time(segment.start_time, segment.end_time),
                     ),
                     (
-                        slide.id,
+                        segment.id,
                         ThumbnailMoment::Complete,
-                        representative_slide_time(slide.start_time, slide.end_time),
+                        representative_segment_time(segment.start_time, segment.end_time),
                     ),
                 ]
             })
@@ -118,8 +118,8 @@ impl PresenterThumbnailCache {
                     requests
                         .into_iter()
                         .zip(frames)
-                        .map(|((slide_id, moment, _), frame)| ThumbnailPixels {
-                            slide_id,
+                        .map(|((segment_id, moment, _), frame)| ThumbnailPixels {
+                            segment_id,
                             moment,
                             width: frame.width,
                             height: frame.height,
@@ -169,7 +169,7 @@ fn thumbnail_dimensions(canvas_width: u32, canvas_height: u32) -> (u32, u32) {
     )
 }
 
-fn representative_slide_time(start_time: f64, end_time: f64) -> f64 {
+fn representative_segment_time(start_time: f64, end_time: f64) -> f64 {
     if end_time > start_time + 1e-4 {
         (end_time - 1e-4).max(start_time)
     } else {
@@ -177,7 +177,7 @@ fn representative_slide_time(start_time: f64, end_time: f64) -> f64 {
     }
 }
 
-fn entry_slide_time(start_time: f64, end_time: f64) -> f64 {
+fn entry_segment_time(start_time: f64, end_time: f64) -> f64 {
     if end_time > start_time + 2e-4 {
         (start_time + 1e-4).min(end_time - 1e-4)
     } else {
@@ -185,7 +185,10 @@ fn entry_slide_time(start_time: f64, end_time: f64) -> f64 {
     }
 }
 
-fn neighboring_slide_indices(index: usize, count: usize) -> (Option<usize>, usize, Option<usize>) {
+fn neighboring_segment_indices(
+    index: usize,
+    count: usize,
+) -> (Option<usize>, usize, Option<usize>) {
     (
         index.checked_sub(1),
         index,
@@ -193,7 +196,7 @@ fn neighboring_slide_indices(index: usize, count: usize) -> (Option<usize>, usiz
     )
 }
 
-fn show_slide_preview(
+fn show_segment_preview(
     ui: &mut egui::Ui,
     role: &str,
     position: Option<(usize, &str)>,
@@ -423,15 +426,15 @@ pub(crate) fn presenter_view_system(
                     );
                     let texture = ctx.load_texture(
                         format!(
-                            "presenter-slide-{}-{:?}-{revision}",
-                            frame.slide_id, frame.moment
+                            "presenter-segment-{}-{:?}-{revision}",
+                            frame.segment_id, frame.moment
                         ),
                         image,
                         egui::TextureOptions::LINEAR,
                     );
                     overview
                         .textures
-                        .insert((frame.slide_id, frame.moment), texture);
+                        .insert((frame.segment_id, frame.moment), texture);
                 }
                 thumbnail_cache.error = None;
             }
@@ -439,12 +442,12 @@ pub(crate) fn presenter_view_system(
         }
     }
     let current_time = timeline.current_time;
-    let current_position = timeline.presentation_position_at(current_time);
+    let current_position = timeline.segment_position_at(current_time);
     let current = current_position.and_then(|position| {
         timeline
-            .presentation
+            .segments
             .iter()
-            .position(|slide| slide.id == position.slide_id)
+            .position(|segment| segment.id == position.segment_id)
             .map(|index| (index, position))
     });
 
@@ -463,11 +466,7 @@ pub(crate) fn presenter_view_system(
 
         if previous_pressed {
             timeline.is_playing = false;
-            timeline.seek_request = Some(
-                timeline
-                    .previous_presentation_stop(current_time)
-                    .unwrap_or(0.0),
-            );
+            timeline.seek_request = Some(timeline.previous_stop(current_time).unwrap_or(0.0));
         }
         if next_pressed {
             timeline.is_playing = true;
@@ -549,26 +548,26 @@ pub(crate) fn presenter_view_system(
             }
 
             if let Some((index, position)) = current {
-                let slide = &timeline.presentation[index];
-                let step_label = position
-                    .step_index
-                    .map(|step| format!(" · Step {}", step + 1))
+                let segment = &timeline.segments[index];
+                let stop_label = position
+                    .stop_index
+                    .map(|stop| format!(" · Stop {}", stop + 1))
                     .unwrap_or_default();
                 ui.heading(format!(
                     "Current · {} / {} · {}{}",
                     index + 1,
-                    timeline.presentation.len(),
-                    slide.name,
-                    step_label
+                    timeline.segments.len(),
+                    segment.name,
+                    stop_label
                 ));
                 ui.label(format!(
-                    "Slide time {}",
-                    format_time(current_time - slide.start_time)
+                    "Segment time {}",
+                    format_time(current_time - segment.start_time)
                 ));
                 ui.add_space(10.0);
 
                 let (previous, current_index, next) =
-                    neighboring_slide_indices(index, timeline.presentation.len());
+                    neighboring_segment_indices(index, timeline.segments.len());
                 ui.horizontal_top(|ui| {
                     let cards = [
                         (
@@ -589,33 +588,33 @@ pub(crate) fn presenter_view_system(
                     ];
                     for (role, card_index, width, moment, active) in cards {
                         let position = card_index.map(|card_index| {
-                            (card_index, timeline.presentation[card_index].name.as_str())
+                            (card_index, timeline.segments[card_index].name.as_str())
                         });
                         let texture = card_index.and_then(|card_index| {
                             overview
                                 .textures
-                                .get(&(timeline.presentation[card_index].id, moment))
+                                .get(&(timeline.segments[card_index].id, moment))
                         });
-                        if show_slide_preview(
+                        if show_segment_preview(
                             ui,
                             role,
                             position,
-                            timeline.presentation.len(),
+                            timeline.segments.len(),
                             texture,
                             width,
                             active,
                         ) && !active
                             && let Some(card_index) = card_index
                         {
-                            requested_seek = timeline
-                                .presentation_time_named(&timeline.presentation[card_index].name);
+                            requested_seek =
+                                timeline.segment_time_named(&timeline.segments[card_index].name);
                         }
                     }
                 });
                 if thumbnail_cache.is_loading() && overview.textures.is_empty() {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Rendering slide previews...");
+                        ui.label("Rendering segment previews...");
                     });
                 } else if let Some(error) = &thumbnail_cache.error {
                     ui.colored_label(
@@ -626,29 +625,34 @@ pub(crate) fn presenter_view_system(
 
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new("Notes").strong());
-                ui.label(slide.notes.as_deref().unwrap_or("No notes for this slide."));
+                ui.label(
+                    segment
+                        .notes
+                        .as_deref()
+                        .unwrap_or("No notes for this segment."),
+                );
 
                 ui.add_space(16.0);
                 ui.label(egui::RichText::new("Next").strong());
-                if let Some(next_time) = timeline.next_presentation_stop(current_time) {
-                    if let Some(next_position) = timeline.presentation_position_at(next_time)
+                if let Some(next_time) = timeline.next_stop(current_time) {
+                    if let Some(next_position) = timeline.segment_position_at(next_time)
                         && let Some(next_index) = timeline
-                            .presentation
+                            .segments
                             .iter()
-                            .position(|slide| slide.id == next_position.slide_id)
+                            .position(|segment| segment.id == next_position.segment_id)
                     {
-                        let next = &timeline.presentation[next_index];
-                        let next_step = next_position
-                            .step_index
-                            .map(|step| format!(" · Step {}", step + 1))
+                        let next = &timeline.segments[next_index];
+                        let next_stop = next_position
+                            .stop_index
+                            .map(|stop| format!(" · Stop {}", stop + 1))
                             .unwrap_or_default();
-                        ui.label(format!("{}{}", next.name, next_step));
+                        ui.label(format!("{}{}", next.name, next_stop));
                     }
                 } else {
                     ui.label("End of presentation");
                 }
             } else {
-                ui.label("No semantic slides are defined in this scene.");
+                ui.label("No segments are defined in this scene.");
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
@@ -656,11 +660,8 @@ pub(crate) fn presenter_view_system(
                 ui.horizontal(|ui| {
                     if ui.button("◀ Previous").clicked() {
                         timeline.is_playing = false;
-                        timeline.seek_request = Some(
-                            timeline
-                                .previous_presentation_stop(current_time)
-                                .unwrap_or(0.0),
-                        );
+                        timeline.seek_request =
+                            Some(timeline.previous_stop(current_time).unwrap_or(0.0));
                     }
                     let label = if timeline.is_playing { "Pause" } else { "Play" };
                     if ui.button(label).clicked() {
@@ -692,20 +693,20 @@ pub(crate) fn presenter_view_system(
 
     if overview.open {
         let mut is_open = overview.open;
-        egui::Window::new("Slide overview")
+        egui::Window::new("Segment overview")
             .open(&mut is_open)
             .resizable(true)
             .default_width(620.0)
             .show(ctx, |ui| {
                 thumbnail_cache.request(&replay_stash, &timeline);
-                ui.label("Jump to a slide by name");
+                ui.label("Jump to a segment by name");
                 ui.text_edit_singleline(&mut overview.query);
                 ui.add_space(8.0);
 
                 if thumbnail_cache.is_loading() {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Rendering slide previews...");
+                        ui.label("Rendering segment previews...");
                     });
                     ui.add_space(8.0);
                 } else if let Some(error) = &thumbnail_cache.error {
@@ -718,14 +719,14 @@ pub(crate) fn presenter_view_system(
 
                 let query = overview.query.trim().to_lowercase();
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, slide) in timeline.presentation.iter().enumerate() {
-                        if !query.is_empty() && !slide.name.to_lowercase().contains(&query) {
+                    for (index, segment) in timeline.segments.iter().enumerate() {
+                        if !query.is_empty() && !segment.name.to_lowercase().contains(&query) {
                             continue;
                         }
 
-                        let active =
-                            current_position.is_some_and(|position| position.slide_id == slide.id);
-                        let step_count = slide.steps.len();
+                        let active = current_position
+                            .is_some_and(|position| position.segment_id == segment.id);
+                        let stop_count = segment.stops.len();
                         let mut clicked = false;
                         egui::Frame::group(ui.style())
                             .fill(if active {
@@ -738,7 +739,7 @@ pub(crate) fn presenter_view_system(
                                 ui.horizontal(|ui| {
                                     if let Some(texture) = overview
                                         .textures
-                                        .get(&(slide.id, ThumbnailMoment::Complete))
+                                        .get(&(segment.id, ThumbnailMoment::Complete))
                                     {
                                         let texture_size = texture.size_vec2();
                                         let scale =
@@ -767,34 +768,34 @@ pub(crate) fn presenter_view_system(
                                             egui::RichText::new(format!(
                                                 "{:02}  {}",
                                                 index + 1,
-                                                slide.name
+                                                segment.name
                                             ))
                                             .strong()
                                             .size(18.0),
                                         );
                                         ui.label(format!(
-                                            "{} step{}",
-                                            step_count,
-                                            if step_count == 1 { "" } else { "s" }
+                                            "{} stop{}",
+                                            stop_count,
+                                            if stop_count == 1 { "" } else { "s" }
                                         ));
-                                        clicked |= ui.button("Go to slide").clicked();
-                                        if !slide.steps.is_empty() {
+                                        clicked |= ui.button("Go to segment").clicked();
+                                        if !segment.stops.is_empty() {
                                             ui.horizontal_wrapped(|ui| {
-                                                for (step_index, step) in
-                                                    slide.steps.iter().enumerate()
+                                                for (stop_index, stop) in
+                                                    segment.stops.iter().enumerate()
                                                 {
-                                                    let label = step
+                                                    let label = stop
                                                         .name
                                                         .as_deref()
                                                         .map(str::to_owned)
                                                         .unwrap_or_else(|| {
-                                                            format!("Step {}", step_index + 1)
+                                                            format!("Stop {}", stop_index + 1)
                                                         });
                                                     if ui.small_button(label).clicked() {
                                                         requested_seek = timeline
-                                                            .presentation_time_indexed(
-                                                                &slide.name,
-                                                                Some(step_index),
+                                                            .segment_time_indexed(
+                                                                &segment.name,
+                                                                Some(stop_index),
                                                             );
                                                     }
                                                 }
@@ -805,7 +806,7 @@ pub(crate) fn presenter_view_system(
                             });
                         ui.add_space(8.0);
                         if clicked {
-                            requested_seek = timeline.presentation_time_named(&slide.name);
+                            requested_seek = timeline.segment_time_named(&segment.name);
                         }
                     }
                 });
@@ -822,7 +823,7 @@ pub(crate) fn presenter_view_system(
 #[cfg(test)]
 mod tests {
     use super::{
-        entry_slide_time, neighboring_slide_indices, representative_slide_time,
+        entry_segment_time, neighboring_segment_indices, representative_segment_time,
         thumbnail_dimensions,
     };
 
@@ -834,23 +835,23 @@ mod tests {
     }
 
     #[test]
-    fn representative_time_stays_inside_the_slide() {
-        assert_eq!(representative_slide_time(2.0, 2.0), 2.0);
-        let time = representative_slide_time(2.0, 5.0);
+    fn representative_time_stays_inside_the_segment() {
+        assert_eq!(representative_segment_time(2.0, 2.0), 2.0);
+        let time = representative_segment_time(2.0, 5.0);
         assert!(time >= 2.0 && time < 5.0);
     }
 
     #[test]
-    fn entry_time_stays_inside_the_slide() {
-        assert_eq!(entry_slide_time(2.0, 2.0), 2.0);
-        let time = entry_slide_time(2.0, 5.0);
+    fn entry_time_stays_inside_the_segment() {
+        assert_eq!(entry_segment_time(2.0, 2.0), 2.0);
+        let time = entry_segment_time(2.0, 5.0);
         assert!(time > 2.0 && time < 5.0);
     }
 
     #[test]
-    fn neighboring_slides_handle_deck_edges() {
-        assert_eq!(neighboring_slide_indices(0, 3), (None, 0, Some(1)));
-        assert_eq!(neighboring_slide_indices(1, 3), (Some(0), 1, Some(2)));
-        assert_eq!(neighboring_slide_indices(2, 3), (Some(1), 2, None));
+    fn neighboring_segments_handle_deck_edges() {
+        assert_eq!(neighboring_segment_indices(0, 3), (None, 0, Some(1)));
+        assert_eq!(neighboring_segment_indices(1, 3), (Some(0), 1, Some(2)));
+        assert_eq!(neighboring_segment_indices(2, 3), (Some(1), 2, None));
     }
 }

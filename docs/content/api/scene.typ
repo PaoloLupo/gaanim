@@ -359,8 +359,40 @@ scene.play([circle.move(200, 0).duration(1.0)])
 scene.play([rect.fade_out().duration(0.5)])
 ```
 
-Use `scene.segment(name, transition)` for named sections, `scene.link(...)` to
-connect them, and `scene.slide()` to add a presentation breakpoint.
+`segment` is the single structural unit for visibility, transitions, notes,
+and presentation layouts. Segment boundaries remain continuous; use `stop()`
+only where interactive playback must wait for input.
+
+#api-entry(
+  name: "Scene.segment",
+  kind: "method",
+  signature: "segment(name, transition=None, *, notes=None, layout=\"blank\") -> Segment",
+  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "layout", type: "str", default: "\"blank\"", desc: [Built-in layout whose named regions are available through the returned Segment.]),),
+  returns: (type: "Segment", desc: [Stable handle accepted by `link` and used to resolve layout regions.]),
+  desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, an empty or duplicate name, or an unknown layout raises `ValueError`.],
+)[
+```python
+intro = scene.segment("Introduction", notes="State the goal.", layout="cover")
+intro.region("title").place(scene.title("One clear idea"), Anchor.CENTER)
+scene.wait(0.5)
+details = scene.segment("Details", Transition.cross_fade(0.4), layout="content")
+scene.link(intro, details, Transition.cross_fade(0.4))
+```
+]
+
+#api-entry(
+  name: "Scene.stop",
+  kind: "method",
+  signature: "stop(name=None) -> None",
+  params: ((name: "name", type: "str | None", default: "None", desc: [Optional Presenter View label.]),),
+  returns: (type: "None", desc: [Adds no duration and creates no visual change.]),
+  desc: [Pauses real-time playback when the playhead reaches this exact position. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
+)[
+```python
+scene.play([result.write().duration(0.6)])
+scene.stop("result-ready")
+```
+]
 
 #api-entry(
   name: "Scene.reuse / persist / release",
@@ -391,9 +423,9 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Semantic slides and branding
+== Presentation segments and branding
 
-Configure the deck identity once before declaring slides:
+Configure the deck identity once before declaring presentation segments:
 
 ```python
 scene.canvas.set_theme("presentation")
@@ -408,18 +440,19 @@ scene.brand(
 ```
 
 The logo, theme-colored rule, footer, and current slide number are generated
-inside every semantic slide, so navigation and independent slide export remain
-correct. Cover slides omit the chrome by default.
+inside every explicit segment, so navigation and independent segment export
+remain correct. Cover layouts omit the chrome by default.
 
-`slide(layout=...)` accepts both structural names and presentation-oriented
+`segment(layout=...)` accepts both structural names and presentation-oriented
 aliases: `cover`, `content`, `agenda`, `comparison`, `divider`, and
 `conclusion`. A comparison exposes `before` and `after` regions as aliases for
 its two columns.
 
 ```python
-slide = scene.slide("Results", layout="comparison", notes="Compare both models.")
-slide.region("before").place(baseline, Anchor.CENTER)
-slide.region("after").place(proposed, Anchor.CENTER)
+segment = scene.segment("Results", layout="comparison", notes="Compare both models.")
+segment.region("before").place(baseline, Anchor.CENTER)
+segment.region("after").place(proposed, Anchor.CENTER)
+scene.stop("comparison-ready")
 ```
 
 `Transition.zoom_through(duration, center=(0, 0), max_zoom=4)` zooms into a
@@ -547,10 +580,10 @@ and `encoder="auto"` (or `"libx264"`, `"nvenc"`, `"amf"`, `"qsv"`, or
 `"vaapi"`) to select encoding. `crf` ranges from 0 to 51 and `speed` accepts
 `"fast"`, `"balanced"`, or `"best"`.
 
-For semantic presentations, use `slide="Name"` to export only one slide. Use
-`slide="*"` to export every slide; the path must contain `{slide}` or `{index}`
+Use `segment="Name"` to export only one named segment. Use `segment="*"` to
+export every segment; the path must contain `{segment}` or `{index}`
 so files cannot overwrite each other. Parent directories are created
-automatically. `slide` is intentionally exclusive with `start_time` and
+automatically. `segment` is intentionally exclusive with `start_time` and
 `end_time`.
 
 ```python
@@ -563,10 +596,10 @@ scene.export(
     end_time=12.0,
 )
 
-scene.export("defense/results.mp4", slide="Resultados", quality="production")
+scene.export("defense/results.mp4", segment="Resultados", quality="production")
 scene.export(
-    "defense/slides/{index}-{slide}.mp4",
-    slide="*",
+    "defense/segments/{index}-{segment}.mp4",
+    segment="*",
     quality="production",
 )
 ```

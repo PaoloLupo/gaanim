@@ -1285,19 +1285,12 @@ class Canvas:
         """
         ...
 
-class Slide:
-    def step(self, name: Optional[str] = None) -> None:
-        """Use step on this Slide or create the requested value.
-
-        Example:
-            slide.step()
-        """
-        ...
+class Segment:
     def region(self, name: str) -> LayoutRegion:
-        """Use region on this Slide or create the requested value.
+        """Resolve a named region from this segment's layout.
 
         Example:
-            result = slide.region("example")
+            result = segment.region("content")
         """
         ...
 
@@ -2284,18 +2277,28 @@ class Scene:
             result = scene.code("example")
         """
         ...
-    def segment(self, name: str, transition: Optional[Transition] = None) -> int:
-        """Schedule segment on the scene timeline.
+    def segment(
+        self,
+        name: str,
+        transition: Optional[Transition] = None,
+        *,
+        notes: Optional[str] = None,
+        layout: Literal[
+            "blank", "title", "cover", "title_content", "content", "agenda",
+            "two_columns", "comparison", "section", "divider", "closing", "conclusion"
+        ] = "blank",
+    ) -> Segment:
+        """Create and activate a named structural segment.
 
         Example:
             result = scene.segment("example")
         """
         ...
-    def link(self, from_: int, to: int, transition: Transition) -> None:
+    def link(self, from_: Segment, to: Segment, transition: Transition) -> None:
         """Schedule link on the scene timeline.
 
         Example:
-            scene.link((0.0, 0.0), (0.0, 0.0), Transition.cut())
+            scene.link(intro, details, Transition.cut())
         """
         ...
     def reuse(self, object: Drawable, *others: Drawable) -> None:
@@ -2342,27 +2345,17 @@ class Scene:
             scene.wait(1.0)
         """
         ...
+    def stop(self, name: Optional[str] = None) -> None:
+        """Pause interactive playback at the current timeline position.
+
+        Export ignores stops and renders the timeline continuously.
+        """
+        ...
     def play(self, anims: Sequence[Anim], lag: Optional[float] = None) -> None:
         """Schedule play on the scene timeline.
 
         Example:
             scene.play([animation])
-        """
-        ...
-    def slide(
-        self,
-        name: str,
-        *,
-        notes: Optional[str] = None,
-        layout: Literal[
-            "blank", "title", "cover", "title_content", "content", "agenda",
-            "two_columns", "comparison", "section", "divider", "closing", "conclusion"
-        ] = "blank",
-    ) -> Slide:
-        """Schedule slide on the scene timeline.
-
-        Example:
-            result = scene.slide("example")
         """
         ...
     def fade_out_all(self, d: float) -> None:
@@ -2391,7 +2384,7 @@ class Scene:
         height: Optional[int] = None,
         start_time: Optional[float] = None,
         end_time: Optional[float] = None,
-        slide: Optional[str] = None,
+        segment: Optional[str] = None,
         crf: Optional[int] = None,
         encoder: Literal["auto", "libx264", "nvenc", "amf", "qsv", "vaapi"] = "auto",
         speed: Optional[Literal["fast", "balanced", "best"]] = None,

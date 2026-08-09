@@ -40,7 +40,7 @@ En términos prácticos:
   con audio mezclado al exportar.
 - **Es una beta técnica** para visualización 3D: superficies, ejes, polilíneas con
   colormap, cámara perspectiva, HUD/billboards y modelos glTF con acciones animadas.
-- **Es beta funcional** para presentaciones interactivas: existen slides y pasos
+- **Es beta funcional** para presentaciones interactivas: existen segmentos y paradas
   semánticos, layouts, notas, Presenter View, overview, navegación por monitor y una
   plantilla completa de sustentación.
 - **Todavía no está listo** como pipeline general de producción de contenido: faltan
@@ -57,7 +57,7 @@ En términos prácticos:
 | Modelos glTF animados | 🟡 | Importación, partes, materiales PBR y acciones; faltan más formatos y E2E |
 | Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
-| Presentaciones animadas en vivo | 🟢 | Slides semánticas, notas, Presenter View y overview verificados |
+| Presentaciones animadas en vivo | 🟢 | Segmentos semánticos, notas, Presenter View y overview verificados |
 | Contenido con código, tablas o datos | 🟡 | `table`, `bar_chart` y `code` existen; faltan charts, highlighting y APIs de datos más ricas |
 | Motion graphics con multimedia | 🟡 | Raster, SVG vectorial avanzado y audio de exportación disponibles; falta video embebido |
 | Pipeline audiovisual de producción | 🔴 | Faltan preview de audio, video, pruebas E2E, empaquetado y estabilidad de API |
@@ -70,7 +70,7 @@ En términos prácticos:
 - El workspace contiene 16 crates de gaanim más el crate de documentación (17 miembros).
 - El paquete declara versión Python `0.1.0`; varios crates Rust siguen en `0.1.0`.
 - La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
-  `Brush`, `Camera`, `Theme`, layouts, `ValueTracker` y `Slide`, además de primitivas 3D
+  `Brush`, `Camera`, `Theme`, layouts, `ValueTracker` y `Segment`, además de primitivas 3D
   y glTF. `Canvas(...)` emite una deprecación y devuelve un `Scene`; la configuración
   visual vive en `scene.canvas`.
 - Los ejemplos Python no importan `Canvas` como fachada de animación.
@@ -94,7 +94,7 @@ La responsabilidad objetivo de cada concepto es:
 
 | Concepto | Responsabilidad |
 |---|---|
-| `Scene` | Mobjects, animaciones, timeline, reproducción, slides y exportación |
+| `Scene` | Mobjects, animaciones, timeline, reproducción, segmentos y exportación |
 | `Canvas` | Dimensiones, fondo, márgenes, coordenadas, aspect ratio y safe areas |
 | `Video` | Composición futura de múltiples escenas y transiciones |
 | `Presentation` | Composición futura de slides, navegación y presenter mode |
@@ -248,19 +248,20 @@ por capítulos o escenas; aún falta una composición no lineal de alto nivel.
 
 ### 6. Presentaciones
 
-`Scene.slide(name, notes=..., layout=...)` define paradas semánticas y `slide.step()`
-define pasos dentro de una diapositiva. Durante la reproducción, el timeline se pausa al
-alcanzarlos y permite avanzar o retroceder con teclado o mouse. El editor muestra los
-breakpoints en la barra temporal y puede iniciarse en pantalla completa con `--present`.
+`Scene.segment(name, notes=..., layout=...)` define la estructura semántica y
+`Scene.stop()` añade únicamente los puntos que requieren input. Durante la reproducción,
+el timeline se pausa al alcanzarlos y permite avanzar o retroceder con teclado o mouse. El
+editor muestra los stops en la barra temporal y puede iniciarse en pantalla completa con
+`--present`.
 
-La Presenter View abre una segunda ventana con slide/paso actual, siguiente parada, notas,
+La Presenter View abre una segunda ventana con segmento/parada actual, siguiente parada, notas,
 cronómetro, navegación, overview consultable por nombre, miniaturas y salto directo a
-slides o pasos. Las miniaturas se capturan de forma asíncrona en un mundo ECS/Vello
+segmentos o paradas. Las miniaturas se capturan de forma asíncrona en un mundo ECS/Vello
 aislado, se invalidan con hot reload y nunca hacen seek sobre el timeline público. Sus atajos locales
 son `←`, `→`, `Espacio`, `O` (overview), `B` (pantalla negra) y `W` (pantalla blanca).
-El panel principal mantiene previews clicables del slide anterior, actual y siguiente; el
+El panel principal mantiene previews clicables del segmento anterior, actual y siguiente; el
 siguiente usa su estado de entrada para no revelar anticipadamente animaciones, mientras
-el overview conserva la composición completa de cada slide.
+el overview conserva la composición completa de cada segmento.
 `gaanim check <script.py>` ejecuta además un preflight de formato 16:9, notas, pasos,
 duración y placeholders; `--strict` permite usarlo como gate antes de una sustentación.
 
@@ -277,7 +278,7 @@ Los tokens también se consultan con `theme.color(...)`/`scene.canvas.color(...)
 `scene.canvas.validate_theme()` audita contraste y tipografía antes de una presentación.
 
 Este es un **modo de presentación beta para slides generales**. El comando
-`gaanim init slides` genera un deck 16:9 con estructura semántica, notas y pasos.
+`gaanim init slides` genera un deck 16:9 con segmentos semánticos, notas y paradas.
 La identidad visual se configura con temas, `scene.brand(...)` y las regiones de
 cada slide, sin APIs ni recursos institucionales incorporados al motor.
 
@@ -328,7 +329,7 @@ El crate de exportación implementa:
 - rango temporal, transparencia y presets de resolución/calidad en Rust.
 
 La API Python pública usa `scene.export(path, fps=None, ...)`: selecciona el formato por
-extensión y permite transparencia, calidad, aspect ratio, rango temporal, slide, CRF,
+extensión y permite transparencia, calidad, aspect ratio, rango temporal, segmento, CRF,
 encoder y velocidad. La exportación depende de FFmpeg y aún necesita smoke tests
 automatizados por plataforma y formato. Las escenas 3D usan la ruta híbrida nativa de
 Bevy; el editor debe mantener aislado ese proceso cuando la escena contiene recursos
@@ -401,7 +402,7 @@ La compilación por sí sola no garantiza el resultado visual. El estado actual 
 4. [~] smoke tests headless de los cinco formatos; faltan ejecuciones automatizadas de
    todos los formatos y de audio por plataforma;
 5. [~] validación de fuentes/Typst en Windows y Linux; falta una matriz macOS declarada;
-6. [~] pruebas de seek, slides y breakpoints; hot reload y escenas 3D requieren más E2E;
+6. [~] pruebas de seek, segmentos y stops; hot reload y escenas 3D requieren más E2E;
 7. [ ] benchmarks reproducibles de preview, timeline y exportación.
 
 **Criterio de salida:** cada release puede demostrar que API, frames, escenas 3D y exports
@@ -497,14 +498,14 @@ componer cada pieza desde primitivas.
 
 ### P1 — Presentaciones completas
 
-- [x] Overview por nombre, indicador de slide/paso, presenter notes y presenter view;
+- [x] Overview por nombre, indicador de segmento/parada, presenter notes y presenter view;
 - [x] Caché de miniaturas en mundo ECS/Vello aislado, publicada como texturas egui sin
   mutar el `Timeline` de reproducción;
 - [x] previews persistentes anterior/actual/siguiente en Presenter View, con navegación
-  por clic y estado de entrada separado para el siguiente slide;
-- [x] exportación continua, por un slide nombrado o por todos los slides con una plantilla
+  por clic y estado de entrada separado para el siguiente segmento;
+- [x] exportación continua, por un segmento nombrado o por todos los segmentos con una plantilla
   de ruta desde la misma función `scene.export(...)`;
-- [x] navegación directa por nombre de slide y por nombre/índice de paso;
+- [x] navegación directa por nombre de segmento y por nombre/índice de parada;
 - [x] plantillas semánticas, temas y branding global expuestos desde Python;
 - [ ] control remoto o protocolo simple de navegación.
 
@@ -538,7 +539,7 @@ promesa de release separada:
 - [x] Temas, branding, layouts, componentes editoriales y presets de aspect ratio.
 - [x] Proyectos `video`/`slides`, `gaanim.toml`, assets relativos, `gaanim check` y
   detección side-effect-free de Python/uv.
-- [x] Slides semánticos, notas, pasos, overview, Presenter View y exportación por slide.
+- [x] Segmentos semánticos, notas, stops, overview, Presenter View y exportación por segmento.
 - [x] Primera ruta 3D pública: ejes, superficies, polilíneas, cámara perspectiva,
   HUD/billboards y transforms 3D.
 - [~] glTF/GLB: importación, jerarquía, materiales, skins/morphs y acciones; falta
@@ -593,7 +594,7 @@ release conviene registrar:
 
 1. Renderer vectorial GPU con Vello/wgpu.
 2. ECS y orden de sistemas centralizado mediante `SceneSet`.
-3. Timeline con clips, seek, snapshots, escenas y breakpoints.
+3. Timeline con clips, seek, snapshots, escenas y stops explícitos.
 4. Texto y matemáticas convertidos a geometría vectorial, con Typst integrado.
 5. Modelo diferido de construcción de escenas, adecuado para hot reload y exportación
    determinista.

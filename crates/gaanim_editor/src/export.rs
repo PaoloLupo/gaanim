@@ -21,7 +21,7 @@ pub struct ProjectPaths {
 #[derive(Resource, Clone, Default)]
 pub struct StashedReplay {
     pub canvas: Option<Canvas>,
-    /// Changes on every replay, even when slide names and timings stay equal.
+    /// Changes on every replay, even when segment names and timings stay equal.
     pub revision: u64,
 }
 

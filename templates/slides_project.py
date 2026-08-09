@@ -17,7 +17,7 @@ scene.brand(
     rule=True,
 )
 
-opening = scene.slide(
+opening = scene.segment(
     "Portada",
     layout="cover",
     notes="Presenta el tema y explica por qué importa.",
@@ -28,9 +28,9 @@ opening.region("subtitle").place(
     Anchor.CENTER,
 )
 scene.wait(0.5)
-opening.step("lista")
+scene.stop("lista")
 
-idea = scene.slide(
+idea = scene.segment(
     "Idea principal",
     layout="content",
     notes="Explica una sola idea y revela el detalle cuando sea necesario.",
@@ -46,9 +46,9 @@ message = idea.region("content").place(
     Anchor.CENTER,
 )
 scene.play([message.fade_in_from(Direction.DOWN).duration(0.5)])
-idea.step("mensaje")
+scene.stop("mensaje")
 
-closing = scene.slide(
+closing = scene.segment(
     "Cierre",
     layout="conclusion",
     notes="Resume el mensaje e invita a preguntas.",
@@ -56,7 +56,7 @@ closing = scene.slide(
 closing.region("title").place(scene.title("Gracias"), Anchor.CENTER)
 closing.region("subtitle").place(scene.subtitle("¿Preguntas?"), Anchor.CENTER)
 scene.wait(0.5)
-closing.step("preguntas")
+scene.stop("preguntas")
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.2, 0.7, 1.2])

@@ -10,11 +10,12 @@ use pyo3::types::PyTuple;
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
     CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
-    PresentationBrand, SlideId, SlideTemplate, TextAlign, ThemeFont,
+    PresentationBrand, SegmentHandle, SegmentLayout, TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
-    detect_best_encoder, export_canvas, export_canvas_slide, export_canvas_slides,
-    AspectRatioPreset, EncodingSpeed, ExportConfig, QualityPreset, SlideExportError, VideoEncoder,
+    detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
+    AspectRatioPreset, EncodingSpeed, ExportConfig, QualityPreset, SegmentExportError,
+    VideoEncoder,
 };
 
 use crate::color::PyColor;
@@ -23,9 +24,9 @@ use crate::pylayout::{PyFlow, PyFrameLayout, PyLayout, PyLayoutRegion};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
-fn slide_export_error(error: SlideExportError) -> PyErr {
+fn segment_export_error(error: SegmentExportError) -> PyErr {
     match &error {
-        SlideExportError::Export(_) | SlideExportError::Io(_) => {
+        SegmentExportError::Export(_) | SegmentExportError::Io(_) => {
             pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
         }
         _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
@@ -719,36 +720,24 @@ impl PyCamera {
     }
 }
 
-/// Handle for adding reveal pauses to one semantic presentation slide.
-#[pyclass(name = "Slide", module = "gaanim_core")]
-pub struct PySlide {
-    inner: Arc<Mutex<ApiCanvas>>,
-    id: SlideId,
-    template: SlideTemplate,
+/// Stable handle for one authored segment and its layout regions.
+#[pyclass(name = "Segment", module = "gaanim_core")]
+pub struct PySegment {
+    canvas: Arc<Mutex<ApiCanvas>>,
+    inner: SegmentHandle,
 }
 
 #[pymethods]
-impl PySlide {
-    #[pyo3(signature = (name=None))]
-    fn step(&self, name: Option<String>) -> PyResult<()> {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .slide_step(self.id, name)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
-    }
-
-    /// Resolve a named region supplied by this slide's template.
+impl PySegment {
+    /// Resolve a named region supplied by this segment's layout.
     fn region(&self, name: &str) -> PyResult<PyLayoutRegion> {
         let region = self
             .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .slide_region(self.template, name)
+            .region(name)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyLayoutRegion {
             region,
-            canvas: self.inner.clone(),
+            canvas: self.canvas.clone(),
         })
     }
 }
@@ -3258,19 +3247,44 @@ impl PyScene {
             .camera_shake(amplitude, frequency, duration);
     }
 
-    #[pyo3(signature = (name, transition=None))]
-    fn segment(&self, name: &str, transition: Option<&PyTransitionType>) -> usize {
-        self.inner
+    #[pyo3(signature = (name, transition=None, *, notes=None, layout="blank"))]
+    fn segment(
+        &self,
+        name: String,
+        transition: Option<&PyTransitionType>,
+        notes: Option<String>,
+        layout: &str,
+    ) -> PyResult<PySegment> {
+        let layout = SegmentLayout::parse(layout)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let handle = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
-            .segment(name, transition.map(|t| t.0.clone()))
+            .segment_with(
+                name,
+                transition.map(|transition| transition.0.clone()),
+                notes,
+                layout,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PySegment {
+            canvas: self.inner.clone(),
+            inner: handle,
+        })
     }
 
-    fn link(&self, from: usize, to: usize, transition: &PyTransitionType) {
+    fn link(
+        &self,
+        from: &PySegment,
+        to: &PySegment,
+        transition: &PyTransitionType,
+    ) -> PyResult<()> {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .link(from, to, transition.0.clone());
+            .link(&from.inner, &to.inner, transition.0.clone())
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     /// Reuse one or more drawables in the active segment at the current cursor.
@@ -3313,6 +3327,16 @@ impl PyScene {
             .wait(duration);
     }
 
+    /// Insert an explicit zero-duration interactive stop.
+    #[pyo3(signature = (name=None))]
+    fn stop(&self, name: Option<String>) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .stop(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     #[pyo3(signature = (anims, *, lag=None))]
     fn play(&self, anims: Vec<PyCanvasAnim>, lag: Option<f64>) {
         let anims = anims.into_iter().map(|anim| anim.inner).collect();
@@ -3324,22 +3348,6 @@ impl PyScene {
         }
     }
 
-    #[pyo3(signature = (name, *, notes=None, layout="blank"))]
-    fn slide(&self, name: String, notes: Option<String>, layout: &str) -> PyResult<PySlide> {
-        let template = SlideTemplate::parse(layout)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        let id = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .slide(name, notes, template)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        Ok(PySlide {
-            inner: self.inner.clone(),
-            id,
-            template,
-        })
-    }
     fn fade_out_all(&self, duration: f64) {
         self.inner
             .lock()
@@ -3373,7 +3381,7 @@ impl PyScene {
         height=None,
         start_time=None,
         end_time=None,
-        slide=None,
+        segment=None,
         crf=None,
         encoder="auto",
         speed=None,
@@ -3389,7 +3397,7 @@ impl PyScene {
         height: Option<u32>,
         start_time: Option<f64>,
         end_time: Option<f64>,
-        slide: Option<&str>,
+        segment: Option<&str>,
         crf: Option<u32>,
         encoder: &str,
         speed: Option<&str>,
@@ -3471,9 +3479,9 @@ impl PyScene {
                 ));
             }
         }
-        if slide.is_some() && (start_time.is_some() || end_time.is_some()) {
+        if segment.is_some() && (start_time.is_some() || end_time.is_some()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "slide cannot be combined with start_time or end_time",
+                "segment cannot be combined with start_time or end_time",
             ));
         }
 
@@ -3482,12 +3490,12 @@ impl PyScene {
             config.encoding_speed = parse_encoding_speed(speed)?;
         }
 
-        match slide {
-            Some("*") => export_canvas_slides(canvas, path, config)
+        match segment {
+            Some("*") => export_canvas_segments(canvas, path, config)
                 .map(|_| ())
-                .map_err(slide_export_error),
-            Some(slide_name) => {
-                export_canvas_slide(canvas, slide_name, config).map_err(slide_export_error)
+                .map_err(segment_export_error),
+            Some(segment_name) => {
+                export_canvas_segment(canvas, segment_name, config).map_err(segment_export_error)
             }
             None => export_canvas(canvas, config)
                 .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),

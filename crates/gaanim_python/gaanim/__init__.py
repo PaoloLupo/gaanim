@@ -35,7 +35,7 @@ from .gaanim_core import (
     Updater,
     ValueTracker,
     Scene,
-    Slide,
+    Segment,
 )
 
 
@@ -152,7 +152,7 @@ Scene.axes = _patched_axes
 
 __all__ = [
     "Scene",
-    "Slide",
+    "Segment",
     "Canvas",
     "Drawable",
     "Anim",

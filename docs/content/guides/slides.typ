@@ -31,18 +31,20 @@ scene = Scene(1920, 1080, margin=72)
 scene.canvas.set_theme("presentation")
 scene.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
 
-cover = scene.slide("Portada", layout="cover", notes="Presenta el tema.")
+cover = scene.segment("Portada", layout="cover", notes="Presenta el tema.")
 cover.region("title").place(scene.title("Una idea clara"), Anchor.CENTER)
 cover.region("subtitle").place(scene.subtitle("Slides reutilizables"), Anchor.CENTER)
-cover.step("portada")
+scene.wait(0.5)
+scene.stop("portada")
 
-content = scene.slide("Contenido", layout="content", notes="Desarrolla la idea.")
+content = scene.segment("Contenido", layout="content", notes="Desarrolla la idea.")
 content.region("title").place(scene.title("Contenido"), Anchor.LEFT)
 content.region("content").place(
     scene.paragraph("Una sola idea por slide.", width=1000, font_size=42),
     Anchor.CENTER,
 )
-content.step("mensaje")
+scene.wait(0.5)
+scene.stop("mensaje")
 scene.render()
 ```
 
@@ -57,8 +59,9 @@ gaanim check mi-charla --strict
 gaanim --present --monitor 1 mi-charla
 ```
 
-Los índices de monitor empiezan en cero. Presenter View utiliza los nombres,
-notas y pasos definidos con `scene.slide(...)` y `slide.step(...)`.
+Los índices de monitor empiezan en cero. Presenter View utiliza los nombres y
+notas de `scene.segment(...)`, y solo espera input en los puntos marcados con
+`scene.stop(...)`. La exportación ignora esas paradas y genera un video continuo.
 
 = Entorno opcional con uv
 

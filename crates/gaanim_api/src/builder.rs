@@ -456,7 +456,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Schedule an instantaneous hide for a root and its generated text
-    /// children. This keeps semantic slide transitions correct even though all
+    /// children. This keeps semantic segment transitions correct even though all
     /// entities are spawned up front for timeline seeking.
     pub(crate) fn schedule_hide_hierarchy(&mut self, root_id: ObjectId) {
         let Some(state) = self.states.get(root_id).cloned() else {
@@ -766,15 +766,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
-    /// Registers an interactive breakpoint (slide transition) at the current timeline playhead.
-    pub fn slide(&mut self) {
+    /// Registers an explicit interactive stop at the current timeline playhead.
+    pub fn stop(&mut self) {
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
             0.0,
-            ClipPayload::Breakpoint,
+            ClipPayload::Stop,
         );
-        self.timeline.breakpoints.push(self.current_time);
     }
 
     /// Sequences a single animation clip on the timeline and advances the playhead.
