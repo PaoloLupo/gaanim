@@ -8,7 +8,7 @@ pub mod timeline;
 pub mod transition;
 
 use gaanim_scene::hierarchy::SceneSet;
-use timeline::Timeline;
+use timeline::{PlaybackStopPolicy, Timeline};
 
 /// Marker resource: inserted by `reload_with` to signal that the t=0 keyframe
 /// snapshot should be captured on the next frame — after deferred Commands from
@@ -22,6 +22,7 @@ pub struct GaanimTimelinePlugin;
 impl Plugin for GaanimTimelinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Timeline>()
+            .init_resource::<PlaybackStopPolicy>()
             .add_systems(PostStartup, capture_initial_keyframe_system)
             .add_systems(
                 Update,
@@ -94,6 +95,7 @@ pub fn capture_initial_keyframe(world: &mut World) {
 /// and random-access seek share the exact same evaluation logic.
 pub fn timeline_playback_system(
     mut timeline: ResMut<Timeline>,
+    stop_policy: Res<PlaybackStopPolicy>,
     dt: Res<gaanim_animation::DeltaTime>,
     playback_state: Option<ResMut<gaanim_animation::PlaybackState>>,
 ) {
@@ -113,7 +115,9 @@ pub fn timeline_playback_system(
         // Segment boundaries are continuous. Only explicitly authored stops
         // pause real-time playback.
         let current = timeline.current_time;
-        let hit_stop = timeline.next_playback_stop(current, next_time);
+        let hit_stop = (*stop_policy == PlaybackStopPolicy::Respect)
+            .then(|| timeline.next_playback_stop(current, next_time))
+            .flatten();
 
         if let Some(stop) = hit_stop {
             timeline.seek_request = Some(stop);
@@ -305,6 +309,7 @@ mod tests {
 
         let mut app = App::new();
         app.insert_resource(timeline)
+            .insert_resource(PlaybackStopPolicy::Respect)
             .insert_resource(gaanim_animation::DeltaTime { dt: 1.0 })
             .add_systems(Update, timeline_playback_system);
         app.update();
@@ -312,5 +317,67 @@ mod tests {
         let timeline = app.world().resource::<Timeline>();
         assert_eq!(timeline.seek_request, Some(1.2));
         assert!(!timeline.is_playing);
+    }
+
+    #[test]
+    fn continuous_playback_ignores_authored_stops() {
+        let mut timeline = Timeline::new();
+        timeline.current_time = 0.4;
+        timeline.cached_duration = 2.0;
+        timeline.is_playing = true;
+        timeline.set_segments(vec![timeline::SegmentMetadata {
+            id: 1,
+            name: "segment".to_owned(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 2.0,
+            stops: vec![timeline::SegmentStop {
+                name: Some("pause".to_owned()),
+                time: 1.2,
+            }],
+        }]);
+
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(PlaybackStopPolicy::Ignore)
+            .insert_resource(gaanim_animation::DeltaTime { dt: 1.0 })
+            .add_systems(Update, timeline_playback_system);
+        app.update();
+
+        let timeline = app.world().resource::<Timeline>();
+        assert_eq!(timeline.seek_request, Some(1.4));
+        assert!(timeline.is_playing);
+    }
+
+    #[test]
+    fn continuous_playback_still_applies_rate_and_looping() {
+        let mut timeline = Timeline::new();
+        timeline.current_time = 1.4;
+        timeline.cached_duration = 3.0;
+        timeline.is_playing = true;
+        timeline.playback_rate = 2.0;
+        timeline.loop_range = Some((1.0, 2.0));
+        timeline.set_segments(vec![timeline::SegmentMetadata {
+            id: 1,
+            name: "segment".to_owned(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 3.0,
+            stops: vec![timeline::SegmentStop {
+                name: None,
+                time: 1.5,
+            }],
+        }]);
+
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(PlaybackStopPolicy::Ignore)
+            .insert_resource(gaanim_animation::DeltaTime { dt: 0.4 })
+            .add_systems(Update, timeline_playback_system);
+        app.update();
+
+        let timeline = app.world().resource::<Timeline>();
+        assert!((timeline.seek_request.unwrap() - 1.2).abs() < 1e-9);
+        assert!(timeline.is_playing);
     }
 }

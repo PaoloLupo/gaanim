@@ -7,7 +7,7 @@ use gaanim_math::Camera;
 use gaanim_scene::{
     FillBrush, GroupMarker, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, WorldBounds,
 };
-use gaanim_timeline::timeline::Timeline;
+use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use std::collections::{HashMap, HashSet};
 
 use gaanim_animation::signals::FloatSignal;
@@ -24,10 +24,19 @@ mod vsync;
 
 fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
+    presentation_mode: Res<PresentationMode>,
+    editor_state: Res<EditorState>,
     mut timeline: ResMut<Timeline>,
+    mut stop_policy: ResMut<PlaybackStopPolicy>,
 ) {
-    timeline.ignore_input =
-        egui_wants.wants_keyboard_input() || egui_wants.wants_any_pointer_input();
+    timeline.ignore_input = presentation_mode.active
+        || egui_wants.wants_keyboard_input()
+        || egui_wants.wants_any_pointer_input();
+    *stop_policy = if presentation_mode.active || !editor_state.continuous_preview {
+        PlaybackStopPolicy::Respect
+    } else {
+        PlaybackStopPolicy::Ignore
+    };
 }
 
 /// Pixel height of UI panels that the animation viewport must avoid.
@@ -91,6 +100,9 @@ impl Plugin for GaanimEditorPlugin {
         .init_resource::<export::ExportState>()
         .init_resource::<export::StashedReplay>()
         .init_resource::<presenter::PresenterThumbnailCache>()
+        .init_resource::<presenter::PresenterOverviewState>()
+        .init_resource::<presenter::AudienceControlsState>()
+        .init_resource::<presenter::PresentationTimer>()
         .init_resource::<fps_overlay::FpsOverlay>()
         .init_resource::<vsync::VsyncState>()
         .init_resource::<PresentationMode>()
@@ -113,13 +125,21 @@ impl Plugin for GaanimEditorPlugin {
                 editor_picking_system,
                 overlays::overlays_toggle_keys_system,
                 global_playback_keys_system,
-                presentation_blank_shortcuts_system,
+                presenter::presentation_input_system
+                    .after(sync_editor_input_ignore_system)
+                    .before(gaanim_timeline::timeline_playback_system),
+                presenter::sync_presentation_timer_system,
                 presentation_escape_system,
                 fps_overlay::fps_overlay_system,
                 vsync::vsync_toggle_system,
             ),
         )
         .add_systems(Startup, presenter::spawn_presenter_window_system)
+        .add_systems(
+            Update,
+            presenter::cleanup_presenter_before_window_close_system
+                .before(bevy::window::close_when_requested),
+        )
         .add_systems(Update, presenter::sync_presenter_camera_system)
         .add_systems(
             Update,
@@ -131,7 +151,11 @@ impl Plugin for GaanimEditorPlugin {
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
         .add_systems(
             EguiPrimaryContextPass,
-            presentation_blank_overlay_system.after(editor_ui_system),
+            presenter::audience_playback_controls_system.after(editor_ui_system),
+        )
+        .add_systems(
+            EguiPrimaryContextPass,
+            presentation_blank_overlay_system.after(presenter::audience_playback_controls_system),
         )
         .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
         .add_systems(
@@ -174,6 +198,8 @@ pub struct EditorState {
     pub timeline_visible: bool,
     /// Whether the window is pinned always-on-top.
     pub pinned_on_top: bool,
+    /// Play through authored presentation stops during editor preview.
+    pub continuous_preview: bool,
     /// Hover time on the seek bar (in seconds), used for tooltip display.
     seek_bar_hover: Option<f64>,
     /// Auto-hide animation progress (0.0 = hidden, 1.0 = fully visible).
@@ -191,6 +217,7 @@ impl Default for EditorState {
             timeline_widget: timeline_widget::TimelineWidget::new(),
             timeline_visible: false,
             pinned_on_top: false,
+            continuous_preview: false,
             seek_bar_hover: None,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
@@ -230,6 +257,7 @@ struct EditorQueries<'w, 's> {
             Option<&'static DecimalNumber>,
         ),
     >,
+    presenter_window: Query<'w, 's, (), With<presenter::PresenterWindow>>,
 }
 
 fn editor_ui_system(
@@ -866,6 +894,27 @@ fn editor_ui_system(
                                 }
                             }
 
+                            let continuous_color = if state.continuous_preview {
+                                egui::Color32::from_rgb(105, 220, 155)
+                            } else {
+                                egui::Color32::from_rgb(120, 120, 132)
+                            };
+                            let continuous_btn = egui::Button::new(
+                                egui::RichText::new("Continuous")
+                                    .size(12.0)
+                                    .color(continuous_color),
+                            )
+                            .selected(state.continuous_preview);
+                            if ui
+                                .add(continuous_btn)
+                                .on_hover_text(
+                                    "Continuous preview: play through scene.stop() markers in the editor",
+                                )
+                                .clicked()
+                            {
+                                state.continuous_preview = !state.continuous_preview;
+                            }
+
                             // Scene name — ahora después del loop (más grande)
                             ui.add_space(10.0);
                             ui.separator();
@@ -973,7 +1022,9 @@ fn editor_ui_system(
                                                     bevy::window::MonitorSelection::Current,
                                                 );
                                             presentation_mode.active = true;
-                                            presenter::spawn_presenter_window(&mut commands);
+                                            if q.presenter_window.is_empty() {
+                                                presenter::spawn_presenter_window(&mut commands);
+                                            }
                                         }
                                     }
 
@@ -1842,9 +1893,10 @@ fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
 fn global_playback_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
+    presentation_mode: Res<PresentationMode>,
     mut timeline: ResMut<Timeline>,
 ) {
-    if egui_wants.wants_keyboard_input() {
+    if presentation_mode.active || egui_wants.wants_keyboard_input() {
         return;
     }
 
@@ -1933,31 +1985,6 @@ fn global_playback_keys_system(
     }
 }
 
-fn presentation_blank_shortcuts_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    presentation_mode: Res<PresentationMode>,
-    mut blank: ResMut<AudienceBlank>,
-) {
-    if !presentation_mode.active {
-        *blank = AudienceBlank::None;
-        return;
-    }
-    if keys.just_pressed(KeyCode::KeyB) {
-        *blank = if *blank == AudienceBlank::Black {
-            AudienceBlank::None
-        } else {
-            AudienceBlank::Black
-        };
-    }
-    if keys.just_pressed(KeyCode::KeyW) {
-        *blank = if *blank == AudienceBlank::White {
-            AudienceBlank::None
-        } else {
-            AudienceBlank::White
-        };
-    }
-}
-
 fn presentation_blank_overlay_system(
     mut contexts: bevy_egui::EguiContexts,
     presentation_mode: Res<PresentationMode>,
@@ -1985,16 +2012,23 @@ fn presentation_blank_overlay_system(
 }
 
 /// Escape leaves audience mode and restores the editor chrome in a window.
+#[allow(clippy::too_many_arguments)]
 fn presentation_escape_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut presentation_mode: ResMut<PresentationMode>,
     mut blank: ResMut<AudienceBlank>,
+    mut overview: ResMut<presenter::PresenterOverviewState>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     presenter_windows: Query<Entity, With<presenter::PresenterWindow>>,
     presenter_cameras: Query<Entity, With<presenter::PresenterCamera>>,
     mut commands: Commands,
 ) {
     if !presentation_mode.active || !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if overview.open {
+        overview.open = false;
+        overview.query.clear();
         return;
     }
     if *blank != AudienceBlank::None {
@@ -2375,27 +2409,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn black_screen_shortcut_only_affects_active_presentations() {
+    fn presentation_mode_overrides_continuous_preview_policy() {
         let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<AudienceBlank>()
+        let mut editor_state = EditorState::default();
+        editor_state.continuous_preview = true;
+        app.init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<Timeline>()
+            .init_resource::<PlaybackStopPolicy>()
+            .insert_resource(editor_state)
             .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_blank_shortcuts_system);
+            .add_systems(Update, sync_editor_input_ignore_system);
 
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyB);
         app.update();
         assert_eq!(
-            *app.world().resource::<AudienceBlank>(),
-            AudienceBlank::Black
+            *app.world().resource::<PlaybackStopPolicy>(),
+            PlaybackStopPolicy::Respect
         );
+        assert!(app.world().resource::<Timeline>().ignore_input);
 
         app.world_mut().resource_mut::<PresentationMode>().active = false;
         app.update();
         assert_eq!(
-            *app.world().resource::<AudienceBlank>(),
-            AudienceBlank::None
+            *app.world().resource::<PlaybackStopPolicy>(),
+            PlaybackStopPolicy::Ignore
         );
     }
 

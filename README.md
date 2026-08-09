@@ -74,6 +74,19 @@ scene.stop("resultado")
 La exportación ignora los stops. Para exportar un segmento concreto use
 `scene.export("intro.mp4", segment="Introducción")`.
 
+En el editor, el toggle **Continuous** reproduce la escena de principio a fin
+sin detenerse en `stop()`; es una preferencia temporal de la sesión y no cambia
+el script. Presenter Mode siempre respeta los stops. Durante una presentación,
+`Right`, `Space`, `Enter` o un clic en la pantalla de audiencia avanzan;
+`Left`/`Backspace` retroceden, `O` abre el overview y `B`/`W` controlan el
+blanking. Cerrar Presenter View mantiene la audiencia activa y `P` vuelve a
+abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.
+  El encabezado incluye un cronómetro de exposición reiniciable y la hora local.
+  La pantalla fullscreen muestra un dock compacto con Previous, Advance/Pause,
+  inicio, fin y progreso solo mientras esa ventana tiene foco. Presenter View
+  identifica el cue activo sin repetir el nombre del segmento y mantiene Up Next
+  por encima de las notas con scroll independiente.
+
 ## Paquete Python local
 
 El binding también puede instalarse en el entorno virtual del repositorio:

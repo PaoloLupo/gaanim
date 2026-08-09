@@ -63,6 +63,28 @@ Los índices de monitor empiezan en cero. Presenter View utiliza los nombres y
 notas de `scene.segment(...)`, y solo espera input en los puntos marcados con
 `scene.stop(...)`. La exportación ignora esas paradas y genera un video continuo.
 
+El cockpit muestra el cue actual, las notas y el siguiente stop. Usa `Right`,
+`Space`, `Enter` o clic en la pantalla de audiencia para avanzar;
+`Left`/`Backspace` para volver; `O` para buscar cues; y `B`/`W` para apagar la
+audiencia en negro o blanco. Si cierras Presenter View, la presentación sigue
+en fullscreen y `P` vuelve a abrir el cockpit. `Esc` cierra primero el overview
+o blanking activo y después sale del modo presentación. Las previews se
+conservan al reabrir Presenter View y se renderizan a una resolución adaptada al
+tamaño y DPI de la ventana. El encabezado muestra un cronómetro reiniciable para
+  medir la exposición y, en menor tamaño, la hora local.
+  La pantalla fullscreen muestra un dock compacto de reproducción con navegación
+  anterior, avance o pausa, inicio, fin y progreso mientras esa ventana tiene
+  foco; al cambiar el foco al cockpit, el dock desaparece de la audiencia. Sus
+  botones y los atajos pasan por las mismas acciones, por lo que un clic en el
+  dock no avanza dos veces. Presenter View titula el cue activo, evita repetir el
+  nombre del segmento y mantiene Up Next por encima de las notas con scroll
+  independiente.
+
+Para revisar una animación sin pausas en el editor, activa *Continuous* junto a
+los controles de transporte. El toggle dura la sesión y sobrevive al hot reload,
+pero Presenter Mode sigue respetando `scene.stop(...)`. Los seeks, snapshots y
+la exportación también continúan ignorando stops como antes.
+
 = Entorno opcional con uv
 
 El visor embebe Gaanim y puede usar un Python compatible del sistema. Si el

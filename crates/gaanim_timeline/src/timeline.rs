@@ -13,6 +13,18 @@ use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{FillBrush, MobjectId, Opacity, Path2D, StrokeBrush};
 
+/// Whether real-time playback pauses at authored presentation stops.
+///
+/// Explicit seeks, snapshots, and exports do not consult this policy.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlaybackStopPolicy {
+    /// Pause when playback crosses the next authored stop.
+    #[default]
+    Respect,
+    /// Traverse authored stops continuously.
+    Ignore,
+}
+
 #[derive(Debug, Clone, Default)]
 struct ReactiveEntityState {
     updater_elapsed: Option<f64>,

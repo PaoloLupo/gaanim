@@ -35,4 +35,5 @@ bevy_vello = "0.13.1"
 pyo3 = { version = "0.28", features = ["abi3-py312"] }
 notify = { workspace = true }
 crossbeam-channel = { workspace = true }
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 rfd = "0.17"

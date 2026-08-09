@@ -695,22 +695,9 @@ where
         let raw_scene =
             gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref());
 
-        let (zoom, cam_x, cam_y) = camera
-            .as_ref()
-            .map(|camera| {
-                let zoom = match camera.projection {
-                    gaanim_math::Projection::Orthographic { zoom } => zoom,
-                    _ => 1.0,
-                };
-                (zoom, camera.position.x, camera.position.y)
-            })
-            .unwrap_or((1.0, 0.0, 0.0));
-
         let mut scene = bevy_vello::vello::Scene::new();
         let camera_to_vello =
-            kurbo::Affine::translate((config.width as f64 / 2.0, config.height as f64 / 2.0))
-                * kurbo::Affine::scale_non_uniform(zoom, -zoom)
-                * kurbo::Affine::translate((-cam_x, -cam_y));
+            capture_camera_to_vello_transform(camera.as_ref(), config.width, config.height);
         scene.append(&raw_scene, Some(camera_to_vello));
 
         let background = app
@@ -739,6 +726,46 @@ where
     }
 
     Ok(frames)
+}
+
+/// Map a canvas-sized scene into a capture target while preserving its aspect
+/// ratio. Thumbnail captures are deliberately much smaller than their source
+/// canvases, so their camera viewport must be scaled down as well.
+fn capture_camera_to_vello_transform(
+    camera: Option<&gaanim_math::Camera>,
+    output_width: u32,
+    output_height: u32,
+) -> kurbo::Affine {
+    let (zoom, viewport_scale, viewport_width, viewport_height, cam_x, cam_y) = camera
+        .map(|camera| {
+            let zoom = match camera.projection {
+                gaanim_math::Projection::Orthographic { zoom } => zoom,
+                _ => 1.0,
+            };
+            (
+                zoom,
+                camera.viewport_scale,
+                camera.viewport_width.max(1),
+                camera.viewport_height.max(1),
+                camera.position.x,
+                camera.position.y,
+            )
+        })
+        .unwrap_or((
+            1.0,
+            1.0,
+            output_width.max(1),
+            output_height.max(1),
+            0.0,
+            0.0,
+        ));
+    let fit_scale = (output_width as f64 / viewport_width as f64)
+        .min(output_height as f64 / viewport_height as f64);
+    let scale = zoom * viewport_scale * fit_scale;
+
+    kurbo::Affine::translate((output_width as f64 / 2.0, output_height as f64 / 2.0))
+        * kurbo::Affine::scale_non_uniform(scale, -scale)
+        * kurbo::Affine::translate((-cam_x, -cam_y))
 }
 
 #[derive(Resource)]
@@ -940,6 +967,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_capture_scales_a_canvas_down_to_a_thumbnail() {
+        let camera = gaanim_math::Camera::ortho_2d(1920, 1080);
+        let transform = capture_camera_to_vello_transform(Some(&camera), 320, 180);
+
+        let top_left = transform * kurbo::Point::new(-960.0, 540.0);
+        let bottom_right = transform * kurbo::Point::new(960.0, -540.0);
+        assert!((top_left.x - 0.0).abs() < 1e-9);
+        assert!((top_left.y - 0.0).abs() < 1e-9);
+        assert!((bottom_right.x - 320.0).abs() < 1e-9);
+        assert!((bottom_right.y - 180.0).abs() < 1e-9);
+    }
 
     #[test]
     fn window_scene_setup_assigns_vello_viewport_before_startup() {

@@ -3,8 +3,12 @@
 Run after `just build`:
     cargo run -p gaanim_editor -- --present examples/presentation_demo.py
 
-Use Right/Left to move between semantic stops. Press O in the Presenter View
-to search and jump directly to any segment.
+Use Right, Space, Enter, or an audience click to advance between semantic
+stops; Left/Backspace goes back. Press O for the cue overview. Closing
+Presenter View keeps the audience fullscreen, and P reopens the cockpit.
+
+In the editor, enable Continuous beside the transport controls to preview the
+whole timeline without pausing at stop(). Presenter Mode still respects stops.
 """
 
 import os
