@@ -5,8 +5,8 @@ from gaanim import BLACK, WHITE, Scene
 
 scene = Scene(1920, 1080, background=BLACK)
 title = scene.title("Resolver paso a paso").fill(WHITE).at(0, 220)
-before = scene.equation("x + 3 = 7").at(0, 0)
-after = scene.equation("x = 4").at(0, 0)
+before = scene.equation("x + 3 = 7").at(0, 0).scaled(2)
+after = scene.equation("x = 4").at(0, 0).scaled(2)
 
 scene.play([title.write(), before.write()])
 scene.wait(0.4)
