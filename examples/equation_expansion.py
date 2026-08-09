@@ -14,10 +14,10 @@ compact = (
     .at(0, 20)
 )
 expanded = (
-    scene.equation("E = (m_1 + m_2) c^2", tags={"mass": "m"})
+    scene.equation("E = (m_1 + m_2) c^2", tags={"mass": "(m_1 + m_2)"})
     .at(0, 20)
 )
-caption = scene.text("La m conserva su identidad; los términos nuevos aparecen.").at(0, -170)
+caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").at(0, -170)
 
 compact.tag("mass").fill(GOLD)
 expanded.tag("mass").fill(GOLD)

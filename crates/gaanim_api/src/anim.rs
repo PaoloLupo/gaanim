@@ -637,13 +637,13 @@ impl MobjectRef {
         }
     }
 
-    /// Temporarily scale up to 1.25x and highlight with GOLD color before returning to baseline.
+    /// Make a subtle upward hop, pulse around the visual center, and highlight with GOLD.
     pub fn indicate(self) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
             anim_type: AnimationType::Indicate {
                 color: Some(Color::from_rgb8(255, 215, 0)),
-                scale_factor: 1.25,
+                scale_factor: 1.1,
             },
             duration: 1.0,
             rate_func: RateFunc::ThereAndBack,

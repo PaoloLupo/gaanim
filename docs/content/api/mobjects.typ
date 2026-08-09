@@ -753,19 +753,21 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.equation",
   kind: "factory",
-  signature: "equation(source: str, *, tags?: dict[str,str]) -> Drawable",
-  params: ((name: "source", type: "str", default: none, desc: [Typst math, e.g. \"E = m c^2\".]), (name: "tags", type: "dict", default: "None", desc: [Semantic names → fragments, e.g. {\"mass\": \"m\"}.]),),
+  signature: "equation(source: str, *, tags?: dict[str, str | tuple[str,int]]) -> Drawable",
+  params: ((name: "source", type: "str", default: none, desc: [Typst math, e.g. \"E = m c^2\".]), (name: "tags", type: "dict", default: "None", desc: [Ordered semantic names → fragments. Use `(fragment, occurrence)` to select one zero-based repeated occurrence.]),),
   returns: (type: "Drawable", desc: [Math drawable with optional named tags.]),
-  desc: [Compiled via Typst. Use `color_by`, `select`, `tag`, `write_by_term`, `reveal_fragment`, etc.],
+  desc: [Compiled via Typst. A string selector keeps all matching occurrences; a tuple isolates one. Tag order controls `write_by_term`. Invalid selectors raise `TypeError` or `ValueError`.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-eq = scene.equation("E = m c^2", tags={"mass": "m"}).at(0, 0)
+eq = scene.equation(
+    "x + x = 2x",
+    tags={"left_x": ("x", 0), "right_x": ("x", 1)},
+).at(0, 0)
+eq.tag("right_x").fill(GOLD)
 scene.play([eq.write().duration(1.0)])
-eq.tag("mass").fill(GOLD)
-scene.play([eq.create().duration(0.4)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1227,10 +1229,10 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Drawable text selection",
   kind: "method",
-  signature: ".color_by(fragment, color) .select(fragment, occurrence?) -> FragmentSelection .tag(name)",
+  signature: ".color_by(fragment, color) .select(fragment, occurrence?) -> FragmentSelection .tag(name) -> FragmentSelection",
   params: ((name: "fragment", type: "str", default: none, desc: [Case-insensitive, ignores math spacing.] ),),
   returns: (type: "Drawable | FragmentSelection", desc: [Selection for chained animation.]),
-  desc: [Grapheme-level control for `text`/`equation`. `FragmentSelection` offers `fill`, `indicate`, `color_to`, `transform_to`, `reveal`, `cancel`.],
+  desc: [Grapheme-level control for `text`/`equation`. Tags retain their optional occurrence selector. `FragmentSelection` offers `fill`, `indicate`, `color_to`, `transform_to`, `reveal`, and `cancel`.],
 )[
 ```python
 # show-code: true

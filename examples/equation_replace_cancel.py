@@ -1,5 +1,7 @@
 """Cancel one semantic term, then replace an equation state."""
 
+import os
+
 from gaanim import BLACK, GOLD, GRAY, WHITE, Scene
 
 
@@ -33,5 +35,9 @@ scene.play([caption.fade_in()])
 # El tag `variable` fija la correspondencia x → x en la transición.
 scene.replace_term(before, after, tag="variable", duration=0.8)
 scene.wait(1.0)
+
+snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
+if snapshot_dir:
+    scene.snapshots(snapshot_dir, [0.0, 1.4, 1.72, 3.25, 3.65, 4.05, 5.05])
 
 scene.render()

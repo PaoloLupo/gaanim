@@ -17,7 +17,7 @@ use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, Timeline};
 
 use crate::anim::{AnimationBuilder, AnimationType};
-use crate::builder::{MobjectRef, MobjectState, SceneBuilder};
+use crate::builder::{EquationTransitionMode, MobjectRef, MobjectState, SceneBuilder};
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
@@ -1193,7 +1193,7 @@ impl Canvas {
                             target,
                             anim_type: AnimationType::Indicate {
                                 color: *color,
-                                scale_factor: 1.3,
+                                scale_factor: 1.1,
                             },
                             duration: *duration,
                             rate_func: RateFunc::ThereAndBack,
@@ -1608,25 +1608,21 @@ impl Canvas {
                         target_fragment,
                         *target_occurrence,
                     );
-                    let source_parent = id_map.get(source).copied();
-                    let target_parent = id_map.get(target).copied();
-                    let mut transformed = false;
-                    if let (Some(source_parent), Some(target_parent)) =
-                        (source_parent, target_parent)
+                    if sources.is_empty() || targets.is_empty() {
+                        bevy::prelude::warn!(
+                            "equation fragment transform could not resolve '{source_fragment}' -> '{target_fragment}'"
+                        );
+                    } else if let (Some(&source_parent), Some(&target_parent)) =
+                        (id_map.get(source), id_map.get(target))
                     {
-                        for (source, target) in sources.into_iter().zip(targets) {
-                            builder.play_fragment_transform(
-                                source,
-                                target,
-                                source_parent,
-                                target_parent,
-                                *duration,
-                            );
-                            transformed = true;
-                        }
-                    }
-                    if transformed {
-                        builder.current_time += *duration;
+                        builder.play_equation_transition(
+                            source_parent,
+                            target_parent,
+                            vec![(sources, targets)],
+                            *duration,
+                            EquationTransitionMode::Copy,
+                            false,
+                        );
                     }
                 }
                 Op::TaggedTransform {
@@ -1635,9 +1631,7 @@ impl Canvas {
                     pairs,
                     duration,
                 } => {
-                    let source_parent = id_map.get(source).copied();
-                    let target_parent = id_map.get(target).copied();
-                    let mut transformed = false;
+                    let mut semantic_groups = Vec::new();
                     for (source_fragment, source_occurrence, target_fragment, target_occurrence) in
                         pairs
                     {
@@ -1655,23 +1649,25 @@ impl Canvas {
                             target_fragment,
                             *target_occurrence,
                         );
-                        if let (Some(source_parent), Some(target_parent)) =
-                            (source_parent, target_parent)
-                        {
-                            for (source, target) in sources.into_iter().zip(targets) {
-                                builder.play_fragment_transform(
-                                    source,
-                                    target,
-                                    source_parent,
-                                    target_parent,
-                                    *duration,
-                                );
-                                transformed = true;
-                            }
+                        if sources.is_empty() || targets.is_empty() {
+                            bevy::prelude::warn!(
+                                "equation tag transform could not resolve '{source_fragment}' -> '{target_fragment}'"
+                            );
+                        } else {
+                            semantic_groups.push((sources, targets));
                         }
                     }
-                    if transformed {
-                        builder.current_time += *duration;
+                    if let (Some(&source_parent), Some(&target_parent)) =
+                        (id_map.get(source), id_map.get(target))
+                    {
+                        builder.play_equation_transition(
+                            source_parent,
+                            target_parent,
+                            semantic_groups,
+                            *duration,
+                            EquationTransitionMode::Copy,
+                            false,
+                        );
                     }
                 }
                 Op::ExpandEquation {
@@ -1707,11 +1703,18 @@ impl Canvas {
                     if let (Some(&source_parent), Some(&target_parent)) =
                         (id_map.get(source), id_map.get(target))
                     {
-                        if !sources.is_empty() && !targets.is_empty() {
-                            builder.play_equation_expansion(
+                        if sources.is_empty() || targets.is_empty() {
+                            bevy::prelude::warn!(
+                                "equation expansion could not resolve '{source_fragment}' -> '{target_fragment}'"
+                            );
+                        } else {
+                            builder.play_equation_transition(
                                 source_parent,
                                 target_parent,
+                                vec![(sources, targets)],
                                 *duration,
+                                EquationTransitionMode::Replace,
+                                true,
                             );
                         }
                     }
@@ -1719,6 +1722,7 @@ impl Canvas {
                 Op::StepEquation {
                     source,
                     target,
+                    pairs,
                     duration,
                 } => {
                     Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
@@ -1731,13 +1735,55 @@ impl Canvas {
                     if let (Some(&source_parent), Some(&target_parent)) =
                         (id_map.get(source), id_map.get(target))
                     {
-                        builder.play_equation_expansion(source_parent, target_parent, *duration);
+                        let semantic_groups = pairs
+                            .iter()
+                            .filter_map(
+                                |(
+                                    source_fragment,
+                                    source_occurrence,
+                                    target_fragment,
+                                    target_occurrence,
+                                )| {
+                                    let sources = Self::fragment_child_ids(
+                                        builder,
+                                        id_map,
+                                        *source,
+                                        source_fragment,
+                                        *source_occurrence,
+                                    );
+                                    let targets = Self::fragment_child_ids(
+                                        builder,
+                                        id_map,
+                                        *target,
+                                        target_fragment,
+                                        *target_occurrence,
+                                    );
+                                    if sources.is_empty() || targets.is_empty() {
+                                        bevy::prelude::warn!(
+                                            "equation step could not resolve semantic match '{source_fragment}' -> '{target_fragment}'"
+                                        );
+                                        None
+                                    } else {
+                                        Some((sources, targets))
+                                    }
+                                },
+                            )
+                            .collect();
+                        builder.play_equation_transition(
+                            source_parent,
+                            target_parent,
+                            semantic_groups,
+                            *duration,
+                            EquationTransitionMode::Replace,
+                            true,
+                        );
                     }
                 }
                 Op::TransformMatching {
                     source,
                     target,
                     mode,
+                    semantic_pairs,
                     duration,
                 } => {
                     Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
@@ -1748,11 +1794,52 @@ impl Canvas {
                         *duration,
                     );
                     if let (Some(&src), Some(&dst)) = (id_map.get(source), id_map.get(target)) {
-                        let m = match mode.as_str() {
-                            "tex" => gaanim_math::matching::MatchingMode::Tex,
-                            _ => gaanim_math::matching::MatchingMode::Shapes,
-                        };
-                        builder.play_transform_matching(src, dst, m, *duration, RateFunc::Smooth);
+                        if mode == "tex" {
+                            let semantic_groups = semantic_pairs
+                                .iter()
+                                .filter_map(
+                                    |(
+                                        source_fragment,
+                                        source_occurrence,
+                                        target_fragment,
+                                        target_occurrence,
+                                    )| {
+                                        let sources = Self::fragment_child_ids(
+                                            builder,
+                                            id_map,
+                                            *source,
+                                            source_fragment,
+                                            *source_occurrence,
+                                        );
+                                        let targets = Self::fragment_child_ids(
+                                            builder,
+                                            id_map,
+                                            *target,
+                                            target_fragment,
+                                            *target_occurrence,
+                                        );
+                                        (!sources.is_empty() && !targets.is_empty())
+                                            .then_some((sources, targets))
+                                    },
+                                )
+                                .collect();
+                            builder.play_equation_transition(
+                                src,
+                                dst,
+                                semantic_groups,
+                                *duration,
+                                EquationTransitionMode::Replace,
+                                true,
+                            );
+                        } else {
+                            builder.play_transform_matching(
+                                src,
+                                dst,
+                                gaanim_math::matching::MatchingMode::Shapes,
+                                *duration,
+                                RateFunc::Smooth,
+                            );
+                        }
                     }
                 }
                 Op::LayoutReflow {
@@ -4871,12 +4958,12 @@ mod tests {
     }
 
     #[test]
-    fn equation_expansion_cross_fades_equations_around_tag() {
+    fn equation_expansion_morphs_semantic_terms_without_cross_fading_pairs() {
         let mut canvas = Canvas::new(640, 360);
         let source = canvas.equation("E = m c^2").define_tag("mass", "m", None);
         let target = canvas
             .equation("E = (m_1 + m_2) c^2")
-            .define_tag("mass", "m", None);
+            .define_tag("mass", "(m_1 + m_2)", None);
         canvas.expand_equation_tag(&source, &target, "mass", 0.8);
 
         let world = World::new();
@@ -4887,7 +4974,90 @@ mod tests {
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
 
-        let opacity_clips = timeline
+        let semantic_morphs = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::PathMorph { .. },
+                            label: Some(label),
+                            ..
+                        }
+                    ) if label == "EquationSemanticMorph"
+                )
+            })
+            .count();
+        assert!(semantic_morphs >= 3, "shared and tagged terms should morph");
+        assert!(timeline.clips.values().all(|clip| {
+            !matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                        label: Some(label),
+                        ..
+                    }
+                ) if clip.duration > 0.0 && label == "EquationSemanticMorph"
+            )
+        }));
+        assert!(timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                        label: Some(label),
+                        ..
+                    }
+                ) if label == "EquationEmerge" && (clip.start - 0.16).abs() < 1e-9
+            )
+        }));
+    }
+
+    #[test]
+    fn equation_step_prioritizes_semantic_tags_then_matches_common_glyphs() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.equation("x + 3 = 7").define_tag("result", "7", None);
+        let target = canvas.equation("x = 4").define_tag("result", "4", None);
+        canvas.step_equation_with_matches(
+            &source,
+            &target,
+            Some(vec![("result".to_string(), "result".to_string())]),
+            0.8,
+        );
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let semantic_morphs = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::PathMorph { .. },
+                            label: Some(label),
+                            ..
+                        }
+                    ) if label == "EquationSemanticMorph"
+                )
+            })
+            .count();
+        assert!(
+            semantic_morphs >= 3,
+            "x and = should auto-match while the result tag forces 7 -> 4"
+        );
+        let handoffs = timeline
             .clips
             .values()
             .filter(|clip| {
@@ -4896,32 +5066,88 @@ mod tests {
                     gaanim_timeline::clip::ClipPayload::Animation(
                         gaanim_timeline::clip::AnimationSpec {
                             lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                            label: Some(label),
                             ..
                         }
-                    )
+                    ) if label == "EquationHandoff" && clip.duration == 0.0
                 )
             })
             .count();
-        assert!(opacity_clips > 2, "every equation glyph should cross-fade");
-        assert!(timeline.clips.values().any(|clip| {
-            matches!(
-                &clip.payload,
-                gaanim_timeline::clip::ClipPayload::Animation(
-                    gaanim_timeline::clip::AnimationSpec {
-                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
-                        ..
-                    }
-                )
-            )
-        }));
+        assert!(handoffs >= semantic_morphs * 2);
     }
 
     #[test]
-    fn equation_step_matches_common_glyphs() {
+    fn equation_step_handoff_is_exact_and_target_remains_animatable() {
         let mut canvas = Canvas::new(640, 360);
-        let source = canvas.equation("x + 3 = 7");
-        let target = canvas.equation("x = 4");
+        let source = canvas.equation("x + 3 = 7").define_tag("result", "7", None);
+        let target = canvas.equation("x = 4").define_tag("result", "4", None);
         canvas.step_equation(&source, &target, 0.8);
+        canvas.play(vec![target.indicate(0.4)]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.8);
+
+        let child_opacities: Vec<Vec<f32>> = world
+            .query::<(
+                Option<&bevy::prelude::ChildOf>,
+                Option<&bevy::prelude::Children>,
+            )>()
+            .iter(&world)
+            .filter_map(|(parent, children)| {
+                (parent.is_none()).then_some(children?).map(|children| {
+                    children
+                        .iter()
+                        .filter_map(|child| world.get::<Opacity>(child).map(|opacity| opacity.0))
+                        .collect()
+                })
+            })
+            .collect();
+        assert_eq!(child_opacities.len(), 2);
+        assert!(
+            child_opacities
+                .iter()
+                .any(|values| values.iter().all(|value| *value == 0.0))
+        );
+        assert!(
+            child_opacities
+                .iter()
+                .any(|values| values.iter().all(|value| *value > 0.99))
+        );
+
+        timeline.seek(&mut world, 1.0);
+        assert!(
+            world
+                .query::<&Opacity>()
+                .iter(&world)
+                .filter(|opacity| opacity.0 > 0.99)
+                .count()
+                >= 3
+        );
+    }
+
+    #[test]
+    fn tagged_equation_copy_keeps_opacity_changes_instantaneous() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas
+            .equation("E = m c^2")
+            .define_tag("mass", "m", None)
+            .at(0.0, 70.0);
+        let target = canvas
+            .equation("p = m v")
+            .define_tag("mass", "m", None)
+            .at(0.0, -90.0);
+        canvas.copy_equation_terms(&source, &target, Some(vec!["mass".to_string()]), 0.8);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -4936,12 +5162,81 @@ mod tests {
                 &clip.payload,
                 gaanim_timeline::clip::ClipPayload::Animation(
                     gaanim_timeline::clip::AnimationSpec {
-                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { .. },
+                        lens: gaanim_timeline::clip::PropertyLensSpec::PathMorph { .. },
+                        label: Some(label),
                         ..
                     }
-                )
+                ) if label == "EquationSemanticMorph"
             )
         }));
+        assert!(timeline.clips.values().all(|clip| {
+            !matches!(
+                &clip.payload,
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { .. },
+                        ..
+                    }
+                ) if clip.duration > 0.0
+            )
+        }));
+    }
+
+    #[test]
+    fn tagged_equation_copy_preserves_both_visible_equations_after_seek() {
+        let mut canvas = Canvas::new(640, 360);
+        let title = canvas.text("One variable");
+        let source = canvas
+            .equation("E = m c^2")
+            .define_tag("mass", "m", None)
+            .at(0.0, 70.0);
+        let target = canvas
+            .equation("p = m v")
+            .define_tag("mass", "m", None)
+            .at(0.0, -90.0);
+        canvas.play(vec![
+            title.write(1.0),
+            source.write(1.0),
+            target.fade_in(1.0),
+        ]);
+        canvas.wait(0.5);
+        canvas.copy_equation_terms(&source, &target, Some(vec!["mass".to_string()]), 0.9);
+        canvas.wait(0.25);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 2.55);
+
+        let textual_roots: Vec<_> = world
+            .query::<(
+                bevy::prelude::Entity,
+                Option<&bevy::prelude::ChildOf>,
+                Option<&bevy::prelude::Children>,
+            )>()
+            .iter(&world)
+            .filter_map(|(entity, parent, children)| {
+                (parent.is_none() && children.is_some()).then_some(entity)
+            })
+            .collect();
+        assert_eq!(textual_roots.len(), 3);
+        for root in textual_roots {
+            let children = world.get::<bevy::prelude::Children>(root).unwrap();
+            assert!(children.iter().all(|child| {
+                world
+                    .get::<Opacity>(child)
+                    .is_some_and(|opacity| opacity.0 > 0.99)
+            }));
+        }
     }
 
     #[test]

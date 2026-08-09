@@ -811,7 +811,7 @@ impl DrawableHandle {
         self.anim_dur(
             AnimationType::Indicate {
                 color: None,
-                scale_factor: 1.3,
+                scale_factor: 1.1,
             },
             dur.into_opt(),
         )

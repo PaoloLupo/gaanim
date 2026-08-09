@@ -6,7 +6,7 @@ script. All camera durations are in seconds; 3D angles are in radians.
 
 from __future__ import annotations
 
-from typing import Callable, ClassVar, Literal, Optional, Sequence, TypeAlias, overload
+from typing import Callable, ClassVar, Literal, Mapping, Optional, Sequence, TypeAlias, overload
 
 CurvePoint: TypeAlias = tuple[float, float]
 """A coordinate pair used by :meth:`Scene.path` and :meth:`Scene.curve`."""
@@ -976,7 +976,7 @@ class Drawable:
         """
         ...
     def indicate(self, duration: Optional[float] = None) -> Anim:
-        """Create a indicate animation for this drawable.
+        """Create a subtle upward hop around the drawable's visual center.
 
         Example:
             result = drawable.indicate()
@@ -1171,7 +1171,7 @@ class FragmentSelection:
         """
         ...
     def indicate(self, duration: Optional[float] = None) -> FragmentSelection:
-        """Apply indicate to the selected fragment.
+        """Apply a subtle upward hop around the selected fragment's visual center.
 
         Example:
             result = selection.indicate()
@@ -1956,11 +1956,16 @@ class Scene:
             result = scene.subtitle("example")
         """
         ...
-    def equation(self, s: str, *, tags: Optional[dict[str, str]] = None) -> Drawable:
-        """Create a equation drawable in the scene.
+    def equation(
+        self,
+        s: str,
+        *,
+        tags: Optional[dict[str, str | tuple[str, int]]] = None,
+    ) -> Drawable:
+        """Create an equation with optional ordered semantic tags.
 
         Example:
-            result = scene.equation("example")
+            result = scene.equation("x + x = 2x", tags={"right_x": ("x", 1)})
         """
         ...
     def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:
@@ -1977,12 +1982,22 @@ class Scene:
         *,
         tags: Optional[Sequence[str]] = None,
         duration: float = 1.0,
-    ) -> None:
-        """Configure or query the scene with transform equation.
+    ) -> Drawable:
+        """Copy shared semantic terms while preserving the source equation.
 
         Example:
             scene.transform_equation(source, target)
         """
+        ...
+    def copy_equation_terms(
+        self,
+        source: Drawable,
+        target: Drawable,
+        *,
+        tags: Optional[Sequence[str]] = None,
+        duration: float = 1.0,
+    ) -> Drawable:
+        """Copy shared semantic terms while preserving the source equation."""
         ...
     def expand_equation(
         self,
@@ -1991,8 +2006,8 @@ class Scene:
         *,
         tag: str,
         duration: float = 1.0,
-    ) -> None:
-        """Configure or query the scene with expand equation.
+    ) -> Drawable:
+        """Expand a tagged term and return the destination equation.
 
         Example:
             scene.expand_equation(source, target, tag="example")
@@ -2006,8 +2021,8 @@ class Scene:
         tag: str,
         target_tag: Optional[str] = None,
         duration: float = 1.0,
-    ) -> None:
-        """Configure or query the scene with replace term.
+    ) -> Drawable:
+        """Replace one semantic term and return the destination equation.
 
         Example:
             scene.replace_term(source, target, tag="example")
@@ -2018,12 +2033,13 @@ class Scene:
         source: Drawable,
         target: Drawable,
         *,
+        matches: Optional[Sequence[str] | Mapping[str, str]] = None,
         duration: float = 1.0,
-    ) -> None:
-        """Configure or query the scene with step equation.
+    ) -> Drawable:
+        """Move semantic and automatically matched terms into the next equation.
 
         Example:
-            scene.step_equation(source, target)
+            current = scene.step_equation(source, target, matches={"old": "new"})
         """
         ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
@@ -2033,15 +2049,15 @@ class Scene:
             scene.transform_matching_shapes(source, target)
         """
         ...
-    def transform_matching_tex(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching tex.
+    def transform_matching_tex(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> Drawable:
+        """Transform matching text/equation glyphs and return the destination.
 
         Example:
             scene.transform_matching_tex(source, target)
         """
         ...
-    def transform_matching_text(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching text.
+    def transform_matching_text(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> Drawable:
+        """Alias of transform_matching_tex returning the destination.
 
         Example:
             scene.transform_matching_text(source, target)

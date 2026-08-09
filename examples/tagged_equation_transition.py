@@ -40,8 +40,8 @@ energy.tag("mass").fill(GOLD)
 scene.play([title.write(), energy.write(), momentum.fade_in(), caption.fade_in()])
 scene.wait(0.5)
 
-# Gaanim encuentra todas las etiquetas compartidas y las transforma en paralelo.
-scene.transform_equation(energy, momentum, tags=["mass"], duration=0.9)
+# La fuente permanece y una copia semántica viaja hasta la ecuación destino.
+scene.copy_equation_terms(energy, momentum, tags=["mass"], duration=0.9)
 scene.wait(0.25)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

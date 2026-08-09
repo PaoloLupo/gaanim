@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyAny, PyDict, PyTuple};
 
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
@@ -43,6 +43,114 @@ fn drawable_args(
         drawables.push(drawable.0.clone());
     }
     Ok(drawables)
+}
+
+fn parse_equation_tags(
+    tags: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Vec<(String, String, Option<usize>)>> {
+    let mut parsed = Vec::new();
+    let Some(tags) = tags else {
+        return Ok(parsed);
+    };
+    for (name, selector) in tags.iter() {
+        let name = name.extract::<String>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err("equation tag names must be strings")
+        })?;
+        let (fragment, occurrence) = if let Ok(fragment) = selector.extract::<String>() {
+            (fragment, None)
+        } else if let Ok((fragment, occurrence)) = selector.extract::<(String, isize)>() {
+            if occurrence < 0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "occurrence for tag '{name}' must be zero or greater"
+                )));
+            }
+            (fragment, Some(occurrence as usize))
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "selector for tag '{name}' must be a string or (fragment, occurrence)"
+            )));
+        };
+        if name.trim().is_empty() || fragment.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "tag names and fragments must not be empty",
+            ));
+        }
+        parsed.push((name, fragment, occurrence));
+    }
+    Ok(parsed)
+}
+
+fn parse_equation_matches(
+    matches: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<Vec<(String, String)>>> {
+    let Some(matches) = matches else {
+        return Ok(None);
+    };
+    let pairs = if let Ok(mapping) = matches.cast::<PyDict>() {
+        let mut pairs = Vec::new();
+        for (source, target) in mapping.iter() {
+            let source = source.extract::<String>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err("match source tags must be strings")
+            })?;
+            let target = target.extract::<String>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err("match target tags must be strings")
+            })?;
+            pairs.push((source, target));
+        }
+        pairs
+    } else if matches.hasattr("items")? {
+        let items = matches.call_method0("items")?;
+        let mut pairs = Vec::new();
+        for item in items.try_iter()? {
+            let (source, target) = item?.extract::<(String, String)>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "match mappings must contain string source and target tag names",
+                )
+            })?;
+            pairs.push((source, target));
+        }
+        pairs
+    } else {
+        matches
+            .extract::<Vec<String>>()
+            .map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "matches must be a sequence of tag names or a source-to-target tag mapping",
+                )
+            })?
+            .into_iter()
+            .map(|name| (name.clone(), name))
+            .collect()
+    };
+    if pairs
+        .iter()
+        .any(|(source, target)| source.trim().is_empty() || target.trim().is_empty())
+    {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "match tag names must not be empty",
+        ));
+    }
+    Ok(Some(pairs))
+}
+
+fn validate_equation_tag_pairs(
+    source: &PyDrawable,
+    target: &PyDrawable,
+    pairs: &[(String, String)],
+) -> PyResult<()> {
+    for (source_tag, target_tag) in pairs {
+        if source.0.tag(source_tag).is_none() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown source equation tag '{source_tag}'"
+            )));
+        }
+        if target.0.tag(target_tag).is_none() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown target equation tag '{target_tag}'"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn parse_quality(value: &str) -> PyResult<QualityPreset> {
@@ -2233,19 +2341,14 @@ impl PyScene {
         )
     }
     #[pyo3(signature = (s, *, tags=None))]
-    fn equation(&self, s: &str, tags: Option<HashMap<String, String>>) -> PyResult<PyDrawable> {
+    fn equation(&self, s: &str, tags: Option<&Bound<'_, PyDict>>) -> PyResult<PyDrawable> {
         let mut equation = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .equation(s);
-        for (name, fragment) in tags.unwrap_or_default() {
-            if name.trim().is_empty() || fragment.trim().is_empty() {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "tag names and fragments must not be empty",
-                ));
-            }
-            equation = equation.define_tag(name, fragment, None);
+        for (name, fragment, occurrence) in parse_equation_tags(tags)? {
+            equation = equation.define_tag(name, fragment, occurrence);
         }
         Ok(PyDrawable(equation))
     }
@@ -2310,17 +2413,45 @@ impl PyScene {
         target: &PyDrawable,
         tags: Option<Vec<String>>,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         if !duration.is_finite() || duration <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be a finite positive number",
             ));
         }
+        if let Some(tags) = &tags {
+            let pairs: Vec<_> = tags.iter().map(|tag| (tag.clone(), tag.clone())).collect();
+            validate_equation_tag_pairs(source, target, &pairs)?;
+        }
         self.inner
             .lock()
             .expect("scene canvas poisoned")
             .transform_equation_tags(&source.0, &target.0, tags, duration);
-        Ok(())
+        Ok(PyDrawable(target.0.clone()))
+    }
+    /// Copy semantic equation terms while preserving the source equation.
+    #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
+    fn copy_equation_terms(
+        &self,
+        source: &PyDrawable,
+        target: &PyDrawable,
+        tags: Option<Vec<String>>,
+        duration: f64,
+    ) -> PyResult<PyDrawable> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        if let Some(tags) = &tags {
+            let pairs: Vec<_> = tags.iter().map(|tag| (tag.clone(), tag.clone())).collect();
+            validate_equation_tag_pairs(source, target, &pairs)?;
+        }
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .copy_equation_terms(&source.0, &target.0, tags, duration);
+        Ok(PyDrawable(target.0.clone()))
     }
     /// Replace an equation while expanding around one persistent semantic tag.
     #[pyo3(signature = (source, target, *, tag, duration=1.0))]
@@ -2330,7 +2461,7 @@ impl PyScene {
         target: &PyDrawable,
         tag: String,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         if tag.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "tag must not be empty",
@@ -2341,11 +2472,12 @@ impl PyScene {
                 "duration must be a finite positive number",
             ));
         }
+        validate_equation_tag_pairs(source, target, &[(tag.clone(), tag.clone())])?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
             .expand_equation_tag(&source.0, &target.0, &tag, duration);
-        Ok(())
+        Ok(PyDrawable(target.0.clone()))
     }
     /// Replace one tagged term while keeping the unchanged equation glyphs in place.
     #[pyo3(signature = (source, target, *, tag, target_tag=None, duration=1.0))]
@@ -2356,7 +2488,7 @@ impl PyScene {
         tag: String,
         target_tag: Option<String>,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         if tag.trim().is_empty()
             || target_tag
                 .as_deref()
@@ -2372,30 +2504,36 @@ impl PyScene {
             ));
         }
         let target_tag = target_tag.as_deref().unwrap_or(&tag);
+        validate_equation_tag_pairs(source, target, &[(tag.clone(), target_tag.to_string())])?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
             .replace_equation_term(&source.0, &target.0, &tag, target_tag, duration);
-        Ok(())
+        Ok(PyDrawable(target.0.clone()))
     }
     /// Transition between two equation steps by moving their common glyphs.
-    #[pyo3(signature = (source, target, *, duration=1.0))]
+    #[pyo3(signature = (source, target, *, matches=None, duration=1.0))]
     fn step_equation(
         &self,
         source: &PyDrawable,
         target: &PyDrawable,
+        matches: Option<&Bound<'_, PyAny>>,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         if !duration.is_finite() || duration <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be a finite positive number",
             ));
         }
+        let matches = parse_equation_matches(matches)?;
+        if let Some(matches) = &matches {
+            validate_equation_tag_pairs(source, target, matches)?;
+        }
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .step_equation(&source.0, &target.0, duration);
-        Ok(())
+            .step_equation_with_matches(&source.0, &target.0, matches, duration);
+        Ok(PyDrawable(target.0.clone()))
     }
     /// Auto-match by shape geometry — improved TransformMatchingShapes.
     ///
@@ -2432,7 +2570,7 @@ impl PyScene {
         source: &PyDrawable,
         target: &PyDrawable,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         if !duration.is_finite() || duration <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be a finite positive number",
@@ -2442,7 +2580,7 @@ impl PyScene {
             .lock()
             .expect("scene canvas poisoned")
             .transform_matching_tex(&source.0, &target.0, duration);
-        Ok(())
+        Ok(PyDrawable(target.0.clone()))
     }
     /// Alias for transform_matching_tex — manim TransformMatchingText compatibility.
     #[pyo3(signature = (source, target, *, duration=1.0))]
@@ -2451,7 +2589,7 @@ impl PyScene {
         source: &PyDrawable,
         target: &PyDrawable,
         duration: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyDrawable> {
         self.transform_matching_tex(source, target, duration)
     }
     /// Generic auto-matching morph. `mode` is "shapes" or "tex".

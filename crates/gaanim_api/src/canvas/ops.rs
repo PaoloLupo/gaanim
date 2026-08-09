@@ -170,8 +170,8 @@ pub(crate) enum Op {
         duration: f64,
     },
     /// Replace one equation state with another while using a semantic tag as
-    /// the moving anchor. Remaining target glyphs fade in as the source fades
-    /// out, which makes single terms naturally expand into longer expressions.
+    /// the moving anchor. Residual glyphs collapse toward or emerge from the
+    /// nearest matched term.
     ExpandEquation {
         source: ObjectId,
         target: ObjectId,
@@ -185,6 +185,7 @@ pub(crate) enum Op {
     StepEquation {
         source: ObjectId,
         target: ObjectId,
+        pairs: Vec<(String, Option<usize>, String, Option<usize>)>,
         duration: f64,
     },
     /// Auto-match and morph between two objects — improved TransformMatchingShapes/Tex.
@@ -192,6 +193,7 @@ pub(crate) enum Op {
         source: ObjectId,
         target: ObjectId,
         mode: String,
+        semantic_pairs: Vec<(String, Option<usize>, String, Option<usize>)>,
         duration: f64,
     },
     /// Advance the cursor by a duration (no animation).

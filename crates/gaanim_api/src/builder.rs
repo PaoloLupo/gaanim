@@ -7,7 +7,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
-use gaanim_math::matching::{MatchItem, MatchingConfig, MatchingMode};
+use gaanim_math::matching::{MatchItem, MatchingConfig, MatchingMode, lcs_match};
 use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
@@ -40,6 +40,19 @@ struct DrawSchedule {
     stroke_width: Option<f64>,
     auto_stroke_width: f64,
     fill_rate_func: gaanim_math::RateFunc,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EquationTransitionMode {
+    Replace,
+    Copy,
+}
+
+#[derive(Clone, Debug, Default)]
+struct EquationTransitionPlan {
+    pairs: Vec<(ObjectId, ObjectId)>,
+    leaving: Vec<(ObjectId, Option<(ObjectId, ObjectId)>)>,
+    entering: Vec<(ObjectId, Option<(ObjectId, ObjectId)>)>,
 }
 
 fn adaptive_lag_ratio(item_count: usize) -> f64 {
@@ -805,147 +818,557 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.play_internal(anim);
     }
 
-    /// Schedule a glyph-copy transition while accounting for the transforms of
-    /// the two textual parent containers. Text glyph transforms are local to
-    /// their equation, so a plain child translation cannot move between
-    /// separately positioned equations by itself.
-    pub(crate) fn play_fragment_transform(
+    fn equation_pair_destination(
+        &self,
+        moving: ObjectId,
+        destination: ObjectId,
+    ) -> Option<SpatialTransform> {
+        let moving_state = self.states.get(moving)?;
+        let parent_world = moving_state
+            .parent
+            .map(|parent| self.get_world_transform(parent).to_affine_2d())
+            .unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+        let destination_world = self.get_world_transform(destination).to_affine_2d();
+        Some(SpatialTransform::from_affine_2d(
+            &(parent_world.inverse() * destination_world),
+        ))
+    }
+
+    fn nearest_equation_pair(
+        &self,
+        id: ObjectId,
+        pairs: &[(ObjectId, ObjectId)],
+        target_side: bool,
+    ) -> Option<(ObjectId, ObjectId)> {
+        let center = self.world_center_for_match(id);
+        pairs.iter().copied().min_by(|a, b| {
+            let a_id = if target_side { a.1 } else { a.0 };
+            let b_id = if target_side { b.1 } else { b.0 };
+            let a_center = self.world_center_for_match(a_id);
+            let b_center = self.world_center_for_match(b_id);
+            let a_distance = (center.0 - a_center.0).powi(2) + (center.1 - a_center.1).powi(2);
+            let b_distance = (center.0 - b_center.0).powi(2) + (center.1 - b_center.1).powi(2);
+            a_distance.total_cmp(&b_distance)
+        })
+    }
+
+    fn plan_equation_transition(
+        &self,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        semantic_groups: &[(Vec<ObjectId>, Vec<ObjectId>)],
+        auto_match: bool,
+    ) -> EquationTransitionPlan {
+        let (Some(source_state), Some(target_state)) = (
+            self.states.get(source_parent),
+            self.states.get(target_parent),
+        ) else {
+            return EquationTransitionPlan::default();
+        };
+        let source_ids: Vec<_> = source_state
+            .child_spans
+            .iter()
+            .map(|child| child.id)
+            .collect();
+        let target_ids: Vec<_> = target_state
+            .child_spans
+            .iter()
+            .map(|child| child.id)
+            .collect();
+        let source_keys: HashMap<_, _> = source_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character.to_string()))
+            .collect();
+        let target_keys: HashMap<_, _> = target_state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character.to_string()))
+            .collect();
+
+        let mut pairs = Vec::new();
+        let mut used_source = HashSet::new();
+        let mut used_target = HashSet::new();
+        let mut considered_source = HashSet::new();
+        let mut considered_target = HashSet::new();
+        let mut source_candidates: HashMap<ObjectId, Vec<(ObjectId, ObjectId)>> = HashMap::new();
+        let mut target_candidates: HashMap<ObjectId, Vec<(ObjectId, ObjectId)>> = HashMap::new();
+
+        for (group_source, group_target) in semantic_groups {
+            let group_source: Vec<_> = group_source
+                .iter()
+                .copied()
+                .filter(|id| source_keys.contains_key(id) && !used_source.contains(id))
+                .collect();
+            let group_target: Vec<_> = group_target
+                .iter()
+                .copied()
+                .filter(|id| target_keys.contains_key(id) && !used_target.contains(id))
+                .collect();
+            considered_source.extend(group_source.iter().copied());
+            considered_target.extend(group_target.iter().copied());
+
+            let source_group_keys: Vec<_> = group_source
+                .iter()
+                .map(|id| source_keys.get(id).cloned())
+                .collect();
+            let target_group_keys: Vec<_> = group_target
+                .iter()
+                .map(|id| target_keys.get(id).cloned())
+                .collect();
+            let mut group_pairs = Vec::new();
+            for (source_index, target_index) in lcs_match(&source_group_keys, &target_group_keys) {
+                let pair = (group_source[source_index], group_target[target_index]);
+                used_source.insert(pair.0);
+                used_target.insert(pair.1);
+                group_pairs.push(pair);
+            }
+
+            let remaining_source: Vec<_> = group_source
+                .iter()
+                .copied()
+                .filter(|id| !used_source.contains(id))
+                .collect();
+            let remaining_target: Vec<_> = group_target
+                .iter()
+                .copied()
+                .filter(|id| !used_target.contains(id))
+                .collect();
+            let source_items: Vec<_> = remaining_source
+                .iter()
+                .enumerate()
+                .filter_map(|(index, id)| {
+                    self.build_match_item(*id, None).map(|mut item| {
+                        item.index = index;
+                        item
+                    })
+                })
+                .collect();
+            let target_items: Vec<_> = remaining_target
+                .iter()
+                .enumerate()
+                .filter_map(|(index, id)| {
+                    self.build_match_item(*id, None).map(|mut item| {
+                        item.index = index;
+                        item
+                    })
+                })
+                .collect();
+            let semantic_result = gaanim_math::matching::match_items(
+                &source_items,
+                &target_items,
+                &MatchingConfig::default(),
+            );
+            for (source_index, target_index) in semantic_result.pairs {
+                let pair = (
+                    remaining_source[source_index],
+                    remaining_target[target_index],
+                );
+                used_source.insert(pair.0);
+                used_target.insert(pair.1);
+                group_pairs.push(pair);
+            }
+
+            for id in &group_source {
+                source_candidates.insert(*id, group_pairs.clone());
+            }
+            for id in &group_target {
+                target_candidates.insert(*id, group_pairs.clone());
+            }
+            pairs.extend(group_pairs);
+        }
+
+        if auto_match {
+            considered_source.extend(source_ids.iter().copied());
+            considered_target.extend(target_ids.iter().copied());
+            let remaining_source: Vec<_> = source_ids
+                .iter()
+                .copied()
+                .filter(|id| !used_source.contains(id))
+                .collect();
+            let remaining_target: Vec<_> = target_ids
+                .iter()
+                .copied()
+                .filter(|id| !used_target.contains(id))
+                .collect();
+            let source_items: Vec<_> = remaining_source
+                .iter()
+                .enumerate()
+                .filter_map(|(index, id)| {
+                    self.build_match_item(*id, source_keys.get(id).cloned())
+                        .map(|mut item| {
+                            item.index = index;
+                            item
+                        })
+                })
+                .collect();
+            let target_items: Vec<_> = remaining_target
+                .iter()
+                .enumerate()
+                .filter_map(|(index, id)| {
+                    self.build_match_item(*id, target_keys.get(id).cloned())
+                        .map(|mut item| {
+                            item.index = index;
+                            item
+                        })
+                })
+                .collect();
+            let result = gaanim_math::matching::match_items(
+                &source_items,
+                &target_items,
+                &MatchingConfig {
+                    mode: MatchingMode::Tex,
+                    ..Default::default()
+                },
+            );
+            for (source_index, target_index) in result.pairs {
+                let pair = (
+                    remaining_source[source_index],
+                    remaining_target[target_index],
+                );
+                used_source.insert(pair.0);
+                used_target.insert(pair.1);
+                pairs.push(pair);
+            }
+        }
+
+        let leaving = considered_source
+            .into_iter()
+            .filter(|id| !used_source.contains(id))
+            .map(|id| {
+                let candidates = source_candidates
+                    .get(&id)
+                    .filter(|candidates| !candidates.is_empty())
+                    .map(Vec::as_slice)
+                    .unwrap_or(&pairs);
+                (id, self.nearest_equation_pair(id, candidates, false))
+            })
+            .collect();
+        let entering = considered_target
+            .into_iter()
+            .filter(|id| !used_target.contains(id))
+            .map(|id| {
+                let candidates = target_candidates
+                    .get(&id)
+                    .filter(|candidates| !candidates.is_empty())
+                    .map(Vec::as_slice)
+                    .unwrap_or(&pairs);
+                (id, self.nearest_equation_pair(id, candidates, true))
+            })
+            .collect();
+
+        EquationTransitionPlan {
+            pairs,
+            leaving,
+            entering,
+        }
+    }
+
+    fn schedule_equation_pair_morph(
         &mut self,
         source: ObjectId,
         target: ObjectId,
-        source_parent: ObjectId,
-        target_parent: ObjectId,
+        start: f64,
         duration: f64,
+        mode: EquationTransitionMode,
     ) {
-        let Some((source_translation, source_center)) = self
-            .states
-            .get(source)
-            .map(|state| (state.transform.translation, state.bounds.center()))
-        else {
+        let (Some(source_state), Some(target_state)) = (
+            self.states.get(source).cloned(),
+            self.states.get(target).cloned(),
+        ) else {
             return;
         };
-        let Some(source_parent_translation) = self
-            .states
-            .get(source_parent)
-            .map(|state| state.transform.translation)
-        else {
-            return;
+        let (moving, from_state, from_transform, to_state, to_transform) = match mode {
+            EquationTransitionMode::Replace => {
+                let Some(to_transform) = self.equation_pair_destination(source, target) else {
+                    return;
+                };
+                (
+                    source,
+                    source_state.clone(),
+                    source_state.transform,
+                    target_state.clone(),
+                    to_transform,
+                )
+            }
+            EquationTransitionMode::Copy => {
+                let Some(from_transform) = self.equation_pair_destination(target, source) else {
+                    return;
+                };
+                (
+                    target,
+                    source_state.clone(),
+                    from_transform,
+                    target_state.clone(),
+                    target_state.transform,
+                )
+            }
         };
-        let Some(target_parent_translation) = self
-            .states
-            .get(target_parent)
-            .map(|state| state.transform.translation)
-        else {
-            return;
+        let track = self.ensure_track(moving);
+        let rate_func = gaanim_math::RateFunc::Smooth;
+        let add = |timeline: &mut Timeline, lens: PropertyLensSpec, label: Option<String>| {
+            timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: moving,
+                    lens,
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label,
+                }),
+            );
         };
-        let Some((destination, target_center)) = self
-            .states
-            .get(target)
-            .map(|state| (state.transform.translation, state.bounds.center()))
-        else {
-            return;
-        };
-        let source_position_in_target = source_translation + source_parent_translation
-            - target_parent_translation
-            + source_center
-            - target_center;
-        let Some(target_state) = self.states.get_mut(target) else {
-            return;
-        };
-        target_state.transform.translation = source_position_in_target;
-        let _ = target_state;
+        add(
+            self.timeline,
+            PropertyLensSpec::PathMorph {
+                from: (*from_state.path).clone(),
+                to: (*to_state.path).clone(),
+            },
+            Some("EquationSemanticMorph".to_string()),
+        );
+        add(
+            self.timeline,
+            PropertyLensSpec::Translation {
+                from: from_transform.translation,
+                to: to_transform.translation,
+            },
+            None,
+        );
+        add(
+            self.timeline,
+            PropertyLensSpec::Rotation {
+                from: from_transform.rotation,
+                to: to_transform.rotation,
+            },
+            None,
+        );
+        add(
+            self.timeline,
+            PropertyLensSpec::Scale {
+                from: from_transform.scale,
+                to: to_transform.scale,
+            },
+            None,
+        );
+        let from_fill = from_state
+            .fill
+            .as_ref()
+            .and_then(extract_brush_color)
+            .unwrap_or(Color::WHITE);
+        let to_fill = to_state
+            .fill
+            .as_ref()
+            .and_then(extract_brush_color)
+            .unwrap_or(Color::WHITE);
+        add(
+            self.timeline,
+            PropertyLensSpec::FillColor {
+                from: from_fill,
+                to: to_fill,
+            },
+            None,
+        );
 
-        // A shared semantic tag represents a term that exists in both
-        // equations. Keep the source equation intact and animate the target
-        // glyph from the source's global position to its own local position.
-        // Bounds compensate for lines whose optical centers differ because of
-        // surrounding superscripts or descenders.
-        self.play_internal(AnimationBuilder {
-            target,
-            anim_type: AnimationType::TranslateTo { to: destination },
-            duration,
-            rate_func: gaanim_math::RateFunc::Smooth,
-            delay: 0.0,
-        });
+        if mode == EquationTransitionMode::Copy {
+            self.timeline.add_clip(
+                track,
+                start,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: target_state.opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        } else {
+            let source_track = self.ensure_track(source);
+            self.timeline.add_clip(
+                source_track,
+                start + duration,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: source,
+                    lens: PropertyLensSpec::Opacity {
+                        from: source_state.opacity,
+                        to: 0.0,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: Some("EquationHandoff".to_string()),
+                }),
+            );
+            let target_track = self.ensure_track(target);
+            self.timeline.add_clip(
+                target_track,
+                start + duration,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: target_state.opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: Some("EquationHandoff".to_string()),
+                }),
+            );
+            if let Some(state) = self.states.get_mut(source) {
+                state.opacity = 0.0;
+            }
+        }
     }
 
-    /// Cross-fades two textual hierarchies, while moving the matched semantic
-    /// glyphs from the source equation into the target equation.
-    pub(crate) fn play_equation_expansion(
+    fn schedule_equation_leaving(
+        &mut self,
+        source: ObjectId,
+        anchor: Option<(ObjectId, ObjectId)>,
+        start: f64,
+        duration: f64,
+    ) {
+        let Some(state) = self.states.get(source).cloned() else {
+            return;
+        };
+        let mut destination = state.transform;
+        if let Some((_, target_anchor)) = anchor
+            && let Some(anchor_transform) = self.equation_pair_destination(source, target_anchor)
+        {
+            destination.translation = anchor_transform.translation;
+        }
+        destination.scale *= 0.78;
+        let track = self.ensure_track(source);
+        for lens in [
+            PropertyLensSpec::Translation {
+                from: state.transform.translation,
+                to: destination.translation,
+            },
+            PropertyLensSpec::Scale {
+                from: state.transform.scale,
+                to: destination.scale,
+            },
+            PropertyLensSpec::Opacity {
+                from: state.opacity,
+                to: 0.0,
+            },
+        ] {
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: source,
+                    lens,
+                    rate_func: gaanim_math::RateFunc::Smooth,
+                    delay: 0.0,
+                    label: Some("EquationCollapse".to_string()),
+                }),
+            );
+        }
+        if let Some(state) = self.states.get_mut(source) {
+            state.opacity = 0.0;
+            state.transform = destination;
+        }
+    }
+
+    fn schedule_equation_entering(
+        &mut self,
+        target: ObjectId,
+        anchor: Option<(ObjectId, ObjectId)>,
+        start: f64,
+        duration: f64,
+    ) {
+        let Some(state) = self.states.get(target).cloned() else {
+            return;
+        };
+        let destination = state.transform;
+        let mut origin = destination;
+        if let Some((source_anchor, _)) = anchor
+            && let Some(anchor_transform) = self.equation_pair_destination(target, source_anchor)
+        {
+            origin.translation = anchor_transform.translation;
+        }
+        origin.scale *= 0.78;
+        let track = self.ensure_track(target);
+        for lens in [
+            PropertyLensSpec::Translation {
+                from: origin.translation,
+                to: destination.translation,
+            },
+            PropertyLensSpec::Scale {
+                from: origin.scale,
+                to: destination.scale,
+            },
+            PropertyLensSpec::Opacity {
+                from: 0.0,
+                to: state.opacity,
+            },
+        ] {
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens,
+                    rate_func: gaanim_math::RateFunc::Smooth,
+                    delay: 0.0,
+                    label: Some("EquationEmerge".to_string()),
+                }),
+            );
+        }
+    }
+
+    pub(crate) fn play_equation_transition(
         &mut self,
         source_parent: ObjectId,
         target_parent: ObjectId,
+        semantic_groups: Vec<(Vec<ObjectId>, Vec<ObjectId>)>,
         duration: f64,
+        mode: EquationTransitionMode,
+        auto_match: bool,
     ) {
-        let source_state = self.states.get(source_parent).cloned();
-        let target_state = self.states.get(target_parent).cloned();
-        let (Some(source_state), Some(target_state)) = (source_state, target_state) else {
-            return;
-        };
-        if source_state.children.is_empty() || target_state.children.is_empty() {
+        if !duration.is_finite() || duration <= 0.0 {
             return;
         }
-
-        // Match the unchanged parts too. They move with the equation's new
-        // centering instead of ghosting through a cross-fade, while unmatched
-        // target glyphs (the expansion) simply fade in.
-        let source_chars: Vec<_> = source_state
-            .child_spans
-            .iter()
-            .map(|child| (child.id, child.span.character))
-            .collect();
-        let target_chars: Vec<_> = target_state
-            .child_spans
-            .iter()
-            .map(|child| (child.id, child.span.character))
-            .collect();
-        let mut table = vec![vec![0usize; target_chars.len() + 1]; source_chars.len() + 1];
-        for source_index in (0..source_chars.len()).rev() {
-            for target_index in (0..target_chars.len()).rev() {
-                table[source_index][target_index] = if source_chars[source_index].1
-                    == target_chars[target_index].1
-                {
-                    1 + table[source_index + 1][target_index + 1]
-                } else {
-                    table[source_index + 1][target_index].max(table[source_index][target_index + 1])
-                };
-            }
+        let plan = self.plan_equation_transition(
+            source_parent,
+            target_parent,
+            &semantic_groups,
+            auto_match,
+        );
+        if plan.pairs.is_empty() && plan.leaving.is_empty() && plan.entering.is_empty() {
+            return;
         }
-        let mut matched_pairs = Vec::new();
-        let (mut source_index, mut target_index) = (0, 0);
-        while source_index < source_chars.len() && target_index < target_chars.len() {
-            if source_chars[source_index].1 == target_chars[target_index].1 {
-                matched_pairs.push((source_chars[source_index].0, target_chars[target_index].0));
-                source_index += 1;
-                target_index += 1;
-            } else if table[source_index + 1][target_index] >= table[source_index][target_index + 1]
-            {
-                source_index += 1;
-            } else {
-                target_index += 1;
+        let target_ids: HashSet<_> = plan
+            .pairs
+            .iter()
+            .map(|(_, target)| *target)
+            .chain(plan.entering.iter().map(|(target, _)| *target))
+            .collect();
+        for target in target_ids {
+            if let Some(state) = self.states.get(target) {
+                self.commands.entity(state.entity).insert(Opacity(0.0));
             }
         }
 
-        for child in source_state.children {
-            self.play_internal(AnimationBuilder {
-                target: child,
-                anim_type: AnimationType::FadeOut,
-                duration,
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-            });
+        let start = self.current_time;
+        for (source, target) in plan.pairs {
+            self.schedule_equation_pair_morph(source, target, start, duration, mode);
         }
-        for child in target_state.children {
-            self.play_internal(AnimationBuilder {
-                target: child,
-                anim_type: AnimationType::FadeIn,
-                duration,
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-            });
+        if mode == EquationTransitionMode::Replace {
+            for (source, anchor) in plan.leaving {
+                self.schedule_equation_leaving(source, anchor, start, duration * 0.55);
+            }
         }
-        for (source, target) in matched_pairs {
-            self.play_fragment_transform(source, target, source_parent, target_parent, duration);
+        for (target, anchor) in plan.entering {
+            self.schedule_equation_entering(target, anchor, start + duration * 0.2, duration * 0.8);
         }
         self.current_time += duration;
     }
@@ -1800,23 +2223,69 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let half = anim.duration * 0.5;
 
-        // 1. Scale up on root target (first half), then scale back down (second half)
+        // 1. Hop upward and pulse the target around its visual center.
         let root_state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => return,
         };
-        // Textual glyph paths are positioned around their parent rather than
-        // their own origin. Scaling them around `(0, 0)` therefore looks like
-        // a diagonal translation. Use each glyph's local visual center as the
-        // pivot, while preserving an explicit pivot on normal mobjects.
-        if root_state.parent.is_some() && root_state.transform.anchor == DVec3::ZERO {
-            root_state.transform.anchor = root_state.bounds.center();
+        // A glyph's bounds may already be shifted into its parent's coordinate
+        // system, while its path remains in local coordinates. Use the path's
+        // actual visual center as the pivot; using `state.bounds.center()` here
+        // creates the diagonal down-right drift seen in equation selections.
+        if root_state.transform.anchor == DVec3::ZERO {
+            let pivot = if root_state.path.elements().is_empty() {
+                root_state.bounds.center()
+            } else {
+                let bounds = root_state.path.bounding_box();
+                DVec3::new(
+                    (bounds.x0 + bounds.x1) * 0.5,
+                    (bounds.y0 + bounds.y1) * 0.5,
+                    0.0,
+                )
+            };
+            root_state.transform.anchor = pivot;
             self.commands
                 .entity(root_state.entity)
                 .insert(root_state.transform);
         }
         let scale_from = root_state.transform.scale;
         let scale_to = scale_from * scale_factor;
+        let translation_from = root_state.transform.translation;
+        let jump_height = (root_state.bounds.height().abs() * 0.1).clamp(4.0, 10.0);
+        let translation_peak = translation_from + DVec3::new(0.0, jump_height, 0.0);
+        let ease_up = gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic);
+        let ease_down = gaanim_math::RateFunc::EaseIn(EasingCurve::Quadratic);
+
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Translation {
+                    from: translation_from,
+                    to: translation_peak,
+                },
+                rate_func: ease_up.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + half,
+            half,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Translation {
+                    from: translation_peak,
+                    to: translation_from,
+                },
+                rate_func: ease_down.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
 
         self.timeline.add_clip(
             parent_track,
@@ -1828,7 +2297,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     from: scale_from,
                     to: scale_to,
                 },
-                rate_func: gaanim_math::RateFunc::Linear,
+                rate_func: ease_up,
                 delay: 0.0,
                 label: self.current_label.clone(),
             }),
@@ -1843,7 +2312,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     from: scale_to,
                     to: scale_from,
                 },
-                rate_func: gaanim_math::RateFunc::Linear,
+                rate_func: ease_down,
                 delay: 0.0,
                 label: self.current_label.clone(),
             }),
@@ -2464,6 +2933,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
         if self.states.get(source).is_none() || self.states.get(target).is_none() {
+            return;
+        }
+        if mode == MatchingMode::Tex {
+            self.play_equation_transition(
+                source,
+                target,
+                Vec::new(),
+                duration,
+                EquationTransitionMode::Replace,
+                true,
+            );
             return;
         }
 
@@ -5414,6 +5894,86 @@ mod tests {
         assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn indicate_hops_up_from_visual_center_without_diagonal_drift() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let parent_id = builder.next_id();
+        let target_id = builder.next_id();
+        let entity = builder.commands.spawn_empty().id();
+        builder.states.insert(
+            target_id,
+            MobjectState {
+                path: square_path(40.0),
+                // This mimics a glyph whose bounds have already been centered
+                // relative to its textual parent, while its path remains local.
+                bounds: Bounds3D::new_2d(0.0, 0.0, 10.0, 10.0),
+                transform: SpatialTransform::identity(),
+                opacity: 1.0,
+                fill: Some(Brush::Solid(Color::WHITE)),
+                stroke: StrokeBrush::transparent(),
+                entity,
+                child_spans: Vec::new(),
+                children: Vec::new(),
+                parent: Some(parent_id),
+            },
+        );
+
+        builder.play(AnimationBuilder {
+            target: target_id,
+            anim_type: AnimationType::Indicate {
+                color: None,
+                scale_factor: 1.1,
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::ThereAndBack,
+        });
+
+        let state = builder.states.get(target_id).unwrap();
+        assert_eq!(state.transform.anchor, DVec3::new(45.0, 5.0, 0.0));
+
+        let translations: Vec<_> = builder
+            .timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Translation { from, to },
+                    ..
+                }) if *target == target_id => Some((*from, *to)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(translations.len(), 2);
+        assert_eq!(translations[0].0.x, translations[0].1.x);
+        assert!(translations[0].1.y > translations[0].0.y);
+        assert_eq!(translations[1].0, translations[0].1);
+        assert_eq!(translations[1].1, translations[0].0);
+
+        let scales: Vec<_> = builder
+            .timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Scale { to, .. },
+                    ..
+                }) if *target == target_id => Some(*to),
+                _ => None,
+            })
+            .collect();
+        assert!(scales.iter().any(|scale| (scale.x - 1.1).abs() < 1e-9));
     }
 
     #[test]

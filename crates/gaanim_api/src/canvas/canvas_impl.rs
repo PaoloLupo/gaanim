@@ -841,18 +841,11 @@ impl Canvas {
         })
     }
 
-    /// Morphs all shared semantic tags from one equation into another in
-    /// parallel. Tags are registered through `DrawableHandle::define_tag`.
-    pub fn transform_equation_tags(
-        &mut self,
+    fn equation_tag_pairs(
         source: &DrawableHandle,
         target: &DrawableHandle,
-        tags: Option<Vec<String>>,
-        duration: f64,
-    ) {
-        if !Arc::ptr_eq(&self.state, &source.state) || !Arc::ptr_eq(&self.state, &target.state) {
-            return;
-        }
+        requested: Option<Vec<(String, String)>>,
+    ) -> Vec<(String, Option<usize>, String, Option<usize>)> {
         let source_tags = source
             .spec
             .lock()
@@ -865,24 +858,28 @@ impl Canvas {
             .expect("object spec poisoned")
             .fragment_tags
             .clone();
-        let requested = tags.unwrap_or_else(|| {
+        let requested = requested.unwrap_or_else(|| {
             source_tags
                 .iter()
                 .filter_map(|(name, _, _)| {
                     target_tags
                         .iter()
                         .any(|(target_name, _, _)| target_name == name)
-                        .then_some(name.clone())
+                        .then_some((name.clone(), name.clone()))
                 })
                 .collect()
         });
-        let pairs = requested
+        requested
             .into_iter()
-            .filter_map(|name| {
-                let (_, source_fragment, source_occurrence) =
-                    source_tags.iter().rev().find(|(tag, _, _)| tag == &name)?;
-                let (_, target_fragment, target_occurrence) =
-                    target_tags.iter().rev().find(|(tag, _, _)| tag == &name)?;
+            .filter_map(|(source_name, target_name)| {
+                let (_, source_fragment, source_occurrence) = source_tags
+                    .iter()
+                    .rev()
+                    .find(|(tag, _, _)| tag == &source_name)?;
+                let (_, target_fragment, target_occurrence) = target_tags
+                    .iter()
+                    .rev()
+                    .find(|(tag, _, _)| tag == &target_name)?;
                 Some((
                     source_fragment.clone(),
                     *source_occurrence,
@@ -890,7 +887,24 @@ impl Canvas {
                     *target_occurrence,
                 ))
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
+
+    /// Copies all shared semantic tags from one visible equation into another.
+    /// Tags are registered through `DrawableHandle::define_tag`.
+    pub fn transform_equation_tags(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        tags: Option<Vec<String>>,
+        duration: f64,
+    ) -> DrawableHandle {
+        if !Arc::ptr_eq(&self.state, &source.state) || !Arc::ptr_eq(&self.state, &target.state) {
+            return target.clone();
+        }
+        let requested =
+            tags.map(|tags| tags.into_iter().map(|name| (name.clone(), name)).collect());
+        let pairs = Self::equation_tag_pairs(source, target, requested);
         if !pairs.is_empty() && duration.is_finite() && duration > 0.0 {
             self.state
                 .lock()
@@ -904,25 +918,36 @@ impl Canvas {
                     duration,
                 });
         }
+        target.clone()
+    }
+
+    pub fn copy_equation_terms(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        tags: Option<Vec<String>>,
+        duration: f64,
+    ) -> DrawableHandle {
+        self.transform_equation_tags(source, target, tags, duration)
     }
 
     /// Replaces `source` with `target`, keeping the named tag as the moving
     /// anchor. This is useful when a term grows into a longer expression: the
-    /// anchor moves while the added glyphs fade in with the new equation.
+    /// anchor moves while the added glyphs emerge from it.
     pub fn expand_equation_tag(
         &mut self,
         source: &DrawableHandle,
         target: &DrawableHandle,
         tag: &str,
         duration: f64,
-    ) {
+    ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
             || !Arc::ptr_eq(&self.state, &target.state)
             || tag.trim().is_empty()
             || !duration.is_finite()
             || duration <= 0.0
         {
-            return;
+            return target.clone();
         }
         let source_tag = source
             .spec
@@ -947,7 +972,7 @@ impl Canvas {
             Some((_, target_fragment, target_occurrence)),
         ) = (source_tag, target_tag)
         else {
-            return;
+            return target.clone();
         };
 
         self.state
@@ -964,6 +989,7 @@ impl Canvas {
                 target_occurrence,
                 duration,
             });
+        target.clone()
     }
 
     /// Replaces a tagged term while retaining the rest of the equation in
@@ -976,7 +1002,7 @@ impl Canvas {
         source_tag: &str,
         target_tag: &str,
         duration: f64,
-    ) {
+    ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
             || !Arc::ptr_eq(&self.state, &target.state)
             || source_tag.trim().is_empty()
@@ -984,7 +1010,7 @@ impl Canvas {
             || !duration.is_finite()
             || duration <= 0.0
         {
-            return;
+            return target.clone();
         }
         let find_tag = |equation: &DrawableHandle, tag: &str| {
             equation
@@ -1002,7 +1028,7 @@ impl Canvas {
             Some((_, target_fragment, target_occurrence)),
         ) = (find_tag(source, source_tag), find_tag(target, target_tag))
         else {
-            return;
+            return target.clone();
         };
         self.state
             .lock()
@@ -1018,23 +1044,36 @@ impl Canvas {
                 target_occurrence,
                 duration,
             });
+        target.clone()
     }
 
     /// Transitions from one equation step to another. Shared glyphs move to
-    /// their new positions; removed and introduced glyphs fade out and in.
+    /// their new positions; removed glyphs collapse and introduced glyphs
+    /// emerge from the nearest matched term.
     pub fn step_equation(
         &mut self,
         source: &DrawableHandle,
         target: &DrawableHandle,
         duration: f64,
-    ) {
+    ) -> DrawableHandle {
+        self.step_equation_with_matches(source, target, None, duration)
+    }
+
+    pub fn step_equation_with_matches(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        matches: Option<Vec<(String, String)>>,
+        duration: f64,
+    ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
             || !Arc::ptr_eq(&self.state, &target.state)
             || !duration.is_finite()
             || duration <= 0.0
         {
-            return;
+            return target.clone();
         }
+        let pairs = Self::equation_tag_pairs(source, target, matches);
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -1043,8 +1082,10 @@ impl Canvas {
             .push(Op::StepEquation {
                 source: source.id,
                 target: target.id,
+                pairs,
                 duration,
             });
+        target.clone()
     }
 
     /// Auto-match and morph submobjects — improved `TransformMatchingShapes`.
@@ -1058,22 +1099,21 @@ impl Canvas {
         source: &DrawableHandle,
         target: &DrawableHandle,
         duration: f64,
-    ) {
-        self.transform_matching(source, target, "shapes", duration);
+    ) -> DrawableHandle {
+        self.transform_matching(source, target, "shapes", duration)
     }
 
     /// Auto-match and morph for text & math equations — improved `TransformMatchingTex`.
     ///
-    /// Matches sub-elements (character glyphs) between text/math objects using an
-    /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
-    /// combined with Hungarian assignment for remaining elements.
+    /// Matches semantic tags first, then uses an order-preserving Longest Common
+    /// Subsequence (LCS) on still-free, identical character keys.
     pub fn transform_matching_tex(
         &mut self,
         source: &DrawableHandle,
         target: &DrawableHandle,
         duration: f64,
-    ) {
-        self.transform_matching(source, target, "tex", duration);
+    ) -> DrawableHandle {
+        self.transform_matching(source, target, "tex", duration)
     }
 
     /// Generic auto-matching morph. `mode` can be `"shapes"` or `"tex"`.
@@ -1086,17 +1126,22 @@ impl Canvas {
         target: &DrawableHandle,
         mode: &str,
         duration: f64,
-    ) {
+    ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
             || !Arc::ptr_eq(&self.state, &target.state)
             || !duration.is_finite()
             || duration <= 0.0
         {
-            return;
+            return target.clone();
         }
         let mode = match mode.to_ascii_lowercase().as_str() {
             "tex" | "text" | "chars" => "tex".to_string(),
             _ => "shapes".to_string(),
+        };
+        let semantic_pairs = if mode == "tex" {
+            Self::equation_tag_pairs(source, target, None)
+        } else {
+            Vec::new()
         };
         self.state
             .lock()
@@ -1107,8 +1152,10 @@ impl Canvas {
                 source: source.id,
                 target: target.id,
                 mode,
+                semantic_pairs,
                 duration,
             });
+        target.clone()
     }
 
     /// Dims all equation glyphs except the requested semantic tags and pulses
@@ -2171,6 +2218,36 @@ mod tests {
             .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<gaanim_animation::Updater>>()
             .iter(&world)
             .count()
+    }
+
+    #[test]
+    fn step_equation_preserves_explicit_tag_mapping_and_occurrence() {
+        let mut canvas = Canvas::new(320, 180);
+        let source = canvas
+            .equation("x + x = 2x")
+            .define_tag("right_x", "x", Some(1));
+        let target = canvas.equation("x = y").define_tag("renamed", "y", Some(0));
+        canvas.step_equation_with_matches(
+            &source,
+            &target,
+            Some(vec![("right_x".to_string(), "renamed".to_string())]),
+            0.8,
+        );
+
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        let pairs = state
+            .segments
+            .iter()
+            .flat_map(|segment| &segment.ops)
+            .find_map(|op| match op {
+                Op::StepEquation { pairs, .. } => Some(pairs),
+                _ => None,
+            })
+            .expect("step equation op should be queued");
+        assert_eq!(
+            pairs,
+            &vec![("x".to_string(), Some(1), "y".to_string(), Some(0),)]
+        );
     }
 
     #[test]

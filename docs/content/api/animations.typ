@@ -345,7 +345,7 @@ scene.export("preview.webp", fps=30)
   signature: ".indicate(duration?) .wiggle(duration?) -> Anim",
   params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
   returns: (type: "Anim", desc: [Attention anims.]),
-  desc: [`indicate` pulses scale+glow, `wiggle` shakes. Use for wrong answer / highlight.],
+  desc: [`indicate` makes a subtle upward hop from the visual center and highlights the target; `wiggle` shakes. Use for wrong answer / highlight.],
 )[
 ```python
 # show-code: true
@@ -356,6 +356,66 @@ wrong = scene.cross(28).stroke(WHITE, 3).at(60, 0)
 scene.play([key.indicate().duration(0.7)])
 scene.play([wrong.wiggle().duration(0.5)])
 scene.export("preview.webp", fps=30)
+```
+]
+
+== Semantic equation transitions
+
+#api-entry(
+  name: "Scene.step_equation",
+  kind: "method",
+  signature: "step_equation(source, target, *, matches=None, duration=1.0) -> Drawable",
+  params: (
+    (name: "source", type: "Drawable", default: none, desc: [Current equation.]),
+    (name: "target", type: "Drawable", default: none, desc: [Next equation.]),
+    (name: "matches", type: "list[str] | dict[str,str]", default: "None", desc: [Same-name tags or source → target tag names. `None` uses every shared tag.]),
+    (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),
+  ),
+  returns: (type: "Drawable", desc: [The target equation, ready for another step.]),
+  desc: [Semantic tags are paired first; remaining identical glyphs are matched automatically. Paired terms move and morph without fading. Removed terms collapse toward the nearest surviving term and new terms emerge from it. Unknown explicit tags and invalid durations raise `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import BLACK, GOLD, Scene
+scene = Scene(480, 270, background=BLACK)
+before = scene.equation("x + 3 = 7", tags={"x":"x", "result":"7"}).scaled(1.6)
+after = scene.equation("x = 4", tags={"x":"x", "result":"4"}).scaled(1.6)
+before.tag("result").fill(GOLD)
+after.tag("result").fill(GOLD)
+scene.play([before.write().duration(0.7)])
+current = scene.step_equation(before, after, duration=0.9)
+current.tag("result").indicate(duration=0.4)
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Scene.expand_equation / replace_term",
+  kind: "method",
+  signature: "expand_equation(source, target, *, tag, duration=1.0) -> Drawable / replace_term(source, target, *, tag, target_tag=None, duration=1.0) -> Drawable",
+  params: ((name: "tag", type: "str", default: none, desc: [Source semantic term. `expand_equation` requires the same name on the target.]), (name: "target_tag", type: "str | None", default: "None", desc: [Different destination name for `replace_term`.]), (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),),
+  returns: (type: "Drawable", desc: [The target equation.]),
+  desc: [`expand_equation` uses the tagged term as the one-to-many origin. `replace_term` forces the selected source and destination terms to correspond while unchanged glyphs continue moving automatically.],
+)[
+```python
+from gaanim import Scene
+scene = Scene(480, 270)
+compact = scene.equation("E = m c^2", tags={"mass":"m"})
+expanded = scene.equation("E = (m_1 + m_2) c^2", tags={"mass":"(m_1 + m_2)"})
+scene.expand_equation(compact, expanded, tag="mass", duration=0.9)
+```
+]
+
+#api-entry(
+  name: "Scene.copy_equation_terms / transform_equation",
+  kind: "method",
+  signature: "copy_equation_terms(source, target, *, tags=None, duration=1.0) -> Drawable",
+  params: ((name: "tags", type: "list[str] | None", default: "None", desc: [Shared semantic names to copy; `None` uses all shared names.]), (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),),
+  returns: (type: "Drawable", desc: [The destination equation.]),
+  desc: [Keeps the source visible and moves visual copies of the selected terms into the destination. `transform_equation` remains as a compatibility alias with identical behavior.],
+)[
+```python
+scene.copy_equation_terms(energy, momentum, tags=["mass"], duration=0.8)
 ```
 ]
 
@@ -390,11 +450,11 @@ scene.export("preview.webp", fps=30)
     (name: "target", type: "Drawable", default: none, desc: [Target object/group containing elements to match.]),
     (name: "duration", type: "float", default: "1.0", desc: [Duration of the transition in seconds.]),
   ),
-  returns: (type: "none", desc: [Schedules the transform matching animation.]),
-  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` (alias `transform_matching_text` for Manim compat) uses order-preserving LCS character matching for text/equations. Generic `scene.transform_matching(source, target, mode="shapes"|"tex", duration=1.0)` dispatches by mode. Unmatched elements automatically fade in/out.],
+  returns: (type: "Drawable | none", desc: [`transform_matching_tex/text` return the destination; shape matching retains its existing `None` return.]),
+  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` (alias `transform_matching_text`) uses semantic equation tags first and order-preserving LCS for remaining characters, then performs the same clean handoff as `step_equation`. Generic `scene.transform_matching(source, target, mode="shapes"|"tex", duration=1.0)` dispatches by mode.],
 )[
 ```python
-from gaanim import BLACK, BLUE, GOLD, GREEN, Scene
+from gaanim import BLACK, GOLD, WHITE, Scene
 scene = Scene(1920, 1080, background=BLACK)
 e1 = scene.equation("E = m c").fill(WHITE).at(0, 80).scaled(1.3)
 e2 = scene.equation("p = m v").fill(GOLD).at(0, 80).scaled(1.3)
