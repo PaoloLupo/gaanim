@@ -2529,8 +2529,15 @@ class Scene:
         to: Drawable | tuple[float, float],
         coils: int = 8,
         amplitude: float = 12.0,
+        crossing: float = 0.0,
     ) -> Drawable:
-        """Create a reactive spring between two endpoints.
+        """Create a reactive helical spring between two endpoints.
+
+        The endpoints may be drawables or fixed ``(x, y)`` positions. When a
+        drawable endpoint moves, the native helix is regenerated every frame,
+        preserving its radius while its pitch deforms with the distance.
+        ``crossing`` ranges from 0 to 1: higher values make each turn fold
+        back briefly, creating e-like visual crossings.
 
         Example:
             spring = scene.spring_between((0, 0), drawable)

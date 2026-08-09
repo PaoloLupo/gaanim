@@ -225,9 +225,11 @@ mechanism = scene.group([rail, spring, mass]).with_pivot(0, 0)
 scene.play([mechanism.rotate(PI / 3).duration(1.0)])
 ```
 
-`spring_between(from, to, coils=8, amplitude=12)` creates a native reactive
-spring. Each endpoint can be a drawable or an `(x, y)` tuple, so it follows a
-moving mass without a Python callback every frame.
+`spring_between(from, to, coils=8, amplitude=12, crossing=0)` creates a native
+reactive helical spring. Each endpoint can be a drawable or an `(x, y)` tuple,
+so it follows a moving mass without a Python callback every frame. Set
+`crossing` from `0` to `1` to fold parts of each turn back into e-like visual
+crossings.
 
 `callout(text, target, offset=(160, 96), width=240, height=72)` creates a
 reusable editorial label: its card, text, and connector follow the target

@@ -1106,17 +1106,17 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.spring_between",
   kind: "factory",
-  signature: "spring_between(from, to, *, coils=8, amplitude=12) -> Drawable",
-  params: ((name: "from", type: "Drawable|vec2", default: none, desc: [Endpoint A.]), (name: "to", type: "Drawable|vec2", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Coil count.]),),
-  returns: (type: "Drawable", desc: [Reactive spring path.]),
-  desc: [Endpoints can be drawables or (x,y). Follows mass without callback.],
+  signature: "spring_between(from, to, *, coils=8, amplitude=12, crossing=0) -> Drawable",
+  params: ((name: "from", type: "Drawable|vec2", default: none, desc: [Endpoint A.]), (name: "to", type: "Drawable|vec2", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]),),
+  returns: (type: "Drawable", desc: [Reactive helical spring path.]),
+  desc: [Endpoints can be drawables or (x,y). The spring is a smooth projected helix: its radius stays stable while its pitch deforms automatically as an endpoint moves. Set `crossing` above 0 to fold parts of each turn back and create e-like crossings.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(10).fill(GOLD).at(70, 0)
-spring = scene.spring_between(( -70, 0), mass, coils=6).no_fill().stroke(WHITE, 3)
+spring = scene.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0).no_fill().stroke(WHITE, 3)
 scene.play([mass.move(40, 0).duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```

@@ -902,16 +902,24 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
     bundle
 }
 
-/// Builds an open zig-zag spring between two points.
+/// Builds an open helical spring between two points.
 ///
 /// The endpoints remain exact even when the spring is rotated or compressed.
-/// `coils` controls the number of zig-zag pairs and `amplitude` is measured
-/// perpendicular to the spring axis.
+/// `coils` controls the number of turns and `amplitude` is measured
+/// perpendicular to the spring axis. The coil is represented by a sampled
+/// sinusoid, so changing the endpoint distance changes its pitch while the
+/// radius remains stable. This is what makes a reactive spring visibly deform
+/// when one of its endpoints is animated.
+///
+/// `crossing` is a normalized visual interlacing amount. At `0.0` each turn is
+/// a regular sinusoidal coil; at `1.0` the turn briefly folds back along its
+/// axis, producing an e-like crossover without moving either endpoint.
 pub fn spring_path(
     start: kurbo::Point,
     end: kurbo::Point,
     coils: usize,
     amplitude: f64,
+    crossing: f64,
 ) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -926,17 +934,27 @@ pub fn spring_path(
 
     let direction = (dx / length, dy / length);
     let normal = (-direction.1, direction.0);
-    let segments = coils.max(1) * 2;
-    for index in 1..=segments {
-        let t = index as f64 / (segments + 1) as f64;
-        let offset = if index % 2 == 0 {
-            -amplitude
-        } else {
-            amplitude
-        };
+    let turns = coils.max(1);
+    let turns_f64 = turns as f64;
+    let crossing = crossing.clamp(0.0, 1.0);
+    // A fixed number of samples per turn keeps the projected helix smooth at
+    // different lengths. The cap prevents pathological input from producing
+    // an unbounded path while preserving the requested endpoints.
+    let samples = turns.saturating_mul(24).clamp(24, 4096);
+    for index in 1..samples {
+        let t = index as f64 / samples as f64;
+        let turn_position = t * turns_f64;
+        let turn_index = turn_position.floor();
+        let turn_t = turn_position - turn_index;
+        let phase = std::f64::consts::TAU * turn_t;
+        // The cosine term is zero at both ends of every turn. Its bounded axial
+        // excursion makes the high-crossing variant loop back over part of the
+        // preceding coil while keeping the spring's endpoints exact.
+        let axial_t = (turn_index + turn_t + crossing * 0.35 * (phase.cos() - 1.0)) / turns_f64;
+        let offset = amplitude * phase.sin();
         path.line_to(kurbo::Point::new(
-            start.x + dx * t + normal.0 * offset,
-            start.y + dy * t + normal.1 * offset,
+            start.x + dx * axial_t + normal.0 * offset,
+            start.y + dy * axial_t + normal.1 * offset,
         ));
     }
     path.line_to(end);
@@ -1309,20 +1327,77 @@ mod arrow_tests {
     }
 
     #[test]
-    fn spring_path_keeps_its_endpoints_and_creates_zig_zags() {
+    fn spring_path_keeps_its_endpoints_and_deforms_as_a_helical_coil() {
         let start = kurbo::Point::new(-80.0, 10.0);
-        let end = kurbo::Point::new(120.0, 10.0);
-        let path = spring_path(start, end, 4, 15.0);
-        let elements = path.elements();
+        let compact_end = kurbo::Point::new(120.0, 10.0);
+        let stretched_end = kurbo::Point::new(320.0, 10.0);
+        let compact = spring_path(start, compact_end, 4, 15.0, 0.0);
+        let stretched = spring_path(start, stretched_end, 4, 15.0, 0.0);
+        let compact_points: Vec<_> = compact
+            .elements()
+            .iter()
+            .filter_map(|element| match element {
+                kurbo::PathEl::LineTo(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
+        let stretched_points: Vec<_> = stretched
+            .elements()
+            .iter()
+            .filter_map(|element| match element {
+                kurbo::PathEl::LineTo(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
 
-        assert!(matches!(elements.first(), Some(kurbo::PathEl::MoveTo(p)) if *p == start));
-        assert!(matches!(elements.last(), Some(kurbo::PathEl::LineTo(p)) if *p == end));
         assert!(
-            elements.iter().any(|element| {
-                matches!(element, kurbo::PathEl::LineTo(point) if (point.y - start.y).abs() > 1e-6)
-            }),
-            "a spring with amplitude must deviate from its axis"
+            matches!(compact.elements().first(), Some(kurbo::PathEl::MoveTo(p)) if *p == start)
         );
+        assert!(
+            matches!(compact.elements().last(), Some(kurbo::PathEl::LineTo(p)) if *p == compact_end)
+        );
+        assert!(
+            matches!(stretched.elements().last(), Some(kurbo::PathEl::LineTo(p)) if *p == stretched_end)
+        );
+        assert_eq!(compact_points.len(), stretched_points.len());
+        assert!(
+            compact_points
+                .iter()
+                .any(|point| (point.y - start.y).abs() > 1e-6),
+            "a helical spring with amplitude must deviate from its axis"
+        );
+        let peak = compact_points
+            .iter()
+            .map(|point| (point.y - start.y).abs())
+            .fold(0.0_f64, f64::max);
+        assert!((peak - 15.0).abs() < 1e-6);
+        assert!(compact_points[6].x < stretched_points[6].x);
+
+        let interlaced = spring_path(start, compact_end, 4, 15.0, 1.0);
+        let interlaced_points: Vec<_> = interlaced
+            .elements()
+            .iter()
+            .filter_map(|element| match element {
+                kurbo::PathEl::LineTo(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            compact_points
+                .windows(2)
+                .all(|points| points[1].x >= points[0].x),
+            "a regular spring should progress monotonically along its axis"
+        );
+        assert!(
+            interlaced_points
+                .windows(2)
+                .any(|points| points[1].x < points[0].x),
+            "crossing should fold part of a turn back along the axis"
+        );
+        assert!(matches!(
+            interlaced.elements().last(),
+            Some(kurbo::PathEl::LineTo(p)) if *p == compact_end
+        ));
     }
 
     #[test]

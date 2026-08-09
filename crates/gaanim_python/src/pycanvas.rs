@@ -3840,13 +3840,14 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (from, to, coils=8, amplitude=12.0))]
+    #[pyo3(signature = (from, to, coils=8, amplitude=12.0, crossing=0.0))]
     fn spring_between(
         &self,
         from: Bound<'_, PyAny>,
         to: Bound<'_, PyAny>,
         coils: usize,
         amplitude: f64,
+        crossing: f64,
     ) -> PyResult<PyDrawable> {
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
@@ -3854,7 +3855,7 @@ impl PyScene {
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .spring_between(from, to, coils, amplitude),
+                .spring_between_with_crossing(from, to, coils, amplitude, crossing),
         ))
     }
 

@@ -313,13 +313,14 @@ pub(crate) enum Op {
         from: CanvasEndpoint,
         to: CanvasEndpoint,
     },
-    /// Attach a spring whose endpoints follow entities or fixed positions.
+    /// Attach a helical spring whose endpoints follow entities or fixed positions.
     AttachTrackingSpring {
         target: ObjectId,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         coils: usize,
         amplitude: f64,
+        crossing: f64,
     },
     /// Attach a dynamic dimension line between two endpoints.
     AttachTrackingDimension {

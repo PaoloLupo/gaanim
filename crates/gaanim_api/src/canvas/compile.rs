@@ -2573,6 +2573,7 @@ impl Canvas {
                     to,
                     coils,
                     amplitude,
+                    crossing,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -2591,6 +2592,7 @@ impl Canvas {
                         let to = resolve_endpoint(to);
                         let coils = *coils;
                         let amplitude = *amplitude;
+                        let crossing = *crossing;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
                             let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
                                 TrackingEndpoint::Static(position) => *position,
@@ -2601,11 +2603,14 @@ impl Canvas {
                             };
                             let from = endpoint_position(&from);
                             let to = endpoint_position(&to);
+                            // Rebuild the projected helix every frame so an animated
+                            // endpoint changes the spring pitch in lockstep.
                             gaanim_objects::primitives::spring_path(
                                 Point::new(from.x, from.y),
                                 Point::new(to.x, to.y),
                                 coils,
                                 amplitude,
+                                crossing,
                             )
                         });
                         builder.commands.entity(st.entity).insert(redraw);

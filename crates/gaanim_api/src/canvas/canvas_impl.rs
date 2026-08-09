@@ -2128,16 +2128,32 @@ impl Canvas {
         handle
     }
 
-    /// Spawn a reactive zig-zag spring between two endpoints.
+    /// Spawn a reactive helical spring between two endpoints.
     ///
     /// Each endpoint can be static or follow a drawable. The path is rebuilt
-    /// natively after updaters and position bindings have run.
+    /// natively after updaters and position bindings have run, changing the
+    /// coil pitch as the endpoint distance changes.
     pub fn spring_between(
         &mut self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         coils: usize,
         amplitude: f64,
+    ) -> DrawableHandle {
+        self.spring_between_with_crossing(from, to, coils, amplitude, 0.0)
+    }
+
+    /// Spawn a reactive helical spring with optional e-like turn crossings.
+    ///
+    /// `crossing` is clamped to `[0, 1]`: zero produces ordinary sinusoidal
+    /// coils, while one folds each turn back along the spring axis briefly.
+    pub fn spring_between_with_crossing(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        coils: usize,
+        amplitude: f64,
+        crossing: f64,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
         let id = handle.id;
@@ -2152,6 +2168,7 @@ impl Canvas {
                 to,
                 coils,
                 amplitude,
+                crossing,
             });
         handle
     }
@@ -3166,13 +3183,14 @@ mod tests {
     }
 
     #[test]
-    fn reactive_spring_regenerates_a_zig_zag_path() {
+    fn reactive_spring_regenerates_a_helical_path() {
         let mut canvas = Canvas::new(1280, 720);
-        let _spring = canvas.spring_between(
+        let _spring = canvas.spring_between_with_crossing(
             crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(-80.0, 0.0, 0.0)),
             crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(80.0, 0.0, 0.0)),
             5,
             14.0,
+            0.7,
         );
 
         let mut world = World::new();
@@ -3192,8 +3210,8 @@ mod tests {
             .get::<gaanim_scene::Path2D>(spring)
             .expect("spring path");
         assert!(
-            path.0.elements().len() > 4,
-            "spring must have zig-zag segments"
+            path.0.elements().len() > 100,
+            "spring must have enough samples for a smooth helical coil"
         );
     }
 
