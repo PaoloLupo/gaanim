@@ -7,6 +7,10 @@ from gaanim import BLACK, GOLD, RED, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 
+# The reactive objects are declared after an earlier timeline interval. Their
+# updater and trail must still begin here, not at t=0.
+scene.wait(1.0)
+
 L = 220.0
 g = 980.0
 damping = 0.03
@@ -32,7 +36,11 @@ bob = (
 
 rod = scene.tracking_line(hinge, bob).no_fill().stroke(WHITE, 4)
 length = scene.dimension_between(hinge, bob, 25).stroke(RED, 2)
-trail = scene.traced_path(bob).no_fill().stroke(RED, 2)
+trail = (
+    scene.traced_path(bob, dissipating_time=2.0)
+    .no_fill()
+    .stroke(RED, 2)
+)
 
 
 def acceleration(theta, omega):
@@ -70,11 +78,21 @@ bob.add_updater_fn(
     fixed_dt=1.0 / 240.0,
 )
 
-scene.wait(8.0)
+# A traced path is hidden until its entrance is explicitly authored.
+scene.play(
+    [
+        hinge.fade_in(),
+        rod.fade_in(),
+        length.fade_in(),
+        trail.fade_in(),
+        bob.grow_from_center(0.5),
+    ]
+)
+scene.wait(7.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    scene.snapshots(snapshot_dir, [0.0, 1.0, 2.5, 5.0, 8.0])
+    scene.snapshots(snapshot_dir, [0.0, 1.0, 1.5, 3.0, 6.0, 9.0])
 
 export_path = os.environ.get("GAANIM_EXPORT")
 if export_path:

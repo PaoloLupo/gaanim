@@ -54,7 +54,7 @@ dot = scene.dot(10).fill(Color(255, 180, 70)).at(200, 0)
 dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
 trail = scene.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
 
-scene.play([dot.fade_in().duration(0.3), trail.create().duration(0.3)])
+scene.play([dot.fade_in().duration(0.3), trail.fade_in().duration(0.3)])
 scene.wait(4.0)
 dot.remove_updater()
 # Run this file with: gaanim reactive_path.py

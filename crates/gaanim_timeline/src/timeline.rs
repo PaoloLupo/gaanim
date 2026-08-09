@@ -18,6 +18,7 @@ struct ReactiveEntityState {
     updater_elapsed: Option<f64>,
     updater_stop_at: Option<f64>,
     traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
+    traced_path_sample_times: Option<Vec<f64>>,
     translation: Option<gaanim_core::glam::DVec3>,
 }
 
@@ -947,6 +948,11 @@ impl Timeline {
 
         self.update_presentation_position();
         self.restore_followed_shake_origin(world);
+        if let Some(mut playback_state) =
+            world.get_resource_mut::<gaanim_animation::PlaybackState>()
+        {
+            playback_state.current_time = self.current_time;
+        }
     }
 
     fn evaluate_gltf_animations(
@@ -1147,6 +1153,9 @@ fn capture_reactive_state(
                 traced_path_points: traced_path
                     .map(|t| t.points.clone())
                     .or_else(|| traced_3d.map(|t| t.points.clone())),
+                traced_path_sample_times: traced_path
+                    .map(|t| t.sample_times.clone())
+                    .or_else(|| traced_3d.map(|t| t.sample_times.clone())),
                 translation: updater
                     .is_some()
                     .then_some(transform.map(|t| t.translation))
@@ -1192,6 +1201,9 @@ fn restore_reactive_state(
         if let Some(points) = &state.traced_path_points {
             if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(entity) {
                 traced_path.points = points.clone();
+                if let Some(sample_times) = &state.traced_path_sample_times {
+                    traced_path.sample_times = sample_times.clone();
+                }
             }
             if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
                 let mut path = gaanim_core::kurbo::BezPath::new();
@@ -1209,6 +1221,9 @@ fn restore_reactive_state(
                 .and_then(|t| t.colormap.clone());
             if let Some(mut traced_3d) = world.get_mut::<gaanim_animation::TracedPath3D>(entity) {
                 traced_3d.points = points.clone();
+                if let Some(sample_times) = &state.traced_path_sample_times {
+                    traced_3d.sample_times = sample_times.clone();
+                }
             }
             if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(entity) {
                 let pts: Vec<[f32; 3]> = points
@@ -1302,14 +1317,31 @@ fn resync_updaters(world: &mut World, target_time: f64) {
 }
 
 fn rebuild_traced_paths(world: &mut World, target_time: f64) {
-    let traces: Vec<(Entity, Entity, f64, Option<usize>)> = {
+    let traces: Vec<(Entity, Entity, f64, Option<usize>, f64, Option<f64>)> = {
         let mut query = world.query::<(Entity, &gaanim_animation::TracedPath)>();
         query
             .iter(world)
-            .map(|(entity, trace)| (entity, trace.source, trace.min_distance, trace.max_points))
+            .map(|(entity, trace)| {
+                (
+                    entity,
+                    trace.source,
+                    trace.min_distance,
+                    trace.max_points,
+                    trace.start_at,
+                    trace.dissipating_time,
+                )
+            })
             .collect()
     };
-    let traces_3d: Vec<(Entity, Entity, f64, Option<usize>, Option<String>)> = {
+    let traces_3d: Vec<(
+        Entity,
+        Entity,
+        f64,
+        Option<usize>,
+        Option<String>,
+        f64,
+        Option<f64>,
+    )> = {
         let mut query = world.query::<(Entity, &gaanim_animation::TracedPath3D)>();
         query
             .iter(world)
@@ -1320,6 +1352,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
                     trace.min_distance,
                     trace.max_points,
                     trace.colormap.clone(),
+                    trace.start_at,
+                    trace.dissipating_time,
                 )
             })
             .collect()
@@ -1330,18 +1364,20 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         return;
     }
 
-    for (trace_entity, _, _, _) in &traces {
+    for (trace_entity, _, _, _, _, _) in &traces {
         if let Some(mut traced_path) = world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
         {
             traced_path.points.clear();
+            traced_path.sample_times.clear();
         }
         if let Some(mut path_comp) = world.get_mut::<Path2D>(*trace_entity) {
             path_comp.0 = std::sync::Arc::new(gaanim_core::kurbo::BezPath::new());
         }
     }
-    for (trace_entity, _, _, _, _) in &traces_3d {
+    for (trace_entity, _, _, _, _, _, _) in &traces_3d {
         if let Some(mut t) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity) {
             t.points.clear();
+            t.sample_times.clear();
         }
         if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
             line.points.clear();
@@ -1370,7 +1406,12 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         previous_sample_time = sample_time;
         gaanim_animation::position_binding_system(world);
 
-        for (trace_entity, source_entity, min_distance, max_points) in &traces {
+        for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in
+            &traces
+        {
+            if sample_time + f64::EPSILON < *start_at {
+                continue;
+            }
             let Some(source_pos) = world
                 .get::<SpatialTransform>(*source_entity)
                 .map(|t| t.translation)
@@ -1381,6 +1422,14 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             if let Some(mut traced_path) =
                 world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
             {
+                if let Some(duration) = dissipating_time {
+                    let cutoff = sample_time - duration;
+                    let expired = traced_path
+                        .sample_times
+                        .partition_point(|time| *time < cutoff);
+                    traced_path.points.drain(0..expired);
+                    traced_path.sample_times.drain(0..expired);
+                }
                 let should_add = match traced_path.points.last() {
                     Some(last_point) => last_point.distance(source_pos) >= *min_distance,
                     None => true,
@@ -1388,15 +1437,30 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
 
                 if should_add {
                     traced_path.points.push(source_pos);
+                    traced_path.sample_times.push(sample_time);
                     if let Some(max) = max_points {
                         if traced_path.points.len() > *max {
-                            traced_path.points.remove(0);
+                            let overflow = traced_path.points.len() - *max;
+                            traced_path.points.drain(0..overflow);
+                            traced_path.sample_times.drain(0..overflow);
                         }
                     }
                 }
             }
         }
-        for (trace_entity, source_entity, min_distance, max_points, _colormap) in &traces_3d {
+        for (
+            trace_entity,
+            source_entity,
+            min_distance,
+            max_points,
+            _colormap,
+            start_at,
+            dissipating_time,
+        ) in &traces_3d
+        {
+            if sample_time + f64::EPSILON < *start_at {
+                continue;
+            }
             let Some(source_pos) = world
                 .get::<SpatialTransform>(*source_entity)
                 .map(|t| t.translation)
@@ -1405,16 +1469,24 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             };
             if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity)
             {
+                if let Some(duration) = dissipating_time {
+                    let cutoff = sample_time - duration;
+                    let expired = traced.sample_times.partition_point(|time| *time < cutoff);
+                    traced.points.drain(0..expired);
+                    traced.sample_times.drain(0..expired);
+                }
                 let should_add = match traced.points.last() {
                     Some(last) => last.distance(source_pos) >= *min_distance,
                     None => true,
                 };
                 if should_add {
                     traced.points.push(source_pos);
+                    traced.sample_times.push(sample_time);
                     if let Some(max) = max_points {
                         if traced.points.len() > *max {
                             let overflow = traced.points.len() - *max;
                             traced.points.drain(0..overflow);
+                            traced.sample_times.drain(0..overflow);
                         }
                     }
                 }
@@ -1422,7 +1494,7 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         }
     }
 
-    for (trace_entity, _, _, _) in &traces {
+    for (trace_entity, _, _, _, _, _) in &traces {
         let points = world
             .get::<gaanim_animation::TracedPath>(*trace_entity)
             .map(|trace| trace.points.clone())
@@ -1439,7 +1511,7 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         }
     }
     // Rebuild 3D traced paths (LineList + vertex colors + bounds)
-    for (trace_entity, _, _, _, colormap) in &traces_3d {
+    for (trace_entity, _, _, _, colormap, _, _) in &traces_3d {
         let (points, colormap_clone) = world
             .get::<gaanim_animation::TracedPath3D>(*trace_entity)
             .map(|t| (t.points.clone(), t.colormap.clone()))
@@ -1895,6 +1967,7 @@ mod tests {
         world.insert_resource(gaanim_animation::PlaybackState {
             is_playing: false,
             scaled_dt: 0.0,
+            current_time: 0.0,
         });
         let object_id = ObjectId::from_raw(0);
         let updater = gaanim_animation::Updater::new_simulation(
@@ -1931,6 +2004,75 @@ mod tests {
         timeline.seek(&mut world, 0.1);
         let rewound = world.get::<SpatialTransform>(entity).unwrap().translation.x;
         assert!((rewound - first).abs() < 1e-12);
+    }
+
+    #[test]
+    fn traced_path_seek_respects_start_and_dissipating_window() {
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+
+        let source_id = ObjectId::from_raw(0);
+        let trace_id = ObjectId::from_raw(1);
+        let updater = gaanim_animation::Updater::new_simulation(
+            |dt, _elapsed, entity, world| {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x += dt;
+                }
+                true
+            },
+            |_entity, _world| true,
+            1.0 / 240.0,
+        )
+        .unwrap()
+        .starting_at(1.0);
+        let source = world
+            .spawn((MobjectId(source_id), SpatialTransform::default(), updater))
+            .id();
+        let traced_path = gaanim_animation::TracedPath::new(source, 0.01, None)
+            .starting_at(1.0)
+            .with_dissipating_time(Some(1.0));
+        let trace = world
+            .spawn((
+                MobjectId(trace_id),
+                SpatialTransform::default(),
+                Path2D(Arc::new(BezPath::new())),
+                traced_path,
+            ))
+            .id();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 3.0;
+        timeline.add_keyframe(0.0, snapshot);
+
+        timeline.seek(&mut world, 0.5);
+        assert!(
+            world
+                .get::<gaanim_animation::TracedPath>(trace)
+                .unwrap()
+                .points
+                .is_empty()
+        );
+
+        timeline.seek(&mut world, 2.5);
+        let at_two_and_a_half = world
+            .get::<gaanim_animation::TracedPath>(trace)
+            .unwrap()
+            .sample_times
+            .clone();
+        assert!(!at_two_and_a_half.is_empty());
+        assert!(at_two_and_a_half.iter().all(|time| *time >= 1.5 - 1e-9));
+        assert!(at_two_and_a_half.iter().all(|time| *time <= 2.5 + 1e-9));
+
+        timeline.seek(&mut world, 1.5);
+        timeline.seek(&mut world, 2.5);
+        assert_eq!(
+            world
+                .get::<gaanim_animation::TracedPath>(trace)
+                .unwrap()
+                .sample_times,
+            at_two_and_a_half
+        );
     }
 
     #[test]

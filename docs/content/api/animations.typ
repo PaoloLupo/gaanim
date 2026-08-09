@@ -414,7 +414,7 @@ scene.transform_matching_tex(e1, e2, duration=1.6)
     (name: "fixed_dt", type: "float | None", default: "None", desc: [Positive simulation step in seconds.]),
   ),
   returns: (type: "Drawable", desc: [The same drawable for fluent chaining.]),
-  desc: [Pass `reset` and `fixed_dt` together for physics or any incremental state. Gaanim restores the drawable's initial local position, calls `reset()`, and replays constant substeps after random seeks and during export. A callback without that pair is intended for lightweight frame or absolute-time behavior. Invalid coordinates or callback exceptions stop the updater.],
+  desc: [Pass `reset` and `fixed_dt` together for physics or any incremental state. The updater starts at the timeline cursor where `add_updater_fn` is authored; it does not evolve during earlier segments. Gaanim restores the drawable's initial local position, calls `reset()`, and replays constant substeps after random seeks and during export. A callback without that pair is intended for lightweight frame or absolute-time behavior. Invalid coordinates or callback exceptions stop the updater.],
 )[
 ```python
 # show-code: true

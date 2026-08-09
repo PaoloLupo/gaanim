@@ -1090,6 +1090,7 @@ impl Canvas {
                 }
                 Op::Spawn(spec) => {
                     let spec = spec.lock().expect("object spec poisoned").clone();
+                    let requires_explicit_entry = matches!(&spec.kind, SpawnKind::TracedPathLine);
                     let actual = Self::spawn_one(
                         builder,
                         &spec,
@@ -1103,7 +1104,11 @@ impl Canvas {
                     // Compilation creates every entity up front so arbitrary timeline seeks
                     // remain possible. An object declared after earlier animations must still
                     // stay hidden until the playhead reaches its declaration point.
-                    if active_slide.is_none()
+                    if requires_explicit_entry {
+                        if let Some(state) = builder.states.get(actual.id).cloned() {
+                            builder.hide_visuals_now(&state);
+                        }
+                    } else if active_slide.is_none()
                         && !transform_targets.contains(&spec.id)
                         && builder.current_time > scene_start + 1e-9
                         && let Some(state) = builder.states.get(actual.id).cloned()
@@ -1123,7 +1128,7 @@ impl Canvas {
                             .is_some_and(|targets| targets.contains(&spec.id));
                         if let Some(state) = builder.states.get(actual.id).cloned() {
                             builder.hide_visuals_now(&state);
-                            if !has_explicit_entry {
+                            if !has_explicit_entry && !requires_explicit_entry {
                                 builder.schedule_show_now(actual.id);
                             }
                         }
@@ -2407,7 +2412,10 @@ impl Canvas {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let updater: Updater = preset.clone().into_updater();
+                        let updater: Updater = preset
+                            .clone()
+                            .into_updater()
+                            .starting_at(builder.current_time);
                         builder.commands.entity(st.entity).insert(updater);
                     }
                 }
@@ -2423,13 +2431,16 @@ impl Canvas {
                     source,
                     min_distance,
                     max_points,
+                    dissipating_time,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(source_id) = id_map.get(source).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(source_st) = builder.states.get(source_id)
                     {
-                        let traced = TracedPath::new(source_st.entity, *min_distance, *max_points);
+                        let traced = TracedPath::new(source_st.entity, *min_distance, *max_points)
+                            .starting_at(builder.current_time)
+                            .with_dissipating_time(*dissipating_time);
                         builder.commands.entity(target_st.entity).insert(traced);
                     }
                 }
@@ -2705,7 +2716,7 @@ impl Canvas {
                         builder
                             .commands
                             .entity(state.entity)
-                            .insert(updater.clone());
+                            .insert(updater.clone().starting_at(builder.current_time));
                     }
                 }
                 Op::AttachTracedPath3D {
@@ -2714,6 +2725,7 @@ impl Canvas {
                     min_distance,
                     max_points,
                     colormap,
+                    dissipating_time,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(source_id) = id_map.get(source).copied()
@@ -2725,7 +2737,9 @@ impl Canvas {
                             *min_distance,
                             *max_points,
                             colormap.clone(),
-                        );
+                        )
+                        .starting_at(builder.current_time)
+                        .with_dissipating_time(*dissipating_time);
                         builder.commands.entity(target_st.entity).insert(comp);
                     }
                 }

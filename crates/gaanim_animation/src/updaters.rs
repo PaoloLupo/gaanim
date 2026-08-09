@@ -14,6 +14,8 @@ type UpdaterResetFn = Arc<dyn Fn(Entity, &mut World) -> bool + Send + Sync>;
 pub struct PlaybackState {
     pub is_playing: bool,
     pub scaled_dt: f64,
+    /// Posición absoluta del cabezal de la timeline.
+    pub current_time: f64,
 }
 
 impl Default for PlaybackState {
@@ -21,6 +23,7 @@ impl Default for PlaybackState {
         Self {
             is_playing: true,
             scaled_dt: 0.0,
+            current_time: 0.0,
         }
     }
 }
@@ -33,8 +36,10 @@ pub struct Updater {
     /// la entidad del updater y acceso exclusivo al World de Bevy.
     /// Retorna `true` para seguir ejecutándose, `false` para ser removido automáticamente.
     pub func: UpdaterFn,
-    /// Tiempo total acumulado desde que se añadió este updater.
+    /// Posición absoluta de la timeline alcanzada por este updater.
     pub elapsed: f64,
+    /// Instante absoluto a partir del cual comienza a ejecutarse.
+    pub start_at: f64,
     /// Tiempo de corte opcional: a partir de aquí el updater queda congelado.
     pub stop_at: Option<f64>,
     /// Si es verdadero, el updater se pausa si la simulación está pausada.
@@ -56,6 +61,7 @@ impl std::fmt::Debug for Updater {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Updater")
             .field("elapsed", &self.elapsed)
+            .field("start_at", &self.start_at)
             .field("stop_at", &self.stop_at)
             .field("time_based", &self.time_based)
             .field("fixed_dt", &self.fixed_dt)
@@ -79,6 +85,7 @@ impl Updater {
         Self {
             func: Arc::new(func),
             elapsed: 0.0,
+            start_at: 0.0,
             stop_at: None,
             time_based: true,
             fixed_dt: None,
@@ -107,6 +114,7 @@ impl Updater {
         Ok(Self {
             func: Arc::new(func),
             elapsed: 0.0,
+            start_at: 0.0,
             stop_at: None,
             time_based: true,
             fixed_dt: Some(fixed_dt),
@@ -115,6 +123,17 @@ impl Updater {
             reset: Some(Arc::new(reset)),
             initial_translation: None,
         })
+    }
+
+    /// Desplaza el inicio del updater a un instante absoluto de la timeline.
+    #[doc(hidden)]
+    pub fn starting_at(mut self, start_at: f64) -> Self {
+        self.start_at = if start_at.is_finite() {
+            start_at.max(0.0)
+        } else {
+            0.0
+        };
+        self
     }
 }
 
@@ -187,8 +206,11 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
         } else {
             previous_elapsed + dt
         };
-        let effective_dt = (next_elapsed - previous_elapsed).max(0.0);
         updater.elapsed = next_elapsed;
+
+        let previous_active_elapsed = (previous_elapsed - updater.start_at).max(0.0);
+        let next_active_elapsed = (next_elapsed - updater.start_at).max(0.0);
+        let effective_dt = (next_active_elapsed - previous_active_elapsed).max(0.0);
 
         if let Some(fixed_dt) = updater.fixed_dt {
             let total = updater.accumulator + effective_dt;
@@ -207,14 +229,14 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
                     steps,
                 });
             }
-        } else {
+        } else if next_elapsed + f64::EPSILON >= updater.start_at {
             jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
                 reset: None,
                 reset_translation: None,
                 dt: effective_dt,
-                first_elapsed: next_elapsed,
+                first_elapsed: next_active_elapsed,
                 steps: 1,
             });
         }
@@ -242,14 +264,15 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
             .map(|stop_at| target_time.min(stop_at))
             .unwrap_or(target_time);
         updater.elapsed = elapsed;
+        let active_elapsed = (elapsed - updater.start_at).max(0.0);
 
         if let Some(fixed_dt) = updater.fixed_dt {
             if updater.initial_translation.is_none() {
                 updater.initial_translation = transform.map(|transform| transform.translation);
             }
-            let steps = fixed_step_count(elapsed, fixed_dt);
+            let steps = fixed_step_count(active_elapsed, fixed_dt);
             updater.simulation_elapsed = steps as f64 * fixed_dt;
-            updater.accumulator = (elapsed - updater.simulation_elapsed).max(0.0);
+            updater.accumulator = (active_elapsed - updater.simulation_elapsed).max(0.0);
             jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
@@ -259,14 +282,14 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
                 first_elapsed: fixed_dt,
                 steps,
             });
-        } else {
+        } else if elapsed + f64::EPSILON >= updater.start_at {
             jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
                 reset: None,
                 reset_translation: None,
                 dt: 0.0,
-                first_elapsed: elapsed,
+                first_elapsed: active_elapsed,
                 steps: 1,
             });
         }
@@ -427,12 +450,16 @@ pub struct TracedPath {
     pub source: Entity,
     /// Historial de puntos acumulados.
     pub points: Vec<DVec3>,
+    /// Instante absoluto asociado a cada punto acumulado.
+    pub sample_times: Vec<f64>,
     /// Límite máximo de puntos a conservar (None para ilimitados).
     pub max_points: Option<usize>,
     /// Distancia mínima para añadir un nuevo punto.
     pub min_distance: f64,
-    /// Tasa de disipación.
-    pub dissipation: f64,
+    /// Instante absoluto a partir del cual comienza el rastro.
+    pub start_at: f64,
+    /// Tiempo de vida de cada punto. `None` conserva el historial completo.
+    pub dissipating_time: Option<f64>,
 }
 
 impl TracedPath {
@@ -441,15 +468,67 @@ impl TracedPath {
         Self {
             source,
             points: Vec::new(),
+            sample_times: Vec::new(),
             max_points,
             min_distance,
-            dissipation: 0.0,
+            start_at: 0.0,
+            dissipating_time: None,
         }
     }
+
+    /// Desplaza el inicio del rastro a un instante absoluto de la timeline.
+    #[doc(hidden)]
+    pub fn starting_at(mut self, start_at: f64) -> Self {
+        self.start_at = start_at.max(0.0);
+        self
+    }
+
+    /// Limita el historial a una ventana temporal móvil.
+    pub fn with_dissipating_time(mut self, dissipating_time: Option<f64>) -> Self {
+        self.dissipating_time = dissipating_time;
+        self
+    }
+}
+
+fn path_from_points(points: &[DVec3]) -> BezPath {
+    let mut path = BezPath::new();
+    if let Some(first) = points.first() {
+        path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+        for point in &points[1..] {
+            path.line_to(gaanim_core::kurbo::Point::new(point.x, point.y));
+        }
+    }
+    path
+}
+
+fn expire_samples(
+    points: &mut Vec<DVec3>,
+    sample_times: &mut Vec<f64>,
+    current_time: f64,
+    dissipating_time: Option<f64>,
+) -> bool {
+    if sample_times.len() != points.len() {
+        sample_times.resize(points.len(), current_time);
+    }
+    let Some(dissipating_time) = dissipating_time else {
+        return false;
+    };
+    let cutoff = current_time - dissipating_time;
+    let expired = sample_times.partition_point(|sample_time| *sample_time < cutoff);
+    if expired == 0 {
+        return false;
+    }
+    points.drain(0..expired);
+    sample_times.drain(0..expired);
+    true
 }
 
 /// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.
 pub fn traced_path_system(world: &mut World) {
+    let current_time = world
+        .get_resource::<PlaybackState>()
+        .map(|state| state.current_time)
+        .unwrap_or(0.0);
     // 1. Extraemos de forma inmutable los datos de los TracedPath que necesitamos
     let mut trace_jobs = Vec::new();
     let mut query = world.query::<(Entity, &TracedPath)>();
@@ -459,46 +538,57 @@ pub fn traced_path_system(world: &mut World) {
             traced_path.source,
             traced_path.min_distance,
             traced_path.max_points,
+            traced_path.start_at,
+            traced_path.dissipating_time,
         ));
     }
 
     let mut trace_updates = Vec::new();
 
     // 2. Procesamos cada trace_job consultando el world de forma secuencial y limpia
-    for (trace_entity, source_entity, min_distance, max_points) in trace_jobs {
+    for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in
+        trace_jobs
+    {
         let source_pos = world
             .get::<SpatialTransform>(source_entity)
             .map(|t| t.translation);
 
-        if let Some(pos) = source_pos {
-            // Obtenemos acceso mutable al TracedPath específico de forma aislada
-            if let Some(mut traced_path) = world.get_mut::<TracedPath>(trace_entity) {
-                let should_add = match traced_path.points.last() {
-                    Some(last_point) => last_point.distance(pos) >= min_distance,
-                    None => true,
+        // Obtenemos acceso mutable al TracedPath específico de forma aislada
+        if let Some(mut traced_path) = world.get_mut::<TracedPath>(trace_entity) {
+            let mut changed = false;
+            if current_time + f64::EPSILON < start_at {
+                changed = !traced_path.points.is_empty();
+                traced_path.points.clear();
+                traced_path.sample_times.clear();
+            } else {
+                let (points, sample_times) = {
+                    let traced_path = &mut *traced_path;
+                    (&mut traced_path.points, &mut traced_path.sample_times)
                 };
+                changed |= expire_samples(points, sample_times, current_time, dissipating_time);
 
-                if should_add {
-                    traced_path.points.push(pos);
-                    if let Some(max) = max_points {
-                        if traced_path.points.len() > max {
-                            traced_path.points.remove(0);
+                if let Some(pos) = source_pos {
+                    let should_add = match traced_path.points.last() {
+                        Some(last_point) => last_point.distance(pos) >= min_distance,
+                        None => true,
+                    };
+
+                    if should_add {
+                        traced_path.points.push(pos);
+                        traced_path.sample_times.push(current_time);
+                        changed = true;
+                        if let Some(max) = max_points {
+                            if traced_path.points.len() > max {
+                                let overflow = traced_path.points.len() - max;
+                                traced_path.points.drain(0..overflow);
+                                traced_path.sample_times.drain(0..overflow);
+                            }
                         }
                     }
-
-                    // Regenerar el path
-                    let mut path = gaanim_core::kurbo::BezPath::new();
-                    if !traced_path.points.is_empty() {
-                        path.move_to(gaanim_core::kurbo::Point::new(
-                            traced_path.points[0].x,
-                            traced_path.points[0].y,
-                        ));
-                        for pt in &traced_path.points[1..] {
-                            path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
-                        }
-                    }
-                    trace_updates.push((trace_entity, path));
                 }
+            }
+            if changed {
+                trace_updates.push((trace_entity, path_from_points(&traced_path.points)));
             }
         }
     }
@@ -523,9 +613,12 @@ pub fn traced_path_system(world: &mut World) {
 pub struct TracedPath3D {
     pub source: Entity,
     pub points: Vec<DVec3>,
+    pub sample_times: Vec<f64>,
     pub max_points: Option<usize>,
     pub min_distance: f64,
     pub colormap: Option<String>,
+    pub start_at: f64,
+    pub dissipating_time: Option<f64>,
 }
 
 impl TracedPath3D {
@@ -538,10 +631,24 @@ impl TracedPath3D {
         Self {
             source,
             points: Vec::new(),
+            sample_times: Vec::new(),
             max_points,
             min_distance,
             colormap,
+            start_at: 0.0,
+            dissipating_time: None,
         }
+    }
+
+    #[doc(hidden)]
+    pub fn starting_at(mut self, start_at: f64) -> Self {
+        self.start_at = start_at.max(0.0);
+        self
+    }
+
+    pub fn with_dissipating_time(mut self, dissipating_time: Option<f64>) -> Self {
+        self.dissipating_time = dissipating_time;
+        self
     }
 }
 
@@ -596,46 +703,69 @@ fn colormap_rgba(name: &str, t: f32) -> [f32; 4] {
 
 /// Sistema que actualiza `LineListData` para cada `TracedPath3D`.
 pub fn traced_path_3d_system(world: &mut World) {
+    let current_time = world
+        .get_resource::<PlaybackState>()
+        .map(|state| state.current_time)
+        .unwrap_or(0.0);
     // Snapshot jobs
-    let mut jobs: Vec<(Entity, Entity, f64, Option<usize>)> = Vec::new();
+    let mut jobs: Vec<(Entity, Entity, f64, Option<usize>, f64, Option<f64>)> = Vec::new();
     let mut query = world.query::<(Entity, &TracedPath3D)>();
     for (e, t) in query.iter(world) {
-        jobs.push((e, t.source, t.min_distance, t.max_points));
+        jobs.push((
+            e,
+            t.source,
+            t.min_distance,
+            t.max_points,
+            t.start_at,
+            t.dissipating_time,
+        ));
     }
-    for (trace_entity, source_entity, min_distance, max_points) in jobs {
+    for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in jobs
+    {
         let source_pos = world
             .get::<SpatialTransform>(source_entity)
             .map(|t| t.translation);
-        if let Some(pos) = source_pos {
-            // Check and push
-            let should_push = {
-                if let Some(tp) = world.get::<TracedPath3D>(trace_entity) {
-                    match tp.points.last() {
+
+        // Mutate TracedPath3D points and expire the old tail even if the source
+        // did not move enough to add a new sample.
+        let update = {
+            if let Some(mut tp) = world.get_mut::<TracedPath3D>(trace_entity) {
+                let mut changed = false;
+                if current_time + f64::EPSILON < start_at {
+                    changed = !tp.points.is_empty();
+                    tp.points.clear();
+                    tp.sample_times.clear();
+                } else {
+                    let (points, sample_times) = {
+                        let tp = &mut *tp;
+                        (&mut tp.points, &mut tp.sample_times)
+                    };
+                    changed |= expire_samples(points, sample_times, current_time, dissipating_time);
+                    let should_push = source_pos.is_some_and(|pos| match tp.points.last() {
                         Some(last) => last.distance(pos) >= min_distance,
                         None => true,
-                    }
-                } else {
-                    false
-                }
-            };
-            if !should_push {
-                continue;
-            }
-            // Mutate TracedPath3D points
-            let (points_snapshot, colormap_clone) = {
-                if let Some(mut tp) = world.get_mut::<TracedPath3D>(trace_entity) {
-                    tp.points.push(pos);
-                    if let Some(max) = max_points {
-                        if tp.points.len() > max {
-                            let overflow = tp.points.len() - max;
-                            tp.points.drain(0..overflow);
+                    });
+                    if should_push {
+                        let pos = source_pos.expect("checked above");
+                        tp.points.push(pos);
+                        tp.sample_times.push(current_time);
+                        changed = true;
+                        if let Some(max) = max_points {
+                            if tp.points.len() > max {
+                                let overflow = tp.points.len() - max;
+                                tp.points.drain(0..overflow);
+                                tp.sample_times.drain(0..overflow);
+                            }
                         }
                     }
-                    (tp.points.clone(), tp.colormap.clone())
-                } else {
-                    continue;
                 }
-            };
+                changed.then(|| (tp.points.clone(), tp.colormap.clone()))
+            } else {
+                None
+            }
+        };
+
+        if let Some((points_snapshot, colormap_clone)) = update {
             // Build LineList points and optional vertex colors
             let line_points: Vec<[f32; 3]> = points_snapshot
                 .iter()
@@ -790,6 +920,79 @@ mod tests {
 
         seek_updaters(&mut world, 0.5);
         assert!((x(&world, entity) - first_half_second).abs() < 1e-12);
+    }
+
+    #[test]
+    fn simulation_waits_for_its_authored_start_time() {
+        let mut world = World::new();
+        let entity = spawn_accelerating_simulation(&mut world, 0.01);
+        let updater = world
+            .get::<Updater>(entity)
+            .unwrap()
+            .clone()
+            .starting_at(2.0);
+        world.entity_mut(entity).insert(updater);
+
+        seek_updaters(&mut world, 1.5);
+        assert_eq!(x(&world, entity), 0.0);
+
+        seek_updaters(&mut world, 2.5);
+        let after_half_second = x(&world, entity);
+        assert!(after_half_second > 0.0);
+
+        seek_updaters(&mut world, 1.0);
+        assert_eq!(x(&world, entity), 0.0);
+
+        seek_updaters(&mut world, 2.5);
+        assert!((x(&world, entity) - after_half_second).abs() < 1e-12);
+    }
+
+    #[test]
+    fn traced_path_starts_at_its_cursor_and_expires_old_samples() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+        let source = world.spawn(SpatialTransform::default()).id();
+        let traced_path = TracedPath::new(source, 0.1, None)
+            .starting_at(1.0)
+            .with_dissipating_time(Some(1.0));
+        let trace = world
+            .spawn((traced_path, Path2D(Arc::new(BezPath::new()))))
+            .id();
+
+        world.resource_mut::<PlaybackState>().current_time = 0.5;
+        traced_path_system(&mut world);
+        assert!(world.get::<TracedPath>(trace).unwrap().points.is_empty());
+
+        world.resource_mut::<PlaybackState>().current_time = 1.0;
+        traced_path_system(&mut world);
+        assert_eq!(world.get::<TracedPath>(trace).unwrap().sample_times, [1.0]);
+
+        world
+            .get_mut::<SpatialTransform>(source)
+            .unwrap()
+            .translation
+            .x = 1.0;
+        world.resource_mut::<PlaybackState>().current_time = 1.5;
+        traced_path_system(&mut world);
+
+        world
+            .get_mut::<SpatialTransform>(source)
+            .unwrap()
+            .translation
+            .x = 2.0;
+        world.resource_mut::<PlaybackState>().current_time = 2.1;
+        traced_path_system(&mut world);
+
+        let traced_path = world.get::<TracedPath>(trace).unwrap();
+        assert_eq!(traced_path.sample_times, [1.5, 2.1]);
+        assert_eq!(
+            traced_path
+                .points
+                .iter()
+                .map(|point| point.x)
+                .collect::<Vec<_>>(),
+            [1.0, 2.0]
+        );
     }
 
     #[test]

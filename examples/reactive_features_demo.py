@@ -22,7 +22,7 @@ def main():
     scene.play([
         title.write().duration(1.0),
         orbiting_dot.grow_from_center().duration(0.5),
-        trail.create().duration(0.5),
+        trail.fade_in().duration(0.5),
         radius.create().duration(0.5),
         bobbing_dot.grow_from_center().duration(0.5),
         pulsing_square.create().duration(0.5),

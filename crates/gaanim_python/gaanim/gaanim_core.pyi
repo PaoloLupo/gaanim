@@ -2461,11 +2461,23 @@ class Scene:
             result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
         """
         ...
-    def traced_path(self, source: Drawable) -> Drawable:
-        """Create a traced path drawable in the scene.
+    def traced_path(
+        self,
+        source: Drawable,
+        *,
+        dissipating_time: Optional[float] = None,
+        max_points: Optional[int] = None,
+        min_distance: float = 1.0,
+    ) -> Drawable:
+        """Trace a moving drawable's position.
+
+        ``dissipating_time`` makes samples expire after the given number of
+        seconds. ``max_points`` caps retained samples and ``min_distance``
+        filters nearby samples. The trail remains hidden until a ``fade_in``
+        animation is included in ``scene.play(...)``.
 
         Example:
-            result = scene.traced_path(source)
+            result = scene.traced_path(source, dissipating_time=2.0)
         """
         ...
     def traced_path_3d(
@@ -2473,12 +2485,14 @@ class Scene:
         source: Drawable,
         *,
         colormap: Optional[str] = None,
+        dissipating_time: Optional[float] = None,
         max_points: Optional[int] = None,
         min_distance: float = 0.1,
     ) -> Drawable:
         """Trace a moving drawable's 3D world-space position.
 
-        ``max_points`` limits retained samples. ``min_distance`` ignores
+        ``dissipating_time`` makes samples expire after the given number of
+        seconds. ``max_points`` limits retained samples. ``min_distance`` ignores
         samples that are closer than the given world-space distance. Supported
         colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
 

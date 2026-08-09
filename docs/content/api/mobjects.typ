@@ -549,7 +549,11 @@ trail = scene.traced_path_3d(dot, colormap="viridis", max_points=120)
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=100.0, duration=0.0)
 scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
-scene.play([axes.create().duration(0.8), path.create().duration(0.8), dot.fade_in().duration(0.4)])
+scene.play([
+    axes.create().duration(0.8),
+    path.create().duration(0.8),
+    dot.fade_in().duration(0.4),
+])
 scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=0.8)
 scene.camera.dolly(factor=0.85, duration=0.5)
 scene.wait(0.5)
@@ -599,17 +603,36 @@ label = scene.text("origin").at_3d(0, 0, 0.5).billboard()
 ]
 
 #api-entry(
+  name: "Scene.traced_path",
+  kind: "factory",
+  signature: "traced_path(source, *, dissipating_time=None, max_points=None, min_distance=1.0) -> Drawable",
+  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose position is sampled.]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "1.0", desc: [Minimum scene-space distance between samples.]),),
+  returns: (type: "Drawable", desc: [Reactive 2D trail, hidden until `fade_in` reveals it.]),
+  desc: [Sampling begins at the timeline cursor where the trail is declared, so earlier segments and seeks cannot pre-fill it. Add `trail.fade_in()` to `scene.play(...)` to reveal it. With `dissipating_time`, samples expire from the tail in editor playback, random seeks, snapshots, and exports.],
+)[
+```python
+from gaanim import RED
+
+dot = scene.dot(7).at(120, 0)
+trail = scene.traced_path(dot, dissipating_time=2.0).stroke(RED, 3).no_fill()
+scene.play([trail.fade_in()])
+```
+]
+
+#api-entry(
   name: "Scene.traced_path_3d",
   kind: "factory",
-  signature: "traced_path_3d(source, *, colormap=None, max_points=None, min_distance=0.1) -> Drawable",
-  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose world-space position is sampled.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "0.1", desc: [Minimum world-space distance between samples.]),),
+  signature: "traced_path_3d(source, *, colormap=None, dissipating_time=None, max_points=None, min_distance=0.1) -> Drawable",
+  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose world-space position is sampled.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "0.1", desc: [Minimum world-space distance between samples.]),),
   returns: (type: "Drawable", desc: [Reactive 3D trail.]),
-  desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. `max_points=...` limits memory and `min_distance` filters nearly identical samples.],
+  desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. Sampling starts where the trail is declared. `dissipating_time` expires the old tail, `max_points` limits memory, and `min_distance` filters nearly identical samples.],
 )[
 ```python
 dot = scene.dot(7).at_3d(1, 0, 0)
 dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
-trail = scene.traced_path_3d(dot, colormap="viridis", max_points=600)
+trail = scene.traced_path_3d(
+    dot, colormap="viridis", dissipating_time=2.0, max_points=600
+)
 ```
 ]
 

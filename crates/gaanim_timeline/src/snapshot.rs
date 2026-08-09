@@ -54,6 +54,9 @@ pub struct EntitySnapshot {
     pub fill_draw_progress: Option<f32>,
     /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
     pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
+    /// Timeline timestamps paired with `traced_path_points`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub traced_path_sample_times: Option<Vec<f64>>,
     /// Whether the entity is a group container.
     pub is_group: bool,
     /// Propagated global spatial transform.
@@ -148,11 +151,13 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         && let Some(mut traced_path) = entity_mut.get_mut::<gaanim_animation::TracedPath>()
     {
         traced_path.points = points.clone();
+        traced_path.sample_times = snap.traced_path_sample_times.clone().unwrap_or_default();
     }
     // 3D traced path — generic, handles inferno/viridis/plasma colormaps
     if let Some(points) = &snap.traced_path_points {
         if let Some(mut traced_3d) = entity_mut.get_mut::<gaanim_animation::TracedPath3D>() {
             traced_3d.points = points.clone();
+            traced_3d.sample_times = snap.traced_path_sample_times.clone().unwrap_or_default();
         }
         let colormap_opt = entity_mut
             .get::<gaanim_animation::TracedPath3D>()
@@ -354,6 +359,14 @@ impl WorldSnapshot {
                             world
                                 .get::<gaanim_animation::TracedPath3D>(entity)
                                 .map(|t| t.points.clone())
+                        }),
+                    traced_path_sample_times: world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .map(|t| t.sample_times.clone())
+                        .or_else(|| {
+                            world
+                                .get::<gaanim_animation::TracedPath3D>(entity)
+                                .map(|t| t.sample_times.clone())
                         }),
                     is_group,
                     global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),

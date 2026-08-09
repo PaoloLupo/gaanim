@@ -287,6 +287,7 @@ pub(crate) enum Op {
         source: ObjectId,
         min_distance: f64,
         max_points: Option<usize>,
+        dissipating_time: Option<f64>,
     },
     /// Attach a PositionBinding — copy source axes to target each frame.
     AttachPositionBinding {
@@ -364,6 +365,7 @@ pub(crate) enum Op {
         min_distance: f64,
         max_points: Option<usize>,
         colormap: Option<String>,
+        dissipating_time: Option<f64>,
     },
 }
 

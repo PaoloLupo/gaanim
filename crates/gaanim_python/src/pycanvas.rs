@@ -3596,22 +3596,11 @@ impl PyScene {
         )
     }
 
-    fn traced_path(&self, source: &PyDrawable) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .traced_path(&source.0),
-        )
-    }
-
-    /// 3D traced path — accumulates the 3D world position of `source` as a `LineList`.
-    /// `colormap` may be "inferno", "viridis" or "plasma" to color by time (like Makie).
-    #[pyo3(signature = (source, *, colormap=None, max_points=None, min_distance=0.1))]
-    fn traced_path_3d(
+    #[pyo3(signature = (source, *, dissipating_time=None, max_points=None, min_distance=1.0))]
+    fn traced_path(
         &self,
         source: &PyDrawable,
-        colormap: Option<String>,
+        dissipating_time: Option<f64>,
         max_points: Option<usize>,
         min_distance: f64,
     ) -> PyResult<PyDrawable> {
@@ -3627,6 +3616,51 @@ impl PyScene {
                 ));
             }
         }
+        if let Some(duration) = dissipating_time {
+            if !duration.is_finite() || duration <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "dissipating_time must be finite and greater than zero",
+                ));
+            }
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .traced_path_with_options(&source.0, dissipating_time, max_points, min_distance),
+        ))
+    }
+
+    /// 3D traced path — accumulates the 3D world position of `source` as a `LineList`.
+    /// `colormap` may be "inferno", "viridis" or "plasma" to color by time (like Makie).
+    #[pyo3(signature = (source, *, colormap=None, dissipating_time=None, max_points=None, min_distance=0.1))]
+    fn traced_path_3d(
+        &self,
+        source: &PyDrawable,
+        colormap: Option<String>,
+        dissipating_time: Option<f64>,
+        max_points: Option<usize>,
+        min_distance: f64,
+    ) -> PyResult<PyDrawable> {
+        if !min_distance.is_finite() || min_distance < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "min_distance must be finite and non-negative",
+            ));
+        }
+        if let Some(n) = max_points {
+            if n == 0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "max_points must be positive when provided",
+                ));
+            }
+        }
+        if let Some(duration) = dissipating_time {
+            if !duration.is_finite() || duration <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "dissipating_time must be finite and greater than zero",
+                ));
+            }
+        }
         if let Some(ref name) = colormap {
             let low = name.to_lowercase();
             if !["inferno", "viridis", "plasma"].contains(&low.as_str()) {
@@ -3639,7 +3673,13 @@ impl PyScene {
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .traced_path_3d(&source.0, colormap, max_points, min_distance),
+                .traced_path_3d_with_options(
+                    &source.0,
+                    colormap,
+                    max_points,
+                    min_distance,
+                    dissipating_time,
+                ),
         ))
     }
 

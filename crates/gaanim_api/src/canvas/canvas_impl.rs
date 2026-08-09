@@ -1916,6 +1916,17 @@ impl Canvas {
     /// Spawn a traced path that accumulates the trajectory of `source` as a
     /// continuous line. The returned drawable's Path2D is regenerated every frame.
     pub fn traced_path(&mut self, source: &DrawableHandle) -> DrawableHandle {
+        self.traced_path_with_options(source, None, None, 1.0)
+    }
+
+    /// Spawn a traced path with optional temporal and sample-count retention limits.
+    pub fn traced_path_with_options(
+        &mut self,
+        source: &DrawableHandle,
+        dissipating_time: Option<f64>,
+        max_points: Option<usize>,
+        min_distance: f64,
+    ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TracedPathLine);
         let source_id = source.id;
         let id = handle.id;
@@ -1927,8 +1938,9 @@ impl Canvas {
             .push(Op::AttachTracedPath {
                 target: id,
                 source: source_id,
-                min_distance: 1.0,
-                max_points: None,
+                min_distance,
+                max_points,
+                dissipating_time,
             });
         handle
     }
@@ -1941,6 +1953,18 @@ impl Canvas {
         colormap: Option<String>,
         max_points: Option<usize>,
         min_distance: f64,
+    ) -> DrawableHandle {
+        self.traced_path_3d_with_options(source, colormap, max_points, min_distance, None)
+    }
+
+    /// Spawn a 3D traced path with an optional temporal retention window.
+    pub fn traced_path_3d_with_options(
+        &mut self,
+        source: &DrawableHandle,
+        colormap: Option<String>,
+        max_points: Option<usize>,
+        min_distance: f64,
+        dissipating_time: Option<f64>,
     ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TracedPath3DLine);
         let source_id = source.id;
@@ -1956,6 +1980,7 @@ impl Canvas {
                 min_distance: min_distance.max(0.0),
                 max_points,
                 colormap,
+                dissipating_time,
             });
         handle
     }
@@ -2072,8 +2097,10 @@ mod tests {
     use super::*;
     use crate::canvas::ops::Op;
     use bevy::prelude::World;
-    use gaanim_scene::MobjectId;
+    use gaanim_math::SpatialTransform;
+    use gaanim_scene::{MobjectId, Opacity};
     use gaanim_timeline::scene::SceneMember;
+    use gaanim_timeline::snapshot::WorldSnapshot;
     use gaanim_timeline::timeline::Timeline;
 
     fn compile_updater_count(canvas: &Canvas) -> usize {
@@ -2099,6 +2126,93 @@ mod tests {
 
         assert_eq!(compile_updater_count(&canvas), 1);
         assert_eq!(compile_updater_count(&canvas), 1);
+    }
+
+    #[test]
+    fn reactive_objects_do_not_run_before_their_authored_cursor() {
+        let mut canvas = Canvas::new(320, 180);
+        canvas.wait(2.0);
+        let dot = canvas.dot(8.0);
+        dot.add_custom_updater(gaanim_animation::Updater::new(
+            |_dt, elapsed, entity, world| {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x = elapsed;
+                }
+                true
+            },
+        ));
+        let _trail = canvas.traced_path(&dot);
+        canvas.wait(1.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut world, 1.0);
+
+        let mut updater_query = world.query_filtered::<
+            (bevy::prelude::Entity, &SpatialTransform),
+            bevy::prelude::With<gaanim_animation::Updater>,
+        >();
+        let (_, transform) = updater_query.single(&world).unwrap();
+        assert_eq!(transform.translation.x, 0.0);
+
+        let mut trail_query = world.query::<&gaanim_animation::TracedPath>();
+        let traced_path = trail_query.single(&world).unwrap();
+        assert!(traced_path.points.is_empty());
+    }
+
+    #[test]
+    fn traced_path_requires_an_explicit_entry_animation() {
+        let mut hidden_canvas = Canvas::new(320, 180);
+        let hidden_dot = hidden_canvas.dot(8.0);
+        let _hidden_trail = hidden_canvas.traced_path(&hidden_dot);
+        hidden_canvas.wait(1.0);
+
+        let mut hidden_world = World::new();
+        hidden_world.insert_resource(Timeline::new());
+        hidden_world.insert_resource(gaanim_animation::PlaybackState::default());
+        hidden_world.insert_resource(gaanim_text::font::FontRegistry::new());
+        hidden_world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        hidden_canvas.compile(&mut hidden_world);
+        hidden_world.flush();
+
+        let hidden_opacity = hidden_world
+            .query_filtered::<&Opacity, bevy::prelude::With<gaanim_animation::TracedPath>>()
+            .single(&hidden_world)
+            .unwrap();
+        assert_eq!(hidden_opacity.0, 0.0);
+
+        let mut animated_canvas = Canvas::new(320, 180);
+        let animated_dot = animated_canvas.dot(8.0);
+        let animated_trail = animated_canvas.traced_path(&animated_dot);
+        animated_canvas.play(vec![animated_trail.fade_in(1.0)]);
+
+        let mut animated_world = World::new();
+        animated_world.insert_resource(Timeline::new());
+        animated_world.insert_resource(gaanim_animation::PlaybackState::default());
+        animated_world.insert_resource(gaanim_text::font::FontRegistry::new());
+        animated_world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        animated_canvas.compile(&mut animated_world);
+        animated_world.flush();
+
+        let snapshot = WorldSnapshot::capture(&mut animated_world);
+        let mut timeline = animated_world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut animated_world, 0.5);
+        let halfway = animated_world
+            .query_filtered::<&Opacity, bevy::prelude::With<gaanim_animation::TracedPath>>()
+            .single(&animated_world)
+            .unwrap()
+            .0;
+        assert!(halfway > 0.0 && halfway < 1.0);
     }
 
     #[test]
