@@ -7,13 +7,6 @@ use pyo3::prelude::*;
 #[derive(Debug, Clone)]
 pub struct PyTransitionType(pub TransitionType);
 
-impl PyTransitionType {
-    /// Instant cut (no transition) — Rust-internal constructor.
-    pub fn cut_transition() -> Self {
-        Self(TransitionType::Cut)
-    }
-}
-
 #[pymethods]
 impl PyTransitionType {
     /// Instant cut (no transition).
