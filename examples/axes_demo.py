@@ -18,7 +18,8 @@ sine = plane.plot(amplitude.expr() * x.sin()).stroke(BLUE, 4)
 parabola = plane.plot(lambda value: 0.12 * value * value - 1.2).no_fill().stroke(GREEN, 3)
 tangent = plane.tangent(lambda value: math.sin(value), 1.2, length=3.0).stroke(RED, 3)
 area = plane.area_under(lambda value: math.sin(value) , (0, math.pi), baseline=0).fill(TEAL).opacity(0.75)
-riemann = plane.riemann_sum(lambda value: math.sin(value), (-math.pi,0), rectangles=20, baseline=0).stroke(BLACK, 3).fill(Brush.linear([ORANGE, GREEN], start=(0, 0), end=(0, 200)))
+riemann = plane.riemann_sum(lambda value: math.sin(value), (-2* math.pi,0), rectangles=20, baseline=0).fill(Brush.linear([ORANGE, GOLD], start=(0, 0), end=(0, 200), extend="reflect"))
+
 
 point = scene.dot(7).fill(RED).at_coordinate(plane.coord(1.2, math.sin(1.2)))
 title = scene.text("CoordinateSpace + Expr + Parameter").fill(BLACK).at(0, 500)

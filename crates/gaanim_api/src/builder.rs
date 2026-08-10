@@ -4036,14 +4036,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Adds a child mobject to an existing group, adjusting its local transform.
     pub fn add_to_group(&mut self, group: MobjectRef, child: MobjectRef) {
-        let (group_entity, group_transform) = match self.states.get(group.id) {
-            Some(state) => (state.entity, state.transform),
+        let group_entity = match self.states.get(group.id) {
+            Some(state) => state.entity,
             None => return,
         };
 
-        // Reparent child
+        // Reparent child - use world transforms for both to handle nested groups correctly.
+        // Using only the group's local transform fails when the group itself is a child
+        // of another group (e.g. `view` inside `root` for CoordinateSpace), which would
+        // make plots appear offset by the view's world position (the 8,10 px gap seen
+        // with area/riemann/sine).
+        let group_world = self.get_world_transform(group.id);
         let child_world = self.get_world_transform(child.id);
-        let inv_group_affine = group_transform.to_affine_2d().inverse();
+        let inv_group_affine = group_world.to_affine_2d().inverse();
         let child_local_affine = inv_group_affine * child_world.to_affine_2d();
         let child_local = SpatialTransform::from_affine_2d(&child_local_affine);
 
