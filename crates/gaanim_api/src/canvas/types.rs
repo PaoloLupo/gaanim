@@ -594,6 +594,8 @@ pub enum SpawnKind {
     /// One resolved vector path imported from an SVG document.
     SvgPath(Box<SvgPath>),
     Group(Vec<ObjectId>),
+    /// Group that preserves children's local transforms (used for coordinate-space view).
+    GroupNoCenter(Vec<ObjectId>),
     /// Invisible value tracker entity (FloatSignal). No visual output.
     ValueTracker(f64),
     /// Placeholder line entity whose Path2D will be overwritten by TracedPath.

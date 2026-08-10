@@ -10,7 +10,7 @@ scene.canvas.set_theme("paper")
 
 x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(2).label("$x$").style(color=BLACK)
 y_axis = Axis.linear(-3, 3).ticks(1).minor_ticks(2).label("$f (x)$").style(color=BLACK)
-plane = scene.number_plane(x_axis, y_axis, width=1500, height=900)
+plane = scene.number_plane(x_axis, y_axis, width=1500, height=900).at(100,0)
 
 x = Expr.var("x")
 amplitude = scene.parameter(1.0)
@@ -21,10 +21,10 @@ area = plane.area_under(lambda value: math.sin(value) , (0, math.pi), baseline=0
 riemann = plane.riemann_sum(lambda value: math.sin(value), (-2* math.pi,0), rectangles=20, baseline=0).fill(Brush.linear([ORANGE, GOLD], start=(0, 0), end=(0, 200), extend="reflect"))
 
 
-point = scene.dot(7).fill(RED).at_coordinate(plane.coord(1.2, math.sin(1.2)))
+point = scene.dot(7).fill(RED).at_coordinate(plane.coord(2, 2))
 title = scene.text("CoordinateSpace + Expr + Parameter").fill(BLACK).at(0, 500)
 
-scene.play([plane.create().duration(1.0), title.write().duration(0.6)])
+scene.play([plane.write(), title.write().duration(0.6)])
 scene.play([sine.write().duration(0.8), parabola.write().duration(0.8)])
 scene.play([area.fade_in().duration(0.5), tangent.create().duration(0.5), point.fade_in().duration(0.3)])
 scene.play([riemann.create().duration(1)])

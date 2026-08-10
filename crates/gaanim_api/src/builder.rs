@@ -4034,6 +4034,82 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         MobjectRef { id }
     }
 
+    /// Create a group that preserves children's local transforms (no auto-centering).
+    /// Used for coordinate-space view/root so that `data_to_local` stays at the view's
+    /// origin and plots remain aligned without baking a center offset into the hierarchy.
+    pub fn group_identity(&mut self, children: &[MobjectRef]) -> MobjectRef {
+        let id = self.next_id();
+        let group_transform = SpatialTransform::default();
+        // Union of children's local bounds (group is at identity, so local == world for children)
+        let mut union_bounds = Bounds3D::default();
+        let mut has_bounds = false;
+        for child in children {
+            if let Some(state) = self.states.get(child.id) {
+                let child_bounds_in_group =
+                    gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                if !has_bounds {
+                    union_bounds = child_bounds_in_group;
+                    has_bounds = true;
+                } else {
+                    union_bounds = union_bounds.union(&child_bounds_in_group);
+                }
+            }
+        }
+        if !has_bounds {
+            union_bounds = Bounds3D::default();
+        }
+        let group_entity = self
+            .commands
+            .spawn((
+                GroupMarker,
+                MobjectId(id),
+                group_transform,
+                gaanim_math::GlobalSpatialTransform::from_local(&group_transform),
+                Transform::default(),
+                Visibility::default(),
+                Opacity(1.0),
+                gaanim_scene::GlobalOpacity(1.0),
+                LocalBounds(union_bounds),
+                WorldBounds(union_bounds),
+                gaanim_scene::RenderOrder::default(),
+                Visible,
+            ))
+            .id();
+        self.tag_entity(group_entity);
+        let mut child_ids = Vec::new();
+        for child in children {
+            child_ids.push(child.id);
+            if let Some(state) = self.states.get_mut(child.id) {
+                state.parent = Some(id);
+                self.commands
+                    .entity(state.entity)
+                    .set_parent_in_place(group_entity);
+                // keep child's transform as-is (already in group's local space)
+            }
+        }
+        self.ensure_track(id);
+        for &child_id in &child_ids {
+            self.ensure_track(child_id);
+        }
+        let group_state = MobjectState {
+            path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
+            bounds: union_bounds,
+            transform: group_transform,
+            opacity: 1.0,
+            fill: None,
+            stroke: gaanim_scene::StrokeBrush::transparent(),
+            entity: group_entity,
+            child_spans: Vec::new(),
+            children: child_ids,
+            parent: None,
+            exclude_from_parent_draw: false,
+        };
+        self.states.insert(id, group_state);
+        self.mobject_names
+            .insert(id, format!("GroupNoCenter ({} children)", children.len()));
+        MobjectRef { id }
+    }
+
     /// Adds a child mobject to an existing group, adjusting its local transform.
     pub fn add_to_group(&mut self, group: MobjectRef, child: MobjectRef) {
         let group_entity = match self.states.get(group.id) {
@@ -4041,16 +4117,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             None => return,
         };
 
-        // Reparent child - use world transforms for both to handle nested groups correctly.
-        // Using only the group's local transform fails when the group itself is a child
-        // of another group (e.g. `view` inside `root` for CoordinateSpace), which would
-        // make plots appear offset by the view's world position (the 8,10 px gap seen
-        // with area/riemann/sine).
-        let group_world = self.get_world_transform(group.id);
-        let child_world = self.get_world_transform(child.id);
-        let inv_group_affine = group_world.to_affine_2d().inverse();
-        let child_local_affine = inv_group_affine * child_world.to_affine_2d();
-        let child_local = SpatialTransform::from_affine_2d(&child_local_affine);
+        // eprintln for debugging removed
+        // For regular groups we preserve world position when reparenting (so the child
+        // does not visually jump). For coordinate-space plots `exclude_from_parent_draw`
+        // is set, meaning the child's geometry is already in the group's local data
+        // space (e.g. `data_to_local`); preserving world would bake the group's world
+        // offset into the child and make it stay at scene origin when the space moves.
+        let child_exclude = self
+            .states
+            .get(child.id)
+            .map(|state| state.exclude_from_parent_draw)
+            .unwrap_or(false);
+        let child_local = if child_exclude {
+            self.states
+                .get(child.id)
+                .map(|state| state.transform)
+                .unwrap_or_default()
+        } else {
+            // Reparent child - use world transforms for both to handle nested groups correctly.
+            // Using only the group's local transform fails when the group itself is a child
+            // of another group (e.g. `view` inside `root` for CoordinateSpace), which would
+            // make plots appear offset by the view's world position (the 8,10 px gap seen
+            // with area/riemann/sine).
+            let group_world = self.get_world_transform(group.id);
+            let child_world = self.get_world_transform(child.id);
+            let inv_group_affine = group_world.to_affine_2d().inverse();
+            let child_local_affine = inv_group_affine * child_world.to_affine_2d();
+            SpatialTransform::from_affine_2d(&child_local_affine)
+        };
 
         if let Some(child_state) = self.states.get_mut(child.id) {
             child_state.transform = child_local;

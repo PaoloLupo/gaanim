@@ -670,8 +670,8 @@ impl Canvas {
         layers.insert(SpaceLayer::Labels, labels.clone());
 
         let members = [&grid_major, &grid_minor, &axes, &ticks, &numbers, &labels];
-        let view = self.group(&members);
-        let root = self.group(&[&view]);
+        let view = self.group_no_center(&members);
+        let root = self.group_no_center(&[&view]);
         Ok(CoordinateSpaceHandle {
             root,
             view,

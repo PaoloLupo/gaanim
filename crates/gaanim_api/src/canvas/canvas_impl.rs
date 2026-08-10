@@ -1480,6 +1480,23 @@ impl Canvas {
         handle
     }
 
+    pub(crate) fn group_no_center(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
+        let defer_visibility = members.iter().any(|member| {
+            member
+                .spec
+                .lock()
+                .expect("object spec poisoned")
+                .defer_visibility_until_play
+        });
+        let handle = self.spawn(SpawnKind::GroupNoCenter(
+            members.iter().map(|m| m.id).collect(),
+        ));
+        if defer_visibility {
+            handle.defer_visibility_until_play();
+        }
+        handle
+    }
+
     /// Updates the direct children of a group created by [`Self::group`].
     /// This is used by the persistent layout container; regular group users
     /// can continue treating groups as immutable.

@@ -470,6 +470,13 @@ impl PyNumberLine {
             inner: self.inner.drawable().create(duration),
         }
     }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().write(duration),
+        }
+    }
 }
 
 #[pyclass(name = "PolarSpace", module = "gaanim_core", skip_from_py_object)]
@@ -535,6 +542,13 @@ impl PyPolarSpace {
             inner: self.inner.drawable().create(duration),
         }
     }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().write(duration),
+        }
+    }
 }
 
 impl PyCoordinateSpace3D {
@@ -561,6 +575,13 @@ impl PyCoordinateSpace3D {
     fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.inner.drawable().create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().write(duration),
         }
     }
 
@@ -691,6 +712,13 @@ impl PyCoordinateSpace {
     fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.inner.drawable().create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().write(duration),
         }
     }
 

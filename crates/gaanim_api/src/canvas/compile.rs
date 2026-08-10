@@ -2486,8 +2486,19 @@ impl Canvas {
                         && builder.states.get(target).is_some()
                     {
                         builder.add_to_group(MobjectRef { id: space }, MobjectRef { id: target });
+                        let view_local = builder
+                            .states
+                            .get(space)
+                            .map(|s| s.transform)
+                            .unwrap_or_default();
+                        let inv = view_local.to_affine_2d().inverse();
+                        let desired_point = Point::new(local.x, local.y);
+                        let local_point = inv * desired_point;
                         if let Some(state) = builder.states.get_mut(target) {
-                            state.transform.translation = *local;
+                            state.transform.translation =
+                                DVec3::new(local_point.x, local_point.y, local.z);
+                            // Preserve any existing rotation/scale from add_to_group (which is identity for dots)
+                            // but ensure translation is correct.
                             builder
                                 .commands
                                 .entity(state.entity)
@@ -4321,6 +4332,16 @@ impl Canvas {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group(&refs);
+                Self::apply_group_arrangement(builder, mr.id, spec);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::GroupNoCenter(ids) => {
+                let refs: Vec<MobjectRef> = ids
+                    .iter()
+                    .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
+                    .collect();
+                let mr = builder.group_identity(&refs);
                 Self::apply_group_arrangement(builder, mr.id, spec);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
