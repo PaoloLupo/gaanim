@@ -103,21 +103,37 @@ fn print_watch_header(config: &Config) {
 struct Config {
     input: Option<PathBuf>,
     output: Option<PathBuf>,
+    pdf_output: Option<PathBuf>,
     server: Option<HttpServer>,
     open: bool,
 }
 
 impl Config {
     fn new(args: &args::CompileArgs, watching: bool) -> Self {
+        let output = args.output.clone().or_else(|| {
+            if watching {
+                None
+            } else {
+                Some(SITE_PATH.into())
+            }
+        });
+
+        let pdf_output = if args.no_pdf {
+            None
+        } else if let Some(path) = &args.pdf_output {
+            Some(path.clone())
+        } else if watching {
+            None
+        } else if let Some(site_path) = &output {
+            Some(site_path.join("documentation.pdf"))
+        } else {
+            Some(PathBuf::from("dist/documentation.pdf"))
+        };
+
         Self {
             input: args.input.clone(),
-            output: args.output.clone().or_else(|| {
-                if watching {
-                    None
-                } else {
-                    Some(SITE_PATH.into())
-                }
-            }),
+            output,
+            pdf_output,
             server: watching.then(|| HttpServer::new("gaanim-docs", None, true).unwrap()),
             open: args.open,
         }
@@ -150,7 +166,16 @@ impl Report {
 
 fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
     let Warned { output, warnings } = typst::compile::<Bundle>(world);
-    let result = output.and_then(|bundle| export_website(bundle, config));
+    let mut result = output.and_then(|bundle| export_website(bundle, config));
+
+    if result.is_ok() {
+        if let Some(pdf_path) = config.pdf_output.clone() {
+            if let Err(pdf_err) = export_pdf(world, &pdf_path) {
+                result = Err(pdf_err);
+            }
+        }
+    }
+
     let mut warned = Warned {
         output: result,
         warnings,
@@ -171,9 +196,10 @@ fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
         config.open = false;
     }
 
-    warned
-        .warnings
-        .retain(|diag| !diag.message.starts_with("bundle export is experimental"));
+    warned.warnings.retain(|diag| {
+        !diag.message.starts_with("bundle export is experimental")
+            && !diag.message.ends_with("was ignored during HTML export")
+    });
 
     Report(warned)
 }
@@ -190,6 +216,23 @@ fn export_website(bundle: Bundle, config: &Config) -> typst::diag::SourceResult<
         server.set_bundle(bundle, fs);
     }
 
+    Ok(())
+}
+
+fn export_pdf(world: &DocWorld, pdf_path: &Path) -> typst::diag::SourceResult<()> {
+    let Warned { output, warnings: _ } = typst::compile::<typst_layout::PagedDocument>(world);
+    let document = output?;
+    let pdf_bytes = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default())?;
+    if let Some(parent) = pdf_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(pdf_path, &pdf_bytes).map_err(|e| {
+        typst::diag::eco_vec![typst::diag::SourceDiagnostic::error(
+            typst::syntax::Span::detached(),
+            typst::diag::eco_format!("failed to write PDF to {}: {}", pdf_path.display(), e)
+        )]
+    })?;
+    eprintln!("PDF documentation compiled: {}", pdf_path.display());
     Ok(())
 }
 

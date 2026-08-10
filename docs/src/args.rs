@@ -33,6 +33,12 @@ pub struct CompileArgs {
     pub input: Option<PathBuf>,
     pub output: Option<PathBuf>,
 
+    #[arg(long = "pdf-output", value_name = "OUTPUT_PDF")]
+    pub pdf_output: Option<PathBuf>,
+
+    #[arg(long = "no-pdf")]
+    pub no_pdf: bool,
+
     #[arg(long = "timings", value_name = "OUTPUT_JSON")]
     pub timings: Option<PathBuf>,
 

@@ -78,9 +78,13 @@ run EX:
 run EX:
     cargo run -p gaanim_editor -- examples/{{ EX }}.py
 
-# Build documentation site (one-shot).
+# Build documentation site and PDF (one-shot).
 docs:
     cargo run -p docs -- compile
+
+# Build documentation PDF explicitly to custom output path.
+docs-pdf output="documentation.pdf":
+    cargo run -p docs -- compile --pdf-output {{ output }}
 
 # Build documentation site and open in browser.
 docs-open:
