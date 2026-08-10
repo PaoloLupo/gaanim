@@ -55,7 +55,13 @@ pub struct EntitySnapshot {
     /// Path-reveal progress for draw animations (0.0 = hidden, 1.0 = fully drawn).
     /// Used to keep reactive regenerators (e.g. ExpressionPlot) in sync
     /// with the current trim so they do not overwrite it with the full path.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub path_reveal: Option<f64>,
+    /// Value of a `FloatSignal` (e.g. `Parameter` / `ValueTracker`) at capture time.
+    /// Restoring this on seek ensures looped playback returns to the initial
+    /// parameter value instead of staying at the final animated value.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub float_signal: Option<f64>,
     /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
     pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Timeline timestamps paired with `traced_path_points`.
@@ -155,6 +161,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::PathReveal(progress));
     } else {
         entity_mut.remove::<gaanim_animation::PathReveal>();
+    }
+
+    if let Some(value) = snap.float_signal {
+        entity_mut.insert(gaanim_animation::FloatSignal::new(value));
+    } else {
+        entity_mut.remove::<gaanim_animation::FloatSignal>();
     }
 
     if let Some(points) = &snap.traced_path_points
@@ -365,6 +377,9 @@ impl WorldSnapshot {
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)
                         .map(|p| p.0),
+                    float_signal: world
+                        .get::<gaanim_animation::FloatSignal>(entity)
+                        .map(|s| s.value),
                     traced_path_points: world
                         .get::<gaanim_animation::TracedPath>(entity)
                         .map(|t| t.points.clone())
