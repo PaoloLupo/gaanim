@@ -1,4 +1,3 @@
-use crate::LayoutAnchor;
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_math::Bounds3D;
 
@@ -86,38 +85,6 @@ impl Anchor {
             (-1, -1) => Self::BottomLeft,
             (1, -1) => Self::BottomRight,
             _ => Self::Center,
-        }
-    }
-}
-
-impl From<LayoutAnchor> for Anchor {
-    fn from(other: LayoutAnchor) -> Self {
-        match other {
-            LayoutAnchor::Center => Self::Center,
-            LayoutAnchor::Left => Self::Left,
-            LayoutAnchor::Right => Self::Right,
-            LayoutAnchor::Top => Self::Top,
-            LayoutAnchor::Bottom => Self::Bottom,
-            LayoutAnchor::TopLeft => Self::TopLeft,
-            LayoutAnchor::TopRight => Self::TopRight,
-            LayoutAnchor::BottomLeft => Self::BottomLeft,
-            LayoutAnchor::BottomRight => Self::BottomRight,
-        }
-    }
-}
-
-impl From<Anchor> for LayoutAnchor {
-    fn from(other: Anchor) -> Self {
-        match other {
-            Anchor::Center => Self::Center,
-            Anchor::Left => Self::Left,
-            Anchor::Right => Self::Right,
-            Anchor::Top => Self::Top,
-            Anchor::Bottom => Self::Bottom,
-            Anchor::TopLeft => Self::TopLeft,
-            Anchor::TopRight => Self::TopRight,
-            Anchor::BottomLeft => Self::BottomLeft,
-            Anchor::BottomRight => Self::BottomRight,
         }
     }
 }

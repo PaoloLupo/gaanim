@@ -17,12 +17,12 @@ use crate::canvas::ops::{
     CanvasEndpoint, CanvasState, LocalSegmentStop, Op, Segment, SharedCanvasState,
 };
 use crate::canvas::types::{
-    Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutKind, Margin, ParagraphOptions,
-    SpawnKind,
+    Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
+    LayoutTreeSnapshot, Margin, ParagraphOptions, SpawnKind,
 };
 use crate::canvas::{
-    Anchor, CanvasTheme, FrameLayout, LayoutPreset, LayoutRegion, PresentationBrand, SegmentError,
-    SegmentHandle, SegmentLayout, SegmentManifest, SegmentSpec, SegmentStop,
+    Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
+    SegmentSpec, SegmentStop,
 };
 use crate::export::{AudioTrack, AudioTrackError};
 
@@ -276,24 +276,6 @@ impl Canvas {
         self
     }
 
-    /// Creates reusable regions for a conventional title/content/footer video.
-    /// Heights, gap, and margins are expressed in the canvas coordinate system.
-    pub fn layout(&self, header_height: f64, footer_height: f64, gap: f64) -> FrameLayout {
-        FrameLayout::new(self.safe_frame(), header_height, footer_height, gap)
-    }
-
-    /// Creates one of the built-in editorial compositions.
-    pub fn layout_preset(&self, preset: LayoutPreset) -> FrameLayout {
-        FrameLayout::preset(self.safe_frame(), preset)
-    }
-
-    /// Returns the drawable region remaining after the configured safe-area margins.
-    pub fn safe_area(&self) -> LayoutRegion {
-        LayoutRegion {
-            bounds: self.safe_frame(),
-        }
-    }
-
     /// Set the base directory used by relative image and SVG paths.
     pub fn set_asset_root(&mut self, path: impl AsRef<Path>) -> Result<(), AssetRootError> {
         let path = path.as_ref().to_path_buf();
@@ -456,22 +438,22 @@ impl Canvas {
         name: impl Into<String>,
         transition: Option<TransitionType>,
     ) -> Result<SegmentHandle, SegmentError> {
-        self.segment_with(name, transition, None, SegmentLayout::Blank)
+        self.segment_with(name, transition, None, None)
     }
 
-    /// Create a segment with presentation metadata and a built-in layout.
+    /// Create a segment with presentation metadata and optional Python
+    /// template metadata. Template execution belongs to the Python layer.
     pub fn segment_with(
         &mut self,
         name: impl Into<String>,
         transition: Option<TransitionType>,
         notes: Option<String>,
-        layout: SegmentLayout,
+        template: Option<String>,
     ) -> Result<SegmentHandle, SegmentError> {
         let name = name.into().trim().to_string();
         if name.is_empty() {
             return Err(SegmentError::EmptyName);
         }
-        let frame = self.safe_frame();
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let normalized_name = name.to_lowercase();
         if guard
@@ -490,7 +472,7 @@ impl Canvas {
         }
 
         let id = guard.next_segment_id();
-        let mut segment = Segment::new(id, name, notes, layout);
+        let mut segment = Segment::new(id, name, notes, template.clone());
         if replace_implicit {
             guard.segments[0] = segment;
             guard.active_idx = 0;
@@ -509,8 +491,8 @@ impl Canvas {
             .count();
         drop(guard);
 
-        self.spawn_segment_branding(layout, segment_number)?;
-        Ok(SegmentHandle::new(id, layout, frame, self.state.clone()))
+        self.spawn_segment_branding(template.as_deref(), segment_number)?;
+        Ok(SegmentHandle::new(id, self.state.clone()))
     }
 
     /// Explicitly link two segments created by this canvas.
@@ -1512,37 +1494,67 @@ impl Canvas {
     pub fn reflow_layout(
         &mut self,
         container: &DrawableHandle,
-        members: &[&DrawableHandle],
-        kind: LayoutKind,
-        gap: f64,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
         duration: Option<f64>,
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
-        max_width: Option<f64>,
-        max_height: Option<f64>,
-        shrink_to_fit: bool,
-        wrap: bool,
-        justify: &str,
     ) {
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::LayoutReflow {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        state.active_mut().ops.push(Op::LayoutTransition {
+            from_version: version.checked_sub(1).filter(|version| *version > 0),
+            to: LayoutTreeSnapshot {
+                version,
                 container: container.id,
-                members: members.iter().map(|member| member.id).collect(),
-                kind,
-                gap: gap.max(0.0),
+                members,
+                spec,
+            },
+            duration: duration.filter(|value| value.is_finite() && *value > 0.0),
+            entering: entering.map(|member| member.id),
+            leaving: leaving.map(|member| member.id),
+        });
+        if !state.layout_constraints.is_empty() {
+            let constraints = state.layout_constraints.clone();
+            state.active_mut().ops.push(Op::LayoutConstraints {
+                constraints,
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
-                entering: entering.map(|member| member.id),
-                leaving: leaving.map(|member| member.id),
-                max_width: max_width.filter(|value| value.is_finite() && *value > 0.0),
-                max_height: max_height.filter(|value| value.is_finite() && *value > 0.0),
-                shrink_to_fit,
-                wrap,
-                justify: justify.to_string(),
             });
+        }
+    }
+
+    /// Register relational Layout v2 constraints and resolve them at the
+    /// current timeline cursor. Registered relations are automatically
+    /// replayed after later structural reflows.
+    pub fn constrain_layout(
+        &mut self,
+        constraints: Vec<gaanim_layout::LayoutConstraint>,
+        duration: Option<f64>,
+    ) -> Result<(), SceneObjectError> {
+        let duration = duration.filter(|value| value.is_finite() && *value > 0.0);
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let owns_every_reference = constraints.iter().all(|constraint| {
+            constraint
+                .lhs
+                .terms
+                .keys()
+                .chain(constraint.rhs.terms.keys())
+                .all(|variable| {
+                    state
+                        .all_drawables
+                        .contains(&gaanim_core::ObjectId::from_raw(variable.node.0))
+                })
+        });
+        if !owns_every_reference {
+            return Err(SceneObjectError::ForeignScene);
+        }
+        state.layout_constraints.extend(constraints);
+        let constraints = state.layout_constraints.clone();
+        state.active_mut().ops.push(Op::LayoutConstraints {
+            constraints,
+            duration,
+        });
+        Ok(())
     }
 
     fn camera_anim(&self, ty: AnimationType, duration: f64) -> Anim {
@@ -1697,13 +1709,13 @@ impl Canvas {
 
     fn spawn_segment_branding(
         &mut self,
-        layout: SegmentLayout,
+        template: Option<&str>,
         segment_number: usize,
     ) -> Result<(), SegmentError> {
         let Some(branding) = self.branding.clone() else {
             return Ok(());
         };
-        if layout == SegmentLayout::Title && !branding.show_on_cover {
+        if matches!(template, Some("title_slide" | "title" | "cover")) && !branding.show_on_cover {
             return Ok(());
         }
 
@@ -1799,7 +1811,7 @@ impl Canvas {
                     id: segment.id,
                     name: segment.name.clone(),
                     notes: segment.notes.clone(),
-                    layout: segment.layout,
+                    template: segment.template.clone(),
                     start_time,
                     end_time,
                     stops: segment
@@ -1822,9 +1834,7 @@ impl Canvas {
     pub fn has_presentation_features(&self) -> bool {
         self.branding.is_some()
             || self.segment_manifest().segments.iter().any(|segment| {
-                segment.notes.is_some()
-                    || segment.layout != SegmentLayout::Blank
-                    || !segment.stops.is_empty()
+                segment.notes.is_some() || segment.template.is_some() || !segment.stops.is_empty()
             })
     }
 
@@ -3401,18 +3411,13 @@ mod tests {
     fn segments_use_absolute_ranges_and_only_explicit_stops_pause() {
         let mut canvas = Canvas::new(1280, 720);
         let intro = canvas
-            .segment_with(
-                "intro",
-                None,
-                Some("Opening".to_string()),
-                SegmentLayout::Blank,
-            )
+            .segment_with("intro", None, Some("Opening".to_string()), None)
             .unwrap();
         canvas.wait(1.0);
         canvas.stop(Some("reveal".to_string())).unwrap();
         canvas.wait(2.0);
         let details = canvas
-            .segment_with("details", None, None, SegmentLayout::TwoColumns)
+            .segment_with("details", None, None, Some("comparison".to_string()))
             .unwrap();
         canvas.wait(0.5);
 
@@ -3481,55 +3486,17 @@ mod tests {
     }
 
     #[test]
-    fn segment_layouts_resolve_named_regions_inside_the_safe_area() {
+    fn segment_template_metadata_is_preserved() {
         let mut canvas = Canvas::new(1000, 600);
-        canvas.margin = Margin::all(50.0);
-
-        let content_segment = canvas
-            .segment_with("content", None, None, SegmentLayout::TitleContent)
+        canvas
+            .segment_with("content", None, None, Some("lecture".to_string()))
             .unwrap();
-        let title = content_segment.region("title").unwrap();
-        let content = content_segment.region("content").unwrap();
-        canvas.wait(0.1);
-        let columns = canvas
-            .segment_with("columns", None, None, SegmentLayout::TwoColumns)
-            .unwrap();
-        let left = columns.region("left").unwrap();
-        let right = columns.region("right").unwrap();
-
-        assert!(title.bounds.min.y >= content.bounds.max.y);
-        assert!(content.height() > title.height());
-        assert!(left.bounds.max.x < right.bounds.min.x);
-        assert!(matches!(
-            SegmentLayout::Blank
-                .region(canvas.safe_frame(), "title")
-                .ok_or_else(|| SegmentError::UnknownRegion {
-                    layout: "blank".to_string(),
-                    region: "title".to_string(),
-                }),
-            Err(SegmentError::UnknownRegion { .. })
-        ));
+        let manifest = canvas.segment_manifest();
+        assert_eq!(manifest.segments[0].template.as_deref(), Some("lecture"));
     }
 
     #[test]
     fn segment_layout_aliases_and_branding_are_reusable() {
-        assert_eq!(
-            SegmentLayout::parse("cover").expect("cover alias"),
-            SegmentLayout::Title
-        );
-        assert_eq!(
-            SegmentLayout::parse("comparison").expect("comparison alias"),
-            SegmentLayout::TwoColumns
-        );
-        assert!(
-            SegmentLayout::TwoColumns
-                .region(
-                    gaanim_math::Bounds3D::new_2d(-100.0, -50.0, 100.0, 50.0),
-                    "before",
-                )
-                .is_some()
-        );
-
         let mut canvas = Canvas::new(1280, 720);
         canvas.set_branding(PresentationBrand {
             footer: Some("Slides · Research Lab".to_owned()),
@@ -3544,7 +3511,7 @@ mod tests {
             .ops
             .len();
         canvas
-            .segment_with("cover", None, None, SegmentLayout::Title)
+            .segment_with("cover", None, None, Some("title_slide".to_string()))
             .expect("cover segment");
         let after_cover = canvas
             .state
@@ -3557,7 +3524,7 @@ mod tests {
 
         canvas.wait(0.1);
         canvas
-            .segment_with("content", None, None, SegmentLayout::TitleContent)
+            .segment_with("content", None, None, Some("lecture".to_string()))
             .expect("content segment");
         let after_content = canvas
             .state

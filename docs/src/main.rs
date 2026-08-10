@@ -220,7 +220,10 @@ fn export_website(bundle: Bundle, config: &Config) -> typst::diag::SourceResult<
 }
 
 fn export_pdf(world: &DocWorld, pdf_path: &Path) -> typst::diag::SourceResult<()> {
-    let Warned { output, warnings: _ } = typst::compile::<typst_layout::PagedDocument>(world);
+    let Warned {
+        output,
+        warnings: _,
+    } = typst::compile::<typst_layout::PagedDocument>(world);
     let document = output?;
     let pdf_bytes = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default())?;
     if let Some(parent) = pdf_path.parent() {

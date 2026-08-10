@@ -160,204 +160,60 @@ class Direction:
         """
         ...
 
-class LayoutRegion:
-    width: float
-    height: float
-    def place(self, drawable: Drawable, anchor: Anchor) -> Drawable:
-        """Use place to configure or query this layout.
+SizeRule: TypeAlias = float | Literal["hug", "fill"]
+Track: TypeAlias = float | Literal["auto"] | str
+Padding: TypeAlias = float | tuple[float, float] | tuple[float, float, float, float]
+Align: TypeAlias = Literal["start", "center", "end", "stretch"]
+Justify: TypeAlias = Literal["start", "center", "end", "between", "around", "evenly"]
+Fit: TypeAlias = Literal["none", "contain", "cover", "stretch", "scale_down"]
 
-        Example:
-            result = region.place(drawable, Anchor.CENTER)
-        """
-        ...
-    def point(self, anchor: Anchor) -> tuple[float, float]:
-        """Use point to configure or query this layout.
+class LayoutExpression:
+    def __add__(self, other: float | LayoutExpression) -> LayoutExpression: ...
+    def __sub__(self, other: float | LayoutExpression) -> LayoutExpression: ...
+    def __mul__(self, scalar: float) -> LayoutExpression: ...
+    def __truediv__(self, scalar: float) -> LayoutExpression: ...
+    def __eq__(self, other: object) -> LayoutConstraint: ...  # type: ignore[override]
+    def __le__(self, other: float | LayoutExpression) -> LayoutConstraint: ...
+    def __ge__(self, other: float | LayoutExpression) -> LayoutConstraint: ...
 
-        Example:
-            result = region.point(Anchor.CENTER)
-        """
-        ...
-    def inset(
-        self,
-        value: float,
-        right: Optional[float] = None,
-        bottom: Optional[float] = None,
-        left: Optional[float] = None,
-    ) -> LayoutRegion:
-        """Use inset to configure or query this layout.
+class LayoutConstraint:
+    def strong(self) -> LayoutConstraint: ...
+    def medium(self) -> LayoutConstraint: ...
+    def weak(self) -> LayoutConstraint: ...
+    def named(self, label: str) -> LayoutConstraint: ...
 
-        Example:
-            result = region.inset(1.0)
-        """
-        ...
-    def grid(
-        self,
-        rows: int = 1,
-        columns: int = 1,
-        row_gap: float = 0.0,
-        column_gap: float = 0.0,
-    ) -> GridLayout:
-        """Use grid to configure or query this layout.
-
-        Example:
-            result = region.grid()
-        """
-        ...
-    def grid_tracks(
-        self,
-        rows: Sequence[float | str],
-        columns: Sequence[float | str],
-        row_gap: float = 0.0,
-        column_gap: float = 0.0,
-    ) -> GridLayout:
-        """Use grid tracks to configure or query this layout.
-
-        Example:
-            result = region.grid_tracks(2, 1.0)
-        """
-        ...
-    def layout(
-        self,
-        kind: Literal["row", "column", "grid"] = "column",
-        *,
-        gap: float = 24.0,
-        columns: int = 2,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        fit: Literal["none", "shrink"] = "none",
-        wrap: bool = False,
-        justify: Literal["start", "center", "end", "between"] = "center",
-    ) -> Layout:
-        """Use layout to configure or query this layout.
-
-        Example:
-            result = region.layout()
-        """
-        ...
-
-class GridLayout:
-    rows: int
-    columns: int
-    def cell(self, row: int, column: int) -> LayoutRegion:
-        """Use cell to configure or query this layout.
-
-        Example:
-            result = grid.cell(1, 1)
-        """
-        ...
-    def area(
-        self,
-        row: int,
-        column: int,
-        row_span: int = 1,
-        column_span: int = 1,
-    ) -> LayoutRegion:
-        """Use area to configure or query this layout.
-
-        Example:
-            result = grid.area(1, 1)
-        """
-        ...
-
-class FrameLayout:
-    frame: LayoutRegion
-    header: LayoutRegion
-    content: LayoutRegion
-    footer: LayoutRegion
-    def column(self, index: int, count: int = 2, gap: float = 24.0) -> LayoutRegion:
-        """Use column to configure or query this layout.
-
-        Example:
-            result = frame.column(1)
-        """
-        ...
-
-class Flow:
+class ConstraintSet:
     count: int
-    def add(self, drawable: Drawable) -> None:
-        """Use add to configure or query this layout.
 
-        Example:
-            flow.add(drawable)
-        """
-        ...
-    def build(self) -> Drawable:
-        """Use build to configure or query this layout.
+class LayoutItem:
+    pass
 
-        Example:
-            result = flow.build()
-        """
-        ...
-
-class Layout:
+class Layout(Drawable):
     count: int
-    @property
-    def drawable(self) -> Drawable:
-        """Read the drawable value from this Layout.
-
-        Example:
-            value = layout.drawable
-        """
-        ...
-    def add(
-        self,
-        child: Drawable | Layout,
-        *,
-        at: Optional[int] = None,
-        animate: Optional[float] = None,
-    ) -> Drawable:
-        """Use add to configure or query this layout.
-
-        Example:
-            result = layout.add(child)
-        """
-        ...
+    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None, animate: Optional[float] = None) -> Drawable: ...
     def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
-        """Use remove to configure or query this layout.
-
-        Example:
-            layout.remove(child)
-        """
         ...
-    def replace(
-        self,
-        old: Drawable | Layout,
-        new: Drawable | Layout,
-        *,
-        animate: Optional[float] = None,
-    ) -> Drawable:
-        """Use replace to configure or query this layout.
-
-        Example:
-            result = layout.replace(old, new)
-        """
-        ...
-    def reflow(self, *, animate: Optional[float] = None) -> None:
-        """Use reflow to configure or query this layout.
-
-        Example:
-            layout.reflow()
-        """
-        ...
+    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem, *, animate: Optional[float] = None) -> Drawable: ...
+    def reflow(self, *, animate: Optional[float] = None) -> None: ...
     def configure(
         self,
         *,
-        kind: Optional[Literal["row", "column", "grid"]] = None,
         gap: Optional[float] = None,
-        columns: Optional[int] = None,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        fit: Optional[Literal["none", "shrink"]] = None,
+        padding: Optional[Padding] = None,
+        width: Optional[SizeRule] = None,
+        height: Optional[SizeRule] = None,
+        min_width: Optional[float] = None,
+        max_width: Optional[float] = None,
+        min_height: Optional[float] = None,
+        max_height: Optional[float] = None,
+        align: Optional[Align] = None,
+        justify: Optional[Justify] = None,
         wrap: Optional[bool] = None,
-        justify: Optional[Literal["start", "center", "end", "between"]] = None,
+        within: Optional[Literal["safe", "frame"]] = None,
         animate: Optional[float] = None,
-    ) -> None:
-        """Use configure to configure or query this layout.
-
-        Example:
-            layout.configure()
-        """
-        ...
+    ) -> None: ...
+    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None, animate: Optional[float] = None) -> None: ...
+    def diagnostics(self) -> list[str]: ...
 
 class Transition:
     @staticmethod
@@ -543,6 +399,14 @@ class Updater:
         ...
 
 class Drawable:
+    left: LayoutExpression
+    right: LayoutExpression
+    top: LayoutExpression
+    bottom: LayoutExpression
+    center_x: LayoutExpression
+    center_y: LayoutExpression
+    width: LayoutExpression
+    height: LayoutExpression
     def part(self, id: str) -> Drawable:
         """Return a named SVG part or glTF node by unique name/canonical path."""
         ...
@@ -821,20 +685,6 @@ class Drawable:
 
         Example:
             result = drawable.to_corner(Anchor.CENTER)
-        """
-        ...
-    def vstack(self, gap: float = 24.0, align: Optional[Anchor] = None) -> Drawable:
-        """Apply vstack to this drawable and return the result.
-
-        Example:
-            result = drawable.vstack()
-        """
-        ...
-    def hstack(self, gap: float = 24.0, align: Optional[Anchor] = None) -> Drawable:
-        """Apply hstack to this drawable and return the result.
-
-        Example:
-            result = drawable.hstack()
         """
         ...
     def move(self, dx: float, dy: float) -> Anim:
@@ -1253,22 +1103,8 @@ class Canvas:
             scene.canvas.set_preset(None)
         """
         ...
-    def safe_area(self) -> LayoutRegion:
-        """Configure the canvas with safe area.
-
-        Example:
-            result = scene.canvas.safe_area()
-        """
-        ...
-
 class Segment:
-    def region(self, name: str) -> LayoutRegion:
-        """Resolve a named region from this segment's layout.
-
-        Example:
-            result = segment.region("content")
-        """
-        ...
+    def bind(self, **slots: Any) -> Layout: ...
 
 class Camera:
     def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
@@ -1640,18 +1476,14 @@ class Scene:
             scene.brand()
         """
         ...
-    def frame_layout(
-        self,
-        header: float = 0.0,
-        footer: float = 0.0,
-        gap: float = 24.0,
-    ) -> FrameLayout:
-        """Use frame layout on this Scene or create the requested value.
-
-        Example:
-            result = scene.frame_layout()
-        """
-        ...
+    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
+    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
+    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
+    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
+    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem: ...
+    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet: ...
+    def check_layout(self) -> list[str]: ...
+    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout: ...
     def assets_dir(self, path: str) -> None:
         """Use assets dir on this Scene or create the requested value.
 
@@ -1694,46 +1526,6 @@ class Scene:
 
         Example:
             scene.audio("example")
-        """
-        ...
-    def layout(
-        self,
-        kind: Literal["row", "column", "grid"] = "column",
-        *,
-        gap: float = 24.0,
-        columns: int = 2,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        fit: Literal["none", "shrink"] = "none",
-        wrap: bool = False,
-        justify: Literal["start", "center", "end", "between"] = "center",
-    ) -> Layout:
-        """Use layout on this Scene or create the requested value.
-
-        Example:
-            result = scene.layout()
-        """
-        ...
-    def layout_preset(
-        self,
-        name: Literal["lecture", "comparison", "vertical_short", "minimal"],
-    ) -> FrameLayout:
-        """Use layout preset on this Scene or create the requested value.
-
-        Example:
-            result = scene.layout_preset(None)
-        """
-        ...
-    def flow(
-        self,
-        direction: Literal["vertical", "horizontal"] = "vertical",
-        gap: float = 24.0,
-        align: Optional[Anchor] = None,
-    ) -> Flow:
-        """Use flow on this Scene or create the requested value.
-
-        Example:
-            result = scene.flow()
         """
         ...
     def circle(self, r: float) -> Drawable:
@@ -2110,7 +1902,7 @@ class Scene:
     def paragraph(
         self,
         s: str,
-        width: float,
+        width: Optional[float] = None,
         *,
         align: Literal["left", "center", "right", "justify"] = "left",
         line_spacing: float = 1.2,
@@ -2482,10 +2274,7 @@ class Scene:
         transition: Optional[Transition] = None,
         *,
         notes: Optional[str] = None,
-        layout: Literal[
-            "blank", "title", "cover", "title_content", "content", "agenda",
-            "two_columns", "comparison", "section", "divider", "closing", "conclusion"
-        ] = "blank",
+        template: Optional[Callable[..., Layout]] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 

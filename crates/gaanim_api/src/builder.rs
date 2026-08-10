@@ -6,7 +6,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_layout::{Anchor, Direction, LayoutAnchor, LayoutDirection};
+use gaanim_layout::{Anchor, Direction};
 use gaanim_math::matching::{MatchItem, MatchingConfig, MatchingMode, lcs_match};
 use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
@@ -379,7 +379,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 child_spans: Vec::new(),
                 children: Vec::new(),
                 parent: Some(parent_id),
-            exclude_from_parent_draw: false,
+                exclude_from_parent_draw: false,
             };
             self.states.insert(child.id, child_state);
         }
@@ -4198,66 +4198,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    /// Arranges the immediate children of a group linearly.
-    pub fn arrange(&mut self, group: MobjectRef, direction: Direction, spacing: f64) {
-        self.arrange_aligned(group, direction, spacing, Anchor::Center);
-    }
-
-    /// Arranges immediate children linearly while keeping one edge aligned.
-    pub fn arrange_aligned(
-        &mut self,
-        group: MobjectRef,
-        direction: Direction,
-        spacing: f64,
-        aligned_edge: Anchor,
-    ) {
-        let children_ids = match self.states.get(group.id) {
-            Some(state) => state.children.clone(),
-            None => return,
-        };
-        if children_ids.is_empty() {
-            return;
-        }
-
-        let mut items = Vec::new();
-        for &child_id in &children_ids {
-            if let Some(state) = self.states.get(child_id) {
-                items.push((state.bounds, state.transform));
-            }
-        }
-
-        let new_translations =
-            gaanim_layout::arrange(&items, direction, spacing.max(0.0), aligned_edge, true);
-
-        let mut union_min =
-            gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-        let mut union_max =
-            gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-
-        for (i, &child_id) in children_ids.iter().enumerate() {
-            if let Some(state) = self.states.get_mut(child_id) {
-                state.transform.translation = new_translations[i];
-                let transform = state.transform;
-                self.commands.entity(state.entity).insert(transform);
-
-                let child_bounds_in_group =
-                    gaanim_layout::transform_bounds(state.bounds, &state.transform);
-                union_min = union_min.min(child_bounds_in_group.min);
-                union_max = union_max.max(child_bounds_in_group.max);
-            }
-        }
-
-        if union_min.x < union_max.x && union_min.y < union_max.y {
-            let new_group_bounds = Bounds3D::new(union_min, union_max);
-            if let Some(group_state) = self.states.get_mut(group.id) {
-                group_state.bounds = new_group_bounds;
-                self.commands
-                    .entity(group_state.entity)
-                    .insert(gaanim_scene::LocalBounds(new_group_bounds));
-            }
-        }
-    }
-
     /// Arranges direct children left-to-right, starting a new row when the
     /// next item would exceed `max_width`. The resulting block is centered on
     /// the group origin, matching the other arrange helpers.
@@ -4380,69 +4320,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.commands
                 .entity(state.entity)
                 .insert(gaanim_scene::LocalBounds(bounds));
-        }
-    }
-
-    /// Arranges the immediate children of a group in a grid.
-    pub fn arrange_in_grid(
-        &mut self,
-        group: MobjectRef,
-        rows: Option<usize>,
-        cols: Option<usize>,
-        h_spacing: f64,
-        v_spacing: f64,
-    ) {
-        let children_ids = match self.states.get(group.id) {
-            Some(state) => state.children.clone(),
-            None => return,
-        };
-        if children_ids.is_empty() {
-            return;
-        }
-
-        let mut items = Vec::new();
-        for &child_id in &children_ids {
-            if let Some(state) = self.states.get(child_id) {
-                items.push((state.bounds, state.transform));
-            }
-        }
-
-        let new_translations = gaanim_layout::arrange_in_grid(
-            &items,
-            rows,
-            cols,
-            h_spacing,
-            v_spacing,
-            Anchor::Center,
-            true,
-        );
-
-        let mut union_min =
-            gaanim_core::glam::DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-        let mut union_max =
-            gaanim_core::glam::DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
-
-        for (i, &child_id) in children_ids.iter().enumerate() {
-            if let Some(state) = self.states.get_mut(child_id) {
-                state.transform.translation = new_translations[i];
-                let transform = state.transform;
-                self.commands.entity(state.entity).insert(transform);
-
-                let child_bounds_in_group =
-                    gaanim_layout::transform_bounds(state.bounds, &state.transform);
-                union_min = union_min.min(child_bounds_in_group.min);
-                union_max = union_max.max(child_bounds_in_group.max);
-            }
-        }
-
-        if union_min.x < union_max.x && union_min.y < union_max.y {
-            let new_group_bounds = Bounds3D::new(union_min, union_max);
-            if let Some(group_state) = self.states.get_mut(group.id) {
-                group_state.bounds = new_group_bounds;
-                self.commands
-                    .entity(group_state.entity)
-                    .insert(gaanim_scene::LocalBounds(new_group_bounds));
-            }
         }
     }
 
@@ -6097,7 +5974,7 @@ mod tests {
                 child_spans: Vec::new(),
                 children: Vec::new(),
                 parent: Some(parent_id),
-            exclude_from_parent_draw: false,
+                exclude_from_parent_draw: false,
             },
         );
 
@@ -6389,49 +6266,6 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
 
     pub fn z_index(mut self, z: i32) -> Self {
         self.bundle.render_order.z_index = z;
-        self
-    }
-
-    /// Positions this object adjacent to a reference object in a specific layout direction.
-    /// Centered along the orthogonal axis (like Manim).
-    pub fn next_to(
-        mut self,
-        reference: MobjectRef,
-        direction: LayoutDirection,
-        spacing: f64,
-    ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(reference.id) {
-            let shift = gaanim_layout::compute_next_to(
-                self.bundle.bounds.0,
-                &self.bundle.transform,
-                ref_state.bounds,
-                &ref_state.transform,
-                direction,
-                spacing,
-            );
-            self.bundle.transform = self.bundle.transform.shift_3d(shift);
-        }
-        self
-    }
-
-    /// Aligns a target anchor point on this object with a reference anchor point on the reference object.
-    pub fn align_to(
-        mut self,
-        reference: MobjectRef,
-        target_anchor: LayoutAnchor,
-        ref_anchor: LayoutAnchor,
-    ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(reference.id) {
-            let shift = gaanim_layout::compute_align_to(
-                self.bundle.bounds.0,
-                &self.bundle.transform,
-                ref_state.bounds,
-                &ref_state.transform,
-                target_anchor,
-                ref_anchor,
-            );
-            self.bundle.transform = self.bundle.transform.shift_3d(shift);
-        }
         self
     }
 

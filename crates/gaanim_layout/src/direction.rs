@@ -1,5 +1,4 @@
 use crate::Anchor;
-use crate::LayoutDirection;
 use gaanim_core::glam::DVec3;
 use std::ops::Add;
 
@@ -117,34 +116,6 @@ impl Add<Direction> for Direction {
                 }
                 (false, false) => Direction::Custom(DVec3::ZERO),
             }
-        }
-    }
-}
-
-impl From<LayoutDirection> for Direction {
-    fn from(other: LayoutDirection) -> Self {
-        match other {
-            LayoutDirection::Up => Self::Up,
-            LayoutDirection::Down => Self::Down,
-            LayoutDirection::Left => Self::Left,
-            LayoutDirection::Right => Self::Right,
-            LayoutDirection::Custom(v) => Self::Custom(v),
-        }
-    }
-}
-
-impl From<Direction> for LayoutDirection {
-    fn from(other: Direction) -> Self {
-        match other {
-            Direction::Up => Self::Up,
-            Direction::Down => Self::Down,
-            Direction::Left => Self::Left,
-            Direction::Right => Self::Right,
-            Direction::UpLeft
-            | Direction::UpRight
-            | Direction::DownLeft
-            | Direction::DownRight
-            | Direction::Custom(_) => Self::Custom(other.to_vector()),
         }
     }
 }

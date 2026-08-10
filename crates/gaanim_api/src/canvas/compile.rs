@@ -1,12 +1,12 @@
 //! Compile — replay Canvas ops into SceneBuilder/Bevy.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
-use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::{Point, Shape, Vec2};
+use gaanim_core::glam::{DVec2, DVec3};
+use gaanim_core::kurbo::{Point, Rect, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform};
 use gaanim_scene::{
@@ -22,7 +22,7 @@ use crate::builder::{EquationTransitionMode, MobjectRef, MobjectState, SceneBuil
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
-    AxesConfig, LayoutKind, LayoutOp, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind,
+    AxesConfig, LayoutOp, LayoutWithin, ObjectSpec, ParagraphOptions, ParagraphOverflow, SpawnKind,
     TextAlign,
 };
 
@@ -31,6 +31,18 @@ use gaanim_animation::{
     TrackingEndpoint, TrackingLine, Updater,
 };
 use gaanim_math::{RateFunc, SpatialTransform};
+
+struct CompiledLayoutMeasure(BTreeMap<gaanim_layout::LayoutId, DVec2>);
+
+impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure {
+    fn measure(
+        &self,
+        id: gaanim_layout::LayoutId,
+        constraints: gaanim_layout::BoxConstraints,
+    ) -> Result<DVec2, gaanim_layout::LayoutError> {
+        Ok(constraints.constrain(*self.0.get(&id).unwrap_or(&DVec2::ZERO)))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompiledObjectScope {
@@ -167,7 +179,7 @@ pub(crate) fn paragraph_typst_source(
     font_size: f64,
     color: gaanim_core::peniko::Color,
 ) -> String {
-    let width = options.width.max(1.0);
+    let width = options.width.unwrap_or(640.0).max(1.0);
     let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
     let (alignment, justify) = match options.align {
         TextAlign::Left => ("left", false),
@@ -981,6 +993,7 @@ impl Canvas {
                 &mut id_map,
                 &mut object_scopes,
                 frame_bounds,
+                raw_bounds,
                 text_config,
                 bg_color,
                 &mut camera_position,
@@ -1068,6 +1081,7 @@ impl Canvas {
         id_map: &mut HashMap<ObjectId, ObjectId>,
         object_scopes: &mut HashMap<ObjectId, CompiledObjectScope>,
         frame_bounds: Bounds3D,
+        raw_frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
         scene_background: gaanim_core::peniko::Color,
         camera_position: &mut DVec3,
@@ -1873,37 +1887,35 @@ impl Canvas {
                         }
                     }
                 }
-                Op::LayoutReflow {
-                    container,
-                    members,
-                    kind,
-                    gap,
+                Op::LayoutTransition {
+                    from_version: _,
+                    to,
                     duration,
                     entering,
                     leaving,
-                    max_width,
-                    max_height,
-                    shrink_to_fit,
-                    wrap,
-                    justify,
                 } => {
+                    let container = &to.container;
+                    let members = &to.members;
+                    let spec = &to.spec;
                     let Some(container) = id_map.get(container).copied() else {
                         continue;
                     };
-                    let members: Vec<ObjectId> = members
+                    let members: Vec<(ObjectId, gaanim_layout::LayoutItemStyle)> = members
                         .iter()
-                        .filter_map(|member| id_map.get(member).copied())
-                        .filter(|member| builder.states.get(*member).is_some())
+                        .filter_map(|member| {
+                            id_map
+                                .get(&member.id)
+                                .copied()
+                                .map(|id| (id, member.style.clone()))
+                        })
+                        .filter(|(member, _)| builder.states.get(*member).is_some())
                         .collect();
-                    if members.is_empty() {
-                        continue;
-                    }
 
                     // A layout group may gain children after it was first
                     // declared. Reparent them before arranging: this keeps a
                     // nested layout's transform attached to its visual tree,
                     // rather than merely moving its invisible group root.
-                    for member in &members {
+                    for (member, _) in &members {
                         let parent = builder.states.get(*member).and_then(|state| state.parent);
                         if parent != Some(container) {
                             builder.add_to_group(
@@ -1913,83 +1925,139 @@ impl Canvas {
                         }
                     }
                     if let Some(state) = builder.states.get_mut(container) {
-                        state.children = members.clone();
+                        state.children = members.iter().map(|(id, _)| *id).collect();
                     }
                     let before: HashMap<ObjectId, SpatialTransform> = members
                         .iter()
-                        .filter_map(|member| {
+                        .filter_map(|(member, _)| {
                             builder
                                 .states
                                 .get(*member)
                                 .map(|state| (*member, state.transform))
                         })
                         .collect();
-                    match kind {
-                        LayoutKind::Row if *wrap => builder.arrange_wrapped(
-                            MobjectRef { id: container },
-                            max_width.unwrap_or(f64::INFINITY),
-                            *gap,
-                        ),
-                        LayoutKind::Row if justify != "center" => builder.arrange_justified(
-                            MobjectRef { id: container },
-                            max_width.unwrap_or(f64::INFINITY),
-                            *gap,
-                            justify,
-                        ),
-                        LayoutKind::Row => builder.arrange_aligned(
-                            MobjectRef { id: container },
-                            gaanim_layout::Direction::Right,
-                            *gap,
-                            gaanim_layout::Anchor::Center,
-                        ),
-                        LayoutKind::Column => builder.arrange_aligned(
-                            MobjectRef { id: container },
-                            gaanim_layout::Direction::Down,
-                            *gap,
-                            gaanim_layout::Anchor::Left,
-                        ),
-                        LayoutKind::Grid { columns } => builder.arrange_in_grid(
-                            MobjectRef { id: container },
-                            None,
-                            Some((*columns).max(1)),
-                            *gap,
-                            *gap,
-                        ),
-                    }
 
-                    let targets: Vec<(ObjectId, DVec3)> = members
+                    let root_id = gaanim_layout::LayoutId(container.as_raw());
+                    let mut measures = BTreeMap::new();
+                    let children = members
                         .iter()
-                        .filter_map(|member| {
-                            builder
-                                .states
-                                .get(*member)
-                                .map(|state| (*member, state.transform.translation))
+                        .filter_map(|(member, item_style)| {
+                            let state = builder.states.get(*member)?;
+                            let mut transform = state.transform;
+                            transform.translation = DVec3::ZERO;
+                            let bounds = gaanim_layout::transform_bounds(state.bounds, &transform);
+                            let layout_id = gaanim_layout::LayoutId(member.as_raw());
+                            measures.insert(
+                                layout_id,
+                                DVec2::new(bounds.width().max(0.0), bounds.height().max(0.0)),
+                            );
+                            Some(gaanim_layout::LayoutChild {
+                                node: Box::new(gaanim_layout::LayoutNode::leaf(layout_id)),
+                                style: item_style.clone(),
+                            })
                         })
                         .collect();
-                    let scale_to = if *shrink_to_fit {
-                        builder.states.get(container).map(|state| {
-                            let bounds = state.bounds;
-                            let width_scale = max_width
-                                .map(|max| max / bounds.width().max(1.0))
-                                .unwrap_or(1.0);
-                            let height_scale = max_height
-                                .map(|max| max / bounds.height().max(1.0))
-                                .unwrap_or(1.0);
-                            width_scale.min(height_scale).min(1.0)
-                        })
-                    } else {
-                        None
+                    let mut root =
+                        gaanim_layout::LayoutNode::container(root_id, spec.kind.clone(), children);
+                    root.style = spec.style.clone();
+                    let viewport = match spec.within {
+                        LayoutWithin::Safe => frame_bounds,
+                        LayoutWithin::Frame => raw_frame_bounds,
+                        LayoutWithin::Intrinsic => frame_bounds,
                     };
-                    let Some(duration) = duration else {
-                        if let Some(scale) = scale_to
-                            && let Some(state) = builder.states.get_mut(container)
-                        {
-                            state.transform.scale = DVec3::splat(scale);
-                            builder
-                                .commands
-                                .entity(state.entity)
-                                .insert(state.transform);
+                    let resolved = gaanim_layout::resolve_layout(
+                        &root,
+                        viewport,
+                        &CompiledLayoutMeasure(measures),
+                        &[],
+                    )
+                    .unwrap_or_else(|error| panic!("layout resolution failed: {error}"));
+                    let root_box = resolved.boxes.get(&root_id).copied().unwrap_or(
+                        gaanim_layout::ResolvedBox {
+                            bounds: Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0),
+                            clip: None,
+                            scale: DVec3::ONE,
+                        },
+                    );
+                    let root_center = root_box.bounds.center();
+                    let local_root_bounds = Bounds3D::new_2d(
+                        -root_box.bounds.width() * 0.5,
+                        -root_box.bounds.height() * 0.5,
+                        root_box.bounds.width() * 0.5,
+                        root_box.bounds.height() * 0.5,
+                    );
+                    if let Some(state) = builder.states.get_mut(container) {
+                        state.bounds = local_root_bounds;
+                        state.transform.translation = root_center;
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert((LocalBounds(local_root_bounds), state.transform));
+                    }
+
+                    let mut targets = Vec::new();
+                    let mut cover_clips = Vec::new();
+                    for (member, item_style) in &members {
+                        let Some(target_box) = resolved
+                            .boxes
+                            .get(&gaanim_layout::LayoutId(member.as_raw()))
+                            .copied()
+                        else {
+                            continue;
+                        };
+                        let Some(state) = builder.states.get_mut(*member) else {
+                            continue;
+                        };
+                        let mut zero_translation = state.transform;
+                        zero_translation.translation = DVec3::ZERO;
+                        let intrinsic =
+                            gaanim_layout::transform_bounds(state.bounds, &zero_translation);
+                        let target_center = target_box.bounds.center() - root_center;
+                        let intrinsic_center = intrinsic.center();
+                        let mut target = state.transform;
+                        target.translation = target_center - intrinsic_center;
+                        let sx = target_box.bounds.width() / intrinsic.width().max(1.0e-9);
+                        let sy = target_box.bounds.height() / intrinsic.height().max(1.0e-9);
+                        let fit = match item_style.fit {
+                            gaanim_layout::FitMode::None => DVec3::ONE,
+                            gaanim_layout::FitMode::Contain => DVec3::splat(sx.min(sy)),
+                            gaanim_layout::FitMode::Cover => DVec3::splat(sx.max(sy)),
+                            gaanim_layout::FitMode::Stretch => DVec3::new(sx, sy, 1.0),
+                            gaanim_layout::FitMode::ScaleDown => DVec3::splat(sx.min(sy).min(1.0)),
+                        };
+                        target.scale *= fit;
+                        if matches!(item_style.fit, gaanim_layout::FitMode::Cover) {
+                            cover_clips.push((*member, target_box.bounds));
                         }
+                        targets.push((*member, target));
+                        state.transform = target;
+                        builder.commands.entity(state.entity).insert(target);
+                    }
+                    for (member, clip_bounds) in cover_clips {
+                        let world_path = Rect::new(
+                            clip_bounds.min.x,
+                            clip_bounds.min.y,
+                            clip_bounds.max.x,
+                            clip_bounds.max.y,
+                        )
+                        .to_path(0.1);
+                        for leaf in Self::visual_leaf_ids(builder, member) {
+                            let Some(state) = builder.states.get(leaf) else {
+                                continue;
+                            };
+                            let mut local_path = world_path.clone();
+                            local_path.apply_affine(
+                                builder.get_world_transform(leaf).to_affine_2d().inverse(),
+                            );
+                            builder.commands.entity(state.entity).insert(
+                                gaanim_renderer::effects::ClipMask {
+                                    path: local_path,
+                                    rule: gaanim_core::peniko::Fill::NonZero,
+                                },
+                            );
+                        }
+                    }
+                    let Some(duration) = duration else {
                         continue;
                     };
 
@@ -2005,12 +2073,23 @@ impl Canvas {
                     }
                     let mut animations: Vec<AnimationBuilder> = targets
                         .into_iter()
-                        .map(|(target, to)| AnimationBuilder {
-                            target,
-                            anim_type: AnimationType::TranslateTo { to },
-                            duration: *duration,
-                            rate_func: RateFunc::Smooth,
-                            delay: 0.0,
+                        .flat_map(|(target, to)| {
+                            [
+                                AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::TranslateTo { to: to.translation },
+                                    duration: *duration,
+                                    rate_func: RateFunc::Smooth,
+                                    delay: 0.0,
+                                },
+                                AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::ScaleTo { to: to.scale },
+                                    duration: *duration,
+                                    rate_func: RateFunc::Smooth,
+                                    delay: 0.0,
+                                },
+                            ]
                         })
                         .collect();
                     if let Some(entering) = entering
@@ -2039,12 +2118,111 @@ impl Canvas {
                             delay: 0.0,
                         });
                     }
-                    if let Some(scale) = scale_to {
-                        animations.push(AnimationBuilder {
-                            target: container,
-                            anim_type: AnimationType::ScaleTo {
-                                to: DVec3::splat(scale),
+                    builder.play_parallel(animations);
+                }
+                Op::LayoutConstraints {
+                    constraints,
+                    duration,
+                } => {
+                    let remap_expression = |expression: &gaanim_layout::LayoutExpression| {
+                        let mut mapped = gaanim_layout::LayoutExpression::from(expression.constant);
+                        for (variable, coefficient) in &expression.terms {
+                            let source = ObjectId::from_raw(variable.node.0);
+                            let Some(target) = id_map.get(&source).copied() else {
+                                continue;
+                            };
+                            mapped = mapped
+                                + gaanim_layout::LayoutExpression::variable(
+                                    gaanim_layout::LayoutId(target.as_raw()),
+                                    variable.attribute,
+                                ) * *coefficient;
+                        }
+                        mapped
+                    };
+                    let mapped: Vec<_> = constraints
+                        .iter()
+                        .map(|constraint| gaanim_layout::LayoutConstraint {
+                            lhs: remap_expression(&constraint.lhs),
+                            relation: constraint.relation,
+                            rhs: remap_expression(&constraint.rhs),
+                            strength: constraint.strength,
+                            label: constraint.label.clone(),
+                        })
+                        .collect();
+                    let referenced: std::collections::BTreeSet<_> = mapped
+                        .iter()
+                        .flat_map(|constraint| {
+                            constraint
+                                .lhs
+                                .terms
+                                .keys()
+                                .chain(constraint.rhs.terms.keys())
+                                .map(|variable| variable.node)
+                        })
+                        .collect();
+                    let mut resolved = gaanim_layout::ResolvedLayout::default();
+                    for layout_id in &referenced {
+                        let object = ObjectId::from_raw(layout_id.0);
+                        let Some(state) = builder.states.get(object) else {
+                            continue;
+                        };
+                        resolved.boxes.insert(
+                            *layout_id,
+                            gaanim_layout::ResolvedBox {
+                                bounds: gaanim_layout::transform_bounds(
+                                    state.bounds,
+                                    &state.transform,
+                                ),
+                                clip: None,
+                                scale: DVec3::ONE,
                             },
+                        );
+                    }
+                    gaanim_layout::solve_constraints(&mut resolved, &mapped).unwrap_or_else(
+                        |error| panic!("layout constraint resolution failed: {error}"),
+                    );
+
+                    let mut targets = Vec::new();
+                    for layout_id in referenced {
+                        let object = ObjectId::from_raw(layout_id.0);
+                        let Some(target_box) = resolved.boxes.get(&layout_id).copied() else {
+                            continue;
+                        };
+                        let Some(state) = builder.states.get_mut(object) else {
+                            continue;
+                        };
+                        let current =
+                            gaanim_layout::transform_bounds(state.bounds, &state.transform);
+                        let sx = target_box.bounds.width() / current.width().max(1.0e-9);
+                        let sy = target_box.bounds.height() / current.height().max(1.0e-9);
+                        let mut target = state.transform;
+                        target.translation += target_box.bounds.center() - current.center();
+                        target.scale *= DVec3::new(sx, sy, 1.0);
+                        targets.push((object, state.transform, target));
+                        state.transform = target;
+                        builder.commands.entity(state.entity).insert(target);
+                    }
+                    let Some(duration) = duration else {
+                        continue;
+                    };
+                    let mut animations = Vec::new();
+                    for (object, before, target) in targets {
+                        if let Some(state) = builder.states.get_mut(object) {
+                            state.transform = before;
+                            builder.commands.entity(state.entity).insert(before);
+                        }
+                        animations.push(AnimationBuilder {
+                            target: object,
+                            anim_type: AnimationType::TranslateTo {
+                                to: target.translation,
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                        animations.push(AnimationBuilder {
+                            target: object,
+                            anim_type: AnimationType::ScaleTo { to: target.scale },
                             duration: *duration,
                             rate_func: RateFunc::Smooth,
                             delay: 0.0,
@@ -4069,7 +4247,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: Vec::new(),
                         parent: None,
-            exclude_from_parent_draw: false,
+                        exclude_from_parent_draw: false,
                     },
                 );
                 let mref = MobjectRef { id };
@@ -4167,7 +4345,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: child_ids,
                         parent: None,
-            exclude_from_parent_draw: false,
+                        exclude_from_parent_draw: false,
                     },
                 );
                 let mref = MobjectRef { id };
@@ -4216,7 +4394,11 @@ impl Canvas {
                     Some(gaanim_core::peniko::Brush::Solid(c)) => c,
                     _ => body.fill_color,
                 };
-                let source = paragraph_typst_source(text, options, font_size, color);
+                let mut resolved_options = options.clone();
+                if resolved_options.width.is_none() {
+                    resolved_options.width = Some(frame_bounds.width().max(1.0));
+                }
+                let source = paragraph_typst_source(text, &resolved_options, font_size, color);
                 let mr = builder.typst(
                     &source,
                     false,
@@ -4332,7 +4514,6 @@ impl Canvas {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group(&refs);
-                Self::apply_group_arrangement(builder, mr.id, spec);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
@@ -4342,7 +4523,6 @@ impl Canvas {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group_identity(&refs);
-                Self::apply_group_arrangement(builder, mr.id, spec);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
@@ -4370,7 +4550,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: Vec::new(),
                         parent: None,
-            exclude_from_parent_draw: false,
+                        exclude_from_parent_draw: false,
                     },
                 );
                 builder.float_signals.insert(new_id, *initial);
@@ -4763,10 +4943,6 @@ impl Canvas {
                         frame_bounds,
                     );
                 }
-                LayoutOp::Arrange { .. } => {
-                    // Group child placement is resolved before this group's own
-                    // bounds are positioned by the other layout operations.
-                }
             }
         }
 
@@ -4781,19 +4957,6 @@ impl Canvas {
                 state.transform = transform;
             }
             builder.commands.entity(entity).insert(transform);
-        }
-    }
-
-    fn apply_group_arrangement(builder: &mut SceneBuilder, id: ObjectId, spec: &ObjectSpec) {
-        for op in &spec.layout_ops {
-            if let LayoutOp::Arrange {
-                direction,
-                spacing,
-                aligned_edge,
-            } = op
-            {
-                builder.arrange_aligned(MobjectRef { id }, *direction, *spacing, *aligned_edge);
-            }
         }
     }
 }
@@ -5032,7 +5195,7 @@ mod tests {
         let source = paragraph_typst_source(
             "A bounded paragraph",
             &ParagraphOptions {
-                width: 240.0,
+                width: Some(240.0),
                 align: TextAlign::Left,
                 line_spacing: 1.2,
                 font_size: Some(30.0),
@@ -5625,32 +5788,6 @@ mod tests {
     }
 
     #[test]
-    fn vstack_updates_group_bounds_before_region_placement() {
-        let mut canvas = Canvas::new(640, 360);
-        let first = canvas.rect(80.0, 30.0);
-        let second = canvas.rect(80.0, 30.0);
-        let stack = canvas.group(&[&first, &second]).vstack(20.0, Anchor::Left);
-        let layout = canvas.layout(0.0, 0.0, 0.0);
-        let _ = layout.content.place(stack, Anchor::TopLeft);
-
-        let world = World::new();
-        let mut queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut queue, &world);
-        let mut timeline = Timeline::new();
-        let fonts = gaanim_text::font::FontRegistry::new();
-        let text_config = gaanim_text::prelude::TextConfig::default();
-        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
-
-        let mut world = world;
-        queue.apply(&mut world);
-        let mut query = world.query::<&LocalBounds>();
-        assert!(query.iter(&world).any(|bounds| {
-            (bounds.0.width() - 80.0).abs() < 1e-6 && (bounds.0.height() - 80.0).abs() < 1e-6
-        }));
-    }
-
-    #[test]
     fn text_with_inline_math_compiles_to_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
         canvas.text("Energia $E = m c^2$ es famosa");
@@ -5749,7 +5886,7 @@ mod tests {
         let para = paragraph_typst_source(
             "Hola $x^2$ mundo",
             &ParagraphOptions {
-                width: 400.0,
+                width: Some(400.0),
                 align: TextAlign::Left,
                 ..Default::default()
             },

@@ -1,6 +1,12 @@
 use ::gaanim_core as engine_core;
 use pyo3::prelude::*;
 
+pyo3::create_exception!(
+    gaanim_core,
+    LayoutOwnershipError,
+    pyo3::exceptions::PyException
+);
+
 mod brush;
 mod color;
 mod pycanvas;
@@ -18,16 +24,18 @@ pub fn register_inittab() {
 
 #[pymodule]
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add(
+        "LayoutOwnershipError",
+        _py.get_type::<LayoutOwnershipError>(),
+    )?;
     m.add_class::<transition::PyTransitionType>()?;
     m.add_class::<color::PyColor>()?;
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;
-    m.add_class::<pylayout::PyLayoutRegion>()?;
-    m.add_class::<pylayout::PyFlow>()?;
-    m.add_class::<pylayout::PyLayout>()?;
-    m.add_class::<pylayout::PyGridLayout>()?;
-    m.add_class::<pylayout::PyFrameLayout>()?;
+    m.add_class::<pylayout::PyLayoutExpression>()?;
+    m.add_class::<pylayout::PyLayoutConstraint>()?;
+    m.add_class::<pylayout::PyConstraintSet>()?;
     m.add_class::<pycanvas::PyTheme>()?;
     m.add_class::<pycanvas::PyCanvas>()?;
     m.add_class::<pycanvas::PyCamera>()?;
@@ -35,6 +43,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PySegment>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
+    m.add_class::<pylayout::PyLayoutItem>()?;
+    m.add_class::<pylayout::PyLayout>()?;
     m.add_class::<pydrawable::PyFragmentSelection>()?;
     m.add_class::<updater::PyUpdater>()?;
     m.add_class::<value_tracker::PyValueTracker>()?;

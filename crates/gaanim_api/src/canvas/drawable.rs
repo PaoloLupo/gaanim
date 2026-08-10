@@ -62,6 +62,18 @@ pub struct RotationAxisError {
     pub axis: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LayoutOwnershipError {
+    #[error("drawable belongs to a different Scene")]
+    ForeignScene,
+    #[error("drawable already belongs to layout {owner:?}")]
+    AlreadyManaged { owner: ObjectId },
+    #[error(
+        "layout owns this drawable's position; remove at/shift/next_to/align_to/to_edge/to_corner and use LayoutItem offset or absolute placement"
+    )]
+    PositionalOperation,
+}
+
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
 #[derive(Debug, Clone)]
 pub struct FragmentSelection {
@@ -99,6 +111,43 @@ fn math_source_terms(source: &str) -> Vec<String> {
 }
 
 impl DrawableHandle {
+    pub fn same_canvas(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
+    pub fn claim_layout(&self, owner: &DrawableHandle) -> Result<(), LayoutOwnershipError> {
+        if !self.same_canvas(owner) {
+            return Err(LayoutOwnershipError::ForeignScene);
+        }
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        if spec.layout_ops.iter().any(|op| {
+            matches!(
+                op,
+                LayoutOp::SetTranslation(_)
+                    | LayoutOp::MoveAnchorTo { .. }
+                    | LayoutOp::NextTo { .. }
+                    | LayoutOp::AlignTo { .. }
+                    | LayoutOp::ToEdge { .. }
+                    | LayoutOp::ToCorner { .. }
+            )
+        }) {
+            return Err(LayoutOwnershipError::PositionalOperation);
+        }
+        if let Some(existing) = spec.layout_owner
+            && existing != owner.id
+        {
+            return Err(LayoutOwnershipError::AlreadyManaged { owner: existing });
+        }
+        spec.layout_owner = Some(owner.id);
+        Ok(())
+    }
+
+    pub fn release_layout(&self, owner: &DrawableHandle) {
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        if spec.layout_owner == Some(owner.id) {
+            spec.layout_owner = None;
+        }
+    }
     pub(crate) fn new(
         id: ObjectId,
         kind: SpawnKind,
@@ -256,7 +305,26 @@ impl DrawableHandle {
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {
-        self.update_spec(|spec| spec.layout_ops.push(op))
+        self.update_spec(|spec| {
+            let positional = matches!(
+                op,
+                LayoutOp::SetTranslation(_)
+                    | LayoutOp::MoveAnchorTo { .. }
+                    | LayoutOp::NextTo { .. }
+                    | LayoutOp::AlignTo { .. }
+                    | LayoutOp::ToEdge { .. }
+                    | LayoutOp::ToCorner { .. }
+            );
+            assert!(
+                !(positional && spec.layout_owner.is_some()),
+                "layout owns this drawable's position; use LayoutItem offset or absolute placement"
+            );
+            spec.layout_ops.push(op);
+        })
+    }
+
+    pub fn layout_owner(&self) -> Option<ObjectId> {
+        self.spec.lock().expect("object spec poisoned").layout_owner
     }
 
     // -- Instant setters (return Self) --
@@ -603,25 +671,6 @@ impl DrawableHandle {
 
     pub fn to_corner(self, corner: Anchor, buff: f64) -> Self {
         self.push_layout(LayoutOp::ToCorner { corner, buff })
-    }
-
-    /// Arranges this group's direct children along a direction.
-    pub fn arrange(self, direction: Direction, spacing: f64, aligned_edge: Anchor) -> Self {
-        self.push_layout(LayoutOp::Arrange {
-            direction,
-            spacing: spacing.max(0.0),
-            aligned_edge,
-        })
-    }
-
-    /// Stacks this group's direct children from top to bottom.
-    pub fn vstack(self, spacing: f64, aligned_edge: Anchor) -> Self {
-        self.arrange(Direction::Down, spacing, aligned_edge)
-    }
-
-    /// Stacks this group's direct children from left to right.
-    pub fn hstack(self, spacing: f64, aligned_edge: Anchor) -> Self {
-        self.arrange(Direction::Right, spacing, aligned_edge)
     }
 
     // -- Internal helpers --

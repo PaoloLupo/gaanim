@@ -6,7 +6,7 @@ use pyo3::types::PyTuple;
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
-use crate::pylayout::{PyAnchor, PyDirection};
+use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression};
 use crate::updater::PyUpdater;
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
@@ -92,9 +92,21 @@ impl PyCanvasAnim {
     }
 }
 
-#[pyclass(name = "Drawable", module = "gaanim_core", from_py_object)]
+#[pyclass(name = "Drawable", module = "gaanim_core", subclass, from_py_object)]
 #[derive(Clone)]
 pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
+
+impl PyDrawable {
+    fn require_free_position(&self, operation: &str) -> PyResult<()> {
+        if self.0.layout_owner().is_some() {
+            Err(crate::LayoutOwnershipError::new_err(format!(
+                "layout owns this drawable's translation; use scene.item(..., offset=...) or layout.configure_item(...). Operation: {operation}"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+}
 
 #[pyclass(name = "FragmentSelection", module = "gaanim_core", from_py_object)]
 #[derive(Clone)]
@@ -150,6 +162,46 @@ impl PyFragmentSelection {
 
 #[pymethods]
 impl PyDrawable {
+    #[getter]
+    fn left(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Left)
+    }
+
+    #[getter]
+    fn right(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Right)
+    }
+
+    #[getter]
+    fn top(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Top)
+    }
+
+    #[getter]
+    fn bottom(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Bottom)
+    }
+
+    #[getter]
+    fn center_x(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::CenterX)
+    }
+
+    #[getter]
+    fn center_y(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::CenterY)
+    }
+
+    #[getter]
+    fn width(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Width)
+    }
+
+    #[getter]
+    fn height(&self) -> PyLayoutExpression {
+        expression_for(&self.0, gaanim_layout::LayoutAttribute::Height)
+    }
+
     /// Return a named source group or path from an imported SVG or glTF.
     fn part(&self, id: &str) -> PyResult<Self> {
         if id.is_empty() {
@@ -352,11 +404,13 @@ impl PyDrawable {
     fn z_index(&self, z: i32) -> Self {
         Self(self.0.clone().z_index(z))
     }
-    fn at(&self, x: f64, y: f64) -> Self {
-        Self(self.0.clone().at(x, y))
+    fn at(&self, x: f64, y: f64) -> PyResult<Self> {
+        self.require_free_position("at")?;
+        Ok(Self(self.0.clone().at(x, y)))
     }
-    fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        Self(self.0.clone().at_3d(x, y, z))
+    fn at_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        self.require_free_position("at_3d")?;
+        Ok(Self(self.0.clone().at_3d(x, y, z)))
     }
     fn billboard(&self) -> Self {
         Self(self.0.clone().billboard())
@@ -385,8 +439,9 @@ impl PyDrawable {
     fn pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().pivot(x, y))
     }
-    fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> Self {
-        Self(self.0.clone().at_anchor(x, y, anchor.0))
+    fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> PyResult<Self> {
+        self.require_free_position("at_anchor")?;
+        Ok(Self(self.0.clone().at_anchor(x, y, anchor.0)))
     }
     #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
     fn next_to(
@@ -395,15 +450,17 @@ impl PyDrawable {
         direction: &PyDirection,
         spacing: f64,
         aligned_edge: Option<&PyAnchor>,
-    ) -> Self {
+    ) -> PyResult<Self> {
+        self.require_free_position("next_to")?;
         let aligned_edge = aligned_edge
             .map(|anchor| anchor.0)
             .unwrap_or(gaanim_api::canvas::Anchor::Center);
-        Self(
-            self.0
-                .clone()
-                .next_to_aligned(&reference.0, direction.0, spacing, aligned_edge),
-        )
+        Ok(Self(self.0.clone().next_to_aligned(
+            &reference.0,
+            direction.0,
+            spacing,
+            aligned_edge,
+        )))
     }
     #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
     fn align_to(
@@ -411,66 +468,49 @@ impl PyDrawable {
         reference: &PyDrawable,
         target_anchor: &PyAnchor,
         reference_anchor: Option<&PyAnchor>,
-    ) -> Self {
+    ) -> PyResult<Self> {
+        self.require_free_position("align_to")?;
         let reference_anchor = reference_anchor
             .map(|anchor| anchor.0)
             .unwrap_or(target_anchor.0);
-        Self(
-            self.0
-                .clone()
-                .align_to(&reference.0, target_anchor.0, reference_anchor),
-        )
+        Ok(Self(self.0.clone().align_to(
+            &reference.0,
+            target_anchor.0,
+            reference_anchor,
+        )))
     }
     #[pyo3(signature = (direction, buff=24.0))]
-    fn to_edge(&self, direction: &PyDirection, buff: f64) -> Self {
-        Self(self.0.clone().to_edge(direction.0, buff))
+    fn to_edge(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
+        self.require_free_position("to_edge")?;
+        Ok(Self(self.0.clone().to_edge(direction.0, buff)))
     }
     #[pyo3(signature = (corner, buff=24.0))]
-    fn to_corner(&self, corner: &PyAnchor, buff: f64) -> Self {
-        Self(self.0.clone().to_corner(corner.0, buff))
+    fn to_corner(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
+        self.require_free_position("to_corner")?;
+        Ok(Self(self.0.clone().to_corner(corner.0, buff)))
     }
-    #[pyo3(signature = (gap=24.0, align=None))]
-    fn vstack(&self, gap: f64, align: Option<&PyAnchor>) -> Self {
-        Self(
-            self.0.clone().vstack(
-                gap,
-                align
-                    .map(|anchor| anchor.0)
-                    .unwrap_or(gaanim_api::canvas::Anchor::Left),
-            ),
-        )
-    }
-    #[pyo3(signature = (gap=24.0, align=None))]
-    fn hstack(&self, gap: f64, align: Option<&PyAnchor>) -> Self {
-        Self(
-            self.0.clone().hstack(
-                gap,
-                align
-                    .map(|anchor| anchor.0)
-                    .unwrap_or(gaanim_api::canvas::Anchor::Bottom),
-            ),
-        )
-    }
-
-    fn r#move(&self, dx: f64, dy: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn r#move(&self, dx: f64, dy: f64) -> PyResult<PyCanvasAnim> {
+        self.require_free_position("move")?;
+        Ok(PyCanvasAnim {
             inner: self.0.r#move(dx, dy),
-        }
+        })
     }
-    fn move_to(&self, x: f64, y: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn move_to(&self, x: f64, y: f64) -> PyResult<PyCanvasAnim> {
+        self.require_free_position("move_to")?;
+        Ok(PyCanvasAnim {
             inner: self.0.move_to(x, y),
-        }
+        })
     }
     fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.move_3d(dx, dy, dz),
         }
     }
-    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<PyCanvasAnim> {
+        self.require_free_position("move_to_3d")?;
+        Ok(PyCanvasAnim {
             inner: self.0.move_to_3d(x, y, z),
-        }
+        })
     }
     fn glide_to(&self, x: f64, y: f64) -> PyCanvasAnim {
         PyCanvasAnim {

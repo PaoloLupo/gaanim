@@ -3,7 +3,7 @@
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::peniko::{Brush, Color, ImageData};
-use gaanim_layout::{Anchor, Direction};
+use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
 use std::path::PathBuf;
@@ -109,7 +109,9 @@ pub enum ParagraphOverflow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphOptions {
     /// Maximum line width in canvas units/Typst points.
-    pub width: f64,
+    /// `None` makes the leaf width-responsive. Outside a Layout it resolves
+    /// against the scene safe frame; a Layout may offer a narrower width.
+    pub width: Option<f64>,
     pub align: TextAlign,
     /// Baseline multiplier. `1.0` is compact and `1.2` is a readable default.
     pub line_spacing: f64,
@@ -125,7 +127,7 @@ pub struct ParagraphOptions {
 impl ParagraphOptions {
     pub fn new(width: f64) -> Self {
         Self {
-            width: width.max(1.0),
+            width: Some(width.max(1.0)),
             ..Self::default()
         }
     }
@@ -134,7 +136,7 @@ impl ParagraphOptions {
 impl Default for ParagraphOptions {
     fn default() -> Self {
         Self {
-            width: 640.0,
+            width: None,
             align: TextAlign::Left,
             line_spacing: 1.2,
             font_size: None,
@@ -673,23 +675,49 @@ pub enum LayoutOp {
         corner: Anchor,
         buff: f64,
     },
-    /// Arrange the direct children of a group before its own placement is resolved.
-    Arrange {
-        direction: Direction,
-        spacing: f64,
-        aligned_edge: Anchor,
-    },
 }
 
-/// The small set of container algorithms exposed by the high-level layout API.
-///
-/// Layouts intentionally use the same primitives as groups: every child can be
-/// a shape, text, equation, group, or another layout container.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LayoutKind {
-    Row,
-    Column,
-    Grid { columns: usize },
+/// Containing block used by a root layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayoutWithin {
+    #[default]
+    Intrinsic,
+    Safe,
+    Frame,
+}
+
+/// Complete rule set for one persistent Layout v2 container.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutSpec {
+    pub kind: LayoutNodeKind,
+    pub style: LayoutStyle,
+    pub within: LayoutWithin,
+}
+
+impl Default for LayoutSpec {
+    fn default() -> Self {
+        Self {
+            kind: LayoutNodeKind::Column { wrap: false },
+            style: LayoutStyle::default(),
+            within: LayoutWithin::Intrinsic,
+        }
+    }
+}
+
+/// Per-child rules captured in a layout snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutMemberSpec {
+    pub id: ObjectId,
+    pub style: LayoutItemStyle,
+}
+
+/// Immutable, versioned authoring snapshot materialized by the timeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutTreeSnapshot {
+    pub version: u64,
+    pub container: ObjectId,
+    pub members: Vec<LayoutMemberSpec>,
+    pub spec: LayoutSpec,
 }
 
 #[derive(Debug, Clone)]
@@ -720,6 +748,8 @@ pub struct ObjectSpec {
     pub fragment_fills: Vec<(String, Color)>,
     /// Named fragment queries attached by the high-level equation API.
     pub fragment_tags: Vec<(String, String, Option<usize>)>,
+    /// Layout v2 container that owns this drawable's translation.
+    pub layout_owner: Option<ObjectId>,
     pub layout_ops: Vec<LayoutOp>,
 }
 
@@ -743,6 +773,7 @@ impl ObjectSpec {
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
+            layout_owner: None,
             layout_ops: Vec::new(),
         }
     }

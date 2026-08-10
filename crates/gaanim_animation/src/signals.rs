@@ -688,7 +688,8 @@ pub fn always_redraw_regen_system(world: &mut World) {
         }
         // Keep the PathReveal component alive so snapshot restore
         // can see the correct reveal factor.
-        if world.get::<crate::writing::PathReveal>(entity).is_none() && (reveal - 1.0).abs() > 1e-9 {
+        if world.get::<crate::writing::PathReveal>(entity).is_none() && (reveal - 1.0).abs() > 1e-9
+        {
             if let Ok(mut em) = world.get_entity_mut(entity) {
                 em.insert(crate::writing::PathReveal(reveal));
             }

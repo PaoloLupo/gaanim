@@ -840,7 +840,7 @@ scene.export("preview.webp", fps=30)
   signature: "group(members: list[Drawable]) -> Drawable",
   params: ((name: "members", type: "list[Drawable]", default: none, desc: [Members to group.]),),
   returns: (type: "Drawable", desc: [Group drawable.]),
-  desc: [Move/rotate/scale as one. Stack with `vstack`/`hstack` before placing.],
+  desc: [Move/rotate/scale as one. Use `Scene.row`, `column`, `grid`, or `stack` for layout.],
 )[
 ```python
 # show-code: true
@@ -1148,22 +1148,22 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Drawable layout helpers",
+  name: "Free drawable positioning",
   kind: "method",
-  signature: ".next_to(ref, dir) .align_to(ref, anchor) .to_edge(dir, buff) .vstack / .hstack",
+  signature: ".next_to(ref, dir) .align_to(ref, anchor) .to_edge(dir, buff)",
   params: ((name: "reference", type: "Drawable", default: none, desc: [Anchor target.]),),
   returns: (type: "Drawable", desc: [Self positioned relatively.]),
-  desc: [`Direction`/`Anchor` enums. `vstack(gap, align)` and `hstack` for stacks.],
+  desc: [`Direction`/`Anchor` helpers are only for free drawables. Layout children use `offset` and constraints.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from gaanim import Anchor, Direction
 scene = Scene(480, 270, background="#0f172a")
-a = scene.circle(18).fill(BLUE).at(-60, 0)
-b = scene.circle(18).fill(WHITE).at(0, 0)
-c = scene.circle(18).fill(BLUE).at(60, 0)
-row = scene.group([a, b, c]).hstack(gap=18)
+a = scene.circle(18).fill(BLUE)
+b = scene.circle(18).fill(WHITE)
+c = scene.circle(18).fill(BLUE)
+row = scene.row([a, b, c], gap=18, within="safe")
 scene.play([row.fade_in().duration(0.6)])
 scene.export("preview.webp", fps=30)
 ```

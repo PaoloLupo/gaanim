@@ -5,12 +5,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyTuple};
+use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
     CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
-    PresentationBrand, SegmentHandle, SegmentLayout, TextAlign, ThemeFont,
+    PresentationBrand, SegmentHandle, TextAlign, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -20,7 +20,10 @@ use gaanim_api::export::{
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
-use crate::pylayout::{PyFlow, PyFrameLayout, PyLayout, PyLayoutRegion};
+use crate::pylayout::{
+    column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
+    stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
+};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -43,6 +46,18 @@ fn drawable_args(
         drawables.push(drawable.0.clone());
     }
     Ok(drawables)
+}
+
+fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::LayoutMember>> {
+    let children = children.downcast::<PySequence>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "children must be a sequence of Drawable, Layout, or LayoutItem values",
+        )
+    })?;
+    children
+        .try_iter()?
+        .map(|child| PyLayout::member_from_python(&child?))
+        .collect()
 }
 
 fn parse_equation_tags(
@@ -590,18 +605,6 @@ impl PyCanvas {
         canvas.margin = margin;
         Ok(())
     }
-
-    /// The region available after the configured safe-area margins.
-    fn safe_area(&self) -> PyLayoutRegion {
-        PyLayoutRegion {
-            region: self
-                .inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .safe_area(),
-            canvas: self.inner.clone(),
-        }
-    }
 }
 
 /// Top-level public facade for building a Gaanim animation.
@@ -828,25 +831,35 @@ impl PyCamera {
     }
 }
 
-/// Stable handle for one authored segment and its layout regions.
+/// Stable handle for one authored segment.
 #[pyclass(name = "Segment", module = "gaanim_core")]
 pub struct PySegment {
-    canvas: Arc<Mutex<ApiCanvas>>,
+    scene: Py<PyScene>,
+    template: Option<Py<PyAny>>,
     inner: SegmentHandle,
 }
 
 #[pymethods]
 impl PySegment {
-    /// Resolve a named region supplied by this segment's layout.
-    fn region(&self, name: &str) -> PyResult<PyLayoutRegion> {
-        let region = self
-            .inner
-            .region(name)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        Ok(PyLayoutRegion {
-            region,
-            canvas: self.canvas.clone(),
-        })
+    /// Bind template slots and return the segment's root Layout.
+    #[pyo3(signature = (**slots))]
+    fn bind<'py>(
+        &self,
+        py: Python<'py>,
+        slots: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyLayout>> {
+        let template = self.template.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(
+                "this segment has no template; pass template= to scene.segment()",
+            )
+        })?;
+        let result = template.bind(py).call((self.scene.bind(py),), slots)?;
+        if !result.is_instance_of::<PyLayout>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "a segment template must return Layout",
+            ));
+        }
+        Ok(result.extract::<Py<PyLayout>>()?)
     }
 }
 
@@ -913,103 +926,221 @@ impl PyScene {
         Ok(())
     }
 
-    /// Defines reusable `header`, `content`, and `footer` safe areas.
-    /// Use `region.place(drawable, Anchor.TOP_LEFT)` to place a drawable.
-    #[pyo3(signature = (header=0.0, footer=0.0, gap=24.0))]
-    fn frame_layout(&self, header: f64, footer: f64, gap: f64) -> PyFrameLayout {
-        PyFrameLayout {
-            layout: self
-                .inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .layout(header, footer, gap),
-            canvas: self.inner.clone(),
-        }
+    /// Horizontal Layout v2 container.
+    #[pyo3(signature = (children, *, gap=24.0, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn row<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyAny>,
+        gap: f64,
+        padding: Option<&Bound<'py, PyAny>>,
+        width: Option<&Bound<'py, PyAny>>,
+        height: Option<&Bound<'py, PyAny>>,
+        align: &str,
+        justify: &str,
+        wrap: bool,
+        within: Option<&str>,
+    ) -> PyResult<Py<PyLayout>> {
+        Py::new(
+            py,
+            PyLayout::initializer(
+                self.inner.clone(),
+                layout_spec(
+                    row_kind(wrap),
+                    gap,
+                    padding,
+                    width,
+                    height,
+                    align,
+                    justify,
+                    within,
+                )?,
+                layout_members(children)?,
+            )?,
+        )
     }
 
-    /// Creates the one persistent container API for presentation layouts.
-    /// Layouts accept drawables and other layouts through `.add(...)`.
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false, justify="center"))]
-    fn layout(
+    /// Vertical Layout v2 container.
+    #[pyo3(signature = (children, *, gap=24.0, padding=None, width=None, height=None, align="start", justify="start", wrap=false, within=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn column<'py>(
         &self,
-        kind: &str,
+        py: Python<'py>,
+        children: &Bound<'py, PyAny>,
         gap: f64,
-        columns: usize,
-        width: Option<f64>,
-        height: Option<f64>,
-        fit: &str,
-        wrap: bool,
+        padding: Option<&Bound<'py, PyAny>>,
+        width: Option<&Bound<'py, PyAny>>,
+        height: Option<&Bound<'py, PyAny>>,
+        align: &str,
         justify: &str,
-    ) -> PyResult<PyLayout> {
-        let kind = match kind {
-            "row" => gaanim_api::canvas::LayoutKind::Row,
-            "column" => gaanim_api::canvas::LayoutKind::Column,
-            "grid" => gaanim_api::canvas::LayoutKind::Grid {
-                columns: columns.max(1),
-            },
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "kind must be 'row', 'column', or 'grid'",
-                ));
-            }
-        };
-        for (name, value) in [("width", width), ("height", height)] {
-            if let Some(value) = value {
-                if !value.is_finite() || value <= 0.0 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "{name} must be a finite positive number"
-                    )));
-                }
-            }
+        wrap: bool,
+        within: Option<&str>,
+    ) -> PyResult<Py<PyLayout>> {
+        Py::new(
+            py,
+            PyLayout::initializer(
+                self.inner.clone(),
+                layout_spec(
+                    column_kind(wrap),
+                    gap,
+                    padding,
+                    width,
+                    height,
+                    align,
+                    justify,
+                    within,
+                )?,
+                layout_members(children)?,
+            )?,
+        )
+    }
+
+    /// Grid Layout v2 container with fixed, auto, and fractional tracks.
+    #[pyo3(signature = (children, *, rows=None, columns=None, gap=0.0, row_gap=None, column_gap=None, padding=None, width=None, height=None, align="stretch", justify="start", auto_flow="row", within=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn grid<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyAny>,
+        rows: Option<&Bound<'py, PyAny>>,
+        columns: Option<&Bound<'py, PyAny>>,
+        gap: f64,
+        row_gap: Option<f64>,
+        column_gap: Option<f64>,
+        padding: Option<&Bound<'py, PyAny>>,
+        width: Option<&Bound<'py, PyAny>>,
+        height: Option<&Bound<'py, PyAny>>,
+        align: &str,
+        justify: &str,
+        auto_flow: &str,
+        within: Option<&str>,
+    ) -> PyResult<Py<PyLayout>> {
+        let kind = grid_kind(
+            parse_grid_tracks(rows, "rows")?,
+            parse_grid_tracks(columns, "columns")?,
+            auto_flow,
+        )?;
+        let mut spec = layout_spec(kind, gap, padding, width, height, align, justify, within)?;
+        spec.style.gap =
+            gaanim_core::glam::DVec2::new(column_gap.unwrap_or(gap), row_gap.unwrap_or(gap));
+        Py::new(
+            py,
+            PyLayout::initializer(self.inner.clone(), spec, layout_members(children)?)?,
+        )
+    }
+
+    /// Overlay Layout v2 container.
+    #[pyo3(signature = (children, *, padding=None, width=None, height=None, align="center", within=None))]
+    fn stack<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyAny>,
+        padding: Option<&Bound<'py, PyAny>>,
+        width: Option<&Bound<'py, PyAny>>,
+        height: Option<&Bound<'py, PyAny>>,
+        align: &str,
+        within: Option<&str>,
+    ) -> PyResult<Py<PyLayout>> {
+        Py::new(
+            py,
+            PyLayout::initializer(
+                self.inner.clone(),
+                layout_spec(
+                    stack_kind(),
+                    0.0,
+                    padding,
+                    width,
+                    height,
+                    align,
+                    "start",
+                    within,
+                )?,
+                layout_members(children)?,
+            )?,
+        )
+    }
+
+    /// Adds per-child sizing, grid, fit, absolute, anchor, and offset rules.
+    #[pyo3(signature = (child, *, grow=0.0, shrink=1.0, align=None, row=None, column=None, row_span=1, column_span=1, absolute=false, anchor=None, offset=(0.0, 0.0), fit="none"))]
+    #[allow(clippy::too_many_arguments)]
+    fn item(
+        &self,
+        child: &Bound<'_, PyAny>,
+        grow: f64,
+        shrink: f64,
+        align: Option<&str>,
+        row: Option<usize>,
+        column: Option<usize>,
+        row_span: usize,
+        column_span: usize,
+        absolute: bool,
+        anchor: Option<&PyAnchor>,
+        offset: (f64, f64),
+        fit: &str,
+    ) -> PyResult<PyLayoutItem> {
+        layout_item_from_python(
+            child,
+            grow,
+            shrink,
+            align,
+            row,
+            column,
+            row_span,
+            column_span,
+            absolute,
+            anchor,
+            offset,
+            fit,
+        )
+    }
+
+    /// Register prioritized linear relations between drawable bounds.
+    #[pyo3(signature = (*constraints, animate=None))]
+    fn constrain(
+        &self,
+        constraints: &Bound<'_, PyTuple>,
+        animate: Option<f64>,
+    ) -> PyResult<PyConstraintSet> {
+        let mut parsed = Vec::with_capacity(constraints.len());
+        for constraint in constraints.iter() {
+            let constraint = constraint
+                .extract::<PyRef<'_, PyLayoutConstraint>>()
+                .map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "constrain() arguments must be LayoutConstraint values",
+                    )
+                })?;
+            parsed.push(constraint.inner.clone());
         }
-        let shrink_to_fit = match fit {
-            "none" => false,
-            "shrink" => true,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "fit must be 'none' or 'shrink'",
-                ));
-            }
-        };
-        if !matches!(justify, "start" | "center" | "end" | "between") {
+        let constraints = parsed;
+        if constraints.is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "justify must be 'start', 'center', 'end', or 'between'",
+                "constrain() requires at least one LayoutConstraint",
             ));
         }
-        Ok(PyLayout::new(
-            self.inner.clone(),
-            kind,
-            gap,
-            width,
-            height,
-            shrink_to_fit,
-            None,
-            wrap,
-            justify,
-        ))
+        let count = constraints.len();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .constrain_layout(constraints, animate)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyConstraintSet { count })
     }
 
-    /// Creates an editorial layout preset that scales with the safe frame.
-    fn layout_preset(&self, name: &str) -> PyResult<PyFrameLayout> {
-        let preset = match name {
-            "lecture" => gaanim_api::canvas::LayoutPreset::Lecture,
-            "comparison" => gaanim_api::canvas::LayoutPreset::Comparison,
-            "vertical_short" => gaanim_api::canvas::LayoutPreset::VerticalShort,
-            "minimal" => gaanim_api::canvas::LayoutPreset::Minimal,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "preset must be 'lecture', 'comparison', 'vertical_short', or 'minimal'",
-                ));
-            }
-        };
-        Ok(PyFrameLayout {
-            layout: self
-                .inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .layout_preset(preset),
-            canvas: self.inner.clone(),
-        })
+    /// Return weak-constraint diagnostics known before rendering.
+    fn check_layout(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Instantiate a typed Python layout template with this scene.
+    #[pyo3(signature = (template, **slots))]
+    fn template<'py>(
+        slf: &Bound<'py, Self>,
+        template: &Bound<'py, PyAny>,
+        slots: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        template.call((slf,), slots).map(Bound::unbind)
     }
 
     /// Sets the directory used to resolve relative image and SVG paths.
@@ -1107,35 +1238,6 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .audio(path, start, duration, volume, fade_in, fade_out)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
-    }
-
-    /// Starts a deferred vertical or horizontal sequence of drawables.
-    #[pyo3(signature = (direction="vertical", gap=24.0, align=None))]
-    fn flow(
-        &self,
-        direction: &str,
-        gap: f64,
-        align: Option<&crate::pylayout::PyAnchor>,
-    ) -> PyResult<PyFlow> {
-        let direction = match direction {
-            "vertical" => gaanim_api::canvas::Direction::Down,
-            "horizontal" => gaanim_api::canvas::Direction::Right,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "direction must be 'vertical' or 'horizontal'",
-                ));
-            }
-        };
-        let default_align = match direction {
-            gaanim_api::canvas::Direction::Down => gaanim_api::canvas::Anchor::Left,
-            _ => gaanim_api::canvas::Anchor::Bottom,
-        };
-        Ok(PyFlow::new(
-            self.inner.clone(),
-            direction,
-            gap,
-            align.map(|anchor| anchor.0).unwrap_or(default_align),
-        ))
     }
 
     fn circle(&self, r: f64) -> PyDrawable {
@@ -2261,11 +2363,11 @@ impl PyScene {
     }
 
     /// Multi-line vector text constrained to a width.
-    #[pyo3(signature = (s, width, *, align="left", line_spacing=1.2, font_size=None, font_family=None, max_lines=None, overflow="clip"))]
+    #[pyo3(signature = (s, width=None, *, align="left", line_spacing=1.2, font_size=None, font_family=None, max_lines=None, overflow="clip"))]
     fn paragraph(
         &self,
         s: &str,
-        width: f64,
+        width: Option<f64>,
         align: &str,
         line_spacing: f64,
         font_size: Option<f64>,
@@ -2284,7 +2386,7 @@ impl PyScene {
                 ));
             }
         };
-        if !width.is_finite() || width <= 0.0 {
+        if width.is_some_and(|width| !width.is_finite() || width <= 0.0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "width must be a finite positive number",
             ));
@@ -3385,17 +3487,22 @@ impl PyScene {
             .camera_shake(amplitude, frequency, duration);
     }
 
-    #[pyo3(signature = (name, transition=None, *, notes=None, layout="blank"))]
-    fn segment(
-        &self,
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None))]
+    fn segment<'py>(
+        slf: &Bound<'py, Self>,
         name: String,
         transition: Option<&PyTransitionType>,
         notes: Option<String>,
-        layout: &str,
+        template: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<PySegment> {
-        let layout = SegmentLayout::parse(layout)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        let handle = self
+        let template_name = template.and_then(|template| {
+            template
+                .getattr("__name__")
+                .ok()
+                .and_then(|name| name.extract::<String>().ok())
+        });
+        let scene = slf.borrow();
+        let handle = scene
             .inner
             .lock()
             .expect("scene canvas poisoned")
@@ -3403,11 +3510,13 @@ impl PyScene {
                 name,
                 transition.map(|transition| transition.0.clone()),
                 notes,
-                layout,
+                template_name,
             )
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        drop(scene);
         Ok(PySegment {
-            canvas: self.inner.clone(),
+            scene: slf.clone().unbind(),
+            template: template.map(|template| template.clone().unbind()),
             inner: handle,
         })
     }

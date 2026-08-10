@@ -1086,7 +1086,7 @@ mod tests {
                 "Opening",
                 None,
                 Some("Introduce the topic".to_string()),
-                gaanim_api::canvas::SegmentLayout::Title,
+                Some("title_slide".to_string()),
             )
             .unwrap();
         canvas.wait(1.0);

@@ -6,11 +6,12 @@ use gaanim_animation::{AxisMask, Updater};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
+use gaanim_layout::LayoutConstraint;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
-use crate::canvas::types::{LayoutKind, ObjectSpec};
-use crate::canvas::{SegmentId, SegmentLayout};
+use crate::canvas::SegmentId;
+use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 
 // -----------------------------------------------------------------------
 // Shared state
@@ -26,6 +27,7 @@ pub(crate) struct CanvasState {
     pub next_id: u32,
     pub next_segment_id: u32,
     pub all_drawables: Vec<ObjectId>,
+    pub layout_constraints: Vec<LayoutConstraint>,
 }
 
 impl CanvasState {
@@ -36,6 +38,7 @@ impl CanvasState {
             next_id: 1,
             next_segment_id: 1,
             all_drawables: Vec::new(),
+            layout_constraints: Vec::new(),
         }
     }
 
@@ -272,19 +275,18 @@ pub(crate) enum Op {
     Release(ObjectId),
     /// Recompute a layout container and optionally animate every affected child
     /// into its new position.
-    LayoutReflow {
-        container: ObjectId,
-        members: Vec<ObjectId>,
-        kind: LayoutKind,
-        gap: f64,
+    LayoutTransition {
+        from_version: Option<u64>,
+        to: LayoutTreeSnapshot,
         duration: Option<f64>,
         entering: Option<ObjectId>,
         leaving: Option<ObjectId>,
-        max_width: Option<f64>,
-        max_height: Option<f64>,
-        shrink_to_fit: bool,
-        wrap: bool,
-        justify: String,
+    },
+    /// Resolve relational constraints against the current geometry. The
+    /// expressions use stable canvas object IDs and are remapped on replay.
+    LayoutConstraints {
+        constraints: Vec<LayoutConstraint>,
+        duration: Option<f64>,
     },
 
     // -- Reactive ops (Phase 2) --
@@ -467,7 +469,7 @@ pub struct Segment {
     pub id: SegmentId,
     pub name: String,
     pub notes: Option<String>,
-    pub layout: SegmentLayout,
+    pub template: Option<String>,
     pub(crate) stops: Vec<LocalSegmentStop>,
     pub explicit: bool,
     pub(crate) cursor: f64,
@@ -486,7 +488,7 @@ impl Segment {
             id: SegmentId(0),
             name: "_default".to_string(),
             notes: None,
-            layout: SegmentLayout::Blank,
+            template: None,
             stops: Vec::new(),
             explicit: false,
             cursor: 0.0,
@@ -501,13 +503,13 @@ impl Segment {
         id: SegmentId,
         name: String,
         notes: Option<String>,
-        layout: SegmentLayout,
+        template: Option<String>,
     ) -> Self {
         Self {
             id,
             name,
             notes,
-            layout,
+            template,
             stops: Vec::new(),
             explicit: true,
             cursor: 0.0,

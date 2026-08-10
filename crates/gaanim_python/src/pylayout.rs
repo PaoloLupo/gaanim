@@ -1,123 +1,334 @@
 use std::sync::{Arc, Mutex, Weak};
 
 use gaanim_api::canvas::{
-    Anchor, Canvas as ApiCanvas, Direction, FrameLayout, GridLayout, GridTrack, LayoutKind,
-    LayoutRegion,
+    Anchor, Canvas as ApiCanvas, Direction, DrawableHandle, LayoutMemberSpec, LayoutSpec,
+    LayoutWithin,
 };
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DVec2, DVec3};
+use gaanim_layout::{
+    Align, AutoFlow, ConstraintRelation, ConstraintStrength, FitMode, Insets, Justify,
+    LayoutAttribute, LayoutConstraint, LayoutExpression, LayoutItemStyle, LayoutNodeKind,
+    LayoutStyle, SizeRule, Track,
+};
 use pyo3::prelude::*;
+use pyo3::types::{PyAny, PySequence, PyString, PyTuple};
 
 use crate::pydrawable::PyDrawable;
+
+/// A linear expression over drawable layout attributes.
+#[pyclass(
+    name = "LayoutExpression",
+    module = "gaanim_core",
+    frozen,
+    from_py_object
+)]
+#[derive(Clone)]
+pub struct PyLayoutExpression {
+    pub(crate) inner: LayoutExpression,
+}
+
+impl PyLayoutExpression {
+    fn operand(value: &Bound<'_, PyAny>) -> PyResult<LayoutExpression> {
+        if let Ok(expression) = value.extract::<PyRef<'_, Self>>() {
+            return Ok(expression.inner.clone());
+        }
+        if let Ok(value) = value.extract::<f64>() {
+            if value.is_finite() {
+                return Ok(value.into());
+            }
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "layout expressions only support finite scalars and other linear expressions",
+        ))
+    }
+
+    fn relation(
+        &self,
+        rhs: &Bound<'_, PyAny>,
+        relation: ConstraintRelation,
+    ) -> PyResult<PyLayoutConstraint> {
+        Ok(PyLayoutConstraint {
+            inner: LayoutConstraint {
+                lhs: self.inner.clone(),
+                relation,
+                rhs: Self::operand(rhs)?,
+                strength: ConstraintStrength::Required,
+                label: None,
+            },
+        })
+    }
+}
+
+#[pymethods]
+impl PyLayoutExpression {
+    fn __add__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.clone() + Self::operand(rhs)?,
+        })
+    }
+
+    fn __radd__(&self, lhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            inner: Self::operand(lhs)? + self.inner.clone(),
+        })
+    }
+
+    fn __sub__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.clone() - Self::operand(rhs)?,
+        })
+    }
+
+    fn __rsub__(&self, lhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            inner: Self::operand(lhs)? - self.inner.clone(),
+        })
+    }
+
+    fn __mul__(&self, scalar: f64) -> PyResult<Self> {
+        if !scalar.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "layout scalar must be finite",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone() * scalar,
+        })
+    }
+
+    fn __rmul__(&self, scalar: f64) -> PyResult<Self> {
+        self.__mul__(scalar)
+    }
+
+    fn __truediv__(&self, scalar: f64) -> PyResult<Self> {
+        if !scalar.is_finite() || scalar == 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "layout divisor must be finite and non-zero",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone() / scalar,
+        })
+    }
+
+    fn __neg__(&self) -> Self {
+        Self {
+            inner: -self.inner.clone(),
+        }
+    }
+
+    fn __eq__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<PyLayoutConstraint> {
+        self.relation(rhs, ConstraintRelation::Equal)
+    }
+
+    fn __le__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<PyLayoutConstraint> {
+        self.relation(rhs, ConstraintRelation::LessOrEqual)
+    }
+
+    fn __ge__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<PyLayoutConstraint> {
+        self.relation(rhs, ConstraintRelation::GreaterOrEqual)
+    }
+}
+
+/// One prioritized linear relation in Layout v2.
+#[pyclass(
+    name = "LayoutConstraint",
+    module = "gaanim_core",
+    frozen,
+    from_py_object
+)]
+#[derive(Clone)]
+pub struct PyLayoutConstraint {
+    pub(crate) inner: LayoutConstraint,
+}
+
+#[pymethods]
+impl PyLayoutConstraint {
+    fn strong(&self) -> Self {
+        let mut inner = self.inner.clone();
+        inner.strength = ConstraintStrength::Strong;
+        Self { inner }
+    }
+
+    fn medium(&self) -> Self {
+        let mut inner = self.inner.clone();
+        inner.strength = ConstraintStrength::Medium;
+        Self { inner }
+    }
+
+    fn weak(&self) -> Self {
+        let mut inner = self.inner.clone();
+        inner.strength = ConstraintStrength::Weak;
+        Self { inner }
+    }
+
+    fn named(&self, label: String) -> Self {
+        let mut inner = self.inner.clone();
+        inner.label = Some(label);
+        Self { inner }
+    }
+}
+
+/// Handle returned by `Scene.constrain`.
+#[pyclass(name = "ConstraintSet", module = "gaanim_core", frozen)]
+#[derive(Clone)]
+pub struct PyConstraintSet {
+    #[pyo3(get)]
+    pub count: usize,
+}
+
+pub(crate) fn expression_for(
+    drawable: &DrawableHandle,
+    attribute: LayoutAttribute,
+) -> PyLayoutExpression {
+    PyLayoutExpression {
+        inner: LayoutExpression::variable(gaanim_layout::LayoutId(drawable.id.as_raw()), attribute),
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct LayoutMember {
+    pub handle: DrawableHandle,
+    pub style: LayoutItemStyle,
+    child_layout: Option<Arc<Mutex<LayoutState>>>,
+}
 
 #[derive(Clone)]
 struct LayoutState {
     canvas: Arc<Mutex<ApiCanvas>>,
-    kind: LayoutKind,
-    gap: f64,
-    max_width: Option<f64>,
-    max_height: Option<f64>,
-    shrink_to_fit: bool,
-    wrap: bool,
-    justify: String,
-    region: Option<LayoutRegion>,
-    members: Vec<gaanim_api::canvas::DrawableHandle>,
-    root: Option<gaanim_api::canvas::DrawableHandle>,
+    spec: LayoutSpec,
+    members: Vec<LayoutMember>,
+    root: DrawableHandle,
+    version: u64,
     parents: Vec<Weak<Mutex<LayoutState>>>,
 }
 
-/// A persistent, nestable layout container. It accepts drawables and other
-/// layouts; changing it recalculates its children and can animate the reflow.
-#[pyclass(name = "Layout", module = "gaanim_core", skip_from_py_object)]
+/// Per-child sizing and placement metadata used by Layout v2.
+#[pyclass(
+    name = "LayoutItem",
+    module = "gaanim_core",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct PyLayoutItem {
+    pub(crate) member: LayoutMember,
+}
+
+#[pymethods]
+impl PyLayoutItem {
+    fn __repr__(&self) -> String {
+        format!("LayoutItem(drawable={:?})", self.member.handle.id)
+    }
+}
+
+/// Persistent, nestable Layout v2 container. Layout extends Drawable, so it
+/// participates in styling and animations without an intermediate `.drawable`.
+#[pyclass(name = "Layout", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyLayout {
     inner: Arc<Mutex<LayoutState>>,
 }
 
 impl PyLayout {
-    pub fn new(
+    pub(crate) fn initializer(
         canvas: Arc<Mutex<ApiCanvas>>,
-        kind: LayoutKind,
-        gap: f64,
-        max_width: Option<f64>,
-        max_height: Option<f64>,
-        shrink_to_fit: bool,
-        region: Option<LayoutRegion>,
-        wrap: bool,
-        justify: &str,
-    ) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(LayoutState {
-                canvas,
-                kind,
-                gap: gap.max(0.0),
-                max_width,
-                max_height,
-                shrink_to_fit,
-                wrap,
-                justify: justify.to_string(),
-                region,
-                members: Vec::new(),
-                root: None,
-                parents: Vec::new(),
-            })),
+        spec: LayoutSpec,
+        members: Vec<LayoutMember>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let refs: Vec<_> = members.iter().map(|member| &member.handle).collect();
+        let root = canvas.lock().expect("scene canvas poisoned").group(&refs);
+        for member in &members {
+            member.handle.claim_layout(&root).map_err(layout_error)?;
         }
+        let inner = Arc::new(Mutex::new(LayoutState {
+            canvas,
+            spec,
+            members,
+            root: root.clone(),
+            version: 0,
+            parents: Vec::new(),
+        }));
+        {
+            let state = inner.lock().expect("layout poisoned");
+            for member in &state.members {
+                if let Some(child) = &member.child_layout {
+                    child
+                        .lock()
+                        .expect("layout poisoned")
+                        .parents
+                        .push(Arc::downgrade(&inner));
+                }
+            }
+        }
+        Self::reflow_inner(&inner, None, None, None);
+        Ok(PyClassInitializer::from(PyDrawable(root)).add_subclass(Self { inner }))
     }
 
-    fn root(&self) -> Option<gaanim_api::canvas::DrawableHandle> {
+    pub(crate) fn member_from_python(child: &Bound<'_, PyAny>) -> PyResult<LayoutMember> {
+        if let Ok(item) = child.extract::<PyRef<'_, PyLayoutItem>>() {
+            return Ok(item.member.clone());
+        }
+        if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
+            let state = layout.inner.lock().expect("layout poisoned");
+            return Ok(LayoutMember {
+                handle: state.root.clone(),
+                style: LayoutItemStyle::default(),
+                child_layout: Some(layout.inner.clone()),
+            });
+        }
+        if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
+            return Ok(LayoutMember {
+                handle: drawable.0.clone(),
+                style: LayoutItemStyle::default(),
+                child_layout: None,
+            });
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "layout children must be Drawable, Layout, or LayoutItem",
+        ))
+    }
+
+    fn root(&self) -> DrawableHandle {
         self.inner.lock().expect("layout poisoned").root.clone()
     }
 
     fn reflow_inner(
         inner: &Arc<Mutex<LayoutState>>,
         duration: Option<f64>,
-        entering: Option<gaanim_api::canvas::DrawableHandle>,
-        leaving: Option<gaanim_api::canvas::DrawableHandle>,
+        entering: Option<DrawableHandle>,
+        leaving: Option<DrawableHandle>,
     ) {
-        let (
-            canvas,
-            kind,
-            gap,
-            max_width,
-            max_height,
-            shrink_to_fit,
-            wrap,
-            justify,
-            root,
-            members,
-            parents,
-        ) = {
-            let state = inner.lock().expect("layout poisoned");
+        let (canvas, spec, root, members, parents, version) = {
+            let mut state = inner.lock().expect("layout poisoned");
+            state.version = state.version.saturating_add(1);
             (
                 state.canvas.clone(),
-                state.kind,
-                state.gap,
-                state.max_width,
-                state.max_height,
-                state.shrink_to_fit,
-                state.wrap,
-                state.justify.clone(),
+                state.spec.clone(),
                 state.root.clone(),
                 state.members.clone(),
                 state.parents.clone(),
+                state.version,
             )
         };
-        let Some(root) = root else { return };
-        let refs: Vec<_> = members.iter().collect();
+        let refs: Vec<_> = members.iter().map(|member| &member.handle).collect();
+        let snapshots = members
+            .iter()
+            .map(|member| LayoutMemberSpec {
+                id: member.handle.id,
+                style: member.style.clone(),
+            })
+            .collect();
         let mut canvas = canvas.lock().expect("scene canvas poisoned");
         canvas.set_group_members(&root, &refs);
         canvas.reflow_layout(
             &root,
-            &refs,
-            kind,
-            gap,
+            snapshots,
+            spec,
+            version,
             duration,
             entering.as_ref(),
             leaving.as_ref(),
-            max_width,
-            max_height,
-            shrink_to_fit,
-            wrap,
-            &justify,
         );
         drop(canvas);
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
@@ -125,12 +336,27 @@ impl PyLayout {
         }
     }
 
-    fn add_member(
+    fn direct_member(child: &Bound<'_, PyAny>) -> PyResult<DrawableHandle> {
+        Ok(Self::member_from_python(child)?.handle)
+    }
+}
+
+#[pymethods]
+impl PyLayout {
+    #[getter]
+    fn count(&self) -> usize {
+        self.inner.lock().expect("layout poisoned").members.len()
+    }
+
+    #[pyo3(signature = (child, *, at=None, animate=None))]
+    fn add(
         &self,
-        member: gaanim_api::canvas::DrawableHandle,
+        child: &Bound<'_, PyAny>,
         at: Option<usize>,
         animate: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        let member = Self::member_from_python(child)?;
+        let handle = member.handle.clone();
         {
             let mut state = self.inner.lock().expect("layout poisoned");
             let index = at.unwrap_or(state.members.len());
@@ -139,207 +365,47 @@ impl PyLayout {
                     "layout insertion index is out of bounds",
                 ));
             }
-            state.members.insert(index, member.clone());
-            if state.root.is_none() {
-                let refs: Vec<_> = state.members.iter().collect();
-                let canvas = state.canvas.clone();
-                let root = canvas.lock().expect("scene canvas poisoned").group(&refs);
-                let root = state
-                    .region
-                    .map(|region| region.place(root.clone(), Anchor::Center))
-                    .unwrap_or(root);
-                state.root = Some(root);
-            }
-        }
-        Self::reflow_inner(&self.inner, animate, Some(member.clone()), None);
-        Ok(PyDrawable(member))
-    }
-
-    fn member_from_python(
-        child: &Bound<'_, PyAny>,
-    ) -> PyResult<gaanim_api::canvas::DrawableHandle> {
-        if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
-            return Ok(drawable.0.clone());
-        }
-        if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
-            return layout.root().ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err("cannot use an empty Layout as a child")
-            });
-        }
-        Err(pyo3::exceptions::PyTypeError::new_err(
-            "Layout children must be a Drawable or Layout",
-        ))
-    }
-}
-
-#[pymethods]
-impl PyLayout {
-    /// Adds a drawable or another Layout. `animate` smoothly moves the items
-    /// displaced by the insertion and fades the new item in.
-    #[pyo3(signature = (child, *, at=None, animate=None))]
-    fn add(
-        &self,
-        child: &Bound<'_, PyAny>,
-        at: Option<usize>,
-        animate: Option<f64>,
-    ) -> PyResult<PyDrawable> {
-        if let Ok(drawable) = child.extract::<PyRef<'_, PyDrawable>>() {
-            return self.add_member(drawable.0.clone(), at, animate);
-        }
-        if let Ok(layout) = child.extract::<PyRef<'_, PyLayout>>() {
-            if Arc::ptr_eq(&self.inner, &layout.inner) {
+            if handle.id == state.root.id {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "a Layout cannot contain itself",
                 ));
             }
-            let root = layout.root().ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err(
-                    "cannot add an empty Layout; add a drawable to it first",
-                )
-            })?;
-            layout
-                .inner
-                .lock()
-                .expect("layout poisoned")
-                .parents
-                .push(Arc::downgrade(&self.inner));
-            return self.add_member(root, at, animate);
+            handle.claim_layout(&state.root).map_err(layout_error)?;
+            if let Some(child_layout) = &member.child_layout {
+                child_layout
+                    .lock()
+                    .expect("layout poisoned")
+                    .parents
+                    .push(Arc::downgrade(&self.inner));
+            }
+            state.members.insert(index, member);
         }
-        Err(pyo3::exceptions::PyTypeError::new_err(
-            "Layout.add expects a Drawable or Layout",
-        ))
+        Self::reflow_inner(&self.inner, animate, Some(handle.clone()), None);
+        Ok(PyDrawable(handle))
     }
 
-    /// Recalculate this container after external changes to its children.
-    #[pyo3(signature = (*, animate=None))]
-    fn reflow(&self, animate: Option<f64>) {
-        Self::reflow_inner(&self.inner, animate, None, None);
-    }
-
-    /// Updates this container's layout rule and recalculates its children.
-    /// Omitted values keep their current setting.
-    #[pyo3(signature = (*, kind=None, gap=None, columns=None, width=None, height=None, fit=None, wrap=None, justify=None, animate=None))]
-    fn configure(
-        &self,
-        kind: Option<&str>,
-        gap: Option<f64>,
-        columns: Option<usize>,
-        width: Option<f64>,
-        height: Option<f64>,
-        fit: Option<&str>,
-        wrap: Option<bool>,
-        justify: Option<&str>,
-        animate: Option<f64>,
-    ) -> PyResult<()> {
-        {
-            let mut state = self.inner.lock().expect("layout poisoned");
-            if let Some(gap) = gap {
-                if !gap.is_finite() || gap < 0.0 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "gap must be a finite non-negative number",
-                    ));
-                }
-                state.gap = gap;
-            }
-            if let Some(width) = width {
-                if !width.is_finite() || width <= 0.0 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "width must be a finite positive number",
-                    ));
-                }
-                state.max_width = Some(width);
-            }
-            if let Some(height) = height {
-                if !height.is_finite() || height <= 0.0 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "height must be a finite positive number",
-                    ));
-                }
-                state.max_height = Some(height);
-            }
-            if let Some(fit) = fit {
-                state.shrink_to_fit = match fit {
-                    "none" => false,
-                    "shrink" => true,
-                    _ => {
-                        return Err(pyo3::exceptions::PyValueError::new_err(
-                            "fit must be 'none' or 'shrink'",
-                        ))
-                    }
-                };
-            }
-            if let Some(wrap) = wrap {
-                if !matches!(state.kind, LayoutKind::Row) {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "wrap can only be configured on a row Layout",
-                    ));
-                }
-                state.wrap = wrap;
-            }
-            if let Some(justify) = justify {
-                if !matches!(state.kind, LayoutKind::Row) {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "justify can only be configured on a row Layout",
-                    ));
-                }
-                if !matches!(justify, "start" | "center" | "end" | "between") {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "justify must be 'start', 'center', 'end', or 'between'",
-                    ));
-                }
-                state.justify = justify.to_string();
-            }
-            if let Some(kind) = kind {
-                state.kind = match kind {
-                    "row" => LayoutKind::Row,
-                    "column" => LayoutKind::Column,
-                    "grid" => LayoutKind::Grid {
-                        columns: columns.unwrap_or(2).max(1),
-                    },
-                    _ => {
-                        return Err(pyo3::exceptions::PyValueError::new_err(
-                            "kind must be 'row', 'column', or 'grid'",
-                        ))
-                    }
-                };
-            } else if let Some(columns) = columns {
-                if let LayoutKind::Grid { columns: current } = &mut state.kind {
-                    *current = columns.max(1);
-                } else {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "columns can only be configured on a grid Layout",
-                    ));
-                }
-            }
-        }
-        Self::reflow_inner(&self.inner, animate, None, None);
-        Ok(())
-    }
-
-    /// Removes a direct child. With `animate`, it fades out while the other
-    /// children collapse into their new layout positions.
     #[pyo3(signature = (child, *, animate=None))]
     fn remove(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
-        let member = Self::member_from_python(child)?;
+        let handle = Self::direct_member(child)?;
         let removed = {
             let mut state = self.inner.lock().expect("layout poisoned");
             let index = state
                 .members
                 .iter()
-                .position(|item| item.id == member.id)
+                .position(|member| member.handle.id == handle.id)
                 .ok_or_else(|| {
                     pyo3::exceptions::PyValueError::new_err(
                         "child is not a direct member of this Layout",
                     )
                 })?;
-            state.members.remove(index)
+            let removed = state.members.remove(index);
+            removed.handle.release_layout(&state.root);
+            removed
         };
-        Self::reflow_inner(&self.inner, animate, None, Some(removed));
+        Self::reflow_inner(&self.inner, animate, None, Some(removed.handle));
         Ok(())
     }
 
-    /// Replaces one direct child in place. The outgoing child fades out, the
-    /// incoming child fades in, and the enclosing layout transitions once.
     #[pyo3(signature = (old, new, *, animate=None))]
     fn replace(
         &self,
@@ -347,67 +413,289 @@ impl PyLayout {
         new: &Bound<'_, PyAny>,
         animate: Option<f64>,
     ) -> PyResult<PyDrawable> {
-        let old = Self::member_from_python(old)?;
-        let new = Self::member_from_python(new)?;
-        let removed = {
+        let old = Self::direct_member(old)?;
+        let replacement = Self::member_from_python(new)?;
+        let replacement_handle = replacement.handle.clone();
+        {
             let mut state = self.inner.lock().expect("layout poisoned");
             let index = state
                 .members
                 .iter()
-                .position(|item| item.id == old.id)
+                .position(|member| member.handle.id == old.id)
                 .ok_or_else(|| {
                     pyo3::exceptions::PyValueError::new_err(
-                        "old child is not a direct member of this Layout",
+                        "old is not a direct member of this Layout",
                     )
                 })?;
-            std::mem::replace(&mut state.members[index], new.clone())
-        };
-        Self::reflow_inner(&self.inner, animate, Some(new.clone()), Some(removed));
-        Ok(PyDrawable(new))
+            replacement_handle
+                .claim_layout(&state.root)
+                .map_err(layout_error)?;
+            old.release_layout(&state.root);
+            state.members[index] = replacement;
+        }
+        Self::reflow_inner(
+            &self.inner,
+            animate,
+            Some(replacement_handle.clone()),
+            Some(old),
+        );
+        Ok(PyDrawable(replacement_handle))
     }
 
-    #[getter]
-    fn count(&self) -> usize {
-        self.inner.lock().expect("layout poisoned").members.len()
+    #[pyo3(signature = (*, gap=None, padding=None, width=None, height=None, min_width=None, max_width=None, min_height=None, max_height=None, align=None, justify=None, wrap=None, within=None, animate=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn configure(
+        &self,
+        gap: Option<f64>,
+        padding: Option<&Bound<'_, PyAny>>,
+        width: Option<&Bound<'_, PyAny>>,
+        height: Option<&Bound<'_, PyAny>>,
+        min_width: Option<f64>,
+        max_width: Option<f64>,
+        min_height: Option<f64>,
+        max_height: Option<f64>,
+        align: Option<&str>,
+        justify: Option<&str>,
+        wrap: Option<bool>,
+        within: Option<&str>,
+        animate: Option<f64>,
+    ) -> PyResult<()> {
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            if let Some(gap) = gap {
+                finite_non_negative(gap, "gap")?;
+                state.spec.style.gap = DVec2::splat(gap);
+            }
+            if let Some(padding) = padding {
+                state.spec.style.padding = parse_padding(padding)?;
+            }
+            if let Some(width) = width {
+                state.spec.style.width = parse_size(width, "width")?;
+            }
+            if let Some(height) = height {
+                state.spec.style.height = parse_size(height, "height")?;
+            }
+            if let Some(value) = min_width {
+                finite_non_negative(value, "min_width")?;
+                state.spec.style.min_width = Some(value);
+            }
+            if let Some(value) = max_width {
+                finite_non_negative(value, "max_width")?;
+                state.spec.style.max_width = Some(value);
+            }
+            if let Some(value) = min_height {
+                finite_non_negative(value, "min_height")?;
+                state.spec.style.min_height = Some(value);
+            }
+            if let Some(value) = max_height {
+                finite_non_negative(value, "max_height")?;
+                state.spec.style.max_height = Some(value);
+            }
+            if let Some(align) = align {
+                state.spec.style.align = parse_align(align)?;
+            }
+            if let Some(justify) = justify {
+                state.spec.style.justify = parse_justify(justify)?;
+            }
+            if let Some(wrap) = wrap {
+                match &mut state.spec.kind {
+                    LayoutNodeKind::Row { wrap: current }
+                    | LayoutNodeKind::Column { wrap: current } => *current = wrap,
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "wrap is only valid for row and column layouts",
+                        ));
+                    }
+                }
+            }
+            if let Some(within) = within {
+                state.spec.within = parse_within(Some(within))?;
+            }
+        }
+        Self::reflow_inner(&self.inner, animate, None, None);
+        Ok(())
     }
 
-    /// The backing group, for placing the completed layout with existing APIs.
-    #[getter]
-    fn drawable(&self) -> PyResult<PyDrawable> {
-        self.root().map(PyDrawable).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err("an empty Layout has no drawable yet")
-        })
+    #[pyo3(signature = (child, *, grow=None, shrink=None, align=None, row=None, column=None, row_span=None, column_span=None, absolute=None, anchor=None, offset=None, fit=None, animate=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn configure_item(
+        &self,
+        child: &Bound<'_, PyAny>,
+        grow: Option<f64>,
+        shrink: Option<f64>,
+        align: Option<&str>,
+        row: Option<usize>,
+        column: Option<usize>,
+        row_span: Option<usize>,
+        column_span: Option<usize>,
+        absolute: Option<bool>,
+        anchor: Option<&PyAnchor>,
+        offset: Option<(f64, f64)>,
+        fit: Option<&str>,
+        animate: Option<f64>,
+    ) -> PyResult<()> {
+        let handle = Self::direct_member(child)?;
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let member = state
+                .members
+                .iter_mut()
+                .find(|member| member.handle.id == handle.id)
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "child is not a direct member of this Layout",
+                    )
+                })?;
+            if let Some(grow) = grow {
+                finite_non_negative(grow, "grow")?;
+                member.style.grow = grow;
+            }
+            if let Some(shrink) = shrink {
+                finite_non_negative(shrink, "shrink")?;
+                member.style.shrink = shrink;
+            }
+            if let Some(align) = align {
+                member.style.align = Some(parse_align(align)?);
+            }
+            if row.is_some() {
+                member.style.row = row;
+            }
+            if column.is_some() {
+                member.style.column = column;
+            }
+            if let Some(row_span) = row_span {
+                member.style.row_span = row_span.max(1);
+            }
+            if let Some(column_span) = column_span {
+                member.style.column_span = column_span.max(1);
+            }
+            if let Some(absolute) = absolute {
+                member.style.absolute = absolute;
+            }
+            if let Some(anchor) = anchor {
+                member.style.anchor = anchor.0;
+            }
+            if let Some((x, y)) = offset {
+                member.style.offset = DVec3::new(x, y, 0.0);
+            }
+            if let Some(fit) = fit {
+                member.style.fit = parse_fit(fit)?;
+            }
+        }
+        Self::reflow_inner(&self.inner, animate, None, None);
+        Ok(())
+    }
+
+    #[pyo3(signature = (*, animate=None))]
+    fn reflow(&self, animate: Option<f64>) {
+        Self::reflow_inner(&self.inner, animate, None, None);
+    }
+
+    fn diagnostics(&self) -> Vec<String> {
+        Vec::new()
     }
 }
 
-fn parse_tracks(values: &Bound<'_, PyAny>, axis: &str) -> PyResult<Vec<GridTrack>> {
-    let mut tracks = Vec::new();
-    for value in values.try_iter()? {
-        let value = value?;
-        if let Ok(size) = value.extract::<f64>() {
-            if !size.is_finite() || size < 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "{axis} fixed tracks must be finite non-negative numbers"
-                )));
-            }
-            tracks.push(GridTrack::Fixed(size));
+pub(crate) fn layout_item_from_python(
+    child: &Bound<'_, PyAny>,
+    grow: f64,
+    shrink: f64,
+    align: Option<&str>,
+    row: Option<usize>,
+    column: Option<usize>,
+    row_span: usize,
+    column_span: usize,
+    absolute: bool,
+    anchor: Option<&PyAnchor>,
+    offset: (f64, f64),
+    fit: &str,
+) -> PyResult<PyLayoutItem> {
+    finite_non_negative(grow, "grow")?;
+    finite_non_negative(shrink, "shrink")?;
+    let mut member = PyLayout::member_from_python(child)?;
+    member.style = LayoutItemStyle {
+        grow,
+        shrink,
+        align: align.map(parse_align).transpose()?,
+        row,
+        column,
+        row_span: row_span.max(1),
+        column_span: column_span.max(1),
+        absolute,
+        anchor: anchor.map(|anchor| anchor.0).unwrap_or(Anchor::Center),
+        offset: DVec3::new(offset.0, offset.1, 0.0),
+        fit: parse_fit(fit)?,
+    };
+    Ok(PyLayoutItem { member })
+}
+
+pub(crate) fn layout_spec(
+    kind: LayoutNodeKind,
+    gap: f64,
+    padding: Option<&Bound<'_, PyAny>>,
+    width: Option<&Bound<'_, PyAny>>,
+    height: Option<&Bound<'_, PyAny>>,
+    align: &str,
+    justify: &str,
+    within: Option<&str>,
+) -> PyResult<LayoutSpec> {
+    finite_non_negative(gap, "gap")?;
+    Ok(LayoutSpec {
+        kind,
+        style: LayoutStyle {
+            width: width.map_or(Ok(SizeRule::Hug), |value| parse_size(value, "width"))?,
+            height: height.map_or(Ok(SizeRule::Hug), |value| parse_size(value, "height"))?,
+            padding: padding.map_or(Ok(Insets::default()), parse_padding)?,
+            gap: DVec2::splat(gap),
+            align: parse_align(align)?,
+            justify: parse_justify(justify)?,
+            ..LayoutStyle::default()
+        },
+        within: parse_within(within)?,
+    })
+}
+
+pub(crate) fn parse_grid_tracks(
+    value: Option<&Bound<'_, PyAny>>,
+    axis: &str,
+) -> PyResult<Vec<Track>> {
+    let Some(value) = value else {
+        return Ok(vec![Track::Fraction(1.0)]);
+    };
+    if let Ok(count) = value.extract::<usize>() {
+        if count == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "{axis} count must be greater than zero"
+            )));
+        }
+        return Ok(vec![Track::Fraction(1.0); count]);
+    }
+    let sequence = value.downcast::<PySequence>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "{axis} must be an integer or sequence of fixed numbers, 'auto', or '<weight>fr'"
+        ))
+    })?;
+    let mut tracks = Vec::with_capacity(sequence.len()? as usize);
+    for item in sequence.try_iter()? {
+        let item = item?;
+        if let Ok(value) = item.extract::<f64>() {
+            finite_non_negative(value, axis)?;
+            tracks.push(Track::Fixed(value));
             continue;
         }
-        let spec = value.extract::<String>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
-                "{axis} tracks must be numbers or strings such as '1fr'"
-            ))
-        })?;
-        let fraction = spec
+        let value = item.downcast::<PyString>()?.to_str()?;
+        if value == "auto" {
+            tracks.push(Track::Auto);
+            continue;
+        }
+        let weight = value
             .strip_suffix("fr")
-            .and_then(|weight| weight.trim().parse::<f64>().ok())
-            .filter(|weight| weight.is_finite() && *weight >= 0.0)
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "invalid {axis} track {spec:?}; expected a non-negative number or '<weight>fr'"
-                ))
+                pyo3::exceptions::PyValueError::new_err(format!("invalid {axis} track {value:?}"))
             })?;
-        tracks.push(GridTrack::Fraction(fraction));
+        tracks.push(Track::Fraction(weight));
     }
     if tracks.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -417,323 +705,118 @@ fn parse_tracks(values: &Bound<'_, PyAny>, axis: &str) -> PyResult<Vec<GridTrack
     Ok(tracks)
 }
 
-/// Deferred sequence of drawables that becomes one arranged group on `build`.
-#[pyclass(name = "Flow", module = "gaanim_core", skip_from_py_object)]
-pub struct PyFlow {
-    canvas: Arc<Mutex<ApiCanvas>>,
-    members: Vec<gaanim_api::canvas::DrawableHandle>,
-    direction: Direction,
-    gap: f64,
-    align: Anchor,
-    built: Option<gaanim_api::canvas::DrawableHandle>,
-}
-
-impl PyFlow {
-    pub fn new(
-        canvas: Arc<Mutex<ApiCanvas>>,
-        direction: Direction,
-        gap: f64,
-        align: Anchor,
-    ) -> Self {
-        Self {
-            canvas,
-            members: Vec::new(),
-            direction,
-            gap: gap.max(0.0),
-            align,
-            built: None,
-        }
+fn parse_size(value: &Bound<'_, PyAny>, name: &str) -> PyResult<SizeRule> {
+    if let Ok(value) = value.extract::<f64>() {
+        finite_non_negative(value, name)?;
+        return Ok(SizeRule::Fixed(value));
     }
-}
-
-#[pymethods]
-impl PyFlow {
-    /// Appends a drawable. A flow cannot be changed after it has been built.
-    fn add(&mut self, drawable: &PyDrawable) -> PyResult<()> {
-        if self.built.is_some() {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "a Flow cannot be changed after build(); create a new flow",
-            ));
-        }
-        self.members.push(drawable.0.clone());
-        Ok(())
-    }
-
-    #[getter]
-    fn count(&self) -> usize {
-        self.members.len()
-    }
-
-    /// Creates the arranged group. Repeated calls return the same drawable.
-    fn build(&mut self) -> PyResult<PyDrawable> {
-        if let Some(built) = &self.built {
-            return Ok(PyDrawable(built.clone()));
-        }
-        if self.members.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "a Flow needs at least one drawable before build()",
-            ));
-        }
-        let refs: Vec<_> = self.members.iter().collect();
-        let group = self
-            .canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .group(&refs)
-            .arrange(self.direction, self.gap, self.align);
-        self.built = Some(group.clone());
-        Ok(PyDrawable(group))
-    }
-}
-
-/// A rectangular safe area produced by [`PyVideoLayout`].
-#[pyclass(
-    name = "LayoutRegion",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
-#[derive(Clone, Debug)]
-pub struct PyLayoutRegion {
-    pub(crate) region: LayoutRegion,
-    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
-}
-
-#[pymethods]
-impl PyLayoutRegion {
-    #[getter]
-    fn width(&self) -> f64 {
-        self.region.width()
-    }
-
-    #[getter]
-    fn height(&self) -> f64 {
-        self.region.height()
-    }
-
-    /// Pins the chosen anchor of a drawable to the same anchor in this region.
-    fn place(&self, drawable: &PyDrawable, anchor: &PyAnchor) -> PyDrawable {
-        PyDrawable(self.region.place(drawable.0.clone(), anchor.0))
-    }
-
-    /// Coordinates for an anchor in this region; useful for custom placement.
-    fn point(&self, anchor: &PyAnchor) -> (f64, f64) {
-        let point = self.region.anchor_point(anchor.0);
-        (point.x, point.y)
-    }
-
-    /// Returns a region inset by CSS-style top/right/bottom/left values.
-    #[pyo3(signature = (value, right=None, bottom=None, left=None))]
-    fn inset(
-        &self,
-        value: f64,
-        right: Option<f64>,
-        bottom: Option<f64>,
-        left: Option<f64>,
-    ) -> Self {
-        let right = right.unwrap_or(value);
-        let bottom = bottom.unwrap_or(value);
-        let left = left.unwrap_or(right);
-        Self {
-            region: self.region.inset(value, right, bottom, left),
-            canvas: self.canvas.clone(),
-        }
-    }
-
-    #[pyo3(signature = (rows=1, columns=1, row_gap=0.0, column_gap=0.0))]
-    fn grid(&self, rows: usize, columns: usize, row_gap: f64, column_gap: f64) -> PyGridLayout {
-        PyGridLayout {
-            grid: self.region.grid(rows, columns, row_gap, column_gap),
-            canvas: self.canvas.clone(),
-        }
-    }
-
-    /// Creates a grid with fixed numeric tracks and fractional strings (`"1fr"`).
-    #[pyo3(signature = (rows, columns, row_gap=0.0, column_gap=0.0))]
-    fn grid_tracks(
-        &self,
-        rows: Bound<'_, PyAny>,
-        columns: Bound<'_, PyAny>,
-        row_gap: f64,
-        column_gap: f64,
-    ) -> PyResult<PyGridLayout> {
-        Ok(PyGridLayout {
-            grid: self.region.grid_with_tracks(
-                parse_tracks(&rows, "row")?,
-                parse_tracks(&columns, "column")?,
-                row_gap,
-                column_gap,
-            ),
-            canvas: self.canvas.clone(),
-        })
-    }
-
-    #[pyo3(signature = (kind="column", *, gap=24.0, columns=2, width=None, height=None, fit="none", wrap=false, justify="center"))]
-    fn layout(
-        &self,
-        kind: &str,
-        gap: f64,
-        columns: usize,
-        width: Option<f64>,
-        height: Option<f64>,
-        fit: &str,
-        wrap: bool,
-        justify: &str,
-    ) -> PyResult<PyLayout> {
-        let kind = match kind {
-            "row" => LayoutKind::Row,
-            "column" => LayoutKind::Column,
-            "grid" => LayoutKind::Grid {
-                columns: columns.max(1),
-            },
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "kind must be 'row', 'column', or 'grid'",
-                ))
-            }
-        };
-        let shrink_to_fit = match fit {
-            "none" => false,
-            "shrink" => true,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "fit must be 'none' or 'shrink'",
-                ))
-            }
-        };
-        if !matches!(justify, "start" | "center" | "end" | "between") {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "justify must be 'start', 'center', 'end', or 'between'",
-            ));
-        }
-        for (name, value) in [("width", width), ("height", height)] {
-            if let Some(value) = value {
-                if !value.is_finite() || value <= 0.0 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "{name} must be a finite positive number"
-                    )));
-                }
-            }
-        }
-        Ok(PyLayout::new(
-            self.canvas.clone(),
-            kind,
-            gap,
-            Some(width.unwrap_or_else(|| self.region.width())),
-            Some(height.unwrap_or_else(|| self.region.height())),
-            shrink_to_fit,
-            Some(self.region),
-            wrap,
-            justify,
+    let value = value.extract::<String>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "{name} must be a non-negative number, 'hug', or 'fill'"
         ))
+    })?;
+    match value.as_str() {
+        "hug" => Ok(SizeRule::Hug),
+        "fill" => Ok(SizeRule::Fill(1.0)),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be a non-negative number, 'hug', or 'fill'"
+        ))),
     }
 }
 
-#[pyclass(
-    name = "GridLayout",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
-#[derive(Clone, Debug)]
-pub struct PyGridLayout {
-    pub(crate) grid: GridLayout,
-    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
-}
-
-#[pymethods]
-impl PyGridLayout {
-    #[getter]
-    fn rows(&self) -> usize {
-        self.grid.rows
+fn parse_padding(value: &Bound<'_, PyAny>) -> PyResult<Insets> {
+    if let Ok(value) = value.extract::<f64>() {
+        finite_non_negative(value, "padding")?;
+        return Ok(Insets::all(value));
     }
-
-    #[getter]
-    fn columns(&self) -> usize {
-        self.grid.columns
+    let tuple = value.downcast::<PyTuple>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "padding must be a number, (vertical, horizontal), or (top, right, bottom, left)",
+        )
+    })?;
+    let values: Vec<f64> = tuple
+        .iter()
+        .map(|item| item.extract::<f64>())
+        .collect::<PyResult<_>>()?;
+    for value in &values {
+        finite_non_negative(*value, "padding")?;
     }
-
-    fn cell(&self, row: usize, column: usize) -> PyResult<PyLayoutRegion> {
-        self.area(row, column, 1, 1)
-    }
-
-    #[pyo3(signature = (row, column, row_span=1, column_span=1))]
-    fn area(
-        &self,
-        row: usize,
-        column: usize,
-        row_span: usize,
-        column_span: usize,
-    ) -> PyResult<PyLayoutRegion> {
-        self.grid
-            .area(row, column, row_span, column_span)
-            .map(|region| PyLayoutRegion {
-                region,
-                canvas: self.canvas.clone(),
-            })
-            .ok_or_else(|| pyo3::exceptions::PyIndexError::new_err("grid area is out of bounds"))
+    match values.as_slice() {
+        [vertical, horizontal] => Ok(Insets::symmetric(*vertical, *horizontal)),
+        [top, right, bottom, left] => Ok(Insets {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+        }),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "padding tuple must contain two or four values",
+        )),
     }
 }
 
-/// Standard regions for a title/content/footer video composition.
-#[pyclass(
-    name = "FrameLayout",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
-#[derive(Clone, Debug)]
-pub struct PyFrameLayout {
-    pub(crate) layout: FrameLayout,
-    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
+fn parse_align(value: &str) -> PyResult<Align> {
+    match value {
+        "start" => Ok(Align::Start),
+        "center" => Ok(Align::Center),
+        "end" => Ok(Align::End),
+        "stretch" => Ok(Align::Stretch),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "align must be 'start', 'center', 'end', or 'stretch'",
+        )),
+    }
 }
 
-#[pymethods]
-impl PyFrameLayout {
-    #[getter]
-    fn frame(&self) -> PyLayoutRegion {
-        PyLayoutRegion {
-            region: self.layout.frame,
-            canvas: self.canvas.clone(),
-        }
+fn parse_justify(value: &str) -> PyResult<Justify> {
+    match value {
+        "start" => Ok(Justify::Start),
+        "center" => Ok(Justify::Center),
+        "end" => Ok(Justify::End),
+        "between" => Ok(Justify::Between),
+        "around" => Ok(Justify::Around),
+        "evenly" => Ok(Justify::Evenly),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "justify must be 'start', 'center', 'end', 'between', 'around', or 'evenly'",
+        )),
     }
-    #[getter]
-    fn header(&self) -> PyLayoutRegion {
-        PyLayoutRegion {
-            region: self.layout.header,
-            canvas: self.canvas.clone(),
-        }
-    }
-    #[getter]
-    fn content(&self) -> PyLayoutRegion {
-        PyLayoutRegion {
-            region: self.layout.content,
-            canvas: self.canvas.clone(),
-        }
-    }
-    #[getter]
-    fn footer(&self) -> PyLayoutRegion {
-        PyLayoutRegion {
-            region: self.layout.footer,
-            canvas: self.canvas.clone(),
-        }
-    }
+}
 
-    /// Convenience accessor for a column spanning the whole content area.
-    #[pyo3(signature = (index, count=2, gap=24.0))]
-    fn column(&self, index: usize, count: usize, gap: f64) -> PyResult<PyLayoutRegion> {
-        self.layout
-            .content
-            .grid(1, count, 0.0, gap)
-            .cell(0, index)
-            .map(|region| PyLayoutRegion {
-                region,
-                canvas: self.canvas.clone(),
-            })
-            .ok_or_else(|| {
-                pyo3::exceptions::PyIndexError::new_err("column index must be smaller than count")
-            })
+fn parse_fit(value: &str) -> PyResult<FitMode> {
+    match value {
+        "none" => Ok(FitMode::None),
+        "contain" => Ok(FitMode::Contain),
+        "cover" => Ok(FitMode::Cover),
+        "stretch" => Ok(FitMode::Stretch),
+        "scale_down" => Ok(FitMode::ScaleDown),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "fit must be 'none', 'contain', 'cover', 'stretch', or 'scale_down'",
+        )),
     }
+}
+
+fn parse_within(value: Option<&str>) -> PyResult<LayoutWithin> {
+    match value {
+        None => Ok(LayoutWithin::Intrinsic),
+        Some("safe") => Ok(LayoutWithin::Safe),
+        Some("frame") => Ok(LayoutWithin::Frame),
+        Some(_) => Err(pyo3::exceptions::PyValueError::new_err(
+            "within must be None, 'safe', or 'frame'",
+        )),
+    }
+}
+
+fn finite_non_negative(value: f64, name: &str) -> PyResult<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be a finite non-negative number"
+        )))
+    }
+}
+
+fn layout_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(error.to_string())
 }
 
 #[pyclass(name = "Anchor", module = "gaanim_core", frozen, from_py_object)]
@@ -747,59 +830,37 @@ impl PyAnchor {
     fn CENTER() -> Self {
         Self(Anchor::Center)
     }
-
     #[classattr]
     fn TOP() -> Self {
         Self(Anchor::Top)
     }
-
     #[classattr]
     fn BOTTOM() -> Self {
         Self(Anchor::Bottom)
     }
-
     #[classattr]
     fn LEFT() -> Self {
         Self(Anchor::Left)
     }
-
     #[classattr]
     fn RIGHT() -> Self {
         Self(Anchor::Right)
     }
-
     #[classattr]
     fn TOP_LEFT() -> Self {
         Self(Anchor::TopLeft)
     }
-
     #[classattr]
     fn TOP_RIGHT() -> Self {
         Self(Anchor::TopRight)
     }
-
     #[classattr]
     fn BOTTOM_LEFT() -> Self {
         Self(Anchor::BottomLeft)
     }
-
     #[classattr]
     fn BOTTOM_RIGHT() -> Self {
         Self(Anchor::BottomRight)
-    }
-
-    fn __repr__(&self) -> &'static str {
-        match self.0 {
-            Anchor::Center => "Anchor.CENTER",
-            Anchor::Top => "Anchor.TOP",
-            Anchor::Bottom => "Anchor.BOTTOM",
-            Anchor::Left => "Anchor.LEFT",
-            Anchor::Right => "Anchor.RIGHT",
-            Anchor::TopLeft => "Anchor.TOP_LEFT",
-            Anchor::TopRight => "Anchor.TOP_RIGHT",
-            Anchor::BottomLeft => "Anchor.BOTTOM_LEFT",
-            Anchor::BottomRight => "Anchor.BOTTOM_RIGHT",
-        }
     }
 }
 
@@ -814,61 +875,70 @@ impl PyDirection {
     fn UP() -> Self {
         Self(Direction::Up)
     }
-
     #[classattr]
     fn DOWN() -> Self {
         Self(Direction::Down)
     }
-
     #[classattr]
     fn LEFT() -> Self {
         Self(Direction::Left)
     }
-
     #[classattr]
     fn RIGHT() -> Self {
         Self(Direction::Right)
     }
-
     #[classattr]
     fn UP_LEFT() -> Self {
         Self(Direction::UpLeft)
     }
-
     #[classattr]
     fn UP_RIGHT() -> Self {
         Self(Direction::UpRight)
     }
-
     #[classattr]
     fn DOWN_LEFT() -> Self {
         Self(Direction::DownLeft)
     }
-
     #[classattr]
     fn DOWN_RIGHT() -> Self {
         Self(Direction::DownRight)
     }
-
     #[staticmethod]
-    #[pyo3(signature = (x, y, z = 0.0))]
+    #[pyo3(signature = (x, y, z=0.0))]
     fn custom(x: f64, y: f64, z: f64) -> Self {
         Self(Direction::Custom(DVec3::new(x, y, z)))
     }
+}
 
-    fn __repr__(&self) -> String {
-        match self.0 {
-            Direction::Up => "Direction.UP".to_string(),
-            Direction::Down => "Direction.DOWN".to_string(),
-            Direction::Left => "Direction.LEFT".to_string(),
-            Direction::Right => "Direction.RIGHT".to_string(),
-            Direction::UpLeft => "Direction.UP_LEFT".to_string(),
-            Direction::UpRight => "Direction.UP_RIGHT".to_string(),
-            Direction::DownLeft => "Direction.DOWN_LEFT".to_string(),
-            Direction::DownRight => "Direction.DOWN_RIGHT".to_string(),
-            Direction::Custom(v) => {
-                format!("Direction.custom({}, {}, {})", v.x, v.y, v.z)
-            }
+pub(crate) fn row_kind(wrap: bool) -> LayoutNodeKind {
+    LayoutNodeKind::Row { wrap }
+}
+
+pub(crate) fn column_kind(wrap: bool) -> LayoutNodeKind {
+    LayoutNodeKind::Column { wrap }
+}
+
+pub(crate) fn stack_kind() -> LayoutNodeKind {
+    LayoutNodeKind::Stack
+}
+
+pub(crate) fn grid_kind(
+    rows: Vec<Track>,
+    columns: Vec<Track>,
+    auto_flow: &str,
+) -> PyResult<LayoutNodeKind> {
+    let auto_flow = match auto_flow {
+        "row" => AutoFlow::Row,
+        "column" => AutoFlow::Column,
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "auto_flow must be 'row' or 'column'",
+            ));
         }
-    }
+    };
+    Ok(LayoutNodeKind::Grid {
+        rows,
+        columns,
+        auto_flow,
+    })
 }
