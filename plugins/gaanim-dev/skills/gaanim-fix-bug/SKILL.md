@@ -24,7 +24,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
    fix. Avoid unrelated cleanup.
 6. If the fix changes public behavior, read `../../references/python-bridge.md`
    and `../../references/api-doc-map.md`; update the contract and docs rather
-   than silently changing semantics.
+   than silently changing semantics. This includes the affected public
+   declaration's docstring in `gaanim_core.pyi`, even when its type signature
+   remains unchanged.
 7. Use `python <PLUGIN_ROOT>/scripts/impact.py` and
    `../../references/verification-matrix.md` to escalate from the focused test
    to the relevant API, docs, or visual checks.

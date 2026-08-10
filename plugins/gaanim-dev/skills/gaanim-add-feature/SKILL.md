@@ -23,7 +23,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
    logic when possible.
 5. If the feature is public, read `../../references/python-bridge.md` and carry
    it through `gaanim_api`, PyO3, the stub, package exports, and a runnable
-   example as applicable.
+   example as applicable. In `gaanim_core.pyi`, add or update the declaration's
+   docstring as part of the implementation; it must describe the actual Python
+   contract, not merely repeat the method name.
 6. If the feature is user-facing, read `../../references/api-doc-map.md` and
    update the mapped Typst page in the same change.
 7. Read `../../references/verification-matrix.md`, run the narrowest relevant
@@ -35,6 +37,8 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 - Place ordered ECS systems in `SceneSet`; do not add scattered ordering edges.
 - Use native `peniko`, `kurbo`, and `glam` types and keep transforms 3D-ready.
 - Preserve deferred Python mutation semantics and fluent chaining.
+- Treat a public Python implementation without matching `.pyi` documentation
+  as incomplete, even when the Typst page is updated separately.
 - Do not expose lower-level ECS details merely because the implementation uses
   them.
 - Do not update visual baselines while implementing. Compare first and require

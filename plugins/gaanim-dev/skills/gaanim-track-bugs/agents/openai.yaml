@@ -1,0 +1,4 @@
+interface:
+  display_name: "Registrar bugs de Gaanim"
+  short_description: "Guarda y retoma bugs desde GitHub Issues"
+  default_prompt: "Usa $gaanim-track-bugs para anotar este bug de Gaanim en GitHub."

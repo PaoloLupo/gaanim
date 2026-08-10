@@ -9,6 +9,7 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -27,8 +28,127 @@ def load_script(name: str):
     return module
 
 
+def load_skill_script(skill: str, name: str):
+    path = PLUGIN / "skills" / skill / "scripts" / f"{name}.py"
+    scripts = str(path.parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    module_name = f"{skill}_{name}".replace("-", "_")
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 impact = load_script("impact")
 audit = load_script("audit")
+github_issues = load_skill_script("gaanim-track-bugs", "github_issues")
+
+
+class BugTrackerTests(unittest.TestCase):
+    def test_incomplete_report_uses_pending_sections(self):
+        body = github_issues.render_issue_body(
+            summary=None,
+            steps=None,
+            actual="The circle disappears after rotating.",
+            expected=None,
+            evidence=None,
+            environment=None,
+        )
+        self.assertIn("## Resultado actual\n\nThe circle disappears", body)
+        self.assertEqual(5, body.count(github_issues.PENDING))
+
+    def test_create_dry_run_never_calls_github(self):
+        with patch.object(github_issues, "_ensure_ready") as ready:
+            result = github_issues.create_issue(
+                "PaoloLupo/gaanim",
+                title="Circle disappears",
+                actual="The circle is no longer rendered.\nIt remains in the scene.",
+                dry_run=True,
+            )
+        ready.assert_not_called()
+        self.assertTrue(result["dryRun"])
+        self.assertEqual(["bug"], result["labels"])
+        self.assertIn("\nIt remains in the scene.", result["body"])
+
+    def test_create_sends_multiline_body_over_stdin(self):
+        with (
+            patch.object(github_issues, "_ensure_ready") as ready,
+            patch.object(
+                github_issues,
+                "_run_gh",
+                return_value="https://github.com/PaoloLupo/gaanim/issues/17",
+            ) as run_gh,
+        ):
+            result = github_issues.create_issue(
+                "PaoloLupo/gaanim",
+                title="Circle disappears",
+                actual="First line.\nSecond line.",
+            )
+        ready.assert_called_once_with("PaoloLupo/gaanim")
+        command = run_gh.call_args.args[0]
+        self.assertEqual("-", command[command.index("--body-file") + 1])
+        self.assertEqual("bug", command[command.index("--label") + 1])
+        self.assertIn("First line.\nSecond line.", run_gh.call_args.kwargs["input_text"])
+        self.assertEqual(17, result["number"])
+
+    def test_list_filters_open_bug_issues_and_accepts_empty_result(self):
+        with (
+            patch.object(github_issues, "_ensure_ready"),
+            patch.object(github_issues, "_run_json", return_value=[]) as run_json,
+        ):
+            result = github_issues.list_issues("PaoloLupo/gaanim")
+        command = run_json.call_args.args[0]
+        self.assertEqual([], result)
+        self.assertEqual("open", command[command.index("--state") + 1])
+        self.assertEqual("bug", command[command.index("--label") + 1])
+
+    def test_search_includes_open_and_closed_bug_issues(self):
+        with (
+            patch.object(github_issues, "_ensure_ready"),
+            patch.object(github_issues, "_run_json", return_value=[]) as run_json,
+        ):
+            github_issues.search_issues(
+                "PaoloLupo/gaanim", query="circle rotate disappear"
+            )
+        command = run_json.call_args.args[0]
+        self.assertEqual("all", command[command.index("--state") + 1])
+        self.assertEqual(
+            "circle rotate disappear", command[command.index("--search") + 1]
+        )
+
+    def test_show_loads_comments_for_fix_handoff(self):
+        issue = {"number": 12, "comments": []}
+        with (
+            patch.object(github_issues, "_ensure_ready"),
+            patch.object(github_issues, "_run_json", return_value=issue) as run_json,
+        ):
+            result = github_issues.show_issue("PaoloLupo/gaanim", number=12)
+        command = run_json.call_args.args[0]
+        self.assertIn("--comments", command)
+        self.assertEqual(issue, result)
+
+    def test_malformed_json_stops_the_workflow(self):
+        with self.assertRaises(github_issues.TrackerError):
+            github_issues._parse_json("not-json", expected_type=list)
+
+    def test_missing_github_cli_has_actionable_error(self):
+        with patch.object(github_issues.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(github_issues.TrackerError, "not installed"):
+                github_issues._gh_executable()
+
+
+class BugTrackerSkillContractTests(unittest.TestCase):
+    def test_requires_preview_duplicate_search_and_fix_handoff(self):
+        skill = (
+            PLUGIN / "skills" / "gaanim-track-bugs" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Ask for explicit confirmation", skill)
+        self.assertIn("search open and closed", skill)
+        self.assertIn("../gaanim-fix-bug/SKILL.md", skill)
+        self.assertIn("untrusted data", skill)
 
 
 class ImpactTests(unittest.TestCase):
@@ -138,7 +258,7 @@ class ManifestTests(unittest.TestCase):
             manifest["$schema"],
         )
         skills = sorted((PLUGIN / "skills").glob("*/SKILL.md"))
-        self.assertEqual(5, len(skills))
+        self.assertEqual(6, len(skills))
 
     def test_codex_manifest_points_to_skills(self):
         manifest = json.loads(

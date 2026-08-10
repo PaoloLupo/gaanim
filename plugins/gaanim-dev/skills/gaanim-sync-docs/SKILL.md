@@ -15,7 +15,10 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
    `../../references/python-bridge.md`.
 2. Inspect the PyO3 binding, `.pyi`, `gaanim/__init__.py`, executable examples,
    and relevant Rust facade. Resolve contradictions in favor of tested runtime
-   behavior, then flag stale sources.
+   behavior, then flag stale sources. For every added or changed public Python
+   declaration, add or refresh its `.pyi` docstring with behavior, relevant
+   units/defaults, return or chaining behavior, and observable errors; Typst is
+   complementary, not a substitute.
 3. Run `python <PLUGIN_ROOT>/scripts/impact.py --format json` and select the narrowest
    existing `.typ` page. Add navigation only for a genuinely new API concept.
 4. Follow neighboring `api-entry` structure. Match the callable signature,
@@ -29,5 +32,5 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
    semantic warnings as review prompts, not automatic failures.
 
 Do not claim full API coverage from a successful Typst build. Finish by naming
-the implementation source used, the `.typ` page changed, and the validations
-performed.
+the implementation source used, the `.pyi` declarations documented, the `.typ`
+page changed, and the validations performed.
