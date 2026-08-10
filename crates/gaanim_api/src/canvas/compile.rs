@@ -850,6 +850,7 @@ impl Canvas {
             child_spans: Vec::new(),
             children: children.iter().map(|c| c.id).collect(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         builder.states.insert(group_id, state);
         for child in &children {
@@ -1096,6 +1097,11 @@ impl Canvas {
                         text_config,
                         scene_background,
                     );
+                    if spec.exclude_from_parent_draw {
+                        if let Some(state) = builder.states.get_mut(actual.id) {
+                            state.exclude_from_parent_draw = true;
+                        }
+                    }
                     id_map.insert(spec.id, actual.id);
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
@@ -4052,6 +4058,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: Vec::new(),
                         parent: None,
+            exclude_from_parent_draw: false,
                     },
                 );
                 let mref = MobjectRef { id };
@@ -4149,6 +4156,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: child_ids,
                         parent: None,
+            exclude_from_parent_draw: false,
                     },
                 );
                 let mref = MobjectRef { id };
@@ -4341,6 +4349,7 @@ impl Canvas {
                         child_spans: Vec::new(),
                         children: Vec::new(),
                         parent: None,
+            exclude_from_parent_draw: false,
                     },
                 );
                 builder.float_signals.insert(new_id, *initial);

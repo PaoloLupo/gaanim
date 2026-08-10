@@ -52,6 +52,10 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    /// Path-reveal progress for draw animations (0.0 = hidden, 1.0 = fully drawn).
+    /// Used to keep reactive regenerators (e.g. ExpressionPlot) in sync
+    /// with the current trim so they do not overwrite it with the full path.
+    pub path_reveal: Option<f64>,
     /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
     pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Timeline timestamps paired with `traced_path_points`.
@@ -145,6 +149,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
     } else {
         entity_mut.remove::<gaanim_animation::FillDrawProgress>();
+    }
+
+    if let Some(progress) = snap.path_reveal {
+        entity_mut.insert(gaanim_animation::PathReveal(progress));
+    } else {
+        entity_mut.remove::<gaanim_animation::PathReveal>();
     }
 
     if let Some(points) = &snap.traced_path_points
@@ -351,6 +361,9 @@ impl WorldSnapshot {
                     path_source: world.get::<PathSource>(entity).map(|p| p.0.clone()),
                     fill_draw_progress: world
                         .get::<gaanim_animation::FillDrawProgress>(entity)
+                        .map(|p| p.0),
+                    path_reveal: world
+                        .get::<gaanim_animation::PathReveal>(entity)
                         .map(|p| p.0),
                     traced_path_points: world
                         .get::<gaanim_animation::TracedPath>(entity)

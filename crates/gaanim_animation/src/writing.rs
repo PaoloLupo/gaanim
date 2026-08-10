@@ -37,6 +37,23 @@ impl Default for FillDrawProgress {
     }
 }
 
+/// Tracks the current reveal progress of a path for reactive regenerators.
+///
+/// Reactive plots (e.g. `ExpressionPlot` bound to a `Parameter`) regenerate
+/// their `PathSource` every frame. Without this component, that regeneration
+/// would overwrite the trimmed `Path2D` produced by a `PathCompletion` animation
+/// and make the plot appear fully from frame 0. The `PathCompletion` lens
+/// updates this component each frame, and `AlwaysRedrawRegen` reads it to
+/// re-trim the freshly regenerated path.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PathReveal(pub f64);
+
+impl Default for PathReveal {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 /// Marker + parameters for the glowing pen-tip effect shown during Write.
 ///
 /// When present on an entity that also has a `PathCompletion` animation,

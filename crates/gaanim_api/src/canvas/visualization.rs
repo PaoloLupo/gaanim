@@ -317,6 +317,11 @@ impl Canvas {
     }
 
     fn attach_to_space(&mut self, space: &CoordinateSpaceHandle, child: &DrawableHandle) {
+        child
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .exclude_from_parent_draw = true;
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -329,6 +334,11 @@ impl Canvas {
     }
 
     fn attach_to_space_3d(&mut self, space: &CoordinateSpace3DHandle, child: &DrawableHandle) {
+        child
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .exclude_from_parent_draw = true;
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -842,6 +852,11 @@ impl Canvas {
             3.0,
             "PolarPlot",
         );
+        handle
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .exclude_from_parent_draw = true;
         self.state
             .lock()
             .expect("canvas state poisoned")

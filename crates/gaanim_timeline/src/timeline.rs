@@ -1665,6 +1665,9 @@ fn apply_lens_spec(
             if let Some(mut tip) = world.get_mut::<gaanim_animation::WriteTipGlow>(target) {
                 tip.completion = completion;
             }
+            if let Ok(mut em) = world.get_entity_mut(target) {
+                em.insert(gaanim_animation::PathReveal(completion));
+            }
         }
         PropertyLensSpec::PathMorph { from, to } => {
             let morphed = if completed {

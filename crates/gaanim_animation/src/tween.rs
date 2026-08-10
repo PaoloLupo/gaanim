@@ -6,7 +6,7 @@ use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform, get_point_at_alpha};
 use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
 
-use crate::writing::{FillDrawProgress, WriteTipGlow};
+use crate::writing::{FillDrawProgress, PathReveal, WriteTipGlow};
 
 /// Resource containing the current simulation delta time.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -269,6 +269,7 @@ impl Clone for Box<dyn AnimatableLens> {
 /// are applied directly via Bevy's parallel query system. Custom lenses are handled separately
 /// by `evaluate_custom_tweens_system` due to their need for exclusive World access.
 pub fn evaluate_tweens_system(
+    mut commands: bevy::prelude::Commands,
     dt: Res<DeltaTime>,
     mut tweens: Query<(Entity, &mut Tween, &PropertyLens)>,
     mut transforms: Query<&mut SpatialTransform>,
@@ -280,6 +281,7 @@ pub fn evaluate_tweens_system(
     mut fill_progress: Query<&mut FillDrawProgress>,
     mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
+    mut path_reveals: Query<&mut PathReveal>,
 ) {
     for (_tween_entity, mut tween, lens) in &mut tweens {
         // Custom lenses need exclusive World access; skip them entirely here.
@@ -363,6 +365,15 @@ pub fn evaluate_tweens_system(
                 // Update the pen-tip glow position if the entity has one.
                 if let Ok(mut tip) = tip_glows.get_mut(tween.target) {
                     tip.completion = completion;
+                }
+                // Keep PathReveal in sync so reactive regenerators (e.g.
+                // ExpressionPlot with a Parameter) can re-trim the freshly
+                // regenerated path instead of overwriting it with the full
+                // untrimmed path.
+                if let Ok(mut reveal) = path_reveals.get_mut(tween.target) {
+                    reveal.0 = completion;
+                } else {
+                    commands.entity(tween.target).insert(PathReveal(completion));
                 }
             }
             PropertyLens::FillDrawProgress { from, to } => {

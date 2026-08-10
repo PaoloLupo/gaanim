@@ -89,6 +89,7 @@ pub struct MobjectState {
     pub child_spans: Vec<HierarchyChild>,
     pub children: Vec<ObjectId>,
     pub parent: Option<ObjectId>,
+    pub exclude_from_parent_draw: bool,
 }
 
 fn compose_child_paths(children: &[HierarchyChild]) -> std::sync::Arc<gaanim_core::kurbo::BezPath> {
@@ -378,6 +379,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 child_spans: Vec::new(),
                 children: Vec::new(),
                 parent: Some(parent_id),
+            exclude_from_parent_draw: false,
             };
             self.states.insert(child.id, child_state);
         }
@@ -394,6 +396,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans,
             children: child_ids,
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(parent_id, state);
 
@@ -1776,6 +1779,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     let Some(child_state) = self.states.get(id) else {
                         continue;
                     };
+                    if child_state.exclude_from_parent_draw {
+                        continue;
+                    }
                     // If this child itself has glyph spans, expand to glyphs
                     if !child_state.child_spans.is_empty() {
                         leaves.extend(child_state.child_spans.iter().map(|c| c.id));
@@ -1844,6 +1850,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         .entity(state.entity)
                         .insert(gaanim_animation::WriteTipGlow::default());
                 }
+
+                let initial_reveal = if schedule.reversed { 1.0 } else { 0.0 };
+                self.commands
+                    .entity(state.entity)
+                    .insert(gaanim_animation::PathReveal(initial_reveal));
 
                 if !schedule.reversed {
                     self.commands
@@ -4014,6 +4025,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans: Vec::new(),
             children: child_ids,
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(id, group_state);
         self.mobject_names
@@ -4433,6 +4445,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans: Vec::new(),
             children: Vec::new(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(id, state);
         self.float_signals.insert(id, initial);
@@ -4673,6 +4686,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans: Vec::new(),
             children: Vec::new(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(id, state);
         MobjectRef { id }
@@ -4763,6 +4777,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans: Vec::new(),
             children: Vec::new(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(id, state);
         MobjectRef { id }
@@ -5588,6 +5603,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             child_spans: Vec::new(),
             children: Vec::new(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.states.insert(parent_id, state);
         self.mobject_names
@@ -5927,6 +5943,7 @@ mod tests {
             children: children.iter().map(|child| child.id).collect(),
             child_spans: children,
             parent: None,
+            exclude_from_parent_draw: false,
         }
     }
 
@@ -5981,6 +5998,7 @@ mod tests {
                 child_spans: Vec::new(),
                 children: Vec::new(),
                 parent: Some(parent_id),
+            exclude_from_parent_draw: false,
             },
         );
 
@@ -6464,6 +6482,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
             child_spans: Vec::new(),
             children: Vec::new(),
             parent: None,
+            exclude_from_parent_draw: false,
         };
         self.builder.states.insert(self.id, state);
         self.builder

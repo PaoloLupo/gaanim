@@ -705,10 +705,14 @@ pub struct ObjectSpec {
     /// If true, keep this reactive visual hidden until an animation targets it.
     pub defer_visibility_until_play: bool,
     pub z_index: i32,
-    /// If true, this object should billboard (face camera) in 3D.
-    pub billboard: bool,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
+    /// If true, this object was attached to a coordinate space as data.
+    /// Its parent's Create/Write animations should not include it as a leaf
+    /// (otherwise a plane.create() would also draw every plot).
+    pub exclude_from_parent_draw: bool,
+    /// If true, this object should billboard (face camera) in 3D.
+    pub billboard: bool,
     /// Fill overrides applied to matching glyph fragments after textual objects
     /// have been compiled into their vector hierarchy.
     pub fragment_fills: Vec<(String, Color)>,
@@ -734,6 +738,7 @@ impl ObjectSpec {
             z_index: 0,
             billboard: false,
             hud: false,
+            exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
             layout_ops: Vec::new(),

@@ -659,18 +659,39 @@ pub fn always_redraw_regen_system(world: &mut World) {
                 rect.y1 + 12.0,
             )
         };
-        updates.push((entity, path, bounds));
+        // Respect any active PathReveal (draw) progress. Without this,
+        // a reactive ExpressionPlot would overwrite the trimmed Path2D
+        // produced by its Write/Create animation and appear fully from
+        // frame 0.
+        let reveal = world
+            .get::<crate::writing::PathReveal>(entity)
+            .map(|r| r.0)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+        updates.push((entity, path, bounds, reveal));
     }
 
-    for (entity, path, bounds) in updates {
+    for (entity, path, bounds, reveal) in updates {
+        let trimmed = if (reveal - 1.0).abs() < 1e-9 {
+            path.clone()
+        } else {
+            gaanim_math::get_subpath(&path, reveal)
+        };
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
-            path_comp.0 = std::sync::Arc::new(path.clone());
+            path_comp.0 = std::sync::Arc::new(trimmed);
         }
         if let Some(mut path_source) = world.get_mut::<gaanim_scene::PathSource>(entity) {
             path_source.0 = std::sync::Arc::new(path);
         }
         if let Some(mut local_bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
             local_bounds.0 = bounds;
+        }
+        // Keep the PathReveal component alive so snapshot restore
+        // can see the correct reveal factor.
+        if world.get::<crate::writing::PathReveal>(entity).is_none() && (reveal - 1.0).abs() > 1e-9 {
+            if let Ok(mut em) = world.get_entity_mut(entity) {
+                em.insert(crate::writing::PathReveal(reveal));
+            }
         }
     }
 }
