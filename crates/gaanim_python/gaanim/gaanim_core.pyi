@@ -1910,21 +1910,31 @@ class Scene:
         """Create a horizontal Layout v2 container in canvas units.
 
         ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
+        Responsive text keeps the width offered by its final row allocation,
+        so tight glyph bounds do not trigger a second, narrower composition.
         Ownership errors are raised before render as ``LayoutOwnershipError``.
         """
         ...
     def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a vertical Layout v2 container with optional wrapping."""
+        """Create a vertical Layout v2 container with optional wrapping.
+
+        Responsive text is composed at the width offered by the column, even
+        when its visible glyph bounds are narrower.
+        """
         ...
     def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
         """Create a grid with fixed, ``"auto"``, or ``"<weight>fr"`` tracks.
 
         Explicit rows/columns and spans are reserved before deterministic
-        auto-placement. Invalid tracks, collisions, or overflow raise errors.
+        auto-placement. Responsive text uses its final track allocation.
+        Invalid tracks, collisions, or overflow raise errors.
         """
         ...
     def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create an overlay Layout; use item anchors and offsets for placement."""
+        """Create an overlay Layout; use item anchors and offsets for placement.
+
+        Responsive text retains the width offered by the overlay container.
+        """
         ...
     def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem:
         """Return per-child layout metadata without creating another Drawable.
@@ -1941,7 +1951,11 @@ class Scene:
         """
         ...
     def check_layout(self) -> list[str]:
-        """Return current soft-constraint diagnostics, available before render."""
+        """Return current constraint and intrinsic-composition diagnostics.
+
+        Invalid responsive text or Typst math is reported here without
+        terminating editor hot reload.
+        """
         ...
     def template(self, template: Callable[..., Layout], **slots: Any) -> Layout:
         """Instantiate a signature-checked Python template and return its root Layout."""

@@ -147,6 +147,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
     use gaanim_text::prelude::TextRole;
 
     #[test]
@@ -165,6 +166,52 @@ mod tests {
         assert_eq!(
             world.resource::<gaanim_text::prelude::TextConfig>().roles[&TextRole::Body].fill_color,
             gaanim_core::peniko::Color::BLACK
+        );
+    }
+
+    #[test]
+    fn invalid_typst_math_in_layout_does_not_remove_runtime_resources() {
+        let mut canvas = Canvas::new(640, 360);
+        let equation = canvas.text("$integral alpha dt + 2 = 0$");
+        let column = canvas.group(&[&equation]);
+        equation.claim_layout(&column).unwrap();
+        canvas.reflow_layout(
+            &column,
+            vec![LayoutMemberSpec {
+                id: equation.id,
+                style: gaanim_layout::LayoutItemStyle::default(),
+            }],
+            LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    width: gaanim_layout::SizeRule::Fill(1.0),
+                    align: gaanim_layout::Align::Start,
+                    ..Default::default()
+                },
+                within: LayoutWithin::Safe,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        let diagnostics = canvas.clone();
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+
+        replay_canvas_into(&mut world, canvas);
+
+        assert!(world.contains_resource::<Timeline>());
+        assert!(world.contains_resource::<gaanim_text::font::FontRegistry>());
+        assert!(world.contains_resource::<gaanim_text::prelude::TextConfig>());
+        assert!(
+            diagnostics
+                .check_layout()
+                .iter()
+                .any(|message| message.contains("unknown variable: dt")),
+            "expected the Typst failure to remain available as a layout diagnostic"
         );
     }
 

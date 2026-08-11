@@ -563,7 +563,7 @@ pub(crate) fn presentation_input_system(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     presenter_windows: Query<&Window, With<PresenterWindow>>,
     audience_controls: Res<AudienceControlsState>,
-    mut timeline: ResMut<Timeline>,
+    timeline: Option<ResMut<Timeline>>,
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
     mut commands: Commands,
@@ -571,6 +571,9 @@ pub(crate) fn presentation_input_system(
     if !presentation_mode.active {
         return;
     }
+    let Some(mut timeline) = timeline else {
+        return;
+    };
 
     let primary_focused = primary_window.single().is_ok_and(|window| window.focused);
     let presenter_focused = presenter_windows.iter().any(|window| window.focused);
@@ -1710,6 +1713,33 @@ mod tests {
         app.update();
 
         assert!(app.world().resource::<Timeline>().is_playing);
+    }
+
+    #[test]
+    fn presentation_input_skips_frames_without_a_timeline() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<EguiWantsInput>()
+            .init_resource::<AudienceBlank>()
+            .init_resource::<AudienceControlsState>()
+            .init_resource::<PresenterOverviewState>()
+            .insert_resource(PresentationMode { active: true })
+            .add_systems(Update, presentation_input_system);
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowRight);
+
+        app.update();
+
+        assert!(!app.world().contains_resource::<Timeline>());
     }
 
     #[test]

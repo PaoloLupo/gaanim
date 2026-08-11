@@ -1,5 +1,6 @@
 //! Compile — replay Canvas ops into SceneBuilder/Bevy.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -50,6 +51,7 @@ struct CompiledTextMeasure {
 struct CompiledLayoutMeasure<'a> {
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
+    text_composition_widths: RefCell<BTreeMap<gaanim_layout::LayoutId, f64>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
 }
 
@@ -67,6 +69,14 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
         } else {
             640.0
         };
+        let composition_width = match text.spec.flow.wrap {
+            StructuredTextWrap::NoWrap => None,
+            StructuredTextWrap::Auto => Some(offered_width),
+            StructuredTextWrap::Width(limit) => Some(offered_width.min(limit).max(1.0)),
+        };
+        if let Some(width) = composition_width {
+            self.text_composition_widths.borrow_mut().insert(id, width);
+        }
         let source = structured_text_typst_source(
             &text.spec,
             Some(offered_width),
@@ -2536,17 +2546,28 @@ impl Canvas {
                         LayoutWithin::Frame => raw_frame_bounds,
                         LayoutWithin::Intrinsic => frame_bounds,
                     };
-                    let resolved = gaanim_layout::resolve_layout(
-                        &tree.root,
-                        viewport,
-                        &CompiledLayoutMeasure {
-                            fixed: tree.fixed.clone(),
-                            texts: tree.texts.clone(),
-                            font_registry: builder.font_registry,
-                        },
-                        &[],
-                    )
-                    .unwrap_or_else(|error| panic!("layout resolution failed: {error}"));
+                    let measurer = CompiledLayoutMeasure {
+                        fixed: tree.fixed.clone(),
+                        texts: tree.texts.clone(),
+                        text_composition_widths: RefCell::default(),
+                        font_registry: builder.font_registry,
+                    };
+                    let resolved =
+                        match gaanim_layout::resolve_layout(&tree.root, viewport, &measurer, &[]) {
+                            Ok(resolved) => resolved,
+                            Err(error) => {
+                                let message =
+                                    format!("layout {} resolution failed: {error}", to.version);
+                                eprintln!("{message}");
+                                diagnostic_state
+                                    .lock()
+                                    .expect("canvas state poisoned")
+                                    .layout_diagnostics
+                                    .push((Some(to.container), message));
+                                continue;
+                            }
+                        };
+                    let text_composition_widths = measurer.text_composition_widths.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -2593,7 +2614,11 @@ impl Canvas {
                         let Some(target_box) = resolved.boxes.get(layout_id).copied() else {
                             continue;
                         };
-                        let width = target_box.bounds.width().max(1.0);
+                        let width = text_composition_widths
+                            .get(layout_id)
+                            .copied()
+                            .unwrap_or_else(|| target_box.bounds.width())
+                            .max(1.0);
                         let current_width = responsive_text_widths
                             .get(source)
                             .copied()
@@ -7090,6 +7115,7 @@ mod tests {
                     color: gaanim_core::peniko::Color::WHITE,
                 },
             )]),
+            text_composition_widths: RefCell::default(),
             font_registry: &fonts,
         };
         let narrow = gaanim_layout::IntrinsicMeasure::measure(
@@ -7115,6 +7141,57 @@ mod tests {
         assert!(gaanim_layout::IntrinsicMeasure::is_width_sensitive(
             &measurer, id
         ));
+    }
+
+    #[test]
+    fn auto_text_measure_preserves_the_width_used_for_composition() {
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let cases = [
+            ("Titulo de presentacion", 64.0),
+            ("Hola mundo", 48.0),
+            ("Texto Normal", 32.0),
+            ("$integral alpha d t + 2 = 0$", 32.0),
+        ];
+
+        for (index, (content, font_size)) in cases.into_iter().enumerate() {
+            let id = gaanim_layout::LayoutId(index as u64 + 1);
+            let measurer = CompiledLayoutMeasure {
+                fixed: BTreeMap::new(),
+                texts: BTreeMap::from([(
+                    id,
+                    CompiledTextMeasure {
+                        spec: StructuredTextSpec::new(
+                            vec![content.into()],
+                            None,
+                            gaanim_text::prelude::TextStyle::default(),
+                            gaanim_text::prelude::TextFlow::default(),
+                        )
+                        .unwrap(),
+                        font_size,
+                        font_family: "New Computer Modern".into(),
+                        math_font: "New Computer Modern Math".into(),
+                        color: gaanim_core::peniko::Color::WHITE,
+                    },
+                )]),
+                text_composition_widths: RefCell::default(),
+                font_registry: &fonts,
+            };
+            let wide = gaanim_layout::IntrinsicMeasure::measure(
+                &measurer,
+                id,
+                gaanim_layout::BoxConstraints {
+                    min: DVec2::ZERO,
+                    max: DVec2::new(1760.0, 1000.0),
+                },
+            )
+            .unwrap();
+            assert!(wide.x < 1760.0, "fixture should have tight visual bounds");
+            assert_eq!(
+                measurer.text_composition_widths.borrow().get(&id),
+                Some(&1760.0),
+                "{content:?} must be materialized at the width used to measure it"
+            );
+        }
     }
 
     #[test]

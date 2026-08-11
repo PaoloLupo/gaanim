@@ -56,6 +56,9 @@ scene.stack(children, *, padding=0, width="hug", height="hug",
 `within=None` makes a nested/intrinsic container; root layouts normally choose
 `"safe"` or `"frame"`. Non-negative numeric values use canvas units. Invalid
 sizes, padding, tracks, alignments, or containing blocks raise `ValueError`.
+Responsive text is composed with the width offered by its final row, column,
+grid track, or stack box. Its tighter visible glyph bounds do not become a new
+wrap limit during materialization.
 
 == Layout possibility atlas
 
@@ -353,7 +356,9 @@ constraint ordering, and explicit weak stays make equivalent solutions
 reproducible.
 
 `scene.check_layout()` returns soft-constraint diagnostics immediately after
-registration; `layout.diagnostics()` filters diagnostics for one root. A
+registration and intrinsic composition failures encountered during replay;
+invalid responsive Typst content does not terminate editor hot reload.
+`layout.diagnostics()` filters diagnostics for one root. A
 conflict message includes its label or canonical index and involved node IDs.
 Expressions cannot mix drawables from different scenes.
 
