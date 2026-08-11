@@ -7,7 +7,7 @@ scene = Scene(1280, 720, background="#0b1020", margin=36)
 agenda = scene.column([scene.text("Measure").fill(WHITE), scene.text("Solve").fill(WHITE)], gap=18)
 notes = scene.column([scene.text("Deterministic").fill(BLUE)], gap=16)
 body = scene.row([scene.item(agenda, grow=1), scene.item(notes, grow=1)], gap=56, width="fill", align="center")
-page = scene.column([scene.title("Reflow").fill(GOLD), scene.item(body, grow=1)], within="safe", width="fill", height="fill", padding=32, gap=28, align="stretch")
+page = scene.column([scene.text("Reflow", role="title").fill(GOLD), scene.item(body, grow=1)], within="safe", width="fill", height="fill", padding=32, gap=28, align="stretch")
 agenda.add(scene.text("Place").fill(WHITE), animate=0.4)
 scene.wait(2.8)
 

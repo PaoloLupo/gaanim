@@ -22,9 +22,12 @@ opening = scene.segment(
     layout="cover",
     notes="Presenta el tema y explica por qué importa.",
 )
-opening.region("title").place(scene.title("Mis slides"), Anchor.CENTER)
+opening.region("title").place(scene.text("Mis slides", role="title"), Anchor.CENTER)
 opening.region("subtitle").place(
-    scene.subtitle("Una presentación construida con estructura semántica"),
+    scene.text(
+        "Una presentación construida con estructura semántica",
+        role="subtitle",
+    ),
     Anchor.CENTER,
 )
 scene.wait(0.5)
@@ -35,13 +38,13 @@ idea = scene.segment(
     layout="content",
     notes="Explica una sola idea y revela el detalle cuando sea necesario.",
 )
-idea.region("title").place(scene.title("Una idea por slide"), Anchor.LEFT)
+idea.region("title").place(scene.text("Una idea por slide", role="title"), Anchor.LEFT)
 message = idea.region("content").place(
-    scene.paragraph(
+    scene.text(
         "Usa regiones para mantener jerarquía, alineación y márgenes consistentes.",
-        width=1120,
-        align="center",
-        font_size=42,
+        wrap=1120,
+        text_align="center",
+        size=42,
     ),
     Anchor.CENTER,
 )
@@ -53,8 +56,11 @@ closing = scene.segment(
     layout="conclusion",
     notes="Resume el mensaje e invita a preguntas.",
 )
-closing.region("title").place(scene.title("Gracias"), Anchor.CENTER)
-closing.region("subtitle").place(scene.subtitle("¿Preguntas?"), Anchor.CENTER)
+closing.region("title").place(scene.text("Gracias", role="title"), Anchor.CENTER)
+closing.region("subtitle").place(
+    scene.text("¿Preguntas?", role="subtitle"),
+    Anchor.CENTER,
+)
 scene.wait(0.5)
 scene.stop("preguntas")
 

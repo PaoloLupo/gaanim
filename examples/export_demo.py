@@ -12,7 +12,7 @@ def main():
         raise SystemExit("Usage: gaanim examples/export_demo.py [a|b|c]")
 
     scene = Scene(1920, 1080, background=BLACK)
-    equation = scene.equation("integral_a^b f(x) d x = F(b) - F(a)").fill(WHITE).at(0, 100)
+    equation = scene.text("$integral_a^b f(x) d x = F(b) - F(a)$").fill(WHITE).at(0, 100)
     circle = scene.circle(120).stroke(GOLD, 6).no_fill().at(-250, -150)
     rect = scene.rect(200, 120).fill(BLUE).at(250, -150)
 

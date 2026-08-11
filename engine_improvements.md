@@ -104,7 +104,7 @@ API objetivo mínima:
 ```python
 scene = Scene(width=1920, height=1080, background=BLACK)
 
-title = scene.title("Gaanim")
+title = scene.text("Gaanim", role="title")
 scene.play([title.write()])
 scene.export("video.mp4")
 ```
@@ -165,7 +165,7 @@ La API pública actual permite:
 
 - crear un `Scene` con tamaño, fondo y margen uniforme;
 - crear `circle`, `rect`, `rounded_rect`, `square`, `dot`, `ellipse`, `line` y `arrow`;
-- crear `text`, `title`, `subtitle`, `equation` e `image` (PNG/JPEG/WebP);
+- crear `text` unificado (roles, prosa y matemática `$...$`) e `image` (PNG/JPEG/WebP);
 - crear paths, arcos, polilíneas, ejes 2D/3D, superficies y primitivas técnicas;
 - importar SVG vectorial y modelos glTF/GLB, consultar partes y acciones del modelo;
 - colocar objetos en 3D con cámara perspectiva, `billboard` y overlays `hud`;
@@ -454,7 +454,7 @@ La escena debe tener una identidad técnica coherente por defecto y no depender
 de que cada ejemplo configure tipografías o ejes manualmente.
 
 1. [x] temas públicos `technical`/`scientific` y `paper`, con New Computer Modern para texto técnico y New Computer Modern Math para ecuaciones;
-2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para `title`, `subtitle`, `text`, `equation`, `caption` y `code`; un `.fill(...)` explícito conserva prioridad;
+2. [x] el runtime aplica el `TextConfig` del tema antes de compilar la escena: `paper` usa fondo blanco y fill negro para los roles `title`, `subtitle`, `body`, `math`, `caption` y `code` de `Text`; un `.fill(...)` explícito conserva prioridad;
 3. [x] fuentes registradas por el motor para la composición técnica actual;
 4. [x] `scene.axes(...)` y `scene.number_plane(...)` desde Python, con rangos, ticks, números, grilla, estilos y etiquetas configurables;
 5. [x] `scene.axes_3d(...)` con tres rangos, planos de grilla, labels billboard/HUD y

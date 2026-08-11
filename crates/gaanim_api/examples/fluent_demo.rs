@@ -49,7 +49,17 @@ fn setup_scene(
         .circle(80.0)
         .fill(Color::from_rgb8(0x19, 0x32, 0x64))
         .at(0.0, 0.0);
-    let title = canvas.title("Gaanim").fill(Color::WHITE).at(0.0, 180.0);
+    let title_spec = gaanim_text::prelude::TextSpec::new(
+        vec!["Gaanim".into()],
+        Some(gaanim_text::prelude::TextRole::Title),
+        gaanim_text::prelude::TextStyle::default(),
+        gaanim_text::prelude::TextFlow::default(),
+    )
+    .expect("valid unified title text");
+    let title = canvas
+        .text_spec(title_spec)
+        .fill(Color::WHITE)
+        .at(0.0, 180.0);
 
     logo.fade_in(1.0);
     canvas.wait(0.5);

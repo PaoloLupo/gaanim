@@ -15,8 +15,8 @@ def card(heading: str, copy: str):
     panel = scene.rounded_rect(340, 220, 18).fill("#17233d")
     content = scene.column(
         [
-            scene.subtitle(heading).fill(GOLD),
-            scene.paragraph(copy).fill(WHITE),
+            scene.text(heading, role="subtitle").fill(GOLD),
+            scene.text(copy).fill(WHITE),
         ],
         width="fill",
         height="fill",
@@ -47,7 +47,7 @@ cards = scene.row(
 
 page = scene.column(
     [
-        scene.title("Responsive layout").fill(GOLD),
+        scene.text("Responsive layout", role="title").fill(GOLD),
         scene.item(cards, grow=1, align="stretch"),
         scene.text("Set GAANIM_VERTICAL=1 for 9:16").fill(BLUE),
     ],

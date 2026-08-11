@@ -7,8 +7,8 @@ from gaanim import BLACK, GRAY, WHITE, Direction, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.title("Integration step").fill(WHITE).at(0, 255)
-subtitle = scene.subtitle("Explicit Euler update").fill(GRAY).at(0, 200)
+title = scene.text("Integration step", role="title").fill(WHITE).at(0, 255)
+subtitle = scene.text("Explicit Euler update", role="subtitle").fill(GRAY).at(0, 200)
 snippet = scene.code(
     "velocity += acceleration * dt\nposition += velocity * dt",
     language="python",

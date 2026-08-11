@@ -5,7 +5,7 @@ from gaanim import BLACK, BLUE, CORAL, CYAN, GOLD, GREEN, ORANGE, WHITE, Scene, 
 
 def main():
     scene = Scene(1280, 720, background=BLACK)
-    title = scene.title("Gaanim Reactive Engine").fill(WHITE).at(0, 240)
+    title = scene.text("Gaanim Reactive Engine", role="title").fill(WHITE).at(0, 240)
     orbiting_dot = scene.dot(15).fill(ORANGE).at(150, 0)
     orbiting_dot.add_updater(Updater.orbit(0, 0, 150, 2.0))
     trail = scene.traced_path(orbiting_dot).stroke(CYAN, 4).no_fill()

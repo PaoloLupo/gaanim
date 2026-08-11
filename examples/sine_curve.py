@@ -13,13 +13,13 @@ scene = Scene(1280, 720, background=Color(15, 15, 26), margin=50)
 # --- Axes ---
 scene.line(-400, 0, 300, 0).stroke(WHITE, 2.0)
 scene.line(-400, -200, -400, 200).stroke(WHITE, 2.0)
-title = scene.title("Ejemplo de updaters").to_edge(Direction.UP)
+title = scene.text("Ejemplo de updaters", role="title").to_edge(Direction.UP)
 
 title.write()
 
 # --- Pi labels ---
 for i, label in enumerate(["pi", "2 pi", "3 pi", "5 pi"]):
-    scene.equation(label).at(-200 + 120 * i, -30)
+    scene.text(f"${label}$").at(-200 + 120 * i, -30)
 
 # --- Circle ---
 origin_x, origin_y = -400.0, 0.0

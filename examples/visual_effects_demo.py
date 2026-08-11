@@ -8,8 +8,8 @@ from gaanim import Brush, Scene
 scene = Scene(1280, 720, margin=52)
 scene.canvas.set_theme("tokyo-night")
 
-scene.title("Visual effects").at(0, 285)
-scene.subtitle("Cached vector effects for presentation graphics").at(0, 230)
+scene.text("Visual effects", role="title").at(0, 285)
+scene.text("Cached vector effects for presentation graphics", role="subtitle").at(0, 230)
 
 scene.circle(115).fill(
     Brush.radial(["#E0F2FE", "#38BDF8", "#2563EB"], center=(-28, 32), radius=155)

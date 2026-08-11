@@ -5,9 +5,9 @@ from gaanim import BLACK, BLUE, CORAL, GOLD, WHITE, Scene
 
 def main():
     scene = Scene(1280, 720, background=BLACK)
-    title = scene.title("Gaanim Vector Engine").fill(WHITE).at(0, 220)
-    energy = scene.equation("E = m c^2").fill(GOLD).at(-180, 0)
-    sum_formula = scene.equation("sum_(i=1)^n i = frac(n(n+1), 2)").fill(CORAL).at(180, 0)
+    title = scene.text("Gaanim Vector Engine", role="title").fill(WHITE).at(0, 220)
+    energy = scene.text("$E = m c^2$").fill(GOLD).at(-180, 0)
+    sum_formula = scene.text("$sum_(i=1)^n i = frac(n(n+1), 2)$").fill(CORAL).at(180, 0)
     halo = scene.circle(100).stroke(BLUE, 5).no_fill().at(-180, 0)
 
     scene.play([
@@ -17,7 +17,7 @@ def main():
         halo.create().duration(1.2).spring(),
     ])
     scene.wait(0.8)
-    target = scene.equation("p = m v").fill(GOLD).at(-180, 0)
+    target = scene.text("$p = m v$").fill(GOLD).at(-180, 0)
     scene.play([energy.transform(target).duration(1.5).spring()])
     scene.wait(1.0)
     scene.render()

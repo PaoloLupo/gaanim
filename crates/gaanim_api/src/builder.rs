@@ -1,4 +1,4 @@
-use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
+use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTrackerRef};
 use bevy::prelude::{
     BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
 };
@@ -8,7 +8,7 @@ use gaanim_core::kurbo::{self, Shape};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_math::matching::{MatchItem, MatchingConfig, MatchingMode, lcs_match};
-use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, SpatialTransform};
+use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, RateFunc, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
     FillBrush, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
@@ -344,6 +344,12 @@ pub struct SceneBuilder<'w, 's, 'a> {
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
     membership_managed_objects: HashSet<ObjectId>,
+    /// Transient marks created by `TextSelection.cancel()`, keyed by their
+    /// owning Text root so the next replacing transition can retire them.
+    text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
+    /// Selected glyphs dimmed by `TextSelection.cancel()`. They leave with the
+    /// same owning Text instead of lingering behind a replacement.
+    text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -599,6 +605,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             float_signals: HashMap::new(),
             persistent_objects: HashSet::new(),
             membership_managed_objects: HashSet::new(),
+            text_cancellation_marks: HashMap::new(),
+            text_canceled_term_children: HashMap::new(),
         }
     }
 
@@ -774,6 +782,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::ShrinkToCenter => "Shrink",
             AnimationType::SpinInFromNothing => "SpinIn",
             AnimationType::Indicate { .. } => "Indicate",
+            AnimationType::TextTransition { copy: true, .. }
+            | AnimationType::TextSelectionTransform { copy: true, .. } => "CopyText",
+            AnimationType::TextTransition { copy: false, .. }
+            | AnimationType::TextSelectionTransform { copy: false, .. } => "MorphText",
+            AnimationType::TextSelection { effect, .. } => match effect {
+                TextSelectionEffect::Focus => "FocusText",
+                TextSelectionEffect::Cancel => "CancelText",
+                TextSelectionEffect::Brace { .. } => "BraceText",
+                TextSelectionEffect::Annotate { .. } => "AnnotateText",
+                _ => "TextSelection",
+            },
             AnimationType::FadeTransform { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. } => "Morph",
@@ -1346,6 +1365,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if !duration.is_finite() || duration <= 0.0 {
             return;
         }
+        if mode == EquationTransitionMode::Replace {
+            self.fade_text_cancellation_artifacts(source_parent, duration);
+        }
         let plan = self.plan_equation_transition(
             source_parent,
             target_parent,
@@ -1382,10 +1404,450 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_time += duration;
     }
 
+    fn fade_text_cancellation_artifacts(
+        &mut self,
+        source_parent: ObjectId,
+        transition_duration: f64,
+    ) {
+        let duration = (transition_duration * 0.25).clamp(0.12, 0.3);
+        let targets = self
+            .text_cancellation_marks
+            .remove(&source_parent)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.text_canceled_term_children
+                    .remove(&source_parent)
+                    .into_iter()
+                    .flatten(),
+            )
+            .collect::<HashSet<_>>();
+        for target in targets {
+            self.play_at_current_time(AnimationBuilder {
+                target,
+                anim_type: AnimationType::FadeOut,
+                duration,
+                rate_func: RateFunc::Smooth,
+                delay: 0.0,
+            });
+        }
+    }
+
+    fn play_text_selection_focus_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        selected: &[ObjectId],
+    ) {
+        let selected = selected.iter().copied().collect::<HashSet<_>>();
+        let all = self
+            .states
+            .get(anim.target)
+            .map(|state| {
+                state
+                    .child_spans
+                    .iter()
+                    .map(|child| child.id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| selected.iter().copied().collect());
+        for target in all {
+            let anim_type = if selected.contains(&target) {
+                AnimationType::Indicate {
+                    color: None,
+                    scale_factor: 1.12,
+                }
+            } else {
+                AnimationType::FadeTo { to: 0.2 }
+            };
+            self.play_internal(AnimationBuilder {
+                target,
+                anim_type,
+                duration: anim.duration,
+                rate_func: if selected.contains(&target) {
+                    RateFunc::ThereAndBack
+                } else {
+                    RateFunc::Smooth
+                },
+                delay: anim.delay,
+            });
+        }
+    }
+
+    fn text_selection_world_bounds(&self, targets: &[ObjectId]) -> Option<Bounds3D> {
+        targets
+            .iter()
+            .filter_map(|target| {
+                let state = self.states.get(*target)?;
+                // Text child bounds are already expressed in the owning text's local
+                // coordinate system. Applying the child's transform here would center
+                // them a second time and shift selection decorations to the left.
+                let world_transform = state
+                    .parent
+                    .map(|parent| self.get_world_transform(parent))
+                    .unwrap_or_else(|| self.get_world_transform(*target));
+                Some(state.bounds.transform_2d(&world_transform.to_affine_2d()))
+            })
+            .reduce(|bounds, next| bounds.union(&next))
+    }
+
+    fn text_selection_color(&self, targets: &[ObjectId]) -> Color {
+        targets
+            .iter()
+            .find_map(|target| {
+                self.states
+                    .get(*target)
+                    .and_then(|state| match &state.fill {
+                        Some(Brush::Solid(color)) => Some(*color),
+                        _ => None,
+                    })
+            })
+            .unwrap_or(Color::WHITE)
+    }
+
+    fn play_text_selection_cancel_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        selected: &[ObjectId],
+    ) {
+        let Some(bounds) = self.text_selection_world_bounds(selected) else {
+            return;
+        };
+        let pad = (bounds.width() * 0.08).max(3.0);
+        let color = self.text_selection_color(selected);
+        let strike = self
+            .line(
+                kurbo::Point::new(bounds.min.x - pad, bounds.min.y - pad * 0.25),
+                kurbo::Point::new(bounds.max.x + pad, bounds.max.y + pad * 0.25),
+            )
+            .no_fill()
+            .stroke(color, 3.0)
+            .spawn();
+        self.text_cancellation_marks
+            .entry(anim.target)
+            .or_default()
+            .push(strike.id);
+        self.text_canceled_term_children
+            .entry(anim.target)
+            .or_default()
+            .extend(selected.iter().copied());
+        self.play_internal(AnimationBuilder {
+            target: strike.id,
+            anim_type: AnimationType::Create {
+                config: Default::default(),
+            },
+            duration: anim.duration,
+            rate_func: anim.rate_func,
+            delay: anim.delay,
+        });
+        for target in selected {
+            self.play_internal(AnimationBuilder {
+                target: *target,
+                anim_type: AnimationType::FadeTo { to: 0.35 },
+                duration: anim.duration,
+                rate_func: RateFunc::Smooth,
+                delay: anim.delay,
+            });
+        }
+    }
+
+    fn play_text_selection_brace_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        selected: &[ObjectId],
+        label: String,
+        above: bool,
+    ) {
+        let Some(bounds) = self.text_selection_world_bounds(selected) else {
+            return;
+        };
+        let side = if above { 1.0 } else { -1.0 };
+        let y = if above {
+            bounds.max.y + 12.0
+        } else {
+            bounds.min.y - 12.0
+        };
+        let color = self.text_selection_color(selected);
+        let brace = self
+            .brace(
+                kurbo::Point::new(bounds.min.x, y),
+                kurbo::Point::new(bounds.max.x, y),
+                -side * 10.0,
+            )
+            .no_fill()
+            .stroke(color, 2.0)
+            .spawn();
+        let label_ref = self.text(&label, "Inter", 28.0);
+        if let Some(state) = self.states.get_mut(label_ref.id) {
+            state.transform.translation = DVec3::new(bounds.center().x, y + side * 25.0, 0.0);
+            self.commands.entity(state.entity).insert(state.transform);
+        }
+        for (target, anim_type) in [
+            (
+                brace.id,
+                AnimationType::Create {
+                    config: Default::default(),
+                },
+            ),
+            (label_ref.id, AnimationType::FadeIn),
+        ] {
+            self.play_internal(AnimationBuilder {
+                target,
+                anim_type,
+                duration: anim.duration,
+                rate_func: anim.rate_func.clone(),
+                delay: anim.delay,
+            });
+        }
+    }
+
+    fn play_text_selection_annotate_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        selected: &[ObjectId],
+        label: String,
+        offset: DVec3,
+    ) {
+        let Some(bounds) = self.text_selection_world_bounds(selected) else {
+            return;
+        };
+        let position = bounds.center() + offset;
+        let label_ref = self.text(&label, "Inter", 28.0);
+        if let Some(state) = self.states.get_mut(label_ref.id) {
+            state.transform.translation = position;
+            self.commands.entity(state.entity).insert(state.transform);
+        }
+        let color = self.text_selection_color(selected);
+        let line = self
+            .line(
+                kurbo::Point::new(bounds.center().x, bounds.center().y),
+                kurbo::Point::new(position.x, position.y),
+            )
+            .no_fill()
+            .stroke(color, 2.0)
+            .spawn();
+        for (target, anim_type) in [
+            (
+                line.id,
+                AnimationType::Create {
+                    config: Default::default(),
+                },
+            ),
+            (label_ref.id, AnimationType::FadeIn),
+        ] {
+            self.play_internal(AnimationBuilder {
+                target,
+                anim_type,
+                duration: anim.duration,
+                rate_func: anim.rate_func.clone(),
+                delay: anim.delay,
+            });
+        }
+    }
+
+    fn play_text_selection_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        fragment: String,
+        occurrence: Option<usize>,
+        effect: TextSelectionEffect,
+    ) {
+        let selected = self
+            .select_occurrence(MobjectRef { id: anim.target }, &fragment, occurrence)
+            .child_ids;
+        if selected.is_empty() {
+            bevy::prelude::warn!(
+                "text selection animation could not resolve fragment '{fragment}'"
+            );
+            return;
+        }
+        match effect {
+            TextSelectionEffect::Focus => {
+                self.play_text_selection_focus_internal(anim, &selected);
+            }
+            TextSelectionEffect::Cancel => {
+                self.play_text_selection_cancel_internal(anim, &selected);
+            }
+            TextSelectionEffect::Brace { label, above } => {
+                self.play_text_selection_brace_internal(anim, &selected, label, above);
+            }
+            TextSelectionEffect::Annotate { label, offset } => {
+                self.play_text_selection_annotate_internal(anim, &selected, label, offset);
+            }
+            effect => {
+                let count = selected.len();
+                for (index, target) in selected.into_iter().enumerate() {
+                    let (anim_type, rate_func, extra_delay) = match &effect {
+                        TextSelectionEffect::Indicate => (
+                            AnimationType::Indicate {
+                                color: None,
+                                scale_factor: 1.1,
+                            },
+                            RateFunc::ThereAndBack,
+                            0.0,
+                        ),
+                        TextSelectionEffect::Pulse => (
+                            AnimationType::Indicate {
+                                color: None,
+                                scale_factor: 1.16,
+                            },
+                            RateFunc::ThereAndBack,
+                            0.0,
+                        ),
+                        TextSelectionEffect::Wiggle => {
+                            (AnimationType::Wiggle, RateFunc::ThereAndBack, 0.0)
+                        }
+                        TextSelectionEffect::Wave => (
+                            AnimationType::Wiggle,
+                            RateFunc::ThereAndBack,
+                            if count > 1 {
+                                index as f64 * anim.duration * 0.35 / (count - 1) as f64
+                            } else {
+                                0.0
+                            },
+                        ),
+                        TextSelectionEffect::Highlight => (
+                            AnimationType::Circumscribe { color: None },
+                            RateFunc::Smooth,
+                            0.0,
+                        ),
+                        TextSelectionEffect::RevealFade => {
+                            (AnimationType::FadeIn, RateFunc::Smooth, 0.0)
+                        }
+                        TextSelectionEffect::RevealWipe => (
+                            AnimationType::Write {
+                                config: Default::default(),
+                            },
+                            RateFunc::Smooth,
+                            0.0,
+                        ),
+                        TextSelectionEffect::RevealFromBelow => (
+                            AnimationType::FadeInFrom {
+                                offset: DVec3::new(0.0, -24.0, 0.0),
+                            },
+                            RateFunc::Smooth,
+                            0.0,
+                        ),
+                        TextSelectionEffect::ColorTo(color) => (
+                            AnimationType::FillColorTo { to: *color },
+                            RateFunc::Smooth,
+                            0.0,
+                        ),
+                        TextSelectionEffect::Focus
+                        | TextSelectionEffect::Cancel
+                        | TextSelectionEffect::Brace { .. }
+                        | TextSelectionEffect::Annotate { .. } => unreachable!(),
+                    };
+                    self.play_internal(AnimationBuilder {
+                        target,
+                        anim_type,
+                        duration: anim.duration,
+                        rate_func,
+                        delay: anim.delay + extra_delay,
+                    });
+                }
+            }
+        }
+    }
+
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
         let track = self.ensure_track(anim.target);
+
+        if let AnimationType::TextTransition {
+            target,
+            copy,
+            semantic_pairs,
+        } = anim.anim_type.clone()
+        {
+            let semantic_groups = semantic_pairs
+                .into_iter()
+                .filter_map(
+                    |(source_fragment, source_occurrence, target_fragment, target_occurrence)| {
+                        let sources = self
+                            .select_occurrence(
+                                MobjectRef { id: anim.target },
+                                &source_fragment,
+                                source_occurrence,
+                            )
+                            .child_ids;
+                        let targets = self
+                            .select_occurrence(
+                                MobjectRef { id: target },
+                                &target_fragment,
+                                target_occurrence,
+                            )
+                            .child_ids;
+                        (!sources.is_empty() && !targets.is_empty()).then_some((sources, targets))
+                    },
+                )
+                .collect();
+            let cursor = self.current_time;
+            self.current_time += anim.delay.max(0.0);
+            self.play_equation_transition(
+                anim.target,
+                target,
+                semantic_groups,
+                anim.duration,
+                if copy {
+                    EquationTransitionMode::Copy
+                } else {
+                    EquationTransitionMode::Replace
+                },
+                true,
+            );
+            self.current_time = cursor;
+            return;
+        }
+        if let AnimationType::TextSelectionTransform {
+            target,
+            source_fragment,
+            source_occurrence,
+            target_fragment,
+            target_occurrence,
+            copy,
+        } = anim.anim_type.clone()
+        {
+            let sources = self
+                .select_occurrence(
+                    MobjectRef { id: anim.target },
+                    &source_fragment,
+                    source_occurrence,
+                )
+                .child_ids;
+            let targets = self
+                .select_occurrence(
+                    MobjectRef { id: target },
+                    &target_fragment,
+                    target_occurrence,
+                )
+                .child_ids;
+            let cursor = self.current_time;
+            self.current_time += anim.delay.max(0.0);
+            self.play_equation_transition(
+                anim.target,
+                target,
+                vec![(sources, targets)],
+                anim.duration,
+                if copy {
+                    EquationTransitionMode::Copy
+                } else {
+                    EquationTransitionMode::Replace
+                },
+                false,
+            );
+            self.current_time = cursor;
+            return;
+        }
+        if let AnimationType::TextSelection {
+            fragment,
+            occurrence,
+            effect,
+        } = anim.anim_type.clone()
+        {
+            self.play_text_selection_internal(anim, fragment, occurrence, effect);
+            return;
+        }
 
         if let AnimationType::GltfAnimation {
             animation_index,
@@ -1609,6 +2071,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Uncreate { .. }
             | AnimationType::SpinInFromNothing
             | AnimationType::Indicate { .. }
+            | AnimationType::TextTransition { .. }
+            | AnimationType::TextSelection { .. }
+            | AnimationType::TextSelectionTransform { .. }
             | AnimationType::FadeTransform { .. }
             | AnimationType::Wiggle
             | AnimationType::GrowFromPoint { .. }
@@ -4775,7 +5240,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             while val <= max + 1e-9 {
                 let display_val = if val.abs() < 1e-9 { 0.0 } else { val };
                 let label_str = format!("{}", display_val);
-                let label_ref = self.body(&label_str);
+                let label_ref = self.spawn_text(&label_str, gaanim_text::prelude::TextRole::Body);
 
                 if let Some(state) = self.states.get_mut(label_ref.id) {
                     if vertical {
@@ -4865,7 +5330,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             label_pos.y += ny * spacing;
         }
 
-        let label_ref = self.body(label);
+        let label_ref = self.spawn_text(label, gaanim_text::prelude::TextRole::Body);
         if let Some(state) = self.states.get_mut(label_ref.id) {
             state.transform = state.transform.shift_2d(label_pos.x, label_pos.y);
             self.commands.entity(state.entity).insert(state.transform);
@@ -5461,80 +5926,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .insert(parent_id, format!("DecimalNumber('{}')", text));
 
         MobjectRef { id: parent_id }
-    }
-
-    /// Shorthand to spawn a Title text Mobject.
-    pub fn title(&mut self, content: &str) -> MobjectRef {
-        self.spawn_text(content, gaanim_text::prelude::TextRole::Title)
-    }
-
-    /// Shorthand to spawn a Subtitle text Mobject.
-    pub fn subtitle(&mut self, content: &str) -> MobjectRef {
-        self.spawn_text(content, gaanim_text::prelude::TextRole::Subtitle)
-    }
-
-    /// Shorthand to spawn a Body text Mobject.
-    pub fn body(&mut self, content: &str) -> MobjectRef {
-        self.spawn_text(content, gaanim_text::prelude::TextRole::Body)
-    }
-
-    /// Shorthand to spawn a Caption text Mobject.
-    pub fn caption(&mut self, content: &str) -> MobjectRef {
-        self.spawn_text(content, gaanim_text::prelude::TextRole::Caption)
-    }
-
-    /// Shorthand to spawn a mathematical equation Mobject (LaTeX style) with default Math styling.
-    pub fn equation(&mut self, formula: &str) -> MobjectRef {
-        let style = self
-            .text_config
-            .roles
-            .get(&gaanim_text::prelude::TextRole::Math)
-            .cloned()
-            .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
-                font_family: "New Computer Modern Math".to_string(),
-                size: 32.0,
-                fill_color: gaanim_core::peniko::Color::WHITE,
-            });
-
-        let parent_id = self.next_id();
-        let fill = Some(gaanim_core::peniko::Brush::Solid(style.fill_color));
-        let stroke = gaanim_scene::StrokeBrush::transparent();
-
-        let id_counter = &mut self.id_counter;
-        let next_id_fn = move || {
-            let id = gaanim_core::ObjectId::from_parts(*id_counter, 1);
-            *id_counter += 1;
-            id
-        };
-
-        let mut child_spans = Vec::new();
-        let (entity, bounds) = compile_typst_to_hierarchy(
-            self.commands,
-            self.font_registry,
-            formula,
-            true, // is_math
-            None,
-            Some(&style.font_family),
-            None,
-            Some(style.size),
-            fill.clone(),
-            stroke.clone(),
-            parent_id,
-            next_id_fn,
-            &mut child_spans,
-        );
-        let result = self.register_textual_hierarchy(
-            parent_id,
-            entity,
-            bounds,
-            Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
-            gaanim_scene::StrokeBrush::transparent(),
-            child_spans,
-        );
-        self.mobject_names
-            .insert(parent_id, format!("Typst('{}')", formula));
-
-        result
     }
 
     /// Selects a subset of characters/shapes in a text or equation Mobject by exact substring.

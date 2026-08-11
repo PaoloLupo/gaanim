@@ -8,8 +8,8 @@ from gaanim import BLUE, GOLD, GRAY, WHITE, Scene, Transition
 scene = Scene(1280, 720, background="#0f172a", margin=48)
 scene.segment("intro")
 
-title = scene.title("Péndulo simple").fill(GOLD).at(0, 120)
-subtitle = scene.subtitle("Un objeto, varios segmentos").fill(GRAY).at(0, 45)
+title = scene.text("Péndulo simple", role="title").fill(GOLD).at(0, 120)
+subtitle = scene.text("Un objeto, varios segmentos", role="subtitle").fill(GRAY).at(0, 45)
 scene.play([title.write().duration(0.6), subtitle.fade_in().duration(0.4)])
 scene.wait(0.4)
 
@@ -30,7 +30,7 @@ scene.wait(0.5)
 scene.segment("detail", Transition.slide(0.5, "left"))
 # The title stays fixed through the incoming transition, then belongs to detail.
 scene.release(title)
-detail = scene.subtitle("La gravedad restaura el movimiento").fill(WHITE).at(0, 60)
+detail = scene.text("La gravedad restaura el movimiento", role="subtitle").fill(WHITE).at(0, 60)
 scene.play([detail.write().duration(0.6)])
 scene.wait(0.8)
 

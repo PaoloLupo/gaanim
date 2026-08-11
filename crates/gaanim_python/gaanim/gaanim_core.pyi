@@ -6,7 +6,7 @@ script. All camera durations are in seconds; 3D angles are in radians.
 
 from __future__ import annotations
 
-from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Sequence, TypeAlias, overload
+from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 
 CurvePoint: TypeAlias = tuple[float, float]
 """A coordinate pair used by :meth:`Scene.path` and :meth:`Scene.curve`."""
@@ -479,28 +479,28 @@ class Drawable:
     ) -> Anim:
         """Sample a Blender Action deterministically on the scene timeline."""
         ...
-    def fill(self, paint: Paint) -> Drawable:
+    def fill(self, paint: Paint) -> Self:
         """Apply fill to this drawable and return the result.
 
         Example:
             result = drawable.fill(BLUE)
         """
         ...
-    def no_fill(self) -> Drawable:
+    def no_fill(self) -> Self:
         """Apply no fill to this drawable and return the result.
 
         Example:
             result = drawable.no_fill()
         """
         ...
-    def stroke(self, paint: Paint, width: float) -> Drawable:
+    def stroke(self, paint: Paint, width: float) -> Self:
         """Apply stroke to this drawable and return the result.
 
         Example:
             result = drawable.stroke(BLUE, 1.0)
         """
         ...
-    def no_stroke(self) -> Drawable:
+    def no_stroke(self) -> Self:
         """Apply no stroke to this drawable and return the result.
 
         Example:
@@ -559,70 +559,21 @@ class Drawable:
             result = drawable.no_clip()
         """
         ...
-    def color_by(self, fragment: str, color: Color) -> Drawable:
-        """Apply color by to this drawable and return the result.
-
-        Example:
-            result = drawable.color_by("example", BLUE)
-        """
-        ...
-    def select(self, fragment: str, occurrence: Optional[int] = None) -> FragmentSelection:
-        """Apply select to this drawable and return the result.
-
-        Example:
-            result = drawable.select("example")
-        """
-        ...
-    def tag(self, name: str) -> FragmentSelection:
-        """Apply tag to this drawable and return the result.
-
-        Example:
-            result = drawable.tag("example")
-        """
-        ...
-    def indicate_tag(self, name: str, duration: Optional[float] = None) -> Drawable:
-        """Apply indicate tag to this drawable and return the result.
-
-        Example:
-            result = drawable.indicate_tag("example")
-        """
-        ...
-    def cancel_term(self, name: str, duration: Optional[float] = None) -> Drawable:
-        """Apply cancel term to this drawable and return the result.
-
-        Example:
-            result = drawable.cancel_term("example")
-        """
-        ...
-    def reveal_fragment(
-        self,
-        fragment: str,
-        *,
-        style: str = "fade",
-        duration: Optional[float] = None,
-        occurrence: Optional[int] = None,
-    ) -> Drawable:
-        """Apply reveal fragment to this drawable and return the result.
-
-        Example:
-            result = drawable.reveal_fragment("example")
-        """
-        ...
-    def opacity(self, op: float) -> Drawable:
+    def opacity(self, op: float) -> Self:
         """Apply opacity to this drawable and return the result.
 
         Example:
             result = drawable.opacity(1.0)
         """
         ...
-    def z_index(self, z: int) -> Drawable:
+    def z_index(self, z: int) -> Self:
         """Apply z index to this drawable and return the result.
 
         Example:
             result = drawable.z_index(1)
         """
         ...
-    def at(self, x: float, y: float) -> Drawable:
+    def at(self, x: float, y: float) -> Self:
         """Apply at to this drawable and return the result.
 
         Example:
@@ -632,7 +583,7 @@ class Drawable:
     def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
         """Place this drawable at a symbolic coordinate owned by a coordinate space."""
         ...
-    def at_3d(self, x: float, y: float, z: float) -> Drawable:
+    def at_3d(self, x: float, y: float, z: float) -> Self:
         """Place the drawable at a 3D world-space position.
 
         Coordinates are interpreted by the perspective camera. The method is
@@ -642,7 +593,7 @@ class Drawable:
             dot = scene.dot(8).fill(RED).at_3d(1.0, 2.0, 0.5)
         """
         ...
-    def billboard(self) -> Drawable:
+    def billboard(self) -> Self:
         """Keep a 3D drawable facing the perspective camera.
 
         This is useful for labels and markers attached to a 3D scene. The
@@ -652,7 +603,7 @@ class Drawable:
             label = scene.text("origin").at_3d(0.0, 1.0, 0.0).billboard()
         """
         ...
-    def hud(self) -> Drawable:
+    def hud(self) -> Self:
         """Pin the drawable to the screen as a fixed HUD overlay.
 
         HUD drawables use screen-space coordinates and are not affected by
@@ -664,38 +615,56 @@ class Drawable:
             title = scene.text("glTF demo").hud().at(0.0, 300.0)
         """
         ...
-    def scaled(self, factor: float) -> Drawable:
+    def scaled(self, factor: float) -> Self:
         """Apply scaled to this drawable and return the result.
 
         Example:
             result = drawable.scaled(1.0)
         """
         ...
-    def scaled_3d(self, x: float, y: float, z: float) -> Drawable: ...
-    def rotated(self, radians: float) -> Drawable:
+    def scaled_3d(self, x: float, y: float, z: float) -> Self:
+        """Scale independently on three axes and preserve the specialized handle.
+
+        Example:
+            label = scene.text("depth").scaled_3d(1.0, 1.0, 0.5)
+        """
+        ...
+    def rotated(self, radians: float) -> Self:
         """Apply rotated to this drawable and return the result.
 
         Example:
             result = drawable.rotated(1.0)
         """
         ...
-    def rotated_3d(self, x: float, y: float, z: float) -> Drawable: ...
-    def with_pivot(self, x: float, y: float) -> Drawable:
+    def rotated_3d(self, x: float, y: float, z: float) -> Self:
+        """Apply Euler rotation in radians and preserve the specialized handle.
+
+        Example:
+            label = scene.text("axis").rotated_3d(0.0, 0.0, 0.5)
+        """
+        ...
+    def with_pivot(self, x: float, y: float) -> Self:
         """Apply with pivot to this drawable and return the result.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
         """
         ...
-    def with_pivot_3d(self, x: float, y: float, z: float) -> Drawable: ...
-    def pivot(self, x: float, y: float) -> Drawable:
+    def with_pivot_3d(self, x: float, y: float, z: float) -> Self:
+        """Set a three-dimensional transform pivot and preserve the handle type.
+
+        Example:
+            label = scene.text("orbit").with_pivot_3d(20.0, 0.0, 0.0)
+        """
+        ...
+    def pivot(self, x: float, y: float) -> Self:
         """Apply pivot to this drawable and return the result.
 
         Example:
             result = drawable.pivot(1.0, 1.0)
         """
         ...
-    def at_anchor(self, x: float, y: float, anchor: Anchor) -> Drawable:
+    def at_anchor(self, x: float, y: float, anchor: Anchor) -> Self:
         """Apply at anchor to this drawable and return the result.
 
         Example:
@@ -708,7 +677,7 @@ class Drawable:
         direction: Direction,
         spacing: float = 24.0,
         aligned_edge: Optional[Anchor] = None,
-    ) -> Drawable:
+    ) -> Self:
         """Apply next to to this drawable and return the result.
 
         Example:
@@ -720,21 +689,21 @@ class Drawable:
         reference: Drawable,
         target_anchor: Anchor,
         reference_anchor: Optional[Anchor] = None,
-    ) -> Drawable:
+    ) -> Self:
         """Apply align to to this drawable and return the result.
 
         Example:
             result = drawable.align_to(reference, Anchor.CENTER)
         """
         ...
-    def to_edge(self, direction: Direction, buff: float = 24.0) -> Drawable:
+    def to_edge(self, direction: Direction, buff: float = 24.0) -> Self:
         """Apply to edge to this drawable and return the result.
 
         Example:
             result = drawable.to_edge(Direction.RIGHT)
         """
         ...
-    def to_corner(self, corner: Anchor, buff: float = 24.0) -> Drawable:
+    def to_corner(self, corner: Anchor, buff: float = 24.0) -> Self:
         """Apply to corner to this drawable and return the result.
 
         Example:
@@ -822,18 +791,6 @@ class Drawable:
 
         Example:
             result = drawable.write()
-        """
-        ...
-    def write_by_term(
-        self,
-        *,
-        tags: Optional[Sequence[str]] = None,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Apply write by term to this drawable and return the result.
-
-        Example:
-            result = drawable.write_by_term()
         """
         ...
     def create(self, duration: Optional[float] = None) -> Anim:
@@ -1042,47 +999,386 @@ class Drawable:
         """
         ...
 
-class FragmentSelection:
-    def fill(self, color: Color) -> FragmentSelection:
-        """Apply fill to the selected fragment.
+TextRole: TypeAlias = Literal["title", "subtitle", "heading", "body", "caption", "label", "code", "math"]
+TextWrap: TypeAlias = Literal["auto", False] | float
+TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
+TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
+TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
+TextGrouping: TypeAlias = Literal["grapheme", "word", "line", "part"]
+
+class TextStyle:
+    """Reusable visual and metric text style without outer box layout."""
+    def __init__(
+        self,
+        *,
+        font: Optional[str] = None,
+        math_font: Optional[str] = None,
+        fallbacks: Sequence[str] = (),
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        italic: Optional[bool] = None,
+        color: Optional[Color] = None,
+        stroke: Optional[Color] = None,
+        stroke_width: Optional[float] = None,
+        opacity: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+        decorations: Sequence[str] = (),
+        baseline: Optional[float] = None,
+    ) -> None:
+        """Create a reusable typography overlay.
+
+        Sizes and spacing use canvas/Typst points. Invalid non-positive sizes
+        raise ``ValueError``. Outer width, height, padding, fit, and growth are
+        intentionally controlled by Layout v2.
 
         Example:
-            result = selection.fill(BLUE)
+            body = TextStyle(font="Inter", size=32, color=WHITE)
         """
         ...
-    def indicate(self, duration: Optional[float] = None) -> FragmentSelection:
-        """Apply a subtle upward hop around the selected fragment's visual center.
+
+class TextFlow:
+    """Reusable internal line-composition options for Text."""
+    def __init__(
+        self,
+        *,
+        wrap: TextWrap = "auto",
+        align: TextAlign = "left",
+        line_spacing: float = 1.2,
+        max_lines: Optional[int] = None,
+        overflow: TextOverflow = "clip",
+        direction: TextDirection = "auto",
+        hyphenate: bool = False,
+    ) -> None:
+        """Configure wrapping and line composition inside a measured Text leaf.
+
+        ``"auto"`` consumes the width offered by Layout v2 or the safe frame;
+        ``False`` keeps one line except for explicit newlines; a number caps the
+        typographic width. Invalid widths, spacing, or line counts raise
+        ``ValueError``.
 
         Example:
-            result = selection.indicate()
+            flow = TextFlow(wrap="auto", align="justify", line_spacing=1.25)
         """
         ...
-    def reveal(self, style: str = "fade", duration: Optional[float] = None) -> FragmentSelection:
-        """Apply reveal to the selected fragment.
+
+class TextPart:
+    """Immutable named subtree created by :func:`part`."""
+
+TextContent: TypeAlias = str | TextPart
+
+def part(
+    name: str,
+    *content: TextContent,
+    style: Optional[TextStyle] = None,
+    font: Optional[str] = None,
+    math_font: Optional[str] = None,
+    size: Optional[float] = None,
+    weight: Optional[int] = None,
+    italic: Optional[bool] = None,
+    color: Optional[Color] = None,
+    opacity: Optional[float] = None,
+    letter_spacing: Optional[float] = None,
+    word_spacing: Optional[float] = None,
+    baseline: Optional[float] = None,
+) -> TextPart:
+    """Build a composable semantic text part with optional local style.
+
+    Names must be non-empty and unique among siblings. Nested parts keep a
+    stable semantic path used by selections and text transitions. Within
+    ``$...$``, whitespace written at a content/part boundary becomes visible
+    mathematical spacing instead of being discarded by Typst.
+
+    Example:
+        formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
+    """
+    ...
+
+class TextSelection:
+    """Deferred grapheme, word, line, or semantic-part selection."""
+    def __getitem__(self, name: str) -> TextSelection: ...
+    def fill(self, color: Color) -> TextSelection:
+        """Persistently color selected glyphs and invalidate metric state if needed.
 
         Example:
-            result = selection.reveal()
+            formula["mass"].fill(GOLD)
         """
         ...
-    def cancel(self, duration: Optional[float] = None) -> FragmentSelection:
-        """Apply cancel to the selected fragment.
+    def indicate(self, duration: Optional[float] = None) -> Anim:
+        """Emphasize selected glyphs without changing their measured size.
 
         Example:
-            result = selection.cancel()
+            scene.play([copy["concept"].indicate()])
         """
         ...
-    def color_to(self, color: Color, duration: Optional[float] = None) -> FragmentSelection:
-        """Apply color to to the selected fragment.
+    def pulse(self, duration: Optional[float] = None) -> Anim:
+        """Pulse selected glyphs without causing layout reflow.
 
         Example:
-            result = selection.color_to(BLUE)
+            scene.play([copy.words[1].pulse()])
         """
         ...
-    def transform_to(self, target: FragmentSelection, duration: Optional[float] = None) -> FragmentSelection:
-        """Apply transform to to the selected fragment.
+    def wiggle(self, duration: Optional[float] = None) -> Anim:
+        """Wiggle selected glyphs without changing intrinsic measurement.
 
         Example:
-            result = selection.transform_to(target)
+            scene.play([copy["warning"].wiggle()])
+        """
+        ...
+    def wave(self, duration: Optional[float] = None) -> Anim:
+        """Apply a wave emphasis to the selected glyph sequence.
+
+        Example:
+            scene.play([copy.words[0:3].wave()])
+        """
+        ...
+    def highlight(self, duration: Optional[float] = None) -> Anim:
+        """Highlight the selected glyph sequence.
+
+        Example:
+            scene.play([copy.lines[0].highlight()])
+        """
+        ...
+    def focus(self, duration: Optional[float] = None) -> Anim:
+        """Focus attention on this selection without making it a Layout leaf.
+
+        Example:
+            scene.play([formula["mass"].focus()])
+        """
+        ...
+    def cancel(self, duration: Optional[float] = None) -> Anim:
+        """Strike through and dim the selected glyphs.
+
+        The mark remains with the owning ``Text`` until its next replacing
+        ``morph_to()``, ``step_to()`` or ``expand_to()`` transition, where both
+        the mark and canceled glyphs fade out. Returns an ``Anim`` for
+        ``scene.play()``; ``duration=None`` uses the animation default.
+
+        Example:
+            scene.play([formula["obsolete"].cancel(duration=0.6)])
+            scene.play([formula.step_to(simplified, duration=0.8)])
+        """
+        ...
+    def reveal(self, *, style: Literal["fade", "wipe", "from_below"] = "fade", duration: Optional[float] = None) -> Anim:
+        """Reveal only this selection using a deterministic fragment preset.
+
+        Example:
+            scene.play([formula["answer"].reveal(style="wipe")])
+        """
+        ...
+    def morph_to(self, target: TextSelection, *, duration: Optional[float] = None) -> Anim:
+        """Morph this selection into another selection.
+
+        Example:
+            scene.play([source["term"].morph_to(target["term"])])
+        """
+        ...
+    def copy_to(self, target: TextSelection, *, duration: Optional[float] = None) -> Anim:
+        """Copy this selection toward another selection while preserving its source.
+
+        Example:
+            scene.play([source["term"].copy_to(target["term"])])
+        """
+        ...
+    def brace(self, label: str, *, above: bool = False, duration: Optional[float] = None) -> Anim:
+        """Attach an animated brace and label to this selection.
+
+        Example:
+            scene.play([formula["mass"].brace("mass")])
+        """
+        ...
+    def annotate(self, label: str, *, offset: tuple[float, float] = (120.0, 80.0), duration: Optional[float] = None) -> Anim:
+        """Attach an animated annotation at a local canvas-unit offset.
+
+        Example:
+            scene.play([formula["mass"].annotate("converted energy", offset=(100, 60))])
+        """
+        ...
+
+class TextQuery:
+    """Deferred indexable view over rendered text units."""
+    def __len__(self) -> int: ...
+    @overload
+    def __getitem__(self, index: int) -> TextSelection: ...
+    @overload
+    def __getitem__(self, index: slice) -> TextSelection: ...
+
+class Text(Drawable):
+    """Structured, Layout-v2-measurable vector text and mathematics."""
+    @overload
+    def __getitem__(self, name: str) -> TextSelection: ...
+    @overload
+    def __getitem__(self, index: int | slice) -> TextSelection: ...
+    @property
+    def graphemes(self) -> TextQuery: ...
+    @property
+    def words(self) -> TextQuery: ...
+    @property
+    def lines(self) -> TextQuery: ...
+    @property
+    def parts(self) -> TextQuery: ...
+    def write(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
+        """Write text over an optional positional duration, grouped as requested.
+
+        Example:
+            scene.play([copy.write(0.8, by="word", stagger=0.06)])
+        """
+        ...
+    def type_in(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.04) -> Anim:
+        """Type text over an optional positional duration with deterministic grouping.
+
+        Example:
+            scene.play([copy.type_in(1.0, by="word")])
+        """
+        ...
+    def reveal(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
+        """Reveal structured text over an optional positional duration.
+
+        Example:
+            scene.play([copy.reveal(0.7, by="line")])
+        """
+        ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Fade the complete Text into the scene.
+
+        Example:
+            scene.play([copy.fade_in()])
+        """
+        ...
+    def slide_in(self, direction: Literal["up", "down", "left", "right"] = "up", *, distance: float = 24.0, duration: Optional[float] = None) -> Anim:
+        """Fade and slide Text from a direction by a canvas-unit distance.
+
+        Example:
+            scene.play([copy.slide_in("up")])
+        """
+        ...
+    def unwrite(self, duration: Optional[float] = None) -> Anim:
+        """Remove Text by reversing its writing animation.
+
+        Example:
+            scene.play([copy.unwrite()])
+        """
+        ...
+    def erase(self, duration: Optional[float] = None) -> Anim:
+        """Erase Text using its vector writing order.
+
+        Example:
+            scene.play([copy.erase()])
+        """
+        ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Fade the complete Text out of the scene.
+
+        Example:
+            scene.play([copy.fade_out()])
+        """
+        ...
+    def slide_out(self, direction: Literal["up", "down", "left", "right"] = "down", *, distance: float = 24.0, duration: Optional[float] = None) -> Anim:
+        """Remove Text with a directional slide/fade exit preset.
+
+        Example:
+            scene.play([copy.slide_out("down")])
+        """
+        ...
+    def indicate(self, duration: Optional[float] = None) -> Anim:
+        """Indicate Text transiently without causing reflow.
+
+        Example:
+            scene.play([copy.indicate()])
+        """
+        ...
+    def pulse(self, duration: Optional[float] = None) -> Anim:
+        """Pulse Text transiently without changing its measurement.
+
+        Example:
+            scene.play([copy.pulse()])
+        """
+        ...
+    def wiggle(self, duration: Optional[float] = None) -> Anim:
+        """Wiggle Text transiently without changing Layout geometry.
+
+        Example:
+            scene.play([copy.wiggle()])
+        """
+        ...
+    def wave(self, duration: Optional[float] = None) -> Anim:
+        """Apply a wave emphasis to the complete Text.
+
+        Example:
+            scene.play([copy.wave()])
+        """
+        ...
+    def highlight(self, duration: Optional[float] = None) -> Anim:
+        """Circumscribe the complete Text as a highlight.
+
+        Example:
+            scene.play([copy.highlight()])
+        """
+        ...
+    def focus(self, duration: Optional[float] = None) -> Anim:
+        """Focus the complete Text transiently.
+
+        Example:
+            scene.play([copy.focus()])
+        """
+        ...
+    def cancel(self, duration: Optional[float] = None) -> Anim:
+        """Strike through and dim the complete Text.
+
+        The mark is retired by the next replacing text transition. Returns an
+        ``Anim`` for ``scene.play()``; ``duration=None`` uses the animation
+        default.
+
+        Example:
+            scene.play([copy.cancel(duration=0.6)])
+        """
+        ...
+    def brace(self, label: str, *, above: bool = False, duration: Optional[float] = None) -> Anim:
+        """Attach a brace and label to the complete Text.
+
+        Example:
+            scene.play([formula.brace("identity", above=True)])
+        """
+        ...
+    def annotate(self, label: str, *, offset: tuple[float, float] = (120.0, 80.0), duration: Optional[float] = None) -> Anim:
+        """Attach an animated annotation to the complete Text.
+
+        Example:
+            scene.play([formula.annotate("important result")])
+        """
+        ...
+    def morph_to(self, target: Text, *, match: Literal["auto", "semantic", "grapheme", "shape"] = "auto", duration: float = 1.0) -> Anim:
+        """Morph into another Text, matching semantic paths before glyphs and shapes.
+
+        Foreign scenes or incompatible Layout owners raise
+        ``LayoutOwnershipError``.
+
+        Example:
+            scene.play([source.morph_to(target, match="auto")])
+        """
+        ...
+    def step_to(self, target: Text, *, matches: Optional[Mapping[str, str] | Sequence[tuple[str, str]]] = None, duration: float = 1.0) -> Anim:
+        """Advance a structured derivation, replacing ``Scene.step_equation``.
+
+        Example:
+            scene.play([first.step_to(second, matches={"left": "result"})])
+        """
+        ...
+    def expand_to(self, target: Text, *, anchor: str = "part", duration: float = 1.0) -> Anim:
+        """Expand toward another Text around a shared semantic part.
+
+        Example:
+            scene.play([short.expand_to(long, anchor="formula.mass")])
+        """
+        ...
+    def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None, duration: float = 1.0) -> None:
+        """Replace structured content while retaining Text identity and reflowing owners.
+
+        The text version and all owning Layout snapshots are incremented. An
+        invalid delimiter or content tree raises ``ValueError``.
+
+        Example:
+            copy.become("Resultado: ", part("value", "$42$", color=GOLD))
         """
         ...
 
@@ -1987,61 +2283,41 @@ class Scene:
             result = scene.get_graph(None, lambda x: x, (0.0, 0.0))
         """
         ...
-    def text(self, s: str) -> Drawable:
-        """Create a text drawable in the scene.
-
-        Example:
-            result = scene.text("example")
-        """
-        ...
-    def paragraph(
+    def text(
         self,
-        s: str,
-        width: Optional[float] = None,
-        *,
-        align: Literal["left", "center", "right", "justify"] = "left",
-        line_spacing: float = 1.2,
-        font_size: Optional[float] = None,
-        font_family: Optional[str] = None,
+        *content: TextContent,
+        role: Optional[TextRole] = None,
+        style: Optional[TextStyle] = None,
+        flow: Optional[TextFlow] = None,
+        font: Optional[str] = None,
+        math_font: Optional[str] = None,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        italic: Optional[bool] = None,
+        color: Optional[Color] = None,
+        opacity: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+        baseline: Optional[float] = None,
+        wrap: Optional[TextWrap] = None,
+        text_align: Optional[TextAlign] = None,
+        line_spacing: Optional[float] = None,
         max_lines: Optional[int] = None,
-        overflow: Literal["visible", "clip"] = "clip",
-    ) -> Drawable:
-        """Create vector paragraph text with optional responsive width.
+        overflow: Optional[TextOverflow] = None,
+        direction: Optional[TextDirection] = None,
+        hyphenate: Optional[bool] = None,
+    ) -> Text:
+        """Create structured vector text, paragraphs, mathematics, or mixed content.
 
-        With ``width=None``, a free paragraph uses the safe frame and a managed
-        paragraph rewraps to the width offered by its Layout. Animated width
-        changes crossfade cached Typst compositions. Width/font size must be
-        positive, line spacing at least 1, and invalid options raise
-        ``ValueError``.
-
-        Example:
-            result = scene.paragraph("Responsive copy")
-        """
-        ...
-    def title(self, s: str) -> Drawable:
-        """Create a title drawable in the scene.
-
-       …21366 tokens truncated… Example:
-            result = Transition.fade_through(1.0, BLUE)
-        """
-        ...
-    def subtitle(self, s: str) -> Drawable:
-        """Create a subtitle drawable in the scene.
+        ``$...$`` activates math and ``\\$`` emits a literal dollar. Unbalanced
+        delimiters, duplicate sibling part names, and invalid metric options
+        raise ``ValueError``. Direct keywords override reusable style/flow
+        objects. Responsive wrapping consumes the Layout-v2 width offer or the
+        scene safe frame; outer box dimensions remain Layout properties.
 
         Example:
-            result = scene.subtitle("example")
-        """
-        ...
-    def equation(
-        self,
-        s: str,
-        *,
-        tags: Optional[dict[str, str | tuple[str, int]]] = None,
-    ) -> Drawable:
-        """Create an equation with optional ordered semantic tags.
-
-        Example:
-            result = scene.equation("x + x = 2x", tags={"right_x": ("x", 1)})
+            formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
+            copy = scene.text("La energía es ", formula, role="body", flow=TextFlow(align="justify"))
         """
         ...
     def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:
@@ -2051,73 +2327,6 @@ class Scene:
             result = scene.typst("example")
         """
         ...
-    def transform_equation(
-        self,
-        source: Drawable,
-        target: Drawable,
-        *,
-        tags: Optional[Sequence[str]] = None,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Copy shared semantic terms while preserving the source equation.
-
-        Example:
-            scene.transform_equation(source, target)
-        """
-        ...
-    def copy_equation_terms(
-        self,
-        source: Drawable,
-        target: Drawable,
-        *,
-        tags: Optional[Sequence[str]] = None,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Copy shared semantic terms while preserving the source equation."""
-        ...
-    def expand_equation(
-        self,
-        source: Drawable,
-        target: Drawable,
-        *,
-        tag: str,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Expand a tagged term and return the destination equation.
-
-        Example:
-            scene.expand_equation(source, target, tag="example")
-        """
-        ...
-    def replace_term(
-        self,
-        source: Drawable,
-        target: Drawable,
-        *,
-        tag: str,
-        target_tag: Optional[str] = None,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Replace one semantic term and return the destination equation.
-
-        Example:
-            scene.replace_term(source, target, tag="example")
-        """
-        ...
-    def step_equation(
-        self,
-        source: Drawable,
-        target: Drawable,
-        *,
-        matches: Optional[Sequence[str] | Mapping[str, str]] = None,
-        duration: float = 1.0,
-    ) -> Drawable:
-        """Move semantic and automatically matched terms into the next equation.
-
-        Example:
-            current = scene.step_equation(source, target, matches={"old": "new"})
-        """
-        ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
         """Configure or query the scene with transform matching shapes.
 
@@ -2125,55 +2334,11 @@ class Scene:
             scene.transform_matching_shapes(source, target)
         """
         ...
-    def transform_matching_tex(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> Drawable:
-        """Transform matching text/equation glyphs and return the destination.
-
-        Example:
-            scene.transform_matching_tex(source, target)
-        """
-        ...
-    def transform_matching_text(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> Drawable:
-        """Alias of transform_matching_tex returning the destination.
-
-        Example:
-            scene.transform_matching_text(source, target)
-        """
-        ...
     def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
         """Configure or query the scene with transform matching.
 
         Example:
             scene.transform_matching(source, target)
-        """
-        ...
-    def focus_equation(
-        self,
-        equation: Drawable,
-        tags: Sequence[str],
-        *,
-        duration: float = 1.0,
-        dim_opacity: float = 0.25,
-    ) -> None:
-        """Configure or query the scene with focus equation.
-
-        Example:
-            scene.focus_equation(equation, ["term"])
-        """
-        ...
-    def brace_label(self, equation: Drawable, tag: str, label: str, *, above: bool = False, duration: float = 0.6) -> None:
-        """Configure or query the scene with brace label.
-
-        Example:
-            scene.brace_label(equation, "example", "example")
-        """
-        ...
-    def annotate_tag(
-        self, equation: Drawable, tag: str, label: str, *, offset: tuple[float, float] = (120.0, 80.0), duration: float = 0.6
-    ) -> None:
-        """Configure or query the scene with annotate tag.
-
-        Example:
-            scene.annotate_tag(equation, "example", "example")
         """
         ...
     def image(

@@ -11,7 +11,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 scene = Scene(1280, 720, background=BLACK, margin=60)
 
 # Titulo
-title = scene.title("Arrows create – fill must stay inside").fill(WHITE).at(0, 280)
+title = scene.text("Arrows create – fill must stay inside", role="title").fill(WHITE).at(0, 280)
 
 # 1. double_arrow horizontal
 da = scene.double_arrow(-500, 120, -120, 120).fill(BLUE).stroke(WHITE, 2.5)

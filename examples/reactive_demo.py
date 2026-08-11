@@ -6,7 +6,7 @@ from gaanim import BLACK, GOLD, WHITE, Scene
 
 
 scene = Scene(960, 540, background=WHITE)
-title = scene.title("Reactive curved arrow").fill(BLACK).at(0, 220)
+title = scene.text("Reactive curved arrow", role="title").fill(BLACK).at(0, 220)
 
 disk = scene.circle(155).no_fill().stroke(BLACK, 4)
 marker = scene.dot(11).fill(GOLD).at(155, 0)

@@ -7,7 +7,7 @@ from gaanim import BLACK, BLUE, NAVY, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.title("Reactive callouts").fill(WHITE).at(0, 250)
+title = scene.text("Reactive callouts", role="title").fill(WHITE).at(0, 250)
 rail = scene.line(-420, -90, 420, -90).stroke(WHITE, 4)
 mass = scene.dot(28).fill(BLUE).stroke(WHITE, 3).at(-300, -90)
 

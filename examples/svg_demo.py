@@ -9,7 +9,7 @@ from gaanim import GOLD, NAVY, Scene
 scene = Scene(960, 540)
 asset = Path(__file__).resolve().parents[1] / "tests" / "assets" / "svg_demo.svg"
 
-title = scene.title("SVG vector import").fill(NAVY).at(0, 220)
+title = scene.text("SVG vector import", role="title").fill(NAVY).at(0, 220)
 art = scene.svg(str(asset)).scaled(1.35).at(0, -15)
 orb = art.part("orb")
 top_spark = art.part("spark-top")

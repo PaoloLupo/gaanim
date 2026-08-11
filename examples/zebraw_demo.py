@@ -7,8 +7,8 @@ from gaanim import BLACK, GRAY, WHITE, Direction, Scene
 
 scene = Scene(1920, 1080, background=WHITE, margin=56)
 
-title = scene.title("Typst Universe package").fill(BLACK).at(0, 250)
-subtitle = scene.subtitle("@preview/zebraw:0.6.3 resolved by the embedded world").fill(GRAY).at(0, 195)
+title = scene.text("Typst Universe package", role="title").fill(BLACK).at(0, 250)
+subtitle = scene.text("@preview/zebraw:0.6.3 resolved by the embedded world", role="subtitle").fill(GRAY).at(0, 195)
 layout = scene.typst('''
 #import "@preview/zebraw:0.6.3": *
 #show: zebraw.with(

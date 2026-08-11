@@ -108,58 +108,6 @@ impl PyDrawable {
     }
 }
 
-#[pyclass(name = "FragmentSelection", module = "gaanim_core", from_py_object)]
-#[derive(Clone)]
-pub struct PyFragmentSelection(pub gaanim_api::canvas::FragmentSelection);
-
-#[pymethods]
-impl PyFragmentSelection {
-    /// Instantly colors the selected glyphs.
-    fn fill(&self, color: PyColor) -> Self {
-        Self(self.0.clone().fill(color.0))
-    }
-
-    /// Emphasizes only the selected glyphs.
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> Self {
-        Self(self.0.clone().indicate(duration))
-    }
-
-    /// Reveal the selected fragment with ``fade``, ``wipe``, or ``from_below``.
-    #[pyo3(signature = (style="fade", duration=None))]
-    fn reveal(&self, style: &str, duration: Option<f64>) -> PyResult<Self> {
-        let style = match style {
-            "fade" => gaanim_api::canvas::FragmentRevealStyle::Fade,
-            "wipe" => gaanim_api::canvas::FragmentRevealStyle::Wipe,
-            "from_below" => gaanim_api::canvas::FragmentRevealStyle::FromBelow,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "style must be 'fade', 'wipe', or 'from_below'",
-                ))
-            }
-        };
-        Ok(Self(self.0.clone().reveal(style, duration)))
-    }
-
-    /// Draw a strikethrough over this fragment and fade it out.
-    #[pyo3(signature = (duration=None))]
-    fn cancel(&self, duration: Option<f64>) -> Self {
-        Self(self.0.clone().cancel(duration))
-    }
-
-    /// Animates the selected glyphs to `color`.
-    #[pyo3(signature = (color, duration=None))]
-    fn color_to(&self, color: PyColor, duration: Option<f64>) -> Self {
-        Self(self.0.clone().color_to(color.0, duration))
-    }
-
-    /// Morphs this fragment into another selected fragment.
-    #[pyo3(signature = (target, duration=None))]
-    fn transform_to(&self, target: &PyFragmentSelection, duration: Option<f64>) -> Self {
-        Self(self.0.clone().transform_to(&target.0, duration))
-    }
-}
-
 #[pymethods]
 impl PyDrawable {
     #[getter]
@@ -319,84 +267,6 @@ impl PyDrawable {
     /// Remove the clipping mask from this drawable.
     fn no_clip(&self) -> Self {
         Self(self.0.clone().no_clip())
-    }
-    /// Colors every matching fragment of a text or equation drawable.
-    ///
-    /// Matching is case-insensitive and ignores mathematical spacing and
-    /// sub/superscript markers. Later calls take precedence on overlaps.
-    fn color_by(&self, fragment: &str, color: PyColor) -> PyResult<Self> {
-        if fragment.trim().is_empty() {
-            return Err(PyValueError::new_err("fragment must not be empty"));
-        }
-        Ok(Self(self.0.clone().color_by(fragment, color.0)))
-    }
-    /// Select matching glyphs for styling or an isolated animation.
-    #[pyo3(signature = (fragment, occurrence=None))]
-    fn select(&self, fragment: &str, occurrence: Option<usize>) -> PyResult<PyFragmentSelection> {
-        if fragment.trim().is_empty() {
-            return Err(PyValueError::new_err("fragment must not be empty"));
-        }
-        let selection = match occurrence {
-            Some(occurrence) => self.0.select_nth(fragment, occurrence),
-            None => self.0.select(fragment),
-        };
-        Ok(PyFragmentSelection(selection))
-    }
-    /// Select a named fragment supplied through ``Scene.equation(tags=...)``.
-    fn tag(&self, name: &str) -> PyResult<PyFragmentSelection> {
-        self.0
-            .tag(name)
-            .map(PyFragmentSelection)
-            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))
-    }
-    /// Pulse a named equation term without selecting its source fragment again.
-    #[pyo3(signature = (name, duration=None))]
-    fn indicate_tag(&self, name: &str, duration: Option<f64>) -> PyResult<Self> {
-        let tag = self
-            .0
-            .tag(name)
-            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))?;
-        tag.indicate(duration);
-        Ok(Self(self.0.clone()))
-    }
-    /// Strike through and remove one named semantic term.
-    #[pyo3(signature = (name, duration=None))]
-    fn cancel_term(&self, name: &str, duration: Option<f64>) -> PyResult<Self> {
-        let tag = self
-            .0
-            .tag(name)
-            .ok_or_else(|| PyValueError::new_err(format!("unknown fragment tag '{name}'")))?;
-        tag.cancel(duration);
-        Ok(Self(self.0.clone()))
-    }
-    /// Reveal a raw equation fragment with ``fade``, ``wipe``, or ``from_below``.
-    #[pyo3(signature = (fragment, *, style="fade", duration=None, occurrence=None))]
-    fn reveal_fragment(
-        &self,
-        fragment: &str,
-        style: &str,
-        duration: Option<f64>,
-        occurrence: Option<usize>,
-    ) -> PyResult<Self> {
-        if fragment.trim().is_empty() {
-            return Err(PyValueError::new_err("fragment must not be empty"));
-        }
-        let style = match style {
-            "fade" => gaanim_api::canvas::FragmentRevealStyle::Fade,
-            "wipe" => gaanim_api::canvas::FragmentRevealStyle::Wipe,
-            "from_below" => gaanim_api::canvas::FragmentRevealStyle::FromBelow,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "style must be 'fade', 'wipe', or 'from_below'",
-                ))
-            }
-        };
-        let selection = match occurrence {
-            Some(occurrence) => self.0.select_nth(fragment, occurrence),
-            None => self.0.select(fragment),
-        };
-        selection.reveal(style, duration);
-        Ok(Self(self.0.clone()))
     }
     fn opacity(&self, op: f32) -> Self {
         Self(self.0.clone().opacity(op))
@@ -582,16 +452,6 @@ impl PyDrawable {
         PyCanvasAnim {
             inner: self.0.write(duration),
         }
-    }
-    /// Write declared equation tags one term at a time, rather than glyph by glyph.
-    #[pyo3(signature = (*, tags=None, duration=1.0))]
-    fn write_by_term(&self, tags: Option<Vec<String>>, duration: f64) -> PyResult<Self> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        Ok(Self(self.0.write_by_terms(tags, duration)))
     }
     #[pyo3(signature = (duration=None))]
     fn create(&self, duration: Option<f64>) -> PyCanvasAnim {

@@ -42,6 +42,7 @@ page = scene.column(
   [`layout.drawable`], [`layout`],
   [`scene.layout_preset("comparison")`], [`scene.template(comparison, ...)`],
   [`segment.region("left")`], [`segment.bind(left=..., right=...)`],
+  [`scene.paragraph(copy, width=None)`], [`scene.text(copy, flow=TextFlow(wrap="auto"))`],
 )
 
 No hay adaptadores de compatibilidad: la ruptura evita que dos modelos de
@@ -70,6 +71,9 @@ tracks fr, wrapping y templates para que el contenido se redistribuya. Reserva
 `absolute=True` para overlays y `stack` para capas; no uses `at()` dentro del
 árbol.
 
-Los cambios de estructura o configuración disparan reflow automáticamente. Si
-una transformación externa altera la geometría medible, llama
-`layout.reflow(animate=...)`.
+Los cambios de estructura o configuración disparan reflow automáticamente.
+`Text` también invalida su medida al cambiar contenido, fuente, tamaño, peso,
+spacing o wrapping. `become`, `morph_to`, `step_to` y `expand_to` propagan el
+reflow a layouts padres con la misma duración; no hace falta duplicar esa
+lógica con `layout.reflow`. Efectos transitorios como `wiggle`, `pulse` y
+`wave` no cambian la medida.

@@ -11,8 +11,7 @@ pub use segment::{
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, CanvasUnits, CurveControl, CurveElement, ImageCrop, ImageFit,
     ImageOptions, ImageOptionsError, LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec,
-    LayoutTreeSnapshot, LayoutWithin, Margin, ObjectSpec, OptDuration, ParagraphOptions,
-    ParagraphOverflow, SpawnKind, TextAlign,
+    LayoutTreeSnapshot, LayoutWithin, Margin, ObjectSpec, OptDuration, SpawnKind,
 };
 mod drawable;
 pub use drawable::{

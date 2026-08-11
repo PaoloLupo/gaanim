@@ -38,7 +38,7 @@ scene.play([
     scene.camera.perspective(fov_y=1, near=0.1, far=500.0, duration=0.0),
     scene.camera.look_at(eye=(3.8, 2.4, 5.8), target=(0.0, 0.15, 0.0), duration=0.0),
     fox.animation("Survey", duration=2.4),
-    title.write(duration=0.8),
+    title.write(0.8),
     caption.fade_in(0.5),
     survey_label.fade_in(0.4),
 ])

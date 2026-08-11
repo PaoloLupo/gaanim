@@ -2,22 +2,17 @@
 
 import os
 
-from gaanim import BLACK, CORAL, GOLD, GRAY, WHITE, Scene
+from gaanim import BLACK, CORAL, GOLD, GRAY, WHITE, Scene, part
 
 
 scene = Scene(1280, 720, background=BLACK)
 
-title = scene.title("Explicar los términos de una ecuación").fill(WHITE).at(0, 250)
-formula = scene.equation(
-    "E = m c^2",
-    tags={
-        "energy": "E",
-        "mass": "m",
-        "light_speed": "c^2",
-    },
+title = scene.text("Explicar los términos de una ecuación", role="title").fill(WHITE).at(0, 250)
+formula = scene.text(
+    "$", part("energy", "E"), " = ", part("mass", "m"), " ", part("light_speed", "c^2"), "$"
 ).at(0, 60)
-formula.tag("mass").fill(GOLD)
-formula.tag("light_speed").fill(CORAL)
+formula["mass"].fill(GOLD)
+formula["light_speed"].fill(CORAL)
 
 caption = scene.text("La llave nombra la masa").fill(GRAY).at(0, -220)
 
@@ -25,7 +20,7 @@ scene.play([title.write(), formula.write(), caption.fade_in()])
 scene.wait(0.4)
 
 # La llave se calcula con el límite real del tag ``mass``.
-scene.brace_label(formula, "mass", "masa", duration=0.65)
+scene.play([formula["mass"].brace("masa", duration=0.65)])
 scene.wait(0.5)
 
 caption.fade_out(duration=0.2)
@@ -33,13 +28,13 @@ caption = scene.text("La línea sigue al término anotado").fill(GRAY).at(0, -22
 scene.play([caption.fade_in()])
 
 # La línea comienza en c² y conserva ese extremo si el término se desplaza.
-scene.annotate_tag(
-    formula,
-    "light_speed",
-    "velocidad de la luz",
-    offset=(175, 95),
-    duration=0.65,
-)
+scene.play([
+    formula["light_speed"].annotate(
+        "velocidad de la luz",
+        offset=(175, 95),
+        duration=0.65,
+    )
+])
 scene.wait(1.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

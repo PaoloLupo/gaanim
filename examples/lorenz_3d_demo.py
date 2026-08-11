@@ -114,7 +114,7 @@ scene.camera.look_at(eye=(-55, -70, 60), target=(0, 0, 25), duration=1.2)
 # ---------------------------------------------------------------------------
 # 5. Timeline
 # ---------------------------------------------------------------------------
-scene.play([axes.create(duration=1.0), title.write(duration=0.8)])
+scene.play([axes.create(duration=1.0), title.write(0.8)])
 scene.play([subtitle.fade_in(0.6)])
 
 # El trail dinámico ya está creciendo vía updater+traced_path_3d;

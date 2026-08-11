@@ -281,10 +281,20 @@ impl CanvasTheme {
             .fill_color = self.palette.muted;
         self.text
             .roles
+            .get_mut(&TextRole::Heading)
+            .unwrap()
+            .fill_color = self.palette.title;
+        self.text
+            .roles
             .get_mut(&TextRole::Caption)
             .unwrap()
             .fill_color = self.palette.muted;
-        for role in [TextRole::Body, TextRole::Math, TextRole::Code] {
+        for role in [
+            TextRole::Body,
+            TextRole::Label,
+            TextRole::Math,
+            TextRole::Code,
+        ] {
             self.text.roles.get_mut(&role).unwrap().fill_color = self.palette.foreground;
         }
     }
@@ -378,21 +388,27 @@ impl CanvasTheme {
                 "text" => &[
                     TextRole::Title,
                     TextRole::Subtitle,
+                    TextRole::Heading,
                     TextRole::Body,
                     TextRole::Caption,
+                    TextRole::Label,
                 ],
                 "all" => &[
                     TextRole::Title,
                     TextRole::Subtitle,
+                    TextRole::Heading,
                     TextRole::Body,
                     TextRole::Caption,
+                    TextRole::Label,
                     TextRole::Math,
                     TextRole::Code,
                 ],
                 "title" => &[TextRole::Title],
                 "subtitle" => &[TextRole::Subtitle],
+                "heading" => &[TextRole::Heading],
                 "body" => &[TextRole::Body],
                 "caption" => &[TextRole::Caption],
+                "label" => &[TextRole::Label],
                 "math" => &[TextRole::Math],
                 "code" => &[TextRole::Code],
                 _ => return Err(format!("unknown theme font role '{role}'")),
@@ -420,8 +436,10 @@ fn text_role(role: &str) -> Result<TextRole, String> {
     match role {
         "title" => Ok(TextRole::Title),
         "subtitle" => Ok(TextRole::Subtitle),
+        "heading" => Ok(TextRole::Heading),
         "body" => Ok(TextRole::Body),
         "caption" => Ok(TextRole::Caption),
+        "label" => Ok(TextRole::Label),
         "math" => Ok(TextRole::Math),
         "code" => Ok(TextRole::Code),
         _ => Err(format!("unknown theme text role '{role}'")),

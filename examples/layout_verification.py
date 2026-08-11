@@ -5,7 +5,7 @@ from gaanim import Anchor, BLACK, BLUE, GOLD, GREEN, RED, WHITE, Direction, Scen
 
 def main():
     scene = Scene(1280, 720, background=BLACK, margin=40)
-    title = scene.title("Scene layout").fill(WHITE).to_edge(Direction.UP, 32)
+    title = scene.text("Scene layout", role="title").fill(WHITE).to_edge(Direction.UP, 32)
     square = scene.square(100).fill(RED).at(-180, 0)
     label = scene.text("anchor").fill(WHITE).next_to(square, Direction.DOWN, 24)
     circle = scene.circle(48).fill(BLUE).next_to(square, Direction.RIGHT, 48)

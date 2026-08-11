@@ -34,7 +34,7 @@ area that every layout and edge-placement operation respects:
 ```python
 scene.canvas.set_preset("vertical")  # 1080×1920, safe around mobile UI
 safe = scene.canvas.safe_area()
-title = safe.place(scene.title("Vertical video"), Anchor.TOP)
+title = safe.place(scene.text("Vertical video", role="title"), Anchor.TOP)
 ```
 
 Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
@@ -45,8 +45,8 @@ platform requires custom insets.
 == Spawning mobjects
 
 Every factory returns a `Drawable` handle with fluent style and layout methods.
-Plain text uses the bundled New Computer Modern scientific theme by default;
-equations use the matching New Computer Modern Math face.
+Unified `Text` uses the bundled New Computer Modern scientific theme by
+default; `$...$` spans use the matching New Computer Modern Math face.
 
 ```python
 from gaanim import Axis, BLUE, GOLD, WHITE, Scene
@@ -64,8 +64,8 @@ underbrace = scene.brace(-120, -100, 120, -100, 36)
 approved = scene.checkmark(32).fill(GREEN)
 rejected = scene.cross(32).stroke(WHITE, 4)
 corner = scene.right_angle(40)
-label = scene.title("Gaanim").at(0, 220)
-formula = scene.equation("E = m c^2").at(0, -180)
+label = scene.text("Gaanim", role="title").at(0, 220)
+formula = scene.text("$E = m c^2$").at(0, -180)
 arrow = scene.arrow(-80, 0, 80, 0)
 angle = scene.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
 rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
@@ -83,7 +83,7 @@ icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `path`, `axes`, `text`, `title`, `subtitle`, `equation`, and
+`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `path`, `axes`, `text`, and
 `group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.
@@ -269,7 +269,7 @@ scene.play([results.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
 
 `typst(source)` compiles full Typst document markup into a vector drawable.
 Use it for publication-style layouts such as table spans or custom mathematical
-structures; `equation(...)` remains the concise API for math-only content. The
+structures; `text("$...$")` is the concise API for math-only content. The
 embedded world resolves `@preview/...` imports through the standard Typst
 Universe cache; the first use downloads the requested package.
 
@@ -356,7 +356,7 @@ only where interactive playback must wait for input.
 )[
 ```python
 intro = scene.segment("Introduction", notes="State the goal.", template=title_slide)
-intro.bind(title=scene.title("One clear idea"))
+intro.bind(title=scene.text("One clear idea", role="title"))
 scene.wait(0.5)
 details = scene.segment("Details", Transition.cross_fade(0.4), template=lecture)
 scene.link(intro, details, Transition.cross_fade(0.4))
@@ -390,7 +390,7 @@ scene.stop("result-ready")
 from gaanim import BLUE, GOLD, Scene, Transition
 
 scene = Scene(480, 270, background="#0f172a")
-title = scene.title("Shared context").fill(GOLD).at(0, 70)
+title = scene.text("Shared context", role="title").fill(GOLD).at(0, 70)
 scene.play([title.write().duration(0.5)])
 
 scene.segment("content", Transition.cross_fade(0.35))
@@ -432,7 +432,7 @@ returns the segment's root `Layout`.
 
 ```python
 segment = scene.segment("Results", template=comparison, notes="Compare both models.")
-segment.bind(title=scene.title("Results"), left=baseline, right=proposed)
+segment.bind(title=scene.text("Results", role="title"), left=baseline, right=proposed)
 scene.stop("comparison-ready")
 ```
 

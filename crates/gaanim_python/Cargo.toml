@@ -17,6 +17,7 @@ gaanim_math = { path = "../gaanim_math" }
 gaanim_layout = { path = "../gaanim_layout" }
 gaanim_objects = { path = "../gaanim_objects" }
 gaanim_scene = { path = "../gaanim_scene" }
+gaanim_text = { path = "../gaanim_text" }
 gaanim_diff = { path = "../gaanim_diff", default-features = false }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_visualization = { path = "../gaanim_visualization" }

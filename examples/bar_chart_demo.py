@@ -20,8 +20,8 @@ space = scene.axes(
 ).at(0, -35)
 bars = space.bars(data, "x", "elapsed", width=0.72).fill(BLUE)
 
-title = scene.title("Convergence benchmark").fill(WHITE).at(0, 245)
-subtitle = scene.subtitle("Elapsed time (ms) — lower is better").fill(GRAY).at(0, 190)
+title = scene.text("Convergence benchmark", role="title").fill(WHITE).at(0, 245)
+subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).at(0, 190)
 scene.play([
     title.write().duration(0.55),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),

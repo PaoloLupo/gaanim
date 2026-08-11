@@ -11,7 +11,7 @@ scene.stop("circle")
 
 details = scene.segment("details", notes="Introduce the second shape.", template=comparison)
 rect = scene.rect(120, 80).fill(RED)
-details.bind(title=scene.title("Shapes"), left=scene.text("Shapes").fill(GOLD), right=rect)
+details.bind(title=scene.text("Shapes", role="title"), left=scene.text("Shapes").fill(GOLD), right=rect)
 scene.play([rect.create().duration(0.5)])
 scene.wait(0.3)
 scene.stop("rectangle")

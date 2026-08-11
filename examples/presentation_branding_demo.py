@@ -16,19 +16,19 @@ scene.brand(
 
 cover = scene.segment("Cover", template=title_slide, notes="Introduce the topic.")
 cover.bind(
-    title=scene.title("A semantic slide deck"),
-    subtitle=scene.subtitle("One theme, one brand, every slide"),
+    title=scene.text("A semantic slide deck", role="title"),
+    subtitle=scene.text("One theme, one brand, every slide", role="subtitle"),
     footer=scene.text("Researcher Name"),
 )
 scene.wait(0.4)
 
 content = scene.segment("Motivation", template=lecture, notes="State the research gap.")
 content.bind(
-    title=scene.title("Motivation"),
-    body=scene.paragraph(
+    title=scene.text("Motivation", role="title"),
+    body=scene.text(
         "Scientific presentations need repeatable hierarchy, safe spacing, "
         "and navigation without manually rebuilding chrome on every slide.",
-        font_size=34,
+        size=34,
     ),
     footer=scene.text("Consistent by construction"),
 )
@@ -43,13 +43,13 @@ semantic = scene.stack([
     scene.text("Semantic"),
 ], width=310, height=120)
 compare = scene.segment("Comparison", template=comparison, notes="Compare both workflows.")
-compare.bind(title=scene.title("Authoring workflow"), left=manual, right=semantic)
+compare.bind(title=scene.text("Authoring workflow", role="title"), left=manual, right=semantic)
 scene.wait(0.4)
 
 closing = scene.segment("Conclusion", template=title_slide, notes="Close and invite questions.")
 closing.bind(
-    title=scene.title("Ready to present"),
-    subtitle=scene.subtitle("Brand once. Present consistently."),
+    title=scene.text("Ready to present", role="title"),
+    subtitle=scene.text("Brand once. Present consistently.", role="subtitle"),
     footer=scene.text("Questions?"),
 )
 scene.wait(0.4)

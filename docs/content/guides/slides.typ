@@ -33,16 +33,16 @@ scene.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
 
 cover = scene.segment("Portada", template=title_slide, notes="Presenta el tema.")
 cover.bind(
-    title=scene.title("Una idea clara"),
-    subtitle=scene.subtitle("Slides reutilizables"),
+    title=scene.text("Una idea clara", role="title"),
+    subtitle=scene.text("Slides reutilizables", role="subtitle"),
 )
 scene.wait(0.5)
 scene.stop("portada")
 
 content = scene.segment("Contenido", template=lecture, notes="Desarrolla la idea.")
 content.bind(
-    title=scene.title("Contenido"),
-    body=scene.paragraph("Una sola idea por slide.", font_size=42),
+    title=scene.text("Contenido", role="title"),
+    body=scene.text("Una sola idea por slide.", size=42),
 )
 scene.wait(0.5)
 scene.stop("mensaje")

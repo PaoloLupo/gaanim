@@ -7,7 +7,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.title("Captions and lower thirds").fill(WHITE).at(0, 210)
+title = scene.text("Captions and lower thirds", role="title").fill(WHITE).at(0, 210)
 accent = scene.circle(86).fill(BLUE).at(0, -20)
 caption = scene.caption(
     "This caption stays inside the safe area and supports two lines of text.",

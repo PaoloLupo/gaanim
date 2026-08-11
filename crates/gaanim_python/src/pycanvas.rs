@@ -9,8 +9,8 @@ use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
-    CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, ParagraphOptions,
-    PresentationBrand, SegmentHandle, TextAlign, ThemeFont,
+    CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand, SegmentHandle,
+    ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -24,6 +24,7 @@ use crate::pylayout::{
     column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
     stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
 };
+use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
 
@@ -58,114 +59,6 @@ fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::
         .try_iter()?
         .map(|child| PyLayout::member_from_python(&child?))
         .collect()
-}
-
-fn parse_equation_tags(
-    tags: Option<&Bound<'_, PyDict>>,
-) -> PyResult<Vec<(String, String, Option<usize>)>> {
-    let mut parsed = Vec::new();
-    let Some(tags) = tags else {
-        return Ok(parsed);
-    };
-    for (name, selector) in tags.iter() {
-        let name = name.extract::<String>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err("equation tag names must be strings")
-        })?;
-        let (fragment, occurrence) = if let Ok(fragment) = selector.extract::<String>() {
-            (fragment, None)
-        } else if let Ok((fragment, occurrence)) = selector.extract::<(String, isize)>() {
-            if occurrence < 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "occurrence for tag '{name}' must be zero or greater"
-                )));
-            }
-            (fragment, Some(occurrence as usize))
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "selector for tag '{name}' must be a string or (fragment, occurrence)"
-            )));
-        };
-        if name.trim().is_empty() || fragment.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tag names and fragments must not be empty",
-            ));
-        }
-        parsed.push((name, fragment, occurrence));
-    }
-    Ok(parsed)
-}
-
-fn parse_equation_matches(
-    matches: Option<&Bound<'_, PyAny>>,
-) -> PyResult<Option<Vec<(String, String)>>> {
-    let Some(matches) = matches else {
-        return Ok(None);
-    };
-    let pairs = if let Ok(mapping) = matches.cast::<PyDict>() {
-        let mut pairs = Vec::new();
-        for (source, target) in mapping.iter() {
-            let source = source.extract::<String>().map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err("match source tags must be strings")
-            })?;
-            let target = target.extract::<String>().map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err("match target tags must be strings")
-            })?;
-            pairs.push((source, target));
-        }
-        pairs
-    } else if matches.hasattr("items")? {
-        let items = matches.call_method0("items")?;
-        let mut pairs = Vec::new();
-        for item in items.try_iter()? {
-            let (source, target) = item?.extract::<(String, String)>().map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(
-                    "match mappings must contain string source and target tag names",
-                )
-            })?;
-            pairs.push((source, target));
-        }
-        pairs
-    } else {
-        matches
-            .extract::<Vec<String>>()
-            .map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(
-                    "matches must be a sequence of tag names or a source-to-target tag mapping",
-                )
-            })?
-            .into_iter()
-            .map(|name| (name.clone(), name))
-            .collect()
-    };
-    if pairs
-        .iter()
-        .any(|(source, target)| source.trim().is_empty() || target.trim().is_empty())
-    {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "match tag names must not be empty",
-        ));
-    }
-    Ok(Some(pairs))
-}
-
-fn validate_equation_tag_pairs(
-    source: &PyDrawable,
-    target: &PyDrawable,
-    pairs: &[(String, String)],
-) -> PyResult<()> {
-    for (source_tag, target_tag) in pairs {
-        if source.0.tag(source_tag).is_none() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown source equation tag '{source_tag}'"
-            )));
-        }
-        if target.0.tag(target_tag).is_none() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown target equation tag '{target_tag}'"
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn parse_quality(value: &str) -> PyResult<QualityPreset> {
@@ -2219,8 +2112,62 @@ impl PyScene {
         ))
     }
 
-    fn text(&self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.lock().expect("scene canvas poisoned").text(s))
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn text<'py>(
+        &self,
+        py: Python<'py>,
+        content: &Bound<'py, PyTuple>,
+        role: Option<&str>,
+        style: Option<PyTextStyle>,
+        flow: Option<PyTextFlow>,
+        font: Option<String>,
+        math_font: Option<String>,
+        size: Option<f64>,
+        weight: Option<u16>,
+        italic: Option<bool>,
+        color: Option<PyColor>,
+        opacity: Option<f32>,
+        letter_spacing: Option<f64>,
+        word_spacing: Option<f64>,
+        baseline: Option<f64>,
+        wrap: Option<&Bound<'py, PyAny>>,
+        text_align: Option<&str>,
+        line_spacing: Option<f64>,
+        max_lines: Option<usize>,
+        overflow: Option<&str>,
+        direction: Option<&str>,
+        hyphenate: Option<bool>,
+    ) -> PyResult<Py<PyText>> {
+        let spec = build_text_spec(
+            content,
+            role,
+            style,
+            flow,
+            font,
+            math_font,
+            size,
+            weight,
+            italic,
+            color,
+            opacity,
+            letter_spacing,
+            word_spacing,
+            baseline,
+            wrap,
+            text_align,
+            line_spacing,
+            max_lines,
+            overflow,
+            direction,
+            hyphenate,
+        )?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .text_spec(spec.clone());
+        Py::new(py, PyText::initializer(handle, spec))
     }
 
     #[pyo3(signature = (function, x_range=(-5.0, 5.0), y_range=(-5.0, 5.0), x_samples=20, y_samples=20, color=None))]
@@ -2406,99 +2353,6 @@ impl PyScene {
         Ok(PyDrawable(handle))
     }
 
-    /// Multi-line vector text constrained to a width.
-    #[pyo3(signature = (s, width=None, *, align="left", line_spacing=1.2, font_size=None, font_family=None, max_lines=None, overflow="clip"))]
-    fn paragraph(
-        &self,
-        s: &str,
-        width: Option<f64>,
-        align: &str,
-        line_spacing: f64,
-        font_size: Option<f64>,
-        font_family: Option<String>,
-        max_lines: Option<usize>,
-        overflow: &str,
-    ) -> PyResult<PyDrawable> {
-        let align = match align {
-            "left" => TextAlign::Left,
-            "center" => TextAlign::Center,
-            "right" => TextAlign::Right,
-            "justify" => TextAlign::Justify,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "align must be 'left', 'center', 'right', or 'justify'",
-                ));
-            }
-        };
-        if width.is_some_and(|width| !width.is_finite() || width <= 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "width must be a finite positive number",
-            ));
-        }
-        if !line_spacing.is_finite() || line_spacing < 1.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "line_spacing must be finite and at least 1.0",
-            ));
-        }
-        if font_size.is_some_and(|size| !size.is_finite() || size <= 0.0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "font_size must be a finite positive number",
-            ));
-        }
-        if max_lines == Some(0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "max_lines must be at least 1 when provided",
-            ));
-        }
-        let overflow = match overflow {
-            "visible" => gaanim_api::canvas::ParagraphOverflow::Visible,
-            "clip" => gaanim_api::canvas::ParagraphOverflow::Clip,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "overflow must be 'visible' or 'clip'",
-                ));
-            }
-        };
-        let options = ParagraphOptions {
-            width,
-            align,
-            line_spacing,
-            font_size,
-            font_family,
-            max_lines,
-            overflow,
-        };
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .paragraph(s, options),
-        ))
-    }
-    fn title(&self, s: &str) -> PyDrawable {
-        PyDrawable(self.inner.lock().expect("scene canvas poisoned").title(s))
-    }
-    fn subtitle(&self, s: &str) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .subtitle(s),
-        )
-    }
-    #[pyo3(signature = (s, *, tags=None))]
-    fn equation(&self, s: &str, tags: Option<&Bound<'_, PyDict>>) -> PyResult<PyDrawable> {
-        let mut equation = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .equation(s);
-        for (name, fragment, occurrence) in parse_equation_tags(tags)? {
-            equation = equation.define_tag(name, fragment, occurrence);
-        }
-        Ok(PyDrawable(equation))
-    }
-
     /// Compile full Typst markup into a vector drawable with optional custom page width (e.g. `width="16cm"` or `width=800`).
     #[pyo3(signature = (source, *, width=None))]
     fn typst(
@@ -2551,136 +2405,6 @@ impl PyScene {
 
         Ok(PyDrawable(handle))
     }
-    /// Morph the semantic tags shared by two equations in parallel.
-    #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
-    fn transform_equation(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        tags: Option<Vec<String>>,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        if let Some(tags) = &tags {
-            let pairs: Vec<_> = tags.iter().map(|tag| (tag.clone(), tag.clone())).collect();
-            validate_equation_tag_pairs(source, target, &pairs)?;
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .transform_equation_tags(&source.0, &target.0, tags, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
-    /// Copy semantic equation terms while preserving the source equation.
-    #[pyo3(signature = (source, target, *, tags=None, duration=1.0))]
-    fn copy_equation_terms(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        tags: Option<Vec<String>>,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        if let Some(tags) = &tags {
-            let pairs: Vec<_> = tags.iter().map(|tag| (tag.clone(), tag.clone())).collect();
-            validate_equation_tag_pairs(source, target, &pairs)?;
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .copy_equation_terms(&source.0, &target.0, tags, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
-    /// Replace an equation while expanding around one persistent semantic tag.
-    #[pyo3(signature = (source, target, *, tag, duration=1.0))]
-    fn expand_equation(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        tag: String,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if tag.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tag must not be empty",
-            ));
-        }
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        validate_equation_tag_pairs(source, target, &[(tag.clone(), tag.clone())])?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .expand_equation_tag(&source.0, &target.0, &tag, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
-    /// Replace one tagged term while keeping the unchanged equation glyphs in place.
-    #[pyo3(signature = (source, target, *, tag, target_tag=None, duration=1.0))]
-    fn replace_term(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        tag: String,
-        target_tag: Option<String>,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if tag.trim().is_empty()
-            || target_tag
-                .as_deref()
-                .is_some_and(|target_tag| target_tag.trim().is_empty())
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tag names must not be empty",
-            ));
-        }
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        let target_tag = target_tag.as_deref().unwrap_or(&tag);
-        validate_equation_tag_pairs(source, target, &[(tag.clone(), target_tag.to_string())])?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .replace_equation_term(&source.0, &target.0, &tag, target_tag, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
-    /// Transition between two equation steps by moving their common glyphs.
-    #[pyo3(signature = (source, target, *, matches=None, duration=1.0))]
-    fn step_equation(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        matches: Option<&Bound<'_, PyAny>>,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        let matches = parse_equation_matches(matches)?;
-        if let Some(matches) = &matches {
-            validate_equation_tag_pairs(source, target, matches)?;
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .step_equation_with_matches(&source.0, &target.0, matches, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
     /// Auto-match by shape geometry — improved TransformMatchingShapes.
     ///
     /// Matches submobjects between `source` and `target` using Hungarian algorithm,
@@ -2710,34 +2434,7 @@ impl PyScene {
     /// Matches submobjects (glyphs/letters) between text/math equations using an
     /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
     /// combined with Hungarian assignment for remaining elements.
-    #[pyo3(signature = (source, target, *, duration=1.0))]
-    fn transform_matching_tex(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .transform_matching_tex(&source.0, &target.0, duration);
-        Ok(PyDrawable(target.0.clone()))
-    }
     /// Alias for transform_matching_tex — manim TransformMatchingText compatibility.
-    #[pyo3(signature = (source, target, *, duration=1.0))]
-    fn transform_matching_text(
-        &self,
-        source: &PyDrawable,
-        target: &PyDrawable,
-        duration: f64,
-    ) -> PyResult<PyDrawable> {
-        self.transform_matching_tex(source, target, duration)
-    }
     /// Generic auto-matching morph. `mode` is "shapes" or "tex".
     ///
     /// Performs auto-matching transform between `source` and `target` using the specified `mode`.
@@ -2761,89 +2458,6 @@ impl PyScene {
         Ok(())
     }
     /// Dim an equation except for the requested semantic tags, then pulse them.
-    #[pyo3(signature = (equation, tags, *, duration=1.0, dim_opacity=0.25))]
-    fn focus_equation(
-        &self,
-        equation: &PyDrawable,
-        tags: Vec<String>,
-        duration: f64,
-        dim_opacity: f32,
-    ) -> PyResult<()> {
-        if tags.is_empty() || tags.iter().any(|tag| tag.trim().is_empty()) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tags must contain at least one non-empty tag",
-            ));
-        }
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "duration must be a finite positive number",
-            ));
-        }
-        if !dim_opacity.is_finite() || !(0.0..=1.0).contains(&dim_opacity) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "dim_opacity must be between 0 and 1",
-            ));
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .focus_equation(&equation.0, tags, dim_opacity, duration);
-        Ok(())
-    }
-    #[pyo3(signature = (equation, tag, label, *, above=false, duration=0.6))]
-    fn brace_label(
-        &self,
-        equation: &PyDrawable,
-        tag: &str,
-        label: String,
-        above: bool,
-        duration: f64,
-    ) -> PyResult<()> {
-        if tag.trim().is_empty()
-            || label.trim().is_empty()
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tag, label, and positive duration are required",
-            ));
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .brace_label(&equation.0, tag, label, above, duration);
-        Ok(())
-    }
-    #[pyo3(signature = (equation, tag, label, *, offset=(120.0, 80.0), duration=0.6))]
-    fn annotate_tag(
-        &self,
-        equation: &PyDrawable,
-        tag: &str,
-        label: String,
-        offset: (f64, f64),
-        duration: f64,
-    ) -> PyResult<()> {
-        if tag.trim().is_empty()
-            || label.trim().is_empty()
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "tag, label, and positive duration are required",
-            ));
-        }
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .annotate_tag(
-                &equation.0,
-                tag,
-                label,
-                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-                duration,
-            );
-        Ok(())
-    }
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, and crop.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
     #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None))]
@@ -3054,10 +2668,19 @@ impl PyScene {
             .rounded_rect(width, height, 14.0)
             .fill(background)
             .no_stroke();
-        let mut options = ParagraphOptions::new(width - 48.0);
-        options.align = TextAlign::Center;
-        options.max_lines = Some(2);
-        let label = scene.paragraph(&text, options).fill(color);
+        let label_spec = gaanim_text::prelude::TextSpec::new(
+            vec![text.into()],
+            Some(gaanim_text::prelude::TextRole::Caption),
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow {
+                wrap: gaanim_text::prelude::TextWrap::Width(width - 48.0),
+                align: gaanim_text::prelude::TextAlign::Center,
+                max_lines: Some(2),
+                ..Default::default()
+            },
+        )
+        .expect("caption card text is validated by its public arguments");
+        let label = scene.text_spec(label_spec).fill(color);
         let caption = scene.group(&[&card, &label]).to_edge(direction, margin);
         Ok(PyDrawable(caption))
     }
@@ -3113,7 +2736,14 @@ impl PyScene {
         let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let title_y = if subtitle.is_some() { 44.0 } else { 0.0 };
-        let title = scene.title(&title).fill(color).at(0.0, title_y);
+        let title_spec = gaanim_text::prelude::TextSpec::new(
+            vec![title.into()],
+            Some(gaanim_text::prelude::TextRole::Title),
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("title card validates title text");
+        let title = scene.text_spec(title_spec).fill(color).at(0.0, title_y);
         let rule = scene
             .line(-width * 0.28, -12.0, width * 0.28, -12.0)
             .stroke(accent, 5.0);
@@ -3129,7 +2759,14 @@ impl PyScene {
         members.push(title);
         members.push(rule);
         if let Some(subtitle) = subtitle {
-            members.push(scene.subtitle(&subtitle).fill(color).at(0.0, -64.0));
+            let subtitle_spec = gaanim_text::prelude::TextSpec::new(
+                vec![subtitle.into()],
+                Some(gaanim_text::prelude::TextRole::Subtitle),
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("title card validates subtitle text");
+            members.push(scene.text_spec(subtitle_spec).fill(color).at(0.0, -64.0));
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
@@ -3186,12 +2823,17 @@ impl PyScene {
         for (index, item) in items.iter().enumerate() {
             let y = start_y - index as f64 * gap;
             members.push(scene.dot(bullet_radius).fill(bullet_color).at(bullet_x, y));
-            members.push(
-                scene
-                    .paragraph(item, ParagraphOptions::new(text_width))
-                    .fill(color)
-                    .at(label_x, y),
-            );
+            let label_spec = gaanim_text::prelude::TextSpec::new(
+                vec![item.clone().into()],
+                Some(gaanim_text::prelude::TextRole::Body),
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow {
+                    wrap: gaanim_text::prelude::TextWrap::Width(text_width),
+                    ..Default::default()
+                },
+            )
+            .expect("bullet text is validated by its public arguments");
+            members.push(scene.text_spec(label_spec).fill(color).at(label_x, y));
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))

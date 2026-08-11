@@ -12,8 +12,11 @@ scene = Scene(1920, 1080, margin=72)
 scene.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("technical")
 
-title = scene.title("Mi video con Gaanim").at(0, 300)
-subtitle = scene.subtitle("Una escena, un timeline y exportación reproducible").at(0, 220)
+title = scene.text("Mi video con Gaanim", role="title").at(0, 300)
+subtitle = scene.text(
+    "Una escena, un timeline y exportación reproducible",
+    role="subtitle",
+).at(0, 220)
 orb = scene.circle(120).fill(BLUE).stroke(WHITE, 5).at(-420, -20)
 label = scene.text("Edita main.py para comenzar").fill(GOLD).at(180, -20)
 

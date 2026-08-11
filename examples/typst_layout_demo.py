@@ -7,8 +7,8 @@ from gaanim import BLACK, GRAY, GREEN, WHITE, Direction, Scene
 
 scene = Scene(1280, 720, background=WHITE, margin=56)
 
-title = scene.title("Typst-native layouts").fill(GREEN).at(0, 260)
-caption = scene.subtitle("Document table and mathematical matrix").fill(GRAY).at(0, 205)
+title = scene.text("Typst-native layouts", role="title").fill(GREEN).at(0, 260)
+caption = scene.text("Document table and mathematical matrix", role="subtitle").fill(GRAY).at(0, 205)
 table = scene.typst('''
     #import "@preview/simple-plot:1.0.0": plot
 
@@ -28,7 +28,7 @@ table = scene.typst('''
       (fn: x => calc.cos(x), stroke: red + 1.2pt, samples: 200, label: $cos(x)$, label-pos: 1.0, label-side: "above-left"),
     )
 ''').scaled(2).at(-220, -35)
-matrix = scene.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).at(285, -35)
+matrix = scene.text("$sum_(k=1)^n k = (n(n+1)) / 2$").fill(BLACK).at(285, -35)
 
 scene.play([
     title.write().duration(0.55),

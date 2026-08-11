@@ -18,7 +18,7 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{
     Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
-    LayoutTreeSnapshot, Margin, ParagraphOptions, SpawnKind,
+    LayoutTreeSnapshot, Margin, SpawnKind,
 };
 use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
@@ -845,22 +845,27 @@ impl Canvas {
         })
     }
     pub fn text(&mut self, s: &str) -> DrawableHandle {
-        self.spawn(SpawnKind::Text(s.to_string()))
+        let spec = gaanim_text::prelude::TextSpec::new(
+            vec![s.into()],
+            None,
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("Canvas::text received invalid text; public bindings validate input first");
+        self.text_spec(spec)
     }
-    pub fn paragraph(&mut self, s: &str, options: ParagraphOptions) -> DrawableHandle {
-        self.spawn(SpawnKind::Paragraph {
-            text: s.to_string(),
-            options,
-        })
-    }
-    pub fn title(&mut self, s: &str) -> DrawableHandle {
-        self.spawn(SpawnKind::Title(s.to_string()))
-    }
-    pub fn subtitle(&mut self, s: &str) -> DrawableHandle {
-        self.spawn(SpawnKind::Subtitle(s.to_string()))
-    }
-    pub fn equation(&mut self, s: &str) -> DrawableHandle {
-        self.spawn(SpawnKind::Equation(s.to_string()))
+
+    /// Creates unified structured text. This is the owning Rust entry point
+    /// used by the Python `Scene.text(*content, ...)` factory.
+    pub fn text_spec(&mut self, spec: gaanim_text::prelude::TextSpec) -> DrawableHandle {
+        let mut handle = self.spawn(SpawnKind::Text(spec.clone()));
+        for part in spec.parts() {
+            if let Some(color) = part.style.color {
+                handle = handle.color_by(part.text.clone(), color);
+            }
+            handle = handle.define_tag(part.path.join("."), part.text, Some(part.occurrence));
+        }
+        handle
     }
     /// Compile full Typst markup, including tables and other document layout.
     pub fn typst(&mut self, source: &str) -> DrawableHandle {
@@ -879,7 +884,7 @@ impl Canvas {
         })
     }
 
-    fn equation_tag_pairs(
+    fn text_semantic_pairs(
         source: &DrawableHandle,
         target: &DrawableHandle,
         requested: Option<Vec<(String, String)>>,
@@ -928,204 +933,6 @@ impl Canvas {
             .collect()
     }
 
-    /// Copies all shared semantic tags from one visible equation into another.
-    /// Tags are registered through `DrawableHandle::define_tag`.
-    pub fn transform_equation_tags(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        tags: Option<Vec<String>>,
-        duration: f64,
-    ) -> DrawableHandle {
-        if !Arc::ptr_eq(&self.state, &source.state) || !Arc::ptr_eq(&self.state, &target.state) {
-            return target.clone();
-        }
-        let requested =
-            tags.map(|tags| tags.into_iter().map(|name| (name.clone(), name)).collect());
-        let pairs = Self::equation_tag_pairs(source, target, requested);
-        if !pairs.is_empty() && duration.is_finite() && duration > 0.0 {
-            self.state
-                .lock()
-                .expect("canvas state poisoned")
-                .active_mut()
-                .ops
-                .push(Op::TaggedTransform {
-                    source: source.id,
-                    target: target.id,
-                    pairs,
-                    duration,
-                });
-        }
-        target.clone()
-    }
-
-    pub fn copy_equation_terms(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        tags: Option<Vec<String>>,
-        duration: f64,
-    ) -> DrawableHandle {
-        self.transform_equation_tags(source, target, tags, duration)
-    }
-
-    /// Replaces `source` with `target`, keeping the named tag as the moving
-    /// anchor. This is useful when a term grows into a longer expression: the
-    /// anchor moves while the added glyphs emerge from it.
-    pub fn expand_equation_tag(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        tag: &str,
-        duration: f64,
-    ) -> DrawableHandle {
-        if !Arc::ptr_eq(&self.state, &source.state)
-            || !Arc::ptr_eq(&self.state, &target.state)
-            || tag.trim().is_empty()
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return target.clone();
-        }
-        let source_tag = source
-            .spec
-            .lock()
-            .expect("object spec poisoned")
-            .fragment_tags
-            .iter()
-            .rev()
-            .find(|(name, _, _)| name == tag)
-            .cloned();
-        let target_tag = target
-            .spec
-            .lock()
-            .expect("object spec poisoned")
-            .fragment_tags
-            .iter()
-            .rev()
-            .find(|(name, _, _)| name == tag)
-            .cloned();
-        let (
-            Some((_, source_fragment, source_occurrence)),
-            Some((_, target_fragment, target_occurrence)),
-        ) = (source_tag, target_tag)
-        else {
-            return target.clone();
-        };
-
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::ExpandEquation {
-                source: source.id,
-                target: target.id,
-                source_fragment,
-                source_occurrence,
-                target_fragment,
-                target_occurrence,
-                duration,
-            });
-        target.clone()
-    }
-
-    /// Replaces a tagged term while retaining the rest of the equation in
-    /// place. Source and target tags may differ when a derivation renames a
-    /// semantic role.
-    pub fn replace_equation_term(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        source_tag: &str,
-        target_tag: &str,
-        duration: f64,
-    ) -> DrawableHandle {
-        if !Arc::ptr_eq(&self.state, &source.state)
-            || !Arc::ptr_eq(&self.state, &target.state)
-            || source_tag.trim().is_empty()
-            || target_tag.trim().is_empty()
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return target.clone();
-        }
-        let find_tag = |equation: &DrawableHandle, tag: &str| {
-            equation
-                .spec
-                .lock()
-                .expect("object spec poisoned")
-                .fragment_tags
-                .iter()
-                .rev()
-                .find(|(name, _, _)| name == tag)
-                .cloned()
-        };
-        let (
-            Some((_, source_fragment, source_occurrence)),
-            Some((_, target_fragment, target_occurrence)),
-        ) = (find_tag(source, source_tag), find_tag(target, target_tag))
-        else {
-            return target.clone();
-        };
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::ExpandEquation {
-                source: source.id,
-                target: target.id,
-                source_fragment,
-                source_occurrence,
-                target_fragment,
-                target_occurrence,
-                duration,
-            });
-        target.clone()
-    }
-
-    /// Transitions from one equation step to another. Shared glyphs move to
-    /// their new positions; removed glyphs shrink around their own visual
-    /// centers and introduced glyphs grow from their centers.
-    pub fn step_equation(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        duration: f64,
-    ) -> DrawableHandle {
-        self.step_equation_with_matches(source, target, None, duration)
-    }
-
-    pub fn step_equation_with_matches(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        matches: Option<Vec<(String, String)>>,
-        duration: f64,
-    ) -> DrawableHandle {
-        if !Arc::ptr_eq(&self.state, &source.state)
-            || !Arc::ptr_eq(&self.state, &target.state)
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return target.clone();
-        }
-        let pairs = Self::equation_tag_pairs(source, target, matches);
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::StepEquation {
-                source: source.id,
-                target: target.id,
-                pairs,
-                duration,
-            });
-        target.clone()
-    }
-
     /// Auto-match and morph submobjects — improved `TransformMatchingShapes`.
     ///
     /// Matches sub-elements between `source` and `target` using Hungarian minimum-cost pairing,
@@ -1139,19 +946,6 @@ impl Canvas {
         duration: f64,
     ) -> DrawableHandle {
         self.transform_matching(source, target, "shapes", duration)
-    }
-
-    /// Auto-match and morph for text & math equations — improved `TransformMatchingTex`.
-    ///
-    /// Matches semantic tags first, then uses an order-preserving Longest Common
-    /// Subsequence (LCS) on still-free, identical character keys.
-    pub fn transform_matching_tex(
-        &mut self,
-        source: &DrawableHandle,
-        target: &DrawableHandle,
-        duration: f64,
-    ) -> DrawableHandle {
-        self.transform_matching(source, target, "tex", duration)
     }
 
     /// Generic auto-matching morph. `mode` can be `"shapes"` or `"tex"`.
@@ -1177,7 +971,7 @@ impl Canvas {
             _ => "shapes".to_string(),
         };
         let semantic_pairs = if mode == "tex" {
-            Self::equation_tag_pairs(source, target, None)
+            Self::text_semantic_pairs(source, target, None)
         } else {
             Vec::new()
         };
@@ -1196,113 +990,6 @@ impl Canvas {
         target.clone()
     }
 
-    /// Dims all equation glyphs except the requested semantic tags and pulses
-    /// the surviving terms. This is tag-based rather than glyph-index based,
-    /// so it stays stable when equation layout changes.
-    pub fn focus_equation(
-        &mut self,
-        equation: &DrawableHandle,
-        tags: Vec<String>,
-        dim_opacity: f32,
-        duration: f64,
-    ) {
-        if !Arc::ptr_eq(&self.state, &equation.state)
-            || tags.is_empty()
-            || !dim_opacity.is_finite()
-            || !(0.0..=1.0).contains(&dim_opacity)
-            || !duration.is_finite()
-            || duration <= 0.0
-        {
-            return;
-        }
-        let declared = equation
-            .spec
-            .lock()
-            .expect("object spec poisoned")
-            .fragment_tags
-            .clone();
-        let terms = tags
-            .into_iter()
-            .filter_map(|name| {
-                declared
-                    .iter()
-                    .rev()
-                    .find(|(tag, _, _)| tag == &name)
-                    .map(|(_, fragment, occurrence)| (fragment.clone(), *occurrence))
-            })
-            .collect::<Vec<_>>();
-        if !terms.is_empty() {
-            self.state
-                .lock()
-                .expect("canvas state poisoned")
-                .active_mut()
-                .ops
-                .push(Op::FocusEquation {
-                    target: equation.id,
-                    terms,
-                    dim_opacity,
-                    duration,
-                });
-        }
-    }
-
-    pub fn brace_label(
-        &mut self,
-        equation: &DrawableHandle,
-        tag: &str,
-        label: String,
-        above: bool,
-        duration: f64,
-    ) {
-        let Some(selection) = equation.tag(tag) else {
-            return;
-        };
-        if label.trim().is_empty() || !duration.is_finite() || duration <= 0.0 {
-            return;
-        }
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::BraceLabel {
-                target: equation.id,
-                fragment: selection.fragment,
-                occurrence: selection.occurrence,
-                label,
-                above,
-                duration,
-            });
-    }
-
-    pub fn annotate_tag(
-        &mut self,
-        equation: &DrawableHandle,
-        tag: &str,
-        label: String,
-        offset: DVec3,
-        duration: f64,
-    ) {
-        let Some(selection) = equation.tag(tag) else {
-            return;
-        };
-        if label.trim().is_empty() || !duration.is_finite() || duration <= 0.0 {
-            return;
-        }
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AnnotateFragment {
-                target: equation.id,
-                fragment: selection.fragment,
-                occurrence: selection.occurrence,
-                label,
-                offset,
-                duration,
-            });
-    }
     /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
     ///
     /// Source pixels are decoded once per canonical path and are displayed at
@@ -1520,14 +1207,16 @@ impl Canvas {
         leaving: Option<&DrawableHandle>,
     ) {
         let mut state = self.state.lock().expect("canvas state poisoned");
+        let snapshot = LayoutTreeSnapshot {
+            version,
+            container: container.id,
+            members,
+            spec,
+        };
+        state.latest_layouts.insert(container.id, snapshot.clone());
         state.active_mut().ops.push(Op::LayoutTransition {
             from_version: version.checked_sub(1).filter(|version| *version > 0),
-            to: LayoutTreeSnapshot {
-                version,
-                container: container.id,
-                members,
-                spec,
-            },
+            to: snapshot,
             duration: duration.filter(|value| value.is_finite() && *value > 0.0),
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
@@ -2393,6 +2082,28 @@ mod tests {
     use gaanim_timeline::snapshot::WorldSnapshot;
     use gaanim_timeline::timeline::Timeline;
 
+    trait UnifiedTextFixture {
+        fn math_text(&mut self, source: &str) -> DrawableHandle;
+        fn test_title(&mut self, source: &str) -> DrawableHandle;
+    }
+
+    impl UnifiedTextFixture for Canvas {
+        fn math_text(&mut self, source: &str) -> DrawableHandle {
+            self.text(&format!("${source}$"))
+        }
+
+        fn test_title(&mut self, source: &str) -> DrawableHandle {
+            let spec = gaanim_text::prelude::TextSpec::new(
+                vec![source.into()],
+                Some(gaanim_text::prelude::TextRole::Title),
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid title fixture");
+            self.text_spec(spec)
+        }
+    }
+
     fn compile_updater_count(canvas: &Canvas) -> usize {
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -2410,15 +2121,19 @@ mod tests {
     fn step_equation_preserves_explicit_tag_mapping_and_occurrence() {
         let mut canvas = Canvas::new(320, 180);
         let source = canvas
-            .equation("x + x = 2x")
+            .math_text("x + x = 2x")
             .define_tag("right_x", "x", Some(1));
-        let target = canvas.equation("x = y").define_tag("renamed", "y", Some(0));
-        canvas.step_equation_with_matches(
-            &source,
-            &target,
-            Some(vec![("right_x".to_string(), "renamed".to_string())]),
-            0.8,
-        );
+        let target = canvas
+            .math_text("x = y")
+            .define_tag("renamed", "y", Some(0));
+        let step = source
+            .step_to(
+                &target,
+                Some(vec![("right_x".to_string(), "renamed".to_string())]),
+                0.8,
+            )
+            .unwrap();
+        canvas.play(vec![step]);
 
         let state = canvas.state.lock().expect("canvas state poisoned");
         let pairs = state
@@ -2426,7 +2141,10 @@ mod tests {
             .iter()
             .flat_map(|segment| &segment.ops)
             .find_map(|op| match op {
-                Op::StepEquation { pairs, .. } => Some(pairs),
+                Op::Play(anims) => anims.iter().find_map(|anim| match &anim.anim_type {
+                    AnimationType::TextTransition { semantic_pairs, .. } => Some(semantic_pairs),
+                    _ => None,
+                }),
                 _ => None,
             })
             .expect("step equation op should be queued");
@@ -2650,8 +2368,10 @@ mod tests {
         for role in [
             TextRole::Title,
             TextRole::Subtitle,
+            TextRole::Heading,
             TextRole::Body,
             TextRole::Caption,
+            TextRole::Label,
             TextRole::Math,
             TextRole::Code,
         ] {
@@ -2722,8 +2442,10 @@ mod tests {
         for role in [
             TextRole::Title,
             TextRole::Subtitle,
+            TextRole::Heading,
             TextRole::Body,
             TextRole::Caption,
+            TextRole::Label,
         ] {
             assert_eq!(theme.text.roles[&role].font_family, "Inter");
         }
@@ -2871,7 +2593,7 @@ mod tests {
     #[test]
     fn scene_object_commands_deduplicate_and_reject_foreign_drawables() {
         let mut canvas = Canvas::new(1280, 720);
-        let title = canvas.title("Persistent title");
+        let title = canvas.test_title("Persistent title");
         canvas.segment("next", None).unwrap();
         canvas
             .reuse_many(&[title.clone(), title.clone()])
@@ -2908,7 +2630,7 @@ mod tests {
     #[test]
     fn reuse_persist_and_release_schedule_reversible_scene_membership() {
         let mut canvas = Canvas::new(1280, 720);
-        let title = canvas.title("Shared title");
+        let title = canvas.test_title("Shared title");
         canvas.wait(1.0);
 
         canvas
@@ -3091,7 +2813,7 @@ mod tests {
     #[test]
     fn persistent_object_stays_fixed_for_the_entire_slide_transition() {
         let mut canvas = Canvas::new(640, 360);
-        let title = canvas.title("KEEP");
+        let title = canvas.test_title("KEEP");
         canvas.wait(1.0);
         canvas.persist(&title).unwrap();
         canvas
@@ -3260,13 +2982,13 @@ mod tests {
     #[test]
     fn persistent_transform_does_not_localize_its_source() {
         let mut canvas = Canvas::new(1280, 720);
-        let source = canvas.title("Source");
+        let source = canvas.test_title("Source");
         canvas.persist(&source).unwrap();
         canvas.wait(0.5);
         canvas
             .segment("target", Some(TransitionType::CrossFade { duration: 0.2 }))
             .unwrap();
-        let target = canvas.title("Target");
+        let target = canvas.test_title("Target");
         source.transform(&target).duration(0.5);
 
         let mut world = World::new();

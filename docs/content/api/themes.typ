@@ -24,7 +24,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
-label = scene.title("Colorful scene").fill(WHITE)
+label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
 
 You can update the viewport background through `scene.canvas`:
@@ -54,9 +54,9 @@ from gaanim import Scene
 scene = Scene(1280, 720)
 scene.canvas.set_theme("presentation")
 
-title = scene.title("Fourier transform")
-subtitle = scene.subtitle("Frequency-domain representation")
-equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x")
+title = scene.text("Fourier transform", role="title")
+subtitle = scene.text("Frequency-domain representation", role="subtitle")
+equation = scene.text("$F(k) = integral f(x) e^(-i k x) dif x$")
 ```
 
 The aliases `scientific`, `deck`, and `light` map to `technical`,

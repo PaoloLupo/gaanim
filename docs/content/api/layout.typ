@@ -17,7 +17,7 @@ trees with `row`, `column`, `grid`, and `stack`; use `item` for per-child rules.
 ```python
 page = scene.column(
     [
-        scene.title("Result"),
+        scene.text("Result", role="title"),
         scene.row([
             scene.item(copy, grow=2),
             scene.item(diagram, grow=3, fit="contain"),
@@ -134,13 +134,40 @@ registration; `layout.diagnostics()` filters diagnostics for one root. A
 conflict message includes its label or canonical index and involved node IDs.
 Expressions cannot mix drawables from different scenes.
 
-== Responsive paragraphs and templates
+== Responsive Text and templates
 
-`scene.paragraph(text, width=None)` resolves against the safe frame when free;
-inside responsive compositions it is a measurable text leaf. The solver
-remeasures after flex/grid allocation and Typst caches by content, typography,
-width, and overflow. Animated width changes crossfade the old and new vector
-compositions. Explicit widths remain supported.
+`scene.text(..., flow=TextFlow(wrap="auto"))` is the only responsive text
+leaf. Free text receives the safe-frame width; managed text consumes the width
+offered by its `BoxConstraints`. `wrap=False` keeps one line and a numeric
+wrap value caps the typographic width without creating a second box model.
+
+```python
+from gaanim import TextFlow
+
+copy = scene.text(
+    "Layout v2 measures this copy at the width of its card.",
+    flow=TextFlow(wrap="auto", align="justify", line_spacing=1.25),
+)
+page = scene.row([
+    scene.item(copy, grow=2),
+    scene.item(diagram, grow=3, fit="contain"),
+], width="fill", gap=32)
+```
+
+The `CompiledTextMeasure` adapter reuses the existing intrinsic-measure pass,
+eight-pass convergence, clips, diagnostics, and `ResolvedLayout`; there is no
+text-specific solver. Its cache key includes structured content, resolved
+style, flow, and offered constraints. Metric changes and `become`, `morph_to`,
+`step_to`, or `expand_to` invalidate the shared versioned snapshot and reflow
+parent layouts using the same transition duration. Transient `wiggle`, `pulse`,
+and `wave` effects do not invalidate measurement.
+
+A managed `Text` rejects `at`, `move`, `next_to`, and manual positional
+animations just like any other Layout-owned child. A `TextSelection` never
+becomes an independent Layout leaf, but its animation methods return normal
+`Anim` values, so selections compose in `scene.play([...])` with any other
+drawable animation. Cross-scene or incompatible-owner text transition targets
+raise `LayoutOwnershipError`.
 
 Templates are typed Python functions:
 

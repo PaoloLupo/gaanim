@@ -13,8 +13,8 @@ headline = Brush.linear(
     start=(-330, 0),
     end=(330, 0),
 )
-scene.title("Brush: one paint API").fill(headline).at(0, 275)
-scene.subtitle("Linear, radial and sweep gradients rendered by Vello").at(0, 220)
+scene.text("Brush: one paint API", role="title").fill(headline).at(0, 275)
+scene.text("Linear, radial and sweep gradients rendered by Vello", role="subtitle").at(0, 220)
 
 linear = Brush.linear(
     ["#7AA2F7", "#BB9AF7", "#F7768E"],

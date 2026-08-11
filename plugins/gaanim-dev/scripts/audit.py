@@ -74,7 +74,7 @@ def _python_exports(path: Path) -> tuple[set[str], set[str]]:
     available: set[str] = set()
     exported: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == "gaanim_core":
+        if isinstance(node, ast.ImportFrom) and node.level == 1:
             available.update(alias.asname or alias.name for alias in node.names)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             available.add(node.name)
@@ -204,6 +204,9 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
         findings.append(_error("python-contract-files", "Python stub or package __init__.py is missing"))
     else:
         stub_names = _stub_names(stub)
+        templates_stub = package.with_name("templates.pyi")
+        if templates_stub.is_file():
+            stub_names.update(_stub_names(templates_stub))
         available, exported = _python_exports(package)
         undefined_exports = sorted(exported - available)
         if undefined_exports:

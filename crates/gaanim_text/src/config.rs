@@ -7,8 +7,10 @@ use std::collections::HashMap;
 pub enum TextRole {
     Title,
     Subtitle,
+    Heading,
     Body,
     Caption,
+    Label,
     Math,
     Code,
 }
@@ -56,6 +58,15 @@ impl Default for TextConfig {
             },
         );
 
+        roles.insert(
+            TextRole::Heading,
+            RoleStyle {
+                font_family: "New Computer Modern".to_string(),
+                size: 40.0,
+                fill_color: gaanim_core::peniko::Color::WHITE,
+            },
+        );
+
         // Body text role
         roles.insert(
             TextRole::Body,
@@ -72,6 +83,15 @@ impl Default for TextConfig {
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
                 size: 24.0,
+                fill_color: gaanim_core::peniko::Color::WHITE,
+            },
+        );
+
+        roles.insert(
+            TextRole::Label,
+            RoleStyle {
+                font_family: "New Computer Modern".to_string(),
+                size: 28.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );

@@ -14,7 +14,7 @@ scene = Scene(1920, 1080, background=BLACK)
 
 # Segment 1: shape matching with mismatched counts and duplicates
 scene.segment("shape_matching")
-title = scene.title("TransformMatchingShapes (mejorado)").fill(WHITE).at(0, 420)
+title = scene.text("TransformMatchingShapes (mejorado)", role="title").fill(WHITE).at(0, 420)
 subtitle = scene.text("Geometría + posición + color · Hungarian + shape-hash · sobrantes Fade").fill(WHITE).at(0, 350).scaled(0.55)
 title.write().duration(0.8).smooth()
 subtitle.write().duration(0.8).smooth()
@@ -47,13 +47,13 @@ caption = scene.text("TransformMatchingTex: LCS + geometría · preserva orden")
 caption.fade_in().duration(0.6).smooth()
 scene.wait(0.2)
 
-src_text = scene.title("ABCD").fill(BLUE).at(0, 80).scaled(1.2)
+src_text = scene.text("ABCD", role="title").fill(BLUE).at(0, 80).scaled(1.2)
 src_text.write().duration(0.7).smooth()
 scene.wait(0.3)
 
-dst_text = scene.title("BADC").fill(GREEN).at(0, 80).scaled(1.2)
+dst_text = scene.text("BADC", role="title").fill(GREEN).at(0, 80).scaled(1.2)
 # Scrambled order BADC shares all letters but order differs — LCS should keep longest order-preserving subset (mismo centro)
-scene.transform_matching_tex(src_text, dst_text, duration=2.0)
+scene.play([src_text.morph_to(dst_text, duration=2.0)])
 scene.wait(0.8)
 
 # Segment 3: equation tex matching — real math
@@ -62,16 +62,16 @@ scene.wait(0.2)
 eq_title = scene.text("Ecuaciones: mantiene 'm' y reordena, sobrantes Fade").fill(WHITE).at(0, 380).scaled(0.6)
 eq_title.fade_in().duration(0.5).smooth()
 
-e1 = scene.equation("E = m c").fill(WHITE).at(0, 80).scaled(1.3)
+e1 = scene.text("$E = m c$").fill(WHITE).at(0, 80).scaled(1.3)
 e1.write().duration(0.7).smooth()
 scene.wait(0.3)
 
-e2 = scene.equation("p = m v^2").fill(GOLD).at(0, 80).scaled(1.3)
+e2 = scene.text("$p = m v^2$").fill(GOLD).at(0, 80).scaled(1.3)
 # Tex matching on equations: 'm' matches by key, other glyphs fade (mismo y, no debajo)
-scene.transform_matching_tex(e1, e2, duration=1.6)
+scene.play([e1.morph_to(e2, duration=1.6)])
 scene.wait(1.0)
 
-finale = scene.subtitle("Mejoras: winding preservado, spring-continuo, coste combinado, greedy >64").fill(GREEN).at(0, -420).scaled(0.9)
+finale = scene.text("Mejoras: winding preservado, spring-continuo, coste combinado, greedy >64", role="subtitle").fill(GREEN).at(0, -420).scaled(0.9)
 finale.write().duration(0.8).smooth()
 scene.wait(1.0)
 

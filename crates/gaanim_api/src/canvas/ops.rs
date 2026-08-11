@@ -1,5 +1,6 @@
 //! Deferred operations and segment tracking for the Canvas API.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use gaanim_animation::{AxisMask, Updater};
@@ -29,6 +30,9 @@ pub(crate) struct CanvasState {
     pub all_drawables: Vec<ObjectId>,
     pub layout_constraints: Vec<LayoutConstraint>,
     pub layout_diagnostics: Vec<(Option<ObjectId>, String)>,
+    /// Latest authoritative authoring snapshot for every Layout v2 root.
+    /// Python layout handles and width-sensitive leaves share this registry.
+    pub latest_layouts: HashMap<ObjectId, LayoutTreeSnapshot>,
 }
 
 impl CanvasState {
@@ -41,6 +45,7 @@ impl CanvasState {
             all_drawables: Vec::new(),
             layout_constraints: Vec::new(),
             layout_diagnostics: Vec::new(),
+            latest_layouts: HashMap::new(),
         }
     }
 
@@ -74,6 +79,7 @@ pub(crate) type SharedObjectSpec = Arc<Mutex<ObjectSpec>>;
 
 /// A deferred operation accumulated by [`Canvas`](super::Canvas) and replayed
 /// into a [`SceneBuilder`](crate::builder::SceneBuilder) on compile.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum Op {
     /// Spawn a mobject from a shared ObjectSpec. The spec is intentionally
@@ -95,7 +101,6 @@ pub(crate) enum Op {
         occurrence: Option<usize>,
         color: Color,
     },
-    /// Emphasize selected glyphs as a parallel animation.
     FragmentIndicate {
         target: ObjectId,
         fragment: String,
@@ -103,7 +108,13 @@ pub(crate) enum Op {
         color: Option<Color>,
         duration: f64,
     },
-    /// Reveal a selected fragment with a presentation-oriented preset.
+    FragmentEmphasis {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        kind: String,
+        duration: f64,
+    },
     FragmentReveal {
         target: ObjectId,
         fragment: String,
@@ -111,7 +122,6 @@ pub(crate) enum Op {
         style: FragmentRevealStyle,
         duration: f64,
     },
-    /// Draw a strikethrough across a selected fragment while fading it out.
     CancelFragment {
         target: ObjectId,
         fragment: String,
@@ -141,15 +151,12 @@ pub(crate) enum Op {
         terms: Vec<(String, Option<usize>)>,
         duration: f64,
     },
-    /// Dim every equation glyph except the selected semantic terms, then
-    /// pulse the selected terms.
     FocusEquation {
         target: ObjectId,
         terms: Vec<(String, Option<usize>)>,
         dim_opacity: f32,
         duration: f64,
     },
-    /// Tween selected glyph fills to a color in parallel.
     FragmentFillTo {
         target: ObjectId,
         fragment: String,
@@ -157,7 +164,6 @@ pub(crate) enum Op {
         color: Color,
         duration: f64,
     },
-    /// Morph selected source glyphs into selected target glyphs pairwise.
     FragmentTransform {
         source: ObjectId,
         source_fragment: String,
@@ -167,7 +173,6 @@ pub(crate) enum Op {
         target_occurrence: Option<usize>,
         duration: f64,
     },
-    /// Morph every explicitly paired semantic equation tag in parallel.
     TaggedTransform {
         source: ObjectId,
         target: ObjectId,

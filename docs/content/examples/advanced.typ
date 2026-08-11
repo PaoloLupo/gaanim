@@ -20,10 +20,10 @@ circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-180, 0)
 scene.play([circle.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
-headline = scene.title("A stable transform").fill(GOLD)
+headline = scene.text("A stable transform", role="title").fill(GOLD)
 scene.play([circle.replacement_transform(headline).duration(1.4).spring()])
 
-formula = scene.equation("E = m c^2").fill(GREEN).at(0, -150)
+formula = scene.text("$E = m c^2$").fill(GREEN).at(0, -150)
 scene.play([headline.transform(formula).duration(1.4).smooth()])
 # Run this file with: gaanim transforms.py
 ```

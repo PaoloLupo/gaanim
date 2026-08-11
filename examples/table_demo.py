@@ -7,8 +7,8 @@ from gaanim import BLACK, GRAY, WHITE, Direction, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.title("Solver comparison").fill(WHITE).at(0, 250)
-subtitle = scene.subtitle("Residual after 200 iterations").fill(GRAY).at(0, 195)
+title = scene.text("Solver comparison", role="title").fill(WHITE).at(0, 250)
+subtitle = scene.text("Residual after 200 iterations", role="subtitle").fill(GRAY).at(0, 195)
 results = scene.table(
     ["Method", "Residual", "Elapsed"],
     [

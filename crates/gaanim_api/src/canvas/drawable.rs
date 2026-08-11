@@ -12,7 +12,7 @@ use gaanim_layout::{Anchor, Direction};
 use gaanim_math::RateFunc;
 use gaanim_objects::prelude::GltfAnimationMetadata;
 
-use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig};
+use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig, TextSelectionEffect};
 use crate::canvas::ops::{
     FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
@@ -81,7 +81,7 @@ pub struct FragmentSelection {
     pub(crate) fragment: String,
     pub(crate) occurrence: Option<usize>,
     state: SharedCanvasState,
-    segment_idx: usize,
+    layout_owner: Option<ObjectId>,
 }
 
 /// Split ordinary mathematical source into display terms when an equation has
@@ -111,6 +111,199 @@ fn math_source_terms(source: &str) -> Vec<String> {
 }
 
 impl DrawableHandle {
+    /// Returns the immutable structured authoring snapshot for unified text.
+    pub fn text_spec(&self) -> Option<gaanim_text::prelude::TextSpec> {
+        let spec = self.spec.lock().expect("object spec poisoned");
+        match &spec.kind {
+            SpawnKind::Text(text) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
+    fn text_semantic_pairs(
+        &self,
+        target: &DrawableHandle,
+        requested: Option<Vec<(String, String)>>,
+    ) -> Vec<(String, Option<usize>, String, Option<usize>)> {
+        let source_tags = self
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .clone();
+        let target_tags = target
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fragment_tags
+            .clone();
+        let requested = requested.unwrap_or_else(|| {
+            source_tags
+                .iter()
+                .filter_map(|(name, _, _)| {
+                    target_tags
+                        .iter()
+                        .any(|(target_name, _, _)| target_name == name)
+                        .then_some((name.clone(), name.clone()))
+                })
+                .collect()
+        });
+        requested
+            .into_iter()
+            .filter_map(|(source_name, target_name)| {
+                let (_, source_fragment, source_occurrence) = source_tags
+                    .iter()
+                    .rev()
+                    .find(|(name, _, _)| name == &source_name)?;
+                let (_, target_fragment, target_occurrence) = target_tags
+                    .iter()
+                    .rev()
+                    .find(|(name, _, _)| name == &target_name)?;
+                Some((
+                    source_fragment.clone(),
+                    *source_occurrence,
+                    target_fragment.clone(),
+                    *target_occurrence,
+                ))
+            })
+            .collect()
+    }
+
+    fn require_text_transition_target(
+        &self,
+        target: &DrawableHandle,
+    ) -> Result<(), LayoutOwnershipError> {
+        if !self.same_canvas(target) {
+            return Err(LayoutOwnershipError::ForeignScene);
+        }
+        let source_owner = self.layout_owner();
+        let target_owner = target.layout_owner();
+        if source_owner.is_some() || target_owner.is_some() {
+            if source_owner != target_owner {
+                return Err(LayoutOwnershipError::AlreadyManaged {
+                    owner: target_owner.or(source_owner).expect("one owner exists"),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// General text/math morph. Semantic paths are paired before the existing
+    /// order-preserving grapheme and shape matching stages.
+    pub fn morph_to(
+        &self,
+        target: &DrawableHandle,
+        duration: f64,
+    ) -> Result<Anim, LayoutOwnershipError> {
+        self.require_text_transition_target(target)?;
+        let semantic_pairs = self.text_semantic_pairs(target, None);
+        Ok(self.anim_dur(
+            AnimationType::TextTransition {
+                target: target.id,
+                copy: false,
+                semantic_pairs,
+            },
+            Some(duration),
+        ))
+    }
+
+    /// Structured derivation step, replacing the equation-only scene method.
+    pub fn step_to(
+        &self,
+        target: &DrawableHandle,
+        matches: Option<Vec<(String, String)>>,
+        duration: f64,
+    ) -> Result<Anim, LayoutOwnershipError> {
+        self.require_text_transition_target(target)?;
+        let semantic_pairs = self.text_semantic_pairs(target, matches);
+        Ok(self.anim_dur(
+            AnimationType::TextTransition {
+                target: target.id,
+                copy: false,
+                semantic_pairs,
+            },
+            Some(duration),
+        ))
+    }
+
+    /// Expands text around one semantic path while new graphemes enter.
+    pub fn expand_to(
+        &self,
+        target: &DrawableHandle,
+        anchor: &str,
+        duration: f64,
+    ) -> Result<Anim, LayoutOwnershipError> {
+        self.require_text_transition_target(target)?;
+        let semantic_pairs = self
+            .text_semantic_pairs(target, Some(vec![(anchor.to_string(), anchor.to_string())]))
+            .into_iter()
+            .take(1)
+            .collect();
+        Ok(self.anim_dur(
+            AnimationType::TextTransition {
+                target: target.id,
+                copy: false,
+                semantic_pairs,
+            },
+            Some(duration),
+        ))
+    }
+
+    /// Replace the authoring snapshot while preserving this handle identity.
+    /// Timeline materialization observes the incremented version.
+    pub fn r#become(&self, text: gaanim_text::prelude::TextSpec, duration: Option<f64>) {
+        let parts = text.parts();
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        if !matches!(spec.kind, SpawnKind::Text(_)) {
+            return;
+        }
+        spec.kind = SpawnKind::Text(text);
+        spec.fragment_tags.clear();
+        spec.fragment_fills.clear();
+        for part in parts {
+            if let Some(color) = part.style.color {
+                spec.fragment_fills.push((part.text.clone(), color));
+            }
+            spec.fragment_tags
+                .push((part.path.join("."), part.text, Some(part.occurrence)));
+        }
+        let owner = spec.layout_owner;
+        drop(spec);
+
+        let Some(owner) = owner else {
+            return;
+        };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let mut affected = vec![owner];
+        let mut index = 0;
+        while index < affected.len() {
+            let child = affected[index];
+            for (root, snapshot) in &state.latest_layouts {
+                if snapshot.members.iter().any(|member| member.id == child)
+                    && !affected.contains(root)
+                {
+                    affected.push(*root);
+                }
+            }
+            index += 1;
+        }
+        for root in affected {
+            let Some(previous) = state.latest_layouts.get(&root).cloned() else {
+                continue;
+            };
+            let mut next = previous.clone();
+            next.version = next.version.saturating_add(1);
+            state.latest_layouts.insert(root, next.clone());
+            state.active_mut().ops.push(Op::LayoutTransition {
+                from_version: Some(previous.version),
+                to: next,
+                duration: duration.filter(|value| value.is_finite() && *value > 0.0),
+                entering: None,
+                leaving: None,
+            });
+        }
+    }
+
     pub fn same_canvas(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
     }
@@ -459,7 +652,7 @@ impl DrawableHandle {
             fragment: fragment.into(),
             occurrence: None,
             state: self.state.clone(),
-            segment_idx: self.segment_idx,
+            layout_owner: self.layout_owner(),
         }
     }
 
@@ -470,7 +663,7 @@ impl DrawableHandle {
             fragment: fragment.into(),
             occurrence: Some(occurrence),
             state: self.state.clone(),
-            segment_idx: self.segment_idx,
+            layout_owner: self.layout_owner(),
         }
     }
 
@@ -506,20 +699,20 @@ impl DrawableHandle {
             fragment,
             occurrence,
             state: self.state.clone(),
-            segment_idx: self.segment_idx,
+            layout_owner: self.layout_owner(),
         })
     }
 
     /// Writes semantic terms in tag order instead of staggering individual
     /// glyphs. If `tags` is omitted, all declared tags are used in declaration
     /// order.
-    pub fn write_by_terms(&self, tags: Option<Vec<String>>, duration: f64) -> Self {
+    pub fn write_by_parts(&self, paths: Option<Vec<String>>, duration: f64) -> Self {
         if !duration.is_finite() || duration <= 0.0 {
             return self.clone();
         }
         let spec = self.spec.lock().expect("object spec poisoned").clone();
         let declared = spec.fragment_tags;
-        let terms: Vec<(String, Option<usize>)> = match tags {
+        let terms: Vec<(String, Option<usize>)> = match paths {
             Some(names) => names
                 .into_iter()
                 .filter_map(|name| {
@@ -535,7 +728,7 @@ impl DrawableHandle {
                 .map(|(_, fragment, occurrence)| (fragment, occurrence))
                 .collect(),
             None => match spec.kind {
-                SpawnKind::Equation(source) | SpawnKind::Text(source) => math_source_terms(&source)
+                SpawnKind::Text(spec) => math_source_terms(&spec.plain_text())
                     .into_iter()
                     .map(|fragment| (fragment, None))
                     .collect(),
@@ -1055,9 +1248,28 @@ impl DrawableHandle {
 
 impl FragmentSelection {
     fn push(&self, op: Op) {
-        self.state.lock().expect("canvas state poisoned").segments[self.segment_idx]
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
             .ops
             .push(op);
+    }
+
+    fn animate(self, effect: TextSelectionEffect, duration: impl OptDuration) -> Anim {
+        let duration = duration.into_opt();
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::queued(
+            self.target,
+            AnimationType::TextSelection {
+                fragment: self.fragment,
+                occurrence: self.occurrence,
+                effect,
+            },
+            self.state,
+            active_idx,
+        )
+        .with_duration(duration)
     }
 
     /// Instantly colors this selected fragment.
@@ -1074,75 +1286,133 @@ impl FragmentSelection {
     }
 
     /// Emphasizes this fragment without affecting the surrounding text.
-    pub fn indicate(self, duration: impl OptDuration) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::FragmentIndicate {
-                target: self.target,
-                fragment: self.fragment.clone(),
-                occurrence: self.occurrence,
-                color: None,
-                duration: duration.into_opt().unwrap_or(1.0),
-            });
-        }
-        self
+    pub fn indicate(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Indicate, duration)
+    }
+
+    pub fn pulse(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Pulse, duration)
+    }
+
+    pub fn wiggle(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Wiggle, duration)
+    }
+
+    pub fn wave(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Wave, duration)
+    }
+
+    pub fn highlight(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Highlight, duration)
+    }
+
+    pub fn focus(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Focus, duration)
+    }
+
+    pub fn brace(self, label: String, above: bool, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Brace { label, above }, duration)
+    }
+
+    pub fn annotate(self, label: String, offset: DVec3, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Annotate { label, offset }, duration)
     }
 
     /// Reveals this fragment with `Fade`, `Wipe`, or `FromBelow`.
-    pub fn reveal(self, style: FragmentRevealStyle, duration: impl OptDuration) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::FragmentReveal {
-                target: self.target,
-                fragment: self.fragment.clone(),
-                occurrence: self.occurrence,
-                style,
-                duration: duration.into_opt().unwrap_or(1.0),
-            });
-        }
-        self
+    pub fn reveal(self, style: FragmentRevealStyle, duration: impl OptDuration) -> Anim {
+        let effect = match style {
+            FragmentRevealStyle::Fade => TextSelectionEffect::RevealFade,
+            FragmentRevealStyle::Wipe => TextSelectionEffect::RevealWipe,
+            FragmentRevealStyle::FromBelow => TextSelectionEffect::RevealFromBelow,
+        };
+        self.animate(effect, duration)
     }
 
     /// Strikes through this fragment and fades it from the equation.
-    pub fn cancel(self, duration: impl OptDuration) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::CancelFragment {
-                target: self.target,
-                fragment: self.fragment.clone(),
-                occurrence: self.occurrence,
-                duration: duration.into_opt().unwrap_or(0.6),
-            });
-        }
-        self
+    pub fn cancel(self, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Cancel, duration)
     }
 
     /// Animates this fragment's fill to `color`.
-    pub fn color_to(self, color: Color, duration: impl OptDuration) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::FragmentFillTo {
-                target: self.target,
-                fragment: self.fragment.clone(),
-                occurrence: self.occurrence,
-                color,
-                duration: duration.into_opt().unwrap_or(1.0),
-            });
-        }
-        self
+    pub fn color_to(self, color: Color, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::ColorTo(color), duration)
     }
 
     /// Morphs this selection into `target`, pairing matching glyphs in order.
     /// Unpaired glyphs remain unchanged; use equal-sized fragments for the
     /// clearest equation derivations.
-    pub fn transform_to(self, target: &FragmentSelection, duration: impl OptDuration) -> Self {
-        if !self.fragment.trim().is_empty() && !target.fragment.trim().is_empty() {
-            self.push(Op::FragmentTransform {
-                source: self.target,
-                source_fragment: self.fragment.clone(),
-                source_occurrence: self.occurrence,
-                target: target.target,
-                target_fragment: target.fragment.clone(),
-                target_occurrence: target.occurrence,
-                duration: duration.into_opt().unwrap_or(1.0),
+    pub fn morph_to(
+        self,
+        target: &FragmentSelection,
+        duration: impl OptDuration,
+    ) -> Result<Anim, LayoutOwnershipError> {
+        if !Arc::ptr_eq(&self.state, &target.state) {
+            return Err(LayoutOwnershipError::ForeignScene);
+        }
+        if self.layout_owner != target.layout_owner
+            && (self.layout_owner.is_some() || target.layout_owner.is_some())
+        {
+            return Err(LayoutOwnershipError::AlreadyManaged {
+                owner: target
+                    .layout_owner
+                    .or(self.layout_owner)
+                    .expect("one owner exists"),
             });
         }
-        self
+        let duration = duration.into_opt();
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Ok(Anim::queued(
+            self.target,
+            AnimationType::TextSelectionTransform {
+                target: target.target,
+                source_fragment: self.fragment,
+                source_occurrence: self.occurrence,
+                target_fragment: target.fragment.clone(),
+                target_occurrence: target.occurrence,
+                copy: false,
+            },
+            self.state,
+            active_idx,
+        )
+        .with_duration(duration))
+    }
+
+    /// Copies this selection to `target` while keeping both parent texts
+    /// visible. This is the structured-text replacement for equation-term
+    /// copying.
+    pub fn copy_to(
+        self,
+        target: &FragmentSelection,
+        duration: impl OptDuration,
+    ) -> Result<Anim, LayoutOwnershipError> {
+        if !Arc::ptr_eq(&self.state, &target.state) {
+            return Err(LayoutOwnershipError::ForeignScene);
+        }
+        if self.layout_owner != target.layout_owner
+            && (self.layout_owner.is_some() || target.layout_owner.is_some())
+        {
+            return Err(LayoutOwnershipError::AlreadyManaged {
+                owner: target
+                    .layout_owner
+                    .or(self.layout_owner)
+                    .expect("one owner exists"),
+            });
+        }
+        let duration = duration.into_opt();
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Ok(Anim::queued(
+            self.target,
+            AnimationType::TextSelectionTransform {
+                target: target.target,
+                source_fragment: self.fragment,
+                source_occurrence: self.occurrence,
+                target_fragment: target.fragment.clone(),
+                target_occurrence: target.occurrence,
+                copy: true,
+            },
+            self.state,
+            active_idx,
+        )
+        .with_duration(duration))
     }
 }

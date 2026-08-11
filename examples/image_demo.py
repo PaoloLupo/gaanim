@@ -16,7 +16,7 @@ source = (
     / "seek_0008_t_12_900000.png"
 )
 
-title = scene.title("ImageMobject").fill(WHITE).at(0, 220)
+title = scene.text("ImageMobject", role="title").fill(WHITE).at(0, 220)
 # Loading the same path repeatedly reuses the process-local decoded texture cache.
 contain = scene.image(str(source), width=250, height=150, fit="contain").at(-300, 20)
 cover = scene.image(str(source), width=250, height=150, fit="cover").at(0, 20)

@@ -8,10 +8,10 @@ from gaanim import BLUE, Direction, Scene
 scene = Scene(1280, 720, margin=72)
 scene.canvas.set_theme("paper")
 
-title = scene.title("Technical documentation").at(0, 170)
-subtitle = scene.subtitle("White paper theme with restrained contrast").at(0, 105)
+title = scene.text("Technical documentation", role="title").at(0, 170)
+subtitle = scene.text("White paper theme with restrained contrast", role="subtitle").at(0, 105)
 body = scene.text("Unfilled text follows the theme foreground.").at(0, -10)
-equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x").at(0, -135)
+equation = scene.text("$F(k) = integral f(x) e^(-i k x) dif x$").at(0, -135)
 marker = scene.circle(34).fill(BLUE).at(-360, -8)
 
 scene.play([

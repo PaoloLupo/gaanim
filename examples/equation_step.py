@@ -2,26 +2,24 @@
 
 import os
 
-from gaanim import BLACK, GOLD, WHITE, Scene
+from gaanim import BLACK, GOLD, WHITE, Scene, part
 
 
 scene = Scene(1920, 1080, background=BLACK)
-title = scene.title("Resolver paso a paso").fill(WHITE).at(0, 220)
-before = scene.equation(
-    "x dot 5 = 25",
-    tags={"variable": "x", "result": "25"},
+title = scene.text("Resolver paso a paso", role="title").fill(WHITE).at(0, 220)
+before = scene.text(
+    "$", part("variable", "x"), " dot 5 = ", part("result", "25"), "$"
 ).at(0, 0).scaled(2)
-after = scene.equation(
-    "x = 5",
-    tags={"variable": "x", "result": "5"},
+after = scene.text(
+    "$", part("variable", "x"), " = ", part("result", "5"), "$"
 ).at(0, 0).scaled(2)
-before.tag("result").fill(GOLD)
-after.tag("result").fill(GOLD)
+before["result"].fill(GOLD)
+after["result"].fill(GOLD)
 
 scene.play([title.write(), before.write()])
 scene.wait(0.4)
-current = scene.step_equation(before, after, duration=0.8)
-current.tag("result").indicate(duration=0.45)
+scene.play([before.step_to(after, duration=0.8)])
+scene.play([after["result"].indicate(duration=0.45)])
 scene.wait(0.4)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

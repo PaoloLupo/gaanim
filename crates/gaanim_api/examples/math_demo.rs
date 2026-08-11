@@ -48,10 +48,14 @@ fn setup_scene(
 
     // Segment 1: Intro
     let _s1 = canvas.segment("intro", None).expect("intro segment");
-    let title = canvas
-        .title("Multi-Segment Demo")
-        .fill(Color::WHITE)
-        .at(0.0, 0.0);
+    let title_spec = gaanim_text::prelude::TextSpec::new(
+        vec!["Multi-Segment Demo".into()],
+        Some(gaanim_text::prelude::TextRole::Title),
+        gaanim_text::prelude::TextStyle::default(),
+        gaanim_text::prelude::TextFlow::default(),
+    )
+    .expect("valid unified title text");
+    let title = canvas.text_spec(title_spec).fill(Color::WHITE).at(0.0, 0.0);
     title.fade_in(1.0);
     canvas.wait(1.5);
     title.fade_out(0.8); // manual exit (Patron B)
@@ -82,7 +86,17 @@ fn setup_scene(
             }),
         )
         .expect("conclusion segment");
-    let thanks = canvas.title("Thank You!").fill(Color::WHITE).at(0.0, 0.0);
+    let thanks_spec = gaanim_text::prelude::TextSpec::new(
+        vec!["Thank You!".into()],
+        Some(gaanim_text::prelude::TextRole::Title),
+        gaanim_text::prelude::TextStyle::default(),
+        gaanim_text::prelude::TextFlow::default(),
+    )
+    .expect("valid unified title text");
+    let thanks = canvas
+        .text_spec(thanks_spec)
+        .fill(Color::WHITE)
+        .at(0.0, 0.0);
     thanks.fade_in(1.0);
     canvas.wait(2.0);
 

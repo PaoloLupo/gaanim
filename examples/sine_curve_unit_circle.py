@@ -19,7 +19,7 @@ Manim                              | Gaanim (esta escena)
 -----------------------------------|---------------------------------------------
 `Line(x_start, x_end)`             | `scene.line(x1, y1, x2, y2).stroke(...)`
 `Circle(radius=1).move_to(origin)` | `scene.circle(r).at(cx, cy)`
-`MathTex(r"\\pi").next_to(...)`    | `scene.equation("pi").at(x, y)`
+`MathTex(r"\\pi").next_to(...)`    | `scene.text("$pi$").at(x, y)`
 `Dot().move_to(orbit.point_…)`     | `scene.dot(r).at(x, y)`
 `dot.add_updater(go_around_circle)`| `dot.add_updater(Updater.orbit(cx,cy,r,speed))`
 `always_redraw(get_line_to_circle)`| `scene.tracking_line((cx,cy), dot)`
@@ -78,11 +78,11 @@ def show_axis():
     y_axis = scene.line(-400, -200, -400, 200).stroke(WHITE, 2.0)
 
     # Manim: self.add_x_labels()  →  MathTex(r"\pi")… next_to(DOWN)
-    # Gaanim: scene.equation("pi") — Typst math; .at() en píxeles
+    # Gaanim: scene.text("$pi$") — Typst math; .at() en píxeles
     for i, label in enumerate([r"pi", r"2 pi", r"3 pi", r"4 pi"]):
         # Manim: next_to(np.array([-1+2*i, 0, 0]), DOWN)
         # Gaanim píxeles: separación ~120 px, y=-35 bajo el eje
-        scene.equation(label).at(-200 + 120 * i, -35).fill(WHITE).scaled(0.55)
+        scene.text(f"${label}$").at(-200 + 120 * i, -35).fill(WHITE).scaled(0.55)
 
     # Manim:
     #   self.origin_point = np.array([-4,0,0])
@@ -96,7 +96,7 @@ origin_point, curve_start_point, *_ = show_axis()
 origin_x, origin_y = origin_point
 curve_start_x, curve_start_y = curve_start_point
 
-scene.title("Seno · círculo unitario").to_edge(Direction.UP).fill(WHITE).scaled(0.9).write()
+scene.text("Seno · círculo unitario", role="title").to_edge(Direction.UP).fill(WHITE).scaled(0.9).write()
 
 # ---------------------------------------------------------------------------
 # show_circle  →  Manim: self.show_circle()

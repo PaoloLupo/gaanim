@@ -10,7 +10,7 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 
 def main():
     scene = Scene(1280, 720, background=BLACK)
-    title = scene.title("Overlapping shapes").fill(WHITE).at(0, 230)
+    title = scene.text("Overlapping shapes", role="title").fill(WHITE).at(0, 230)
     circle_a = scene.circle(80).fill(BLUE).opacity(0.7).at(-60, 60)
     circle_b = scene.circle(80).fill(RED).opacity(0.7).at(60, 60)
     rect_a = scene.rect(120, 120).fill(GREEN).opacity(0.7).at(-80, -150)

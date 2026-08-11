@@ -24,8 +24,12 @@ use crate::builder::{
 use crate::canvas::canvas_impl::Canvas;
 use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
-    AxesConfig, LayoutOp, LayoutTreeSnapshot, LayoutWithin, ObjectSpec, ParagraphOptions,
-    ParagraphOverflow, SpawnKind, TextAlign,
+    AxesConfig, LayoutOp, LayoutTreeSnapshot, LayoutWithin, ObjectSpec, SpawnKind,
+};
+use gaanim_text::prelude::{
+    TextContent as StructuredTextContent, TextDirection as StructuredTextDirection,
+    TextOverflow as StructuredTextOverflow, TextSpec as StructuredTextSpec,
+    TextStyle as StructuredTextStyle, TextWrap as StructuredTextWrap,
 };
 
 use gaanim_animation::{
@@ -35,17 +39,17 @@ use gaanim_animation::{
 use gaanim_math::{RateFunc, SpatialTransform};
 
 #[derive(Clone)]
-struct CompiledParagraphMeasure {
-    text: String,
-    options: ParagraphOptions,
+struct CompiledTextMeasure {
+    spec: StructuredTextSpec,
     font_size: f64,
     font_family: String,
+    math_font: String,
     color: PenikoColor,
 }
 
 struct CompiledLayoutMeasure<'a> {
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
-    paragraphs: BTreeMap<gaanim_layout::LayoutId, CompiledParagraphMeasure>,
+    texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
     font_registry: &'a gaanim_text::font::FontRegistry,
 }
 
@@ -55,37 +59,30 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
         id: gaanim_layout::LayoutId,
         constraints: gaanim_layout::BoxConstraints,
     ) -> Result<DVec2, gaanim_layout::LayoutError> {
-        let Some(paragraph) = self.paragraphs.get(&id) else {
+        let Some(text) = self.texts.get(&id) else {
             return Ok(constraints.constrain(*self.fixed.get(&id).unwrap_or(&DVec2::ZERO)));
         };
         let offered_width = if constraints.max.x.is_finite() {
             constraints.max.x.max(1.0)
         } else {
-            paragraph.options.width.unwrap_or(640.0).max(1.0)
+            640.0
         };
-        let mut options = paragraph.options.clone();
-        options.width = Some(
-            options
-                .width
-                .unwrap_or(offered_width)
-                .min(offered_width)
-                .max(1.0),
-        );
-        let source = paragraph_typst_source(
-            &paragraph.text,
-            &options,
-            paragraph.font_size,
-            paragraph.color,
+        let source = structured_text_typst_source(
+            &text.spec,
+            Some(offered_width),
+            text.font_size,
+            &text.font_family,
+            text.color,
         );
         let bounds = gaanim_text::prelude::measure_typst(
             self.font_registry,
             &source,
             false,
-            Some(&paragraph.font_family),
+            Some(&text.font_family),
+            Some(&text.math_font),
+            Some(text.font_size),
             None,
-            Some(paragraph.font_size),
-            None,
-            Some(gaanim_core::peniko::Brush::Solid(paragraph.color)),
+            Some(gaanim_core::peniko::Brush::Solid(text.color)),
             StrokeBrush::transparent(),
         )
         .map_err(|errors| gaanim_layout::LayoutError::Measure {
@@ -99,7 +96,9 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
     }
 
     fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
-        self.paragraphs.contains_key(&id)
+        self.texts
+            .get(&id)
+            .is_some_and(|text| !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap))
     }
 }
 
@@ -217,6 +216,227 @@ pub(crate) fn typst_inline_content(text: &str) -> String {
     parts.join("")
 }
 
+fn merge_text_style(
+    base: &StructuredTextStyle,
+    overlay: &StructuredTextStyle,
+) -> StructuredTextStyle {
+    StructuredTextStyle {
+        font: overlay.font.clone().or_else(|| base.font.clone()),
+        math_font: overlay.math_font.clone().or_else(|| base.math_font.clone()),
+        fallbacks: if overlay.fallbacks.is_empty() {
+            base.fallbacks.clone()
+        } else {
+            overlay.fallbacks.clone()
+        },
+        size: overlay.size.or(base.size),
+        weight: overlay.weight.or(base.weight),
+        italic: overlay.italic.or(base.italic),
+        color: overlay.color.or(base.color),
+        stroke_color: overlay.stroke_color.or(base.stroke_color),
+        stroke_width: overlay.stroke_width.or(base.stroke_width),
+        opacity: overlay.opacity.or(base.opacity),
+        letter_spacing: overlay.letter_spacing.or(base.letter_spacing),
+        word_spacing: overlay.word_spacing.or(base.word_spacing),
+        decorations: if overlay.decorations.is_empty() {
+            base.decorations.clone()
+        } else {
+            overlay.decorations.clone()
+        },
+        baseline: overlay.baseline.or(base.baseline),
+    }
+}
+
+fn collect_styled_text_leaves(
+    content: &[StructuredTextContent],
+    inherited: &StructuredTextStyle,
+    leaves: &mut Vec<(String, StructuredTextStyle)>,
+) {
+    for node in content {
+        match node {
+            StructuredTextContent::Literal(text) => leaves.push((text.clone(), inherited.clone())),
+            StructuredTextContent::Part(part) => {
+                let style = merge_text_style(inherited, &part.style);
+                collect_styled_text_leaves(&part.content, &style, leaves);
+            }
+        }
+    }
+}
+
+fn typst_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(font) = &style.font {
+        let font = escape_typst_string(font);
+        args.push(format!("font: \"{font}\""));
+    }
+    if let Some(size) = style.size {
+        args.push(format!("size: {size}pt"));
+    }
+    if let Some(weight) = style.weight {
+        args.push(format!("weight: {weight}"));
+    }
+    if style.italic == Some(true) {
+        args.push("style: \"italic\"".to_string());
+    }
+    if let Some(color) = style.color {
+        args.push(format!("fill: rgb(\"{}\")", color_to_hex(color)));
+    }
+    if let Some(spacing) = style.letter_spacing {
+        args.push(format!("tracking: {spacing}pt"));
+    }
+    if let Some(spacing) = style.word_spacing {
+        args.push(format!("spacing: {spacing}pt"));
+    }
+    args
+}
+
+fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let content = if math {
+        let text = text.trim();
+        if text.is_empty() {
+            return String::new();
+        }
+        format!("${text}$")
+    } else {
+        format!("#text(\"{}\")", escape_typst_string(text))
+    };
+    let args = typst_style_arguments(style);
+    let mut content = if args.is_empty() {
+        content
+    } else {
+        format!("#text({})[{content}]", args.join(", "))
+    };
+    for decoration in &style.decorations {
+        content = match decoration.as_str() {
+            "underline" => format!("#underline[{content}]"),
+            "strike" | "strikethrough" => format!("#strike[{content}]"),
+            _ => content,
+        };
+    }
+    if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
+        content = format!("#move(dy: {}pt)[{content}]", -baseline);
+    }
+    content
+}
+
+/// Compile structured leaves without discarding the semantic style stack.
+/// Math delimiters are tracked across part boundaries, so a styled nested
+/// part may safely live inside a `$...$` expression.
+fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String {
+    let mut raw_leaves = Vec::new();
+    collect_styled_text_leaves(
+        &spec.content,
+        &StructuredTextStyle::default(),
+        &mut raw_leaves,
+    );
+    // Typst ignores ordinary spaces inside math. At compositional boundaries,
+    // however, users naturally write `part("x"), " dot ..."` and expect that
+    // leading/trailing space to remain visible. Record those boundaries so we
+    // can emit a non-weak gap between inline math runs. Keeping the gap outside
+    // each run prevents Typst from discarding it at the edge of a locally
+    // styled part. Use an absolute length derived from the resolved font size:
+    // markup outside math would otherwise resolve `em` against Typst's default
+    // text size instead of this Text's configured size.
+    let mut gap_before = vec![false; raw_leaves.len()];
+    let mut in_math = false;
+    let mut escaped = false;
+    for index in 0..raw_leaves.len().saturating_sub(1) {
+        for character in raw_leaves[index].0.chars() {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '$' {
+                in_math = !in_math;
+            }
+        }
+        if !in_math {
+            continue;
+        }
+        let left_has_space = raw_leaves[index]
+            .0
+            .ends_with(|character| character == ' ' || character == '\t');
+        let right_has_space = raw_leaves[index + 1]
+            .0
+            .starts_with(|character| character == ' ' || character == '\t');
+        if left_has_space || right_has_space {
+            let trimmed_left_len = raw_leaves[index].0.trim_end_matches([' ', '\t']).len();
+            raw_leaves[index].0.truncate(trimmed_left_len);
+            raw_leaves[index + 1].0 = raw_leaves[index + 1]
+                .0
+                .trim_start_matches([' ', '\t'])
+                .to_string();
+            gap_before[index + 1] = true;
+        }
+    }
+    // A semantic part must not become a typographic boundary. Coalesce
+    // adjacent leaves with the same resolved style so a structured equation
+    // is shaped exactly like the equivalent single string, including math
+    // operator spacing and kerning.
+    let mut leaves: Vec<(String, StructuredTextStyle, bool)> = Vec::new();
+    for ((text, style), gap_before) in raw_leaves.into_iter().zip(gap_before) {
+        if let Some((previous, previous_style, _)) = leaves.last_mut()
+            && !gap_before
+            && *previous_style == style
+        {
+            previous.push_str(&text);
+        } else {
+            leaves.push((text, style, gap_before));
+        }
+    }
+    let mut output = String::new();
+    let mut in_math = false;
+    let append_chunk = |output: &mut String, chunk: String| {
+        if chunk.is_empty() {
+            return;
+        }
+        // Two adjacent inline-math fragments would produce `$$`, which Typst
+        // parses as block math. A zero-width markup separator preserves the
+        // inline flow and keeps semantic part boundaries measurable.
+        if output.ends_with('$') && chunk.starts_with('$') {
+            output.push_str("#h(0pt)");
+        }
+        output.push_str(&chunk);
+    };
+    for (text, style, gap_before) in leaves {
+        if gap_before && in_math {
+            output.push_str(&format!("#h({}pt, weak: false)", font_size * 0.28));
+        }
+        let mut chunk = String::new();
+        let mut escaped = false;
+        for character in text.chars() {
+            if escaped {
+                if character == '$' {
+                    chunk.push('$');
+                } else {
+                    chunk.push('\\');
+                    chunk.push(character);
+                }
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == '$' {
+                append_chunk(&mut output, styled_typst_chunk(&chunk, in_math, &style));
+                chunk.clear();
+                in_math = !in_math;
+            } else {
+                chunk.push(character);
+            }
+        }
+        if escaped {
+            chunk.push('\\');
+        }
+        append_chunk(&mut output, styled_typst_chunk(&chunk, in_math, &style));
+    }
+    output
+}
+
 fn color_to_hex(color: gaanim_core::peniko::Color) -> String {
     let rgba = color.to_rgba8();
     format!("{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b)
@@ -232,60 +452,115 @@ pub(crate) fn text_inline_typst_source(text: &str, color: gaanim_core::peniko::C
     )
 }
 
-pub(crate) fn paragraph_typst_source(
-    text: &str,
-    options: &ParagraphOptions,
+/// Compose every structured text role through one Typst vector pipeline. The
+/// optional width is the offer from Layout v2 (or the scene safe frame for a
+/// free text object); it is never stored as an outer text box.
+fn structured_text_typst_source(
+    spec: &StructuredTextSpec,
+    offered_width: Option<f64>,
     font_size: f64,
+    font_family: &str,
     color: gaanim_core::peniko::Color,
 ) -> String {
-    let width = options.width.unwrap_or(640.0).max(1.0);
-    let leading = font_size * (options.line_spacing.max(1.0) - 1.0);
-    let (alignment, justify) = match options.align {
-        TextAlign::Left => ("left", false),
-        TextAlign::Center => ("center", false),
-        TextAlign::Right => ("right", false),
-        TextAlign::Justify => ("left", true),
+    let width = match spec.flow.wrap {
+        StructuredTextWrap::NoWrap => None,
+        StructuredTextWrap::Auto => offered_width.map(|width| width.max(1.0)),
+        StructuredTextWrap::Width(limit) => Some(
+            offered_width
+                .map(|width| width.min(limit))
+                .unwrap_or(limit)
+                .max(1.0),
+        ),
+    };
+    let page_width = width
+        .map(|width| format!("{width}pt"))
+        .unwrap_or_else(|| "auto".to_string());
+    let leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0);
+    let (alignment, justify) = match spec.flow.align {
+        gaanim_text::prelude::TextAlign::Left => ("left", false),
+        gaanim_text::prelude::TextAlign::Center => ("center", false),
+        gaanim_text::prelude::TextAlign::Right => ("right", false),
+        gaanim_text::prelude::TextAlign::Justify => ("left", true),
+    };
+    let direction = match spec.flow.direction {
+        StructuredTextDirection::Auto => "auto",
+        StructuredTextDirection::Ltr => "ltr",
+        StructuredTextDirection::Rtl => "rtl",
+    };
+    let weight = spec
+        .style
+        .weight
+        .map(|weight| format!(", weight: {weight}"))
+        .unwrap_or_default();
+    let italic = if spec.style.italic == Some(true) {
+        ", style: \"italic\""
+    } else {
+        ""
+    };
+    let tracking = spec
+        .style
+        .letter_spacing
+        .map(|spacing| format!(", tracking: {spacing}pt"))
+        .unwrap_or_default();
+    let family = spec.style.font.as_deref().unwrap_or(font_family);
+    let font = if spec.style.fallbacks.is_empty() {
+        format!("font: \"{}\", ", escape_typst_string(family))
+    } else {
+        let families = std::iter::once(family)
+            .chain(spec.style.fallbacks.iter().map(String::as_str))
+            .map(|family| format!("\"{}\"", escape_typst_string(family)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("font: ({families}), ")
     };
     let hex = color_to_hex(color);
-    let content = format!("#align({alignment})[{}]", typst_inline_content(text));
-    let content = if let Some(max_lines) = options.max_lines.filter(|lines| *lines > 0) {
-        let height = font_size * options.line_spacing.max(1.0) * max_lines as f64;
-        let clip = matches!(options.overflow, ParagraphOverflow::Clip);
+    let content = structured_typst_content(spec, font_size);
+    let content = format!("#align({alignment})[{content}]");
+    let content = if let Some(max_lines) = spec.flow.max_lines {
+        let height = font_size * spec.flow.line_spacing.max(0.1) * max_lines as f64;
+        let clip = !matches!(spec.flow.overflow, StructuredTextOverflow::Visible);
+        // Typst currently supplies the clip for both clip and ellipsis. The
+        // structured overflow value remains distinct in the cache/spec so a
+        // renderer-level ellipsis marker can be added without an API change.
         format!("#block(width: 100%, height: {height}pt, clip: {clip})[{content}]")
     } else {
         content
     };
     format!(
-        "#set page(width: {width}pt, height: auto, margin: 0pt)\n\
-         #set text(fill: rgb(\"{hex}\"))\n\
+        "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{weight}{italic}{tracking})\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
          {content}",
+        spec.flow.hyphenate,
     )
 }
 
-fn responsive_paragraph_measure(
-    spec: &ObjectSpec,
+fn compiled_text_measure(
+    object: &ObjectSpec,
     text_config: &gaanim_text::prelude::TextConfig,
-) -> Option<CompiledParagraphMeasure> {
-    let SpawnKind::Paragraph { text, options } = &spec.kind else {
+) -> Option<CompiledTextMeasure> {
+    let SpawnKind::Text(spec) = &object.kind else {
         return None;
     };
-    if options.width.is_some() {
-        return None;
-    }
-    let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-    let color = match &spec.fill {
+    let role = &text_config.roles[&spec.role];
+    let math = &text_config.roles[&gaanim_text::prelude::TextRole::Math];
+    let color = match &object.fill {
         Some(gaanim_core::peniko::Brush::Solid(color)) => *color,
-        _ => body.fill_color,
+        _ => spec.style.color.unwrap_or(role.fill_color),
     };
-    Some(CompiledParagraphMeasure {
-        text: text.clone(),
-        options: options.clone(),
-        font_size: options.font_size.unwrap_or(body.size).max(1.0),
-        font_family: options
-            .font_family
+    Some(CompiledTextMeasure {
+        spec: spec.clone(),
+        font_size: spec.style.size.unwrap_or(role.size).max(1.0),
+        font_family: spec
+            .style
+            .font
             .clone()
-            .unwrap_or_else(|| body.font_family.clone()),
+            .unwrap_or_else(|| role.font_family.clone()),
+        math_font: spec
+            .style
+            .math_font
+            .clone()
+            .unwrap_or_else(|| math.font_family.clone()),
         color,
     })
 }
@@ -297,7 +572,7 @@ struct CompiledLayoutTree {
     item_style_by_id: BTreeMap<gaanim_layout::LayoutId, gaanim_layout::LayoutItemStyle>,
     children_by_id: BTreeMap<gaanim_layout::LayoutId, Vec<gaanim_layout::LayoutId>>,
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
-    paragraphs: BTreeMap<gaanim_layout::LayoutId, CompiledParagraphMeasure>,
+    texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
 }
 
 fn collect_compiled_layout_node(
@@ -312,7 +587,7 @@ fn collect_compiled_layout_node(
     item_style_by_id: &mut BTreeMap<gaanim_layout::LayoutId, gaanim_layout::LayoutItemStyle>,
     children_by_id: &mut BTreeMap<gaanim_layout::LayoutId, Vec<gaanim_layout::LayoutId>>,
     fixed: &mut BTreeMap<gaanim_layout::LayoutId, DVec2>,
-    paragraphs: &mut BTreeMap<gaanim_layout::LayoutId, CompiledParagraphMeasure>,
+    texts: &mut BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
     visiting: &mut HashSet<ObjectId>,
 ) -> Option<gaanim_layout::LayoutNode> {
     assert!(
@@ -346,7 +621,7 @@ fn collect_compiled_layout_node(
                 item_style_by_id,
                 children_by_id,
                 fixed,
-                paragraphs,
+                texts,
                 visiting,
             ) else {
                 continue;
@@ -372,11 +647,11 @@ fn collect_compiled_layout_node(
             id,
             DVec2::new(bounds.width().max(0.0), bounds.height().max(0.0)),
         );
-        if let Some(paragraph) = object_specs
+        if let Some(text) = object_specs
             .get(&source)
-            .and_then(|spec| responsive_paragraph_measure(spec, text_config))
+            .and_then(|spec| compiled_text_measure(spec, text_config))
         {
-            paragraphs.insert(id, paragraph);
+            texts.insert(id, text);
         }
         gaanim_layout::LayoutNode::leaf(id)
     };
@@ -397,7 +672,7 @@ fn compile_layout_tree(
     let mut item_style_by_id = BTreeMap::new();
     let mut children_by_id = BTreeMap::new();
     let mut fixed = BTreeMap::new();
-    let mut paragraphs = BTreeMap::new();
+    let mut texts = BTreeMap::new();
     let root = collect_compiled_layout_node(
         root_source,
         snapshots,
@@ -410,7 +685,7 @@ fn compile_layout_tree(
         &mut item_style_by_id,
         &mut children_by_id,
         &mut fixed,
-        &mut paragraphs,
+        &mut texts,
         &mut HashSet::new(),
     )?;
     Some(CompiledLayoutTree {
@@ -420,7 +695,7 @@ fn compile_layout_tree(
         item_style_by_id,
         children_by_id,
         fixed,
-        paragraphs,
+        texts,
     })
 }
 
@@ -471,7 +746,7 @@ impl Canvas {
         y: f64,
         color: PenikoColor,
     ) -> MobjectRef {
-        let label = builder.body(text);
+        let label = builder.spawn_text(text, gaanim_text::prelude::TextRole::Body);
         if let Some(state) = builder.states.get_mut(label.id) {
             state.transform = state.transform.shift_2d(x, y);
             builder
@@ -927,7 +1202,7 @@ impl Canvas {
 
         // Numbers and labels as billboarded text
         let mut add_text = |text: &str, x: f64, y: f64, z: f64, color: peniko::Color| {
-            let label = builder.body(text);
+            let label = builder.spawn_text(text, gaanim_text::prelude::TextRole::Body);
             // Clone child info before mutable borrow ends
             let child_entities: Vec<bevy::prelude::Entity> = builder
                 .states
@@ -1204,7 +1479,7 @@ impl Canvas {
         let mut scene_ids: Vec<SceneId> = Vec::new();
         let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
         let mut object_specs: HashMap<ObjectId, ObjectSpec> = HashMap::new();
-        let mut responsive_paragraph_widths: HashMap<ObjectId, f64> = HashMap::new();
+        let mut responsive_text_widths: HashMap<ObjectId, f64> = HashMap::new();
         let mut layout_versions: HashMap<ObjectId, u64> = HashMap::new();
         let mut layout_snapshots: HashMap<ObjectId, LayoutTreeSnapshot> = HashMap::new();
         let mut object_scopes: HashMap<ObjectId, CompiledObjectScope> = HashMap::new();
@@ -1242,7 +1517,7 @@ impl Canvas {
                 previous_scene,
                 &mut id_map,
                 &mut object_specs,
-                &mut responsive_paragraph_widths,
+                &mut responsive_text_widths,
                 &mut layout_versions,
                 &mut layout_snapshots,
                 &mut object_scopes,
@@ -1335,7 +1610,7 @@ impl Canvas {
         previous_scene: Option<SceneId>,
         id_map: &mut HashMap<ObjectId, ObjectId>,
         object_specs: &mut HashMap<ObjectId, ObjectSpec>,
-        responsive_paragraph_widths: &mut HashMap<ObjectId, f64>,
+        responsive_text_widths: &mut HashMap<ObjectId, f64>,
         layout_versions: &mut HashMap<ObjectId, u64>,
         layout_snapshots: &mut HashMap<ObjectId, LayoutTreeSnapshot>,
         object_scopes: &mut HashMap<ObjectId, CompiledObjectScope>,
@@ -1363,9 +1638,9 @@ impl Canvas {
                     object_specs.insert(spec.id, spec.clone());
                     if matches!(
                         &spec.kind,
-                        SpawnKind::Paragraph { options, .. } if options.width.is_none()
+                        SpawnKind::Text(text) if !matches!(text.flow.wrap, StructuredTextWrap::NoWrap)
                     ) {
-                        responsive_paragraph_widths.insert(spec.id, frame_bounds.width().max(1.0));
+                        responsive_text_widths.insert(spec.id, frame_bounds.width().max(1.0));
                     }
                     if spec.defer_visibility_until_play {
                         deferred_visibility.insert(spec.id);
@@ -1510,6 +1785,40 @@ impl Canvas {
                             duration: *duration,
                             rate_func: RateFunc::ThereAndBack,
                             delay: 0.0,
+                        })
+                        .collect();
+                    builder.play_parallel(anims);
+                }
+                Op::FragmentEmphasis {
+                    target,
+                    fragment,
+                    occurrence,
+                    kind,
+                    duration,
+                } => {
+                    let children =
+                        Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence);
+                    let count = children.len();
+                    let anims = children
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, target)| AnimationBuilder {
+                            target,
+                            anim_type: match kind.as_str() {
+                                "wiggle" | "wave" => AnimationType::Wiggle,
+                                "highlight" => AnimationType::Circumscribe { color: None },
+                                _ => AnimationType::Indicate {
+                                    color: None,
+                                    scale_factor: if kind == "pulse" { 1.16 } else { 1.1 },
+                                },
+                            },
+                            duration: *duration,
+                            rate_func: RateFunc::ThereAndBack,
+                            delay: if kind == "wave" && count > 1 {
+                                index as f64 * duration * 0.35 / (count - 1) as f64
+                            } else {
+                                0.0
+                            },
                         })
                         .collect();
                     builder.play_parallel(anims);
@@ -2215,7 +2524,7 @@ impl Canvas {
                         viewport,
                         &CompiledLayoutMeasure {
                             fixed: tree.fixed.clone(),
-                            paragraphs: tree.paragraphs.clone(),
+                            texts: tree.texts.clone(),
                             font_registry: builder.font_registry,
                         },
                         &[],
@@ -2245,15 +2554,17 @@ impl Canvas {
                             id_map.get(source).copied().map(|actual| (*id, actual))
                         })
                         .collect();
-                    let mut paragraph_crossfades = Vec::new();
+                    let mut text_crossfades = Vec::new();
                     for (layout_id, source) in &tree.source_by_id {
-                        if !tree.paragraphs.contains_key(layout_id) {
+                        if !tree.texts.contains_key(layout_id) {
                             continue;
                         }
-                        let Some(paragraph_spec) = object_specs
+                        let Some(text_spec) = object_specs
                             .get(source)
                             .filter(|spec| {
-                                responsive_paragraph_measure(spec, text_config).is_some()
+                                compiled_text_measure(spec, text_config).is_some_and(|text| {
+                                    !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap)
+                                })
                             })
                             .cloned()
                         else {
@@ -2266,18 +2577,22 @@ impl Canvas {
                             continue;
                         };
                         let width = target_box.bounds.width().max(1.0);
-                        let current_width = responsive_paragraph_widths
+                        let current_width = responsive_text_widths
                             .get(source)
                             .copied()
                             .unwrap_or_else(|| frame_bounds.width().max(1.0));
                         if (width - current_width).abs() <= 1.0e-6 {
                             continue;
                         }
-                        let mut materialized = paragraph_spec;
-                        let SpawnKind::Paragraph { options, .. } = &mut materialized.kind else {
+                        let mut materialized = text_spec;
+                        let SpawnKind::Text(text) = &mut materialized.kind else {
                             continue;
                         };
-                        options.width = Some(width);
+                        text.flow.wrap = StructuredTextWrap::Width(match text.flow.wrap {
+                            StructuredTextWrap::Width(limit) => limit.min(width),
+                            StructuredTextWrap::Auto => width,
+                            StructuredTextWrap::NoWrap => continue,
+                        });
                         let replacement = Self::spawn_one(
                             builder,
                             &materialized,
@@ -2286,10 +2601,10 @@ impl Canvas {
                             text_config,
                             scene_background,
                         );
-                        paragraph_crossfades.push((member, replacement.id));
+                        text_crossfades.push((member, replacement.id));
                         materialized_by_id.insert(*layout_id, replacement.id);
                         id_map.insert(*source, replacement.id);
-                        responsive_paragraph_widths.insert(*source, width);
+                        responsive_text_widths.insert(*source, width);
                     }
 
                     // Rebuild every direct group edge in the current tree. A
@@ -2476,7 +2791,7 @@ impl Canvas {
                     } else {
                         Vec::new()
                     };
-                    for (old, new) in paragraph_crossfades {
+                    for (old, new) in text_crossfades {
                         animations.push(AnimationBuilder {
                             target: old,
                             anim_type: AnimationType::FadeOut,
@@ -3937,6 +4252,30 @@ impl Canvas {
             AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
             },
+            AnimationType::TextTransition {
+                target,
+                copy,
+                semantic_pairs,
+            } => AnimationType::TextTransition {
+                target: *id_map.get(target)?,
+                copy: *copy,
+                semantic_pairs: semantic_pairs.clone(),
+            },
+            AnimationType::TextSelectionTransform {
+                target,
+                source_fragment,
+                source_occurrence,
+                target_fragment,
+                target_occurrence,
+                copy,
+            } => AnimationType::TextSelectionTransform {
+                target: *id_map.get(target)?,
+                source_fragment: source_fragment.clone(),
+                source_occurrence: *source_occurrence,
+                target_fragment: target_fragment.clone(),
+                target_occurrence: *target_occurrence,
+                copy: *copy,
+            },
             AnimationType::MoveAlongPath { path, path_target } => AnimationType::MoveAlongPath {
                 path: path.clone(),
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
@@ -4792,127 +5131,37 @@ impl Canvas {
                 Self::post_apply(builder, id, spec, id_map, frame_bounds);
                 mref
             }
-            SpawnKind::Text(t) => {
-                let role = gaanim_text::prelude::TextRole::Body;
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
-                let color = match styled_spec.fill {
-                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
-                    _ => text_config.roles[&role].fill_color,
-                };
-                let has_inline_math = split_text_math(t)
-                    .iter()
-                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
-                let mr = if has_inline_math {
-                    let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t, color);
-                    builder.typst(
-                        &source,
-                        false,
-                        Some(&style.font_family),
-                        None,
-                        Some(style.size),
-                        None,
-                    )
-                } else {
-                    builder.spawn_text(t, role)
-                };
-                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, &styled_spec);
-                mr
-            }
-            SpawnKind::Paragraph { text, options } => {
-                let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                let font_size = options.font_size.unwrap_or(body.size).max(1.0);
-                let font_family = options.font_family.as_deref().unwrap_or(&body.font_family);
-                let mut paragraph_spec = spec.clone();
-                if !paragraph_spec.fill_overridden {
-                    paragraph_spec.fill = Some(gaanim_core::peniko::Brush::Solid(body.fill_color));
-                    paragraph_spec.fill_overridden = true;
+            SpawnKind::Text(text) => {
+                let role = &text_config.roles[&text.role];
+                let mut styled_spec =
+                    Self::with_default_text_fill(spec, text.style.color.unwrap_or(role.fill_color));
+                if let Some(opacity) = text.style.opacity {
+                    styled_spec.opacity *= opacity.clamp(0.0, 1.0);
                 }
-                let color = match paragraph_spec.fill {
-                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
-                    _ => body.fill_color,
-                };
-                let mut resolved_options = options.clone();
-                if resolved_options.width.is_none() {
-                    resolved_options.width = Some(frame_bounds.width().max(1.0));
+                if !styled_spec.stroke_overridden
+                    && let (Some(color), Some(width)) =
+                        (text.style.stroke_color, text.style.stroke_width)
+                {
+                    styled_spec.stroke =
+                        Some((gaanim_core::peniko::Brush::Solid(color), width.max(0.0)));
                 }
-                let source = paragraph_typst_source(text, &resolved_options, font_size, color);
+                let compiled = compiled_text_measure(&styled_spec, text_config)
+                    .expect("unified text spawn must produce a text measure");
+                let source = structured_text_typst_source(
+                    text,
+                    Some(frame_bounds.width().max(1.0)),
+                    compiled.font_size,
+                    &compiled.font_family,
+                    compiled.color,
+                );
                 let mr = builder.typst(
                     &source,
                     false,
-                    Some(font_family),
-                    None,
-                    Some(font_size),
-                    None,
+                    Some(&compiled.font_family),
+                    Some(&compiled.math_font),
+                    Some(compiled.font_size),
+                    Some(compiled.font_size),
                 );
-                Self::post_apply(builder, mr.id, &paragraph_spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, &paragraph_spec);
-                mr
-            }
-            SpawnKind::Title(t) => {
-                let role = gaanim_text::prelude::TextRole::Title;
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
-                let color = match styled_spec.fill {
-                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
-                    _ => text_config.roles[&role].fill_color,
-                };
-                let has_inline_math = split_text_math(t)
-                    .iter()
-                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
-                let mr = if has_inline_math {
-                    let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t, color);
-                    builder.typst(
-                        &source,
-                        false,
-                        Some(&style.font_family),
-                        None,
-                        Some(style.size),
-                        None,
-                    )
-                } else {
-                    builder.spawn_text(t, role)
-                };
-                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, &styled_spec);
-                mr
-            }
-            SpawnKind::Subtitle(t) => {
-                let role = gaanim_text::prelude::TextRole::Subtitle;
-                let styled_spec =
-                    Self::with_default_text_fill(spec, text_config.roles[&role].fill_color);
-                let color = match styled_spec.fill {
-                    Some(gaanim_core::peniko::Brush::Solid(c)) => c,
-                    _ => text_config.roles[&role].fill_color,
-                };
-                let has_inline_math = split_text_math(t)
-                    .iter()
-                    .any(|(is_math, c)| *is_math && !c.trim().is_empty());
-                let mr = if has_inline_math {
-                    let style = &text_config.roles[&role];
-                    let source = text_inline_typst_source(t, color);
-                    builder.typst(
-                        &source,
-                        false,
-                        Some(&style.font_family),
-                        None,
-                        Some(style.size),
-                        None,
-                    )
-                } else {
-                    builder.spawn_text(t, role)
-                };
-                Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
-                Self::apply_fragment_fills(builder, mr, &styled_spec);
-                mr
-            }
-            SpawnKind::Equation(f) => {
-                let mr = builder.equation(f);
-                let math = &text_config.roles[&gaanim_text::prelude::TextRole::Math];
-                let styled_spec = Self::with_default_text_fill(spec, math.fill_color);
                 Self::post_apply(builder, mr.id, &styled_spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
@@ -5404,10 +5653,162 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::DrawableHandle;
     use bevy::ecs::world::CommandQueue;
     use gaanim_core::peniko::Brush;
     use gaanim_scene::LocalBounds;
     use gaanim_timeline::snapshot::WorldSnapshot;
+
+    trait UnifiedTextFixture {
+        fn math_text(&mut self, source: &str) -> DrawableHandle;
+        fn test_title(&mut self, source: &str) -> DrawableHandle;
+        fn test_subtitle(&mut self, source: &str) -> DrawableHandle;
+        fn configured_text(
+            &mut self,
+            source: &str,
+            style: gaanim_text::prelude::TextStyle,
+            flow: gaanim_text::prelude::TextFlow,
+        ) -> DrawableHandle;
+    }
+
+    impl UnifiedTextFixture for Canvas {
+        fn math_text(&mut self, source: &str) -> DrawableHandle {
+            self.text(&format!("${source}$"))
+        }
+
+        fn test_title(&mut self, source: &str) -> DrawableHandle {
+            let spec = StructuredTextSpec::new(
+                vec![source.into()],
+                Some(gaanim_text::prelude::TextRole::Title),
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid title fixture");
+            self.text_spec(spec)
+        }
+
+        fn test_subtitle(&mut self, source: &str) -> DrawableHandle {
+            let spec = StructuredTextSpec::new(
+                vec![source.into()],
+                Some(gaanim_text::prelude::TextRole::Subtitle),
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid subtitle fixture");
+            self.text_spec(spec)
+        }
+
+        fn configured_text(
+            &mut self,
+            source: &str,
+            style: gaanim_text::prelude::TextStyle,
+            flow: gaanim_text::prelude::TextFlow,
+        ) -> DrawableHandle {
+            let spec = StructuredTextSpec::new(vec![source.into()], None, style, flow)
+                .expect("valid configured text fixture");
+            self.text_spec(spec)
+        }
+    }
+
+    #[test]
+    fn structured_math_parts_remain_inline_across_semantic_boundaries() {
+        let spec = StructuredTextSpec::new(
+            vec![
+                "$".into(),
+                gaanim_text::prelude::TextPart::new(
+                    "variable",
+                    vec!["x".into()],
+                    StructuredTextStyle::default(),
+                )
+                .into(),
+                " dot 5 = ".into(),
+                gaanim_text::prelude::TextPart::new(
+                    "result",
+                    vec!["25".into()],
+                    StructuredTextStyle::default(),
+                )
+                .into(),
+                "$".into(),
+            ],
+            None,
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("valid structured equation");
+
+        let source = structured_typst_content(&spec, 32.0);
+        assert_eq!(
+            source,
+            "$x$#h(8.96pt, weak: false)$dot 5 =$#h(8.96pt, weak: false)$25$"
+        );
+        assert!(!source.contains("$$"));
+        assert!(!source.contains("$ "));
+        assert!(!source.contains(" $"));
+        assert!(!source.contains("#h(0pt)"));
+    }
+
+    #[test]
+    fn structured_math_boundary_spaces_increase_the_compiled_width() {
+        let equation = |with_boundary_spaces: bool| {
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "variable",
+                        vec!["5".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    if with_boundary_spaces {
+                        " 5 = ".into()
+                    } else {
+                        "5 =".into()
+                    },
+                    gaanim_text::prelude::TextPart::new(
+                        "result",
+                        vec!["25".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    "$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured equation")
+        };
+        let mut canvas = Canvas::new(640, 360);
+        canvas.text_spec(equation(false));
+        canvas.text_spec(equation(true));
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let mut widths = world
+            .query::<(&LocalBounds, Option<&bevy::prelude::ChildOf>)>()
+            .iter(&world)
+            .filter_map(|(bounds, parent)| parent.is_none().then_some(bounds.0.width()))
+            .collect::<Vec<_>>();
+        widths.sort_by(f64::total_cmp);
+        assert_eq!(
+            widths.len(),
+            2,
+            "expected two compiled text roots: {widths:?}"
+        );
+        assert!(
+            widths[1] > widths[0] + 6.0,
+            "part-boundary spaces must add visible width: {widths:?}"
+        );
+    }
 
     #[test]
     fn camera_and_drawable_play_compile_at_the_same_start_time() {
@@ -5597,16 +5998,17 @@ mod tests {
     #[test]
     fn justified_paragraph_compiles_to_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
-        canvas.paragraph(
+        canvas.configured_text(
             "Este párrafo debe ocupar varias líneas y conservar glifos vectoriales.",
-            ParagraphOptions {
-                width: Some(180.0),
-                align: TextAlign::Justify,
+            gaanim_text::prelude::TextStyle {
+                size: Some(28.0),
+                ..Default::default()
+            },
+            gaanim_text::prelude::TextFlow {
+                wrap: gaanim_text::prelude::TextWrap::Width(180.0),
+                align: gaanim_text::prelude::TextAlign::Justify,
                 line_spacing: 1.25,
-                font_size: Some(28.0),
-                font_family: None,
-                max_lines: None,
-                overflow: ParagraphOverflow::Clip,
+                ..Default::default()
             },
         );
 
@@ -5631,18 +6033,27 @@ mod tests {
 
     #[test]
     fn paragraph_max_lines_emits_a_clipped_text_box() {
-        let source = paragraph_typst_source(
-            "A bounded paragraph",
-            &ParagraphOptions {
-                width: Some(240.0),
-                align: TextAlign::Left,
-                line_spacing: 1.2,
-                font_size: Some(30.0),
-                font_family: None,
-                max_lines: Some(2),
-                overflow: ParagraphOverflow::Clip,
+        let spec = StructuredTextSpec::new(
+            vec!["A bounded paragraph".into()],
+            None,
+            gaanim_text::prelude::TextStyle {
+                size: Some(30.0),
+                ..Default::default()
             },
+            gaanim_text::prelude::TextFlow {
+                wrap: gaanim_text::prelude::TextWrap::Width(240.0),
+                line_spacing: 1.2,
+                max_lines: Some(2),
+                overflow: gaanim_text::prelude::TextOverflow::Clip,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let source = structured_text_typst_source(
+            &spec,
+            Some(240.0),
             30.0,
+            "New Computer Modern",
             gaanim_core::peniko::Color::WHITE,
         );
 
@@ -5654,7 +6065,7 @@ mod tests {
     fn equation_fragment_fill_overrides_matching_vector_glyphs() {
         let highlight = gaanim_core::peniko::Color::from_rgb8(255, 180, 0);
         let mut canvas = Canvas::new(640, 360);
-        canvas.equation("E = m c^2").color_by("m", highlight);
+        canvas.math_text("E = m c^2").color_by("m", highlight);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5710,10 +6121,10 @@ mod tests {
         canvas
             .set_theme("paper")
             .expect("paper is a built-in theme");
-        canvas.title("Heading");
-        canvas.subtitle("Subheading");
+        canvas.test_title("Heading");
+        canvas.test_subtitle("Subheading");
         canvas.text("Body copy");
-        canvas.equation("x = y");
+        canvas.math_text("x = y");
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5742,9 +6153,13 @@ mod tests {
     #[test]
     fn fragment_transform_moves_selected_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
-        let source = canvas.equation("E = m c^2");
-        let target = canvas.equation("p = m v");
-        source.select("m").transform_to(&target.select("m"), 0.8);
+        let source = canvas.math_text("E = m c^2");
+        let target = canvas.math_text("p = m v");
+        let morph = source
+            .select("m")
+            .morph_to(&target.select("m"), 0.8)
+            .expect("selections share a Canvas");
+        canvas.play(vec![morph]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5771,7 +6186,7 @@ mod tests {
     fn named_fragment_tag_resolves_to_a_vector_selection() {
         let highlight = gaanim_core::peniko::Color::from_rgb8(64, 180, 255);
         let mut canvas = Canvas::new(640, 360);
-        let formula = canvas.equation("E = m c^2").define_tag("mass", "m", None);
+        let formula = canvas.math_text("E = m c^2").define_tag("mass", "m", None);
         formula
             .tag("mass")
             .expect("registered tag should resolve")
@@ -5802,12 +6217,13 @@ mod tests {
         let strike_color = PenikoColor::WHITE;
         let mut canvas = Canvas::new(640, 360);
         let formula = canvas
-            .equation("x + 3 = 7")
+            .math_text("x + 3 = 7")
             .define_tag("constant", "3", None);
-        formula
+        let cancel = formula
             .tag("constant")
             .expect("registered tag should resolve")
             .cancel(0.6);
+        canvas.play(vec![cancel]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5820,30 +6236,148 @@ mod tests {
 
         let mut world = world;
         queue.apply(&mut world);
-        let mut query = world.query::<(&gaanim_scene::StrokeBrush, &LocalBounds)>();
-        let bounds = query
+        let selected_bounds = {
+            let mut query = world.query::<(&gaanim_scene::components::TextSpan, &LocalBounds)>();
+            query
+                .iter(&world)
+                .find_map(|(span, bounds)| (span.character == '3').then_some(bounds.0))
+                .expect("the selected digit should retain its glyph bounds")
+        };
+        let strike_bounds = {
+            let mut query = world.query::<(&gaanim_scene::StrokeBrush, &LocalBounds)>();
+            query
+                .iter(&world)
+                .find_map(|(stroke, bounds)| {
+                    matches!(&stroke.brush, Some(gaanim_core::peniko::Brush::Solid(color)) if *color == strike_color)
+                        .then_some(bounds.0)
+                })
+                .expect("cancel should spawn a white strikethrough")
+        };
+        let center_delta = strike_bounds.center() - selected_bounds.center();
+        assert!(
+            center_delta.length() < 3.0,
+            "cancel strike center {:?} should overlap selected glyph center {:?}",
+            strike_bounds.center(),
+            selected_bounds.center()
+        );
+        assert!(strike_bounds.width() > 0.0 && strike_bounds.height() > 0.0);
+    }
+
+    #[test]
+    fn cancel_mark_fades_when_text_step_replaces_its_source() {
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.text_spec(
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "variable",
+                        vec!["x".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    " + ".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "constant",
+                        vec!["3".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    " = ".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "result",
+                        vec!["7".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    "$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid source equation"),
+        );
+        let target = canvas.text_spec(
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "variable",
+                        vec!["x".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    " = ".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "result",
+                        vec!["4".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    "$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid target equation"),
+        );
+        canvas.play(vec![
+            source.tag("constant").expect("constant tag").cancel(0.6),
+        ]);
+        canvas.play(vec![source.step_to(&target, None, 0.8).unwrap()]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let strike = world
+            .query::<(
+                bevy::prelude::Entity,
+                &gaanim_scene::StrokeBrush,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
             .iter(&world)
-            .find_map(|(stroke, bounds)| {
-                matches!(&stroke.brush, Some(gaanim_core::peniko::Brush::Solid(color)) if *color == strike_color)
-                    .then_some(bounds.0)
+            .find_map(|(entity, stroke, parent)| {
+                (parent.is_none() && stroke.brush.is_some()).then_some(entity)
             })
-            .expect("cancel should spawn a coral strikethrough");
-        assert!(bounds.center().x.abs() < 100.0);
-        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
+            .expect("cancel should spawn a root strike");
+
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.4);
+        assert!(
+            world
+                .get::<Opacity>(strike)
+                .is_some_and(|opacity| opacity.0 < 0.01),
+            "the cancellation mark must leave with the replaced source text"
+        );
     }
 
     #[test]
     fn tagged_equation_transform_moves_shared_tags() {
         let mut canvas = Canvas::new(640, 360);
         let source = canvas
-            .equation("E = m c^2")
+            .math_text("E = m c^2")
             .define_tag("mass", "m", None)
             .at(0.0, 70.0);
         let target = canvas
-            .equation("p = m v")
+            .math_text("p = m v")
             .define_tag("mass", "m", None)
             .at(0.0, -90.0);
-        canvas.transform_equation_tags(&source, &target, None, 0.8);
+        let copy = source
+            .tag("mass")
+            .unwrap()
+            .copy_to(&target.tag("mass").unwrap(), 0.8)
+            .expect("selections share a Canvas");
+        canvas.play(vec![copy]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5869,11 +6403,13 @@ mod tests {
     #[test]
     fn equation_expansion_morphs_semantic_terms_without_cross_fading_pairs() {
         let mut canvas = Canvas::new(640, 360);
-        let source = canvas.equation("E = m c^2").define_tag("mass", "m", None);
-        let target = canvas
-            .equation("E = (m_1 + m_2) c^2")
-            .define_tag("mass", "(m_1 + m_2)", None);
-        canvas.expand_equation_tag(&source, &target, "mass", 0.8);
+        let source = canvas.math_text("E = m c^2").define_tag("mass", "m", None);
+        let target =
+            canvas
+                .math_text("E = (m_1 + m_2) c^2")
+                .define_tag("mass", "(m_1 + m_2)", None);
+        let expansion = source.expand_to(&target, "mass", 0.8).unwrap();
+        canvas.play(vec![expansion]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -5944,14 +6480,18 @@ mod tests {
     #[test]
     fn equation_step_prioritizes_semantic_tags_then_matches_common_glyphs() {
         let mut canvas = Canvas::new(640, 360);
-        let source = canvas.equation("x + 3 = 7").define_tag("result", "7", None);
-        let target = canvas.equation("x = 4").define_tag("result", "4", None);
-        canvas.step_equation_with_matches(
-            &source,
-            &target,
-            Some(vec![("result".to_string(), "result".to_string())]),
-            0.8,
-        );
+        let source = canvas
+            .math_text("x + 3 = 7")
+            .define_tag("result", "7", None);
+        let target = canvas.math_text("x = 4").define_tag("result", "4", None);
+        let step = source
+            .step_to(
+                &target,
+                Some(vec![("result".to_string(), "result".to_string())]),
+                0.8,
+            )
+            .unwrap();
+        canvas.play(vec![step]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -6028,10 +6568,38 @@ mod tests {
     #[test]
     fn equation_step_handoff_is_exact_and_target_remains_animatable() {
         let mut canvas = Canvas::new(640, 360);
-        let source = canvas.equation("x + 3 = 7").define_tag("result", "7", None);
-        let target = canvas.equation("x = 4").define_tag("result", "4", None);
-        canvas.step_equation(&source, &target, 0.8);
-        canvas.play(vec![target.indicate(0.4)]);
+        let equation = |middle: &str, result: &str| {
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "variable",
+                        vec!["x".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    middle.into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "result",
+                        vec![result.into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    "$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured equation")
+        };
+        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scaled(2.0);
+        let target = canvas.text_spec(equation(" = ", "5")).scaled(2.0);
+        let step = source.step_to(&target, None, 0.8).unwrap();
+        canvas.play(vec![step]);
+        canvas.play(vec![
+            target.tag("result").expect("result tag").indicate(0.4),
+        ]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -6083,20 +6651,148 @@ mod tests {
                 .count()
                 >= 3
         );
+
+        timeline.seek(&mut world, 1.2);
+        let child_opacities: Vec<Vec<f32>> = world
+            .query::<(
+                Option<&bevy::prelude::ChildOf>,
+                Option<&bevy::prelude::Children>,
+            )>()
+            .iter(&world)
+            .filter_map(|(parent, children)| {
+                (parent.is_none()).then_some(children?).map(|children| {
+                    children
+                        .iter()
+                        .filter_map(|child| world.get::<Opacity>(child).map(|opacity| opacity.0))
+                        .collect()
+                })
+            })
+            .collect();
+        assert!(
+            child_opacities
+                .iter()
+                .any(|values| !values.is_empty() && values.iter().all(|value| *value > 0.99)),
+            "all target glyphs must remain visible after animating one selection: {child_opacities:?}"
+        );
+    }
+
+    #[test]
+    fn text_step_does_not_mutate_unrelated_written_text() {
+        let mut canvas = Canvas::new(640, 360);
+        let title = canvas
+            .text_spec(
+                StructuredTextSpec::new(
+                    vec!["Resolver paso a paso".into()],
+                    Some(gaanim_text::prelude::TextRole::Title),
+                    StructuredTextStyle::default(),
+                    gaanim_text::prelude::TextFlow::default(),
+                )
+                .expect("valid title"),
+            )
+            .at(0.0, 120.0);
+        let equation = |middle: &str, result: &str| {
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "variable",
+                        vec!["x".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    middle.into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "result",
+                        vec![result.into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    "$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured equation")
+        };
+        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scaled(2.0);
+        let target = canvas.text_spec(equation(" = ", "5")).scaled(2.0);
+        canvas.play(vec![title.write(1.0), source.write(1.0)]);
+        canvas.wait(0.4);
+        canvas.play(vec![source.step_to(&target, None, 0.8).unwrap()]);
+        canvas.play(vec![
+            target.tag("result").expect("result tag").indicate(0.45),
+        ]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let title_children = world
+            .query::<(
+                &MobjectId,
+                &ObjectTag,
+                Option<&bevy::prelude::ChildOf>,
+                Option<&bevy::prelude::Children>,
+            )>()
+            .iter(&world)
+            .find_map(|(_, tag, parent, children)| {
+                (parent.is_none() && tag.0.contains("Resolver paso a paso"))
+                    .then_some(children?.iter().collect::<Vec<_>>())
+            })
+            .expect("compiled title root");
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.4);
+        let title_paths = title_children
+            .iter()
+            .map(|child| {
+                world
+                    .get::<gaanim_scene::Path2D>(*child)
+                    .expect("title glyph path")
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        for time in [1.8, 2.2] {
+            timeline.seek(&mut world, time);
+            assert!(
+                title_children.iter().enumerate().all(|(index, child)| {
+                    world
+                        .get::<Opacity>(*child)
+                        .is_some_and(|opacity| opacity.0 > 0.99)
+                        && world
+                            .get::<gaanim_animation::writing::FillDrawProgress>(*child)
+                            .is_none_or(|progress| progress.0 > 0.99)
+                        && world.get::<gaanim_scene::Path2D>(*child) == title_paths.get(index)
+                }),
+                "title glyphs must remain fully drawn during the equation transition at {time}s"
+            );
+        }
     }
 
     #[test]
     fn tagged_equation_copy_keeps_opacity_changes_instantaneous() {
         let mut canvas = Canvas::new(640, 360);
         let source = canvas
-            .equation("E = m c^2")
+            .math_text("E = m c^2")
             .define_tag("mass", "m", None)
             .at(0.0, 70.0);
         let target = canvas
-            .equation("p = m v")
+            .math_text("p = m v")
             .define_tag("mass", "m", None)
             .at(0.0, -90.0);
-        canvas.copy_equation_terms(&source, &target, Some(vec!["mass".to_string()]), 0.8);
+        let copy = source
+            .tag("mass")
+            .unwrap()
+            .copy_to(&target.tag("mass").unwrap(), 0.8)
+            .expect("selections share a Canvas");
+        canvas.play(vec![copy]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -6136,11 +6832,11 @@ mod tests {
         let mut canvas = Canvas::new(640, 360);
         let title = canvas.text("One variable");
         let source = canvas
-            .equation("E = m c^2")
+            .math_text("E = m c^2")
             .define_tag("mass", "m", None)
             .at(0.0, 70.0);
         let target = canvas
-            .equation("p = m v")
+            .math_text("p = m v")
             .define_tag("mass", "m", None)
             .at(0.0, -90.0);
         canvas.play(vec![
@@ -6149,7 +6845,12 @@ mod tests {
             target.fade_in(1.0),
         ]);
         canvas.wait(0.5);
-        canvas.copy_equation_terms(&source, &target, Some(vec!["mass".to_string()]), 0.9);
+        let copy = source
+            .tag("mass")
+            .unwrap()
+            .copy_to(&target.tag("mass").unwrap(), 0.9)
+            .expect("selections share a Canvas");
+        canvas.play(vec![copy]);
         canvas.wait(0.25);
 
         let world = World::new();
@@ -6270,13 +6971,14 @@ mod tests {
     #[test]
     fn paragraph_with_inline_math_compiles_to_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
-        canvas.paragraph(
+        canvas.configured_text(
             "La energia $E = m c^2$ relaciona masa y energia en $x^2 + y^2 = z^2$.",
-            ParagraphOptions {
-                width: Some(500.0),
-                align: TextAlign::Left,
-                line_spacing: 1.2,
-                font_size: Some(28.0),
+            gaanim_text::prelude::TextStyle {
+                size: Some(28.0),
+                ..Default::default()
+            },
+            gaanim_text::prelude::TextFlow {
+                wrap: gaanim_text::prelude::TextWrap::Width(500.0),
                 ..Default::default()
             },
         );
@@ -6310,18 +7012,23 @@ mod tests {
     }
 
     #[test]
-    fn responsive_paragraph_measure_rewraps_at_the_offered_width() {
+    fn compiled_text_measure_rewraps_at_the_offered_width() {
         let id = gaanim_layout::LayoutId(7);
         let fonts = gaanim_text::font::FontRegistry::new();
         let measurer = CompiledLayoutMeasure {
             fixed: BTreeMap::new(),
-            paragraphs: BTreeMap::from([(
+            texts: BTreeMap::from([(
                 id,
-                CompiledParagraphMeasure {
-                    text: "Responsive paragraphs measure their true wrapped height before any ECS entity is materialized.".into(),
-                    options: ParagraphOptions::default(),
+                CompiledTextMeasure {
+                    spec: StructuredTextSpec::new(
+                        vec!["Responsive text measures its true wrapped height before any ECS entity is materialized.".into()],
+                        None,
+                        gaanim_text::prelude::TextStyle::default(),
+                        gaanim_text::prelude::TextFlow::default(),
+                    ).unwrap(),
                     font_size: 28.0,
                     font_family: "New Computer Modern".into(),
+                    math_font: "New Computer Modern Math".into(),
                     color: gaanim_core::peniko::Color::WHITE,
                 },
             )]),
@@ -6355,9 +7062,8 @@ mod tests {
     #[test]
     fn nested_layout_materializes_paragraph_at_the_outer_assigned_width() {
         let mut canvas = Canvas::new(1280, 720);
-        let paragraph = canvas.paragraph(
+        let paragraph = canvas.text(
             "Nested responsive paragraphs must use the card width instead of the safe frame width.",
-            ParagraphOptions::default(),
         );
         let inner = canvas.group(&[&paragraph]);
         paragraph.claim_layout(&inner).unwrap();
@@ -6454,14 +7160,21 @@ mod tests {
             "#text(\"Escapado $ literal \")$x$"
         );
         assert_eq!(split_text_math("a $x$ b $y$ c").len(), 5);
-        let para = paragraph_typst_source(
-            "Hola $x^2$ mundo",
-            &ParagraphOptions {
-                width: Some(400.0),
-                align: TextAlign::Left,
+        let spec = StructuredTextSpec::new(
+            vec!["Hola $x^2$ mundo".into()],
+            None,
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow {
+                wrap: gaanim_text::prelude::TextWrap::Width(400.0),
                 ..Default::default()
             },
+        )
+        .unwrap();
+        let para = structured_text_typst_source(
+            &spec,
+            Some(400.0),
             32.0,
+            "New Computer Modern",
             gaanim_core::peniko::Color::WHITE,
         );
         assert!(

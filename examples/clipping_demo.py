@@ -7,8 +7,8 @@ from gaanim import Brush, Scene
 
 scene = Scene(1280, 720, margin=52)
 scene.canvas.set_theme("tokyo-night")
-scene.title("Clipping and masks").at(0, 285)
-scene.subtitle("Any vector drawable can define the visible region").at(0, 230)
+scene.text("Clipping and masks", role="title").at(0, 285)
+scene.text("Any vector drawable can define the visible region", role="subtitle").at(0, 230)
 
 # One large gradient is constrained to a circular viewport.
 orb_mask = scene.circle(118).no_fill().no_stroke().at(-330, 5)

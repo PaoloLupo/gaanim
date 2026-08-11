@@ -6,7 +6,7 @@ from gaanim import BLACK, BLUE, CORAL, GOLD, WHITE, Scene, Updater
 
 
 scene = Scene(960, 540, background=BLACK)
-scene.title("Camera controls").fill(WHITE).at(0, 220)
+scene.text("Camera controls", role="title").fill(WHITE).at(0, 220)
 left = scene.circle(85).fill(BLUE).at(-260, -10)
 right = scene.rect(180, 110).fill(GOLD).at(250, -10)
 guide = scene.dot(18).fill(CORAL).at(180, 0)

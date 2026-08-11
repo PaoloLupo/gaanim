@@ -85,68 +85,6 @@ pub struct AxesConfig {
     pub tips: bool,
 }
 
-/// Horizontal alignment for multi-line paragraph text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TextAlign {
-    #[default]
-    Left,
-    Center,
-    Right,
-    Justify,
-}
-
-/// How a paragraph behaves when a maximum line count constrains its height.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ParagraphOverflow {
-    /// Keep all lines visible even if they extend beyond the nominal text box.
-    Visible,
-    /// Clip lines outside the text box. This is the safe default for video layouts.
-    #[default]
-    Clip,
-}
-
-/// Vector paragraph layout options.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParagraphOptions {
-    /// Maximum line width in canvas units/Typst points.
-    /// `None` makes the leaf width-responsive. Outside a Layout it resolves
-    /// against the scene safe frame; a Layout may offer a narrower width.
-    pub width: Option<f64>,
-    pub align: TextAlign,
-    /// Baseline multiplier. `1.0` is compact and `1.2` is a readable default.
-    pub line_spacing: f64,
-    /// Overrides the configured Body role when present.
-    pub font_size: Option<f64>,
-    /// Overrides the configured Body role when present.
-    pub font_family: Option<String>,
-    /// Optional maximum number of visible lines.
-    pub max_lines: Option<usize>,
-    pub overflow: ParagraphOverflow,
-}
-
-impl ParagraphOptions {
-    pub fn new(width: f64) -> Self {
-        Self {
-            width: Some(width.max(1.0)),
-            ..Self::default()
-        }
-    }
-}
-
-impl Default for ParagraphOptions {
-    fn default() -> Self {
-        Self {
-            width: None,
-            align: TextAlign::Left,
-            line_spacing: 1.2,
-            font_size: None,
-            font_family: None,
-            max_lines: None,
-            overflow: ParagraphOverflow::Clip,
-        }
-    }
-}
-
 impl Default for AxesConfig {
     fn default() -> Self {
         Self {
@@ -575,14 +513,8 @@ pub enum SpawnKind {
         nodes: Vec<(usize, Option<usize>, String, ObjectId)>,
         animation_names: Vec<String>,
     },
-    Text(String),
-    Paragraph {
-        text: String,
-        options: ParagraphOptions,
-    },
-    Title(String),
-    Subtitle(String),
-    Equation(String),
+    /// Unified structured text, including paragraphs and inline/display math.
+    Text(gaanim_text::prelude::TextSpec),
     /// Full Typst document markup, compiled as vector text and shapes.
     Typst {
         source: String,

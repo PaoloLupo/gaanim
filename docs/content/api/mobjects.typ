@@ -58,7 +58,7 @@ scene.export("preview.webp", fps=30)
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 card = scene.rect(160, 90).fill(BLUE).stroke(WHITE, 2).at(0, 0)
 scene.play([card.grow_from_center().duration(0.9)])
@@ -76,7 +76,7 @@ scene.export("preview.webp", fps=30)
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 btn = scene.rounded_rect(160, 50, 12).fill(GOLD).at(0, 0)
 label = scene.text("CLICK").at(0, 0)
@@ -663,75 +663,73 @@ scene.play([space.create(), curve.create()])
 #api-entry(
   name: "Scene.text",
   kind: "factory",
-  signature: "text(string: str) -> Drawable",
-  params: ((name: "string", type: "str", default: none, desc: [Single-line text.]),),
-  returns: (type: "Drawable", desc: [Text drawable.]),
-  desc: [Labels, annotations. For multi-line use `paragraph`. Supports `color_by`, `select`, `write`.],
+  signature: "text(*content, role=None, style=None, flow=None, **overrides) -> Text",
+  params: ((name: "content", type: "str | TextPart", default: none, desc: [Composable strings and semantic parts.]), (name: "role", type: "str | None", default: "None", desc: [title|subtitle|heading|body|caption|label|code|math]),),
+  returns: (type: "Text", desc: [Structured, measurable vector text.]),
+  desc: [`$...$` enables math, `\$` emits a literal dollar, and unbalanced delimiters raise `ValueError`.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
-label = scene.text("Hello, Gaanim").fill(WHITE).at(0, 0)
+label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).at(0, 0)
 scene.play([label.write().duration(0.9)])
 scene.export("preview.webp", fps=30)
 ```
 ]
 
 #api-entry(
-  name: "Scene.paragraph",
-  kind: "factory",
-  signature: "paragraph(text, width=None, *, align, line_spacing, font_size, font_family, max_lines, overflow) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Body text.]), (name: "width", type: "float | None", default: "None", desc: [Explicit wrap width; when omitted, uses the safe frame while free and the offered width inside Layout v2.]), (name: "align", type: "str", default: "\"left\"", desc: ["left|center|right|justify"]), (name: "line_spacing", type: "float", default: "1.2", desc: [≥1.0]),),
-  returns: (type: "Drawable", desc: [Wrapped paragraph as vector outlines.]),
-  desc: [Justified body copy. Glyphs remain animatable (`write`, `select`).],
+  name: "TextFlow",
+  kind: "value",
+  signature: "TextFlow(*, wrap=\"auto\", align=\"left\", line_spacing=1.2, max_lines=None, overflow=\"clip\", direction=\"auto\", hyphenate=False)",
+  params: ((name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [Uses the offered Layout width, disables wrapping, or caps typographic width.]), (name: "align", type: "str", default: "\"left\"", desc: [left|center|right|justify]), (name: "overflow", type: "str", default: "\"clip\"", desc: [visible|clip|ellipsis]),),
+  returns: (type: "TextFlow", desc: [Reusable internal composition options.]),
+  desc: [Box size, padding, columns, fit, growth, and vertical alignment remain Layout v2 properties.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import Scene, TextFlow
 scene = Scene(480, 270, background="#0f172a")
-body = scene.paragraph("Una explicación larga que se ajusta al ancho y muestra el salto de línea automático.", width=320, align="left", line_spacing=1.25).at(0, 0)
+body = scene.text("Una explicación larga que se ajusta al ancho.", flow=TextFlow(wrap=320, align="left", line_spacing=1.25)).at(0, 0)
 scene.play([body.fade_in().duration(0.6)])
 scene.export("preview.webp", fps=30)
 ```
 ]
 
 #api-entry(
-  name: "Scene.title / subtitle",
-  kind: "factory",
-  signature: "title(string) / subtitle(string) -> Drawable",
-  params: ((name: "string", type: "str", default: none, desc: [Text.]),),
-  returns: (type: "Drawable", desc: [Styled heading.]),
-  desc: [Convenience wrappers with theme-aware sizing.],
+  name: "Text roles and TextStyle",
+  kind: "value",
+  signature: "TextStyle(font=None, math_font=None, size=None, weight=None, color=None, ...)",
+  params: ((name: "font", type: "str | None", default: "None", desc: [Primary text font.]), (name: "math_font", type: "str | None", default: "None", desc: [Math font used by inline equations.]), (name: "size", type: "float | None", default: "None", desc: [Font size in canvas/Typst points.]), (name: "weight", type: "int | None", default: "None", desc: [Font weight from 1 through 1000.]), (name: "color", type: "Color | None", default: "None", desc: [Resolved glyph color.])),
+  returns: (type: "TextStyle", desc: [Reusable typography overlay.]),
+  desc: [Roles are title, subtitle, heading, body, caption, label, code, and math. Role theme values are resolved before `TextStyle`, direct keywords, local `part` style, and persistent selection changes.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
-t = scene.title("Fourier Transform").at(0, 30)
-s = scene.subtitle("A visual proof").at(0, -20)
+t = scene.text("Fourier Transform", role="title").at(0, 30)
+s = scene.text("A visual proof", role="subtitle").at(0, -20)
 scene.play([t.write().duration(0.7), s.fade_in().duration(0.5)])
 scene.export("preview.webp", fps=30)
 ```
 ]
 
 #api-entry(
-  name: "Scene.equation",
+  name: "TextPart and inline math",
   kind: "factory",
-  signature: "equation(source: str, *, tags?: dict[str, str | tuple[str,int]]) -> Drawable",
-  params: ((name: "source", type: "str", default: none, desc: [Typst math, e.g. \"E = m c^2\".]), (name: "tags", type: "dict", default: "None", desc: [Ordered semantic names → fragments. Use `(fragment, occurrence)` to select one zero-based repeated occurrence.]),),
-  returns: (type: "Drawable", desc: [Math drawable with optional named tags.]),
-  desc: [Compiled via Typst. A string selector keeps all matching occurrences; a tuple isolates one. Tag order controls `write_by_term`. Invalid selectors raise `TypeError` or `ValueError`.],
+  signature: "part(name, *content, **style) -> TextPart",
+  params: ((name: "name", type: "str", default: none, desc: [Non-empty semantic name, unique among siblings.]), (name: "content", type: "str | TextPart", default: none, desc: [Nested strings and semantic parts.]), (name: "style", type: "TextStyle | keywords", default: "None", desc: [Local typography overlay for the complete subtree.])),
+  returns: (type: "TextPart", desc: [Composable semantic subtree.]),
+  desc: [Math and prose share `scene.text`; semantic paths replace manual ranges and equation tags. Whitespace written next to a part inside `$...$` is preserved as explicit mathematical spacing.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, Scene
+from gaanim import GOLD, Scene, part
 scene = Scene(480, 270, background="#0f172a")
-eq = scene.equation(
-    "x + x = 2x",
-    tags={"left_x": ("x", 0), "right_x": ("x", 1)},
-).at(0, 0)
-eq.tag("right_x").fill(GOLD)
+# Fluent placement preserves the specialized Text handle.
+eq = scene.text("$", part("variable", "x"), " dot 5 = ", part("result", "25"), "$").at(0, 0)
+eq["result"].fill(GOLD)
 scene.play([eq.write().duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```
@@ -1190,20 +1188,24 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Drawable text selection",
+  name: "TextSelection and TextQuery",
   kind: "method",
-  signature: ".color_by(fragment, color) .select(fragment, occurrence?) -> FragmentSelection .tag(name) -> FragmentSelection",
-  params: ((name: "fragment", type: "str", default: none, desc: [Case-insensitive, ignores math spacing.] ),),
-  returns: (type: "Drawable | FragmentSelection", desc: [Selection for chained animation.]),
-  desc: [Grapheme-level control for `text`/`equation`. Tags retain their optional occurrence selector. `FragmentSelection` offers `fill`, `indicate`, `color_to`, `transform_to`, `reveal`, and `cancel`.],
+  signature: "text[name] / text[index_or_slice] / text.graphemes|words|lines|parts[index] -> TextSelection",
+  params: ((name: "name", type: "str", default: none, desc: [Nested semantic path from `part()`.]), (name: "index", type: "int | slice", default: none, desc: [Rendered unit selection, Unicode-grapheme safe.])),
+  returns: (type: "TextSelection", desc: [Deferred local selection; never a Layout leaf.]),
+  desc: [Selections support styling, emphasis, braces, annotations, and structural morph/copy transitions.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, Scene
+from gaanim import GOLD, Scene, part
 scene = Scene(480, 270, background="#0f172a")
-eq = scene.equation("E = m c^2").at(0, 0)
-eq.color_by("m", GOLD)
-scene.play([eq.write().duration(0.8)])
+# TextSelection animations compose with complete-Text animations.
+eq = scene.text("$E = ", part("mass", "m"), " c^2$").at(0, 0)
+eq["mass"].fill(GOLD)
+scene.play([
+    eq.write().duration(0.8),
+    eq["mass"].indicate().duration(0.8),
+])
 scene.export("preview.webp", fps=30)
 ```
 ]

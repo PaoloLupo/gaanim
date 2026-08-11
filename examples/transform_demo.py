@@ -18,9 +18,12 @@ c = Scene(1920, 1080, background=BLACK)
 # Segment 1: shape -> shape
 c.segment("shape_to_shape")
 
-title = c.title("Transform Demo").fill(WHITE).at(0.0, 260.0)
+title = c.text("Transform Demo", role="title").fill(WHITE).at(0.0, 260.0)
 subtitle = (
-    c.subtitle("shape -> shape, shape -> text, text -> math, math -> math")
+    c.text(
+        "shape -> shape, shape -> text, text -> math, math -> math",
+        role="subtitle",
+    )
     .fill(WHITE)
     .at(0.0, 200.0)
 )
@@ -42,7 +45,7 @@ c.wait(0.8)
 c.segment("shape_to_text", Transition.cross_fade(0.5))
 c.wait(1.0)
 
-headline = c.title("Morphing into text").fill(GREEN).at(0.0, 100.0)
+headline = c.text("Morphing into text", role="title").fill(GREEN).at(0.0, 100.0)
 circle.replacement_transform(headline).duration(2.1).spring()
 c.wait(0.5)
 headline.indicate().duration(0.9)
@@ -53,24 +56,24 @@ c.wait(0.7)
 # Keep this in the same segment to avoid transition flicker while exercising
 # text/text and text/math conversions.
 
-phrase = c.title("Energy").fill(WHITE).at(-260.0, 40.0)
+phrase = c.text("Energy", role="title").fill(WHITE).at(-260.0, 40.0)
 phrase.write().duration(0.8).smooth()
 c.wait(0.3)
 
-target_text = c.title("Momentum").fill(BLUE).at(240.0, -20.0).scaled(1.1)
+target_text = c.text("Momentum", role="title").fill(BLUE).at(240.0, -20.0).scaled(1.1)
 phrase.transform(target_text).duration(2.2).spring()
 c.wait(0.8)
 
-target_math = c.equation("p = m v").fill(GREEN).at(0.0, 10.0).scaled(1.2)
+target_math = c.text("$p = m v$").fill(GREEN).at(0.0, 10.0).scaled(1.2)
 phrase.transform(target_math).duration(2.2).spring()
 c.wait(0.8)
 
-alt_math = c.equation("E = m c^2").fill(BLUE).at(0.0, 10.0).scaled(1.2)
+alt_math = c.text("$E = m c^2$").fill(BLUE).at(0.0, 10.0).scaled(1.2)
 phrase.replacement_transform(alt_math).duration(2.2).spring()
 c.wait(0.8)
 
 finale = (
-    c.subtitle("Transform pipeline with text and math hierarchies")
+    c.text("Transform pipeline with text and math hierarchies", role="subtitle")
     .fill(GREEN)
     .at(0.0, -240.0)
 )

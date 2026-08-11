@@ -482,24 +482,22 @@ fn compile_typst_source(
     if let Some(size) = text_size {
         directives.push_str(&format!("#set text(size: {}pt)\n", size));
     }
-    if is_math {
-        if let Some(family) = math_font {
-            let actual_family = if family.eq_ignore_ascii_case("newcmmath") {
-                "New Computer Modern Math"
-            } else {
-                family
-            };
-            directives.push_str(&format!(
-                "#show math.equation: set text(font: \"{}\")\n",
-                actual_family
-            ));
-        }
-        if let Some(size) = math_size {
-            directives.push_str(&format!(
-                "#show math.equation: set text(size: {}pt)\n",
-                size
-            ));
-        }
+    if let Some(family) = math_font {
+        let actual_family = if family.eq_ignore_ascii_case("newcmmath") {
+            "New Computer Modern Math"
+        } else {
+            family
+        };
+        directives.push_str(&format!(
+            "#show math.equation: set text(font: \"{}\")\n",
+            actual_family
+        ));
+    }
+    if let Some(size) = math_size {
+        directives.push_str(&format!(
+            "#show math.equation: set text(size: {}pt)\n",
+            size
+        ));
     }
 
     let full_source = if is_math {

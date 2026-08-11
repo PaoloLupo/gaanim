@@ -26,6 +26,7 @@ typst-kit = { version = "0.15.0", features = ["embedded-fonts", "scan-fonts", "s
 typst-layout = "0.15.0"
 fontdb = "0.23"
 thiserror = "2.0"
+unicode-segmentation = "1.12"
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }

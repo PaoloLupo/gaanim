@@ -237,7 +237,7 @@ scene.export("preview.webp", fps=30)
 # show-code: true
 from gaanim import GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
-formula = scene.equation("E = m c^2").fill(GOLD).at(0, 0)
+formula = scene.text("$E = m c^2$").fill(GOLD).at(0, 0)
 scene.play([formula.write().duration(1.0)])
 scene.play([formula.unwrite().duration(0.7)])
 scene.export("preview.webp", fps=30)
@@ -245,20 +245,20 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Drawable.write_by_term",
+  name: "Text.write grouping",
   kind: "method",
-  signature: ".write_by_term(*, tags?, duration=1.0) -> Drawable",
-  params: ((name: "tags", type: "list[str]", default: "None (all)", desc: [Subset of declared tags to sequence.]), (name: "duration", type: "float", default: "1.0", desc: [Total duration.] ),),
-  returns: (type: "Drawable", desc: [Self — queues term-by-term write.]),
-  desc: [Writes each `tags` declaration as one semantic unit. Needs `equation(..., tags={...})`.],
+  signature: ".write(duration=None, *, by=\"grapheme\", order=\"forward\", stagger=0.0) -> Anim",
+  params: ((name: "duration", type: "float | None", default: "None", desc: [Optional total duration, accepted as the first positional argument.]), (name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),),
+  returns: (type: "Anim", desc: [Animation descriptor accepted by #raw("scene.play()") .]),
+  desc: [Writes graphemes, words, rendered lines, or semantic parts in deterministic order. The duration is positional, so #raw("text.write(0.8, by=\"word\")") is valid.],
 )[
 ```python
 # show-code: true
-from gaanim import Scene
+from gaanim import Scene, part
 scene = Scene(480, 270, background="#0f172a")
-eq = scene.equation("E = m c^2", tags={"e":"E","m":"m","c2":"c^2"}).at(0, 0)
-eq.write_by_term(duration=1.4)
-scene.play([eq.create().duration(0.5)])
+# Grouping is resolved by the specialized Text API.
+eq = scene.text("$", part("energy", "E"), " = ", part("mass", "m"), " ", part("speed", "c^2"), "$").at(0, 0)
+scene.play([eq.write(1.4, by="part", stagger=0.08)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -361,63 +361,82 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Semantic equation transitions
+== Structured text transitions
 
 #api-entry(
-  name: "Scene.step_equation",
+  name: "Text.step_to",
   kind: "method",
-  signature: "step_equation(source, target, *, matches=None, duration=1.0) -> Drawable",
+  signature: "source.step_to(target, *, matches=None, duration=1.0) -> Anim",
   params: (
-    (name: "source", type: "Drawable", default: none, desc: [Current equation.]),
-    (name: "target", type: "Drawable", default: none, desc: [Next equation.]),
-    (name: "matches", type: "list[str] | dict[str,str]", default: "None", desc: [Same-name tags or source → target tag names. `None` uses every shared tag.]),
+    (name: "source", type: "Text", default: none, desc: [Current structured text or formula.]),
+    (name: "target", type: "Text", default: none, desc: [Next structured text version.]),
+    (name: "matches", type: "sequence[tuple[str,str]] | mapping[str,str]", default: "None", desc: [Explicit source → target semantic paths. `None` uses shared paths.]),
     (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),
   ),
-  returns: (type: "Drawable", desc: [The target equation, ready for another step.]),
-  desc: [Semantic tags are paired first; remaining identical glyphs are matched automatically. Paired terms move and morph without fading. Removed terms shrink into their own visual centers and new terms grow outward from their centers. Unknown explicit tags and invalid durations raise `ValueError`.],
+  returns: (type: "Anim", desc: [A structured transition accepted by `scene.play()`; Layout v2 reflow shares its duration.]),
+  desc: [Semantic paths are paired first; remaining identical graphemes are matched automatically. Paired content moves and morphs without fading. Removed glyphs shrink into their own visual centers and new glyphs grow outward. Cross-scene or incompatible Layout owners raise `LayoutOwnershipError`.],
 )[
 ```python
 # show-code: true
-from gaanim import BLACK, GOLD, Scene
+from gaanim import BLACK, GOLD, Scene, part
 scene = Scene(480, 270, background=BLACK)
-before = scene.equation("x + 3 = 7", tags={"x":"x", "result":"7"}).scaled(1.6)
-after = scene.equation("x = 4", tags={"x":"x", "result":"4"}).scaled(1.6)
-before.tag("result").fill(GOLD)
-after.tag("result").fill(GOLD)
+# Fluent scaling retains semantic selection support.
+before = scene.text("$", part("x", "x"), " + 3 = ", part("result", "7"), "$").scaled(1.6)
+after = scene.text("$", part("x", "x"), " = ", part("result", "4"), "$").scaled(1.6)
+before["result"].fill(GOLD)
+after["result"].fill(GOLD)
 scene.play([before.write().duration(0.7)])
-current = scene.step_equation(before, after, duration=0.9)
-current.tag("result").indicate(duration=0.4)
+scene.play([before.step_to(after, duration=0.9)])
+scene.play([after["result"].indicate(duration=0.4)])
 scene.export("preview.webp", fps=30)
 ```
 ]
 
 #api-entry(
-  name: "Scene.expand_equation / replace_term",
+  name: "TextSelection.cancel",
   kind: "method",
-  signature: "expand_equation(source, target, *, tag, duration=1.0) -> Drawable / replace_term(source, target, *, tag, target_tag=None, duration=1.0) -> Drawable",
-  params: ((name: "tag", type: "str", default: none, desc: [Source semantic term. `expand_equation` requires the same name on the target.]), (name: "target_tag", type: "str | None", default: "None", desc: [Different destination name for `replace_term`.]), (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),),
-  returns: (type: "Drawable", desc: [The target equation.]),
-  desc: [`expand_equation` uses the tagged term as the one-to-many origin. `replace_term` forces the selected source and destination terms to correspond while unchanged glyphs continue moving automatically.],
+  signature: "selection.cancel(duration=None) -> Anim",
+  params: ((name: "duration", type: "float | None", default: "None", desc: [Positive finite seconds; the animation default is used when omitted.]),),
+  returns: (type: "Anim", desc: [Deferred cancellation animation accepted by `scene.play()`.]),
+  desc: [Draws a diagonal mark and dims the selected glyphs. The mark remains associated with its owning `Text`; the next replacing `morph_to`, `step_to`, or `expand_to` fades both the mark and canceled glyphs as the source leaves.],
 )[
 ```python
-from gaanim import Scene
+from gaanim import Scene, part
 scene = Scene(480, 270)
-compact = scene.equation("E = m c^2", tags={"mass":"m"})
-expanded = scene.equation("E = (m_1 + m_2) c^2", tags={"mass":"(m_1 + m_2)"})
-scene.expand_equation(compact, expanded, tag="mass", duration=0.9)
+before = scene.text("$x + ", part("obsolete", "3"), " = 7$")
+after = scene.text("$x = 4$")
+scene.play([before["obsolete"].cancel(duration=0.6)])
+scene.play([before.step_to(after, duration=0.8)])
 ```
 ]
 
 #api-entry(
-  name: "Scene.copy_equation_terms / transform_equation",
+  name: "Text.expand_to / TextSelection.morph_to",
   kind: "method",
-  signature: "copy_equation_terms(source, target, *, tags=None, duration=1.0) -> Drawable",
-  params: ((name: "tags", type: "list[str] | None", default: "None", desc: [Shared semantic names to copy; `None` uses all shared names.]), (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),),
-  returns: (type: "Drawable", desc: [The destination equation.]),
-  desc: [Keeps the source visible and moves visual copies of the selected terms into the destination. `transform_equation` remains as a compatibility alias with identical behavior.],
+  signature: "source.expand_to(target, *, anchor=\"part\", duration=1.0) / selection.morph_to(target_selection) -> Anim",
+  params: ((name: "target", type: "Text", default: none, desc: [Destination structured text.]), (name: "anchor", type: "str", default: "\"part\"", desc: [Shared semantic path; `part` selects the first shared path automatically.]), (name: "target_selection", type: "TextSelection", default: none, desc: [Destination for a local selection morph.]), (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.])),
+  returns: (type: "Anim", desc: [Both transitions return animations accepted by `scene.play()`.]),
+  desc: [`expand_to` uses a shared semantic part as the one-to-many origin. `TextSelection.morph_to` explicitly pairs two local selections while the surrounding text remains one Layout leaf.],
 )[
 ```python
-scene.copy_equation_terms(energy, momentum, tags=["mass"], duration=0.8)
+from gaanim import Scene, part
+scene = Scene(480, 270)
+compact = scene.text("$E = ", part("mass", "m"), " c^2$")
+expanded = scene.text("$E = ", part("mass", "(m_1 + m_2)"), " c^2$")
+scene.play([compact.expand_to(expanded, anchor="mass", duration=0.9)])
+```
+]
+
+#api-entry(
+  name: "TextSelection.copy_to",
+  kind: "method",
+  signature: "source_selection.copy_to(target_selection, *, duration=None) -> Anim",
+  params: ((name: "target_selection", type: "TextSelection", default: none, desc: [Destination semantic or query selection.]), (name: "duration", type: "float | None", default: "None", desc: [Positive finite seconds; the animation default is used when omitted.])),
+  returns: (type: "Anim", desc: [A deferred animation accepted by `scene.play()` and composable with other animations.]),
+  desc: [Keeps the source selection visible and moves a semantic copy into the destination selection.],
+)[
+```python
+scene.play([energy["mass"].copy_to(momentum["mass"], duration=0.8)])
 ```
 ]
 
@@ -444,23 +463,23 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Scene.transform_matching_shapes / transform_matching_tex / transform_matching_text",
+  name: "Scene.transform_matching_shapes / Text.morph_to",
   kind: "method",
-  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / scene.transform_matching_tex(source, target, duration=1.0) / scene.transform_matching_text(source, target, duration=1.0)",
+  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / source_text.morph_to(target_text, match=\"auto\", duration=1.0)",
   params: (
     (name: "source", type: "Drawable", default: none, desc: [Source object/group containing elements to match.]),
     (name: "target", type: "Drawable", default: none, desc: [Target object/group containing elements to match.]),
     (name: "duration", type: "float", default: "1.0", desc: [Duration of the transition in seconds.]),
   ),
-  returns: (type: "Drawable | none", desc: [`transform_matching_tex/text` return the destination; shape matching retains its existing `None` return.]),
-  desc: [`transform_matching_shapes` auto-matches sub-elements by geometry, position and color using Hungarian assignment + shape hashing. `transform_matching_tex` (alias `transform_matching_text`) uses semantic equation tags first and order-preserving LCS for remaining characters, then performs the same clean handoff as `step_equation`. Generic `scene.transform_matching(source, target, mode="shapes"|"tex", duration=1.0)` dispatches by mode.],
+  returns: (type: "None | Anim", desc: [`Scene.transform_matching_shapes` queues directly; `Text.morph_to` returns an animation accepted by `scene.play()`.]),
+  desc: [`transform_matching_shapes` matches arbitrary sub-elements by geometry, position, and color. `Text.morph_to` first matches semantic part paths, then ordered equal graphemes and shape similarity, with deterministic entry/exit for unmatched glyphs.],
 )[
 ```python
 from gaanim import BLACK, GOLD, WHITE, Scene
 scene = Scene(1920, 1080, background=BLACK)
-e1 = scene.equation("E = m c").fill(WHITE).at(0, 80).scaled(1.3)
-e2 = scene.equation("p = m v").fill(GOLD).at(0, 80).scaled(1.3)
-scene.transform_matching_tex(e1, e2, duration=1.6)
+e1 = scene.text("$E = m c$").fill(WHITE).at(0, 80).scaled(1.3)
+e2 = scene.text("$p = m v$").fill(GOLD).at(0, 80).scaled(1.3)
+scene.play([e1.morph_to(e2, duration=1.6)])
 ```
 ]
 

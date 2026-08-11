@@ -154,6 +154,27 @@ pub enum AnimationType {
         color: Option<Color>,
         scale_factor: f64,
     },
+    /// Structured transition between complete Text objects.
+    TextTransition {
+        target: ObjectId,
+        copy: bool,
+        semantic_pairs: Vec<(String, Option<usize>, String, Option<usize>)>,
+    },
+    /// Deferred operation over selected glyphs without changing hierarchy.
+    TextSelection {
+        fragment: String,
+        occurrence: Option<usize>,
+        effect: TextSelectionEffect,
+    },
+    /// Morph or copy between two local selections.
+    TextSelectionTransform {
+        target: ObjectId,
+        source_fragment: String,
+        source_occurrence: Option<usize>,
+        target_fragment: String,
+        target_occurrence: Option<usize>,
+        copy: bool,
+    },
     /// Fade out the source and fade in the target concurrently.
     FadeTransform {
         target: ObjectId,
@@ -213,6 +234,23 @@ pub enum AnimationType {
     ShowPassingFlash {
         time_width: f64,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum TextSelectionEffect {
+    Indicate,
+    Pulse,
+    Wiggle,
+    Wave,
+    Highlight,
+    Focus,
+    Cancel,
+    RevealFade,
+    RevealWipe,
+    RevealFromBelow,
+    ColorTo(Color),
+    Brace { label: String, above: bool },
+    Annotate { label: String, offset: DVec3 },
 }
 
 /// A fluent builder for an animation tween clip.
