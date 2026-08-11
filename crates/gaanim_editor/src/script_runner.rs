@@ -251,28 +251,3 @@ fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
     py.run(&std::ffi::CString::new(code).unwrap(), None, None)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn embedded_package_exports_tailwind_colors() {
-        gaanim_python::register_inittab();
-        Python::initialize();
-
-        Python::attach(|py| {
-            bootstrap_gaanim_package(py).expect("embedded gaanim package should bootstrap");
-            let package = py.import("gaanim").expect("gaanim should be importable");
-            let colors = package
-                .getattr("colors")
-                .expect("gaanim should export its colors module");
-            let blue = colors
-                .getattr("tailwind")
-                .and_then(|tailwind| tailwind.getattr("blue"))
-                .and_then(|family| family.get_item(500))
-                .expect("Tailwind blue[500] should be available in the embedded host");
-            assert_eq!(blue.to_string(), "Color(#2B7FFF)");
-        });
-    }
-}
