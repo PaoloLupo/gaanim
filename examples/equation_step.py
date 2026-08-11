@@ -2,18 +2,18 @@
 
 import os
 
-from gaanim import BLACK, GOLD, WHITE, Scene, part
+from gaanim import BLACK, GOLD, RED, WHITE, Scene, part
 
 
 scene = Scene(1920, 1080, background=BLACK)
 title = scene.text("Resolver paso a paso", role="title").fill(WHITE).at(0, 220)
 before = scene.text(
-    "$", part("variable", "x"), " dot 5 = ", part("result", "25"), "$"
+    "$", part("variable", "x"), " dot 5 = ", "25", "$"
 ).at(0, 0).scaled(2)
 after = scene.text(
     "$", part("variable", "x"), " = ", part("result", "5"), "$"
 ).at(0, 0).scaled(2)
-before["result"].fill(GOLD)
+before.words[3].fill(RED)
 after["result"].fill(GOLD)
 
 scene.play([title.write(), before.write()])
