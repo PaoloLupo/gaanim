@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    Canvas as ApiCanvas, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, Direction,
+    Canvas as ApiCanvas, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
     NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
@@ -70,10 +70,6 @@ fn build_readout_parts(
         if let Some(color) = color.clone() {
             handle = handle.fill(color.0);
         }
-        // The numeric outline is right-aligned when it is compiled. Reserve
-        // one digit of growth on its left so changing magnitude does not run
-        // into the equality sign while its right edge (and unit) stays fixed.
-        handle = handle.next_to(&number_part.0, Direction::Left, 30.0);
         PyDrawable(handle)
     });
     let label_part = label.filter(|value| !value.is_empty()).map(|value| {
@@ -81,11 +77,6 @@ fn build_readout_parts(
         if let Some(color) = color.clone() {
             handle = handle.fill(color.0);
         }
-        handle = handle.next_to(
-            &equals_part.as_ref().expect("equals part exists").0,
-            Direction::Left,
-            10.0,
-        );
         PyDrawable(handle)
     });
     let unit_part = unit.filter(|value| !value.is_empty()).map(|value| {
@@ -93,21 +84,15 @@ fn build_readout_parts(
         if let Some(color) = color.clone() {
             handle = handle.fill(color.0);
         }
-        handle = handle.next_to(&number_part.0, Direction::Right, 10.0);
         PyDrawable(handle)
     });
-    let mut members = Vec::new();
-    if let Some(part) = &label_part {
-        members.push(&part.0);
-    }
-    if let Some(part) = &equals_part {
-        members.push(&part.0);
-    }
-    members.push(&number_part.0);
-    if let Some(part) = &unit_part {
-        members.push(&part.0);
-    }
-    let group = canvas.group(&members);
+    let group = canvas.reactive_readout_group(
+        label_part.as_ref().map(|part| &part.0),
+        equals_part.as_ref().map(|part| &part.0),
+        &number_part.0,
+        unit_part.as_ref().map(|part| &part.0),
+        10.0,
+    );
     (group, label_part, equals_part, number_part, unit_part)
 }
 

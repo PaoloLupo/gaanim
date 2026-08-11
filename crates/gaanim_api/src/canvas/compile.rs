@@ -5340,6 +5340,19 @@ impl Canvas {
                     .collect();
                 let mr = builder.group(&refs);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(layout) = &spec.reactive_readout_layout
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    builder.commands.entity(state.entity).insert(
+                        gaanim_animation::ReactiveReadoutLayout {
+                            label: layout.label.and_then(|id| id_map.get(&id).copied()),
+                            equals: layout.equals.and_then(|id| id_map.get(&id).copied()),
+                            number: id_map.get(&layout.number).copied().unwrap_or(layout.number),
+                            unit: layout.unit.and_then(|id| id_map.get(&id).copied()),
+                            spacing: layout.spacing,
+                        },
+                    );
+                }
                 mr
             }
             SpawnKind::GroupNoCenter(ids) => {

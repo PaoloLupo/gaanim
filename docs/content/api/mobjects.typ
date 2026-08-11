@@ -1041,7 +1041,7 @@ scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2
   signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Variable",
   params: ((name: "label", type: "str", default: none, desc: [Visible label placed before the equality sign.]), (name: "format", type: "str", default: "'.2f'", desc: [Numeric format: width, sign, grouping, precision, and `f`, `e`, `g`, or `%`.]), (name: "unit", type: "str | None", default: none, desc: [Optional visible unit.]),),
   returns: (type: "Variable", desc: [A `Drawable` and reactive scalar at the same time.]),
-  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts; the returned group retains normal create, write, fade, layout, and style operations.],
+  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
 ```python
 from gaanim import RED, Scene
@@ -1058,7 +1058,7 @@ scene.play([k.create(), k.animate_to(100, duration=1.5)])
   signature: "readout(source, *, label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Readout",
   params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [A scalar or no-argument lambda traced once.]), (name: "invalid", type: "str", default: "'—'", desc: [Text used when evaluation is invalid or non-finite.]),),
   returns: (type: "Readout", desc: [A reactive `Drawable` group.]),
-  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts.],
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts with equal equation-style spacing and a shared visual baseline for textual terms.],
 )[
 ```python
 from gaanim import Scene, math as gm

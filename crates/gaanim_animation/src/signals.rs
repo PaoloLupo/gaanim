@@ -4,7 +4,7 @@ use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_scene::{LocalBounds, Path2D, PathSource};
+use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -47,6 +47,17 @@ pub struct ReactiveReadout {
     pub last_text: String,
     pub last_path: Arc<BezPath>,
     pub last_bounds: Bounds3D,
+}
+
+/// Keeps the independently styleable pieces of a reactive readout laid out as
+/// one equation row while the numeric outline changes width.
+#[derive(Component, Debug, Clone)]
+pub struct ReactiveReadoutLayout {
+    pub label: Option<gaanim_core::ObjectId>,
+    pub equals: Option<gaanim_core::ObjectId>,
+    pub number: gaanim_core::ObjectId,
+    pub unit: Option<gaanim_core::ObjectId>,
+    pub spacing: f64,
 }
 
 pub fn format_reactive_number(value: f64, specification: &str, invalid: &str) -> String {
@@ -193,6 +204,87 @@ pub fn reactive_readout_update_system(
             readout.last_text = text;
             readout.last_path = path.0.clone();
             readout.last_bounds = new_bounds;
+        }
+    }
+}
+
+/// Align labels, numbers, and units on a common visual baseline, keep the
+/// equality sign on the numeric axis, and preserve an exact gap between terms.
+pub fn reactive_readout_layout_system(
+    layouts: Query<&ReactiveReadoutLayout>,
+    ids: Query<(Entity, &MobjectId)>,
+    bounds: Query<&LocalBounds>,
+    mut transforms: Query<&mut SpatialTransform>,
+) {
+    let entities = ids
+        .iter()
+        .map(|(entity, id)| (id.0, entity))
+        .collect::<HashMap<_, _>>();
+
+    for layout in &layouts {
+        let ordered_ids = [
+            layout.label,
+            layout.equals,
+            Some(layout.number),
+            layout.unit,
+        ];
+        let parts = ordered_ids
+            .into_iter()
+            .flatten()
+            .filter_map(|id| {
+                let entity = *entities.get(&id)?;
+                let local = bounds.get(entity).ok()?.0;
+                Some((id, entity, local))
+            })
+            .collect::<Vec<_>>();
+        if parts.is_empty() {
+            continue;
+        }
+
+        let widths = parts
+            .iter()
+            .map(|(_, _, bounds)| (bounds.max.x - bounds.min.x).max(0.0))
+            .collect::<Vec<_>>();
+        let total_width = widths.iter().sum::<f64>()
+            + layout.spacing.max(0.0) * (parts.len().saturating_sub(1) as f64);
+        let number_bounds = parts
+            .iter()
+            .find_map(|(id, _, bounds)| (*id == layout.number).then_some(*bounds))
+            .unwrap_or_default();
+        let number_axis = (number_bounds.max.y - number_bounds.min.y).max(0.0) * 0.5;
+        let provisional_y = parts
+            .iter()
+            .map(|(id, _, local)| {
+                if Some(*id) == layout.equals {
+                    number_axis - (local.min.y + local.max.y) * 0.5
+                } else {
+                    -local.min.y
+                }
+            })
+            .collect::<Vec<_>>();
+        let row_min_y = parts
+            .iter()
+            .zip(&provisional_y)
+            .map(|((_, _, local), translation)| local.min.y + translation)
+            .fold(f64::INFINITY, f64::min);
+        let row_max_y = parts
+            .iter()
+            .zip(&provisional_y)
+            .map(|((_, _, local), translation)| local.max.y + translation)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let vertical_centering = -(row_min_y + row_max_y) * 0.5;
+        let mut cursor = -total_width * 0.5;
+
+        for (((_, entity, local), width), translation_y) in
+            parts.into_iter().zip(widths).zip(provisional_y)
+        {
+            let target_center_x = cursor + width * 0.5;
+            let local_center_x = (local.min.x + local.max.x) * 0.5;
+            if let Ok(mut transform) = transforms.get_mut(entity) {
+                transform.translation.x = target_center_x - local_center_x;
+                transform.translation.y = translation_y + vertical_centering;
+            }
+            cursor += width + layout.spacing.max(0.0);
         }
     }
 }
@@ -780,6 +872,80 @@ mod tests {
             app.world().get::<LocalBounds>(readout).unwrap().0,
             expected_bounds
         );
+    }
+
+    #[test]
+    fn reactive_readout_layout_preserves_equal_gaps_when_number_width_changes() {
+        let label_id = gaanim_core::ObjectId::from_raw(11);
+        let equals_id = gaanim_core::ObjectId::from_raw(12);
+        let number_id = gaanim_core::ObjectId::from_raw(13);
+        let unit_id = gaanim_core::ObjectId::from_raw(14);
+        let mut app = App::new();
+        app.add_systems(Update, reactive_readout_layout_system);
+
+        let spawn_part = |app: &mut App, id, width: f64, height: f64| {
+            app.world_mut()
+                .spawn((
+                    MobjectId(id),
+                    LocalBounds(Bounds3D::new_2d(0.0, 0.0, width, height)),
+                    SpatialTransform::default(),
+                ))
+                .id()
+        };
+        let label = spawn_part(&mut app, label_id, 20.0, 28.0);
+        let equals = spawn_part(&mut app, equals_id, 12.0, 12.0);
+        let number = spawn_part(&mut app, number_id, 40.0, 24.0);
+        let unit = spawn_part(&mut app, unit_id, 18.0, 30.0);
+        app.world_mut().spawn(ReactiveReadoutLayout {
+            label: Some(label_id),
+            equals: Some(equals_id),
+            number: number_id,
+            unit: Some(unit_id),
+            spacing: 10.0,
+        });
+
+        app.update();
+
+        let visual_edges = |app: &App, entity| {
+            let bounds = app.world().get::<LocalBounds>(entity).unwrap().0;
+            let transform = app.world().get::<SpatialTransform>(entity).unwrap();
+            (
+                bounds.min.x + transform.translation.x,
+                bounds.max.x + transform.translation.x,
+                bounds.min.y + transform.translation.y,
+                bounds.max.y + transform.translation.y,
+            )
+        };
+        let label_edges = visual_edges(&app, label);
+        let equals_edges = visual_edges(&app, equals);
+        let initial_number_edges = visual_edges(&app, number);
+        let initial_unit_edges = visual_edges(&app, unit);
+        assert_eq!(equals_edges.0 - label_edges.1, 10.0);
+        assert_eq!(initial_number_edges.0 - equals_edges.1, 10.0);
+        assert_eq!(initial_unit_edges.0 - initial_number_edges.1, 10.0);
+        assert_eq!(label_edges.2, initial_number_edges.2);
+        assert_eq!(initial_unit_edges.2, initial_number_edges.2);
+        assert_eq!(
+            (equals_edges.2 + equals_edges.3) * 0.5,
+            (initial_number_edges.2 + initial_number_edges.3) * 0.5
+        );
+        assert_eq!(initial_unit_edges.2, -15.0);
+        assert_eq!(initial_unit_edges.3, 15.0);
+
+        app.world_mut()
+            .entity_mut(number)
+            .insert(LocalBounds(Bounds3D::new_2d(0.0, 0.0, 70.0, 24.0)));
+        app.update();
+
+        let label_edges = visual_edges(&app, label);
+        let equals_edges = visual_edges(&app, equals);
+        let number_edges = visual_edges(&app, number);
+        let unit_edges = visual_edges(&app, unit);
+        assert_eq!(equals_edges.0 - label_edges.1, 10.0);
+        assert_eq!(number_edges.0 - equals_edges.1, 10.0);
+        assert_eq!(unit_edges.0 - number_edges.1, 10.0);
+        assert_eq!(label_edges.0, -75.0);
+        assert_eq!(unit_edges.1, 75.0);
     }
 
     #[test]

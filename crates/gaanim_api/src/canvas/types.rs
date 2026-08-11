@@ -666,6 +666,15 @@ pub struct LayoutTreeSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ReactiveReadoutLayoutSpec {
+    pub label: Option<ObjectId>,
+    pub equals: Option<ObjectId>,
+    pub number: ObjectId,
+    pub unit: Option<ObjectId>,
+    pub spacing: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct ObjectSpec {
     pub id: ObjectId,
     pub kind: SpawnKind,
@@ -705,6 +714,7 @@ pub struct ObjectSpec {
     /// Whether the author has queued a manual translation animation.
     pub manual_position_animation: bool,
     pub layout_ops: Vec<LayoutOp>,
+    pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
 }
 
 impl ObjectSpec {
@@ -734,6 +744,7 @@ impl ObjectSpec {
             layout_owner: None,
             manual_position_animation: false,
             layout_ops: Vec::new(),
+            reactive_readout_layout: None,
         }
     }
 }

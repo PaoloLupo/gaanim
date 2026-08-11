@@ -18,7 +18,7 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{
     Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
-    LayoutTreeSnapshot, Margin, SpawnKind,
+    LayoutTreeSnapshot, Margin, ReactiveReadoutLayoutSpec, SpawnKind,
 };
 use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
@@ -1199,6 +1199,42 @@ impl Canvas {
             handle.defer_visibility_until_play();
         }
         handle
+    }
+
+    /// Build the stable, equation-style row used by reactive numeric readouts.
+    #[doc(hidden)]
+    pub fn reactive_readout_group(
+        &mut self,
+        label: Option<&DrawableHandle>,
+        equals: Option<&DrawableHandle>,
+        number: &DrawableHandle,
+        unit: Option<&DrawableHandle>,
+        spacing: f64,
+    ) -> DrawableHandle {
+        let mut members = Vec::with_capacity(4);
+        if let Some(label) = label {
+            members.push(label);
+        }
+        if let Some(equals) = equals {
+            members.push(equals);
+        }
+        members.push(number);
+        if let Some(unit) = unit {
+            members.push(unit);
+        }
+        let group = self.group(&members);
+        group
+            .spec
+            .lock()
+            .expect("readout group spec poisoned")
+            .reactive_readout_layout = Some(ReactiveReadoutLayoutSpec {
+            label: label.map(|part| part.id),
+            equals: equals.map(|part| part.id),
+            number: number.id,
+            unit: unit.map(|part| part.id),
+            spacing,
+        });
+        group
     }
 
     pub(crate) fn group_no_center(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
