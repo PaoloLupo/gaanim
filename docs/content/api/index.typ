@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "API Reference",
-  description: "Gaanim API — Scene, Mobjects, Animations, Themes",
+  description: "Gaanim API — Scene, Text, Mobjects, Animations, Themes",
   route: "/api/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -18,6 +18,12 @@ Toda la superficie pública de Gaanim — una carta técnica sin adornos.
     #html.div(style: "font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; color: var(--text-main);", [Scene])
     #html.div(style: "font-size: 0.84rem; color: var(--text-muted); margin-top: 6px;", [Constructor, viewport, factories, timeline, slides, cámara y export. Entrada única.])
     #html.div(style: "margin-top: 12px; font-family: var(--font-code); font-size: 0.62rem; font-weight: 800; color: var(--accent-blue); border: 1.5px solid var(--code-border); display: inline-block; padding: 3px 8px; background: #eff6ff;", [SCENE →])
+  ])
+  #html.a(href: "text/", style: "display: block; background: var(--bg-card); border: 1.5px solid var(--code-border); padding: 18px; text-decoration: none !important;", [
+    #html.div(style: "font-family: var(--font-code); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-violet); margin-bottom: 6px; border-bottom: 2px solid var(--accent-violet); display: inline-block; padding-bottom: 2px;", [TEXT — UNIFIED])
+    #html.div(style: "font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; color: var(--text-main);", [Text])
+    #html.div(style: "font-size: 0.84rem; color: var(--text-muted); margin-top: 6px;", [Prose, matemática, partes semánticas, flujo responsive, selecciones y transiciones estructurales.])
+    #html.div(style: "margin-top: 12px; font-family: var(--font-code); font-size: 0.62rem; font-weight: 800; color: var(--accent-violet); border: 1.5px solid var(--code-border); display: inline-block; padding: 3px 8px; background: #f5f3ff;", [TEXT →])
   ])
   #html.a(href: "mobjects/", style: "display: block; background: var(--bg-card); border: 1.5px solid var(--code-border); padding: 18px; text-decoration: none !important;", [
     #html.div(style: "font-family: var(--font-code); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-violet); margin-bottom: 6px; border-bottom: 2px solid var(--accent-violet); display: inline-block; padding-bottom: 2px;", [02 — DRAWABLES · 58])
@@ -65,6 +71,7 @@ Copiar, pegar, `gaanim archivo.py`.
 == Mapa rápido
 
 - #link("/api/scene/", "Scene — viewport, factories, timeline, slides, cámara, export")
+- #link("/api/text/", "Text — prosa, matemática, estilo, flujo, selecciones y transiciones")
 - #link("/api/visualization/", "Visualization — ejes, funciones, datos, estadística y cálculo")
 - #link("/api/mobjects/", "Mobjects — 40+ factories por categoría")
 - #link("/api/animations/", "Animations — 22 anims + timing/easing")
@@ -73,4 +80,4 @@ Copiar, pegar, `gaanim archivo.py`.
 
 == Siguiente
 
-#link("/api/scene/", "Empezar por Scene →") · #link("/api/mobjects/", "Ver Mobjects →") · #link("/examples/basic/", "Ejemplos completos →")
+#link("/api/scene/", "Empezar por Scene →") · #link("/api/text/", "Dominar Text →") · #link("/api/mobjects/", "Ver Mobjects →") · #link("/examples/basic/", "Ejemplos completos →")

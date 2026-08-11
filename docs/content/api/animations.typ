@@ -363,6 +363,10 @@ scene.export("preview.webp", fps=30)
 
 == Structured text transitions
 
+The complete text-specific surface, including selections, annotations,
+ownership, and error behavior, is documented in
+#link("/api/text/", "Text — unified authoring and animation").
+
 #api-entry(
   name: "Text.step_to",
   kind: "method",

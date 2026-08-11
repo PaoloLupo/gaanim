@@ -660,6 +660,9 @@ scene.play([space.create(), curve.create()])
 
 == Text & Math
 
+This page keeps a compact factory index. The canonical, complete reference is
+#link("/api/text/", "Text — content, math, style, flow, selections, Layout, and animation").
+
 #api-entry(
   name: "Scene.text",
   kind: "factory",
@@ -673,7 +676,7 @@ scene.play([space.create(), curve.create()])
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).at(0, 0)
-scene.play([label.write().duration(0.9)])
+scene.play([label.write(0.9)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -710,7 +713,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 t = scene.text("Fourier Transform", role="title").at(0, 30)
 s = scene.text("A visual proof", role="subtitle").at(0, -20)
-scene.play([t.write().duration(0.7), s.fade_in().duration(0.5)])
+scene.play([t.write(0.7), s.fade_in().duration(0.5)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -730,7 +733,7 @@ scene = Scene(480, 270, background="#0f172a")
 # Fluent placement preserves the specialized Text handle.
 eq = scene.text("$", part("variable", "x"), " dot 5 = ", part("result", "25"), "$").at(0, 0)
 eq["result"].fill(GOLD)
-scene.play([eq.write().duration(1.0)])
+scene.play([eq.write(1.0)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1203,8 +1206,8 @@ scene = Scene(480, 270, background="#0f172a")
 eq = scene.text("$E = ", part("mass", "m"), " c^2$").at(0, 0)
 eq["mass"].fill(GOLD)
 scene.play([
-    eq.write().duration(0.8),
-    eq["mass"].indicate().duration(0.8),
+    eq.write(0.8),
+    eq["mass"].indicate(0.8),
 ])
 scene.export("preview.webp", fps=30)
 ```

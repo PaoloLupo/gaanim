@@ -57,6 +57,229 @@ scene.stack(children, *, padding=0, width="hug", height="hug",
 `"safe"` or `"frame"`. Non-negative numeric values use canvas units. Invalid
 sizes, padding, tracks, alignments, or containing blocks raise `ValueError`.
 
+== Layout possibility atlas
+
+This section is a compact catalogue of the complete public Layout v2 design
+space. The features are orthogonal: a grid can be nested in a column, a stack
+can occupy one fractional track, responsive text can grow inside either, and
+the resulting tree can still be constrained and animated.
+
+#table(
+  columns: (1.05fr, 1.15fr, 2.4fr),
+  inset: 7pt,
+  [*Goal*], [*API*], [*What it controls*],
+  [Horizontal flow], [`scene.row(...)`], [Main axis is left to right; optionally wraps into new rows.],
+  [Vertical flow], [`scene.column(...)`], [Main axis is top to bottom; optionally wraps into new columns.],
+  [Track layout], [`scene.grid(...)`], [Fixed, intrinsic `auto`, and weighted `fr` rows and columns, spans, and auto-placement.],
+  [Overlays], [`scene.stack(...)`], [Shared containing box for backgrounds, media, captions, badges, and absolute children.],
+  [Outer size], [`width` / `height`], [A fixed canvas-unit number, intrinsic `"hug"`, or available-space `"fill"`.],
+  [Flexible children], [`scene.item(...)`], [`grow`, `shrink`, per-item alignment, grid coordinates, spans, offsets, anchors, and fitting.],
+  [Spacing], [`padding`, `gap`], [One inset, vertical/horizontal insets, four side insets, and independent grid row/column gaps.],
+  [Alignment], [`align`, `justify`], [Cross-axis placement and main-axis distribution.],
+  [Root bounds], [`within="safe"` / `"frame"`], [Whether a root consumes the margin-aware safe frame or the complete viewport.],
+  [Responsive content], [`TextFlow(wrap="auto")`], [Remeasures text using the width offered by its final nested Layout box.],
+  [Media fitting], [`fit=...`], [`none`, `contain`, `cover`, `stretch`, or `scale_down`; `cover` also clips.],
+  [Relations], [`scene.constrain(...)`], [Linear equations and inequalities between geometry in different branches.],
+  [Live structure], [`add` / `remove` / `replace` / `configure`], [Creates an instant or animated deterministic reflow snapshot.],
+  [Reusable pages], [`scene.template(...)` / `segment.bind(...)`], [Typed slots, built-in presentation patterns, and theme-driven spacing tokens.],
+)
+
+=== Complete scene without coordinates
+
+The following scene uses a nested `column -> row -> stack -> column` tree. No
+child calls `at()`: the outer tree decides every translation, and the text is
+remeasured at the width of the card that contains it.
+
+```python
+from gaanim import BLUE, GOLD, WHITE, Scene, TextFlow
+
+scene = Scene(1280, 720, background="#0b1020", margin=48)
+
+copy = scene.text(
+    "The same tree can drive a slide, a dashboard, or a vertical video.",
+    role="body",
+    color=WHITE,
+    flow=TextFlow(wrap="auto", line_spacing=1.2),
+)
+
+card = scene.stack(
+    [
+        scene.item(scene.rounded_rect(360, 220, 18).fill(BLUE), fit="stretch"),
+        scene.column(
+            [
+                scene.text("Measured content", role="heading", color=GOLD),
+                copy,
+            ],
+            width="fill",
+            height="fill",
+            padding=28,
+            gap=18,
+            align="stretch",
+            justify="center",
+        ),
+    ],
+    width=360,
+    height=220,
+    align="stretch",
+)
+
+body = scene.row(
+    [
+        scene.item(card, grow=2),
+        scene.item(scene.circle(96).fill(GOLD), grow=1, align="center"),
+    ],
+    width="fill",
+    gap=40,
+    align="center",
+)
+
+page = scene.column(
+    [
+        scene.text("Layout v2 atlas", role="title", color=GOLD),
+        scene.item(body, grow=1, align="stretch"),
+        scene.text("No manual coordinates", role="caption", color=WHITE),
+    ],
+    within="safe",
+    width="fill",
+    height="fill",
+    padding=(24, 40),
+    gap=32,
+    align="stretch",
+    justify="between",
+)
+
+scene.play([page.fade_in().duration(0.6)])
+scene.render()
+```
+
+=== Sizing, padding, and flexible space
+
+`"hug"` measures intrinsic content, a number fixes the outer box in canvas
+units, and `"fill"` consumes the available constraint. `grow` distributes
+remaining main-axis space between siblings; `shrink` decides which siblings
+may contract when the row or column is tighter than their preferred size.
+
+```python
+badge = scene.row([icon, label], width="hug", padding=(8, 14), gap=8)
+
+workspace = scene.row(
+    [
+        scene.item(sidebar, grow=0, shrink=0),
+        scene.item(content, grow=3, shrink=1, align="stretch"),
+        scene.item(inspector, grow=1, shrink=1),
+    ],
+    width="fill",
+    height="fill",
+    padding=(24, 40),       # vertical, horizontal
+    gap=32,
+    align="stretch",
+)
+
+workspace.configure(
+    min_width=640,
+    max_width=1180,
+    min_height=360,
+    aspect_ratio=16 / 9,
+)
+```
+
+Padding accepts `padding=24`, `padding=(vertical, horizontal)`, or
+`padding=(top, right, bottom, left)`. Rows and columns use one `gap`; grids can
+override it with `row_gap` and `column_gap`.
+
+=== Alignment and distribution
+
+`align` controls the cross axis and accepts `start`, `center`, `end`, or
+`stretch`. `justify` controls the main axis and accepts `start`, `center`,
+`end`, `between`, `around`, or `evenly`. A child can override cross-axis
+alignment through `scene.item(..., align=...)`.
+
+```python
+toolbar = scene.row(
+    [back, scene.item(search, grow=1, align="stretch"), actions],
+    width="fill",
+    align="center",
+    justify="between",
+)
+
+steps = scene.column(
+    [intro, explanation, result],
+    height="fill",
+    align="stretch",
+    justify="evenly",
+)
+
+chips = scene.row(tags, width=620, gap=12, wrap=True, align="center")
+```
+
+With `wrap=True`, rows start another row when the next child exceeds the
+available width; columns use the corresponding vertical rule and start another
+column. Absolute children never consume flow space.
+
+=== Every per-item rule
+
+#table(
+  columns: (0.95fr, 1.15fr, 2.7fr),
+  inset: 7pt,
+  [*Rule*], [*Values*], [*Effect*],
+  [`grow`], [non-negative number], [Weighted share of unused main-axis space.],
+  [`shrink`], [non-negative number], [Relative permission to contract under pressure; `0` protects the preferred size.],
+  [`align`], [`start | center | end | stretch`], [Overrides the container's cross-axis alignment for this child.],
+  [`row`, `column`], [zero-based integer or `None`], [Chooses an explicit grid origin; omitted coordinates use deterministic auto-placement.],
+  [`row_span`, `column_span`], [integer >= 1], [Occupies multiple grid tracks.],
+  [`absolute`], [`True | False`], [Removes the child from flow measurement and places it against the containing box.],
+  [`anchor`], [`Anchor.*`], [Selects center, edge, or corner placement inside a stack, grid cell, or absolute containing box.],
+  [`offset`], [`(x, y)`], [Adds an intentional editorial displacement without surrendering Layout ownership.],
+  [`fit`], [`none | contain | cover | stretch | scale_down`], [Maps drawable geometry into the assigned box.],
+)
+
+These rules work at construction time and can be changed later without
+rebuilding the tree:
+
+```python
+page.configure_item(
+    chart,
+    grow=2,
+    shrink=1,
+    align="stretch",
+    offset=(12, 0),
+    fit="contain",
+    animate=0.35,
+)
+```
+
+=== Responsive roots and nested trees
+
+Use `within="safe"` for presentation content that respects scene margins and
+`within="frame"` for full-bleed backgrounds. Nested layouts normally leave
+`within=None`; they receive their constraints from the parent. Dirty state and
+responsive measurement propagate to the outermost owner automatically.
+
+```python
+background = scene.stack(
+    [scene.item(photo, fit="cover")],
+    within="frame",
+    width="fill",
+    height="fill",
+    align="stretch",
+)
+
+content = scene.column(
+    [title, scene.text(copy, flow=TextFlow(wrap="auto")), footer],
+    within="safe",
+    width="fill",
+    height="fill",
+    align="stretch",
+    justify="between",
+)
+
+page = scene.stack([background, content], within="frame", width="fill", height="fill")
+```
+
+The same tree can target 16:9 and 9:16. Flow wrapping, fractional tracks,
+`grow`, and responsive text adapt to the offered viewport; use separate trees
+only when the editorial hierarchy itself changes.
+
 == Grid and overlays
 
 Grid tracks accept fixed values, `"auto"`, and fractional strings such as
