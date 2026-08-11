@@ -162,6 +162,7 @@ impl TimelineWidget {
         signal_values: &HashMap<ObjectId, f64>,
         updater_entities: &HashSet<ObjectId>,
         decimal_values: &HashMap<ObjectId, f64>,
+        snapping_allowed: bool,
     ) {
         let header_rows = if self.show_scene_header { 1 } else { 0 };
         let mobject_tracks: Vec<TrackId> = timeline
@@ -200,7 +201,7 @@ impl TimelineWidget {
                     .max_rect(inner)
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
-            self.paint_header(&mut hu, timeline);
+            self.paint_header(&mut hu, timeline, snapping_allowed);
         }
 
         // ── Canvas (zoom bar + ruler + tracks) — fills remaining height ──
@@ -290,6 +291,7 @@ impl TimelineWidget {
             on_edge,
             hover_pos,
             group_children,
+            snapping_allowed,
         );
 
         // Paint
@@ -464,7 +466,7 @@ impl TimelineWidget {
     }
 
     // ── Header (Premiere-style) ───────────────────────────────────────
-    fn paint_header(&mut self, ui: &mut egui::Ui, timeline: &mut Timeline) {
+    fn paint_header(&mut self, ui: &mut egui::Ui, timeline: &mut Timeline, snapping_allowed: bool) {
         // Style helpers
         let btn_fill = |active: bool| {
             if active {
@@ -567,10 +569,19 @@ impl TimelineWidget {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
             // Snap toggle
-            let snap_label = if self.snap_enabled { "🧲" } else { "○" };
+            let snap_label = if self.snapping_active(snapping_allowed) {
+                "🧲"
+            } else {
+                "○"
+            };
             if ui
-                .add(mk_btn(snap_label, self.snap_enabled))
-                .on_hover_text(if self.snap_enabled {
+                .add_enabled(
+                    snapping_allowed,
+                    mk_btn(snap_label, self.snapping_active(snapping_allowed)),
+                )
+                .on_hover_text(if !snapping_allowed {
+                    "Snap is disabled for 3D scenes"
+                } else if self.snap_enabled {
                     "Snap: ON (magnet to playhead/clips)"
                 } else {
                     "Snap: OFF"
@@ -583,6 +594,10 @@ impl TimelineWidget {
     }
 
     // ── Ruler (Premiere-like: timecode + ticks) ───────────────────────
+    fn snapping_active(&self, snapping_allowed: bool) -> bool {
+        snapping_allowed && self.snap_enabled
+    }
+
     fn paint_ruler(&self, p: &egui::Painter, rect: Rect) {
         // Background with bottom border
         p.rect_filled(rect, 0u8, RULER_BG);
@@ -1538,6 +1553,7 @@ impl TimelineWidget {
         on_edge: bool,
         hover_pos: Option<Pos2>,
         group_children: &HashMap<TrackId, Vec<TrackId>>,
+        snapping_allowed: bool,
     ) {
         // ── Keyboard shortcuts ──────────────────────────────────────────
         let pressed = |key| ui.input(|i| i.key_pressed(key));
@@ -1900,7 +1916,7 @@ impl TimelineWidget {
                             let dx = pos.x - self.drag_mouse_start_x;
                             let dt = dx as f64 / self.pixels_per_second;
                             let ns = (self.drag_orig_start + dt).max(0.0);
-                            let snapped = if self.snap_enabled {
+                            let snapped = if self.snapping_active(snapping_allowed) {
                                 self.snap_time(ns, clips_rect, timeline)
                             } else {
                                 ns
@@ -1913,7 +1929,7 @@ impl TimelineWidget {
                             let dx = pos.x - self.drag_mouse_start_x;
                             let dt = dx as f64 / self.pixels_per_second;
                             let ns = (self.drag_orig_start + dt).max(0.0);
-                            let snapped = if self.snap_enabled {
+                            let snapped = if self.snapping_active(snapping_allowed) {
                                 self.snap_time(ns, clips_rect, timeline)
                             } else {
                                 ns
@@ -1929,7 +1945,7 @@ impl TimelineWidget {
                             let dx = pos.x - self.drag_mouse_start_x;
                             let dt = dx as f64 / self.pixels_per_second;
                             let ne = self.drag_orig_start + self.drag_orig_duration + dt;
-                            let snapped_end = if self.snap_enabled {
+                            let snapped_end = if self.snapping_active(snapping_allowed) {
                                 self.snap_time(ne, clips_rect, timeline)
                             } else {
                                 ne
@@ -2264,5 +2280,20 @@ fn clip_label(payload: &ClipPayload) -> String {
         ClipPayload::RemoveUpdater { .. } => "StopUpdater".into(),
         ClipPayload::SetSceneMember { .. } => "SceneMember".into(),
         ClipPayload::Transition { .. } => "Transition".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TimelineWidget;
+
+    #[test]
+    fn three_d_policy_overrides_snap_preference_without_forgetting_it() {
+        let mut timeline = TimelineWidget::default();
+        assert!(timeline.snapping_active(true));
+        assert!(!timeline.snapping_active(false));
+
+        timeline.snap_enabled = false;
+        assert!(!timeline.snapping_active(true));
     }
 }

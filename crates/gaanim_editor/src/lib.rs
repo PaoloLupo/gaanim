@@ -96,6 +96,32 @@ impl Default for PreviewInteractive {
 }
 
 impl PreviewInteractive {
+    fn set_enabled(&mut self, enabled: bool, authored_camera: Option<Camera>) {
+        self.enabled = enabled;
+        if !enabled {
+            self.view = PreviewView::CameraView;
+            return;
+        }
+
+        self.user_zoom = 1.0;
+        self.pan = glam::DVec2::ZERO;
+        if self.detected_3d {
+            self.free_camera = authored_camera;
+            self.view = if self.free_camera.is_some() {
+                PreviewView::Free3D
+            } else {
+                PreviewView::CameraView
+            };
+        } else {
+            self.free_camera = None;
+            self.view = PreviewView::CameraView;
+        }
+    }
+
+    fn toggle(&mut self, authored_camera: Option<Camera>) {
+        self.set_enabled(!self.enabled, authored_camera);
+    }
+
     pub fn reset(&mut self) {
         self.user_zoom = 1.0;
         self.pan = glam::DVec2::ZERO;
@@ -183,7 +209,7 @@ impl Plugin for GaanimEditorPlugin {
         .add_systems(
             Update,
             (
-                auto_activate_3d_view_system,
+                detect_3d_content_system,
                 frame_free_camera_system,
                 viewport_adjust_system,
             )
@@ -288,7 +314,6 @@ struct EditorQueries<'w, 's> {
     fill: Query<'w, 's, &'static FillBrush>,
     stroke: Query<'w, 's, &'static StrokeBrush>,
     opacity: Query<'w, 's, &'static Opacity>,
-    bounds: Query<'w, 's, &'static WorldBounds>,
     extra: Query<
         'w,
         's,
@@ -312,7 +337,6 @@ fn editor_ui_system(
     mut inset: ResMut<ViewportInset>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut commands: Commands,
-    camera: Option<Res<ResolvedCamera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
@@ -368,45 +392,6 @@ fn editor_ui_system(
             egui::Stroke::new(1.0, egui::Color32::from_white_alpha(70)),
             egui::StrokeKind::Inside,
         );
-    }
-
-    // Interactive mode banner (esquina para no tapar toolbar de overlays en CENTER_TOP)
-    if interactive.enabled {
-        egui::Area::new("interactive_banner".into())
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
-            .order(egui::Order::Foreground)
-            .interactable(false)
-            .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgba_premultiplied(30, 90, 50, 230))
-                    .corner_radius(8.0)
-                    .inner_margin(egui::Margin::symmetric(12, 6))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgba_premultiplied(80, 180, 120, 180),
-                    ))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("MODO INTERACTIVO")
-                                    .color(egui::Color32::from_rgb(160, 255, 180))
-                                    .strong()
-                                    .size(12.0),
-                            );
-                            ui.separator();
-                            ui.label(
-                                egui::RichText::new("Esc: salir  ·  R: reset cámara  ·  Rueda: zoom  ·  Arrastrar: pan")
-                                    .color(egui::Color32::from_rgb(230, 240, 230))
-                                    .size(11.0),
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("  {:.0}%", interactive.user_zoom * 100.0))
-                                    .color(egui::Color32::from_rgb(255, 220, 120))
-                                    .size(11.0),
-                            );
-                        });
-                    });
-            });
     }
 
     let is_exporting = export_state.active;
@@ -555,6 +540,10 @@ fn editor_ui_system(
         }
     }
 
+    // Temporal snapping is intentionally unavailable while inspecting 3D.
+    // Keep the ordinary 2D preference untouched.
+    let snapping_allowed = !interactive.detected_3d;
+
     // ── Full timeline panel (only when explicitly toggled on) ──────────────
     let timeline_response = if state.timeline_visible {
         Some(
@@ -571,6 +560,7 @@ fn editor_ui_system(
                         &signal_values,
                         &updater_entities,
                         &decimal_values,
+                        snapping_allowed,
                     );
                 }),
         )
@@ -688,29 +678,15 @@ fn editor_ui_system(
                             &scene_segs,
                             &mut state.seek_bar_drag_target,
                             total,
+                            snapping_allowed,
                         );
                         if let Some(new_frac) = seek_resp.seek_to {
-                            // snapping visual magnético: imán suave a bordes de escena / stops
-                            let mut snapped_frac = new_frac;
-                            let snap_frac = 0.015; // ~10px en ancho típico
-                            for seg in &scene_segs {
-                                if (new_frac - seg.start_frac).abs() < snap_frac {
-                                    snapped_frac = seg.start_frac;
-                                    break;
-                                }
-                                if (new_frac - seg.end_frac).abs() < snap_frac {
-                                    snapped_frac = seg.end_frac;
-                                    break;
-                                }
-                            }
-                            if snapped_frac == new_frac {
-                                for &bp in &bp_fracs {
-                                    if (new_frac - bp).abs() < snap_frac {
-                                        snapped_frac = bp;
-                                        break;
-                                    }
-                                }
-                            }
+                            let snapped_frac = snap_seek_fraction(
+                                new_frac,
+                                &scene_segs,
+                                &bp_fracs,
+                                snapping_allowed,
+                            );
                             timeline.seek_request = Some(snapped_frac as f64 * total);
                         }
                         if let Some((ls, le)) = seek_resp.loop_drag {
@@ -1211,57 +1187,6 @@ fn editor_ui_system(
         state.timeline_widget.selected_track = None;
     }
 
-    if let Some(selected) = state.selected
-        && let Some(camera) = camera.as_ref()
-        && let Ok(bounds) = q.bounds.get(selected)
-    {
-        let corners = [
-            glam::DVec3::new(bounds.0.min.x, bounds.0.min.y, 0.0),
-            glam::DVec3::new(bounds.0.max.x, bounds.0.min.y, 0.0),
-            glam::DVec3::new(bounds.0.max.x, bounds.0.max.y, 0.0),
-            glam::DVec3::new(bounds.0.min.x, bounds.0.max.y, 0.0),
-        ];
-
-        let screen: Vec<egui::Pos2> = corners
-            .iter()
-            .map(|c| {
-                let s = camera.world_to_screen(*c);
-                egui::Pos2::new(s.x as f32, s.y as f32)
-            })
-            .collect();
-
-        let color = egui::Color32::from_rgba_premultiplied(68, 160, 255, 180);
-        let stroke = egui::Stroke::new(2.0, color);
-        egui::Area::new("viewport_selection".into())
-            .fixed_pos(egui::pos2(0.0, 0.0))
-            .interactable(false)
-            .show(ctx, |ui| {
-                let vp = ctx.viewport_rect();
-                let _ = ui.allocate_space(vp.size());
-                let p = ui.painter();
-                for i in 0..4 {
-                    p.line_segment([screen[i], screen[(i + 1) % 4]], stroke);
-                }
-                let cs = 6.0;
-                for &c in &screen {
-                    p.line_segment(
-                        [
-                            egui::Pos2::new(c.x - cs, c.y),
-                            egui::Pos2::new(c.x + cs, c.y),
-                        ],
-                        stroke,
-                    );
-                    p.line_segment(
-                        [
-                            egui::Pos2::new(c.x, c.y - cs),
-                            egui::Pos2::new(c.x, c.y + cs),
-                        ],
-                        stroke,
-                    );
-                }
-            });
-    }
-
     fps_overlay.render(ctx);
 }
 
@@ -1330,6 +1255,31 @@ fn seek_bar_drag_target(origin_x: f32, left_x: f32, right_x: f32) -> SeekBarDrag
     }
 }
 
+fn snap_seek_fraction(
+    fraction: f32,
+    scenes: &[SceneSegment],
+    stops: &[f32],
+    snapping_enabled: bool,
+) -> f32 {
+    if !snapping_enabled {
+        return fraction;
+    }
+    const THRESHOLD: f32 = 0.015;
+    for scene in scenes {
+        if (fraction - scene.start_frac).abs() < THRESHOLD {
+            return scene.start_frac;
+        }
+        if (fraction - scene.end_frac).abs() < THRESHOLD {
+            return scene.end_frac;
+        }
+    }
+    stops
+        .iter()
+        .copied()
+        .find(|stop| (fraction - stop).abs() < THRESHOLD)
+        .unwrap_or(fraction)
+}
+
 /// Paint a custom seek bar with progress fill, loop region, stop markers,
 /// scene sections, playhead handle, and hover time tooltip.
 ///
@@ -1337,6 +1287,7 @@ fn seek_bar_drag_target(origin_x: f32, left_x: f32, right_x: f32) -> SeekBarDrag
 /// línea de tiempo**: each scene occupies its time span, its name is
 /// centered above the track, and the boundary between scenes is marked
 /// with a crisp tick that connects the lane to the seek bar.
+#[allow(clippy::too_many_arguments)]
 fn paint_seek_bar(
     ui: &mut egui::Ui,
     frac: f32,
@@ -1345,6 +1296,7 @@ fn paint_seek_bar(
     scenes: &[SceneSegment],
     drag_target: &mut Option<SeekBarDragTarget>,
     total: f64,
+    snapping_enabled: bool,
 ) -> SeekBarResponse {
     let bar_h = 6.0_f32;
     let handle_r = 6.0_f32;
@@ -1735,51 +1687,30 @@ fn paint_seek_bar(
             let hover_secs = hover_frac as f64 * total;
 
             // snapping visual: detecta borde cercano
-            let snap_thr = 0.015;
-            let mut snap_frac: Option<f32> = None;
-            let mut snap_label: Option<&str> = None;
-            for seg in scenes {
-                if (hover_frac - seg.start_frac).abs() < snap_thr {
-                    snap_frac = Some(seg.start_frac);
-                    snap_label = Some(&seg.name);
-                    break;
+            if snapping_enabled {
+                let snapped = snap_seek_fraction(hover_frac, scenes, bp_fracs, true);
+                if snapped != hover_frac {
+                    let sf = snapped;
+                    let sx = bar_rect.min.x + sf * bar_rect.width();
+                    painter.line_segment(
+                        [
+                            egui::pos2(sx, bar_rect.min.y - 6.0),
+                            egui::pos2(sx, bar_rect.max.y + 6.0),
+                        ],
+                        egui::Stroke::new(
+                            1.6,
+                            egui::Color32::from_rgba_premultiplied(255, 210, 110, 200),
+                        ),
+                    );
+                    // pequeño imán
+                    painter.text(
+                        egui::pos2(sx, bar_rect.min.y - 8.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        "🧲",
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::from_rgb(255, 210, 110),
+                    );
                 }
-                if (hover_frac - seg.end_frac).abs() < snap_thr {
-                    snap_frac = Some(seg.end_frac);
-                    snap_label = None;
-                    break;
-                }
-            }
-            if snap_frac.is_none() {
-                for &bp in bp_fracs {
-                    if (hover_frac - bp).abs() < snap_thr {
-                        snap_frac = Some(bp);
-                        break;
-                    }
-                }
-            }
-            if let Some(sf) = snap_frac {
-                let sx = bar_rect.min.x + sf * bar_rect.width();
-                painter.line_segment(
-                    [
-                        egui::pos2(sx, bar_rect.min.y - 6.0),
-                        egui::pos2(sx, bar_rect.max.y + 6.0),
-                    ],
-                    egui::Stroke::new(
-                        1.6,
-                        egui::Color32::from_rgba_premultiplied(255, 210, 110, 200),
-                    ),
-                );
-                // pequeño imán
-                painter.text(
-                    egui::pos2(sx, bar_rect.min.y - 8.0),
-                    egui::Align2::CENTER_BOTTOM,
-                    "🧲",
-                    egui::FontId::proportional(10.0),
-                    egui::Color32::from_rgb(255, 210, 110),
-                );
-                // si hay snap, el tooltip puede indicar el borde
-                let _ = snap_label;
             }
 
             // texto del tooltip: "Escena · m:ss"
@@ -2135,6 +2066,7 @@ fn preview_mode_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mut interactive: ResMut<PreviewInteractive>,
+    authored_camera: Option<Res<Camera>>,
     presentation_mode: Res<PresentationMode>,
 ) {
     if egui_wants.wants_keyboard_input() {
@@ -2146,15 +2078,9 @@ fn preview_mode_keys_system(
     }
 
     if keys.just_pressed(KeyCode::KeyI) {
-        interactive.enabled = !interactive.enabled;
-        if !interactive.enabled {
-            interactive.view = PreviewView::CameraView;
-        } else if interactive.free_camera.is_some() {
-            interactive.view = PreviewView::Free3D;
-        }
+        interactive.toggle(authored_camera.as_deref().copied());
     } else if interactive.enabled && keys.just_pressed(KeyCode::Escape) {
-        interactive.enabled = false;
-        interactive.view = PreviewView::CameraView;
+        interactive.set_enabled(false, None);
     } else if interactive.enabled && keys.just_pressed(KeyCode::KeyR) {
         interactive.reset();
     } else if interactive.enabled && keys.just_pressed(KeyCode::KeyF) {
@@ -2472,7 +2398,7 @@ fn ray_aabb_intersect(
 }
 
 #[allow(clippy::type_complexity)]
-fn auto_activate_3d_view_system(
+fn detect_3d_content_system(
     mut interactive: ResMut<PreviewInteractive>,
     primitives: Query<(), Or<(With<Mesh3DMarker>, With<GltfModelRoot>)>>,
 ) {
@@ -2480,9 +2406,6 @@ fn auto_activate_3d_view_system(
         return;
     }
     interactive.detected_3d = true;
-    interactive.enabled = true;
-    interactive.view = PreviewView::Free3D;
-    interactive.needs_frame = true;
 }
 
 fn frame_free_camera_system(
@@ -2604,6 +2527,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compact_seek_snapping_is_bypassed_for_3d_content() {
+        let scenes = [SceneSegment {
+            name: "scene".into(),
+            start_frac: 0.25,
+            end_frac: 0.75,
+        }];
+        let near_boundary = 0.251;
+
+        assert_eq!(snap_seek_fraction(near_boundary, &scenes, &[], true), 0.25);
+        assert_eq!(
+            snap_seek_fraction(near_boundary, &scenes, &[], false),
+            near_boundary
+        );
+    }
+
+    #[test]
     fn viewport_frame_rejects_letterbox_and_maps_output_pixels() {
         let frame = ViewportFrame {
             origin: glam::DVec2::new(100.0, 50.0),
@@ -2622,14 +2561,16 @@ mod tests {
     }
 
     #[test]
-    fn three_d_content_auto_frames_once_and_two_d_stays_orthographic() {
+    fn three_d_interaction_restarts_from_authored_camera_every_time() {
         let mut app = App::new();
+        let mut authored = Camera::perspective_3d(1280, 720, 0.8);
+        authored.position = glam::DVec3::new(1.0, 2.0, 3.0);
         app.init_resource::<PreviewInteractive>()
             .init_resource::<EditorState>()
-            .insert_resource(Camera::ortho_2d(1280, 720))
+            .insert_resource(authored)
             .add_systems(
                 Update,
-                (auto_activate_3d_view_system, frame_free_camera_system).chain(),
+                (detect_3d_content_system, frame_free_camera_system).chain(),
             );
         let entity = app
             .world_mut()
@@ -2642,32 +2583,40 @@ mod tests {
             .id();
         app.update();
         let preview = app.world().resource::<PreviewInteractive>();
+        assert!(preview.detected_3d);
+        assert!(!preview.enabled);
+        assert_eq!(preview.view, PreviewView::CameraView);
+        assert_eq!(preview.free_camera, None);
+
+        app.world_mut()
+            .resource_mut::<PreviewInteractive>()
+            .set_enabled(true, Some(authored));
+        let preview = app.world().resource::<PreviewInteractive>();
         assert!(preview.enabled);
         assert_eq!(preview.view, PreviewView::Free3D);
-        let framed = preview.free_camera.expect("free camera");
-        assert!(matches!(
-            framed.projection,
-            gaanim_math::Projection::Perspective { .. }
-        ));
+        assert_eq!(preview.free_camera, Some(authored));
+
+        let mut latest_authored = authored;
+        latest_authored.position = glam::DVec3::new(-4.0, 5.0, 6.0);
+        {
+            let mut preview = app.world_mut().resource_mut::<PreviewInteractive>();
+            preview.free_camera.as_mut().unwrap().position = glam::DVec3::splat(99.0);
+            preview.user_zoom = 3.0;
+            preview.pan = glam::DVec2::splat(20.0);
+            preview.set_enabled(false, None);
+            preview.set_enabled(true, Some(latest_authored));
+        }
+        let preview = app.world().resource::<PreviewInteractive>();
+        assert_eq!(preview.free_camera, Some(latest_authored));
+        assert_eq!(preview.user_zoom, 1.0);
+        assert_eq!(preview.pan, glam::DVec2::ZERO);
 
         app.world_mut().despawn(entity);
-        app.world_mut().spawn((
-            Mesh3DMarker,
-            WorldBounds(gaanim_math::Bounds3D::new_3d(
-                -10.0, -10.0, -10.0, 10.0, 10.0, 10.0,
-            )),
-        ));
-        app.update();
-        assert_eq!(
-            app.world().resource::<PreviewInteractive>().free_camera,
-            Some(framed),
-            "hot reload must preserve the inspection camera"
-        );
 
         let mut two_d = App::new();
         two_d
             .init_resource::<PreviewInteractive>()
-            .add_systems(Update, auto_activate_3d_view_system);
+            .add_systems(Update, detect_3d_content_system);
         two_d.update();
         assert!(!two_d.world().resource::<PreviewInteractive>().enabled);
     }

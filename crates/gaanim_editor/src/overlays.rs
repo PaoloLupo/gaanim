@@ -3,7 +3,7 @@ use bevy_egui::{EguiContexts, egui};
 use gaanim_math::{Camera, ResolvedCamera};
 use gaanim_renderer::pipeline::CanvasBackground;
 
-use crate::PresentationMode;
+use crate::{PresentationMode, PreviewInteractive};
 
 /// Configuración de overlays del editor.
 ///
@@ -19,10 +19,6 @@ pub struct EditorOverlays {
     pub show_coords: bool,
     /// Mostrar grilla dentro del canvas.
     pub show_grid: bool,
-    /// Color del borde del canvas.
-    pub bounds_color: egui::Color32,
-    /// Grosor del borde.
-    pub bounds_stroke: f32,
 }
 
 impl Default for EditorOverlays {
@@ -32,8 +28,6 @@ impl Default for EditorOverlays {
             show_bounds: true,
             show_coords: true,
             show_grid: false,
-            bounds_color: egui::Color32::from_rgb(255, 200, 80),
-            bounds_stroke: 1.5,
         }
     }
 }
@@ -86,6 +80,8 @@ fn egui_to_world(cam: &Camera, window: &Window, screen: egui::Pos2) -> glam::DVe
 pub fn overlays_settings_ui_system(
     mut contexts: EguiContexts,
     mut overlays: ResMut<EditorOverlays>,
+    mut interactive: ResMut<PreviewInteractive>,
+    authored_camera: Option<Res<Camera>>,
     presentation: Res<PresentationMode>,
 ) {
     if presentation.active || !overlays.enabled {
@@ -116,6 +112,26 @@ pub fn overlays_settings_ui_system(
                                 .size(11.0)
                                 .color(egui::Color32::from_rgb(160, 160, 175)),
                         );
+                        let interactive_btn = egui::Button::new(
+                            egui::RichText::new(if interactive.enabled {
+                                "Interactivo: ON"
+                            } else {
+                                "Interactivo: OFF"
+                            })
+                            .size(11.0)
+                            .color(if interactive.enabled {
+                                egui::Color32::from_rgb(120, 235, 150)
+                            } else {
+                                egui::Color32::from_rgb(150, 150, 165)
+                            }),
+                        )
+                        .min_size(egui::vec2(104.0, 18.0))
+                        .corner_radius(3.0)
+                        .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
+                        if ui.add(interactive_btn).clicked() {
+                            interactive.toggle(authored_camera.as_deref().copied());
+                        }
+                        ui.separator();
                         let bounds_btn = egui::Button::new(
                             egui::RichText::new(if overlays.show_bounds {
                                 "⬜ Límites ✓"
@@ -184,24 +200,6 @@ pub fn overlays_settings_ui_system(
                             .clicked()
                         {
                             overlays.show_grid = !overlays.show_grid;
-                        }
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new("B / C / G · O: salir")
-                                .size(10.0)
-                                .color(egui::Color32::from_rgb(110, 110, 120)),
-                        );
-                        if overlays.show_bounds {
-                            ui.add_space(8.0);
-                            egui::color_picker::color_edit_button_srgba(
-                                ui,
-                                &mut overlays.bounds_color,
-                                egui::color_picker::Alpha::Opaque,
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut overlays.bounds_stroke, 0.5..=3.0)
-                                    .show_value(false),
-                            );
                         }
                     });
                 });
@@ -294,7 +292,7 @@ pub fn scene_overlays_system(
 
             // --- Límites del área real (canvas) ---
             if overlays.show_bounds {
-                let stroke = egui::Stroke::new(overlays.bounds_stroke, overlays.bounds_color);
+                let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80));
                 // Dibujar borde (sólido con esquinas y dash sutil)
                 for i in 0..4 {
                     painter.line_segment([corners_screen[i], corners_screen[(i + 1) % 4]], stroke);

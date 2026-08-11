@@ -95,12 +95,18 @@ animables, con `Material3D.matte`, `Material3D.metal` y
 `Material3D.emissive`. `scene.lighting_3d("studio")` proporciona un único rig
 de estudio. Consulta `examples/primitives_3d_demo.py` para una escena completa.
 
-Las escenas con mallas o glTF se abren automáticamente en **Free 3D**. La
-cámara libre del editor es independiente de `scene.camera`, por lo que orbitar,
-desplazar o hacer dolly no altera el timeline, snapshots, Presenter View ni la
-exportación. `Num0` alterna **Free 3D** / **Camera View**; `F` encuadra, `R`
-reinicia e `I` activa o desactiva la inspección. El marco de salida conserva
-siempre la resolución y relación de aspecto declaradas por la escena.
+Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
+pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva
+comienza siempre como una copia fresca de `scene.camera` en el tiempo actual;
+una inspección anterior nunca se reutiliza. La copia es independiente, por lo
+que orbitar, desplazar o hacer dolly no altera el timeline, snapshots, Presenter
+View ni la exportación. Con la interacción activa, `Num0` alterna **Free 3D** /
+**Camera View**; `F` encuadra y `R` reinicia. El picking conserva internamente
+la selección sin dibujar un bounding box sobre el objeto. El marco de salida
+mantiene la resolución y relación de aspecto declaradas por la escena.
+
+El snapping temporal del editor permanece desactivado mientras haya contenido
+3D. Las escenas puramente 2D conservan el comportamiento habitual.
 
 ## Paquete Python local
 

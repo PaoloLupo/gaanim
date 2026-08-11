@@ -63,11 +63,13 @@ friendly ambient/key/fill rig for native PBR primitives and glTF content. Use
 `preset="none"` for emissive-only or externally lit work. The rig is scene
 level, so several models never create duplicate automatic lights.
 
-The editor keeps its inspection camera separate from `scene.camera`. A scene
-containing a native mesh or glTF model opens in *Free 3D* and is framed once;
-hot reload preserves that inspection view. *Camera View* always shows the
-timeline-authored camera, and neither mode changes snapshots, Presenter View,
-or export.
+The editor keeps its inspection camera separate from `scene.camera`. Both 2D
+and 3D scenes open with interactive mode disabled. Every activation through
+`I` or the *Interactive: ON/OFF* indicator in Overlays (`O`) starts from a fresh
+copy of the current timeline-authored camera; the prior inspection position is
+never reused. *Camera View* continues to show the authored camera, and neither
+mode changes snapshots, Presenter View, or export. Picking retains selection
+for framing without drawing a bounding box over the selected object.
 
 - `Num0`: switch between *Free 3D* and *Camera View*.
 - Right drag: orbit; middle drag or Shift+left drag: pan; wheel: dolly.
@@ -77,6 +79,9 @@ or export.
 The visible output frame keeps the scene's resolution and aspect ratio fixed.
 Picking and ray casting are limited to that frame. Purely 2D scenes remain
 orthographic unless inspection is enabled manually.
+
+Timeline and compact seek-bar snapping are disabled while the compiled scene
+contains 3D content. Purely 2D scenes retain the regular snapping behavior.
 
 == Spawning mobjects
 
