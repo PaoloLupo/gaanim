@@ -7,4 +7,4 @@ page = scene.column(
     within="safe", width="fill", height="fill", padding=32, gap=24, align="stretch", justify="between",
 )
 scene.play([page.fade_in().duration(0.5)])
-
+scene.render()
