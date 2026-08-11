@@ -211,7 +211,18 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
         undefined_exports = sorted(exported - available)
         if undefined_exports:
             findings.append(_error("python-all", f"__all__ contains undefined names: {', '.join(undefined_exports)}"))
-        imported_native = available - {"Canvas", "_norm_range", "_patched_axes", "_axes_plot", "_axes_plot_parametric"}
+        pure_python_modules = {
+            path.stem
+            for path in package.parent.glob("*.py")
+            if path.name != "__init__.py"
+        }
+        imported_native = available - pure_python_modules - {
+            "Canvas",
+            "_norm_range",
+            "_patched_axes",
+            "_axes_plot",
+            "_axes_plot_parametric",
+        }
         missing_stub_names = sorted(name for name in imported_native if not name.startswith("_") and name not in stub_names)
         if missing_stub_names:
             findings.append(_error("python-stub", f"Top-level native imports missing from stub: {', '.join(missing_stub_names)}"))

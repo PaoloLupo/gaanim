@@ -12,6 +12,7 @@ mod color;
 mod pycanvas;
 mod pydrawable;
 mod pylayout;
+mod pystyle;
 mod pytext;
 mod transition;
 mod updater;
@@ -45,6 +46,9 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
     m.add_class::<pytext::PyTextStyle>()?;
+    m.add_class::<pystyle::PyStrokeStyle>()?;
+    m.add_class::<pystyle::PyStyle>()?;
+    m.add_class::<pystyle::PyAxesStyle>()?;
     m.add_class::<pytext::PyTextFlow>()?;
     m.add_class::<pytext::PyTextPart>()?;
     m.add_class::<pytext::PyTextQuery>()?;

@@ -313,7 +313,13 @@ impl Canvas {
             fill: None,
             stroke: gaanim_scene::StrokeBrush::new(color, width),
         };
-        self.spawn(SpawnKind::SvgPath(Box::new(path)))
+        let handle = self.spawn(SpawnKind::SvgPath(Box::new(path)));
+        handle
+            .spec
+            .lock()
+            .expect("visualization path spec poisoned")
+            .theme_selector = Some("plot".into());
+        handle
     }
 
     fn attach_to_space(&mut self, space: &CoordinateSpaceHandle, child: &DrawableHandle) {
@@ -589,22 +595,87 @@ impl Canvas {
     /// Build Cartesian axes with typed reusable axis specs.
     pub fn coordinate_axes(
         &mut self,
-        x: Axis,
-        y: Axis,
+        mut x: Axis,
+        mut y: Axis,
         width: Option<f64>,
         height: Option<f64>,
         grid: bool,
     ) -> Result<CoordinateSpaceHandle, VisualizationError> {
+        let x_uses_default_style = x.style_value() == gaanim_visualization::AxisStyle::default();
+        let y_uses_default_style = y.style_value() == gaanim_visualization::AxisStyle::default();
+        let themed = self.theme_style.as_ref().map(|theme| {
+            let mut axis_style = gaanim_visualization::AxisStyle {
+                color: theme.palette.foreground,
+                number_color: theme.palette.foreground,
+                label_color: theme.palette.foreground,
+                ..Default::default()
+            };
+            if let Some(stroke) = theme
+                .styles
+                .get("axes/axis")
+                .and_then(|style| style.stroke.as_ref())
+            {
+                if let Ok(gaanim_core::peniko::Brush::Solid(color)) =
+                    theme.resolve_paint(&stroke.paint)
+                {
+                    axis_style.color = color;
+                }
+                axis_style.width = stroke.style.width;
+            }
+            let grid_color = theme
+                .styles
+                .get("axes/grid")
+                .and_then(|style| style.stroke.as_ref())
+                .and_then(|stroke| theme.resolve_paint(&stroke.paint).ok())
+                .and_then(|brush| match brush {
+                    gaanim_core::peniko::Brush::Solid(color) => Some(color),
+                    _ => None,
+                })
+                .unwrap_or(theme.palette.rule);
+            let number_style = theme
+                .styles
+                .get("axes/numbers")
+                .and_then(|style| style.text.as_ref());
+            let label_style = theme
+                .styles
+                .get("axes/labels")
+                .and_then(|style| style.text.as_ref());
+            if let Some(color) = number_style.and_then(|style| style.color) {
+                axis_style.number_color = color;
+            }
+            if let Some(color) = label_style.and_then(|style| style.color) {
+                axis_style.label_color = color;
+            }
+            (
+                axis_style,
+                grid_color,
+                number_style.and_then(|style| style.size),
+                label_style.and_then(|style| style.size),
+            )
+        });
+        if let Some((style, _, _, _)) = &themed {
+            if x.style_value() == gaanim_visualization::AxisStyle::default() {
+                x = x.style(*style);
+            }
+            if y.style_value() == gaanim_visualization::AxisStyle::default() {
+                y = y.style(*style);
+            }
+        }
         let safe = self.safe_frame();
         let frame = PlotFrame::new(
             width.unwrap_or_else(|| safe.width()),
             height.unwrap_or_else(|| safe.height()),
         )?;
-        let space = if grid {
+        let mut space = if grid {
             CartesianSpace::number_plane(x, y, frame)
         } else {
             CartesianSpace::axes(x, y, frame)
         };
+        if let Some((_, grid_color, _, _)) = themed {
+            space.grid_color = grid_color;
+            let rgba = grid_color.to_rgba8();
+            space.minor_grid_color = Color::from_rgba8(rgba.r, rgba.g, rgba.b, rgba.a / 2);
+        }
         let geometry = space.geometry()?;
         let mut layers = HashMap::new();
         let grid_major = self.visualization_path(
@@ -614,6 +685,11 @@ impl Canvas {
             1.0,
             "CoordinateMajorGrid",
         );
+        grid_major
+            .spec
+            .lock()
+            .expect("grid spec poisoned")
+            .theme_selector = Some("axes/grid".into());
         layers.insert(SpaceLayer::MajorGrid, grid_major.clone());
         let grid_minor = self.visualization_path(
             geometry.minor_grid,
@@ -622,6 +698,11 @@ impl Canvas {
             0.6,
             "CoordinateMinorGrid",
         );
+        grid_minor
+            .spec
+            .lock()
+            .expect("minor grid spec poisoned")
+            .theme_selector = Some("axes/minor_grid".into());
         layers.insert(SpaceLayer::MinorGrid, grid_minor.clone());
         let axis_color = space.map.x.style_value().color;
         let axes = self.visualization_path(
@@ -631,6 +712,9 @@ impl Canvas {
             space.map.x.style_value().width,
             "CoordinateAxes",
         );
+        if x_uses_default_style && y_uses_default_style {
+            axes.spec.lock().expect("axes spec poisoned").theme_selector = Some("axes/axis".into());
+        }
         layers.insert(SpaceLayer::Axes, axes.clone());
         let ticks = self.visualization_path(
             geometry.ticks,
@@ -639,19 +723,53 @@ impl Canvas {
             space.map.x.style_value().tick_width,
             "CoordinateTicks",
         );
+        if x_uses_default_style && y_uses_default_style {
+            ticks
+                .spec
+                .lock()
+                .expect("ticks spec poisoned")
+                .theme_selector = Some("axes/ticks".into());
+        }
         layers.insert(SpaceLayer::Ticks, ticks.clone());
 
+        let number_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/numbers"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| {
+                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
+            })
+            .unwrap_or(0.45);
+        let label_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/labels"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| {
+                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
+            })
+            .unwrap_or(0.55);
         let number_handles: Vec<DrawableHandle> = geometry
             .numbers
             .iter()
             .map(|label| {
                 self.text(&label.text)
                     .fill(label.color)
-                    .scaled(0.45)
+                    .scaled(number_scale)
                     .at(label.position.x, label.position.y)
             })
             .collect();
         let number_refs: Vec<&DrawableHandle> = number_handles.iter().collect();
+        if x_uses_default_style && y_uses_default_style {
+            for number in &number_handles {
+                let mut spec = number.spec.lock().expect("number spec poisoned");
+                spec.theme_selector = Some("axes/numbers".into());
+                spec.fill_overridden = false;
+            }
+        }
         let numbers = self.group(&number_refs);
         layers.insert(SpaceLayer::Numbers, numbers.clone());
 
@@ -661,11 +779,18 @@ impl Canvas {
             .map(|label| {
                 self.text(&label.text)
                     .fill(label.color)
-                    .scaled(0.55)
+                    .scaled(label_scale)
                     .at(label.position.x, label.position.y)
             })
             .collect();
         let label_refs: Vec<&DrawableHandle> = label_handles.iter().collect();
+        if x_uses_default_style && y_uses_default_style {
+            for label in &label_handles {
+                let mut spec = label.spec.lock().expect("label spec poisoned");
+                spec.theme_selector = Some("axes/labels".into());
+                spec.fill_overridden = false;
+            }
+        }
         let labels = self.group(&label_refs);
         layers.insert(SpaceLayer::Labels, labels.clone());
 
@@ -1117,13 +1242,35 @@ impl Canvas {
                     gaanim_visualization::MarkError::Empty => VisualizationError::EmptyData,
                 },
             )?;
-            let progress = band as f32 / (bands - 1) as f32;
-            let color = Color::from_rgba8(
-                (0x30 as f32 + progress * 0x30 as f32) as u8,
-                (0x90 as f32 - progress * 0x60 as f32) as u8,
-                (0xF0 as f32 - progress * 0x80 as f32) as u8,
-                0xFF,
-            );
+            let progress = band as f64 / (bands - 1) as f64;
+            let palette = self
+                .theme_style
+                .as_ref()
+                .map(|theme| theme.heatmap.as_slice())
+                .filter(|palette| palette.len() >= 2);
+            let color = if let Some(palette) = palette {
+                let scaled = progress * (palette.len() - 1) as f64;
+                let index = scaled.floor() as usize;
+                let next = (index + 1).min(palette.len() - 1);
+                let t = scaled - index as f64;
+                let left = palette[index].to_rgba8();
+                let right = palette[next].to_rgba8();
+                let channel =
+                    |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
+                Color::from_rgba8(
+                    channel(left.r, right.r),
+                    channel(left.g, right.g),
+                    channel(left.b, right.b),
+                    channel(left.a, right.a),
+                )
+            } else {
+                Color::from_rgba8(
+                    (0x30 as f64 + progress * 0x30 as f64) as u8,
+                    (0x90 as f64 - progress * 0x60 as f64) as u8,
+                    (0xF0 as f64 - progress * 0x80 as f64) as u8,
+                    0xFF,
+                )
+            };
             handles.push(
                 self.spawn(SpawnKind::DataMark {
                     map: space.map.clone(),
@@ -1154,9 +1301,20 @@ impl Canvas {
             return Err(VisualizationError::InvalidSize);
         }
         let points = scatter_points(&space.map, x, y, policy)?;
+        let series_color = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.series.first().copied());
         let marks: Vec<DrawableHandle> = points
             .iter()
-            .map(|point| self.dot(radius).at(point.x, point.y))
+            .map(|point| {
+                let mark = self.dot(radius).at(point.x, point.y);
+                if let Some(color) = series_color {
+                    mark.fill(color)
+                } else {
+                    mark
+                }
+            })
             .collect();
         let refs: Vec<&DrawableHandle> = marks.iter().collect();
         let handle = self.group(&refs);
@@ -1176,14 +1334,24 @@ impl Canvas {
             return Err(VisualizationError::LengthMismatch);
         }
         let rects = bars(&space.map, x, values, width, baseline)?;
+        let series_color = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.series.first().copied());
         let marks: Vec<DrawableHandle> = rects
             .iter()
             .map(|rect| {
-                self.rect(rect.max.x - rect.min.x, rect.max.y - rect.min.y)
+                let mark = self
+                    .rect(rect.max.x - rect.min.x, rect.max.y - rect.min.y)
                     .at(
                         (rect.min.x + rect.max.x) * 0.5,
                         (rect.min.y + rect.max.y) * 0.5,
-                    )
+                    );
+                if let Some(color) = series_color {
+                    mark.fill(color)
+                } else {
+                    mark
+                }
             })
             .collect();
         let refs: Vec<&DrawableHandle> = marks.iter().collect();

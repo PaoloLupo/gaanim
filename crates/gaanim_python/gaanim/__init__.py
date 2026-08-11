@@ -2,6 +2,7 @@
 
 import warnings
 
+from . import colors
 from .gaanim_core import (
     Anchor,
     Direction,
@@ -31,6 +32,9 @@ from .gaanim_core import (
     Brush,
     Camera,
     Theme,
+    Style,
+    StrokeStyle,
+    AxesStyle,
     Drawable,
     Text,
     TextPart,
@@ -97,6 +101,10 @@ __all__ = [
     "Brush",
     "Camera",
     "Theme",
+    "Style",
+    "StrokeStyle",
+    "AxesStyle",
+    "colors",
     "Anchor",
     "Direction",
     "Layout",

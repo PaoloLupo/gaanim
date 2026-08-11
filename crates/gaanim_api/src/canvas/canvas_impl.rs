@@ -142,6 +142,7 @@ pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub background: Option<Color>,
+    pub(crate) background_overridden: bool,
     pub units: CanvasUnits,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
@@ -165,6 +166,7 @@ impl Canvas {
             width,
             height,
             background: None,
+            background_overridden: false,
             theme: None,
             theme_style: None,
             units: CanvasUnits::Pixels,
@@ -212,7 +214,13 @@ impl Canvas {
 
     pub fn background(mut self, c: Color) -> Self {
         self.background = Some(c);
+        self.background_overridden = true;
         self
+    }
+
+    pub fn set_background(&mut self, color: Option<Color>) {
+        self.background = color;
+        self.background_overridden = true;
     }
 
     /// Apply one of the built-in visual themes.
@@ -229,7 +237,9 @@ impl Canvas {
 
     /// Apply a complete custom or derived visual theme.
     pub fn apply_theme(&mut self, theme: CanvasTheme) {
-        self.background = Some(theme.palette.background);
+        if !self.background_overridden {
+            self.background = Some(theme.palette.background);
+        }
         self.theme = Some(theme.name.clone());
         self.theme_style = Some(theme);
     }
@@ -262,10 +272,27 @@ impl Canvas {
     }
 
     pub(crate) fn themed_text_config(&self) -> gaanim_text::prelude::TextConfig {
-        self.theme_style
+        let mut config = self
+            .theme_style
             .as_ref()
             .map(|theme| theme.text.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some(theme) = &self.theme_style {
+            for (role, overlay) in &theme.text_styles {
+                if let Some(style) = config.roles.get_mut(role) {
+                    if let Some(font) = &overlay.font {
+                        style.font_family = font.clone();
+                    }
+                    if let Some(size) = overlay.size {
+                        style.size = size;
+                    }
+                    if let Some(color) = overlay.color {
+                        style.fill_color = color;
+                    }
+                }
+            }
+        }
+        config
     }
 
     pub(crate) fn register_theme_fonts(&self, registry: &mut gaanim_text::font::FontRegistry) {
@@ -1160,7 +1187,14 @@ impl Canvas {
                 .expect("object spec poisoned")
                 .defer_visibility_until_play
         });
-        let handle = self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()));
+        let handle = self
+            .spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+            .with_style_targets(
+                members
+                    .iter()
+                    .flat_map(|member| member.inherited_style_targets())
+                    .collect(),
+            );
         if defer_visibility {
             handle.defer_visibility_until_play();
         }
@@ -1175,9 +1209,16 @@ impl Canvas {
                 .expect("object spec poisoned")
                 .defer_visibility_until_play
         });
-        let handle = self.spawn(SpawnKind::GroupNoCenter(
-            members.iter().map(|m| m.id).collect(),
-        ));
+        let handle = self
+            .spawn(SpawnKind::GroupNoCenter(
+                members.iter().map(|m| m.id).collect(),
+            ))
+            .with_style_targets(
+                members
+                    .iter()
+                    .flat_map(|member| member.inherited_style_targets())
+                    .collect(),
+            );
         if defer_visibility {
             handle.defer_visibility_until_play();
         }
@@ -2417,6 +2458,41 @@ mod tests {
         assert_eq!(
             theme.text.roles[&TextRole::Body].fill_color,
             theme.palette.foreground
+        );
+    }
+
+    #[test]
+    fn explicit_background_survives_later_theme_changes() {
+        let explicit = Color::from_rgb8(0x12, 0x34, 0x56);
+        let mut canvas = Canvas::new(640, 360);
+        canvas.set_background(Some(explicit));
+        canvas.set_theme("paper").unwrap();
+        assert_eq!(canvas.background, Some(explicit));
+    }
+
+    #[test]
+    fn theme_classes_propagate_through_nested_groups() {
+        let mut canvas = Canvas::new(640, 360);
+        let first = canvas.circle(20.0);
+        let second = canvas.square(30.0);
+        let inner = canvas.group(&[&first, &second]);
+        let outer = canvas.group(&[&inner]);
+        outer.style_class("focus").unwrap();
+        assert_eq!(
+            first
+                .spec
+                .lock()
+                .expect("first spec poisoned")
+                .style_classes,
+            ["focus"]
+        );
+        assert_eq!(
+            second
+                .spec
+                .lock()
+                .expect("second spec poisoned")
+                .style_classes,
+            ["focus"]
         );
     }
 

@@ -13,6 +13,45 @@
 
 Every factory on `Scene` returns a `Drawable`. Chain style, layout and animation fluently.
 
+== Theme classes and complete strokes
+
+#api-entry(
+  name: "Drawable.style_class",
+  kind: "method",
+  signature: "style_class(name: str) -> Self",
+  params: ((name: "name", type: "str", default: none, desc: [Theme class without the leading dot; letters, digits, `_`, and `-` are accepted.]),),
+  returns: (type: "Self", desc: [The same fluent drawable type.]),
+  desc: [Adds an ordered class used by `Theme.styles`. Repeated calls cascade in order; explicit constructor and fluent styles retain higher priority. Applying a class to a group propagates it through nested visual members.],
+)[
+```python
+# show-code: true
+from gaanim import Scene, Style, Theme
+theme = Theme("paper", styles={".warning": Style(fill="#e11d48")})
+scene = Scene(480, 270, theme=theme)
+warning = scene.square(90).style_class("warning")
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Drawable.stroke_style",
+  kind: "method",
+  signature: "stroke_style(style: StrokeStyle) -> Self",
+  params: ((name: "style", type: "StrokeStyle", default: none, desc: [Paint, width, cap, join, miter limit, dash sequence, and dash offset.]),),
+  returns: (type: "Self", desc: [The styled drawable.]),
+  desc: [Applies complete native stroke geometry. Individual calls require a literal CSS color or Brush; token names are resolved when StrokeStyle is placed inside `Theme.styles`. Invalid stroke metrics raise `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene, StrokeStyle
+scene = Scene(480, 270)
+guide = scene.line(-160, 0, 160, 0).stroke_style(
+    StrokeStyle("#2563eb", 5, cap="round", dashes=[18, 10])
+)
+scene.export("preview.webp", fps=30)
+```
+]
+
 == Imported glTF models
 
 ```python

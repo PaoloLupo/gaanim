@@ -745,10 +745,16 @@ impl Canvas {
         x: f64,
         y: f64,
         color: PenikoColor,
+        size: Option<f64>,
     ) -> MobjectRef {
-        let label = builder.spawn_text(text, gaanim_text::prelude::TextRole::Body);
+        let role = gaanim_text::prelude::TextRole::Body;
+        let label = builder.spawn_text(text, role);
+        let base_size = builder.text_config.roles[&role].size.max(1.0);
         if let Some(state) = builder.states.get_mut(label.id) {
             state.transform = state.transform.shift_2d(x, y);
+            if let Some(size) = size {
+                state.transform.scale *= size / base_size;
+            }
             builder
                 .commands
                 .entity(state.entity)
@@ -941,6 +947,7 @@ impl Canvas {
                     sx(x),
                     sy(0.0) - tick_half - 14.0,
                     config.number_color,
+                    config.number_size,
                 ));
                 x += x_step;
             }
@@ -958,6 +965,7 @@ impl Canvas {
                         sx(0.0) - tick_half - 8.0 - estimated_width * 0.5,
                         sy(y),
                         config.number_color,
+                        config.number_size,
                     ));
                 }
                 y += y_step;
@@ -972,6 +980,7 @@ impl Canvas {
                     sx(x_max) + 18.0,
                     sy(0.0) - tick_half - 2.0,
                     config.label_color,
+                    config.label_size,
                 ));
             }
             if let Some(label) = config.y_label.as_deref().filter(|_| y_axis_in_range) {
@@ -981,6 +990,7 @@ impl Canvas {
                     sx(0.0) + tick_half + 12.0,
                     sy(y_max) + 12.0,
                     config.label_color,
+                    config.label_size,
                 ));
             }
         }
@@ -1524,6 +1534,7 @@ impl Canvas {
                 frame_bounds,
                 raw_bounds,
                 text_config,
+                self.theme_style.as_ref(),
                 bg_color,
                 &mut camera_position,
                 &mut camera_zoom,
@@ -1617,6 +1628,7 @@ impl Canvas {
         frame_bounds: Bounds3D,
         raw_frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
+        theme: Option<&crate::canvas::CanvasTheme>,
         scene_background: gaanim_core::peniko::Color,
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
@@ -1634,7 +1646,12 @@ impl Canvas {
         for op in &seg.ops {
             match op {
                 Op::Spawn(spec) => {
-                    let spec = spec.lock().expect("object spec poisoned").clone();
+                    let authored = spec.lock().expect("object spec poisoned").clone();
+                    let spec = theme
+                        .map(|theme| theme.resolve_object(&authored))
+                        .transpose()
+                        .unwrap_or_else(|error| panic!("invalid theme cascade: {error}"))
+                        .unwrap_or(authored);
                     object_specs.insert(spec.id, spec.clone());
                     if matches!(
                         &spec.kind,
@@ -5272,7 +5289,11 @@ impl Canvas {
     ) -> MobjectRef {
         if spec.stroke_overridden {
             if let Some((ref brush, w)) = spec.stroke {
-                b = b.stroke_brush(brush.clone(), w);
+                b = if let Some(style) = &spec.stroke_style {
+                    b.stroke_with_style(brush.clone(), style.clone())
+                } else {
+                    b.stroke_brush(brush.clone(), w)
+                };
             } else {
                 b = b.no_stroke();
             }
@@ -5320,7 +5341,10 @@ impl Canvas {
                 if let Some((ref brush, w)) = spec.stroke {
                     let sb = StrokeBrush {
                         brush: Some(brush.clone()),
-                        style: gaanim_core::kurbo::Stroke::new(w),
+                        style: spec
+                            .stroke_style
+                            .clone()
+                            .unwrap_or_else(|| gaanim_core::kurbo::Stroke::new(w)),
                     };
                     st.stroke = sb.clone();
                     if !is_textual_hierarchy {
@@ -5409,7 +5433,10 @@ impl Canvas {
                 let sb = if let Some((ref brush, w)) = spec.stroke {
                     StrokeBrush {
                         brush: Some(brush.clone()),
-                        style: gaanim_core::kurbo::Stroke::new(w),
+                        style: spec
+                            .stroke_style
+                            .clone()
+                            .unwrap_or_else(|| gaanim_core::kurbo::Stroke::new(w)),
                     }
                 } else {
                     StrokeBrush::transparent()
@@ -6148,6 +6175,37 @@ mod tests {
 
         assert!(fills.contains(&PenikoColor::BLACK));
         assert!(!fills.contains(&PenikoColor::WHITE));
+    }
+
+    #[test]
+    fn theme_selected_after_authoring_is_materialized_during_compile() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.circle(40.0);
+        canvas.circle(20.0).fill(PenikoColor::BLACK).at(100.0, 0.0);
+        let mut theme = crate::canvas::CanvasTheme::builtin("paper").unwrap();
+        let brand = PenikoColor::from_rgb8(0x25, 0x63, 0xEB);
+        theme
+            .set_colors(&HashMap::from([("accent".to_string(), brand)]))
+            .unwrap();
+        canvas.apply_theme(theme);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut query = world.query::<&gaanim_scene::FillBrush>();
+        let colors = query
+            .iter(&world)
+            .filter_map(|fill| match fill.0.as_ref() {
+                Some(gaanim_core::peniko::Brush::Solid(color)) => Some(*color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(colors.contains(&brand));
+        assert!(colors.contains(&PenikoColor::BLACK));
     }
 
     #[test]

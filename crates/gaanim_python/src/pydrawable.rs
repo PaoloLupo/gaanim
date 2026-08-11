@@ -7,6 +7,7 @@ use pyo3::types::PyTuple;
 use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression};
+use crate::pystyle::PyStrokeStyle;
 use crate::updater::PyUpdater;
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
@@ -207,8 +208,36 @@ impl PyDrawable {
     fn stroke(&self, paint: PyPaint, width: f64) -> Self {
         Self(self.0.clone().stroke_brush(paint.0, width))
     }
+    /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
+    fn stroke_style(&self, style: PyStrokeStyle) -> PyResult<Self> {
+        let brush = match style.0.paint {
+            gaanim_api::canvas::ThemePaint::Color(color) => {
+                gaanim_core::peniko::Brush::Solid(color)
+            }
+            gaanim_api::canvas::ThemePaint::Brush(brush) => brush,
+            gaanim_api::canvas::ThemePaint::Named(name) => {
+                use std::str::FromStr;
+                gaanim_core::peniko::Color::from_str(&name)
+                    .map(gaanim_core::peniko::Brush::Solid)
+                    .map_err(|_| {
+                        PyValueError::new_err(
+                            "individual stroke_style paint must be a literal CSS color; theme tokens are resolved inside Theme.styles",
+                        )
+                    })?
+            }
+        };
+        Ok(Self(self.0.clone().stroke_with_style(brush, style.0.style)))
+    }
     fn no_stroke(&self) -> Self {
         Self(self.0.clone().no_stroke())
+    }
+    /// Add a theme class; calls may be chained and later classes win.
+    fn style_class(&self, name: &str) -> PyResult<Self> {
+        self.0
+            .clone()
+            .style_class(name)
+            .map(Self)
+            .map_err(PyValueError::new_err)
     }
     /// Add a cached soft outer glow.
     #[pyo3(signature = (color, radius=16.0, intensity=1.0))]

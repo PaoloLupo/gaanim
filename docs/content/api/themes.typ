@@ -1,14 +1,14 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Colors",
-  description: "Color constants and viewport backgrounds",
+  title: "Themes and colors",
+  description: "Centralized visual rules, CSS colors, and reusable palettes",
   route: "/api/themes/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Colors
+= Themes and colors
 
 Use a scene background and the exported color constants to define the visual
 language of an animation. Built-in themes are available through `scene.canvas`.
@@ -82,12 +82,13 @@ scheme.
 
 == Custom and derived themes
 
-`Theme` is the single configuration object for semantic colors, typographic
-roles, sizes, layout tokens, and font files. Pass a scheme name to derive it and override only
-what changes:
+`Theme` is the single configuration object for semantic colors, structured
+typography, selector rules, data palettes, layout tokens, and font files. It
+can be installed directly with `Scene(theme=...)`; pass a scheme name to
+derive it and override only what changes:
 
 ```python
-from gaanim import Scene, Theme
+from gaanim import AxesStyle, Scene, StrokeStyle, Style, TextStyle, Theme, colors
 
 theme = Theme(
     "nord",
@@ -102,6 +103,20 @@ theme = Theme(
         "code": "JetBrains Mono",
     },
     sizes={"title": 72, "body": 34},
+    text={
+        "body": TextStyle(size=32, letter_spacing=0.1),
+        "label": TextStyle(size=24, weight=600),
+    },
+    styles={
+        "shape": Style(fill="accent"),
+        "line": Style(stroke=StrokeStyle("foreground", 3, cap="round")),
+        ".warning": Style(fill=colors.tailwind.rose[600]),
+        "axes": AxesStyle(
+            grid=StrokeStyle("rule", 1),
+            labels=TextStyle(size=24),
+        ),
+    },
+    series=[colors.tailwind.blue[600], colors.tailwind.amber[500]],
     layout={"page_padding": 56, "column_gap": 48},
     font_files={
         "Inter": "assets/Inter-Regular.ttf",
@@ -109,9 +124,47 @@ theme = Theme(
     },
 )
 
-scene = Scene(1920, 1080)
-scene.canvas.set_theme(theme)
+scene = Scene(1920, 1080, theme=theme)
 ```
+
+The `text` dictionary reuses the same `TextStyle` accepted by structured
+`Text` and `part(...)`. It is an overlay: omitted properties continue to come
+from the semantic role. `TextPart` styles and explicit drawable methods retain
+higher priority.
+
+== Selector cascade
+
+Theme rules may target a family (`shape`, `line`, `text`, `axes`, `plot`), an
+exact factory name (`circle`, `rounded_rect`, `arrow`), a semantic part such as
+`axes/grid` or `axes/labels`, or a user class such as `.warning`.
+
+```python
+from gaanim import Scene, Style, Theme
+
+theme = Theme(
+    "paper",
+    colors={"brand": "#2563eb", "danger": "oklch(58% .24 25)"},
+    styles={
+        "shape": Style(fill="brand"),
+        ".danger": Style(fill="danger"),
+    },
+)
+scene = Scene(theme=theme)
+ordinary = scene.circle(60)
+warning = scene.square(100).style_class("danger")
+explicit = scene.circle(40).fill("gold")
+```
+
+Precedence is base theme, family, exact type or semantic part, ordered user
+classes, constructor values, then fluent overrides. Rules are materialized
+when the scene compiles, so changing the active theme also updates already
+authored compatible objects. Imported asset paints remain source-controlled
+unless explicitly styled.
+
+`StrokeStyle` carries paint, width, cap, join, miter limit, dash pattern, and
+dash offset. It can be reused in a theme or applied directly with
+`drawable.stroke_style(style)`. Invalid metrics, selectors, and unresolved
+tokens raise `ValueError`.
 
 Font files are read when `Theme` is created and embedded in the canvas runtime,
 so exports do not depend on the font being installed on the presentation
@@ -148,10 +201,32 @@ print_theme = Theme(
 )
 ```
 
-Color roles are `background`, `foreground`, `muted`, `title`, `accent`,
+Built-in color roles are `background`, `foreground`, `muted`, `title`, `accent`,
 `chart`, `panel`, `header`, and `rule`. Font roles are `text`, `all`, `title`,
-`subtitle`, `body`, `caption`, `math`, and `code`; size roles use the six
-individual text roles.
+`subtitle`, `heading`, `body`, `caption`, `label`, `math`, and `code`. The
+`colors` dictionary may also define arbitrary non-empty tokens for selector
+rules.
+
+== CSS Color 4 and Tailwind
+
+Every `ColorLike` position accepts CSS Color 4 syntax. `Color(...)` also accepts
+a literal directly, and the explicit constructors are useful when values are
+computed:
+
+```python
+from gaanim import Color, colors
+
+navy = Color("#0f172a")
+accent = Color("oklch(62.3% 0.214 259.815)")
+translucent = Color("rgb(37 99 235 / 65%)")
+computed = Color.from_hsl(215, 0.9, 0.55, 0.8)
+perceptual = Color.from_oklch(0.68, 0.17, 240)
+tailwind_blue = colors.tailwind.blue[500]
+```
+
+`colors.tailwind` contains all 26 color families and the 50–950 scales from
+Tailwind CSS v4.3.3, including `mauve`, `olive`, `mist`, and `taupe`. The
+embedded version is available as `colors.tailwind.version`.
 
 Layout templates consume named spacing values through
 `scene.canvas.layout_token(name)`. The default scale includes `space_xs`,

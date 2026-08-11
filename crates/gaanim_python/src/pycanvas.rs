@@ -24,6 +24,7 @@ use crate::pylayout::{
     column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
     stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
 };
+use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
 use crate::value_tracker::PyValueTracker;
@@ -248,6 +249,10 @@ impl PyTheme {
         colors=None,
         fonts=None,
         sizes=None,
+        text=None,
+        styles=None,
+        series=None,
+        heatmap=None,
         layout=None,
         font_files=None,
     ))]
@@ -257,6 +262,10 @@ impl PyTheme {
         colors: Option<HashMap<String, PyColor>>,
         fonts: Option<HashMap<String, String>>,
         sizes: Option<HashMap<String, f64>>,
+        text: Option<&Bound<'_, PyDict>>,
+        styles: Option<&Bound<'_, PyDict>>,
+        series: Option<Vec<PyColor>>,
+        heatmap: Option<Vec<PyColor>>,
         layout: Option<HashMap<String, f64>>,
         font_files: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
@@ -299,6 +308,65 @@ impl PyTheme {
             theme
                 .set_sizes(&sizes)
                 .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(text) = text {
+            let mut overlays = HashMap::new();
+            for (role, style) in text.iter() {
+                let role_name = role.extract::<String>()?;
+                let role = match role_name.as_str() {
+                    "title" => gaanim_text::prelude::TextRole::Title,
+                    "subtitle" => gaanim_text::prelude::TextRole::Subtitle,
+                    "heading" => gaanim_text::prelude::TextRole::Heading,
+                    "body" => gaanim_text::prelude::TextRole::Body,
+                    "caption" => gaanim_text::prelude::TextRole::Caption,
+                    "label" => gaanim_text::prelude::TextRole::Label,
+                    "math" => gaanim_text::prelude::TextRole::Math,
+                    "code" => gaanim_text::prelude::TextRole::Code,
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "unknown theme text role '{role_name}'"
+                        )))
+                    }
+                };
+                overlays.insert(role, style.extract::<PyTextStyle>()?.0);
+            }
+            theme
+                .set_text_styles(&overlays)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(styles) = styles {
+            let mut rules = HashMap::new();
+            for (selector, style) in styles.iter() {
+                let selector = selector.extract::<String>()?;
+                if let Ok(style) = style.extract::<PyStyle>() {
+                    rules.insert(selector, style.0);
+                } else if let Ok(style) = style.extract::<PyAxesStyle>() {
+                    rules.extend(style.expand(&selector));
+                } else {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "theme style '{selector}' must be Style or AxesStyle"
+                    )));
+                }
+            }
+            theme
+                .set_styles(&rules)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
+        if let Some(series) = series {
+            if series.is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "series must contain at least one color",
+                ));
+            }
+            theme.series = series.into_iter().map(|color| color.0).collect();
+        }
+        if let Some(heatmap) = heatmap {
+            if heatmap.len() < 2 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "heatmap must contain at least two colors",
+                ));
+            }
+            theme.heatmap = heatmap.into_iter().map(|color| color.0).collect();
         }
         if let Some(layout) = layout {
             theme
@@ -401,7 +469,10 @@ impl PyCanvas {
 
     #[setter]
     fn set_background(&self, background: Option<PyColor>) {
-        self.inner.lock().expect("scene canvas poisoned").background = background.map(|c| c.0);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_background(background.map(|c| c.0));
     }
 
     /// Name of the selected built-in or custom visual theme, if any.
@@ -784,18 +855,37 @@ impl PySegment {
 #[pymethods]
 impl PyScene {
     #[new]
-    #[pyo3(signature = (width=1280, height=720, background=None, margin=None))]
-    fn new(width: u32, height: u32, background: Option<PyColor>, margin: Option<f64>) -> Self {
+    #[pyo3(signature = (width=1280, height=720, background=None, margin=None, theme=None))]
+    fn new(
+        width: u32,
+        height: u32,
+        background: Option<PyColor>,
+        margin: Option<f64>,
+        theme: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let mut canvas = ApiCanvas::new(width, height);
+        if let Some(theme) = theme {
+            if let Ok(name) = theme.extract::<String>() {
+                canvas
+                    .set_theme(&name)
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            } else if let Ok(theme) = theme.extract::<PyRef<'_, PyTheme>>() {
+                canvas.apply_theme(theme.inner.clone());
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "theme must be a built-in scheme name, Theme, or None",
+                ));
+            }
+        }
         if let Some(background) = background {
-            canvas.background = Some(background.0);
+            canvas.set_background(Some(background.0));
         }
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
-        Self {
+        Ok(Self {
             inner: Arc::new(Mutex::new(canvas)),
-        }
+        })
     }
 
     /// The scene viewport and visual configuration.
@@ -1750,6 +1840,8 @@ impl PyScene {
             tick_color: tick_color.map(|color| color.0).unwrap_or(axis_color),
             number_color: number_color.map(|color| color.0).unwrap_or(axis_color),
             label_color: label_color.map(|color| color.0).unwrap_or(axis_color),
+            number_size: None,
+            label_size: None,
             axis_width,
             grid_width,
             tick_width,

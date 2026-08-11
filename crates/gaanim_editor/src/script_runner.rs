@@ -102,7 +102,8 @@ fn run_script_thread(
 
     // One-time bootstrap: expose the exact same public package surface as the
     // wheel while keeping the in-process `gaanim_core` module that owns the host
-    // channel. Pure-Python helpers such as layout templates are embedded below.
+    // channel. Pure-Python helpers such as colors and layout templates are
+    // embedded below.
     let bootstrap_err = Python::attach(bootstrap_gaanim_package);
     if let Err(e) = bootstrap_err {
         Python::attach(|py| {
@@ -145,6 +146,7 @@ fn run_script_thread(
 }
 
 const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__init__.py");
+const GAANIM_COLORS: &str = include_str!("../../gaanim_python/gaanim/colors.py");
 const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
@@ -166,6 +168,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     package.setattr("__path__", Vec::<String>::new())?;
     modules.set_item("gaanim", &package)?;
     modules.set_item("gaanim.gaanim_core", &core)?;
+
+    let colors_source = std::ffi::CString::new(GAANIM_COLORS).unwrap();
+    let colors_file = std::ffi::CString::new("gaanim/colors.py").unwrap();
+    let colors_name = std::ffi::CString::new("gaanim.colors").unwrap();
+    let colors = PyModule::from_code(py, &colors_source, &colors_file, &colors_name)?;
+    modules.set_item("gaanim.colors", &colors)?;
 
     let templates_source = std::ffi::CString::new(GAANIM_TEMPLATES).unwrap();
     let templates_file = std::ffi::CString::new("gaanim/templates.py").unwrap();
@@ -242,4 +250,29 @@ fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
     );
     py.run(&std::ffi::CString::new(code).unwrap(), None, None)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_package_exports_tailwind_colors() {
+        gaanim_python::register_inittab();
+        Python::initialize();
+
+        Python::attach(|py| {
+            bootstrap_gaanim_package(py).expect("embedded gaanim package should bootstrap");
+            let package = py.import("gaanim").expect("gaanim should be importable");
+            let colors = package
+                .getattr("colors")
+                .expect("gaanim should export its colors module");
+            let blue = colors
+                .getattr("tailwind")
+                .and_then(|tailwind| tailwind.getattr("blue"))
+                .and_then(|family| family.get_item(500))
+                .expect("Tailwind blue[500] should be available in the embedded host");
+            assert_eq!(blue.to_string(), "Color(#2B7FFF)");
+        });
+    }
 }

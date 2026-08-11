@@ -6500,6 +6500,14 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         self
     }
 
+    pub fn stroke_with_style(mut self, brush: Brush, style: kurbo::Stroke) -> Self {
+        self.bundle.stroke = StrokeBrush {
+            brush: Some(brush),
+            style,
+        };
+        self
+    }
+
     pub fn no_stroke(mut self) -> Self {
         self.bundle.stroke = StrokeBrush::transparent();
         self

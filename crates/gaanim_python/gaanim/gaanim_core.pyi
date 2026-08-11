@@ -18,13 +18,31 @@ CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
 """A ``Scene.path`` or ``Scene.curve`` command and its arguments."""
 
 class Color:
-    def __init__(self, r: int, g: int, b: int, a: int = 255) -> None:
-        """Create a Color instance.
-
-        Example:
-            Color(30, 80, 160)
-        """
+    @overload
+    def __init__(self, value: str) -> None: ...
+    @overload
+    def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
+    @staticmethod
+    def from_hex(value: str) -> Color: ...
+    @staticmethod
+    def from_rgb(r: int, g: int, b: int) -> Color: ...
+    @staticmethod
+    def from_rgba(r: int, g: int, b: int, a: int) -> Color: ...
+    @staticmethod
+    def from_hsl(h: float, s: float, l: float, a: float = 1.0) -> Color:
+        """Create HSL color; saturation, lightness, and alpha use 0..1."""
         ...
+    @staticmethod
+    def from_oklch(l: float, c: float, h: float, a: float = 1.0) -> Color:
+        """Create perceptual OKLCH color; lightness and alpha use 0..1."""
+        ...
+
+    """A CSS Color 4 or explicit RGBA color.
+
+    Examples include ``Color("#0f172a")``, ``Color("oklch(62% .2 260)")``
+    and ``Color(15, 23, 42)``. Invalid syntax or component ranges raise
+    ``ValueError``.
+    """
 
 ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
 
@@ -83,6 +101,47 @@ class Brush:
 
 Paint: TypeAlias = ColorLike | Brush
 
+class StrokeStyle:
+    def __init__(
+        self,
+        paint: Paint,
+        width: float = 2.0,
+        *,
+        cap: Literal["butt", "round", "square"] = "round",
+        join: Literal["bevel", "miter", "round"] = "round",
+        miter_limit: float = 4.0,
+        dashes: Sequence[float] = (),
+        dash_offset: float = 0.0,
+    ) -> None:
+        """Define a complete reusable stroke; invalid metrics raise ValueError."""
+        ...
+
+class Style:
+    def __init__(
+        self,
+        *,
+        fill: Optional[Paint] = None,
+        stroke: Optional[StrokeStyle] = None,
+        opacity: Optional[float] = None,
+        text: Optional[TextStyle] = None,
+    ) -> None:
+        """Define a property-wise theme rule; strings may name theme tokens."""
+        ...
+
+class AxesStyle:
+    def __init__(
+        self,
+        *,
+        axis: Optional[StrokeStyle] = None,
+        grid: Optional[StrokeStyle] = None,
+        minor_grid: Optional[StrokeStyle] = None,
+        ticks: Optional[StrokeStyle] = None,
+        numbers: Optional[TextStyle] = None,
+        labels: Optional[TextStyle] = None,
+    ) -> None:
+        """Define axis-part strokes and typography under an ``axes`` selector."""
+        ...
+
 class Theme:
     """Reusable semantic colors, typography, fonts, and Layout v2 tokens."""
     def __init__(
@@ -93,13 +152,18 @@ class Theme:
         colors: Optional[dict[str, ColorLike]] = None,
         fonts: Optional[dict[str, str]] = None,
         sizes: Optional[dict[str, float]] = None,
+        text: Optional[dict[TextRole, TextStyle]] = None,
+        styles: Optional[dict[str, Style | AxesStyle]] = None,
+        series: Optional[Sequence[ColorLike]] = None,
+        heatmap: Optional[Sequence[ColorLike]] = None,
         layout: Optional[dict[str, float]] = None,
         font_files: Optional[dict[str, str]] = None,
     ) -> None:
-        """Create or derive a theme and apply the supplied role dictionaries.
+        """Create or derive a centralized visual theme.
 
-        Layout token values must be finite and non-negative; invalid roles or
-        font files raise ``ValueError`` or ``OSError``.
+        Rules use family/type/part selectors or ``.classes``. Text values reuse
+        the structured ``TextStyle`` overlay. Invalid selectors, tokens, roles,
+        metrics, or font files raise ``ValueError`` or ``OSError``.
 
         Example:
             Theme()
@@ -500,12 +564,18 @@ class Drawable:
             result = drawable.stroke(BLUE, 1.0)
         """
         ...
+    def stroke_style(self, style: StrokeStyle) -> Self:
+        """Apply complete stroke geometry and return this drawable."""
+        ...
     def no_stroke(self) -> Self:
         """Apply no stroke to this drawable and return the result.
 
         Example:
             result = drawable.no_stroke()
         """
+        ...
+    def style_class(self, name: str) -> Self:
+        """Attach an ordered theme class; explicit fluent styles still win."""
         ...
     def glow(self, color: Color, radius: float = 16.0, intensity: float = 1.0) -> Drawable:
         """Apply glow to this drawable and return the result.
@@ -1754,11 +1824,12 @@ class Scene:
         height: int = 720,
         background: Optional[Color] = None,
         margin: Optional[float] = None,
+        theme: Optional[str | Theme] = None,
     ) -> None:
-        """Create a Scene instance.
+        """Create a scene and optionally install its centralized theme.
 
-        Example:
-            Scene()
+        An explicit background wins over the theme background. Unknown theme
+        names and invalid values raise ``ValueError``.
         """
         ...
     def parameter(self, initial: float) -> Parameter: ...

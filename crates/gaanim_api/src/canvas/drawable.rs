@@ -387,6 +387,12 @@ impl DrawableHandle {
         self
     }
 
+    pub(crate) fn inherited_style_targets(&self) -> Vec<SharedObjectSpec> {
+        std::iter::once(self.spec.clone())
+            .chain(self.style_targets.iter().cloned())
+            .collect()
+    }
+
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
         self.named_parts = Some(Arc::new(parts));
         self
@@ -549,6 +555,16 @@ impl DrawableHandle {
     pub fn stroke_brush(self, brush: Brush, width: f64) -> Self {
         self.update_style(|spec| {
             spec.stroke = Some((brush.clone(), width));
+            spec.stroke_style = Some(gaanim_core::kurbo::Stroke::new(width));
+            spec.stroke_overridden = true;
+        })
+    }
+
+    /// Apply a complete native stroke, including cap, join, miter and dashes.
+    pub fn stroke_with_style(self, brush: Brush, style: gaanim_core::kurbo::Stroke) -> Self {
+        self.update_style(|spec| {
+            spec.stroke = Some((brush.clone(), style.width));
+            spec.stroke_style = Some(style.clone());
             spec.stroke_overridden = true;
         })
     }
@@ -556,8 +572,22 @@ impl DrawableHandle {
     pub fn no_stroke(self) -> Self {
         self.update_style(|spec| {
             spec.stroke = None;
+            spec.stroke_style = None;
             spec.stroke_overridden = true;
         })
+    }
+
+    /// Attach an ordered theme class to this drawable and its visual style targets.
+    pub fn style_class(self, name: impl Into<String>) -> Result<Self, String> {
+        let name = name.into();
+        if name.is_empty()
+            || name
+                .chars()
+                .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        {
+            return Err("style class names must use letters, digits, '_' or '-'".into());
+        }
+        Ok(self.update_style(|spec| spec.style_classes.push(name.clone())))
     }
 
     /// Add a soft outer glow. The effect is compiled into the retained vector fragment.
@@ -758,7 +788,10 @@ impl DrawableHandle {
     }
 
     pub fn opacity(self, op: f32) -> Self {
-        self.update_spec(|spec| spec.opacity = op)
+        self.update_style(|spec| {
+            spec.opacity = op;
+            spec.opacity_overridden = true;
+        })
     }
 
     pub fn z_index(self, z: i32) -> Self {

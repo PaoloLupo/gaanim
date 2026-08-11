@@ -48,10 +48,35 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyColor {
 #[pymethods]
 impl PyColor {
     #[new]
-    #[pyo3(signature = (r, g, b, a=None))]
-    fn new(r: u8, g: u8, b: u8, a: Option<u8>) -> Self {
-        let a = a.unwrap_or(0xFF);
-        Self(peniko::Color::from_rgba8(r, g, b, a))
+    #[pyo3(signature = (value, g=None, b=None, a=None))]
+    fn new(
+        value: &Bound<'_, PyAny>,
+        g: Option<u8>,
+        b: Option<u8>,
+        a: Option<u8>,
+    ) -> PyResult<Self> {
+        if let Ok(source) = value.extract::<&str>() {
+            if g.is_some() || b.is_some() || a.is_some() {
+                return Err(PyValueError::new_err(
+                    "Color(css) does not accept separate g, b, or a components",
+                ));
+            }
+            return peniko::Color::from_str(source).map(Self).map_err(|error| {
+                PyValueError::new_err(format!("invalid color '{source}': {error}"))
+            });
+        }
+        let r = value.extract::<u8>().map_err(|_| {
+            PyValueError::new_err("Color expects a CSS color string or r, g, b integer components")
+        })?;
+        let (g, b) = match (g, b) {
+            (Some(g), Some(b)) => (g, b),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "Color(r, g, b, a?) requires all three RGB components",
+                ))
+            }
+        };
+        Ok(Self(peniko::Color::from_rgba8(r, g, b, a.unwrap_or(0xFF))))
     }
 
     /// Parse a hex color string. Supports `#RGB`, `#RRGGBB`, `#RRGGBBAA` (with or without `#`).
@@ -103,6 +128,50 @@ impl PyColor {
     #[staticmethod]
     fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self(peniko::Color::from_rgba8(r, g, b, a))
+    }
+
+    /// Construct an HSL color. Saturation, lightness, and alpha use 0..1.
+    #[staticmethod]
+    #[pyo3(signature = (h, s, l, a=1.0))]
+    fn from_hsl(h: f64, s: f64, l: f64, a: f64) -> PyResult<Self> {
+        if !h.is_finite()
+            || !s.is_finite()
+            || !l.is_finite()
+            || !a.is_finite()
+            || !(0.0..=1.0).contains(&s)
+            || !(0.0..=1.0).contains(&l)
+            || !(0.0..=1.0).contains(&a)
+        {
+            return Err(PyValueError::new_err(
+                "h must be finite; s, l, and a must be between 0 and 1",
+            ));
+        }
+        let css = format!("hsl({h} {}% {}% / {a})", s * 100.0, l * 100.0);
+        peniko::Color::from_str(&css)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    /// Construct an OKLCH color. Lightness and alpha use 0..1; hue is degrees.
+    #[staticmethod]
+    #[pyo3(signature = (l, c, h, a=1.0))]
+    fn from_oklch(l: f64, c: f64, h: f64, a: f64) -> PyResult<Self> {
+        if !l.is_finite()
+            || !c.is_finite()
+            || !h.is_finite()
+            || !a.is_finite()
+            || !(0.0..=1.0).contains(&l)
+            || c < 0.0
+            || !(0.0..=1.0).contains(&a)
+        {
+            return Err(PyValueError::new_err(
+                "l and a must be between 0 and 1; c must be finite and non-negative; h must be finite",
+            ));
+        }
+        let css = format!("oklch({}% {c} {h} / {a})", l * 100.0);
+        peniko::Color::from_str(&css)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     #[getter]
