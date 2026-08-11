@@ -316,6 +316,12 @@ impl BoxConstraints {
 /// Bridge implemented by the API/compiler for text, vector and media leaves.
 pub trait IntrinsicMeasure {
     fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError>;
+
+    /// Whether measuring this leaf can change when its offered width changes.
+    /// Paragraphs and other wrapping content should return `true`.
+    fn is_width_sensitive(&self, _id: LayoutId) -> bool {
+        false
+    }
 }
 
 /// Final geometry for one node.
@@ -356,6 +362,10 @@ pub enum LayoutError {
     EmptyGrid,
     #[error("grid item for node {0:?} is outside the configured tracks")]
     GridOutOfBounds(LayoutId),
+    #[error("grid item for node {0:?} overlaps another explicitly placed item")]
+    GridCollision(LayoutId),
+    #[error("grid has no free cell for node {0:?}")]
+    GridNoSpace(LayoutId),
     #[error("required layout constraints are incompatible: {0}")]
     Unsatisfiable(String),
     #[error("layout did not converge after {iterations} measurement passes")]
@@ -556,7 +566,7 @@ pub fn resolve_layout(
                     && (old.bounds.max - box_.bounds.max).length() <= EPSILON
             })
         }) && previous.len() == resolved.boxes.len();
-        if stable || iteration == 1 && !contains_width_sensitive(root) {
+        if stable || iteration == 1 && !contains_width_sensitive(root, measurer) {
             return Ok(resolved);
         }
         previous = resolved.boxes.clone();
@@ -579,12 +589,13 @@ pub fn solve_constraints(
     apply_relations(layout, relations)
 }
 
-fn contains_width_sensitive(node: &LayoutNode) -> bool {
+fn contains_width_sensitive(node: &LayoutNode, measurer: &impl IntrinsicMeasure) -> bool {
     matches!(node.style.width, SizeRule::Fill(_))
+        || matches!(node.kind, LayoutNodeKind::Leaf) && measurer.is_width_sensitive(node.id)
         || node
             .children
             .iter()
-            .any(|child| contains_width_sensitive(&child.node))
+            .any(|child| contains_width_sensitive(&child.node, measurer))
 }
 
 fn validate_tree(root: &LayoutNode) -> Result<(), LayoutError> {
@@ -647,9 +658,14 @@ fn measure_node(
             height += style.gap.y * count.saturating_sub(1) as f64;
             DVec2::new(width, height)
         }
-        LayoutNodeKind::Grid { rows, columns, .. } => {
-            let (widths, heights) =
-                grid_tracks(node, rows, columns, inner_max, measurer, resolved)?;
+        LayoutNodeKind::Grid {
+            rows,
+            columns,
+            auto_flow,
+        } => {
+            let (widths, heights) = grid_tracks(
+                node, rows, columns, *auto_flow, inner_max, measurer, resolved,
+            )?;
             DVec2::new(
                 widths.iter().sum::<f64>() + style.gap.x * widths.len().saturating_sub(1) as f64,
                 heights.iter().sum::<f64>() + style.gap.y * heights.len().saturating_sub(1) as f64,
@@ -657,7 +673,7 @@ fn measure_node(
         }
         LayoutNodeKind::Stack => {
             let mut size = DVec2::ZERO;
-            for child in &node.children {
+            for child in node.children.iter().filter(|child| !child.style.absolute) {
                 size = size.max(measure_node(
                     &child.node,
                     child_constraints,
@@ -682,6 +698,8 @@ fn measure_node(
             size.x = size.y * ratio;
         }
     }
+    size.x = clamp_axis(size.x, style.min_width, style.max_width);
+    size.y = clamp_axis(size.y, style.min_height, style.max_height);
     Ok(constraints.constrain(size))
 }
 
@@ -743,7 +761,7 @@ fn place_node(
             auto_flow,
         } => place_grid(node, content, rows, columns, *auto_flow, measurer, resolved)?,
         LayoutNodeKind::Stack => {
-            for child in &node.children {
+            for child in node.children.iter().filter(|child| !child.style.absolute) {
                 place_overlay(child, content, measurer, resolved)?;
             }
         }
@@ -787,27 +805,109 @@ fn place_linear(
     }
     let main_available = if horizontal { available.x } else { available.y };
     let gap = if horizontal { style.gap.x } else { style.gap.y };
-    let main_used: f64 = sizes
+    let initial_main_used: f64 = sizes
         .iter()
         .map(|size| if horizontal { size.x } else { size.y })
         .sum::<f64>()
         + gap * children.len().saturating_sub(1) as f64;
-    let grow_total: f64 = children.iter().map(|child| child.style.grow.max(0.0)).sum();
-    let free = (main_available - main_used).max(0.0);
-    if grow_total > 0.0 {
-        for (child, size) in children.iter().zip(&mut sizes) {
-            let extra = free * child.style.grow.max(0.0) / grow_total;
-            if horizontal {
-                size.x += extra
-            } else {
-                size.y += extra
-            }
-        }
-    }
-    if wrap && main_used > main_available {
+    if wrap && initial_main_used > main_available {
         return place_wrapped(
             node, content, horizontal, &children, &sizes, measurer, resolved,
         );
+    }
+
+    let grow_weights: Vec<f64> = children
+        .iter()
+        .map(|child| {
+            if child.style.grow > 0.0 {
+                child.style.grow
+            } else {
+                let rule = if horizontal {
+                    child.node.style.width
+                } else {
+                    child.node.style.height
+                };
+                match rule {
+                    SizeRule::Fill(weight) => weight.max(0.0),
+                    _ => 0.0,
+                }
+            }
+        })
+        .collect();
+    let grow_total: f64 = grow_weights.iter().sum();
+    if grow_total > 0.0 {
+        let fixed = sizes
+            .iter()
+            .zip(&grow_weights)
+            .filter(|(_, weight)| **weight <= 0.0)
+            .map(|(size, _)| if horizontal { size.x } else { size.y })
+            .sum::<f64>()
+            + gap * children.len().saturating_sub(1) as f64;
+        let flexible = (main_available - fixed).max(0.0);
+        for ((child, size), weight) in children.iter().zip(&mut sizes).zip(&grow_weights) {
+            if *weight <= 0.0 {
+                continue;
+            }
+            let assigned = flexible * *weight / grow_total;
+            let max = if horizontal {
+                DVec2::new(assigned, available.y)
+            } else {
+                DVec2::new(available.x, assigned)
+            };
+            let measured = measure_node(
+                &child.node,
+                BoxConstraints {
+                    min: DVec2::ZERO,
+                    max,
+                },
+                measurer,
+                resolved,
+            )?;
+            if horizontal {
+                size.x = assigned;
+                size.y = measured.y;
+            } else {
+                size.x = measured.x;
+                size.y = assigned;
+            }
+        }
+    } else if initial_main_used > main_available {
+        let deficit = initial_main_used - main_available;
+        let shrink_total = children
+            .iter()
+            .zip(&sizes)
+            .map(|(child, size)| {
+                child.style.shrink.max(0.0) * if horizontal { size.x } else { size.y }
+            })
+            .sum::<f64>();
+        if shrink_total > 0.0 {
+            for (child, size) in children.iter().zip(&mut sizes) {
+                let main = if horizontal { size.x } else { size.y };
+                let contribution = child.style.shrink.max(0.0) * main;
+                let assigned = (main - deficit * contribution / shrink_total).max(0.0);
+                let max = if horizontal {
+                    DVec2::new(assigned, available.y)
+                } else {
+                    DVec2::new(available.x, assigned)
+                };
+                let measured = measure_node(
+                    &child.node,
+                    BoxConstraints {
+                        min: DVec2::ZERO,
+                        max,
+                    },
+                    measurer,
+                    resolved,
+                )?;
+                if horizontal {
+                    size.x = assigned;
+                    size.y = measured.y;
+                } else {
+                    size.x = measured.x;
+                    size.y = assigned;
+                }
+            }
+        }
     }
     let used: f64 = sizes
         .iter()
@@ -855,7 +955,7 @@ fn place_linear(
 }
 
 fn place_wrapped(
-    _node: &LayoutNode,
+    node: &LayoutNode,
     content: Bounds3D,
     horizontal: bool,
     children: &[&LayoutChild],
@@ -863,21 +963,35 @@ fn place_wrapped(
     measurer: &impl IntrinsicMeasure,
     resolved: &mut ResolvedLayout,
 ) -> Result<(), LayoutError> {
-    let mut cursor = if horizontal {
-        DVec2::new(content.min.x, content.max.y)
-    } else {
-        DVec2::new(content.min.x, content.max.y)
-    };
+    let gap = node.style.gap;
+    let mut cursor = DVec2::new(content.min.x, content.max.y);
     let mut line_cross: f64 = 0.0;
+    let mut first_in_line = true;
     for (child, size) in children.iter().zip(sizes) {
-        if horizontal && cursor.x > content.min.x && cursor.x + size.x > content.max.x {
+        let main_gap = if first_in_line {
+            0.0
+        } else if horizontal {
+            gap.x
+        } else {
+            gap.y
+        };
+        if horizontal && !first_in_line && cursor.x + main_gap + size.x > content.max.x {
             cursor.x = content.min.x;
-            cursor.y -= line_cross;
+            cursor.y -= line_cross + gap.y;
             line_cross = 0.0;
-        } else if !horizontal && cursor.y < content.max.y && cursor.y - size.y < content.min.y {
+            first_in_line = true;
+        } else if !horizontal && !first_in_line && cursor.y - main_gap - size.y < content.min.y {
             cursor.y = content.max.y;
-            cursor.x += line_cross;
+            cursor.x += line_cross + gap.x;
             line_cross = 0.0;
+            first_in_line = true;
+        }
+        if !first_in_line {
+            if horizontal {
+                cursor.x += gap.x;
+            } else {
+                cursor.y -= gap.y;
+            }
         }
         let center = if horizontal {
             DVec2::new(cursor.x + size.x * 0.5, cursor.y - size.y * 0.5)
@@ -892,6 +1006,7 @@ fn place_wrapped(
             cursor.y -= size.y;
             line_cross = line_cross.max(size.x);
         }
+        first_in_line = false;
     }
     Ok(())
 }
@@ -980,6 +1095,7 @@ fn grid_tracks(
     node: &LayoutNode,
     rows: &[Track],
     columns: &[Track],
+    auto_flow: AutoFlow,
     available: DVec2,
     measurer: &impl IntrinsicMeasure,
     resolved: &mut ResolvedLayout,
@@ -996,13 +1112,13 @@ fn grid_tracks(
             heights[index] = value;
         }
     }
-    for (index, child) in node
+    let children: Vec<_> = node
         .children
         .iter()
         .filter(|child| !child.style.absolute)
-        .enumerate()
-    {
-        let (row, column) = grid_position(child, index, rows.len(), columns.len(), AutoFlow::Row)?;
+        .collect();
+    let positions = grid_positions(&children, rows.len(), columns.len(), auto_flow)?;
+    for (child, (row, column)) in children.iter().zip(positions) {
         let size = measure_node(
             &child.node,
             BoxConstraints {
@@ -1053,14 +1169,16 @@ fn place_grid(
     resolved: &mut ResolvedLayout,
 ) -> Result<(), LayoutError> {
     let available = DVec2::new(content.width(), content.height());
-    let (widths, heights) = grid_tracks(node, rows, columns, available, measurer, resolved)?;
-    for (index, child) in node
+    let (widths, heights) = grid_tracks(
+        node, rows, columns, auto_flow, available, measurer, resolved,
+    )?;
+    let children: Vec<_> = node
         .children
         .iter()
         .filter(|child| !child.style.absolute)
-        .enumerate()
-    {
-        let (row, column) = grid_position(child, index, rows.len(), columns.len(), auto_flow)?;
+        .collect();
+    let positions = grid_positions(&children, rows.len(), columns.len(), auto_flow)?;
+    for (child, (row, column)) in children.iter().zip(positions) {
         let row_end = row + child.style.row_span.max(1);
         let column_end = column + child.style.column_span.max(1);
         if row_end > rows.len() || column_end > columns.len() {
@@ -1102,26 +1220,92 @@ fn place_grid(
     Ok(())
 }
 
-fn grid_position(
-    child: &LayoutChild,
-    index: usize,
+fn grid_positions(
+    children: &[&LayoutChild],
     rows: usize,
     columns: usize,
     auto_flow: AutoFlow,
-) -> Result<(usize, usize), LayoutError> {
-    let position = match (child.style.row, child.style.column) {
-        (Some(row), Some(column)) => (row, column),
-        (Some(row), None) => (row, index % columns),
-        (None, Some(column)) => (index / columns, column),
-        (None, None) => match auto_flow {
-            AutoFlow::Row => (index / columns, index % columns),
-            AutoFlow::Column => (index % rows, index / rows),
-        },
-    };
-    if position.0 >= rows || position.1 >= columns {
-        return Err(LayoutError::GridOutOfBounds(child.node.id));
+) -> Result<Vec<(usize, usize)>, LayoutError> {
+    let mut occupied = vec![false; rows * columns];
+    let mut positions = vec![None; children.len()];
+    let fits =
+        |occupied: &[bool], row: usize, column: usize, row_span: usize, column_span: usize| {
+            row + row_span <= rows
+                && column + column_span <= columns
+                && (row..row + row_span)
+                    .all(|r| (column..column + column_span).all(|c| !occupied[r * columns + c]))
+        };
+    let mark =
+        |occupied: &mut [bool], row: usize, column: usize, row_span: usize, column_span: usize| {
+            for r in row..row + row_span {
+                for c in column..column + column_span {
+                    occupied[r * columns + c] = true;
+                }
+            }
+        };
+
+    // Reserve fully explicit items first so auto-placement never steals their
+    // cells merely because an automatic item appeared earlier in the list.
+    for (index, child) in children.iter().enumerate() {
+        let (Some(row), Some(column)) = (child.style.row, child.style.column) else {
+            continue;
+        };
+        let row_span = child.style.row_span.max(1);
+        let column_span = child.style.column_span.max(1);
+        if row + row_span > rows || column + column_span > columns {
+            return Err(LayoutError::GridOutOfBounds(child.node.id));
+        }
+        if !fits(&occupied, row, column, row_span, column_span) {
+            return Err(LayoutError::GridCollision(child.node.id));
+        }
+        mark(&mut occupied, row, column, row_span, column_span);
+        positions[index] = Some((row, column));
     }
-    Ok(position)
+
+    for (index, child) in children.iter().enumerate() {
+        if positions[index].is_some() {
+            continue;
+        }
+        let row_span = child.style.row_span.max(1);
+        let column_span = child.style.column_span.max(1);
+        let mut candidates = Vec::with_capacity(rows * columns);
+        match (child.style.row, child.style.column) {
+            (Some(row), None) => {
+                if row >= rows {
+                    return Err(LayoutError::GridOutOfBounds(child.node.id));
+                }
+                candidates.extend((0..columns).map(|column| (row, column)));
+            }
+            (None, Some(column)) => {
+                if column >= columns {
+                    return Err(LayoutError::GridOutOfBounds(child.node.id));
+                }
+                candidates.extend((0..rows).map(|row| (row, column)));
+            }
+            (None, None) => match auto_flow {
+                AutoFlow::Row => {
+                    candidates.extend(
+                        (0..rows).flat_map(|row| (0..columns).map(move |column| (row, column))),
+                    );
+                }
+                AutoFlow::Column => {
+                    candidates.extend(
+                        (0..columns).flat_map(|column| (0..rows).map(move |row| (row, column))),
+                    );
+                }
+            },
+            (Some(_), Some(_)) => unreachable!(),
+        }
+        let Some((row, column)) = candidates
+            .into_iter()
+            .find(|(row, column)| fits(&occupied, *row, *column, row_span, column_span))
+        else {
+            return Err(LayoutError::GridNoSpace(child.node.id));
+        };
+        mark(&mut occupied, row, column, row_span, column_span);
+        positions[index] = Some((row, column));
+    }
+    Ok(positions.into_iter().map(Option::unwrap).collect())
 }
 
 fn place_overlay(
@@ -1174,7 +1358,7 @@ fn apply_relations(
         };
         variables.insert(*id, vars);
         let b = box_.bounds;
-        let tie = Strength::new(Strength::STRONG.value() - order as f64 * EPSILON);
+        let tie = Strength::new((Strength::WEAK.value() - order as f64 * EPSILON).max(EPSILON));
         for constraint in [
             SolverConstraint::new(
                 vars.width.into(),
@@ -1196,7 +1380,7 @@ fn apply_relations(
                 .map_err(|error| LayoutError::Unsatisfiable(error.to_string()))?;
         }
     }
-    for relation in relations {
+    for (index, relation) in relations.iter().enumerate() {
         let lhs = solver_expression(&relation.lhs, &variables)?;
         let rhs = solver_expression(&relation.rhs, &variables)?;
         let operator = match relation.relation {
@@ -1210,7 +1394,26 @@ fn apply_relations(
                 operator,
                 relation.strength.solver(),
             ))
-            .map_err(|error| LayoutError::Unsatisfiable(error.to_string()))?;
+            .map_err(|error| {
+                let nodes = relation
+                    .lhs
+                    .terms
+                    .keys()
+                    .chain(relation.rhs.terms.keys())
+                    .map(|variable| variable.node.0.to_string())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let label = relation
+                    .label
+                    .as_deref()
+                    .map_or_else(|| format!("constraint #{index}"), |label| label.to_string());
+                LayoutError::Unsatisfiable(format!(
+                    "{label} involving nodes [{nodes}] ({:?}): {error}",
+                    relation.relation
+                ))
+            })?;
     }
     let mut values = BTreeMap::new();
     for (variable, value) in solver.fetch_changes() {
@@ -1301,6 +1504,7 @@ fn attribute_value(box_: ResolvedBox, attribute: LayoutAttribute) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     struct Measure(BTreeMap<LayoutId, DVec2>);
     impl IntrinsicMeasure for Measure {
@@ -1419,5 +1623,189 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, LayoutError::Unsatisfiable(_)));
+    }
+
+    struct ResponsiveMeasure {
+        calls: RefCell<BTreeMap<LayoutId, Vec<f64>>>,
+    }
+
+    impl IntrinsicMeasure for ResponsiveMeasure {
+        fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            let width = constraints.max.x.max(1.0);
+            self.calls.borrow_mut().entry(id).or_default().push(width);
+            Ok(constraints.constrain(DVec2::new(width, 1000.0 / width)))
+        }
+
+        fn is_width_sensitive(&self, _id: LayoutId) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn weighted_grow_remeasures_wrapping_leaves_at_assigned_width() {
+        let (mut left, _) = child(1, DVec2::ZERO);
+        left.style.grow = 2.0;
+        let (mut right, _) = child(2, DVec2::ZERO);
+        right.style.grow = 3.0;
+        let mut root = LayoutNode::container(
+            LayoutId(0),
+            LayoutNodeKind::Row { wrap: false },
+            vec![left, right],
+        );
+        root.style.width = SizeRule::Fill(1.0);
+        root.style.height = SizeRule::Fill(1.0);
+        root.style.gap = DVec2::splat(20.0);
+        let measure = ResponsiveMeasure {
+            calls: RefCell::new(BTreeMap::new()),
+        };
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(0.0, 0.0, 500.0, 200.0),
+            &measure,
+            &[],
+        )
+        .unwrap();
+
+        assert!((layout.boxes[&LayoutId(1)].bounds.width() - 192.0).abs() < EPSILON);
+        assert!((layout.boxes[&LayoutId(2)].bounds.width() - 288.0).abs() < EPSILON);
+        assert!(
+            measure.calls.borrow()[&LayoutId(1)]
+                .iter()
+                .any(|width| (*width - 192.0).abs() < EPSILON)
+        );
+        assert!(layout.iterations >= 2);
+    }
+
+    #[test]
+    fn shrink_prevents_non_wrapping_rows_from_overflowing() {
+        let (left, ml) = child(1, DVec2::new(80.0, 20.0));
+        let (right, mr) = child(2, DVec2::new(80.0, 20.0));
+        let mut root = LayoutNode::container(
+            LayoutId(0),
+            LayoutNodeKind::Row { wrap: false },
+            vec![left, right],
+        );
+        root.style.width = SizeRule::Fill(1.0);
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(0.0, 0.0, 100.0, 40.0),
+            &Measure(BTreeMap::from([ml, mr])),
+            &[],
+        )
+        .unwrap();
+
+        assert!((layout.boxes[&LayoutId(1)].bounds.width() - 50.0).abs() < EPSILON);
+        assert!((layout.boxes[&LayoutId(2)].bounds.width() - 50.0).abs() < EPSILON);
+        assert!(layout.boxes[&LayoutId(2)].bounds.max.x <= 100.0 + EPSILON);
+    }
+
+    #[test]
+    fn required_size_limits_win_over_aspect_preference() {
+        let mut leaf = LayoutNode::leaf(LayoutId(1));
+        leaf.style.width = SizeRule::Fixed(120.0);
+        leaf.style.aspect_ratio = Some(2.0);
+        leaf.style.max_height = Some(40.0);
+        let layout = resolve_layout(
+            &leaf,
+            Bounds3D::new_2d(0.0, 0.0, 200.0, 200.0),
+            &Measure(BTreeMap::from([(LayoutId(1), DVec2::splat(10.0))])),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(layout.boxes[&LayoutId(1)].size(), DVec2::new(120.0, 40.0));
+    }
+
+    #[test]
+    fn grid_column_flow_uses_column_major_auto_placement() {
+        let (a, ma) = child(1, DVec2::splat(10.0));
+        let (b, mb) = child(2, DVec2::splat(10.0));
+        let mut root = LayoutNode::container(
+            LayoutId(0),
+            LayoutNodeKind::Grid {
+                rows: vec![Track::Fraction(1.0), Track::Fraction(1.0)],
+                columns: vec![Track::Fraction(1.0), Track::Fraction(1.0)],
+                auto_flow: AutoFlow::Column,
+            },
+            vec![a, b],
+        );
+        root.style.width = SizeRule::Fill(1.0);
+        root.style.height = SizeRule::Fill(1.0);
+        root.style.align = Align::Stretch;
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(0.0, 0.0, 200.0, 200.0),
+            &Measure(BTreeMap::from([ma, mb])),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(layout.boxes[&LayoutId(1)].bounds.center().x, 50.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.center().x, 50.0);
+        assert!(layout.boxes[&LayoutId(1)].bounds.center().y > 100.0);
+        assert!(layout.boxes[&LayoutId(2)].bounds.center().y < 100.0);
+    }
+
+    #[test]
+    fn grid_reserves_explicit_spans_before_auto_placement() {
+        let (automatic, ma) = child(1, DVec2::splat(10.0));
+        let (mut explicit, me) = child(2, DVec2::splat(10.0));
+        explicit.style.row = Some(0);
+        explicit.style.column = Some(0);
+        explicit.style.row_span = 2;
+        let mut root = LayoutNode::container(
+            LayoutId(0),
+            LayoutNodeKind::Grid {
+                rows: vec![Track::Fraction(1.0), Track::Fraction(1.0)],
+                columns: vec![Track::Fraction(1.0), Track::Fraction(1.0)],
+                auto_flow: AutoFlow::Row,
+            },
+            vec![automatic, explicit],
+        );
+        root.style.width = SizeRule::Fill(1.0);
+        root.style.height = SizeRule::Fill(1.0);
+        root.style.align = Align::Stretch;
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(0.0, 0.0, 200.0, 200.0),
+            &Measure(BTreeMap::from([ma, me])),
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(layout.boxes[&LayoutId(1)].bounds.center().x, 150.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.center().x, 50.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 200.0);
+    }
+
+    #[test]
+    fn stronger_relations_win_and_repeated_solves_are_identical() {
+        let leaf = LayoutNode::leaf(LayoutId(1));
+        let left = LayoutExpression::variable(LayoutId(1), LayoutAttribute::Left);
+        let relations = [
+            LayoutConstraint::equal(left.clone(), 25.0.into())
+                .with_strength(ConstraintStrength::Strong),
+            LayoutConstraint::equal(left, 80.0.into()).with_strength(ConstraintStrength::Medium),
+        ];
+        let measure = Measure(BTreeMap::from([(LayoutId(1), DVec2::new(20.0, 10.0))]));
+        let first = resolve_layout(
+            &leaf,
+            Bounds3D::new_2d(0.0, 0.0, 100.0, 100.0),
+            &measure,
+            &relations,
+        )
+        .unwrap();
+        assert!((first.boxes[&LayoutId(1)].bounds.min.x - 25.0).abs() < EPSILON);
+        assert_eq!(first.diagnostics.len(), 1);
+
+        for _ in 0..8 {
+            let repeated = resolve_layout(
+                &leaf,
+                Bounds3D::new_2d(0.0, 0.0, 100.0, 100.0),
+                &measure,
+                &relations,
+            )
+            .unwrap();
+            assert_eq!(repeated.boxes, first.boxes);
+            assert_eq!(repeated.diagnostics, first.diagnostics);
+        }
     }
 }

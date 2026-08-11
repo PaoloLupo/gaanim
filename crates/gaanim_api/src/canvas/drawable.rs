@@ -120,17 +120,19 @@ impl DrawableHandle {
             return Err(LayoutOwnershipError::ForeignScene);
         }
         let mut spec = self.spec.lock().expect("object spec poisoned");
-        if spec.layout_ops.iter().any(|op| {
-            matches!(
-                op,
-                LayoutOp::SetTranslation(_)
-                    | LayoutOp::MoveAnchorTo { .. }
-                    | LayoutOp::NextTo { .. }
-                    | LayoutOp::AlignTo { .. }
-                    | LayoutOp::ToEdge { .. }
-                    | LayoutOp::ToCorner { .. }
-            )
-        }) {
+        if spec.manual_position_animation
+            || spec.layout_ops.iter().any(|op| {
+                matches!(
+                    op,
+                    LayoutOp::SetTranslation(_)
+                        | LayoutOp::MoveAnchorTo { .. }
+                        | LayoutOp::NextTo { .. }
+                        | LayoutOp::AlignTo { .. }
+                        | LayoutOp::ToEdge { .. }
+                        | LayoutOp::ToCorner { .. }
+                )
+            })
+        {
             return Err(LayoutOwnershipError::PositionalOperation);
         }
         if let Some(existing) = spec.layout_owner
@@ -676,6 +678,17 @@ impl DrawableHandle {
     // -- Internal helpers --
 
     fn anim(&self, ty: AnimationType) -> Anim {
+        if matches!(
+            &ty,
+            AnimationType::TranslateBy { .. } | AnimationType::TranslateTo { .. }
+        ) {
+            let mut spec = self.spec.lock().expect("object spec poisoned");
+            assert!(
+                spec.layout_owner.is_none(),
+                "layout owns this drawable's position; use LayoutItem offset or configure_item"
+            );
+            spec.manual_position_animation = true;
+        }
         let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
         Anim::queued(self.id, ty, self.state.clone(), active_idx)
     }

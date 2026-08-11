@@ -28,6 +28,7 @@ pub(crate) struct CanvasState {
     pub next_segment_id: u32,
     pub all_drawables: Vec<ObjectId>,
     pub layout_constraints: Vec<LayoutConstraint>,
+    pub layout_diagnostics: Vec<(Option<ObjectId>, String)>,
 }
 
 impl CanvasState {
@@ -39,6 +40,7 @@ impl CanvasState {
             next_segment_id: 1,
             all_drawables: Vec::new(),
             layout_constraints: Vec::new(),
+            layout_diagnostics: Vec::new(),
         }
     }
 

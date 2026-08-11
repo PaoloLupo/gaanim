@@ -83,7 +83,7 @@ scheme.
 == Custom and derived themes
 
 `Theme` is the single configuration object for semantic colors, typographic
-roles, sizes, and font files. Pass a scheme name to derive it and override only
+roles, sizes, layout tokens, and font files. Pass a scheme name to derive it and override only
 what changes:
 
 ```python
@@ -102,6 +102,7 @@ theme = Theme(
         "code": "JetBrains Mono",
     },
     sizes={"title": 72, "body": 34},
+    layout={"page_padding": 56, "column_gap": 48},
     font_files={
         "Inter": "assets/Inter-Regular.ttf",
         "JetBrains Mono": "assets/JetBrainsMono-Regular.ttf",
@@ -152,6 +153,13 @@ Color roles are `background`, `foreground`, `muted`, `title`, `accent`,
 `subtitle`, `body`, `caption`, `math`, and `code`; size roles use the six
 individual text roles.
 
+Layout templates consume named spacing values through
+`scene.canvas.layout_token(name)`. The default scale includes `space_xs`,
+`space_sm`, `space_md`, `space_lg`, `page_padding`, `page_padding_wide`,
+`page_padding_x`, `column_gap`, `vertical_padding`, `vertical_padding_x`, and
+`lower_third_offset`. Custom themes may override these or add project-specific
+tokens through the `layout={...}` argument.
+
 == Theme tokens and readability
 
 Manual vector objects can consume the same semantic tokens as components:
@@ -163,6 +171,12 @@ scene.rounded_rect(420, 180, 24) \
 
 divider = scene.line(-400, 0, 400, 0) \
     .stroke(theme.color("rule"), 2)
+
+page = scene.column(
+    [title, body],
+    padding=scene.canvas.layout_token("page_padding"),
+    gap=scene.canvas.layout_token("space_lg"),
+)
 ```
 
 `Theme.validate()` and `scene.canvas.validate_theme()` return actionable

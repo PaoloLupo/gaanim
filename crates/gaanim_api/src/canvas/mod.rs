@@ -31,6 +31,6 @@ pub use canvas_impl::{
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
-pub use theme::{CanvasTheme, ThemeFont, ThemePalette};
+pub use theme::{CanvasTheme, LayoutTokens, ThemeFont, ThemePalette};
 mod compile;
 pub(crate) use compile::{split_text_math, text_inline_typst_source};

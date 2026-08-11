@@ -573,6 +573,77 @@ fn compile_typst_source(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cached_typst_hierarchy(
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: &Option<peniko::Brush>,
+    stroke: &StrokeBrush,
+) -> Result<Arc<CachedTypstHierarchy>, Vec<String>> {
+    let cache_key = build_typst_cache_key(
+        source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
+    );
+    if let Some(cached) = typst_hierarchy_cache()
+        .lock()
+        .expect("Typst hierarchy cache poisoned")
+        .get(&cache_key)
+        .cloned()
+    {
+        return Ok(cached);
+    }
+    let compiled = Arc::new(compile_typst_source(
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        fill,
+        stroke,
+    )?);
+    typst_hierarchy_cache()
+        .lock()
+        .expect("Typst hierarchy cache poisoned")
+        .insert(cache_key, compiled.clone());
+    Ok(compiled)
+}
+
+/// Measure Typst vector output without spawning ECS entities.
+///
+/// Measurement and materialization share the same cache key, so resolving a
+/// responsive paragraph warms the exact hierarchy later used for rendering.
+#[allow(clippy::too_many_arguments)]
+pub fn measure_typst(
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: Option<peniko::Brush>,
+    stroke: StrokeBrush,
+) -> Result<Bounds3D, Vec<String>> {
+    cached_typst_hierarchy(
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        &fill,
+        &stroke,
+    )
+    .map(|cached| cached.parent_bounds)
+}
+
 fn spawn_cached_typst_hierarchy(
     commands: &mut Commands,
     source: &str,
@@ -631,43 +702,27 @@ pub fn compile_typst_to_hierarchy(
     next_id_fn: impl FnMut() -> ObjectId,
     child_spans: &mut Vec<HierarchyChild>,
 ) -> (Entity, Bounds3D) {
-    let cache_key = build_typst_cache_key(
-        source, is_math, text_font, math_font, text_size, math_size, &fill, &stroke,
-    );
-    let cached = {
-        let cache = typst_hierarchy_cache().lock().unwrap();
-        cache.get(&cache_key).cloned()
-    };
-
-    let cached = match cached {
-        Some(cached) => cached,
-        None => match compile_typst_source(
-            font_registry,
-            source,
-            is_math,
-            text_font,
-            math_font,
-            text_size,
-            math_size,
-            &fill,
-            &stroke,
-        ) {
-            Ok(compiled) => {
-                let compiled = Arc::new(compiled);
-                let mut cache = typst_hierarchy_cache().lock().unwrap();
-                cache.insert(cache_key, compiled.clone());
-                compiled
+    let cached = match cached_typst_hierarchy(
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        &fill,
+        &stroke,
+    ) {
+        Ok(cached) => cached,
+        Err(errors) => {
+            for error in errors {
+                eprintln!("Typst compilation error: {error}");
             }
-            Err(errors) => {
-                for error in errors {
-                    eprintln!("Typst compilation error: {error}");
-                }
-                let bounds = Bounds3D::default();
-                let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
-                let entity = commands.spawn(bundle).id();
-                return (entity, bounds);
-            }
-        },
+            let bounds = Bounds3D::default();
+            let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
+            let entity = commands.spawn(bundle).id();
+            return (entity, bounds);
+        }
     };
 
     spawn_cached_typst_hierarchy(

@@ -33,6 +33,16 @@ def declared_members(node: ast.ClassDef) -> set[str]:
     return members
 
 
+def is_type_alias(node: ast.AnnAssign) -> bool:
+    """Return whether an annotated assignment exists only for static typing."""
+    annotation = node.annotation
+    return (
+        isinstance(annotation, ast.Name) and annotation.id == "TypeAlias"
+    ) or (
+        isinstance(annotation, ast.Attribute) and annotation.attr == "TypeAlias"
+    )
+
+
 def validate_visualization_contract(module: object) -> list[str]:
     """Exercise the native builders without starting the renderer."""
     failures: list[str] = []
@@ -106,6 +116,7 @@ def main() -> int:
         elif (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
+            and not is_type_alias(node)
             and node.target.id not in TYPE_CHECKING_ONLY
             and not hasattr(module, node.target.id)
         ):

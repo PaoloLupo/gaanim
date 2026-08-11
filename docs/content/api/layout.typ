@@ -39,6 +39,24 @@ accepts one value, `(vertical, horizontal)`, or `(top, right, bottom, left)`.
 Alignment is `start`, `center`, `end`, or `stretch`; distribution also supports
 `between`, `around`, and `evenly`.
 
+The public constructors are:
+
+```python
+scene.row(children, *, gap=24, padding=0, width="hug", height="hug",
+          align="center", justify="start", wrap=False, within=None)
+scene.column(children, *, gap=24, padding=0, width="hug", height="hug",
+             align="start", justify="start", wrap=False, within=None)
+scene.grid(children, *, rows=1, columns=1, gap=0, row_gap=None,
+           column_gap=None, padding=0, width="hug", height="hug",
+           align="stretch", justify="start", auto_flow="row", within=None)
+scene.stack(children, *, padding=0, width="hug", height="hug",
+            align="center", within=None)
+```
+
+`within=None` makes a nested/intrinsic container; root layouts normally choose
+`"safe"` or `"frame"`. Non-negative numeric values use canvas units. Invalid
+sizes, padding, tracks, alignments, or containing blocks raise `ValueError`.
+
 == Grid and overlays
 
 Grid tracks accept fixed values, `"auto"`, and fractional strings such as
@@ -63,6 +81,10 @@ overlay = scene.stack([
 Image and SVG fitting supports `contain`, `cover`, `stretch`, and `scale_down`.
 `cover` clips rendering to the assigned box.
 
+Explicit cells and their spans are reserved before auto-placement, independent
+of child order. An explicit collision, an out-of-range span, or a grid without
+enough free cells aborts layout resolution with the involved node ID.
+
 == Ownership and reflow
 
 After a drawable is attached, positional calls such as `at`, `next_to`,
@@ -74,6 +96,7 @@ displacement with `offset`.
 page.add(extra, at=1, animate=0.35)
 page.replace(old, new, animate=0.35)
 page.configure(gap=40, padding=56, animate=0.4)
+page.configure(min_width=480, max_width=960, aspect_ratio=16 / 9)
 page.configure_item(chart, grow=2, offset=(12, 0), animate=0.3)
 page.reflow(animate=0.25)
 ```
@@ -81,6 +104,11 @@ page.reflow(animate=0.25)
 Structural mutations propagate through nested layouts. Timeline operations
 store versioned tree snapshots, so direct seek and sequential playback resolve
 the same target geometry.
+
+`add`, `remove`, and `replace` operate on direct children. Their `animate`
+value and the `animate` values on `configure`, `configure_item`, and `reflow`
+are durations in seconds. With `None`, the timeline records an instant,
+deterministic transition.
 
 == Linear constraints
 
@@ -101,11 +129,18 @@ alternatives. Required conflicts fail before rendering. Stable IDs, canonical
 constraint ordering, and explicit weak stays make equivalent solutions
 reproducible.
 
+`scene.check_layout()` returns soft-constraint diagnostics immediately after
+registration; `layout.diagnostics()` filters diagnostics for one root. A
+conflict message includes its label or canonical index and involved node IDs.
+Expressions cannot mix drawables from different scenes.
+
 == Responsive paragraphs and templates
 
 `scene.paragraph(text, width=None)` resolves against the safe frame when free;
-inside responsive compositions it is a measurable text leaf. Explicit widths
-remain supported.
+inside responsive compositions it is a measurable text leaf. The solver
+remeasures after flex/grid allocation and Typst caches by content, typography,
+width, and overflow. Animated width changes crossfade the old and new vector
+compositions. Explicit widths remain supported.
 
 Templates are typed Python functions:
 
@@ -128,3 +163,6 @@ page = slide.bind(title=title, left=copy, right=diagram)
 Built-ins are `title_slide`, `lecture`, `comparison`, `vertical_short`,
 `minimal`, `lower_third`, and `credits`.
 
+Built-in templates consume theme layout tokens instead of isolated dimensions.
+Read them with `scene.canvas.layout_token(name)` and override them with
+`Theme(..., layout={"page_padding": 56, "column_gap": 48})`.

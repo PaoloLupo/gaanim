@@ -100,18 +100,10 @@ fn run_script_thread(
     // payloads to us. This is done once; the channel persists across re-runs.
     host::set_host_sender(Some(payload_tx));
 
-    // One-time bootstrap: the embedded interpreter has `gaanim_core` registered
-    // as a top-level builtin module (via `append_to_inittab!` in main). User
-    // scripts, however, do `from gaanim import Canvas`. There is no pip-installed
-    // `gaanim` package in the embedded environment, so we synthesize one in
-    // memory that re-exports every public attribute of the builtin `gaanim_core`.
-    let bootstrap_err = Python::attach(|py| {
-        py.run(
-            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
-            None,
-            None,
-        )
-    });
+    // One-time bootstrap: expose the exact same public package surface as the
+    // wheel while keeping the in-process `gaanim_core` module that owns the host
+    // channel. Pure-Python helpers such as layout templates are embedded below.
+    let bootstrap_err = Python::attach(bootstrap_gaanim_package);
     if let Err(e) = bootstrap_err {
         Python::attach(|py| {
             let msg = format_py_traceback(py, &e);
@@ -152,10 +144,38 @@ fn run_script_thread(
     exited.store(true, Ordering::SeqCst);
 }
 
-/// Python bootstrap that creates an in-memory `gaanim` package aliasing the
-/// builtin `gaanim_core` module, so `from gaanim import Canvas` works without a
-/// pip-installed package.
-const BOOTSTRAP_GAANIM_PACKAGE: &str = "import sys, types\nimport gaanim_core\nif 'gaanim' not in sys.modules:\n    _pkg = types.ModuleType('gaanim')\n    _pkg.__path__ = []\n    for _n in dir(gaanim_core):\n        if not _n.startswith('_'):\n            setattr(_pkg, _n, getattr(gaanim_core, _n))\n    sys.modules['gaanim'] = _pkg\n";
+const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__init__.py");
+const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
+
+/// Build the public `gaanim` package around the builtin `gaanim_core` module.
+///
+/// Loading the installed wheel here would create a second native extension and
+/// therefore a second host-channel static. Instead, the package initializer and
+/// pure-Python helpers are compiled into the editor and executed with
+/// `gaanim.gaanim_core` explicitly aliased to the builtin module.
+fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
+    let sys = py.import("sys")?;
+    let modules = sys.getattr("modules")?;
+    if modules.contains("gaanim")? {
+        return Ok(());
+    }
+
+    let core = py.import("gaanim_core")?;
+    let package = PyModule::new(py, "gaanim")?;
+    package.setattr("__package__", "gaanim")?;
+    package.setattr("__path__", Vec::<String>::new())?;
+    modules.set_item("gaanim", &package)?;
+    modules.set_item("gaanim.gaanim_core", &core)?;
+
+    let templates_source = std::ffi::CString::new(GAANIM_TEMPLATES).unwrap();
+    let templates_file = std::ffi::CString::new("gaanim/templates.py").unwrap();
+    let templates_name = std::ffi::CString::new("gaanim.templates").unwrap();
+    let templates = PyModule::from_code(py, &templates_source, &templates_file, &templates_name)?;
+    modules.set_item("gaanim.templates", &templates)?;
+
+    let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
+    py.run(&init_source, Some(&package.dict()), None)
+}
 
 /// Execute one script solely to produce `Scene.snapshots()` artifacts.
 ///
@@ -169,11 +189,7 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
     host::set_host_sender(Some(sender));
 
     let result = Python::attach(|py| -> PyResult<()> {
-        py.run(
-            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
-            None,
-            None,
-        )?;
+        bootstrap_gaanim_package(py)?;
         let os = py.import("os")?;
         os.getattr("environ")?
             .set_item("GAANIM_SNAPSHOTS", snapshot_dir)?;
@@ -194,11 +210,7 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Canv
     host::set_host_sender(Some(sender));
 
     let result = Python::attach(|py| -> PyResult<()> {
-        py.run(
-            &std::ffi::CString::new(BOOTSTRAP_GAANIM_PACKAGE).unwrap(),
-            None,
-            None,
-        )?;
+        bootstrap_gaanim_package(py)?;
         let environment = py.import("os")?.getattr("environ")?;
         let _ = environment.del_item("GAANIM_SNAPSHOTS");
         let _ = environment.del_item("GAANIM_EXPORT");

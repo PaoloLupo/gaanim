@@ -49,7 +49,7 @@ fn drawable_args(
 }
 
 fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::LayoutMember>> {
-    let children = children.downcast::<PySequence>().map_err(|_| {
+    let children = children.cast::<PySequence>().map_err(|_| {
         pyo3::exceptions::PyTypeError::new_err(
             "children must be a sequence of Drawable, Layout, or LayoutItem values",
         )
@@ -355,6 +355,7 @@ impl PyTheme {
         colors=None,
         fonts=None,
         sizes=None,
+        layout=None,
         font_files=None,
     ))]
     fn new(
@@ -363,6 +364,7 @@ impl PyTheme {
         colors: Option<HashMap<String, PyColor>>,
         fonts: Option<HashMap<String, String>>,
         sizes: Option<HashMap<String, f64>>,
+        layout: Option<HashMap<String, f64>>,
         font_files: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
         let mut theme = match base {
@@ -405,6 +407,12 @@ impl PyTheme {
                 .set_sizes(&sizes)
                 .map_err(pyo3::exceptions::PyValueError::new_err)?;
         }
+        if let Some(layout) = layout {
+            theme
+                .layout
+                .set(&layout)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        }
         if let Some(font_files) = font_files {
             for (family, path) in font_files {
                 let bytes = std::fs::read(&path).map_err(|error| {
@@ -437,6 +445,14 @@ impl PyTheme {
         self.inner
             .color(role)
             .map(PyColor)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Resolve a named spacing/layout token.
+    fn layout_token(&self, name: &str) -> PyResult<f64> {
+        self.inner
+            .layout
+            .get(name)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
@@ -533,6 +549,15 @@ impl PyCanvas {
             .expect("scene canvas poisoned")
             .theme_color(role)
             .map(PyColor)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Resolve a layout token from the active theme or the default scale.
+    fn layout_token(&self, name: &str) -> PyResult<f64> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .theme_layout_token(name)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
@@ -1111,6 +1136,16 @@ impl PyScene {
                         "constrain() arguments must be LayoutConstraint values",
                     )
                 })?;
+            if !self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .owns_drawable(&constraint.owner)
+            {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "layout constraint belongs to a different Scene",
+                ));
+            }
             parsed.push(constraint.inner.clone());
         }
         let constraints = parsed;
@@ -1130,7 +1165,10 @@ impl PyScene {
 
     /// Return weak-constraint diagnostics known before rendering.
     fn check_layout(&self) -> Vec<String> {
-        Vec::new()
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .check_layout()
     }
 
     /// Instantiate a typed Python layout template with this scene.
@@ -1139,8 +1177,14 @@ impl PyScene {
         slf: &Bound<'py, Self>,
         template: &Bound<'py, PyAny>,
         slots: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
-        template.call((slf,), slots).map(Bound::unbind)
+    ) -> PyResult<Py<PyLayout>> {
+        let result = template.call((slf,), slots)?;
+        if !result.is_instance_of::<PyLayout>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "a layout template must return Layout",
+            ));
+        }
+        Ok(result.extract::<Py<PyLayout>>()?)
     }
 
     /// Sets the directory used to resolve relative image and SVG paths.

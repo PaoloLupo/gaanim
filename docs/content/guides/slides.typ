@@ -25,23 +25,24 @@ seleccionar *Slides*. El Inicio detecta Python, `.venv` y uv antes de abrir.
 = Estructura semántica
 
 ```python
-from gaanim import Anchor, Scene
+from gaanim import Scene, lecture, title_slide
 
 scene = Scene(1920, 1080, margin=72)
 scene.canvas.set_theme("presentation")
 scene.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
 
-cover = scene.segment("Portada", layout="cover", notes="Presenta el tema.")
-cover.region("title").place(scene.title("Una idea clara"), Anchor.CENTER)
-cover.region("subtitle").place(scene.subtitle("Slides reutilizables"), Anchor.CENTER)
+cover = scene.segment("Portada", template=title_slide, notes="Presenta el tema.")
+cover.bind(
+    title=scene.title("Una idea clara"),
+    subtitle=scene.subtitle("Slides reutilizables"),
+)
 scene.wait(0.5)
 scene.stop("portada")
 
-content = scene.segment("Contenido", layout="content", notes="Desarrolla la idea.")
-content.region("title").place(scene.title("Contenido"), Anchor.LEFT)
-content.region("content").place(
-    scene.paragraph("Una sola idea por slide.", width=1000, font_size=42),
-    Anchor.CENTER,
+content = scene.segment("Contenido", template=lecture, notes="Desarrolla la idea.")
+content.bind(
+    title=scene.title("Contenido"),
+    body=scene.paragraph("Una sola idea por slide.", font_size=42),
 )
 scene.wait(0.5)
 scene.stop("mensaje")
@@ -49,8 +50,8 @@ scene.render()
 ```
 
 `scene.brand(...)` configura logo, footer, numeración y regla para todo el deck.
-Los layouts `cover`, `content`, `comparison` y `conclusion` aportan regiones,
-pero siguen siendo APIs generales que puedes combinar con cualquier tema.
+Las plantillas `title_slide`, `lecture`, `comparison` y `credits` devuelven un
+`Layout` raíz responsive y pueden reemplazarse por funciones Python propias.
 
 = Presentar y validar
 

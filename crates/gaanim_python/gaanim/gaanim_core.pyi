@@ -84,6 +84,7 @@ class Brush:
 Paint: TypeAlias = ColorLike | Brush
 
 class Theme:
+    """Reusable semantic colors, typography, fonts, and Layout v2 tokens."""
     def __init__(
         self,
         base: Optional[str | Theme] = None,
@@ -92,9 +93,13 @@ class Theme:
         colors: Optional[dict[str, ColorLike]] = None,
         fonts: Optional[dict[str, str]] = None,
         sizes: Optional[dict[str, float]] = None,
+        layout: Optional[dict[str, float]] = None,
         font_files: Optional[dict[str, str]] = None,
     ) -> None:
-        """Create a Theme instance.
+        """Create or derive a theme and apply the supplied role dictionaries.
+
+        Layout token values must be finite and non-negative; invalid roles or
+        font files raise ``ValueError`` or ``OSError``.
 
         Example:
             Theme()
@@ -122,6 +127,9 @@ class Theme:
         Example:
             result = theme.color("foreground")
         """
+        ...
+    def layout_token(self, name: str) -> float:
+        """Return a named layout token in canvas units or raise ``ValueError``."""
         ...
     def validate(self) -> list[str]:
         """Use validate on this Theme or create the requested value.
@@ -168,6 +176,11 @@ Justify: TypeAlias = Literal["start", "center", "end", "between", "around", "eve
 Fit: TypeAlias = Literal["none", "contain", "cover", "stretch", "scale_down"]
 
 class LayoutExpression:
+    """Linear drawable geometry expression used to build Layout v2 constraints.
+
+    Expressions may be added or subtracted and scaled only by finite scalars.
+    Combining drawables from different scenes raises ``ValueError``.
+    """
     def __add__(self, other: float | LayoutExpression) -> LayoutExpression: ...
     def __sub__(self, other: float | LayoutExpression) -> LayoutExpression: ...
     def __mul__(self, scalar: float) -> LayoutExpression: ...
@@ -177,24 +190,50 @@ class LayoutExpression:
     def __ge__(self, other: float | LayoutExpression) -> LayoutConstraint: ...
 
 class LayoutConstraint:
-    def strong(self) -> LayoutConstraint: ...
-    def medium(self) -> LayoutConstraint: ...
-    def weak(self) -> LayoutConstraint: ...
-    def named(self, label: str) -> LayoutConstraint: ...
+    """Required or prioritized linear relation between drawable geometry."""
+    def strong(self) -> LayoutConstraint:
+        """Return a strong-priority copy of this constraint."""
+        ...
+    def medium(self) -> LayoutConstraint:
+        """Return a medium-priority copy of this constraint."""
+        ...
+    def weak(self) -> LayoutConstraint:
+        """Return a weak-priority copy reported by layout diagnostics if violated."""
+        ...
+    def named(self, label: str) -> LayoutConstraint:
+        """Return a copy carrying ``label`` in conflict diagnostics."""
+        ...
 
 class ConstraintSet:
+    """Handle returned after a scene registers one or more constraints."""
     count: int
 
 class LayoutItem:
-    pass
+    """Immutable per-child grow, grid, absolute-placement, offset, and fit rules."""
 
 class Layout(Drawable):
+    """Persistent row, column, grid, or stack that owns child translation.
+
+    Layout is itself a ``Drawable``. Positional fluent methods on managed
+    children raise ``LayoutOwnershipError``; use ``configure_item`` offsets.
+    """
     count: int
-    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None, animate: Optional[float] = None) -> Drawable: ...
-    def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
+    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None, animate: Optional[float] = None) -> Drawable:
+        """Insert a direct child and return it; ``animate`` is seconds for reflow.
+
+        Raises ``IndexError`` for an invalid index and ``LayoutOwnershipError``
+        when the child is positioned manually, foreign, or already managed.
+        """
         ...
-    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem, *, animate: Optional[float] = None) -> Drawable: ...
-    def reflow(self, *, animate: Optional[float] = None) -> None: ...
+    def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
+        """Remove a direct child and release its positional ownership."""
+        ...
+    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem, *, animate: Optional[float] = None) -> Drawable:
+        """Replace a direct child, returning the replacement after optional reflow."""
+        ...
+    def reflow(self, *, animate: Optional[float] = None) -> None:
+        """Resolve external geometry changes; ``animate`` transitions in seconds."""
+        ...
     def configure(
         self,
         *,
@@ -206,14 +245,29 @@ class Layout(Drawable):
         max_width: Optional[float] = None,
         min_height: Optional[float] = None,
         max_height: Optional[float] = None,
+        aspect_ratio: Optional[float] = None,
         align: Optional[Align] = None,
         justify: Optional[Justify] = None,
         wrap: Optional[bool] = None,
         within: Optional[Literal["safe", "frame"]] = None,
         animate: Optional[float] = None,
-    ) -> None: ...
-    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None, animate: Optional[float] = None) -> None: ...
-    def diagnostics(self) -> list[str]: ...
+    ) -> None:
+        """Update container rules and queue deterministic reflow.
+
+        Numeric geometry uses canvas units; ``aspect_ratio`` must be positive.
+        ``wrap`` is valid only for rows and columns. Invalid values raise
+        ``ValueError``.
+        """
+        ...
+    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None, animate: Optional[float] = None) -> None:
+        """Update direct-child rules and optionally animate the resulting reflow."""
+        ...
+    def diagnostics(self) -> list[str]:
+        """Return soft-constraint diagnostics associated with this layout root."""
+        ...
+
+class LayoutOwnershipError(Exception):
+    """Raised when a Layout cannot take or retain ownership of child position."""
 
 class Transition:
     @staticmethod
@@ -1068,6 +1122,9 @@ class Canvas:
     def color(self, role: str) -> Color:
         """Resolve a semantic color from the active theme."""
         ...
+    def layout_token(self, name: str) -> float:
+        """Resolve a spacing/layout token from the theme or default scale."""
+        ...
     def validate_theme(self) -> list[str]:
         """Configure the canvas with validate theme.
 
@@ -1104,7 +1161,13 @@ class Canvas:
         """
         ...
 class Segment:
-    def bind(self, **slots: Any) -> Layout: ...
+    def bind(self, **slots: Any) -> Layout:
+        """Bind this segment's template slots and return its root Layout.
+
+        Missing or extra slots raise ``TypeError``; a segment without a
+        template raises ``ValueError``.
+        """
+        ...
 
 class Camera:
     def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
@@ -1476,14 +1539,46 @@ class Scene:
             scene.brand()
         """
         ...
-    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
-    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
-    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
-    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout: ...
-    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem: ...
-    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet: ...
-    def check_layout(self) -> list[str]: ...
-    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout: ...
+    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a horizontal Layout v2 container in canvas units.
+
+        ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
+        Ownership errors are raised before render as ``LayoutOwnershipError``.
+        """
+        ...
+    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a vertical Layout v2 container with optional wrapping."""
+        ...
+    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a grid with fixed, ``"auto"``, or ``"<weight>fr"`` tracks.
+
+        Explicit rows/columns and spans are reserved before deterministic
+        auto-placement. Invalid tracks, collisions, or overflow raise errors.
+        """
+        ...
+    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create an overlay Layout; use item anchors and offsets for placement."""
+        ...
+    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem:
+        """Return per-child layout metadata without creating another Drawable.
+
+        ``fit="cover"`` clips media to its allocated box; ``absolute=True``
+        removes the item from normal flow. Negative grow/shrink values error.
+        """
+        ...
+    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet:
+        """Register prioritized linear relations and return their count.
+
+        Conflicting required relations or cross-scene references raise
+        ``ValueError`` immediately; ``animate`` is a transition duration.
+        """
+        ...
+    def check_layout(self) -> list[str]:
+        """Return current soft-constraint diagnostics, available before render."""
+        ...
+    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout:
+        """Instantiate a signature-checked Python template and return its root Layout."""
+        ...
     def assets_dir(self, path: str) -> None:
         """Use assets dir on this Scene or create the requested value.
 
@@ -1911,10 +2006,16 @@ class Scene:
         max_lines: Optional[int] = None,
         overflow: Literal["visible", "clip"] = "clip",
     ) -> Drawable:
-        """Create a paragraph drawable in the scene.
+        """Create vector paragraph text with optional responsive width.
+
+        With ``width=None``, a free paragraph uses the safe frame and a managed
+        paragraph rewraps to the width offered by its Layout. Animated width
+        changes crossfade cached Typst compositions. Width/font size must be
+        positive, line spacing at least 1, and invalid options raise
+        ``ValueError``.
 
         Example:
-            result = scene.paragraph("example", 40.0)
+            result = scene.paragraph("Responsive copy")
         """
         ...
     def title(self, s: str) -> Drawable:

@@ -49,6 +49,10 @@ def _present(*values: Any) -> list[Any]:
     return [value for value in values if value is not None]
 
 
+def _token(scene: Any, name: str) -> float:
+    return scene.canvas.layout_token(name)
+
+
 @layout_template
 def title_slide(scene: Any, *, title: Any, subtitle: Any = None, footer: Any = None) -> Any:
     return scene.column(
@@ -56,8 +60,8 @@ def title_slide(scene: Any, *, title: Any, subtitle: Any = None, footer: Any = N
         within="safe",
         width="fill",
         height="fill",
-        padding=(72, 88),
-        gap=28,
+        padding=(_token(scene, "page_padding_wide"), _token(scene, "page_padding_x")),
+        gap=_token(scene, "space_lg"),
         align="center",
         justify="center",
     )
@@ -70,8 +74,8 @@ def lecture(scene: Any, *, title: Any, body: Any, footer: Any = None) -> Any:
         within="safe",
         width="fill",
         height="fill",
-        padding=48,
-        gap=32,
+        padding=_token(scene, "page_padding"),
+        gap=_token(scene, "space_lg"),
         align="stretch",
         justify="start",
     )
@@ -90,7 +94,7 @@ def comparison(
         [scene.item(left, grow=1, fit="contain"), scene.item(right, grow=1, fit="contain")],
         width="fill",
         height="fill",
-        gap=40,
+        gap=_token(scene, "column_gap"),
         align="stretch",
     )
     return scene.column(
@@ -98,8 +102,8 @@ def comparison(
         within="safe",
         width="fill",
         height="fill",
-        padding=48,
-        gap=32,
+        padding=_token(scene, "page_padding"),
+        gap=_token(scene, "space_lg"),
         align="stretch",
     )
 
@@ -111,8 +115,8 @@ def vertical_short(scene: Any, *, title: Any, body: Any, caption: Any = None) ->
         within="safe",
         width="fill",
         height="fill",
-        padding=(96, 56),
-        gap=36,
+        padding=(_token(scene, "vertical_padding"), _token(scene, "vertical_padding_x")),
+        gap=_token(scene, "space_lg"),
         align="stretch",
         justify="between",
     )
@@ -125,18 +129,22 @@ def minimal(scene: Any, *, content: Any) -> Any:
         within="safe",
         width="fill",
         height="fill",
-        padding=32,
+        padding=_token(scene, "space_lg"),
         align="center",
     )
 
 
 @layout_template
 def lower_third(scene: Any, *, title: Any, subtitle: Any = None, background: Any = None) -> Any:
-    copy = scene.column(_present(title, subtitle), gap=10, align="start")
+    copy = scene.column(_present(title, subtitle), gap=_token(scene, "space_xs"), align="start")
     return scene.stack(
         _present(
             scene.item(background, absolute=True, fit="stretch") if background is not None else None,
-            scene.item(copy, anchor=None, offset=(0, -240)),
+            scene.item(
+                copy,
+                anchor=None,
+                offset=(0, -_token(scene, "lower_third_offset")),
+            ),
         ),
         within="safe",
         width="fill",
@@ -152,8 +160,8 @@ def credits(scene: Any, *, title: Any = None, entries: Any, footer: Any = None) 
         within="safe",
         width="fill",
         height="fill",
-        padding=(72, 64),
-        gap=28,
+        padding=(_token(scene, "page_padding_wide"), _token(scene, "page_padding_x")),
+        gap=_token(scene, "space_md"),
         align="center",
         justify="center",
     )

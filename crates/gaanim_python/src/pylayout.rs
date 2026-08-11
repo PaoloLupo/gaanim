@@ -25,16 +25,25 @@ use crate::pydrawable::PyDrawable;
 #[derive(Clone)]
 pub struct PyLayoutExpression {
     pub(crate) inner: LayoutExpression,
+    pub(crate) owner: DrawableHandle,
 }
 
 impl PyLayoutExpression {
-    fn operand(value: &Bound<'_, PyAny>) -> PyResult<LayoutExpression> {
+    fn operand(
+        &self,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<(LayoutExpression, Option<DrawableHandle>)> {
         if let Ok(expression) = value.extract::<PyRef<'_, Self>>() {
-            return Ok(expression.inner.clone());
+            if !self.owner.same_canvas(&expression.owner) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "layout expressions cannot reference drawables from different Scenes",
+                ));
+            }
+            return Ok((expression.inner.clone(), Some(expression.owner.clone())));
         }
         if let Ok(value) = value.extract::<f64>() {
             if value.is_finite() {
-                return Ok(value.into());
+                return Ok((value.into(), None));
             }
         }
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -47,14 +56,16 @@ impl PyLayoutExpression {
         rhs: &Bound<'_, PyAny>,
         relation: ConstraintRelation,
     ) -> PyResult<PyLayoutConstraint> {
+        let (rhs, _) = self.operand(rhs)?;
         Ok(PyLayoutConstraint {
             inner: LayoutConstraint {
                 lhs: self.inner.clone(),
                 relation,
-                rhs: Self::operand(rhs)?,
+                rhs,
                 strength: ConstraintStrength::Required,
                 label: None,
             },
+            owner: self.owner.clone(),
         })
     }
 }
@@ -62,26 +73,34 @@ impl PyLayoutExpression {
 #[pymethods]
 impl PyLayoutExpression {
     fn __add__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let (rhs, _) = self.operand(rhs)?;
         Ok(Self {
-            inner: self.inner.clone() + Self::operand(rhs)?,
+            inner: self.inner.clone() + rhs,
+            owner: self.owner.clone(),
         })
     }
 
     fn __radd__(&self, lhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let (lhs, _) = self.operand(lhs)?;
         Ok(Self {
-            inner: Self::operand(lhs)? + self.inner.clone(),
+            inner: lhs + self.inner.clone(),
+            owner: self.owner.clone(),
         })
     }
 
     fn __sub__(&self, rhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let (rhs, _) = self.operand(rhs)?;
         Ok(Self {
-            inner: self.inner.clone() - Self::operand(rhs)?,
+            inner: self.inner.clone() - rhs,
+            owner: self.owner.clone(),
         })
     }
 
     fn __rsub__(&self, lhs: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let (lhs, _) = self.operand(lhs)?;
         Ok(Self {
-            inner: Self::operand(lhs)? - self.inner.clone(),
+            inner: lhs - self.inner.clone(),
+            owner: self.owner.clone(),
         })
     }
 
@@ -93,6 +112,7 @@ impl PyLayoutExpression {
         }
         Ok(Self {
             inner: self.inner.clone() * scalar,
+            owner: self.owner.clone(),
         })
     }
 
@@ -108,12 +128,14 @@ impl PyLayoutExpression {
         }
         Ok(Self {
             inner: self.inner.clone() / scalar,
+            owner: self.owner.clone(),
         })
     }
 
     fn __neg__(&self) -> Self {
         Self {
             inner: -self.inner.clone(),
+            owner: self.owner.clone(),
         }
     }
 
@@ -140,6 +162,7 @@ impl PyLayoutExpression {
 #[derive(Clone)]
 pub struct PyLayoutConstraint {
     pub(crate) inner: LayoutConstraint,
+    pub(crate) owner: DrawableHandle,
 }
 
 #[pymethods]
@@ -147,30 +170,47 @@ impl PyLayoutConstraint {
     fn strong(&self) -> Self {
         let mut inner = self.inner.clone();
         inner.strength = ConstraintStrength::Strong;
-        Self { inner }
+        Self {
+            inner,
+            owner: self.owner.clone(),
+        }
     }
 
     fn medium(&self) -> Self {
         let mut inner = self.inner.clone();
         inner.strength = ConstraintStrength::Medium;
-        Self { inner }
+        Self {
+            inner,
+            owner: self.owner.clone(),
+        }
     }
 
     fn weak(&self) -> Self {
         let mut inner = self.inner.clone();
         inner.strength = ConstraintStrength::Weak;
-        Self { inner }
+        Self {
+            inner,
+            owner: self.owner.clone(),
+        }
     }
 
     fn named(&self, label: String) -> Self {
         let mut inner = self.inner.clone();
         inner.label = Some(label);
-        Self { inner }
+        Self {
+            inner,
+            owner: self.owner.clone(),
+        }
     }
 }
 
 /// Handle returned by `Scene.constrain`.
-#[pyclass(name = "ConstraintSet", module = "gaanim_core", frozen)]
+#[pyclass(
+    name = "ConstraintSet",
+    module = "gaanim_core",
+    frozen,
+    skip_from_py_object
+)]
 #[derive(Clone)]
 pub struct PyConstraintSet {
     #[pyo3(get)]
@@ -183,6 +223,7 @@ pub(crate) fn expression_for(
 ) -> PyLayoutExpression {
     PyLayoutExpression {
         inner: LayoutExpression::variable(gaanim_layout::LayoutId(drawable.id.as_raw()), attribute),
+        owner: drawable.clone(),
     }
 }
 
@@ -287,10 +328,6 @@ impl PyLayout {
         Err(pyo3::exceptions::PyTypeError::new_err(
             "layout children must be Drawable, Layout, or LayoutItem",
         ))
-    }
-
-    fn root(&self) -> DrawableHandle {
-        self.inner.lock().expect("layout poisoned").root.clone()
     }
 
     fn reflow_inner(
@@ -442,7 +479,7 @@ impl PyLayout {
         Ok(PyDrawable(replacement_handle))
     }
 
-    #[pyo3(signature = (*, gap=None, padding=None, width=None, height=None, min_width=None, max_width=None, min_height=None, max_height=None, align=None, justify=None, wrap=None, within=None, animate=None))]
+    #[pyo3(signature = (*, gap=None, padding=None, width=None, height=None, min_width=None, max_width=None, min_height=None, max_height=None, aspect_ratio=None, align=None, justify=None, wrap=None, within=None, animate=None))]
     #[allow(clippy::too_many_arguments)]
     fn configure(
         &self,
@@ -454,6 +491,7 @@ impl PyLayout {
         max_width: Option<f64>,
         min_height: Option<f64>,
         max_height: Option<f64>,
+        aspect_ratio: Option<f64>,
         align: Option<&str>,
         justify: Option<&str>,
         wrap: Option<bool>,
@@ -490,6 +528,14 @@ impl PyLayout {
             if let Some(value) = max_height {
                 finite_non_negative(value, "max_height")?;
                 state.spec.style.max_height = Some(value);
+            }
+            if let Some(value) = aspect_ratio {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "aspect_ratio must be a finite positive number",
+                    ));
+                }
+                state.spec.style.aspect_ratio = Some(value);
             }
             if let Some(align) = align {
                 state.spec.style.align = parse_align(align)?;
@@ -592,7 +638,15 @@ impl PyLayout {
     }
 
     fn diagnostics(&self) -> Vec<String> {
-        Vec::new()
+        let (canvas, root) = {
+            let state = self.inner.lock().expect("layout poisoned");
+            (state.canvas.clone(), state.root.clone())
+        };
+        let diagnostics = canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .layout_diagnostics(&root);
+        diagnostics
     }
 }
 
@@ -670,7 +724,7 @@ pub(crate) fn parse_grid_tracks(
         }
         return Ok(vec![Track::Fraction(1.0); count]);
     }
-    let sequence = value.downcast::<PySequence>().map_err(|_| {
+    let sequence = value.cast::<PySequence>().map_err(|_| {
         pyo3::exceptions::PyTypeError::new_err(format!(
             "{axis} must be an integer or sequence of fixed numbers, 'auto', or '<weight>fr'"
         ))
@@ -683,7 +737,7 @@ pub(crate) fn parse_grid_tracks(
             tracks.push(Track::Fixed(value));
             continue;
         }
-        let value = item.downcast::<PyString>()?.to_str()?;
+        let value = item.cast::<PyString>()?.to_str()?;
         if value == "auto" {
             tracks.push(Track::Auto);
             continue;
@@ -729,7 +783,7 @@ fn parse_padding(value: &Bound<'_, PyAny>) -> PyResult<Insets> {
         finite_non_negative(value, "padding")?;
         return Ok(Insets::all(value));
     }
-    let tuple = value.downcast::<PyTuple>().map_err(|_| {
+    let tuple = value.cast::<PyTuple>().map_err(|_| {
         pyo3::exceptions::PyTypeError::new_err(
             "padding must be a number, (vertical, horizontal), or (top, right, bottom, left)",
         )
@@ -816,7 +870,7 @@ fn finite_non_negative(value: f64, name: &str) -> PyResult<()> {
 }
 
 fn layout_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
-    pyo3::exceptions::PyValueError::new_err(error.to_string())
+    crate::LayoutOwnershipError::new_err(error.to_string())
 }
 
 #[pyclass(name = "Anchor", module = "gaanim_core", frozen, from_py_object)]

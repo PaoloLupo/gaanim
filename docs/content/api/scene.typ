@@ -349,16 +349,16 @@ only where interactive playback must wait for input.
 #api-entry(
   name: "Scene.segment",
   kind: "method",
-  signature: "segment(name, transition=None, *, notes=None, layout=\"blank\") -> Segment",
-  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "layout", type: "str", default: "\"blank\"", desc: [Built-in layout whose named regions are available through the returned Segment.]),),
-  returns: (type: "Segment", desc: [Stable handle accepted by `link` and used to resolve layout regions.]),
-  desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, an empty or duplicate name, or an unknown layout raises `ValueError`.],
+  signature: "segment(name, transition=None, *, notes=None, template=None) -> Segment",
+  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "template", type: "LayoutTemplate | None", default: "None", desc: [Typed Python template instantiated later with `Segment.bind`.]),),
+  returns: (type: "Segment", desc: [Stable handle accepted by `link`; `bind(**slots)` returns its root Layout.]),
+  desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, or an empty or duplicate name, raises `ValueError`.],
 )[
 ```python
-intro = scene.segment("Introduction", notes="State the goal.", layout="cover")
-intro.region("title").place(scene.title("One clear idea"), Anchor.CENTER)
+intro = scene.segment("Introduction", notes="State the goal.", template=title_slide)
+intro.bind(title=scene.title("One clear idea"))
 scene.wait(0.5)
-details = scene.segment("Details", Transition.cross_fade(0.4), layout="content")
+details = scene.segment("Details", Transition.cross_fade(0.4), template=lecture)
 scene.link(intro, details, Transition.cross_fade(0.4))
 ```
 ]
@@ -426,15 +426,13 @@ The logo, theme-colored rule, footer, and current slide number are generated
 inside every explicit segment, so navigation and independent segment export
 remain correct. Cover layouts omit the chrome by default.
 
-`segment(layout=...)` accepts both structural names and presentation-oriented
-aliases: `cover`, `content`, `agenda`, `comparison`, `divider`, and
-`conclusion`. A comparison exposes `before` and `after` regions as aliases for
-its two columns.
+`segment(template=...)` accepts a built-in or project-defined typed Python
+template. `bind(**slots)` validates required, optional, and extra slots and
+returns the segment's root `Layout`.
 
 ```python
-segment = scene.segment("Results", layout="comparison", notes="Compare both models.")
-segment.region("before").place(baseline, Anchor.CENTER)
-segment.region("after").place(proposed, Anchor.CENTER)
+segment = scene.segment("Results", template=comparison, notes="Compare both models.")
+segment.bind(title=scene.title("Results"), left=baseline, right=proposed)
 scene.stop("comparison-ready")
 ```
 

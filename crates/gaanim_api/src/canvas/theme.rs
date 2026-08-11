@@ -27,6 +27,53 @@ pub struct ThemeFont {
     pub bytes: Arc<[u8]>,
 }
 
+/// Named spacing and layout values consumed by reusable templates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutTokens {
+    values: HashMap<String, f64>,
+}
+
+impl Default for LayoutTokens {
+    fn default() -> Self {
+        Self {
+            values: HashMap::from([
+                ("space_xs".into(), 8.0),
+                ("space_sm".into(), 16.0),
+                ("space_md".into(), 24.0),
+                ("space_lg".into(), 32.0),
+                ("page_padding".into(), 48.0),
+                ("page_padding_wide".into(), 72.0),
+                ("page_padding_x".into(), 64.0),
+                ("column_gap".into(), 40.0),
+                ("vertical_padding".into(), 96.0),
+                ("vertical_padding_x".into(), 56.0),
+                ("lower_third_offset".into(), 240.0),
+            ]),
+        }
+    }
+}
+
+impl LayoutTokens {
+    pub fn get(&self, name: &str) -> Result<f64, String> {
+        self.values
+            .get(name)
+            .copied()
+            .ok_or_else(|| format!("unknown layout token '{name}'"))
+    }
+
+    pub fn set(&mut self, values: &HashMap<String, f64>) -> Result<(), String> {
+        for (name, value) in values {
+            if name.trim().is_empty() || !value.is_finite() || *value < 0.0 {
+                return Err(format!(
+                    "layout token '{name}' must have a non-empty name and finite non-negative value"
+                ));
+            }
+            self.values.insert(name.clone(), *value);
+        }
+        Ok(())
+    }
+}
+
 /// Complete visual theme: semantic colors, typography, and optional font files.
 #[derive(Debug, Clone)]
 pub struct CanvasTheme {
@@ -34,6 +81,7 @@ pub struct CanvasTheme {
     pub palette: ThemePalette,
     pub text: TextConfig,
     pub fonts: Vec<ThemeFont>,
+    pub layout: LayoutTokens,
 }
 
 impl CanvasTheme {
@@ -214,6 +262,7 @@ impl CanvasTheme {
             palette,
             text: TextConfig::default(),
             fonts: Vec::new(),
+            layout: LayoutTokens::default(),
         };
         result.sync_text_colors();
         result
@@ -435,5 +484,26 @@ mod tests {
     fn deck_remains_generic_but_thesis_alias_is_removed() {
         assert_eq!(CanvasTheme::builtin("deck").unwrap().name, "presentation");
         assert!(CanvasTheme::builtin("thesis").is_err());
+    }
+
+    #[test]
+    fn layout_tokens_are_inherited_and_overridable() {
+        let mut theme = CanvasTheme::builtin("presentation").unwrap();
+        assert_eq!(theme.layout.get("page_padding").unwrap(), 48.0);
+        theme
+            .layout
+            .set(&HashMap::from([
+                ("page_padding".to_string(), 60.0),
+                ("brand_rhythm".to_string(), 18.0),
+            ]))
+            .unwrap();
+        assert_eq!(theme.layout.get("page_padding").unwrap(), 60.0);
+        assert_eq!(theme.layout.get("brand_rhythm").unwrap(), 18.0);
+        assert!(
+            theme
+                .layout
+                .set(&HashMap::from([("bad".to_string(), f64::NAN)]))
+                .is_err()
+        );
     }
 }

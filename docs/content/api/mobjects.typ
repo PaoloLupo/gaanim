@@ -681,8 +681,8 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.paragraph",
   kind: "factory",
-  signature: "paragraph(text, width, *, align, line_spacing, font_size, font_family) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Body text.]), (name: "width", type: "float", default: none, desc: [Wrap width > 0.]), (name: "align", type: "str", default: "\"left\"", desc: ["left|center|right|justify"]), (name: "line_spacing", type: "float", default: "1.2", desc: [≥1.0]),),
+  signature: "paragraph(text, width=None, *, align, line_spacing, font_size, font_family, max_lines, overflow) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Body text.]), (name: "width", type: "float | None", default: "None", desc: [Explicit wrap width; when omitted, uses the safe frame while free and the offered width inside Layout v2.]), (name: "align", type: "str", default: "\"left\"", desc: ["left|center|right|justify"]), (name: "line_spacing", type: "float", default: "1.2", desc: [≥1.0]),),
   returns: (type: "Drawable", desc: [Wrapped paragraph as vector outlines.]),
   desc: [Justified body copy. Glyphs remain animatable (`write`, `select`).],
 )[
@@ -1157,7 +1157,7 @@ scene.export("preview.webp", fps=30)
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import BLUE, WHITE, Scene
 from gaanim import Anchor, Direction
 scene = Scene(480, 270, background="#0f172a")
 a = scene.circle(18).fill(BLUE)

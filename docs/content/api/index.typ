@@ -69,7 +69,7 @@ Copiar, pegar, `gaanim archivo.py`.
 - #link("/api/mobjects/", "Mobjects — 40+ factories por categoría")
 - #link("/api/animations/", "Animations — 22 anims + timing/easing")
 - #link("/api/themes/", "Themes — colores y brushes")
-- #link("/api/layout/", "Layout — safe area y presets") · #link("/api/assets/", "Assets — imágenes y SVG") · #link("/api/audio/", "Audio")
+- #link("/api/layout/", "Layout v2 — row, column, grid, stack y constraints") · #link("/api/assets/", "Assets — imágenes y SVG") · #link("/api/audio/", "Audio")
 
 == Siguiente
 

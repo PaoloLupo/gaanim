@@ -65,6 +65,8 @@ pub enum SceneObjectError {
     NoObjects,
     #[error("drawable belongs to a different Scene")]
     ForeignScene,
+    #[error(transparent)]
+    Layout(#[from] gaanim_layout::LayoutError),
 }
 
 #[derive(Clone, Copy)]
@@ -177,6 +179,12 @@ impl Canvas {
         }
     }
 
+    /// Whether a handle was created by this exact Scene, independent of its
+    /// numeric object ID.
+    pub fn owns_drawable(&self, drawable: &DrawableHandle) -> bool {
+        Arc::ptr_eq(&self.state, &drawable.state)
+    }
+
     /// Whether replay requires Bevy's native 3D render graph.
     pub fn has_native_3d_content(&self) -> bool {
         self.state
@@ -232,6 +240,16 @@ impl Canvas {
             .as_ref()
             .ok_or_else(|| "no theme is active on this canvas".to_string())?
             .color(role)
+    }
+
+    /// Resolve a spacing/layout token. Scenes without an active theme use the
+    /// canonical default token scale so templates remain deterministic.
+    pub fn theme_layout_token(&self, name: &str) -> Result<f64, String> {
+        self.theme_style
+            .as_ref()
+            .map(|theme| theme.layout.clone())
+            .unwrap_or_default()
+            .get(name)
     }
 
     /// Validate the active theme for projected-text readability.
@@ -1548,13 +1566,74 @@ impl Canvas {
         if !owns_every_reference {
             return Err(SceneObjectError::ForeignScene);
         }
-        state.layout_constraints.extend(constraints);
+        let mut combined = state.layout_constraints.clone();
+        combined.extend(constraints);
+        let referenced: std::collections::BTreeSet<_> = combined
+            .iter()
+            .flat_map(|constraint| {
+                constraint
+                    .lhs
+                    .terms
+                    .keys()
+                    .chain(constraint.rhs.terms.keys())
+                    .map(|variable| variable.node)
+            })
+            .collect();
+        let mut preflight = gaanim_layout::ResolvedLayout::default();
+        for node in referenced {
+            preflight.boxes.insert(
+                node,
+                gaanim_layout::ResolvedBox {
+                    bounds: gaanim_math::Bounds3D::new_2d(0.0, 0.0, 1.0, 1.0),
+                    clip: None,
+                    scale: gaanim_core::glam::DVec3::ONE,
+                },
+            );
+        }
+        gaanim_layout::solve_constraints(&mut preflight, &combined)?;
+        state.layout_diagnostics = preflight
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    None,
+                    format!(
+                        "constraint #{}: {} (residual {:.6})",
+                        diagnostic.constraint, diagnostic.message, diagnostic.residual
+                    ),
+                )
+            })
+            .collect();
+        state.layout_constraints = combined;
         let constraints = state.layout_constraints.clone();
         state.active_mut().ops.push(Op::LayoutConstraints {
             constraints,
             duration,
         });
         Ok(())
+    }
+
+    /// Diagnostics produced by the most recent layout compilation.
+    pub fn check_layout(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .layout_diagnostics
+            .iter()
+            .map(|(_, message)| message.clone())
+            .collect()
+    }
+
+    /// Diagnostics associated with one layout root.
+    pub fn layout_diagnostics(&self, root: &DrawableHandle) -> Vec<String> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .layout_diagnostics
+            .iter()
+            .filter(|(owner, _)| owner.is_none_or(|owner| owner == root.id))
+            .map(|(_, message)| message.clone())
+            .collect()
     }
 
     fn camera_anim(&self, ty: AnimationType, duration: f64) -> Anim {
@@ -3536,6 +3615,86 @@ mod tests {
         assert_eq!(
             after_content, 2,
             "rule and numbered footer are added to the active segment"
+        );
+    }
+
+    #[test]
+    fn required_constraint_conflicts_fail_during_authoring() {
+        let mut canvas = Canvas::new(320, 180);
+        let object = canvas.circle(10.0);
+        let left = gaanim_layout::LayoutExpression::variable(
+            gaanim_layout::LayoutId(object.id.as_raw()),
+            gaanim_layout::LayoutAttribute::Left,
+        );
+        let result = canvas.constrain_layout(
+            vec![
+                gaanim_layout::LayoutConstraint::equal(left.clone(), 10.0.into()),
+                gaanim_layout::LayoutConstraint::equal(left, 20.0.into()),
+            ],
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(SceneObjectError::Layout(
+                gaanim_layout::LayoutError::Unsatisfiable(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn weak_constraint_diagnostics_are_available_before_compile() {
+        let mut canvas = Canvas::new(320, 180);
+        let object = canvas.circle(10.0);
+        let left = gaanim_layout::LayoutExpression::variable(
+            gaanim_layout::LayoutId(object.id.as_raw()),
+            gaanim_layout::LayoutAttribute::Left,
+        );
+        canvas
+            .constrain_layout(
+                vec![
+                    gaanim_layout::LayoutConstraint::equal(left.clone(), 10.0.into()),
+                    gaanim_layout::LayoutConstraint::equal(left, 20.0.into())
+                        .with_strength(gaanim_layout::ConstraintStrength::Weak),
+                ],
+                None,
+            )
+            .unwrap();
+        let diagnostics = canvas.check_layout();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].contains("residual 10.000000"));
+
+        let mut foreign = Canvas::new(320, 180);
+        let foreign_object = foreign.circle(10.0);
+        assert!(!canvas.owns_drawable(&foreign_object));
+    }
+
+    #[test]
+    fn layout_ownership_rejects_positioning_but_allows_visual_transforms() {
+        let mut canvas = Canvas::new(320, 180);
+        let owner = canvas.group(&[]);
+        let positioned = canvas.circle(10.0).at(12.0, 0.0);
+        assert_eq!(
+            positioned.claim_layout(&owner),
+            Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
+        );
+
+        let animated = canvas.circle(10.0);
+        let _ = animated.r#move(8.0, 0.0);
+        assert_eq!(
+            animated.claim_layout(&owner),
+            Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
+        );
+
+        let visual = canvas.circle(10.0);
+        let _ = visual.scale(1.5);
+        let _ = visual.rotate(0.25);
+        assert!(visual.claim_layout(&owner).is_ok());
+
+        let mut foreign_canvas = Canvas::new(320, 180);
+        let foreign = foreign_canvas.circle(10.0);
+        assert_eq!(
+            foreign.claim_layout(&owner),
+            Err(crate::canvas::LayoutOwnershipError::ForeignScene)
         );
     }
 }

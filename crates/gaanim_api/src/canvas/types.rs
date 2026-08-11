@@ -750,6 +750,8 @@ pub struct ObjectSpec {
     pub fragment_tags: Vec<(String, String, Option<usize>)>,
     /// Layout v2 container that owns this drawable's translation.
     pub layout_owner: Option<ObjectId>,
+    /// Whether the author has queued a manual translation animation.
+    pub manual_position_animation: bool,
     pub layout_ops: Vec<LayoutOp>,
 }
 
@@ -774,6 +776,7 @@ impl ObjectSpec {
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
             layout_owner: None,
+            manual_position_animation: false,
             layout_ops: Vec::new(),
         }
     }
