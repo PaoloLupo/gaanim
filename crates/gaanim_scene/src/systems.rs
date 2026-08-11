@@ -1,18 +1,29 @@
 use crate::components::{
-    FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, Opacity,
-    StrokeBrush, TriangleMeshData, WorldBounds,
+    FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Material3D,
+    Material3DBaseline, Mesh3DMarker, Opacity, StrokeBrush, TriangleMeshData, WorldBounds,
 };
 use bevy::animation::AnimationPlayer;
 use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
 use bevy::color::Alpha;
 use bevy::prelude::{
     Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
-    DirectionalLight, Entity, Handle, Local, MeshMaterial3d, Name, Or, ParamSet, PointLight, Query,
-    Res, ResMut, SceneRoot, SceneSpawner, SpotLight, StandardMaterial, Transform, Visibility, With,
-    Without,
+    DirectionalLight, Entity, GlobalAmbientLight, Handle, Local, MeshMaterial3d, Name, Or,
+    ParamSet, PointLight, Query, Res, ResMut, SceneRoot, SceneSpawner, SpotLight, StandardMaterial,
+    Transform, Visibility, With, Without,
 };
 use bevy::scene::SceneInstance;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
+
+/// Resolve the timeline-authored camera and an optional presentation override.
+pub fn resolve_camera_system(
+    authored: Option<Res<gaanim_math::Camera>>,
+    view_override: Res<gaanim_math::CameraViewOverride>,
+    mut resolved: ResMut<gaanim_math::ResolvedCamera>,
+) {
+    if let Some(camera) = view_override.0.or_else(|| authored.as_deref().copied()) {
+        resolved.0 = camera;
+    }
+}
 use std::collections::HashSet;
 
 /// Run condition: skip transform propagation when no local transform has changed.
@@ -353,23 +364,64 @@ pub fn request_gltf_assets_system(
     }
 }
 
-pub fn ensure_gltf_default_light_system(
+pub fn ensure_default_3d_light_system(
     mut commands: Commands,
     models: Query<(), With<crate::components::GltfModelRoot>>,
+    meshes: Query<&TriangleMeshData>,
     lights: Query<(), With<crate::components::GaanimDefault3dLight>>,
+    lighting: Option<Res<crate::components::Lighting3D>>,
+    ambient: Option<ResMut<GlobalAmbientLight>>,
 ) {
-    if !models.is_empty() && lights.is_empty() {
+    let has_lit_content = !models.is_empty() || meshes.iter().any(|mesh| mesh.material.is_some());
+    let lighting = lighting.as_deref().copied().unwrap_or_default();
+    if let Some(mut ambient) = ambient {
+        ambient.color = bevy::color::Color::srgb(0.72, 0.78, 1.0);
+        ambient.brightness = if has_lit_content && lighting.enabled {
+            180.0 * lighting.intensity.max(0.0)
+        } else {
+            0.0
+        };
+    }
+    if !lighting.enabled {
+        return;
+    }
+    if has_lit_content && lights.is_empty() {
         commands.spawn((
             crate::components::GaanimDefault3dLight,
             DirectionalLight {
-                illuminance: 10_000.0,
-                shadows_enabled: true,
+                color: bevy::color::Color::srgb(1.0, 0.93, 0.82),
+                illuminance: 11_000.0 * lighting.intensity.max(0.0),
+                shadows_enabled: lighting.shadows,
                 ..Default::default()
             },
             Transform::from_xyz(4.0, 8.0, 4.0)
                 .looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
         ));
+        commands.spawn((
+            crate::components::GaanimDefault3dLight,
+            DirectionalLight {
+                color: bevy::color::Color::srgb(0.58, 0.72, 1.0),
+                illuminance: 4_000.0 * lighting.intensity.max(0.0),
+                shadows_enabled: false,
+                ..Default::default()
+            },
+            Transform::from_xyz(-5.0, 3.0, -4.0)
+                .looking_at(bevy::prelude::Vec3::ZERO, bevy::prelude::Vec3::Y),
+        ));
     }
+}
+
+fn bevy_color(color: gaanim_core::peniko::Color) -> bevy::color::Color {
+    let rgba = color.to_rgba8();
+    bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
+}
+
+fn bevy_emissive(material: Material3D) -> bevy::color::LinearRgba {
+    let mut linear = bevy_color(material.emissive).to_linear();
+    linear.red *= material.emissive_strength;
+    linear.green *= material.emissive_strength;
+    linear.blue *= material.emissive_strength;
+    linear
 }
 
 /// Attach the selected scene once Bevy has decoded the glTF container.
@@ -618,7 +670,7 @@ pub fn sync_gltf_visibility_system(
 /// the label appear at the correct screen location over the 3D geometry and
 /// stay upright regardless of camera orbit.
 pub fn billboard_system(
-    camera: Option<bevy::prelude::Res<gaanim_math::Camera>>,
+    camera: Option<bevy::prelude::Res<gaanim_math::ResolvedCamera>>,
     children_query: Query<&Children>,
     mut query: Query<
         (
@@ -746,10 +798,12 @@ pub fn build_3d_meshes_system(
         );
         let positions: Vec<[f32; 3]> = data.vertices.clone();
         let indices = data.indices.clone();
-        // Compute simple normals (up) if not provided
-        let normals: Vec<[f32; 3]> = positions.iter().map(|_| [0.0, 1.0, 0.0]).collect();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        if let Some(normals) = &data.normals
+            && normals.len() == mesh.count_vertices()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
+        }
         let has_vertex_colors = data
             .colors
             .as_ref()
@@ -761,35 +815,58 @@ pub fn build_3d_meshes_system(
         }
         mesh.insert_attribute(
             Mesh::ATTRIBUTE_UV_0,
-            vec![[0.0, 0.0]; mesh.count_vertices()],
+            data.uvs
+                .clone()
+                .filter(|uvs| uvs.len() == mesh.count_vertices())
+                .unwrap_or_else(|| vec![[0.0, 0.0]; mesh.count_vertices()]),
         );
         mesh.insert_indices(Indices::U32(indices));
+        if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) {
+            mesh.compute_smooth_normals();
+        }
         let mesh_handle = meshes.add(mesh);
-        let color = data
-            .color
-            .map(|c| {
-                let rgba = c.to_rgba8();
-                bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
-            })
-            .unwrap_or(bevy::color::Color::WHITE);
-        let mat = materials.add(bevy::pbr::StandardMaterial {
-            base_color: if has_vertex_colors {
-                bevy::color::Color::WHITE
-            } else {
-                color
-            },
-            unlit: true,
-            double_sided: true,
-            cull_mode: None,
+        let pbr = data.material;
+        let source = pbr.unwrap_or(Material3D {
+            color: data.color.unwrap_or(gaanim_core::peniko::Color::WHITE),
             ..Default::default()
         });
-        commands.entity(entity).insert((
+        let source_color = if has_vertex_colors {
+            bevy::color::Color::WHITE
+        } else {
+            bevy_color(source.color)
+        };
+        let alpha = source_color.alpha();
+        let alpha_mode = if alpha < 0.999 {
+            bevy::render::alpha::AlphaMode::Blend
+        } else {
+            bevy::render::alpha::AlphaMode::Opaque
+        };
+        let mat = materials.add(bevy::pbr::StandardMaterial {
+            base_color: source_color,
+            emissive: bevy_emissive(source),
+            perceptual_roughness: source.roughness,
+            metallic: source.metallic,
+            alpha_mode,
+            unlit: pbr.is_none(),
+            double_sided: pbr.is_none(),
+            cull_mode: if pbr.is_none() {
+                None
+            } else {
+                Some(bevy::render::render_resource::Face::Back)
+            },
+            ..Default::default()
+        });
+        let mut entity_commands = commands.entity(entity);
+        entity_commands.insert((
             bevy::prelude::Mesh3d(mesh_handle),
             bevy::prelude::MeshMaterial3d::<bevy::pbr::StandardMaterial>(mat),
             bevy::prelude::Transform::default(),
             bevy::prelude::Visibility::default(),
             Mesh3DMarker,
         ));
+        if pbr.is_some() {
+            entity_commands.insert((source, Material3DBaseline { alpha, alpha_mode }));
+        }
     }
 
     for (entity, data) in &query_line {
@@ -842,6 +919,37 @@ pub fn build_3d_meshes_system(
             bevy::prelude::Visibility::default(),
             Mesh3DMarker,
         ));
+    }
+}
+
+/// Synchronize animatable Gaanim PBR parameters and propagated opacity.
+#[allow(clippy::type_complexity)]
+pub fn sync_material_3d_system(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<
+        (
+            &Material3D,
+            &GlobalOpacity,
+            &Material3DBaseline,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
+        Or<(Changed<Material3D>, Changed<GlobalOpacity>)>,
+    >,
+) {
+    for (source, opacity, baseline, handle) in &query {
+        if let Some(material) = materials.get_mut(&handle.0) {
+            let mut color = bevy_color(source.color);
+            color.set_alpha((color.alpha() * opacity.0).clamp(0.0, 1.0));
+            material.base_color = color;
+            material.emissive = bevy_emissive(*source);
+            material.perceptual_roughness = source.roughness;
+            material.metallic = source.metallic;
+            material.alpha_mode = if color.alpha() < 0.999 {
+                bevy::render::alpha::AlphaMode::Blend
+            } else {
+                baseline.alpha_mode
+            };
+        }
     }
 }
 
@@ -934,7 +1042,84 @@ pub fn update_3d_line_meshes_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::prelude::{BuildChildrenTransformExt, Schedule, World};
+    use bevy::prelude::{App, BuildChildrenTransformExt, Schedule, Update, World};
+
+    fn lit_triangle() -> TriangleMeshData {
+        TriangleMeshData {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
+            uvs: Some(vec![[0.0, 0.0]; 3]),
+            color: None,
+            colors: None,
+            material: Some(Material3D::default()),
+        }
+    }
+
+    #[test]
+    fn studio_rig_is_created_once_and_none_creates_no_lights() {
+        let mut app = App::new();
+        app.insert_resource(GlobalAmbientLight::default())
+            .insert_resource(crate::components::Lighting3D::default())
+            .add_systems(Update, ensure_default_3d_light_system);
+        app.world_mut().spawn(lit_triangle());
+        app.update();
+        app.update();
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::components::GaanimDefault3dLight>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 2);
+
+        let mut none = App::new();
+        none.insert_resource(GlobalAmbientLight::default())
+            .insert_resource(crate::components::Lighting3D {
+                enabled: false,
+                intensity: 1.0,
+                shadows: true,
+            })
+            .add_systems(Update, ensure_default_3d_light_system);
+        none.world_mut().spawn(lit_triangle());
+        none.update();
+        let count = none
+            .world_mut()
+            .query_filtered::<Entity, With<crate::components::GaanimDefault3dLight>>()
+            .iter(none.world())
+            .count();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn native_primitive_compiles_to_lit_standard_material() {
+        let mut world = World::new();
+        world.insert_resource(Assets::<bevy::mesh::Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        let source =
+            Material3D::new(gaanim_core::peniko::Color::WHITE, 0.3, 0.8, None, 0.0).unwrap();
+        let mut triangle = lit_triangle();
+        triangle.material = Some(source);
+        let entity = world
+            .spawn((triangle, GlobalOpacity(1.0), Opacity(1.0)))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(build_3d_meshes_system);
+        schedule.run(&mut world);
+
+        let handle = world
+            .get::<MeshMaterial3d<StandardMaterial>>(entity)
+            .expect("compiled material handle")
+            .0
+            .clone();
+        let material = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap();
+        assert!(!material.unlit);
+        assert!((material.perceptual_roughness - 0.3).abs() < 1e-6);
+        assert!((material.metallic - 0.8).abs() < 1e-6);
+        assert_eq!(*world.get::<Material3D>(entity).unwrap(), source);
+    }
 
     #[test]
     fn nested_descendants_receive_current_transform_and_opacity() {

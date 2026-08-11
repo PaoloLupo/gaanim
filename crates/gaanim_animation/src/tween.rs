@@ -117,6 +117,10 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    Material3D {
+        from: gaanim_scene::Material3D,
+        to: gaanim_scene::Material3D,
+    },
 
     // === Geometry & Paths ===
     PathMorph {
@@ -210,6 +214,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::FillColor { from, to } => write!(f, "FillColor({:?} -> {:?})", from, to),
             Self::StrokeColor { from, to } => write!(f, "StrokeColor({:?} -> {:?})", from, to),
             Self::StrokeWidth { from, to } => write!(f, "StrokeWidth({} -> {})", from, to),
+            Self::Material3D { from, to } => write!(f, "Material3D({from:?} -> {to:?})"),
             Self::PathMorph { .. } => write!(f, "PathMorph"),
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
             Self::FillDrawProgress { from, to } => {
@@ -276,6 +281,7 @@ pub fn evaluate_tweens_system(
     mut opacities: Query<&mut Opacity>,
     mut fills: Query<&mut FillBrush>,
     mut strokes: Query<&mut StrokeBrush>,
+    mut materials3d: Query<&mut gaanim_scene::Material3D>,
     mut sources: Query<&mut PathSource>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
@@ -348,6 +354,11 @@ pub fn evaluate_tweens_system(
             PropertyLens::StrokeWidth { from, to } => {
                 if let Ok(mut stroke) = strokes.get_mut(tween.target) {
                     stroke.style.width = *from + (*to - *from) * t;
+                }
+            }
+            PropertyLens::Material3D { from, to } => {
+                if let Ok(mut material) = materials3d.get_mut(tween.target) {
+                    *material = from.lerp(*to, t);
                 }
             }
             PropertyLens::PathCompletion { from, to } => {

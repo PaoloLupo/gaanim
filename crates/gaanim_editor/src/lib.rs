@@ -3,9 +3,10 @@ use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_core::id::ObjectId;
 use gaanim_core::peniko;
-use gaanim_math::Camera;
+use gaanim_math::{Camera, CameraViewOverride, ResolvedCamera};
 use gaanim_scene::{
-    FillBrush, GroupMarker, MobjectId, ObjectTag, Opacity, RenderOrder, StrokeBrush, WorldBounds,
+    FillBrush, GltfModelRoot, GroupMarker, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
+    RenderOrder, StrokeBrush, WorldBounds,
 };
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use std::collections::{HashMap, HashSet};
@@ -63,16 +64,31 @@ impl Default for ViewportInset {
 #[derive(Resource, Debug, Clone)]
 pub struct PreviewInteractive {
     pub enabled: bool,
+    pub view: PreviewView,
+    pub free_camera: Option<Camera>,
+    pub needs_frame: bool,
+    pub detected_3d: bool,
     /// Multiplicative zoom factor applied on top of the fit `viewport_scale`.
     pub user_zoom: f64,
     /// Pan offset in world coordinates applied to `Camera.position`.
     pub pan: glam::DVec2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewView {
+    #[default]
+    CameraView,
+    Free3D,
+}
+
 impl Default for PreviewInteractive {
     fn default() -> Self {
         Self {
             enabled: false,
+            view: PreviewView::CameraView,
+            free_camera: None,
+            needs_frame: false,
+            detected_3d: false,
             user_zoom: 1.0,
             pan: glam::DVec2::ZERO,
         }
@@ -83,6 +99,28 @@ impl PreviewInteractive {
     pub fn reset(&mut self) {
         self.user_zoom = 1.0;
         self.pan = glam::DVec2::ZERO;
+        self.needs_frame = true;
+    }
+}
+
+/// Output frame inside the editor window, in logical window pixels.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct ViewportFrame {
+    pub origin: glam::DVec2,
+    pub size: glam::DVec2,
+    pub output_size: glam::DVec2,
+}
+
+impl ViewportFrame {
+    fn window_to_output(&self, point: glam::DVec2) -> Option<glam::DVec2> {
+        let local = point - self.origin;
+        if local.x < 0.0 || local.y < 0.0 || local.x > self.size.x || local.y > self.size.y {
+            return None;
+        }
+        Some(glam::DVec2::new(
+            local.x / self.size.x.max(1.0) * self.output_size.x,
+            local.y / self.size.y.max(1.0) * self.output_size.y,
+        ))
     }
 }
 
@@ -108,6 +146,7 @@ impl Plugin for GaanimEditorPlugin {
         .init_resource::<PresentationMode>()
         .init_resource::<AudienceBlank>()
         .init_resource::<ViewportInset>()
+        .init_resource::<ViewportFrame>()
         .init_resource::<PreviewInteractive>()
         .init_resource::<overlays::EditorOverlays>()
         .add_systems(
@@ -143,10 +182,14 @@ impl Plugin for GaanimEditorPlugin {
         .add_systems(Update, presenter::sync_presenter_camera_system)
         .add_systems(
             Update,
-            viewport_adjust_system
-                .in_set(gaanim_scene::hierarchy::SceneSet::Bounds)
-                .before(gaanim_renderer::pipeline::sync_gaanim_camera_to_bevy_system)
-                .before(gaanim_renderer::pipeline::sync_gaanim_camera_to_bevy_3d_system),
+            (
+                auto_activate_3d_view_system,
+                frame_free_camera_system,
+                viewport_adjust_system,
+            )
+                .chain()
+                .in_set(gaanim_scene::hierarchy::SceneSet::Camera)
+                .before(gaanim_scene::systems::resolve_camera_system),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
         .add_systems(
@@ -269,9 +312,10 @@ fn editor_ui_system(
     mut inset: ResMut<ViewportInset>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut commands: Commands,
-    camera: Option<Res<Camera>>,
+    camera: Option<Res<ResolvedCamera>>,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     interactive: Res<PreviewInteractive>,
+    viewport_frame: Res<ViewportFrame>,
     hub: Option<Res<project_hub::ProjectHubState>>,
     q: EditorQueries,
 ) {
@@ -286,6 +330,45 @@ fn editor_ui_system(
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
     };
+
+    if viewport_frame.size.x > 0.0 && viewport_frame.size.y > 0.0 {
+        let screen = ctx.content_rect();
+        let x0 = viewport_frame.origin.x as f32;
+        let y0 = viewport_frame.origin.y as f32;
+        let x1 = (viewport_frame.origin.x + viewport_frame.size.x) as f32;
+        let y1 = (viewport_frame.origin.y + viewport_frame.size.y) as f32;
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Background,
+            egui::Id::new("viewport_letterbox"),
+        ));
+        let shade = egui::Color32::from_black_alpha(145);
+        painter.rect_filled(
+            egui::Rect::from_min_max(screen.min, egui::pos2(screen.max.x, y0)),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(screen.min.x, y1), screen.max),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(screen.min.x, y0), egui::pos2(x0, y1)),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x1, y0), egui::pos2(screen.max.x, y1)),
+            0.0,
+            shade,
+        );
+        painter.rect_stroke(
+            egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
+            0.0,
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(70)),
+            egui::StrokeKind::Inside,
+        );
+    }
 
     // Interactive mode banner (esquina para no tapar toolbar de overlays en CENTER_TOP)
     if interactive.enabled {
@@ -2062,13 +2145,28 @@ fn preview_mode_keys_system(
         return;
     }
 
-    if !interactive.enabled && keys.just_pressed(KeyCode::KeyI) {
-        interactive.enabled = true;
+    if keys.just_pressed(KeyCode::KeyI) {
+        interactive.enabled = !interactive.enabled;
+        if !interactive.enabled {
+            interactive.view = PreviewView::CameraView;
+        } else if interactive.free_camera.is_some() {
+            interactive.view = PreviewView::Free3D;
+        }
     } else if interactive.enabled && keys.just_pressed(KeyCode::Escape) {
         interactive.enabled = false;
-        interactive.reset();
+        interactive.view = PreviewView::CameraView;
     } else if interactive.enabled && keys.just_pressed(KeyCode::KeyR) {
         interactive.reset();
+    } else if interactive.enabled && keys.just_pressed(KeyCode::KeyF) {
+        interactive.needs_frame = true;
+    } else if interactive.enabled
+        && interactive.free_camera.is_some()
+        && keys.just_pressed(KeyCode::Numpad0)
+    {
+        interactive.view = match interactive.view {
+            PreviewView::CameraView => PreviewView::Free3D,
+            PreviewView::Free3D => PreviewView::CameraView,
+        };
     }
 }
 
@@ -2078,7 +2176,7 @@ fn preview_mode_keys_system(
 /// For perspective cameras: Right-drag orbits, Middle/Shift+Left pan, Wheel dolly.
 fn preview_interactive_input_system(
     mut interactive: ResMut<PreviewInteractive>,
-    camera: Option<ResMut<Camera>>,
+    authored_camera: Option<Res<Camera>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -2110,7 +2208,11 @@ fn preview_interactive_input_system(
     };
     commands.entity(win_entity).insert(icon);
 
-    let Some(mut cam) = camera else {
+    let mut cam = match interactive.view {
+        PreviewView::Free3D => interactive.free_camera,
+        PreviewView::CameraView => authored_camera.as_deref().copied(),
+    };
+    let Some(ref mut cam) = cam else {
         *prev_cursor = None;
         return;
     };
@@ -2202,6 +2304,9 @@ fn preview_interactive_input_system(
     let is_dragging = is_orbiting || is_panning_3d || is_panning_2d;
 
     if !is_dragging {
+        if interactive.view == PreviewView::Free3D {
+            interactive.free_camera = Some(*cam);
+        }
         *prev_cursor = cur;
         return;
     }
@@ -2237,11 +2342,16 @@ fn preview_interactive_input_system(
         interactive.pan.x -= delta.x / effective;
         interactive.pan.y += delta.y / effective;
     }
+    if interactive.view == PreviewView::Free3D {
+        interactive.free_camera = Some(*cam);
+    }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn editor_picking_system(
     egui_wants: Res<EguiWantsInput>,
-    camera: Option<Res<Camera>>,
+    camera: Option<Res<ResolvedCamera>>,
+    viewport_frame: Res<ViewportFrame>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     entities: Query<(Entity, &WorldBounds, Option<&RenderOrder>)>,
@@ -2271,14 +2381,20 @@ fn editor_picking_system(
     let Some(cursor_pos) = window.cursor_position() else {
         return;
     };
+    let Some(viewport_pos) =
+        viewport_frame.window_to_output(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64))
+    else {
+        state.selected = None;
+        return;
+    };
+    let camera = &camera.0;
 
     let mut best_z = i32::MIN;
     let mut best_entity: Option<Entity> = None;
     let mut best_t: f64 = f64::INFINITY;
 
     if is_perspective {
-        let (origin, dir) =
-            camera.screen_to_ray(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+        let (origin, dir) = camera.screen_to_ray(viewport_pos);
         for (entity, bounds, render_order) in &entities {
             if let Some(t) = ray_aabb_intersect(origin, dir, bounds.0) {
                 if t < best_t {
@@ -2295,8 +2411,13 @@ fn editor_picking_system(
             }
         }
     } else {
-        let world_pos =
-            camera.screen_to_world(glam::DVec2::new(cursor_pos.x as f64, cursor_pos.y as f64));
+        let mut picking_camera = *camera;
+        let fit_scale = (viewport_frame.size.x / viewport_frame.output_size.x.max(1.0)).max(1e-6);
+        if let gaanim_math::Projection::Orthographic { ref mut zoom } = picking_camera.projection {
+            *zoom *= picking_camera.viewport_scale / fit_scale;
+        }
+        picking_camera.viewport_scale = 1.0;
+        let world_pos = picking_camera.screen_to_world(viewport_pos);
         for (entity, bounds, render_order) in &entities {
             if bounds
                 .0
@@ -2350,19 +2471,91 @@ fn ray_aabb_intersect(
     Some(if t_min >= 0.0 { t_min } else { t_max })
 }
 
-/// System: adjusts the [`Camera`] resource so the animation preview fits in the
+#[allow(clippy::type_complexity)]
+fn auto_activate_3d_view_system(
+    mut interactive: ResMut<PreviewInteractive>,
+    primitives: Query<(), Or<(With<Mesh3DMarker>, With<GltfModelRoot>)>>,
+) {
+    if interactive.detected_3d || primitives.is_empty() {
+        return;
+    }
+    interactive.detected_3d = true;
+    interactive.enabled = true;
+    interactive.view = PreviewView::Free3D;
+    interactive.needs_frame = true;
+}
+
+fn frame_free_camera_system(
+    authored: Option<Res<Camera>>,
+    state: Res<EditorState>,
+    mut interactive: ResMut<PreviewInteractive>,
+    bounds: Query<(Entity, &WorldBounds)>,
+) {
+    if !interactive.needs_frame {
+        return;
+    }
+    let selected = state.selected;
+    let mut combined: Option<gaanim_math::Bounds3D> = None;
+    for (entity, bounds) in &bounds {
+        if selected.is_some() && selected != Some(entity) {
+            continue;
+        }
+        combined = Some(match combined {
+            Some(current) => current.union(&bounds.0),
+            None => bounds.0,
+        });
+    }
+    if combined.is_none() && selected.is_some() {
+        for (_, bounds) in &bounds {
+            combined = Some(match combined {
+                Some(current) => current.union(&bounds.0),
+                None => bounds.0,
+            });
+        }
+    }
+    let Some(bounds) = combined else { return };
+    let authored = authored
+        .as_deref()
+        .copied()
+        .unwrap_or_else(|| Camera::ortho_2d(1280, 720));
+    let fov = std::f64::consts::FRAC_PI_4;
+    let mut camera = Camera::perspective_3d(authored.viewport_width, authored.viewport_height, fov);
+    let center = bounds.center();
+    let radius = (bounds.size().length() * 0.5).max(0.5);
+    let distance = (radius / (fov * 0.5).tan() * 1.35).max(2.0);
+    let direction = glam::DVec3::new(1.0, 0.75, 1.25).normalize();
+    camera.look_at(center + direction * distance, center, glam::DVec3::Y);
+    interactive.free_camera = Some(camera);
+    interactive.needs_frame = false;
+}
+
+/// System: composes an editor presentation camera so the animation fits in the
 /// area above UI panels (the timeline at the bottom).
 ///
 /// When [`PreviewInteractive`] is enabled, its `user_zoom` and `pan` are
 /// composed on top of the fit scale so the user can inspect the scene
 /// without losing the aspect-ratio fit on window resize.
+#[allow(clippy::too_many_arguments)]
 fn viewport_adjust_system(
     inset: Res<ViewportInset>,
     interactive: Res<PreviewInteractive>,
-    mut camera: Option<ResMut<Camera>>,
+    authored: Option<Res<Camera>>,
+    mut view_override: ResMut<CameraViewOverride>,
+    mut viewport_frame: ResMut<ViewportFrame>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    presentation: Res<PresentationMode>,
+    export_state: Res<export::ExportState>,
 ) {
-    let Some(ref mut cam) = camera else { return };
+    if presentation.active || export_state.active {
+        view_override.0 = None;
+        return;
+    }
+    let Some(authored) = authored else { return };
+    let mut cam = if interactive.enabled && interactive.view == PreviewView::Free3D {
+        interactive.free_camera.unwrap_or(*authored)
+    } else {
+        *authored
+    };
     let Ok(window) = windows.single() else { return };
 
     let window_h = window.height() as f64;
@@ -2371,12 +2564,7 @@ fn viewport_adjust_system(
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     if available_h < 1.0 {
-        cam.viewport_offset_y = 0.0;
-        cam.viewport_scale = 1.0;
-        if interactive.enabled && !is_perspective {
-            cam.position.x += interactive.pan.x;
-            cam.position.y += interactive.pan.y;
-        }
+        view_override.0 = Some(cam);
         return;
     }
 
@@ -2386,9 +2574,15 @@ fn viewport_adjust_system(
     let scale_x = window_w / anim_w;
     let scale_y = available_h / anim_h;
     let fit_scale = scale_x.min(scale_y);
+    let frame_size = glam::DVec2::new(anim_w * fit_scale, anim_h * fit_scale);
+    viewport_frame.origin = glam::DVec2::new(
+        (window_w - frame_size.x) * 0.5,
+        (available_h - frame_size.y) * 0.5,
+    );
+    viewport_frame.size = frame_size;
+    viewport_frame.output_size = glam::DVec2::new(anim_w, anim_h);
 
     if is_perspective {
-        // For perspective, interactive orbit/pan/dolly already mutated Camera directly.
         cam.viewport_scale = fit_scale;
     } else if interactive.enabled {
         cam.viewport_scale = fit_scale * interactive.user_zoom.clamp(0.1, 20.0);
@@ -2402,11 +2596,81 @@ fn viewport_adjust_system(
     // Shift the Vello centre upward so the animation sits above the timeline.
     // When there is no timeline panel (inset.bottom == 0) the offset is 0.
     cam.viewport_offset_y = -(inset.bottom as f64) / 2.0;
+    view_override.0 = Some(cam);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_frame_rejects_letterbox_and_maps_output_pixels() {
+        let frame = ViewportFrame {
+            origin: glam::DVec2::new(100.0, 50.0),
+            size: glam::DVec2::new(640.0, 360.0),
+            output_size: glam::DVec2::new(1280.0, 720.0),
+        };
+        assert_eq!(
+            frame.window_to_output(glam::DVec2::new(100.0, 50.0)),
+            Some(glam::DVec2::ZERO)
+        );
+        assert_eq!(
+            frame.window_to_output(glam::DVec2::new(740.0, 410.0)),
+            Some(glam::DVec2::new(1280.0, 720.0))
+        );
+        assert_eq!(frame.window_to_output(glam::DVec2::new(99.0, 200.0)), None);
+    }
+
+    #[test]
+    fn three_d_content_auto_frames_once_and_two_d_stays_orthographic() {
+        let mut app = App::new();
+        app.init_resource::<PreviewInteractive>()
+            .init_resource::<EditorState>()
+            .insert_resource(Camera::ortho_2d(1280, 720))
+            .add_systems(
+                Update,
+                (auto_activate_3d_view_system, frame_free_camera_system).chain(),
+            );
+        let entity = app
+            .world_mut()
+            .spawn((
+                Mesh3DMarker,
+                WorldBounds(gaanim_math::Bounds3D::new_3d(
+                    -1.0, -2.0, -3.0, 1.0, 2.0, 3.0,
+                )),
+            ))
+            .id();
+        app.update();
+        let preview = app.world().resource::<PreviewInteractive>();
+        assert!(preview.enabled);
+        assert_eq!(preview.view, PreviewView::Free3D);
+        let framed = preview.free_camera.expect("free camera");
+        assert!(matches!(
+            framed.projection,
+            gaanim_math::Projection::Perspective { .. }
+        ));
+
+        app.world_mut().despawn(entity);
+        app.world_mut().spawn((
+            Mesh3DMarker,
+            WorldBounds(gaanim_math::Bounds3D::new_3d(
+                -10.0, -10.0, -10.0, 10.0, 10.0, 10.0,
+            )),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<PreviewInteractive>().free_camera,
+            Some(framed),
+            "hot reload must preserve the inspection camera"
+        );
+
+        let mut two_d = App::new();
+        two_d
+            .init_resource::<PreviewInteractive>()
+            .add_systems(Update, auto_activate_3d_view_system);
+        two_d.update();
+        assert!(!two_d.world().resource::<PreviewInteractive>().enabled);
+    }
 
     #[test]
     fn presentation_mode_overrides_continuous_preview_policy() {

@@ -542,6 +542,7 @@ class Drawable:
     def part(self, id: str) -> Drawable:
         """Return a named SVG part or glTF node by unique name/canonical path."""
         ...
+
     def parts(self) -> tuple[str, ...]: ...
     def animations(self) -> tuple[str, ...]: ...
     def animation(
@@ -1089,6 +1090,41 @@ TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
 TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
 TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
 TextGrouping: TypeAlias = Literal["grapheme", "word", "line", "part"]
+
+class Material3D:
+    """PBR material whose numeric properties interpolate in linear space."""
+    def __init__(
+        self,
+        color: ColorLike = WHITE,
+        roughness: float = 0.55,
+        metallic: float = 0.0,
+        emissive: Optional[ColorLike] = None,
+        emissive_strength: float = 0.0,
+    ) -> None: ...
+    @staticmethod
+    def matte(color: ColorLike = WHITE) -> Material3D: ...
+    @staticmethod
+    def metal(color: ColorLike = WHITE) -> Material3D: ...
+    @staticmethod
+    def emissive(color: ColorLike = WHITE, strength: float = 1.0) -> Material3D: ...
+    @property
+    def color(self) -> Color: ...
+    @property
+    def roughness(self) -> float: ...
+    @property
+    def metallic(self) -> float: ...
+    @property
+    def emissive_color(self) -> Color: ...
+    @property
+    def emissive_strength(self) -> float: ...
+
+class Primitive3D(Drawable):
+    """Native indexed 3D mesh with an animatable PBR material."""
+    def material(self, material: Material3D) -> Self: ...
+    def material_to(self, material: Material3D) -> Anim: ...
+    def write(self, duration: Optional[float] = None) -> Anim:
+        """Unsupported for meshes; use :meth:`Drawable.create`."""
+        ...
 
 class TextStyle:
     """Reusable visual and metric text style without outer box layout."""
@@ -2058,6 +2094,24 @@ class Scene:
         Example:
             result = scene.circle(1.0)
         """
+        ...
+    def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
+        """Create a centered cube with flat faces."""
+        ...
+    def sphere(self, radius: float = 1.0, *, segments: int = 32, rings: int = 16, material: Optional[Material3D] = None) -> Primitive3D:
+        """Create a smooth-shaded UV sphere."""
+        ...
+    def cylinder(self, radius: float = 1.0, height: float = 2.0, *, segments: int = 32, caps: bool = True, material: Optional[Material3D] = None) -> Primitive3D:
+        """Create a Y-up cylinder."""
+        ...
+    def cone(self, radius: float = 1.0, height: float = 2.0, *, segments: int = 32, cap: bool = True, material: Optional[Material3D] = None) -> Primitive3D:
+        """Create a Y-up cone."""
+        ...
+    def plane(self, width: float = 2.0, height: float = 2.0, *, subdivisions: tuple[int, int] = (1, 1), material: Optional[Material3D] = None) -> Primitive3D:
+        """Create an XZ plane with upward-facing normals."""
+        ...
+    def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
+        """Configure the scene's single automatic 3D light rig."""
         ...
     def rect(self, w: float, h: float) -> Drawable:
         """Create a rect drawable in the scene.

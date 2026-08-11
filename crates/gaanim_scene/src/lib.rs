@@ -4,10 +4,11 @@ pub mod prelude;
 pub mod systems;
 
 pub use components::{
-    Billboard, FillBrush, GaanimDefault3dLight, GlobalOpacity, GltfAnimationState, GltfAssetHandle,
-    GltfMaterialBaseline, GltfModelReady, GltfModelRoot, GltfNodeBinding, GltfNodeWrapper,
-    GroupMarker, HudOverlay, LineListData, LocalBounds, Mesh3DMarker, MobjectId, ObjectTag,
-    Opacity, Path2D, PathSource, RasterImage, RenderLayer, RenderOrder, StrokeBrush,
+    AuthoritativeCameraView, Billboard, FillBrush, GaanimDefault3dLight, GlobalOpacity,
+    GltfAnimationState, GltfAssetHandle, GltfMaterialBaseline, GltfModelReady, GltfModelRoot,
+    GltfNodeBinding, GltfNodeWrapper, GroupMarker, HudOverlay, Lighting3D, LineListData,
+    LocalBounds, Material3D, Material3DBaseline, Material3DError, Mesh3DMarker, MobjectId,
+    ObjectTag, Opacity, Path2D, PathSource, RasterImage, RenderLayer, RenderOrder, StrokeBrush,
     TriangleMeshData, Visible, WorldBounds,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};

@@ -441,6 +441,7 @@ pub(crate) fn sync_presenter_camera_system(
         commands.spawn((
             Camera3d::default(),
             Camera::default(),
+            gaanim_scene::AuthoritativeCameraView,
             bevy::core_pipeline::tonemapping::Tonemapping::None,
             RenderTarget::Window(WindowRef::Entity(event.window)),
             EguiMultipassSchedule::new(PresenterEguiPass),

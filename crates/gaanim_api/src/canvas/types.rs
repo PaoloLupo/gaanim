@@ -501,6 +501,8 @@ pub enum SpawnKind {
         /// Optional per-vertex colors.
         colors: Option<Vec<Color>>,
     },
+    /// Friendly native PBR primitive with complete geometry attributes.
+    Primitive3D(gaanim_scene::TriangleMeshData),
     /// 3D polyline (e.g., curve) defined by world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used (colormap).
     Polyline3D {
@@ -713,6 +715,8 @@ pub struct ObjectSpec {
     pub layout_owner: Option<ObjectId>,
     /// Whether the author has queued a manual translation animation.
     pub manual_position_animation: bool,
+    /// Deferred material state after queued `material_to` calls.
+    pub material_animation_cursor: Option<gaanim_scene::Material3D>,
     pub layout_ops: Vec<LayoutOp>,
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
 }
@@ -743,6 +747,7 @@ impl ObjectSpec {
             fragment_tags: Vec::new(),
             layout_owner: None,
             manual_position_animation: false,
+            material_animation_cursor: None,
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
         }

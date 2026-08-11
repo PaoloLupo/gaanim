@@ -65,6 +65,41 @@ The model and every selected node support the complete 3D transform surface:
 `at_3d(x,y,z)`, `scaled_3d(x,y,z)`, `rotated_3d(x,y,z)`, and
 `with_pivot_3d(x,y,z)`. Euler rotations use XYZ order and radians.
 
+== Native PBR primitives
+
+`Primitive3D` extends `Drawable`, so position, rotation, scale, opacity, and
+the PBR material are animatable and deterministic under timeline seek. Geometry
+parameters stay fixed after construction. Gaanim uses a right-handed, Y-up
+world: cylinders and cones grow along Y, while planes lie on XZ.
+
+```python
+from gaanim import BLUE, GOLD, Material3D, Scene
+
+scene = Scene(1280, 720)
+cube = scene.cube(2, material=Material3D.matte(BLUE))
+sphere = scene.sphere(1, segments=32, rings=16,
+                      material=Material3D.metal(GOLD)).at_3d(3, 0, 0)
+floor = scene.plane(10, 8, subdivisions=(4, 4)).at_3d(0, -2, 0)
+scene.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.play([cube.create(), sphere.create(), floor.fade_in()])
+scene.play([cube.material_to(Material3D.metal(GOLD)).duration(1.0)])
+```
+
+```python
+Scene.cube(size=2.0, *, material=None) -> Primitive3D
+Scene.sphere(radius=1.0, *, segments=32, rings=16, material=None) -> Primitive3D
+Scene.cylinder(radius=1.0, height=2.0, *, segments=32, caps=True, material=None) -> Primitive3D
+Scene.cone(radius=1.0, height=2.0, *, segments=32, cap=True, material=None) -> Primitive3D
+Scene.plane(width=2.0, height=2.0, *, subdivisions=(1, 1), material=None) -> Primitive3D
+```
+
+`Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None,
+emissive_strength=0.0)` validates all surface ranges. Presets
+`Material3D.matte`, `.metal`, and `.emissive` cover common looks. Use
+`Primitive3D.material(...)` for an immediate fluent change and
+`material_to(...)` for interpolation. `create()` grows a mesh from its center
+while fading it in; vector-only `write()` is rejected explicitly.
+
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 40+ FACTORIES · ALL RETURN Drawable —])
 
 == Primitives

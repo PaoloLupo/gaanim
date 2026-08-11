@@ -166,7 +166,7 @@ fn draw_glow(scene: &mut vello::Scene, path: &kurbo::BezPath, glow: &Glow) {
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
 /// in the actual rendered output, since `bevy_vello` relies on the Bevy camera for projection.
 pub fn sync_gaanim_camera_to_bevy_system(
-    gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
 ) {
     let Some(cam) = gaanim_camera else { return };
@@ -250,7 +250,7 @@ fn fitted_canvas_viewport(
     let viewport_width = (cam.viewport_width as f64 * fit).min(window_width);
     let viewport_height = (cam.viewport_height as f64 * fit).min(window_height);
     let left = ((window_width - viewport_width) * 0.5).max(0.0);
-    let center_y = window_height * 0.5 + cam.viewport_offset_y * fit;
+    let center_y = window_height * 0.5 + cam.viewport_offset_y;
     let top =
         (center_y - viewport_height * 0.5).clamp(0.0, (window_height - viewport_height).max(0.0));
     let scale_factor = window.scale_factor() as f64;
@@ -269,22 +269,33 @@ fn fitted_canvas_viewport(
 }
 
 pub fn sync_gaanim_camera_to_bevy_3d_system(
-    gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    authored_camera: Option<Res<gaanim_math::Camera>>,
     mut bevy_cameras: Query<
         (
             &mut Camera,
             &bevy::camera::RenderTarget,
             &mut Transform,
             &mut Projection,
+            Option<&gaanim_scene::AuthoritativeCameraView>,
         ),
         With<Camera3d>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
-    let Some(cam) = gaanim_camera else { return };
+    let Some(resolved_camera) = gaanim_camera else {
+        return;
+    };
     let primary_window = primary_window.single().ok();
-    for (mut bevy_camera, render_target, mut transform, mut projection) in &mut bevy_cameras {
+    for (mut bevy_camera, render_target, mut transform, mut projection, authoritative_view) in
+        &mut bevy_cameras
+    {
+        let cam: &gaanim_math::Camera = if authoritative_view.is_some() {
+            authored_camera.as_deref().unwrap_or(&resolved_camera.0)
+        } else {
+            &resolved_camera.0
+        };
         transform.translation = Vec3::new(
             cam.position.x as f32,
             cam.position.y as f32,
@@ -777,7 +788,7 @@ pub fn compile_scene_from_world(
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
-    gaanim_camera: Option<Res<gaanim_math::Camera>>,
+    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     child_query: Query<&ChildOf>,
     query_mobjects: Query<
@@ -1184,7 +1195,10 @@ pub fn gaanim_render_system(
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(ref canvas_bg) = canvas_bg {
-            let (rect, transform) = canvas_background_geometry(canvas_bg, gaanim_camera.as_deref());
+            let (rect, transform) = canvas_background_geometry(
+                canvas_bg,
+                gaanim_camera.as_deref().map(|camera| &**camera),
+            );
             main_scene.fill(
                 peniko::Fill::NonZero,
                 transform,
@@ -1322,5 +1336,53 @@ mod tests {
 
         assert_eq!(viewport.physical_size, UVec2::new(640, 360));
         assert_eq!(viewport.physical_position, UVec2::new(0, 70));
+    }
+
+    #[test]
+    fn perspective_viewport_offset_is_measured_in_window_pixels() {
+        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
+        cam.viewport_scale = 0.5;
+        cam.viewport_offset_y = -100.0;
+        let viewport = fitted_canvas_viewport(&cam, &window(1280, 720)).unwrap();
+
+        assert_eq!(viewport.physical_size, UVec2::new(640, 360));
+        assert_eq!(viewport.physical_position, UVec2::new(320, 80));
+    }
+
+    #[test]
+    fn presentation_camera_uses_authored_camera_instead_of_editor_override() {
+        let mut authored = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
+        authored.position = gaanim_core::glam::DVec3::new(1.0, 2.0, 3.0);
+        let mut resolved = authored.clone();
+        resolved.position = gaanim_core::glam::DVec3::new(9.0, 8.0, 7.0);
+
+        let mut app = App::new();
+        app.insert_resource(authored)
+            .insert_resource(gaanim_math::ResolvedCamera(resolved))
+            .add_systems(Update, sync_gaanim_camera_to_bevy_3d_system);
+        let presentation = app
+            .world_mut()
+            .spawn((Camera3d::default(), gaanim_scene::AuthoritativeCameraView))
+            .id();
+        let inspection = app.world_mut().spawn(Camera3d::default()).id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .entity(presentation)
+                .get::<Transform>()
+                .unwrap()
+                .translation,
+            Vec3::new(1.0, 2.0, 3.0)
+        );
+        assert_eq!(
+            app.world()
+                .entity(inspection)
+                .get::<Transform>()
+                .unwrap()
+                .translation,
+            Vec3::new(9.0, 8.0, 7.0)
+        );
     }
 }

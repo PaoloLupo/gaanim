@@ -2147,6 +2147,7 @@ fn clip_color(payload: &ClipPayload) -> Color32 {
 
 fn lens_color(lens: &PropertyLensSpec) -> Color32 {
     match lens {
+        PropertyLensSpec::Material3D { .. } => Color32::from_rgb(190, 120, 235),
         PropertyLensSpec::Translation { .. } => Color32::from_rgb(74, 144, 217),
         PropertyLensSpec::Rotation { .. } => Color32::from_rgb(80, 200, 120),
         PropertyLensSpec::Scale { .. } => Color32::from_rgb(255, 185, 15),
@@ -2174,6 +2175,7 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
 fn clip_icon(payload: &ClipPayload) -> &'static str {
     match payload {
         ClipPayload::Animation(a) => match &a.lens {
+            PropertyLensSpec::Material3D { .. } => "3D",
             PropertyLensSpec::Translation { .. } => "↔",
             PropertyLensSpec::Rotation { .. } => "⟲",
             PropertyLensSpec::Scale { .. } => "⤢",
@@ -2219,6 +2221,7 @@ fn clip_label(payload: &ClipPayload) -> String {
                 return label.clone();
             }
             let n = match &a.lens {
+                PropertyLensSpec::Material3D { .. } => "Material",
                 PropertyLensSpec::Translation { .. } => "Move",
                 PropertyLensSpec::Rotation { .. } => "Rotate",
                 PropertyLensSpec::Scale { .. } => "Scale",

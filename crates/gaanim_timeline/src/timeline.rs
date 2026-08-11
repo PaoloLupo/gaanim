@@ -1629,6 +1629,11 @@ fn apply_lens_spec(
                 stroke.style.width = *from + (*to - *from) * t;
             }
         }
+        PropertyLensSpec::Material3D { from, to } => {
+            if let Some(mut material) = world.get_mut::<gaanim_scene::Material3D>(target) {
+                *material = from.lerp(*to, t);
+            }
+        }
         PropertyLensSpec::PathCompletion { from, to } => {
             let completion = *from + (*to - *from) * t;
 
@@ -1946,8 +1951,52 @@ mod tests {
     use gaanim_core::ObjectId;
     use gaanim_core::kurbo::BezPath;
     use gaanim_math::{RateFunc, SpatialTransform};
-    use gaanim_scene::{MobjectId, PathSource};
+    use gaanim_scene::{Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn material_3d_seek_is_exact_and_reversible() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let from = Material3D::new(gaanim_core::peniko::Color::BLACK, 0.8, 0.1, None, 0.0).unwrap();
+        let to = Material3D::new(
+            gaanim_core::peniko::Color::WHITE,
+            0.2,
+            0.9,
+            Some(gaanim_core::peniko::Color::WHITE),
+            4.0,
+        )
+        .unwrap();
+        let entity = world
+            .spawn((MobjectId(object_id), SpatialTransform::default(), from))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Material", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::Material3D { from, to },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Material".into()),
+            }),
+        );
+
+        timeline.seek(&mut world, 2.0);
+        assert_eq!(*world.get::<Material3D>(entity).unwrap(), to);
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(*world.get::<Material3D>(entity).unwrap(), from);
+        timeline.seek(&mut world, 1.5);
+        let middle = *world.get::<Material3D>(entity).unwrap();
+        assert!((middle.roughness - 0.5).abs() < 1e-6);
+        assert!((middle.metallic - 0.5).abs() < 1e-6);
+        assert!((middle.emissive_strength - 2.0).abs() < 1e-6);
+    }
 
     #[test]
     fn fixed_step_simulation_moves_during_explicit_export_seeks_and_rewinds() {

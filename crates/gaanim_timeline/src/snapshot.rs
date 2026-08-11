@@ -62,6 +62,9 @@ pub struct EntitySnapshot {
     /// parameter value instead of staying at the final animated value.
     #[cfg_attr(feature = "serde", serde(default))]
     pub float_signal: Option<f64>,
+    /// PBR material state for deterministic backward and forward seeks.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub material_3d: Option<gaanim_scene::Material3D>,
     /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
     pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Timeline timestamps paired with `traced_path_points`.
@@ -167,6 +170,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::FloatSignal::new(value));
     } else {
         entity_mut.remove::<gaanim_animation::FloatSignal>();
+    }
+
+    if let Some(material) = snap.material_3d {
+        entity_mut.insert(material);
+    } else {
+        entity_mut.remove::<gaanim_scene::Material3D>();
     }
 
     if let Some(points) = &snap.traced_path_points
@@ -380,6 +389,7 @@ impl WorldSnapshot {
                     float_signal: world
                         .get::<gaanim_animation::FloatSignal>(entity)
                         .map(|s| s.value),
+                    material_3d: world.get::<gaanim_scene::Material3D>(entity).copied(),
                     traced_path_points: world
                         .get::<gaanim_animation::TracedPath>(entity)
                         .map(|t| t.points.clone())

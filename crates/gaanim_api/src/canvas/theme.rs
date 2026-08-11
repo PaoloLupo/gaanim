@@ -929,6 +929,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Axes { .. } => "axes",
         SpawnKind::Axes3D { .. } => "axes_3d",
         SpawnKind::SurfaceMesh { .. } => "surface",
+        SpawnKind::Primitive3D(_) => "primitive_3d",
         SpawnKind::Polyline3D { .. } => "polyline_3d",
         SpawnKind::LineSegments3D { .. } => "line_segments_3d",
         SpawnKind::GltfNode { .. } => "gltf_node",

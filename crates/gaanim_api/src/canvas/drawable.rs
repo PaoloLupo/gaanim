@@ -62,6 +62,10 @@ pub struct RotationAxisError {
     pub axis: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("material operations require a native Primitive3D drawable")]
+pub struct Primitive3DHandleError;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutOwnershipError {
     #[error("drawable belongs to a different Scene")]
@@ -532,6 +536,40 @@ impl DrawableHandle {
 
     pub fn fill(self, color: Color) -> Self {
         self.fill_brush(Brush::Solid(color))
+    }
+
+    pub fn material(
+        self,
+        material: gaanim_scene::Material3D,
+    ) -> Result<Self, Primitive3DHandleError> {
+        {
+            let mut spec = self.spec.lock().expect("object spec poisoned");
+            let SpawnKind::Primitive3D(mesh) = &mut spec.kind else {
+                return Err(Primitive3DHandleError);
+            };
+            mesh.material = Some(material);
+            spec.material_animation_cursor = Some(material);
+        }
+        Ok(self)
+    }
+
+    pub fn material_to(
+        &self,
+        material: gaanim_scene::Material3D,
+    ) -> Result<Anim, Primitive3DHandleError> {
+        let from = {
+            let mut spec = self.spec.lock().expect("object spec poisoned");
+            let SpawnKind::Primitive3D(mesh) = &spec.kind else {
+                return Err(Primitive3DHandleError);
+            };
+            let from = spec
+                .material_animation_cursor
+                .or(mesh.material)
+                .unwrap_or_default();
+            spec.material_animation_cursor = Some(material);
+            from
+        };
+        Ok(self.anim(AnimationType::Material3DTo { from, to: material }))
     }
 
     pub fn fill_brush(self, brush: Brush) -> Self {
@@ -1047,6 +1085,12 @@ impl DrawableHandle {
     }
 
     pub fn create(&self, dur: impl OptDuration) -> Anim {
+        if matches!(
+            &self.spec.lock().expect("object spec poisoned").kind,
+            SpawnKind::Primitive3D(..)
+        ) {
+            return self.anim_dur(AnimationType::Create3D, dur.into_opt());
+        }
         self.anim_dur(
             AnimationType::Create {
                 config: DrawAnimationConfig::default(),

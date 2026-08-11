@@ -50,6 +50,13 @@ part.scale_to_3d(x, y, z) -> Anim
 Euler triples use XYZ order and radians. `rotate_by_3d` accepts only `"x"`,
 `"y"`, or `"z"`; other axes raise `ValueError`.
 
+Native `Primitive3D` meshes also provide
+`primitive.material_to(material: Material3D) -> Anim`. Color, emissive color,
+roughness, metallic, and emission strength interpolate deterministically;
+exact endpoints are restored when seeking in either direction. On a mesh,
+`create()` means grow from center plus fade. `write()` remains vector-only and
+raises `TypeError` with guidance to use `create()`.
+
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 22 ANIMS · ALL ON Drawable —])
 
 == Motion

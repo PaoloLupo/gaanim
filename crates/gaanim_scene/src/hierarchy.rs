@@ -11,7 +11,9 @@ pub enum SceneSet {
     Input,
     /// Phase 2: Evaluating animation tweens, lenses, and keyframes.
     Animation,
-    /// Phase 3: Applying custom Mobject updaters (e.g. rotate updater, orbit updaters, tracked paths).
+    /// Phase 3: Resolving the authored camera into the presentation camera.
+    Camera,
+    /// Phase 4: Applying custom Mobject updaters (e.g. rotate updater, orbit updaters, tracked paths).
     Updaters,
     /// Phase 4: Regenerating coordinate spaces, plots, and data-driven marks.
     Visualization,
@@ -42,6 +44,7 @@ impl Plugin for GaanimScenePlugin {
             (
                 SceneSet::Input,
                 SceneSet::Animation,
+                SceneSet::Camera,
                 SceneSet::Updaters,
                 SceneSet::Visualization,
                 SceneSet::Layout,
@@ -52,6 +55,13 @@ impl Plugin for GaanimScenePlugin {
             )
                 .chain(),
         );
+
+        app.init_resource::<gaanim_math::ResolvedCamera>()
+            .init_resource::<gaanim_math::CameraViewOverride>()
+            .add_systems(
+                Update,
+                crate::systems::resolve_camera_system.in_set(SceneSet::Camera),
+            );
 
         // Register default propagation systems in the Propagation SystemSet.
         // Both propagation systems use `run_if` to skip entirely when no
@@ -74,7 +84,7 @@ impl Plugin for GaanimScenePlugin {
             Update,
             (
                 crate::systems::request_gltf_assets_system,
-                crate::systems::ensure_gltf_default_light_system,
+                crate::systems::ensure_default_3d_light_system,
                 crate::systems::attach_gltf_scenes_system,
                 crate::systems::finalize_gltf_instances_system,
             )
@@ -90,6 +100,8 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::sync_gltf_wrapper_transform_system,
                 crate::systems::sync_gltf_visibility_system,
                 crate::systems::sync_gltf_material_opacity_system
+                    .run_if(resource_exists::<Assets<StandardMaterial>>),
+                crate::systems::sync_material_3d_system
                     .run_if(resource_exists::<Assets<StandardMaterial>>),
             )
                 .in_set(SceneSet::Propagation)
@@ -134,5 +146,24 @@ mod tests {
         app.add_plugins(GaanimScenePlugin);
 
         app.update();
+    }
+
+    #[test]
+    fn presentation_override_never_mutates_authored_camera() {
+        let mut app = App::new();
+        app.add_plugins(GaanimScenePlugin);
+        let authored = gaanim_math::Camera::ortho_2d(640, 360);
+        let mut free = gaanim_math::Camera::perspective_3d(640, 360, 0.8);
+        free.position.x = 7.0;
+        app.insert_resource(authored)
+            .insert_resource(gaanim_math::CameraViewOverride(Some(free)));
+
+        app.update();
+
+        assert_eq!(*app.world().resource::<gaanim_math::Camera>(), authored);
+        assert_eq!(
+            app.world().resource::<gaanim_math::ResolvedCamera>().0,
+            free
+        );
     }
 }

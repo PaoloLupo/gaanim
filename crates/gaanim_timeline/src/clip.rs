@@ -189,6 +189,10 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    Material3D {
+        from: gaanim_scene::Material3D,
+        to: gaanim_scene::Material3D,
+    },
     PathCompletion {
         from: f64,
         to: f64,
@@ -293,6 +297,10 @@ impl PropertyLensSpec {
                 to: *to,
             },
             Self::StrokeWidth { from, to } => PropertyLens::StrokeWidth {
+                from: *from,
+                to: *to,
+            },
+            Self::Material3D { from, to } => PropertyLens::Material3D {
                 from: *from,
                 to: *to,
             },

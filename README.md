@@ -88,6 +88,20 @@ abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.
   identifica el cue activo sin repetir el nombre del segmento y mantiene Up Next
   por encima de las notas con scroll independiente.
 
+## 3D nativo e inspección
+
+Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas PBR
+animables, con `Material3D.matte`, `Material3D.metal` y
+`Material3D.emissive`. `scene.lighting_3d("studio")` proporciona un único rig
+de estudio. Consulta `examples/primitives_3d_demo.py` para una escena completa.
+
+Las escenas con mallas o glTF se abren automáticamente en **Free 3D**. La
+cámara libre del editor es independiente de `scene.camera`, por lo que orbitar,
+desplazar o hacer dolly no altera el timeline, snapshots, Presenter View ni la
+exportación. `Num0` alterna **Free 3D** / **Camera View**; `F` encuadra, `R`
+reinicia e `I` activa o desactiva la inspección. El marco de salida conserva
+siempre la resolución y relación de aspecto declaradas por la escena.
+
 ## Paquete Python local
 
 El binding también puede instalarse en el entorno virtual del repositorio:

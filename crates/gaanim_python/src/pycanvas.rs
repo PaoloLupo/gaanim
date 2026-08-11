@@ -19,6 +19,7 @@ use gaanim_api::export::{
 };
 
 use crate::color::PyColor;
+use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 use crate::pylayout::{
     column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
@@ -2278,6 +2279,141 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .text_spec(spec.clone());
         Py::new(py, PyText::initializer(handle, spec))
+    }
+
+    #[pyo3(signature = (size=2.0, *, material=None))]
+    fn cube<'py>(
+        &self,
+        py: Python<'py>,
+        size: f64,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .cube(size, material.map(|value| value.0).unwrap_or_default())
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (radius=1.0, *, segments=32, rings=16, material=None))]
+    fn sphere<'py>(
+        &self,
+        py: Python<'py>,
+        radius: f64,
+        segments: u32,
+        rings: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .sphere(
+                radius,
+                segments,
+                rings,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (radius=1.0, height=2.0, *, segments=32, caps=true, material=None))]
+    fn cylinder<'py>(
+        &self,
+        py: Python<'py>,
+        radius: f64,
+        height: f64,
+        segments: u32,
+        caps: bool,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .cylinder(
+                radius,
+                height,
+                segments,
+                caps,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (radius=1.0, height=2.0, *, segments=32, cap=true, material=None))]
+    fn cone<'py>(
+        &self,
+        py: Python<'py>,
+        radius: f64,
+        height: f64,
+        segments: u32,
+        cap: bool,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .cone(
+                radius,
+                height,
+                segments,
+                cap,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (width=2.0, height=2.0, *, subdivisions=(1, 1), material=None))]
+    fn plane<'py>(
+        &self,
+        py: Python<'py>,
+        width: f64,
+        height: f64,
+        subdivisions: (u32, u32),
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .plane(
+                width,
+                height,
+                subdivisions,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (preset="studio", intensity=1.0, shadows=true))]
+    fn lighting_3d(&self, preset: &str, intensity: f32, shadows: bool) -> PyResult<()> {
+        if !intensity.is_finite() || intensity < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "intensity must be finite and non-negative",
+            ));
+        }
+        let enabled = match preset {
+            "studio" => true,
+            "none" => false,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "preset must be 'studio' or 'none'",
+                ));
+            }
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .lighting_3d(enabled, intensity, shadows);
+        Ok(())
     }
 
     #[pyo3(signature = (function, x_range=(-5.0, 5.0), y_range=(-5.0, 5.0), x_samples=20, y_samples=20, color=None))]

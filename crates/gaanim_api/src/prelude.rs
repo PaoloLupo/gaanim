@@ -7,6 +7,8 @@ pub use crate::canvas::{
     SpawnKind, ThemePalette,
 };
 pub use gaanim_expr::{EvalContext, Expr, VectorExpr};
+pub use gaanim_objects::primitives3d::Primitive3DError;
+pub use gaanim_scene::{Lighting3D, Material3D, Material3DError};
 pub use gaanim_visualization::{
     Axis, AxisStyle, DataSource, DataTable, NonFinitePolicy, NumberFormat, Sampling, Scale,
     SpaceLayer,

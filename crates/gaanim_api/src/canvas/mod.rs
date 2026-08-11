@@ -15,8 +15,8 @@ pub use types::{
 };
 mod drawable;
 pub use drawable::{
-    DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError, RotationAxisError,
-    SvgPartError,
+    DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
+    Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 mod visualization;
 pub use visualization::{

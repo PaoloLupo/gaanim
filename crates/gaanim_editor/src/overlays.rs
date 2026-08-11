@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
-use gaanim_math::Camera;
+use gaanim_math::{Camera, ResolvedCamera};
 use gaanim_renderer::pipeline::CanvasBackground;
 
 use crate::PresentationMode;
@@ -213,7 +213,7 @@ pub fn overlays_settings_ui_system(
 pub fn scene_overlays_system(
     mut contexts: EguiContexts,
     overlays: Res<EditorOverlays>,
-    camera: Option<Res<Camera>>,
+    camera: Option<Res<ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,

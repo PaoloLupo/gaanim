@@ -9,6 +9,7 @@ use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::Shape;
 use gaanim_core::peniko::Color;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
+use gaanim_objects::primitives3d;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
@@ -157,6 +158,7 @@ pub struct Canvas {
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) camera_zoom: f64,
     pub(crate) camera_rotation: gaanim_core::glam::DQuat,
+    pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
 }
 
@@ -177,6 +179,7 @@ impl Canvas {
             camera_position: gaanim_core::glam::DVec3::ZERO,
             camera_zoom: 1.0,
             camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
+            lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
     }
@@ -203,6 +206,7 @@ impl Canvas {
                             spec.lock().expect("object spec poisoned").kind,
                             SpawnKind::GltfModel { .. }
                                 | SpawnKind::Axes3D { .. }
+                                | SpawnKind::Primitive3D(..)
                                 | SpawnKind::SurfaceMesh { .. }
                                 | SpawnKind::Polyline3D { .. }
                                 | SpawnKind::LineSegments3D { .. }
@@ -817,6 +821,75 @@ impl Canvas {
             color,
             colors: None,
         })
+    }
+
+    pub fn cube(
+        &mut self,
+        size: f64,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::cube(size, material)?)))
+    }
+
+    pub fn sphere(
+        &mut self,
+        radius: f64,
+        segments: u32,
+        rings: u32,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::sphere(
+            radius, segments, rings, material,
+        )?)))
+    }
+
+    pub fn cylinder(
+        &mut self,
+        radius: f64,
+        height: f64,
+        segments: u32,
+        caps: bool,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::cylinder(
+            radius, height, segments, caps, material,
+        )?)))
+    }
+
+    pub fn cone(
+        &mut self,
+        radius: f64,
+        height: f64,
+        segments: u32,
+        cap: bool,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::cone(
+            radius, height, segments, cap, material,
+        )?)))
+    }
+
+    pub fn plane(
+        &mut self,
+        width: f64,
+        height: f64,
+        subdivisions: (u32, u32),
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::plane(
+            width,
+            height,
+            subdivisions,
+            material,
+        )?)))
+    }
+
+    pub fn lighting_3d(&mut self, enabled: bool, intensity: f32, shadows: bool) {
+        self.lighting_3d = gaanim_scene::Lighting3D {
+            enabled,
+            intensity,
+            shadows,
+        };
     }
 
     pub fn surface_mesh_with_colors(

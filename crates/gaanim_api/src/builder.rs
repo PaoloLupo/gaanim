@@ -764,6 +764,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::GltfAnimation { .. } => "Action",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
+            AnimationType::Create3D => "Create3D",
             AnimationType::Unwrite { .. } => "Unwrite",
             AnimationType::Uncreate { .. } => "Uncreate",
             AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
@@ -776,6 +777,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::FadeOut
             | AnimationType::FadeInFrom { .. } => "Fade",
             AnimationType::FillColorTo { .. } => "Fill",
+            AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
             AnimationType::GrowFromCenter => "Grow",
@@ -1900,6 +1902,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_fade_in_from_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::Create3D) {
+            self.play_create_3d_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::Indicate { .. }) {
             self.play_indicate_internal(anim, track);
             return;
@@ -2039,6 +2045,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.stroke.style.width = to;
                 PropertyLensSpec::StrokeWidth { from, to }
             }
+            AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
             AnimationType::GrowFromCenter => {
                 let to = state.transform.scale;
                 let from = gaanim_core::glam::DVec3::ZERO;
@@ -2067,6 +2074,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::GltfAnimation { .. }
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
+            | AnimationType::Create3D
             | AnimationType::Unwrite { .. }
             | AnimationType::Uncreate { .. }
             | AnimationType::SpinInFromNothing
@@ -2576,6 +2584,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.play_internal(AnimationBuilder {
             target: anim.target,
             anim_type: AnimationType::TranslateTo { to: final_position },
+            duration: anim.duration,
+            rate_func: anim.rate_func,
+            delay: anim.delay,
+        });
+    }
+
+    fn play_create_3d_internal(&mut self, anim: AnimationBuilder, _track: TrackId) {
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::FadeIn,
+            duration: anim.duration,
+            rate_func: anim.rate_func.clone(),
+            delay: anim.delay,
+        });
+        self.play_internal(AnimationBuilder {
+            target: anim.target,
+            anim_type: AnimationType::GrowFromCenter,
             duration: anim.duration,
             rate_func: anim.rate_func,
             delay: anim.delay,
@@ -4981,11 +5006,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         color: Option<Color>,
         colors: Option<Vec<[f32; 4]>>,
     ) -> MobjectRef {
+        self.spawn_triangle_mesh_data(TriangleMeshData {
+            vertices,
+            indices,
+            normals: None,
+            uvs: None,
+            color,
+            colors,
+            material: None,
+        })
+    }
+
+    pub fn spawn_triangle_mesh_data(&mut self, data: TriangleMeshData) -> MobjectRef {
         let id = self.next_id();
         // Compute bounds
         let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
         let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
-        for v in &vertices {
+        for v in &data.vertices {
             let p = gaanim_core::glam::DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64);
             min = min.min(p);
             max = max.max(p);
@@ -5003,12 +5040,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 GlobalSpatialTransform::default(),
                 LocalBounds(bounds),
                 WorldBounds::default(),
-                TriangleMeshData {
-                    vertices,
-                    indices,
-                    color,
-                    colors,
-                },
+                data.clone(),
                 Mesh3DMarker,
                 Transform::default(),
                 GlobalTransform::default(),
@@ -5018,13 +5050,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 gaanim_scene::GlobalOpacity(1.0),
             ))
             .id();
+        if let Some(material) = data.material {
+            self.commands.entity(entity).insert(material);
+        }
         self.tag_entity(entity);
         let state = MobjectState {
             path: std::sync::Arc::new(kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
             opacity: 1.0,
-            fill: color.map(|c| Brush::Solid(c)),
+            fill: data.color.map(|c| Brush::Solid(c)),
             stroke: StrokeBrush::transparent(),
             entity,
             child_spans: Vec::new(),

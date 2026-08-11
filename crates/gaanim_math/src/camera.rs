@@ -1,6 +1,7 @@
 use bevy::prelude::Resource;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::Affine;
+use std::ops::{Deref, DerefMut};
 
 /// Extensible camera projection types.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +52,37 @@ pub struct Camera {
     /// Used by the editor to fit content in the available area below UI panels.
     pub viewport_scale: f64,
 }
+
+/// Camera consumed by rendering, billboards, overlays and picking.
+///
+/// The authored [`Camera`] remains the timeline authority. Editor-only views
+/// are composed here without changing authored scene state.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedCamera(pub Camera);
+
+impl Default for ResolvedCamera {
+    fn default() -> Self {
+        Self(Camera::ortho_2d(1280, 720))
+    }
+}
+
+impl Deref for ResolvedCamera {
+    type Target = Camera;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ResolvedCamera {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// Optional presentation-only override, primarily owned by the editor.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct CameraViewOverride(pub Option<Camera>);
 
 impl Camera {
     /// Creates a default orthographic camera for a given viewport size.

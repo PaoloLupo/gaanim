@@ -7,7 +7,7 @@ pub mod prelude;
 pub mod spatial;
 
 pub use bounds::Bounds3D;
-pub use camera::{Camera, Projection};
+pub use camera::{Camera, CameraViewOverride, Projection, ResolvedCamera};
 pub use easing::{EasingCurve, RateFunc};
 pub use path::{
     get_path_length, get_point_at_alpha, get_subpath, get_subpath_range, interpolate_paths,

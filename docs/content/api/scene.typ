@@ -56,6 +56,28 @@ Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
 `set_safe_area(top=..., right=..., bottom=..., left=...)` when a brand or
 platform requires custom insets.
 
+== 3D lighting and editor camera
+
+`scene.lighting_3d(preset="studio", intensity=1.0, shadows=True)` installs one
+friendly ambient/key/fill rig for native PBR primitives and glTF content. Use
+`preset="none"` for emissive-only or externally lit work. The rig is scene
+level, so several models never create duplicate automatic lights.
+
+The editor keeps its inspection camera separate from `scene.camera`. A scene
+containing a native mesh or glTF model opens in *Free 3D* and is framed once;
+hot reload preserves that inspection view. *Camera View* always shows the
+timeline-authored camera, and neither mode changes snapshots, Presenter View,
+or export.
+
+- `Num0`: switch between *Free 3D* and *Camera View*.
+- Right drag: orbit; middle drag or Shift+left drag: pan; wheel: dolly.
+- `F`: frame the selection, or the complete scene when nothing is selected.
+- `R`: reset and frame; `I`: toggle inspection mode.
+
+The visible output frame keeps the scene's resolution and aspect ratio fixed.
+Picking and ray casting are limited to that frame. Purely 2D scenes remain
+orthographic unless inspection is enabled manually.
+
 == Spawning mobjects
 
 Every factory returns a `Drawable` handle with fluent style and layout methods.

@@ -1,5 +1,5 @@
 use bevy::animation::graph::{AnimationGraph, AnimationNodeIndex};
-use bevy::prelude::{Component, Entity, Handle};
+use bevy::prelude::{Component, Entity, Handle, Resource};
 use gaanim_core::kurbo::{Affine, BezPath, Stroke};
 use gaanim_core::peniko::{Brush, ImageBrush};
 use gaanim_math::Bounds3D;
@@ -226,6 +226,14 @@ pub struct HudOverlay;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mesh3DMarker;
 
+/// Marker for a Bevy presentation camera that must follow the authored scene camera.
+///
+/// Editor inspection cameras intentionally consume [`gaanim_math::ResolvedCamera`],
+/// while presenter/export views remain coupled to the timeline-owned
+/// [`gaanim_math::Camera`].
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AuthoritativeCameraView;
+
 /// Stable Gaanim wrapper placed immediately above a native glTF node.
 ///
 /// Blender-authored transforms remain on the native node while manual Gaanim
@@ -273,6 +281,133 @@ pub struct GltfModelReady;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct GaanimDefault3dLight;
 
+/// Renderer-neutral PBR parameters owned by a Gaanim 3D primitive.
+///
+/// Colors remain native `peniko::Color` values until the Bevy material is built,
+/// keeping the public scene description independent from Bevy's renderer types.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Material3D {
+    pub color: gaanim_core::peniko::Color,
+    pub roughness: f32,
+    pub metallic: f32,
+    pub emissive: gaanim_core::peniko::Color,
+    pub emissive_strength: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Material3DError {
+    #[error("roughness and metallic must be finite values in the 0..=1 range")]
+    InvalidSurface,
+    #[error("emissive strength must be finite and non-negative")]
+    InvalidEmissiveStrength,
+}
+
+impl Material3D {
+    pub fn new(
+        color: gaanim_core::peniko::Color,
+        roughness: f32,
+        metallic: f32,
+        emissive: Option<gaanim_core::peniko::Color>,
+        emissive_strength: f32,
+    ) -> Result<Self, Material3DError> {
+        if !roughness.is_finite()
+            || !metallic.is_finite()
+            || !(0.0..=1.0).contains(&roughness)
+            || !(0.0..=1.0).contains(&metallic)
+        {
+            return Err(Material3DError::InvalidSurface);
+        }
+        if !emissive_strength.is_finite() || emissive_strength < 0.0 {
+            return Err(Material3DError::InvalidEmissiveStrength);
+        }
+        Ok(Self {
+            color,
+            roughness,
+            metallic,
+            emissive: emissive.unwrap_or(gaanim_core::peniko::Color::TRANSPARENT),
+            emissive_strength,
+        })
+    }
+
+    pub fn matte(color: gaanim_core::peniko::Color) -> Self {
+        Self {
+            color,
+            ..Self::default()
+        }
+    }
+
+    pub fn metal(color: gaanim_core::peniko::Color) -> Self {
+        Self {
+            color,
+            roughness: 0.22,
+            metallic: 1.0,
+            ..Self::default()
+        }
+    }
+
+    pub fn emissive(
+        color: gaanim_core::peniko::Color,
+        strength: f32,
+    ) -> Result<Self, Material3DError> {
+        Self::new(color, 0.45, 0.0, Some(color), strength)
+    }
+
+    pub fn lerp(self, other: Self, t: f64) -> Self {
+        if t <= 0.0 {
+            return self;
+        }
+        if t >= 1.0 {
+            return other;
+        }
+        Self {
+            color: gaanim_core::interpolate_color(self.color, other.color, t),
+            roughness: self.roughness + (other.roughness - self.roughness) * t as f32,
+            metallic: self.metallic + (other.metallic - self.metallic) * t as f32,
+            emissive: gaanim_core::interpolate_color(self.emissive, other.emissive, t),
+            emissive_strength: self.emissive_strength
+                + (other.emissive_strength - self.emissive_strength) * t as f32,
+        }
+    }
+}
+
+impl Default for Material3D {
+    fn default() -> Self {
+        Self {
+            color: gaanim_core::peniko::Color::WHITE,
+            roughness: 0.55,
+            metallic: 0.0,
+            emissive: gaanim_core::peniko::Color::TRANSPARENT,
+            emissive_strength: 0.0,
+        }
+    }
+}
+
+/// Baseline alpha mode for a Gaanim-owned PBR material.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Material3DBaseline {
+    pub alpha: f32,
+    pub alpha_mode: bevy::render::alpha::AlphaMode,
+}
+
+/// Scene-level automatic lighting policy for native 3D content.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct Lighting3D {
+    pub enabled: bool,
+    pub intensity: f32,
+    pub shadows: bool,
+}
+
+impl Default for Lighting3D {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            intensity: 1.0,
+            shadows: true,
+        }
+    }
+}
+
 /// Original material properties retained while wrapper opacity is animated.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GltfMaterialBaseline {
@@ -285,8 +420,14 @@ pub struct GltfMaterialBaseline {
 pub struct TriangleMeshData {
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
+    /// Optional explicit vertex normals. Missing/invalid normals are generated.
+    pub normals: Option<Vec<[f32; 3]>>,
+    /// Optional UV0 coordinates. Missing/invalid UVs fall back to zeroes.
+    pub uvs: Option<Vec<[f32; 2]>>,
     pub color: Option<gaanim_core::peniko::Color>,
     pub colors: Option<Vec<[f32; 4]>>,
+    /// `None` preserves the historical unlit surface-mesh behavior.
+    pub material: Option<Material3D>,
 }
 
 /// Raw line list data (pairs of points) to be converted to Bevy `Mesh3d` line list.
@@ -301,4 +442,32 @@ pub struct LineListData {
     /// Optional per-vertex RGBA colors (linear, 0..1). If Some, length must match `points`.
     /// When present the renderer uses vertex colors instead of the uniform `color`.
     pub colors: Option<Vec<[f32; 4]>>,
+}
+
+#[cfg(test)]
+mod material_3d_tests {
+    use super::*;
+
+    #[test]
+    fn material_validates_pbr_ranges() {
+        assert!(Material3D::new(gaanim_core::peniko::Color::WHITE, -0.1, 0.0, None, 0.0).is_err());
+        assert!(Material3D::new(gaanim_core::peniko::Color::WHITE, 0.5, 1.1, None, 0.0).is_err());
+        assert!(Material3D::new(gaanim_core::peniko::Color::WHITE, 0.5, 0.0, None, -1.0).is_err());
+        assert!(Material3D::new(gaanim_core::peniko::Color::WHITE, 0.5, 0.0, None, 2.0).is_ok());
+    }
+
+    #[test]
+    fn material_lerp_reaches_exact_endpoints() {
+        let from = Material3D::matte(gaanim_core::peniko::Color::BLACK);
+        let to = Material3D::new(
+            gaanim_core::peniko::Color::WHITE,
+            0.1,
+            0.9,
+            Some(gaanim_core::peniko::Color::WHITE),
+            3.0,
+        )
+        .unwrap();
+        assert_eq!(from.lerp(to, 0.0), from);
+        assert_eq!(from.lerp(to, 1.0), to);
+    }
 }

@@ -101,6 +101,10 @@ pub enum AnimationType {
     StrokeWidthTo {
         to: f64,
     },
+    Material3DTo {
+        from: gaanim_scene::Material3D,
+        to: gaanim_scene::Material3D,
+    },
     /// Manim-style `Write`: progressively draw the target's path(s) along
     /// their arc length, then cross-fade the fill in once the outline is
     /// complete. This produces the characteristic "pen draws the object,
@@ -141,6 +145,8 @@ pub enum AnimationType {
     Create {
         config: DrawAnimationConfig,
     },
+    /// Mesh-friendly creation: fade and grow from zero scale in parallel.
+    Create3D,
     Uncreate {
         config: DrawAnimationConfig,
     },

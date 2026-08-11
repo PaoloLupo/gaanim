@@ -1591,6 +1591,7 @@ impl Canvas {
         builder
             .commands
             .insert_resource(ClearColor(Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)));
+        builder.commands.insert_resource(self.lighting_3d);
     }
 
     pub fn compile(&self, world: &mut World) {
@@ -5034,6 +5035,11 @@ impl Canvas {
                     *color,
                     colors,
                 );
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
+            SpawnKind::Primitive3D(mesh) => {
+                let mref = builder.spawn_triangle_mesh_data(mesh.clone());
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }

@@ -9,6 +9,7 @@ pyo3::create_exception!(
 
 mod brush;
 mod color;
+mod py3d;
 mod pycanvas;
 mod pydrawable;
 mod pylayout;
@@ -44,6 +45,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PySegment>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
+    m.add_class::<py3d::PyMaterial3D>()?;
+    m.add_class::<py3d::PyPrimitive3D>()?;
     m.add_class::<pytext::PyTextStyle>()?;
     m.add_class::<pystyle::PyStrokeStyle>()?;
     m.add_class::<pystyle::PyStyle>()?;
