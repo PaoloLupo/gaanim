@@ -443,6 +443,28 @@ impl PyLayout {
         Ok(())
     }
 
+    /// Detach a direct child without hiding it, releasing positional ownership.
+    #[pyo3(signature = (child, *, animate=None))]
+    fn detach(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
+        let handle = Self::direct_member(child)?;
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let index = state
+                .members
+                .iter()
+                .position(|member| member.handle.id == handle.id)
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "child is not a direct member of this Layout",
+                    )
+                })?;
+            let detached = state.members.remove(index);
+            detached.handle.release_layout(&state.root);
+        }
+        Self::reflow_inner(&self.inner, animate, None, None);
+        Ok(())
+    }
+
     #[pyo3(signature = (old, new, *, animate=None))]
     fn replace(
         &self,

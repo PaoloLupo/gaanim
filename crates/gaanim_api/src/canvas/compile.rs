@@ -2661,6 +2661,24 @@ impl Canvas {
                             .iter()
                             .filter_map(|id| materialized_by_id.get(id).copied())
                             .collect();
+                        let removed_children: Vec<_> = builder
+                            .states
+                            .get(parent)
+                            .map(|state| {
+                                state
+                                    .children
+                                    .iter()
+                                    .copied()
+                                    .filter(|child| !children.contains(child))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        for child in removed_children {
+                            builder.remove_from_group(
+                                MobjectRef { id: parent },
+                                MobjectRef { id: child },
+                            );
+                        }
                         for child in &children {
                             let current_parent =
                                 builder.states.get(*child).and_then(|state| state.parent);

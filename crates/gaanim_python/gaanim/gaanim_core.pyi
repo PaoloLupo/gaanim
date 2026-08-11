@@ -292,6 +292,20 @@ class Layout(Drawable):
     def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
         """Remove a direct child and release its positional ownership."""
         ...
+    def detach(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
+        """Release a direct child from the layout without hiding it.
+
+        The child preserves its world position, opacity, and scene membership,
+        so positional methods such as ``move_to`` are valid immediately after
+        this call. ``animate`` optionally reflows the remaining children in
+        seconds. A non-member raises ``ValueError``.
+
+        Example:
+            scene.reuse(title)
+            page.detach(title)
+            scene.play([title.move_to(0.0, 200.0)])
+        """
+        ...
     def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem, *, animate: Optional[float] = None) -> Drawable:
         """Replace a direct child, returning the replacement after optional reflow."""
         ...

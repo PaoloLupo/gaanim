@@ -4663,6 +4663,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Removes one child from a group while preserving its world transform.
+    ///
+    /// Layout reflow uses this when a versioned tree no longer contains a
+    /// member. The child remains alive and visible, but subsequent transforms
+    /// are evaluated in world space instead of the former group's local space.
+    pub fn remove_from_group(&mut self, group: MobjectRef, child: MobjectRef) {
+        let is_direct_child = self
+            .states
+            .get(child.id)
+            .is_some_and(|state| state.parent == Some(group.id));
+        if !is_direct_child {
+            return;
+        }
+
+        let child_world = self.get_world_transform(child.id);
+        if let Some(child_state) = self.states.get_mut(child.id) {
+            child_state.transform = child_world;
+            child_state.parent = None;
+            self.commands
+                .entity(child_state.entity)
+                .remove_parent_in_place()
+                .insert(child_world);
+        }
+        if let Some(group_state) = self.states.get_mut(group.id) {
+            group_state.children.retain(|id| *id != child.id);
+        }
+    }
+
     /// Discharges all children from the group and despawns the group container entity.
     ///
     /// The children's local transforms are adjusted to world space so they remain in their
@@ -6457,6 +6485,47 @@ mod tests {
         schedule.run(&mut world);
 
         assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
+    }
+
+    #[test]
+    fn remove_from_group_preserves_world_transform_and_visibility() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let child = builder.rectangle(40.0, 30.0).at(120.0, -45.0).spawn();
+        let child_entity = builder.states.get(child.id).unwrap().entity;
+        let group = builder.group(&[child]);
+        let before = builder.get_world_transform(child.id);
+
+        builder.remove_from_group(group, child);
+
+        let child_state = builder.states.get(child.id).unwrap();
+        assert_eq!(child_state.parent, None);
+        assert_eq!(child_state.transform, before);
+        assert_eq!(child_state.opacity, 1.0);
+        assert!(
+            !builder
+                .states
+                .get(group.id)
+                .unwrap()
+                .children
+                .contains(&child.id)
+        );
+
+        drop(builder);
+        drop(commands);
+        queue.apply(&mut world);
+        assert!(
+            world
+                .get::<bevy::ecs::hierarchy::ChildOf>(child_entity)
+                .is_none()
+        );
+        assert_eq!(world.get::<Opacity>(child_entity), Some(&Opacity(1.0)));
     }
 }
 

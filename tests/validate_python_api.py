@@ -199,6 +199,27 @@ def validate_visualization_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_layout_detach_contract(module: object) -> list[str]:
+    """A reused layout child can detach and regain positional operations."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    scene.segment("cover")
+    title = scene.text("Reusable title", role="title")
+    body = scene.text("Body")
+    page = scene.column([title, body], width="fill", align="center")
+    scene.segment("detail", module.Transition.cross_fade(0.2))
+    scene.reuse(title)
+    page.detach(title)
+    try:
+        movement = title.move_to(0.0, 120.0)
+    except module.LayoutOwnershipError:
+        failures.append("Layout.detach did not release positional ownership")
+    else:
+        if not isinstance(movement, module.Anim):
+            failures.append("a detached child move_to did not return Anim")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -226,6 +247,7 @@ def main() -> int:
                 missing.append(node.name)
 
     missing.extend(validate_visualization_contract(module))
+    missing.extend(validate_layout_detach_contract(module))
     missing.extend(documented_text_api_failures(tree))
 
     if missing:

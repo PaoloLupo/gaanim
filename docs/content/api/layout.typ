@@ -83,7 +83,7 @@ the resulting tree can still be constrained and animated.
   [Responsive content], [`TextFlow(wrap="auto")`], [Remeasures text using the width offered by its final nested Layout box.],
   [Media fitting], [`fit=...`], [`none`, `contain`, `cover`, `stretch`, or `scale_down`; `cover` also clips.],
   [Relations], [`scene.constrain(...)`], [Linear equations and inequalities between geometry in different branches.],
-  [Live structure], [`add` / `remove` / `replace` / `configure`], [Creates an instant or animated deterministic reflow snapshot.],
+  [Live structure], [`add` / `remove` / `detach` / `replace` / `configure`], [Creates an instant or animated deterministic reflow snapshot.],
   [Reusable pages], [`scene.template(...)` / `segment.bind(...)`], [Typed slots, built-in presentation patterns, and theme-driven spacing tokens.],
 )
 
@@ -321,6 +321,8 @@ displacement with `offset`.
 ```python
 page.add(extra, at=1, animate=0.35)
 page.replace(old, new, animate=0.35)
+page.detach(title, animate=0.35)
+scene.play([title.move_to(0, 200)])
 page.configure(gap=40, padding=56, animate=0.4)
 page.configure(min_width=480, max_width=960, aspect_ratio=16 / 9)
 page.configure_item(chart, grow=2, offset=(12, 0), animate=0.3)
@@ -331,10 +333,24 @@ Structural mutations propagate through nested layouts. Timeline operations
 store versioned tree snapshots, so direct seek and sequential playback resolve
 the same target geometry.
 
-`add`, `remove`, and `replace` operate on direct children. Their `animate`
-value and the `animate` values on `configure`, `configure_item`, and `reflow`
-are durations in seconds. With `None`, the timeline records an instant,
-deterministic transition.
+`add`, `remove`, `detach`, and `replace` operate on direct children. `remove`
+performs a visual exit; `detach` instead preserves the child's world position,
+opacity, and scene membership while releasing Layout ownership. A detached
+drawable can immediately use `at`, `move_to`, `next_to`, and other positional
+operations. This is useful after adopting a managed child into a new segment:
+
+```python
+scene.segment("detail", Transition.cross_fade(0.4))
+scene.reuse(title)
+page.detach(title)
+scene.play([title.move_to(0, 200).duration(0.35)])
+```
+
+Their `animate` value and the `animate` values on `configure`,
+`configure_item`, and `reflow` are durations in seconds. For `detach`, it
+animates only the remaining children's reflow; the detached child stays
+visible and fixed until explicitly animated. With `None`, the timeline records
+an instant, deterministic transition.
 
 == Linear constraints
 
