@@ -1,6 +1,6 @@
 use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
 use bevy::prelude::*;
-use gaanim_animation::{FillDrawProgress, WriteTipGlow};
+use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
 use gaanim_core::ObjectId;
 use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
@@ -793,6 +793,7 @@ pub fn gaanim_render_system(
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
             Option<Ref<RasterImage>>,
+            Option<Ref<ReactiveReadout>>,
             Option<&gaanim_scene::ObjectTag>,
         ),
         With<Visible>,
@@ -848,6 +849,7 @@ pub fn gaanim_render_system(
         fill_ref,
         stroke_ref,
         raster_image_ref,
+        reactive_readout_ref,
         _tag,
     ) in &query_mobjects
     {
@@ -910,6 +912,9 @@ pub fn gaanim_render_system(
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
             || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
+            || reactive_readout_ref
+                .as_ref()
+                .is_some_and(|r| r.is_changed())
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())

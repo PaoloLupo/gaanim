@@ -56,7 +56,10 @@ impl Parameter {
         &self.handle
     }
 
-    pub fn expr(&self) -> Expr {
+    /// Internal expression representation used by the language bindings.
+    /// Public callers compose parameters directly rather than depending on
+    /// the expression AST.
+    pub fn expression(&self) -> Expr {
         Expr::parameter(self.handle.id)
     }
 
@@ -1020,6 +1023,28 @@ impl Canvas {
         Ok(handle)
     }
 
+    /// Create a numeric glyph path sourced from a native expression. The
+    /// compiler resolves parameter entities and installs the visualizer-phase
+    /// update system, so Python is only involved while constructing the scene.
+    pub fn expression_readout(
+        &mut self,
+        expression: Expr,
+        format: impl Into<String>,
+        prefix: impl Into<String>,
+        suffix: impl Into<String>,
+        invalid: impl Into<String>,
+        font_size: Option<f64>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::ExpressionReadout {
+            expression,
+            format: format.into(),
+            prefix: prefix.into(),
+            suffix: suffix.into(),
+            invalid: invalid.into(),
+            font_size,
+        })
+    }
+
     pub fn function_plot(
         &mut self,
         space: &CoordinateSpaceHandle,
@@ -1505,7 +1530,7 @@ mod tests {
 
         let context = gaanim_expr::EvalContext::new()
             .with_parameter(parameter.drawable().id, parameter.current());
-        assert_eq!(parameter.expr().eval(&context).unwrap(), 2.25);
+        assert_eq!(parameter.expression().eval(&context).unwrap(), 2.25);
 
         let animation = parameter.animate_to(4.0).unwrap();
         assert_eq!(animation.inner.target, parameter.drawable().id);

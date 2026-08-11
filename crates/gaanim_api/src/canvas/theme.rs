@@ -887,6 +887,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         SpawnKind::Text(_) | SpawnKind::Typst { .. } => "text",
         SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => "axes",
         SpawnKind::ExpressionPlot { .. }
+        | SpawnKind::ExpressionReadout { .. }
         | SpawnKind::DataMark { .. }
         | SpawnKind::Polyline3D { .. }
         | SpawnKind::LineSegments3D { .. }
@@ -923,6 +924,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Bezier { .. } => "bezier",
         SpawnKind::Curve(_) => "curve",
         SpawnKind::ExpressionPlot { .. } => "expression_plot",
+        SpawnKind::ExpressionReadout { .. } => "expression_readout",
         SpawnKind::DataMark { .. } => "data_mark",
         SpawnKind::Axes { .. } => "axes",
         SpawnKind::Axes3D { .. } => "axes_3d",

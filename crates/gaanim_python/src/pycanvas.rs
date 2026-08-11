@@ -27,7 +27,25 @@ use crate::pylayout::{
 use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
-use crate::value_tracker::PyValueTracker;
+use crate::visualization::{PyParameter, PyVariable};
+
+fn reactive_scalar(value: Bound<'_, PyAny>) -> PyResult<(gaanim_api::canvas::DrawableHandle, f64)> {
+    if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+        Ok((
+            parameter.inner.drawable().clone(),
+            parameter.inner.current(),
+        ))
+    } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
+        Ok((
+            variable.parameter.inner.drawable().clone(),
+            variable.parameter.inner.current(),
+        ))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "tracker must be a Parameter or Variable",
+        ))
+    }
+}
 
 fn segment_export_error(error: SegmentExportError) -> PyErr {
     match &error {
@@ -3537,96 +3555,96 @@ impl PyScene {
 
     // -- Reactive objects --
 
-    fn value_tracker(&self, initial: f64) -> PyValueTracker {
-        let handle = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .value_tracker(initial);
-        PyValueTracker::new(handle, initial)
-    }
-
     /// Create a dot positioned at the normalized arc-length of a sampled curve.
-    fn point_on_curve(&self, curve: &PyDrawable, tracker: &PyValueTracker) -> PyDrawable {
-        PyDrawable(
+    fn point_on_curve(
+        &self,
+        curve: &PyDrawable,
+        tracker: Bound<'_, PyAny>,
+    ) -> PyResult<PyDrawable> {
+        let (tracker, _) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .point_on_curve(&curve.0, &tracker.inner),
-        )
+                .point_on_curve(&curve.0, &tracker),
+        ))
     }
 
     #[pyo3(signature = (curve, tracker, length=80.0))]
     fn tangent_on_curve(
         &self,
         curve: &PyDrawable,
-        tracker: &PyValueTracker,
+        tracker: Bound<'_, PyAny>,
         length: f64,
-    ) -> PyDrawable {
-        PyDrawable(
+    ) -> PyResult<PyDrawable> {
+        let (tracker, _) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .tangent_on_curve(&curve.0, &tracker.inner, length),
-        )
+                .tangent_on_curve(&curve.0, &tracker, length),
+        ))
     }
 
     #[pyo3(signature = (curve, tracker, length=80.0))]
     fn normal_on_curve(
         &self,
         curve: &PyDrawable,
-        tracker: &PyValueTracker,
+        tracker: Bound<'_, PyAny>,
         length: f64,
-    ) -> PyDrawable {
-        PyDrawable(
+    ) -> PyResult<PyDrawable> {
+        let (tracker, _) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .normal_on_curve(&curve.0, &tracker.inner, length),
-        )
+                .normal_on_curve(&curve.0, &tracker, length),
+        ))
     }
 
     #[pyo3(signature = (curve, tracker, window=0.02))]
     fn curvature_on_curve(
         &self,
         curve: &PyDrawable,
-        tracker: &PyValueTracker,
+        tracker: Bound<'_, PyAny>,
         window: f64,
-    ) -> PyDrawable {
-        PyDrawable(
+    ) -> PyResult<PyDrawable> {
+        let (tracker, _) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .curvature_on_curve(&curve.0, &tracker.inner, window),
-        )
+                .curvature_on_curve(&curve.0, &tracker, window),
+        ))
     }
 
     #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]
     fn always_redraw_arc(
         &self,
-        tracker: &PyValueTracker,
+        tracker: Bound<'_, PyAny>,
         cx: f64,
         cy: f64,
         radius: f64,
         start_angle: f64,
         sweep_scale: f64,
         sweep_offset: f64,
-    ) -> PyDrawable {
-        PyDrawable(
+    ) -> PyResult<PyDrawable> {
+        let (tracker, current) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .always_redraw_arc(
-                    &tracker.inner,
+                    &tracker,
                     cx,
                     cy,
                     radius,
                     start_angle,
-                    tracker.current_value(),
+                    current,
                     sweep_scale,
                     sweep_offset,
                 ),
-        )
+        ))
     }
 
     #[pyo3(signature = (source, *, dissipating_time=None, max_points=None, min_distance=1.0))]

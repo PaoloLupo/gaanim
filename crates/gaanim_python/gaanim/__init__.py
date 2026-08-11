@@ -45,10 +45,10 @@ from .gaanim_core import (
     part,
     Transition,
     Updater,
-    ValueTracker,
     Axis,
-    Expr,
     Parameter,
+    Readout,
+    Variable,
     CoordinateRef,
     CoordinateSpace,
     CoordinateSpace3D,
@@ -123,10 +123,10 @@ __all__ = [
     "lower_third",
     "credits",
     "Updater",
-    "ValueTracker",
     "Axis",
-    "Expr",
     "Parameter",
+    "Readout",
+    "Variable",
     "CoordinateRef",
     "CoordinateSpace",
     "CoordinateSpace3D",
@@ -150,5 +150,8 @@ __all__ = [
     "NAVY",
     "TEAL",
 ]
+
+# Explicitly expose the traced numeric helpers as ``gaanim.math``.
+from . import math
 
 __version__ = "0.1.0"

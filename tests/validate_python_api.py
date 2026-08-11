@@ -113,9 +113,15 @@ def validate_visualization_contract(module: object) -> list[str]:
     y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y")
     space = scene.number_plane(x_axis, y_axis, width=520.0, height=280.0)
 
-    x = module.Expr.var("x")
     amplitude = scene.parameter(1.0)
-    space.plot(amplitude.expr() * x.sin())
+    from gaanim import math as gm
+    space.plot(lambda x: amplitude * gm.sin(x))
+    readout = scene.readout(lambda: amplitude * 2.0, label="$a$")
+    variable = scene.variable(1.0, label="$k$")
+    if not isinstance(readout, module.Drawable) or not isinstance(variable, module.Drawable):
+        failures.append("reactive readouts must be Drawable instances")
+    if hasattr(module, "Expr") or hasattr(module, "ValueTracker"):
+        failures.append("legacy reactive classes remain public")
     space.parametric(lambda t: (t, t * t), (-1.0, 1.0), samples=32)
     space.implicit(lambda px, py: px * px + py * py - 1.0, resolution=(16, 16))
     space.vector_field(lambda px, py: (-py, px), resolution=(4, 4))

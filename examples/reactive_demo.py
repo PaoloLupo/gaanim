@@ -1,4 +1,4 @@
-"""A ValueTracker driving an always-redrawn curved arrow."""
+"""A Parameter driving an always-redrawn curved arrow."""
 
 import os
 
@@ -10,7 +10,7 @@ title = scene.text("Reactive curved arrow", role="title").fill(BLACK).at(0, 220)
 
 disk = scene.circle(155).no_fill().stroke(BLACK, 4)
 marker = scene.dot(11).fill(GOLD).at(155, 0)
-theta = scene.value_tracker(0.25)
+theta = scene.parameter(0.25)
 
 # The sweep is regenerated natively every frame from the tracker value.
 rotation = scene.always_redraw_arc(theta, 0, 0, 190, 0.0).fill(BLACK).stroke(BLACK, 3)

@@ -12,6 +12,10 @@ use gaanim_scene::{LocalBounds, Path2D, PathSource, SceneSet};
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_path;
 
+pub use gaanim_animation::{
+    ReactiveReadout, format_reactive_number, reactive_readout_update_system,
+};
+
 /// Component for dynamically-rendered decimal numbers that bind to a FloatSignal.
 #[derive(Component, Debug, Clone)]
 pub struct DecimalNumber {
@@ -70,5 +74,21 @@ impl Plugin for GaanimApiPlugin {
             Update,
             decimal_number_update_system.in_set(SceneSet::Updaters),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_reactive_number;
+
+    #[test]
+    fn reactive_number_format_supports_precision_grouping_sign_and_percent() {
+        assert_eq!(format_reactive_number(1234.5, ",.2f", "—"), "1,234.50");
+        assert_eq!(format_reactive_number(0.125, "+.1%", "—"), "+12.5%");
+        assert_eq!(
+            format_reactive_number(f64::NAN, ".2f", "invalid"),
+            "invalid"
+        );
+        assert_eq!(format_reactive_number(2.0, "6.0f", "—"), "     2");
     }
 }

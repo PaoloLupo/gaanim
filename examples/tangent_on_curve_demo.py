@@ -13,7 +13,7 @@ curve = (
     .no_fill()
     .stroke(BLUE, 4)
 )
-tracker = scene.value_tracker(0.0)
+tracker = scene.parameter(0.0)
 tangent = scene.tangent_on_curve(curve, tracker, length=200).stroke(GOLD, 5)
 title = scene.text("tangent on curve").fill(BLACK).at(0, 190)
 scene.play([curve.create().duration(0.7), tangent.create().duration(0.3), title.write().duration(0.4)])

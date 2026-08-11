@@ -6,10 +6,11 @@ pub mod writing;
 
 pub use signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, CurvatureOnCurve, FloatSignal,
-    MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, Signal, SignalBinding, SpecValue,
-    TangentOnCurve, Vec3Signal, always_redraw_regen_system, curvature_on_curve_system,
-    normal_on_curve_system, point_on_curve_system, position_binding_system, signal_binding_system,
-    tangent_on_curve_system,
+    MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, ReactiveReadout, Signal,
+    SignalBinding, SpecValue, TangentOnCurve, Vec3Signal, always_redraw_regen_system,
+    curvature_on_curve_system, format_reactive_number, normal_on_curve_system,
+    point_on_curve_system, position_binding_system, reactive_readout_update_system,
+    right_align_readout_path, signal_binding_system, tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
@@ -48,6 +49,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             path_source_seed_added_system
                 .in_set(SceneSet::Input)
                 .after(sync_delta_time_system),
+        );
+        app.add_systems(
+            Update,
+            reactive_readout_update_system.in_set(SceneSet::Visualization),
         );
 
         // Register tween evaluation in the Animation Phase.

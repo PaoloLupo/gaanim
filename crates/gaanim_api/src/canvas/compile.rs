@@ -4869,6 +4869,82 @@ impl Canvas {
                 }
                 mr
             }
+            SpawnKind::ExpressionReadout {
+                expression,
+                format,
+                prefix,
+                suffix,
+                invalid,
+                font_size,
+            } => {
+                let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
+                    expression
+                        .parameter_ids()
+                        .into_iter()
+                        .filter_map(|logical| {
+                            let actual = id_map.get(&logical).copied()?;
+                            Some((logical, builder.states.get(actual)?.entity))
+                        })
+                        .collect();
+                let mut context = gaanim_expr::EvalContext::new();
+                for (logical, _) in &parameter_entities {
+                    if let Some(actual) = id_map.get(logical).copied()
+                        && let Some(value) = builder.float_signals.get(&actual).copied()
+                    {
+                        context.set_parameter(*logical, value);
+                    }
+                }
+                let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                let size = font_size.unwrap_or(body.size);
+                let text = format!(
+                    "{}{}{}",
+                    prefix,
+                    gaanim_animation::format_reactive_number(
+                        expression.eval(&context).unwrap_or(f64::NAN),
+                        format,
+                        invalid
+                    ),
+                    suffix,
+                );
+                let (path, bounds) = gaanim_text::shaper::compile_text_to_path(
+                    builder.font_registry,
+                    &text,
+                    &body.font_family,
+                    size,
+                )
+                .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
+                let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "ReactiveReadout".to_owned(),
+                    path,
+                    bounds,
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let source_path = std::sync::Arc::new(svg_path.path.clone());
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert((
+                        gaanim_scene::PathSource(source_path.clone()),
+                        gaanim_animation::ReactiveReadout {
+                            expression: expression.clone(),
+                            parameters: parameter_entities,
+                            format: format.clone(),
+                            prefix: prefix.clone(),
+                            suffix: suffix.clone(),
+                            invalid: invalid.clone(),
+                            font_family: body.font_family.clone(),
+                            font_size: size,
+                            last_text: text,
+                            last_path: source_path,
+                            last_bounds: bounds,
+                        },
+                    ));
+                }
+                mr
+            }
             SpawnKind::DataMark { map, source, kind } => {
                 let path = gaanim_visualization::data_mark_path(map, &source.snapshot(), kind)
                     .unwrap_or_default();

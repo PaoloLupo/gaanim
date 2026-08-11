@@ -1,8 +1,10 @@
-use bevy::prelude::{Changed, Commands, Component, Entity, Query, World};
+use bevy::prelude::{Changed, Commands, Component, Entity, Query, Res, World};
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::{BezPath, PathEl, Point};
+use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
+use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::{Bounds3D, SpatialTransform};
+use gaanim_scene::{LocalBounds, Path2D, PathSource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,6 +30,172 @@ impl<T: Send + Sync + Clone + 'static> Signal<T> {
 pub type FloatSignal = Signal<f64>;
 pub type Vec3Signal = Signal<gaanim_core::glam::DVec3>;
 pub type ColorSignal = Signal<Color>;
+
+/// Native numeric text driven by an expression and one or more float signals.
+/// It lives in `gaanim_animation` so previews, headless snapshots, and exports
+/// all run the same visualizer-phase update.
+#[derive(Component, Debug, Clone)]
+pub struct ReactiveReadout {
+    pub expression: Expr,
+    pub parameters: Vec<(gaanim_core::ObjectId, Entity)>,
+    pub format: String,
+    pub prefix: String,
+    pub suffix: String,
+    pub invalid: String,
+    pub font_family: String,
+    pub font_size: f64,
+    pub last_text: String,
+    pub last_path: Arc<BezPath>,
+    pub last_bounds: Bounds3D,
+}
+
+pub fn format_reactive_number(value: f64, specification: &str, invalid: &str) -> String {
+    if !value.is_finite() {
+        return invalid.to_owned();
+    }
+    let mut rest = specification.trim();
+    let explicit_sign = rest.starts_with('+');
+    if explicit_sign {
+        rest = &rest[1..];
+    }
+    let grouped = rest.contains(',');
+    let normalized = rest.replace(',', "");
+    rest = &normalized;
+    let ty = rest
+        .chars()
+        .last()
+        .filter(|c| matches!(c, 'f' | 'e' | 'g' | '%'))
+        .unwrap_or('g');
+    if rest.ends_with(ty) {
+        rest = &rest[..rest.len() - ty.len_utf8()];
+    }
+    let (width_text, precision) = match rest.split_once('.') {
+        Some((width, precision)) => (width, precision.parse::<usize>().unwrap_or(6)),
+        None => (rest, 6),
+    };
+    let width = width_text.parse::<usize>().unwrap_or(0);
+    let percent = ty == '%';
+    let magnitude = if percent { value * 100.0 } else { value };
+    let mut text = match ty {
+        'f' | '%' => format!("{magnitude:.precision$}"),
+        'e' => format!("{magnitude:.precision$e}"),
+        _ => {
+            let absolute = magnitude.abs();
+            let raw = if absolute != 0.0 && !(1e-4..1e6).contains(&absolute) {
+                format!("{magnitude:.precision$e}")
+            } else {
+                format!("{magnitude:.precision$}")
+            };
+            raw.trim_end_matches('0').trim_end_matches('.').to_owned()
+        }
+    };
+    if grouped && !text.contains(['e', 'E']) {
+        let (sign, digits) = text
+            .strip_prefix('-')
+            .map_or(("", text.as_str()), |digits| ("-", digits));
+        let (integer, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+        let reversed = integer.chars().rev().collect::<Vec<_>>();
+        let mut grouped_integer = String::new();
+        for (index, digit) in reversed.iter().enumerate().rev() {
+            grouped_integer.push(*digit);
+            if index > 0 && index % 3 == 0 {
+                grouped_integer.push(',');
+            }
+        }
+        text = format!(
+            "{sign}{grouped_integer}{}",
+            if fraction.is_empty() {
+                String::new()
+            } else {
+                format!(".{fraction}")
+            }
+        );
+    }
+    if explicit_sign && value >= 0.0 {
+        text.insert(0, '+');
+    }
+    if percent {
+        text.push('%');
+    }
+    format!("{:>width$}", text, width = width)
+}
+
+/// Center digits vertically and anchor their right edge at the local origin.
+/// This prevents baseline drift and keeps the unit fixed as the value width
+/// changes.
+pub fn right_align_readout_path(mut path: BezPath, _bounds: Bounds3D) -> (BezPath, Bounds3D) {
+    let rect = path.bounding_box();
+    path.apply_affine(Affine::translate((-rect.x1, -(rect.y0 + rect.y1) * 0.5)));
+    let rect = path.bounding_box();
+    (path, Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1))
+}
+
+/// Restore the cached outline after snapshot replay and only recompile it when
+/// the formatted text changes.
+pub fn reactive_readout_update_system(
+    registry: Res<gaanim_text::font::FontRegistry>,
+    mut query: Query<(
+        &mut ReactiveReadout,
+        &mut Path2D,
+        Option<&mut PathSource>,
+        &mut LocalBounds,
+    )>,
+    signals: Query<&FloatSignal>,
+) {
+    for (mut readout, mut path, path_source, mut bounds) in &mut query {
+        let mut context = EvalContext::new();
+        for (id, entity) in &readout.parameters {
+            if let Ok(signal) = signals.get(*entity) {
+                context.set_parameter(*id, signal.value);
+            }
+        }
+        let value = readout.expression.eval(&context).unwrap_or(f64::NAN);
+        let text = format!(
+            "{}{}{}",
+            readout.prefix,
+            format_reactive_number(value, &readout.format, &readout.invalid),
+            readout.suffix
+        );
+        if text == readout.last_text {
+            let cached_geometry_is_current = path_source
+                .as_ref()
+                .map(|source| Arc::ptr_eq(&source.0, &readout.last_path))
+                .unwrap_or_else(|| Arc::ptr_eq(&path.0, &readout.last_path));
+            if cached_geometry_is_current {
+                continue;
+            }
+
+            // Timeline seeks restore Path2D/PathSource from the t=0 snapshot,
+            // while this component intentionally retains its last formatted
+            // text. Restore the cached outline even when the formatted value
+            // has not crossed another precision boundary.
+            let cached_path = readout.last_path.clone();
+            if let Some(mut source) = path_source {
+                source.0 = cached_path.clone();
+            }
+            path.0 = cached_path;
+            bounds.0 = readout.last_bounds;
+            continue;
+        }
+        if let Ok((new_path, new_bounds)) = gaanim_text::shaper::compile_text_to_path(
+            &registry,
+            &text,
+            &readout.font_family,
+            readout.font_size,
+        ) {
+            let (new_path, new_bounds) = right_align_readout_path(new_path, new_bounds);
+            let new_path = std::sync::Arc::new(new_path);
+            if let Some(mut source) = path_source {
+                source.0 = new_path.clone();
+            }
+            path.0 = new_path;
+            bounds.0 = new_bounds;
+            readout.last_text = text;
+            readout.last_path = path.0.clone();
+            readout.last_bounds = new_bounds;
+        }
+    }
+}
 
 /// Component defining a binding constraint between a source signal and a target entity.
 ///
@@ -547,7 +715,72 @@ fn osculating_circle(path: &BezPath, fraction: f64, window: f64) -> Option<(Poin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::{App, Update};
     use std::sync::Arc;
+
+    #[test]
+    fn reactive_readout_replaces_both_render_paths_when_signal_changes() {
+        let parameter_id = gaanim_core::ObjectId::from_raw(7);
+        let mut app = App::new();
+        app.insert_resource(gaanim_text::font::FontRegistry::new());
+        app.add_systems(Update, reactive_readout_update_system);
+
+        let signal = app.world_mut().spawn(FloatSignal::new(2.5)).id();
+        let initial_path = Arc::new(BezPath::new());
+        let readout = app
+            .world_mut()
+            .spawn((
+                ReactiveReadout {
+                    expression: Expr::parameter(parameter_id),
+                    parameters: vec![(parameter_id, signal)],
+                    format: ".1f".to_owned(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                    invalid: "—".to_owned(),
+                    font_family: "sans-serif".to_owned(),
+                    font_size: 40.0,
+                    last_text: "1.0".to_owned(),
+                    last_path: initial_path.clone(),
+                    last_bounds: Bounds3D::default(),
+                },
+                Path2D(initial_path.clone()),
+                PathSource(initial_path),
+                LocalBounds(Bounds3D::default()),
+            ))
+            .id();
+
+        app.update();
+
+        let component = app.world().get::<ReactiveReadout>(readout).unwrap();
+        let path = app.world().get::<Path2D>(readout).unwrap();
+        let source = app.world().get::<PathSource>(readout).unwrap();
+        assert_eq!(component.last_text, "2.5");
+        assert!(!path.0.elements().is_empty());
+        assert!(Arc::ptr_eq(&path.0, &source.0));
+
+        let expected_path = path.0.clone();
+        let expected_bounds = app.world().get::<LocalBounds>(readout).unwrap().0;
+        let restored_initial = Arc::new(BezPath::new());
+        app.world_mut().entity_mut(readout).insert((
+            Path2D(restored_initial.clone()),
+            PathSource(restored_initial),
+            LocalBounds(Bounds3D::default()),
+        ));
+
+        // Editor playback seeks from its t=0 snapshot every frame. The
+        // formatted value may remain unchanged for several frames, but the
+        // snapshot-restored geometry must not remain at the initial value.
+        app.update();
+
+        let path = app.world().get::<Path2D>(readout).unwrap();
+        let source = app.world().get::<PathSource>(readout).unwrap();
+        assert!(Arc::ptr_eq(&path.0, &expected_path));
+        assert!(Arc::ptr_eq(&source.0, &expected_path));
+        assert_eq!(
+            app.world().get::<LocalBounds>(readout).unwrap().0,
+            expected_bounds
+        );
+    }
 
     #[test]
     fn point_on_curve_uses_normalized_arc_length_and_clamps_tracker() {

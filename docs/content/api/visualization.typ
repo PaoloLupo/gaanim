@@ -17,25 +17,23 @@ marks are then created by that space. This keeps coordinates, layout,
 transformations, clipping, and sampling in one native hierarchy.
 
 ```python
-from gaanim import Axis, BLUE, Expr, Scene
+from gaanim import Axis, BLUE, Scene, math as gm
 
 scene = Scene(1280, 720)
 x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(2).label("x")
 y_axis = Axis.linear(-3, 3).ticks(1).label("f(x)")
 plane = scene.number_plane(x_axis, y_axis, width=1000, height=520)
 
-x = Expr.var("x")
 amplitude = scene.parameter(1.0)
-curve = plane.plot(amplitude.expr() * x.sin()).stroke(BLUE, 3)
+curve = plane.plot(lambda x: amplitude * gm.sin(x)).stroke(BLUE, 3)
 
 scene.play([plane.create(), curve.create()])
 scene.play([amplitude.animate_to(2.0).duration(1.2)])
 ```
 
-`Expr` is evaluated and differentiated in Rust. An expression that references
-a `Parameter` is resampled while that parameter animates without executing a
-Python callback per frame. Python callables remain available and are sampled
-once when the scene is built.
+Lambdas are traced once with `gaanim.math` and then evaluated and
+differentiated in Rust. A traced expression that references a `Parameter` is
+resampled while that parameter animates without a Python callback per frame.
 
 == Axis
 
@@ -94,9 +92,9 @@ height colormap. Static Python callbacks are never kept as per-frame updaters.
 #api-entry(
   name: "CoordinateSpace.plot",
   kind: "factory",
-  signature: "plot(Expr | callable, domain=None, *, variable='x', samples=None, tolerance=0.75) -> Drawable",
+  signature: "plot(callable, domain=None, *, samples=None, tolerance=0.75, derivative=0) -> Drawable",
   params: (
-    (name: "function", type: "Expr | callable", default: none, desc: [Scalar function y=f(x).]),
+    (name: "function", type: "callable", default: none, desc: [Scalar function y=f(x), traced once with `gaanim.math`.]),
     (name: "domain", type: "(float,float)", default: "x axis domain", desc: [Sampling interval.]),
     (name: "samples", type: "int", default: "adaptive", desc: [Set for fixed sampling.]),
     (name: "tolerance", type: "float", default: "0.75", desc: [Maximum visual error for adaptive sampling.]),

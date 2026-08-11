@@ -327,8 +327,11 @@ pub fn compile_text_to_path(
 
             // Apply horizontal pen offsets
             path.apply_affine(Affine::translate((glyph_x, glyph_y)));
-            // Scale and flip outline
-            path.apply_affine(Affine::scale_non_uniform(scale, -scale));
+            // Font outlines and Gaanim world coordinates are both Y-up. Keep
+            // this direct-to-path helper consistent with
+            // `compile_text_to_hierarchy`; flipping here mirrored reactive
+            // readout digits vertically.
+            path.apply_affine(Affine::scale(scale));
 
             let path_bounding_rect = path.bounding_box();
             let glyph_local_bounds = Bounds3D::new_2d(

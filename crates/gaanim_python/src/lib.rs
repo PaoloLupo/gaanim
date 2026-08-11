@@ -16,7 +16,6 @@ mod pystyle;
 mod pytext;
 mod transition;
 mod updater;
-mod value_tracker;
 mod visualization;
 
 /// Register the `gaanim_core` builtin module.
@@ -58,10 +57,11 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pylayout::PyLayoutItem>()?;
     m.add_class::<pylayout::PyLayout>()?;
     m.add_class::<updater::PyUpdater>()?;
-    m.add_class::<value_tracker::PyValueTracker>()?;
     m.add_class::<visualization::PyAxis>()?;
     m.add_class::<visualization::PyExpr>()?;
     m.add_class::<visualization::PyParameter>()?;
+    m.add_class::<visualization::PyReadout>()?;
+    m.add_class::<visualization::PyVariable>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpace3D>()?;

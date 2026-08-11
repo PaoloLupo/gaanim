@@ -1003,6 +1003,73 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
+== Native reactivity
+
+Reactive values are traced once when a scene is built. Use `Parameter` as an
+invisible scalar, `Variable` when the scalar must also be visible, and
+`Readout` to display a derived quantity. During playback Gaanim evaluates the
+native expression tree in Rust: it does not re-enter Python or acquire the
+GIL per frame.
+
+Use functions from `gaanim.math` inside traced lambdas. Standard-library
+`math` functions and Python control flow cannot consume symbolic values. A
+plot lambda accepts its symbolic input once; a readout lambda takes no
+arguments. The result must be a number or a traced scalar expression.
+
+#api-entry(
+  name: "Scene.parameter",
+  kind: "factory",
+  signature: "parameter(initial: float) -> Parameter",
+  params: ((name: "initial", type: "float", default: none, desc: [Finite starting scalar value.]),),
+  returns: (type: "Parameter", desc: [An invisible scalar usable directly in `gaanim.math` expressions.]),
+  desc: [`current` reads its construction value, `set(value)` changes it before compilation, and `animate_to(value, duration=None)` returns an `Anim`. Parameters support arithmetic, power, negation, and `abs`. Non-finite values raise `ValueError`.],
+)[
+```python
+from gaanim import Axis, Scene, math as gm
+
+scene = Scene(640, 360)
+amplitude = scene.parameter(1.0)
+axes = scene.axes(Axis.linear(-4, 4), Axis.linear(-2, 2))
+curve = axes.plot(lambda x: amplitude * gm.sin(x))
+scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2)])
+```
+]
+
+#api-entry(
+  name: "Scene.variable",
+  kind: "factory",
+  signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Variable",
+  params: ((name: "label", type: "str", default: none, desc: [Visible label placed before the equality sign.]), (name: "format", type: "str", default: "'.2f'", desc: [Numeric format: width, sign, grouping, precision, and `f`, `e`, `g`, or `%`.]), (name: "unit", type: "str | None", default: none, desc: [Optional visible unit.]),),
+  returns: (type: "Variable", desc: [A `Drawable` and reactive scalar at the same time.]),
+  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts; the returned group retains normal create, write, fade, layout, and style operations.],
+)[
+```python
+from gaanim import RED, Scene
+
+scene = Scene(640, 360)
+k = scene.variable(10, label="$k$", format=".0f", color=RED)
+scene.play([k.create(), k.animate_to(100, duration=1.5)])
+```
+]
+
+#api-entry(
+  name: "Scene.readout",
+  kind: "factory",
+  signature: "readout(source, *, label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Readout",
+  params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [A scalar or no-argument lambda traced once.]), (name: "invalid", type: "str", default: "'—'", desc: [Text used when evaluation is invalid or non-finite.]),),
+  returns: (type: "Readout", desc: [A reactive `Drawable` group.]),
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts.],
+)[
+```python
+from gaanim import Scene, math as gm
+
+scene = Scene(640, 360)
+radius = scene.parameter(1.0)
+area = scene.readout(lambda: gm.pi * radius**2, label="$A$", format=".2f", unit="m²")
+scene.play([area.create(), radius.animate_to(3.0, duration=1.5)])
+```
+]
+
 == Reactive Geometry
 
 #api-entry(

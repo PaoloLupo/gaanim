@@ -466,6 +466,15 @@ pub enum SpawnKind {
         domain: (f64, f64),
         sampling: gaanim_visualization::Sampling,
     },
+    /// Numeric text evaluated from a native expression without Python callbacks.
+    ExpressionReadout {
+        expression: gaanim_expr::Expr,
+        format: String,
+        prefix: String,
+        suffix: String,
+        invalid: String,
+        font_size: Option<f64>,
+    },
     /// One table-backed mark regenerated natively when its DataSource changes.
     DataMark {
         map: gaanim_visualization::CoordinateMap2D,

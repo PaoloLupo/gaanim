@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    Canvas as ApiCanvas, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
+    Canvas as ApiCanvas, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, Direction,
     NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
@@ -13,6 +13,7 @@ use gaanim_visualization::{
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pyclass_init::PyClassInitializer;
 use pyo3::types::{PyAny, PyDict};
 
 use crate::color::PyColor;
@@ -21,6 +22,93 @@ use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 
 fn value_error(error: impl ToString) -> PyErr {
     PyValueError::new_err(error.to_string())
+}
+
+fn trace_readout_source(source: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
+    if source.is_callable() {
+        let result = source.call0().map_err(|_| {
+            PyTypeError::new_err(
+                "readout lambda must be a no-argument scalar expression traced with gaanim.math",
+            )
+        })?;
+        extract_expr(result).map_err(|_| {
+            PyTypeError::new_err(
+                "readout lambda must return a number, Parameter, Variable, or traced scalar",
+            )
+        })
+    } else {
+        extract_expr(source)
+    }
+}
+
+fn build_readout_parts(
+    canvas: &mut ApiCanvas,
+    expression: NativeExpr,
+    label: Option<String>,
+    format: String,
+    prefix: String,
+    suffix: String,
+    unit: Option<String>,
+    font_size: Option<f64>,
+    color: Option<PyColor>,
+    invalid: String,
+) -> (
+    gaanim_api::canvas::DrawableHandle,
+    Option<PyDrawable>,
+    Option<PyDrawable>,
+    PyDrawable,
+    Option<PyDrawable>,
+) {
+    let mut number =
+        canvas.expression_readout(expression, format, prefix, suffix, invalid, font_size);
+    if let Some(color) = color.clone() {
+        number = number.fill(color.0);
+    }
+    let number_part = PyDrawable(number.clone());
+    let equals_part = label.as_deref().filter(|value| !value.is_empty()).map(|_| {
+        let mut handle = canvas.text("=");
+        if let Some(color) = color.clone() {
+            handle = handle.fill(color.0);
+        }
+        // The numeric outline is right-aligned when it is compiled. Reserve
+        // one digit of growth on its left so changing magnitude does not run
+        // into the equality sign while its right edge (and unit) stays fixed.
+        handle = handle.next_to(&number_part.0, Direction::Left, 30.0);
+        PyDrawable(handle)
+    });
+    let label_part = label.filter(|value| !value.is_empty()).map(|value| {
+        let mut handle = canvas.text(&value);
+        if let Some(color) = color.clone() {
+            handle = handle.fill(color.0);
+        }
+        handle = handle.next_to(
+            &equals_part.as_ref().expect("equals part exists").0,
+            Direction::Left,
+            10.0,
+        );
+        PyDrawable(handle)
+    });
+    let unit_part = unit.filter(|value| !value.is_empty()).map(|value| {
+        let mut handle = canvas.text(&value);
+        if let Some(color) = color.clone() {
+            handle = handle.fill(color.0);
+        }
+        handle = handle.next_to(&number_part.0, Direction::Right, 10.0);
+        PyDrawable(handle)
+    });
+    let mut members = Vec::new();
+    if let Some(part) = &label_part {
+        members.push(&part.0);
+    }
+    if let Some(part) = &equals_part {
+        members.push(&part.0);
+    }
+    members.push(&number_part.0);
+    if let Some(part) = &unit_part {
+        members.push(&part.0);
+    }
+    let group = canvas.group(&members);
+    (group, label_part, equals_part, number_part, unit_part)
 }
 
 fn sampling(samples: Option<usize>, tolerance: f64) -> PyResult<Sampling> {
@@ -208,18 +296,28 @@ impl PyAxis {
     }
 }
 
-/// Native expression tree evaluated by Rust, including per-frame parameters.
-#[pyclass(name = "Expr", module = "gaanim_core", from_py_object)]
+/// Private native expression tree used while tracing public Python lambdas.
+///
+/// This is intentionally registered as `_Expr`: applications construct
+/// expressions by using `Parameter`/`Variable` values and `gaanim.math`, not
+/// by depending on the AST implementation.
+#[pyclass(name = "_Expr", module = "gaanim_core", from_py_object)]
 #[derive(Clone)]
 pub struct PyExpr(pub NativeExpr);
 
 fn extract_expr(value: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
     if let Ok(expr) = value.extract::<PyRef<'_, PyExpr>>() {
         Ok(expr.0.clone())
+    } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+        Ok(parameter.inner.expression())
+    } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
+        Ok(variable.parameter.inner.expression())
     } else if let Ok(number) = value.extract::<f64>() {
         Ok(NativeExpr::constant(number))
     } else {
-        Err(PyTypeError::new_err("expected Expr or a real number"))
+        Err(PyTypeError::new_err(
+            "expected a traced scalar (Parameter, Variable, or number)",
+        ))
     }
 }
 
@@ -363,6 +461,18 @@ impl PyExpr {
     ) -> PyResult<Self> {
         self.pow(other)
     }
+
+    fn __rpow__(
+        &self,
+        other: Bound<'_, PyAny>,
+        _modulo: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        Ok(Self(extract_expr(other)?.pow(self.0.clone())))
+    }
+
+    fn __abs__(&self) -> Self {
+        Self(self.0.clone().abs())
+    }
 }
 
 /// Animatable scalar referenced from an [`Expr`].
@@ -383,15 +493,252 @@ impl PyParameter {
         self.inner.set(value).map_err(value_error)
     }
 
-    fn animate_to(&self, value: f64) -> PyResult<PyCanvasAnim> {
-        self.inner
-            .animate_to(value)
-            .map(|inner| PyCanvasAnim { inner })
-            .map_err(value_error)
+    #[pyo3(signature = (value, duration=None))]
+    fn animate_to(&self, value: f64, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
+        let inner = self.inner.animate_to(value).map_err(value_error)?;
+        Ok(PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
+        })
     }
 
-    fn expr(&self) -> PyExpr {
-        PyExpr(self.inner.expr())
+    fn __neg__(&self) -> PyExpr {
+        PyExpr(-self.inner.expression())
+    }
+
+    fn __add__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(self.inner.expression() + extract_expr(other)?))
+    }
+
+    fn __radd__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(extract_expr(other)? + self.inner.expression()))
+    }
+
+    fn __sub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(self.inner.expression() - extract_expr(other)?))
+    }
+
+    fn __rsub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(extract_expr(other)? - self.inner.expression()))
+    }
+
+    fn __mul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(self.inner.expression() * extract_expr(other)?))
+    }
+
+    fn __rmul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(extract_expr(other)? * self.inner.expression()))
+    }
+
+    fn __truediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(self.inner.expression() / extract_expr(other)?))
+    }
+
+    fn __rtruediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(extract_expr(other)? / self.inner.expression()))
+    }
+
+    fn __pow__(
+        &self,
+        other: Bound<'_, PyAny>,
+        _modulo: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyExpr> {
+        Ok(PyExpr(self.inner.expression().pow(extract_expr(other)?)))
+    }
+
+    fn __rpow__(
+        &self,
+        other: Bound<'_, PyAny>,
+        _modulo: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyExpr> {
+        Ok(PyExpr(extract_expr(other)?.pow(self.inner.expression())))
+    }
+
+    fn __abs__(&self) -> PyExpr {
+        PyExpr(self.inner.expression().abs())
+    }
+}
+
+/// A visible parameter.  Its drawable base owns the stable readout group;
+/// scalar operations still produce private traced expressions.
+#[pyclass(name = "Variable", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyVariable {
+    pub(crate) parameter: PyParameter,
+    label_part: Option<PyDrawable>,
+    equals_part: Option<PyDrawable>,
+    number_part: PyDrawable,
+    unit_part: Option<PyDrawable>,
+}
+
+impl PyVariable {
+    fn initializer(
+        drawable: gaanim_api::canvas::DrawableHandle,
+        parameter: PyParameter,
+        label_part: Option<PyDrawable>,
+        equals_part: Option<PyDrawable>,
+        number_part: PyDrawable,
+        unit_part: Option<PyDrawable>,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(drawable)).add_subclass(Self {
+            parameter,
+            label_part,
+            equals_part,
+            number_part,
+            unit_part,
+        })
+    }
+}
+
+#[pymethods]
+impl PyVariable {
+    #[getter]
+    fn current(&self) -> f64 {
+        self.parameter.inner.current()
+    }
+
+    fn set(&self, value: f64) -> PyResult<()> {
+        self.parameter.inner.set(value).map_err(value_error)
+    }
+
+    #[pyo3(signature = (value, duration=None))]
+    fn animate_to(&self, value: f64, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
+        let inner = self
+            .parameter
+            .inner
+            .animate_to(value)
+            .map_err(value_error)?;
+        Ok(PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
+        })
+    }
+
+    #[getter]
+    fn label(&self) -> Option<PyDrawable> {
+        self.label_part.clone()
+    }
+    #[getter]
+    fn equals(&self) -> Option<PyDrawable> {
+        self.equals_part.clone()
+    }
+    #[getter]
+    fn number(&self) -> PyDrawable {
+        self.number_part.clone()
+    }
+    #[getter]
+    fn unit(&self) -> Option<PyDrawable> {
+        self.unit_part.clone()
+    }
+
+    fn __neg__(&self) -> PyExpr {
+        PyExpr(-self.parameter.inner.expression())
+    }
+    fn __add__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            self.parameter.inner.expression() + extract_expr(other)?,
+        ))
+    }
+    fn __radd__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            extract_expr(other)? + self.parameter.inner.expression(),
+        ))
+    }
+    fn __sub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            self.parameter.inner.expression() - extract_expr(other)?,
+        ))
+    }
+    fn __rsub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            extract_expr(other)? - self.parameter.inner.expression(),
+        ))
+    }
+    fn __mul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            self.parameter.inner.expression() * extract_expr(other)?,
+        ))
+    }
+    fn __rmul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            extract_expr(other)? * self.parameter.inner.expression(),
+        ))
+    }
+    fn __truediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            self.parameter.inner.expression() / extract_expr(other)?,
+        ))
+    }
+    fn __rtruediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            extract_expr(other)? / self.parameter.inner.expression(),
+        ))
+    }
+    fn __pow__(
+        &self,
+        other: Bound<'_, PyAny>,
+        _modulo: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            self.parameter.inner.expression().pow(extract_expr(other)?),
+        ))
+    }
+    fn __rpow__(
+        &self,
+        other: Bound<'_, PyAny>,
+        _modulo: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyExpr> {
+        Ok(PyExpr(
+            extract_expr(other)?.pow(self.parameter.inner.expression()),
+        ))
+    }
+    fn __abs__(&self) -> PyExpr {
+        PyExpr(self.parameter.inner.expression().abs())
+    }
+}
+
+/// A stable group containing the visible parts of a reactive value.
+#[pyclass(name = "Readout", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyReadout {
+    label_part: Option<PyDrawable>,
+    equals_part: Option<PyDrawable>,
+    number_part: PyDrawable,
+    unit_part: Option<PyDrawable>,
+}
+
+impl PyReadout {
+    fn initializer(
+        drawable: gaanim_api::canvas::DrawableHandle,
+        label_part: Option<PyDrawable>,
+        equals_part: Option<PyDrawable>,
+        number_part: PyDrawable,
+        unit_part: Option<PyDrawable>,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(drawable)).add_subclass(Self {
+            label_part,
+            equals_part,
+            number_part,
+            unit_part,
+        })
+    }
+}
+
+#[pymethods]
+impl PyReadout {
+    #[getter]
+    fn label(&self) -> Option<PyDrawable> {
+        self.label_part.clone()
+    }
+    #[getter]
+    fn equals(&self) -> Option<PyDrawable> {
+        self.equals_part.clone()
+    }
+    #[getter]
+    fn number(&self) -> PyDrawable {
+        self.number_part.clone()
+    }
+    #[getter]
+    fn unit(&self) -> Option<PyDrawable> {
+        self.unit_part.clone()
     }
 }
 
@@ -790,36 +1137,41 @@ impl PyCoordinateSpace {
             .ok_or_else(|| value_error("layer is not available on this space"))
     }
 
-    #[pyo3(signature = (function, domain=None, *, variable="x", samples=None, tolerance=0.75))]
+    #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=0))]
     fn plot(
         &self,
         function: Bound<'_, PyAny>,
         domain: Option<(f64, f64)>,
-        variable: &str,
         samples: Option<usize>,
         tolerance: f64,
+        derivative: usize,
     ) -> PyResult<PyDrawable> {
         let domain = domain.unwrap_or_else(|| self.inner.map().x.domain());
         let sampling = sampling(samples, tolerance)?;
-        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
-        if let Ok(expr) = function.extract::<PyRef<'_, PyExpr>>() {
-            canvas
-                .expression_plot(&self.inner, expr.0.clone(), variable, domain, sampling)
-                .map(PyDrawable)
-                .map_err(value_error)
+        let expression = if let Ok(expr) = function.extract::<PyRef<'_, PyExpr>>() {
+            expr.0.clone()
         } else if function.is_callable() {
-            canvas
-                .function_plot(&self.inner, domain, sampling, |x| {
-                    function
-                        .call1((x,))
-                        .and_then(|value| value.extract::<f64>())
-                        .ok()
-                })
-                .map(PyDrawable)
-                .map_err(value_error)
+            // The lambda is invoked once with a symbolic probe.  From this
+            // point on sampling and all reactive updates stay in Rust.
+            let probe = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
+            let result = function.call1((probe,)).map_err(|_| {
+                PyTypeError::new_err(
+                    "plot lambda must return a scalar traced with gaanim.math; ".to_owned()
+                        + "Python math/control flow cannot be traced",
+                )
+            })?;
+            extract_expr(result).map_err(|_| {
+                PyTypeError::new_err("plot lambda must return a scalar traced with gaanim.math")
+            })?
         } else {
-            Err(PyTypeError::new_err("function must be an Expr or callable"))
-        }
+            return Err(PyTypeError::new_err("function must be callable"));
+        };
+        let expression = (0..derivative).fold(expression, |value, _| value.derivative("x"));
+        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
+        canvas
+            .expression_plot(&self.inner, expression, "x", domain, sampling)
+            .map(PyDrawable)
+            .map_err(value_error)
     }
 
     #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75))]
@@ -1427,6 +1779,84 @@ impl PyScene {
             .parameter(initial)
             .map_err(value_error)?;
         Ok(PyParameter { inner })
+    }
+
+    #[pyo3(signature = (source, *, label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="—"))]
+    #[allow(clippy::too_many_arguments)]
+    fn readout<'py>(
+        &self,
+        py: Python<'py>,
+        source: Bound<'py, PyAny>,
+        label: Option<String>,
+        format: &str,
+        prefix: &str,
+        suffix: &str,
+        unit: Option<String>,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+        invalid: &str,
+    ) -> PyResult<Py<PyReadout>> {
+        let expression = trace_readout_source(source)?;
+        let (group, label_part, equals_part, number_part, unit_part) = build_readout_parts(
+            &mut self.inner.lock().expect("scene canvas poisoned"),
+            expression,
+            label,
+            format.to_owned(),
+            prefix.to_owned(),
+            suffix.to_owned(),
+            unit,
+            font_size,
+            color,
+            invalid.to_owned(),
+        );
+        Py::new(
+            py,
+            PyReadout::initializer(group, label_part, equals_part, number_part, unit_part),
+        )
+    }
+
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="—"))]
+    #[allow(clippy::too_many_arguments)]
+    fn variable<'py>(
+        &self,
+        py: Python<'py>,
+        initial: f64,
+        label: String,
+        format: &str,
+        prefix: &str,
+        suffix: &str,
+        unit: Option<String>,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+        invalid: &str,
+    ) -> PyResult<Py<PyVariable>> {
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        let parameter = PyParameter {
+            inner: canvas.parameter(initial).map_err(value_error)?,
+        };
+        let (group, label_part, equals_part, number_part, unit_part) = build_readout_parts(
+            &mut canvas,
+            parameter.inner.expression(),
+            Some(label),
+            format.to_owned(),
+            prefix.to_owned(),
+            suffix.to_owned(),
+            unit,
+            font_size,
+            color,
+            invalid.to_owned(),
+        );
+        Py::new(
+            py,
+            PyVariable::initializer(
+                group,
+                parameter,
+                label_part,
+                equals_part,
+                number_part,
+                unit_part,
+            ),
+        )
     }
 
     #[pyo3(signature = (axis, *, length=None))]

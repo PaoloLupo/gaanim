@@ -5,7 +5,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = scene.arc(0, 0, 160, 0.0, math.pi * 1.35).no_fill().stroke(BLUE, 4)
-tracker = scene.value_tracker(0.0)
+tracker = scene.parameter(0.0)
 dot = scene.point_on_curve(curve, tracker).fill(GOLD)
 tangent = scene.tangent_on_curve(curve, tracker, length=80).stroke(BLACK, 4)
 title = scene.text("Bézier curve bindings").fill(BLACK).at(0, 190)

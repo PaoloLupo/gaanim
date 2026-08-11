@@ -13,7 +13,7 @@ curve = (
     .no_fill()
     .stroke(BLUE, 4)
 )
-tracker = scene.value_tracker(0.0)
+tracker = scene.parameter(0.0)
 dot = scene.point_on_curve(curve, tracker).fill(GOLD)
 title = scene.text("point on curve").fill(BLACK).at(0, 190)
 scene.play([curve.create().duration(0.7), dot.create().duration(0.3), title.write().duration(0.4)])

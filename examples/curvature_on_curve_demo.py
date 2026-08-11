@@ -8,7 +8,7 @@ curve = scene.polyline([
     (180 * math.cos(t), 100 * math.sin(2 * t))
     for t in (2 * math.pi * index / 240 for index in range(241))
 ]).no_fill().stroke(BLUE, 4)
-tracker = scene.value_tracker(0.15)
+tracker = scene.parameter(0.15)
 circle = scene.curvature_on_curve(curve, tracker).no_fill().stroke(GOLD, 3)
 title = scene.text("osculating circle").fill(BLACK).at(0, 190)
 scene.play([curve.create().duration(0.7), circle.create().duration(0.3), title.write().duration(0.4)])
