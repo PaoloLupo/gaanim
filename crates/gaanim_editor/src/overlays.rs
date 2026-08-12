@@ -32,21 +32,21 @@ impl Default for EditorOverlays {
     }
 }
 
-fn effective_zoom(cam: &Camera) -> f64 {
+fn effective_zoom(cam: &ResolvedCamera) -> f64 {
     match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => (zoom * cam.viewport_scale).max(0.01),
+        gaanim_math::Projection::Orthographic { zoom } => (zoom * cam.viewport.scale).max(0.01),
         _ => 1.0,
     }
 }
 
-fn world_to_egui(cam: &Camera, window: &Window, world: glam::DVec3) -> egui::Pos2 {
+fn world_to_egui(cam: &ResolvedCamera, window: &Window, world: glam::DVec3) -> egui::Pos2 {
     if matches!(cam.projection, gaanim_math::Projection::Perspective { .. }) {
         let s = cam.world_to_screen(world);
         return egui::pos2(s.x as f32, s.y as f32);
     }
     let eff = effective_zoom(cam);
     let hw = window.width() as f64 * 0.5;
-    let hh = window.height() as f64 * 0.5 + cam.viewport_offset_y;
+    let hh = window.height() as f64 * 0.5 + cam.viewport.offset_y;
     let angle = cam.z_angle();
     let cos = (-angle).cos();
     let sin = (-angle).sin();
@@ -57,13 +57,13 @@ fn world_to_egui(cam: &Camera, window: &Window, world: glam::DVec3) -> egui::Pos
     egui::pos2((hw + rx * eff) as f32, (hh - ry * eff) as f32)
 }
 
-fn egui_to_world(cam: &Camera, window: &Window, screen: egui::Pos2) -> glam::DVec3 {
+fn egui_to_world(cam: &ResolvedCamera, window: &Window, screen: egui::Pos2) -> glam::DVec3 {
     if matches!(cam.projection, gaanim_math::Projection::Perspective { .. }) {
         return cam.screen_to_world(glam::DVec2::new(screen.x as f64, screen.y as f64));
     }
     let eff = effective_zoom(cam);
     let hw = window.width() as f64 * 0.5;
-    let hh = window.height() as f64 * 0.5 + cam.viewport_offset_y;
+    let hh = window.height() as f64 * 0.5 + cam.viewport.offset_y;
     let angle = cam.z_angle();
     // screen -> rotated
     let rx = (screen.x as f64 - hw) / eff;
@@ -258,10 +258,10 @@ pub fn scene_overlays_system(
         // Dibujar un rectángulo fijo centrado en la ventana usando viewport scale/offset.
         let w = window.width() as f32;
         let h = window.height() as f32;
-        let vp_w = cam.viewport_width as f32 * cam.viewport_scale as f32;
-        let vp_h = cam.viewport_height as f32 * cam.viewport_scale as f32;
+        let vp_w = cam.viewport_width as f32 * cam.viewport.scale as f32;
+        let vp_h = cam.viewport_height as f32 * cam.viewport.scale as f32;
         let cx = w * 0.5;
-        let cy = h * 0.5 + cam.viewport_offset_y as f32 * cam.viewport_scale as f32;
+        let cy = h * 0.5 + cam.viewport.offset_y as f32;
         vec![
             egui::pos2(cx - vp_w * 0.5, cy - vp_h * 0.5),
             egui::pos2(cx + vp_w * 0.5, cy - vp_h * 0.5),

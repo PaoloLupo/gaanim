@@ -11,9 +11,9 @@ pub enum SceneSet {
     Input,
     /// Phase 2: Evaluating animation tweens, lenses, and keyframes.
     Animation,
-    /// Phase 3: Resolving the authored camera into the presentation camera.
+    /// Resolve reactive camera constraints after layout and before propagation.
     Camera,
-    /// Phase 4: Applying custom Mobject updaters (e.g. rotate updater, orbit updaters, tracked paths).
+    /// Phase 3: Applying custom Mobject updaters (e.g. rotate updater, orbit updaters, tracked paths).
     Updaters,
     /// Phase 4: Regenerating coordinate spaces, plots, and data-driven marks.
     Visualization,
@@ -44,10 +44,10 @@ impl Plugin for GaanimScenePlugin {
             (
                 SceneSet::Input,
                 SceneSet::Animation,
-                SceneSet::Camera,
                 SceneSet::Updaters,
                 SceneSet::Visualization,
                 SceneSet::Layout,
+                SceneSet::Camera,
                 SceneSet::Propagation,
                 SceneSet::Bounds,
                 SceneSet::Extraction,
@@ -58,6 +58,7 @@ impl Plugin for GaanimScenePlugin {
 
         app.init_resource::<gaanim_math::ResolvedCamera>()
             .init_resource::<gaanim_math::CameraViewOverride>()
+            .init_resource::<gaanim_math::CameraViewport>()
             .add_systems(
                 Update,
                 crate::systems::resolve_camera_system.in_set(SceneSet::Camera),
@@ -162,7 +163,7 @@ mod tests {
 
         assert_eq!(*app.world().resource::<gaanim_math::Camera>(), authored);
         assert_eq!(
-            app.world().resource::<gaanim_math::ResolvedCamera>().0,
+            app.world().resource::<gaanim_math::ResolvedCamera>().camera,
             free
         );
     }

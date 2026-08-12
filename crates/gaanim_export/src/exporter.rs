@@ -691,13 +691,32 @@ where
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
         app.update();
 
-        let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
-        let raw_scene =
-            gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), camera.as_ref());
+        let resolved_camera = app
+            .world()
+            .get_resource::<gaanim_math::ResolvedCamera>()
+            .copied()
+            .or_else(|| {
+                app.world()
+                    .get_resource::<gaanim_math::Camera>()
+                    .copied()
+                    .map(|camera| {
+                        gaanim_math::ResolvedCamera::new(
+                            camera,
+                            gaanim_math::CameraViewport::default(),
+                        )
+                    })
+            });
+        let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
+            app.world_mut(),
+            resolved_camera.as_ref().map(|resolved| &resolved.camera),
+        );
 
         let mut scene = bevy_vello::vello::Scene::new();
-        let camera_to_vello =
-            capture_camera_to_vello_transform(camera.as_ref(), config.width, config.height);
+        let camera_to_vello = capture_camera_to_vello_transform(
+            resolved_camera.as_ref(),
+            config.width,
+            config.height,
+        );
         scene.append(&raw_scene, Some(camera_to_vello));
 
         let background = app
@@ -732,39 +751,46 @@ where
 /// ratio. Thumbnail captures are deliberately much smaller than their source
 /// canvases, so their camera viewport must be scaled down as well.
 fn capture_camera_to_vello_transform(
-    camera: Option<&gaanim_math::Camera>,
+    resolved: Option<&gaanim_math::ResolvedCamera>,
     output_width: u32,
     output_height: u32,
 ) -> kurbo::Affine {
-    let (zoom, viewport_scale, viewport_width, viewport_height, cam_x, cam_y) = camera
-        .map(|camera| {
+    let (zoom, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) = resolved
+        .map(|resolved| {
+            let camera = &resolved.camera;
             let zoom = match camera.projection {
                 gaanim_math::Projection::Orthographic { zoom } => zoom,
                 _ => 1.0,
             };
             (
                 zoom,
-                camera.viewport_scale,
                 camera.viewport_width.max(1),
                 camera.viewport_height.max(1),
                 camera.position.x,
                 camera.position.y,
+                camera.z_angle(),
+                resolved.viewport,
             )
         })
         .unwrap_or((
-            1.0,
             1.0,
             output_width.max(1),
             output_height.max(1),
             0.0,
             0.0,
+            0.0,
+            gaanim_math::CameraViewport::default(),
         ));
     let fit_scale = (output_width as f64 / viewport_width as f64)
         .min(output_height as f64 / viewport_height as f64);
-    let scale = zoom * viewport_scale * fit_scale;
+    let scale = zoom * fit_scale * viewport.scale;
+    let offset_y = viewport.offset_y * fit_scale;
 
-    kurbo::Affine::translate((output_width as f64 / 2.0, output_height as f64 / 2.0))
-        * kurbo::Affine::scale_non_uniform(scale, -scale)
+    kurbo::Affine::translate((
+        output_width as f64 / 2.0,
+        output_height as f64 / 2.0 + offset_y,
+    )) * kurbo::Affine::scale_non_uniform(scale, -scale)
+        * kurbo::Affine::rotate(-angle)
         * kurbo::Affine::translate((-cam_x, -cam_y))
 }
 
@@ -819,6 +845,12 @@ fn hybrid_capture_system(
             pipeline.phase = 1;
         }
         1 => {
+            // Let Bevy propagate a changed Camera3d projection through its
+            // frustum and render-world extraction before requesting a GPU
+            // screenshot. The timeline remains at the exact seek timestamp.
+            pipeline.phase = 2;
+        }
+        2 => {
             let tx = pipeline.tx.clone();
             let width = pipeline.width;
             let height = pipeline.height;
@@ -857,7 +889,7 @@ fn hybrid_capture_system(
                     let _ = tx.send(data);
                 },
             );
-            pipeline.phase = 2;
+            pipeline.phase = 3;
         }
         _ => {
             let received = pipeline.rx.lock().unwrap().try_recv();
@@ -971,7 +1003,9 @@ mod tests {
     #[test]
     fn direct_capture_scales_a_canvas_down_to_a_thumbnail() {
         let camera = gaanim_math::Camera::ortho_2d(1920, 1080);
-        let transform = capture_camera_to_vello_transform(Some(&camera), 320, 180);
+        let resolved =
+            gaanim_math::ResolvedCamera::new(camera, gaanim_math::CameraViewport::default());
+        let transform = capture_camera_to_vello_transform(Some(&resolved), 320, 180);
 
         let top_left = transform * kurbo::Point::new(-960.0, 540.0);
         let bottom_right = transform * kurbo::Point::new(960.0, -540.0);
@@ -979,6 +1013,25 @@ mod tests {
         assert!((top_left.y - 0.0).abs() < 1e-9);
         assert!((bottom_right.x - 320.0).abs() < 1e-9);
         assert!((bottom_right.y - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn direct_capture_uses_resolved_rig_pose_rotation_and_viewport() {
+        let mut camera = gaanim_math::Camera::ortho_2d(960, 540);
+        camera.position = gaanim_core::glam::DVec3::new(120.0, -35.0, 0.0);
+        camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(0.25);
+        camera.projection = gaanim_math::Projection::Orthographic { zoom: 1.4 };
+        let viewport = gaanim_math::CameraViewport {
+            scale: 0.8,
+            offset_y: 24.0,
+        };
+        let expected = camera.to_vello_transform_with_viewport(viewport);
+        let resolved = gaanim_math::ResolvedCamera::new(camera, viewport);
+        let actual = capture_camera_to_vello_transform(Some(&resolved), 960, 540);
+
+        for (actual, expected) in actual.as_coeffs().iter().zip(expected.as_coeffs()) {
+            assert!((actual - expected).abs() < 1e-9);
+        }
     }
 
     #[test]

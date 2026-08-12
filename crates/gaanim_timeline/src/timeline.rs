@@ -649,17 +649,6 @@ impl Timeline {
             0.0
         };
 
-        // Snapshots contain entity state but not resources. Reset the camera
-        // before replaying explicit camera clips so random seeks cannot retain
-        // pan, zoom, or rotation from a later frame.
-        if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-            camera.position = gaanim_core::glam::DVec3::ZERO;
-            camera.rotation = gaanim_core::glam::DQuat::IDENTITY;
-            if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
-                *zoom = 1.0;
-            }
-        }
-
         self.current_time = clamped_target;
 
         // 2. Fetch all clips starting within [kf_start_time, target_time]
@@ -1018,34 +1007,19 @@ impl Timeline {
     /// seeking skips intermediate frames, so resolve that anchor explicitly and
     /// restore reactive updaters to the requested time afterwards.
     fn restore_followed_shake_origin(&self, world: &mut World) {
-        let Some((shake_start, shake_end, shake_t, amplitude, frequency)) = self
+        let Some(shake_start) = self
             .clips
             .values()
             .filter_map(|clip| match &clip.payload {
                 ClipPayload::Animation(anim) => match &anim.lens {
-                    PropertyLensSpec::CameraShake {
-                        amplitude,
-                        frequency,
-                        ..
-                    } if clip.start <= self.current_time => {
-                        let progress = if clip.duration > 0.0 {
-                            ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-                        Some((
-                            clip.start,
-                            clip.end(),
-                            anim.rate_func.evaluate(progress),
-                            *amplitude,
-                            *frequency,
-                        ))
+                    PropertyLensSpec::CameraShake { .. } if clip.start <= self.current_time => {
+                        Some(clip.start)
                     }
                     _ => None,
                 },
                 _ => None,
             })
-            .max_by(|(left, ..), (right, ..)| left.total_cmp(right))
+            .max_by(|left, right| left.total_cmp(right))
         else {
             return;
         };
@@ -1097,19 +1071,8 @@ impl Timeline {
         let Some(anchor) = anchor else {
             return;
         };
-        let phase = shake_t * frequency * std::f64::consts::TAU;
-        let envelope = if self.current_time <= shake_end {
-            (1.0 - shake_t).max(0.0)
-        } else {
-            0.0
-        };
-        let offset = gaanim_core::glam::DVec3::new(
-            phase.sin() * amplitude * envelope,
-            (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
-            0.0,
-        );
         if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-            camera.position = anchor + offset;
+            camera.position = anchor;
         }
     }
 }
@@ -1705,6 +1668,15 @@ fn apply_lens_spec(
                 camera.position = from.lerp(*to, t);
             }
         }
+        PropertyLensSpec::CameraPositionSource { from, to } => {
+            if let Some(target) = gaanim_animation::resolve_tracking_endpoint(to, world)
+                && target.is_finite()
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                let destination = gaanim_core::glam::DVec3::new(target.x, target.y, from.z);
+                camera.position = from.lerp(destination, t);
+            }
+        }
         PropertyLensSpec::CameraRotation { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.rotation = from.slerp(*to, t);
@@ -1715,6 +1687,56 @@ fn apply_lens_spec(
                 && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
             {
                 *zoom = *from + (*to - *from) * t;
+            }
+        }
+        PropertyLensSpec::CameraZoomSource { from, to } => {
+            if let Some(target) = to.evaluate(world)
+                && target.is_finite()
+                && target > 0.0
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.projection = gaanim_math::Projection::Orthographic {
+                    zoom: *from + (target - *from) * t,
+                };
+            }
+        }
+        PropertyLensSpec::CameraRotationSource { from, to } => {
+            if let Some(target) = to.evaluate(world)
+                && target.is_finite()
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                let angle = *from + (target - *from) * t;
+                camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
+            }
+        }
+        PropertyLensSpec::CameraOrthographic { from, to } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.projection = gaanim_math::Projection::Orthographic {
+                    zoom: *from + (*to - *from) * t,
+                };
+            }
+        }
+        PropertyLensSpec::CameraReset {
+            from_position,
+            from_rotation,
+            from_target,
+            from_up,
+            from_zoom,
+            to_zoom,
+        } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = from_position.lerp(gaanim_core::glam::DVec3::ZERO, t);
+                camera.rotation = from_rotation.slerp(gaanim_core::glam::DQuat::IDENTITY, t);
+                camera.target = from_target.lerp(gaanim_core::glam::DVec3::ZERO, t);
+                let blended_up = from_up.lerp(gaanim_core::glam::DVec3::Y, t);
+                camera.up = if blended_up.length_squared() > f64::EPSILON {
+                    blended_up.normalize()
+                } else {
+                    gaanim_core::glam::DVec3::Y
+                };
+                camera.projection = gaanim_math::Projection::Orthographic {
+                    zoom: *from_zoom + (*to_zoom - *from_zoom) * t,
+                };
             }
         }
         PropertyLensSpec::CameraFollow { target: followed } => {
@@ -1731,22 +1753,13 @@ fn apply_lens_spec(
                 camera.position.y = position.y;
             }
         }
-        PropertyLensSpec::CameraShake {
-            origin,
-            amplitude,
-            frequency,
-        } => {
-            let phase = t * frequency * std::f64::consts::TAU;
-            let envelope = (1.0 - t).max(0.0);
-            let offset = gaanim_core::glam::DVec3::new(
-                phase.sin() * amplitude * envelope,
-                (phase * 1.618_033_988_75).sin() * amplitude * 0.6 * envelope,
-                0.0,
-            );
-            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                camera.position = *origin + offset;
-            }
+        PropertyLensSpec::CameraFollowEndpoint { .. } => {
+            // Applied in the camera phase after persistent bindings.
         }
+        PropertyLensSpec::CameraFrameDynamic { .. } => {
+            // Applied in the camera phase after persistent bindings and layout.
+        }
+        PropertyLensSpec::CameraShake { .. } => {}
         PropertyLensSpec::CameraTarget { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.target = from.lerp(*to, t);
@@ -1756,6 +1769,29 @@ fn apply_lens_spec(
                 let view = gaanim_core::glam::DMat4::look_at_rh(eye, camera.target, up);
                 let rot = view.inverse().to_scale_rotation_translation().1;
                 camera.rotation = rot;
+            }
+        }
+        PropertyLensSpec::CameraLookAtSource {
+            from_position,
+            from_target,
+            from_rotation,
+            eye,
+            target,
+            up,
+        } => {
+            let resolved = gaanim_animation::resolve_tracking_endpoint(eye, world)
+                .zip(gaanim_animation::resolve_tracking_endpoint(target, world));
+            if let Some((eye, target)) = resolved
+                && gaanim_math::Camera::validate_look_at(eye, target, *up).is_ok()
+            {
+                let view = gaanim_core::glam::DMat4::look_at_rh(eye, target, *up);
+                let rotation = view.inverse().to_scale_rotation_translation().1;
+                if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                    camera.position = from_position.lerp(eye, t);
+                    camera.target = from_target.lerp(target, t);
+                    camera.rotation = from_rotation.slerp(rotation, t);
+                    camera.up = *up;
+                }
             }
         }
         PropertyLensSpec::CameraPerspective {

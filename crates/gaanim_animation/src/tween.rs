@@ -146,6 +146,10 @@ pub enum PropertyLens {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    CameraPositionSource {
+        from: gaanim_core::glam::DVec3,
+        to: crate::TrackingEndpoint,
+    },
     CameraRotation {
         from: gaanim_core::glam::DQuat,
         to: gaanim_core::glam::DQuat,
@@ -154,8 +158,43 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    CameraZoomSource {
+        from: f64,
+        to: crate::TrackingScalar,
+    },
+    CameraRotationSource {
+        from: f64,
+        to: crate::TrackingScalar,
+    },
+    CameraOrthographic {
+        from: f64,
+        to: f64,
+    },
+    CameraReset {
+        from_position: gaanim_core::glam::DVec3,
+        from_rotation: gaanim_core::glam::DQuat,
+        from_target: gaanim_core::glam::DVec3,
+        from_up: gaanim_core::glam::DVec3,
+        from_zoom: f64,
+        to_zoom: f64,
+    },
     CameraFollow {
         target: gaanim_core::ObjectId,
+    },
+    CameraFollowEndpoint {
+        target: crate::TrackingEndpoint,
+        from: gaanim_core::glam::DVec3,
+        offset: gaanim_core::glam::DVec3,
+        offset_space: crate::FollowOffsetSpace,
+        lag: f64,
+    },
+    CameraFrameDynamic {
+        targets: Vec<bevy::prelude::Entity>,
+        from_position: gaanim_core::glam::DVec3,
+        from_zoom: f64,
+        margins: [f64; 4],
+        frame_width: f64,
+        frame_height: f64,
     },
     CameraShake {
         origin: gaanim_core::glam::DVec3,
@@ -165,6 +204,14 @@ pub enum PropertyLens {
     CameraTarget {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
+    },
+    CameraLookAtSource {
+        from_position: gaanim_core::glam::DVec3,
+        from_target: gaanim_core::glam::DVec3,
+        from_rotation: gaanim_core::glam::DQuat,
+        eye: crate::TrackingEndpoint,
+        target: crate::TrackingEndpoint,
+        up: gaanim_core::glam::DVec3,
     },
     CameraPerspective {
         from_fov: f64,
@@ -223,11 +270,20 @@ impl std::fmt::Debug for PropertyLens {
             Self::CameraPosition { from, to } => {
                 write!(f, "CameraPosition({:?} -> {:?})", from, to)
             }
+            Self::CameraPositionSource { .. } => write!(f, "CameraPositionSource"),
             Self::CameraRotation { from, to } => {
                 write!(f, "CameraRotation({:?} -> {:?})", from, to)
             }
             Self::CameraZoom { from, to } => write!(f, "CameraZoom({} -> {})", from, to),
+            Self::CameraZoomSource { .. } => write!(f, "CameraZoomSource"),
+            Self::CameraRotationSource { .. } => write!(f, "CameraRotationSource"),
+            Self::CameraOrthographic { from, to } => {
+                write!(f, "CameraOrthographic({from} -> {to})")
+            }
+            Self::CameraReset { .. } => write!(f, "CameraReset"),
             Self::CameraFollow { target } => write!(f, "CameraFollow({target:?})"),
+            Self::CameraFollowEndpoint { .. } => write!(f, "CameraFollowEndpoint"),
+            Self::CameraFrameDynamic { .. } => write!(f, "CameraFrameDynamic"),
             Self::CameraShake {
                 amplitude,
                 frequency,
@@ -237,6 +293,7 @@ impl std::fmt::Debug for PropertyLens {
                 "CameraShake(amplitude {amplitude}, frequency {frequency})"
             ),
             Self::CameraTarget { from, to } => write!(f, "CameraTarget({:?} -> {:?})", from, to),
+            Self::CameraLookAtSource { .. } => write!(f, "CameraLookAtSource"),
             Self::CameraPerspective {
                 from_fov, to_fov, ..
             } => write!(f, "CameraPerspective({} -> {})", from_fov, to_fov),
@@ -402,11 +459,19 @@ pub fn evaluate_tweens_system(
             PropertyLens::CameraPosition { from: _, to: _ } => {
                 // Camera is a resource, not a component. Custom lenses can handle this.
             }
+            PropertyLens::CameraPositionSource { .. } => {}
             PropertyLens::CameraRotation { from: _, to: _ } => {}
             PropertyLens::CameraZoom { from: _, to: _ } => {}
+            PropertyLens::CameraZoomSource { .. } => {}
+            PropertyLens::CameraRotationSource { .. } => {}
+            PropertyLens::CameraOrthographic { .. } => {}
+            PropertyLens::CameraReset { .. } => {}
             PropertyLens::CameraFollow { .. } => {}
+            PropertyLens::CameraFollowEndpoint { .. } => {}
+            PropertyLens::CameraFrameDynamic { .. } => {}
             PropertyLens::CameraShake { .. } => {}
             PropertyLens::CameraTarget { .. } => {}
+            PropertyLens::CameraLookAtSource { .. } => {}
             PropertyLens::CameraPerspective { .. } => {}
             PropertyLens::PathMorph { from, to, table: _ } => {
                 let completed = tween.state == TweenState::Completed;

@@ -2174,11 +2174,19 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
         PropertyLensSpec::PathCompletion { .. } => Color32::from_rgb(155, 89, 182),
         PropertyLensSpec::FillDrawProgress { .. } => Color32::from_rgb(180, 130, 210),
         PropertyLensSpec::CameraPosition { .. }
+        | PropertyLensSpec::CameraPositionSource { .. }
         | PropertyLensSpec::CameraRotation { .. }
+        | PropertyLensSpec::CameraRotationSource { .. }
         | PropertyLensSpec::CameraZoom { .. }
+        | PropertyLensSpec::CameraZoomSource { .. }
+        | PropertyLensSpec::CameraOrthographic { .. }
+        | PropertyLensSpec::CameraReset { .. }
         | PropertyLensSpec::CameraFollow { .. }
+        | PropertyLensSpec::CameraFollowEndpoint { .. }
+        | PropertyLensSpec::CameraFrameDynamic { .. }
         | PropertyLensSpec::CameraShake { .. }
         | PropertyLensSpec::CameraTarget { .. }
+        | PropertyLensSpec::CameraLookAtSource { .. }
         | PropertyLensSpec::CameraPerspective { .. } => Color32::from_rgb(100, 100, 100),
         PropertyLensSpec::PathFollow { .. } => Color32::from_rgb(26, 188, 156),
         PropertyLensSpec::SignalFloat { .. } => Color32::from_rgb(180, 180, 50),
@@ -2191,6 +2199,14 @@ fn lens_color(lens: &PropertyLensSpec) -> Color32 {
 fn clip_icon(payload: &ClipPayload) -> &'static str {
     match payload {
         ClipPayload::Animation(a) => match &a.lens {
+            PropertyLensSpec::CameraPositionSource { .. } => "P",
+            PropertyLensSpec::CameraZoomSource { .. } => "Z",
+            PropertyLensSpec::CameraRotationSource { .. } => "A",
+            PropertyLensSpec::CameraFollowEndpoint { .. } => "F",
+            PropertyLensSpec::CameraLookAtSource { .. } => "L",
+            PropertyLensSpec::CameraFrameDynamic { .. } => "D",
+            PropertyLensSpec::CameraOrthographic { .. } => "O",
+            PropertyLensSpec::CameraReset { .. } => "R",
             PropertyLensSpec::Material3D { .. } => "3D",
             PropertyLensSpec::Translation { .. } => "↔",
             PropertyLensSpec::Rotation { .. } => "⟲",
@@ -2237,6 +2253,14 @@ fn clip_label(payload: &ClipPayload) -> String {
                 return label.clone();
             }
             let n = match &a.lens {
+                PropertyLensSpec::CameraPositionSource { .. } => "CamPoint",
+                PropertyLensSpec::CameraZoomSource { .. } => "ZoomSource",
+                PropertyLensSpec::CameraRotationSource { .. } => "AngleSource",
+                PropertyLensSpec::CameraFollowEndpoint { .. } => "CamFollow",
+                PropertyLensSpec::CameraLookAtSource { .. } => "LookAt",
+                PropertyLensSpec::CameraFrameDynamic { .. } => "DynFrame",
+                PropertyLensSpec::CameraOrthographic { .. } => "Ortho",
+                PropertyLensSpec::CameraReset { .. } => "CamReset",
                 PropertyLensSpec::Material3D { .. } => "Material",
                 PropertyLensSpec::Translation { .. } => "Move",
                 PropertyLensSpec::Rotation { .. } => "Rotate",

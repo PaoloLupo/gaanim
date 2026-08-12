@@ -3,6 +3,60 @@ use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::Affine;
 use std::ops::{Deref, DerefMut};
 
+/// Invalid authored camera or host viewport state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CameraValidationError {
+    #[error("camera values must be finite")]
+    NonFinite,
+    #[error("camera viewport must be non-empty")]
+    EmptyViewport,
+    #[error("orthographic zoom must be greater than zero")]
+    InvalidZoom,
+    #[error("perspective projection requires 0 < fov_y < pi")]
+    InvalidFov,
+    #[error("perspective clipping requires 0 < near < far")]
+    InvalidClipping,
+    #[error("camera eye and target must differ")]
+    CoincidentEyeTarget,
+    #[error("camera up must be non-zero and non-collinear with the view direction")]
+    InvalidUp,
+    #[error("viewport scale must be finite and greater than zero")]
+    InvalidViewportScale,
+}
+
+/// Presentation-only mapping from the logical canvas into a host viewport.
+///
+/// This state is deliberately separate from [`Camera`]: editor fit and panel
+/// offsets must never become authored timeline state or leak into snapshots.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct CameraViewport {
+    /// Scale applied after the authored projection to fit the host viewport.
+    pub scale: f64,
+    /// Vertical host-pixel offset of the logical canvas centre.
+    pub offset_y: f64,
+}
+
+impl Default for CameraViewport {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            offset_y: 0.0,
+        }
+    }
+}
+
+impl CameraViewport {
+    pub fn validate(self) -> Result<(), CameraValidationError> {
+        if !self.scale.is_finite() || self.scale <= 0.0 {
+            return Err(CameraValidationError::InvalidViewportScale);
+        }
+        if !self.offset_y.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        Ok(())
+    }
+}
+
 /// Extensible camera projection types.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -45,12 +99,6 @@ pub struct Camera {
     pub viewport_width: u32,
     /// Pixel height of the active rendering area.
     pub viewport_height: u32,
-    /// Additional vertical pixel offset applied to the Vello transform center.
-    /// Used by the editor to shift content above UI panels (positive = shift up).
-    pub viewport_offset_y: f64,
-    /// Additional scale factor applied to the Vello transform (on top of zoom).
-    /// Used by the editor to fit content in the available area below UI panels.
-    pub viewport_scale: f64,
 }
 
 /// Camera consumed by rendering, billboards, overlays and picking.
@@ -58,11 +106,27 @@ pub struct Camera {
 /// The authored [`Camera`] remains the timeline authority. Editor-only views
 /// are composed here without changing authored scene state.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
-pub struct ResolvedCamera(pub Camera);
+pub struct ResolvedCamera {
+    /// Final pose/projection selected for rendering.
+    pub camera: Camera,
+    /// Host-only viewport mapping applied after the authored camera.
+    pub viewport: CameraViewport,
+}
+
+/// Per-frame working camera after native constraints but before editor override.
+/// This is derived from [`Camera`] and is never authored or snapshotted.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct CameraRigCamera(pub Camera);
+
+impl ResolvedCamera {
+    pub const fn new(camera: Camera, viewport: CameraViewport) -> Self {
+        Self { camera, viewport }
+    }
+}
 
 impl Default for ResolvedCamera {
     fn default() -> Self {
-        Self(Camera::ortho_2d(1280, 720))
+        Self::new(Camera::ortho_2d(1280, 720), CameraViewport::default())
     }
 }
 
@@ -70,13 +134,13 @@ impl Deref for ResolvedCamera {
     type Target = Camera;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.camera
     }
 }
 
 impl DerefMut for ResolvedCamera {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.camera
     }
 }
 
@@ -85,6 +149,69 @@ impl DerefMut for ResolvedCamera {
 pub struct CameraViewOverride(pub Option<Camera>);
 
 impl Camera {
+    /// Validate all authored pose, projection, and logical viewport invariants.
+    pub fn validate(&self) -> Result<(), CameraValidationError> {
+        if !self.position.is_finite()
+            || !self.rotation.is_finite()
+            || !self.target.is_finite()
+            || !self.up.is_finite()
+        {
+            return Err(CameraValidationError::NonFinite);
+        }
+        if self.viewport_width == 0 || self.viewport_height == 0 {
+            return Err(CameraValidationError::EmptyViewport);
+        }
+        match self.projection {
+            Projection::Orthographic { zoom } => {
+                if !zoom.is_finite() || zoom <= 0.0 {
+                    return Err(CameraValidationError::InvalidZoom);
+                }
+            }
+            Projection::Perspective { fov_y, near, far } => {
+                Self::validate_perspective(fov_y, near, far)?;
+                Self::validate_look_at(self.position, self.target, self.up)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_look_at(
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+    ) -> Result<(), CameraValidationError> {
+        if !eye.is_finite() || !target.is_finite() || !up.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        let direction = target - eye;
+        if direction.length_squared() <= f64::EPSILON {
+            return Err(CameraValidationError::CoincidentEyeTarget);
+        }
+        if up.length_squared() <= f64::EPSILON
+            || direction.cross(up).length_squared() <= f64::EPSILON
+        {
+            return Err(CameraValidationError::InvalidUp);
+        }
+        Ok(())
+    }
+
+    pub fn validate_perspective(
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> Result<(), CameraValidationError> {
+        if !fov_y.is_finite() || !near.is_finite() || !far.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        if !(0.0 < fov_y && fov_y < std::f64::consts::PI) {
+            return Err(CameraValidationError::InvalidFov);
+        }
+        if !(0.0 < near && near < far) {
+            return Err(CameraValidationError::InvalidClipping);
+        }
+        Ok(())
+    }
+
     /// Creates a default orthographic camera for a given viewport size.
     pub fn ortho_2d(width: u32, height: u32) -> Self {
         Self {
@@ -95,8 +222,6 @@ impl Camera {
             projection: Projection::Orthographic { zoom: 1.0 },
             viewport_width: width,
             viewport_height: height,
-            viewport_offset_y: 0.0,
-            viewport_scale: 1.0,
         }
     }
 
@@ -114,13 +239,17 @@ impl Camera {
             },
             viewport_width: width,
             viewport_height: height,
-            viewport_offset_y: 0.0,
-            viewport_scale: 1.0,
         }
     }
 
     /// Sets this camera to look at `target` from `eye` with the given `up`.
-    pub fn look_at(&mut self, eye: DVec3, target: DVec3, up: DVec3) {
+    pub fn look_at(
+        &mut self,
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+    ) -> Result<(), CameraValidationError> {
+        Self::validate_look_at(eye, target, up)?;
         self.position = eye;
         self.target = target;
         self.up = up;
@@ -129,34 +258,53 @@ impl Camera {
         let cam_to_world = view.inverse();
         let (_scale, rot, _trans) = cam_to_world.to_scale_rotation_translation();
         self.rotation = rot;
+        Ok(())
     }
 
-    /// Orbits around `target` by yaw/pitch deltas (radians). Pitch clamped to +-89°.
-    pub fn orbit_around_target(&mut self, delta_yaw: f64, delta_pitch: f64) {
-        let dir = self.position - self.target;
-        let radius = dir.length().max(0.01);
+    /// Orbits around `target` by yaw/pitch deltas (radians).
+    pub fn orbit_around_target(
+        &mut self,
+        delta_yaw: f64,
+        delta_pitch: f64,
+    ) -> Result<(), CameraValidationError> {
+        if !delta_yaw.is_finite() || !delta_pitch.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        let authored_dir = self.position - self.target;
+        // The default orthographic pose has no eye distance. Give its first
+        // orbit a deterministic seed direction; subsequent orbits use the
+        // authored radius exactly.
+        let (dir, radius) = if authored_dir.length_squared() <= f64::EPSILON {
+            (DVec3::Z * 0.01, 0.01)
+        } else {
+            (authored_dir, authored_dir.length())
+        };
         let mut yaw = f64::atan2(dir.x, dir.z);
         let mut pitch = (dir.y / radius).asin();
         yaw += delta_yaw;
-        pitch = (pitch + delta_pitch).clamp(-1.5533, 1.5533); // ~89°
+        pitch += delta_pitch;
         let cp = pitch.cos();
         let sp = pitch.sin();
         let cy = yaw.cos();
         let sy = yaw.sin();
         let new_dir = DVec3::new(sy * cp, sp, cy * cp) * radius;
-        self.position = self.target + new_dir;
-        self.look_at(self.position, self.target, self.up);
+        self.look_at(self.target + new_dir, self.target, self.up)
     }
 
     /// Pan in screen space (pixels scaled to world).
     pub fn pan_screen_delta(&mut self, delta: DVec2) {
+        self.pan_screen_delta_with_viewport(delta, CameraViewport::default());
+    }
+
+    /// Pan in screen space using the current host viewport fit.
+    pub fn pan_screen_delta_with_viewport(&mut self, delta: DVec2, viewport: CameraViewport) {
         // Right and up vectors from rotation
         let right = self.rotation * DVec3::X;
         let up_dir = self.rotation * DVec3::Y;
         // Scale delta by distance for perspective, or 1/zoom for ortho
         let scale = match self.projection {
             Projection::Perspective { .. } => (self.position - self.target).length() * 0.002,
-            Projection::Orthographic { zoom } => 1.0 / (zoom * self.viewport_scale).max(0.1),
+            Projection::Orthographic { zoom } => 1.0 / (zoom * viewport.scale).max(0.1),
         };
         let move_vec = -right * delta.x * scale + up_dir * delta.y * scale;
         self.position += move_vec;
@@ -164,18 +312,28 @@ impl Camera {
     }
 
     /// Dolly (move closer/further to target) by factor (<1 closer, >1 further).
-    pub fn dolly(&mut self, factor: f64) {
-        let dir = self.position - self.target;
-        let new_pos = self.target + dir * factor.clamp(0.1, 10.0);
-        // Prevent crossing target
-        if (new_pos - self.target).length() > 0.1 {
-            self.position = new_pos;
+    pub fn dolly(&mut self, factor: f64) -> Result<(), CameraValidationError> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err(CameraValidationError::NonFinite);
         }
+        let dir = self.position - self.target;
+        if dir.length_squared() <= f64::EPSILON {
+            return Err(CameraValidationError::CoincidentEyeTarget);
+        }
+        self.position = self.target + dir * factor;
+        Ok(())
     }
 
     /// Set perspective projection parameters.
-    pub fn set_perspective(&mut self, fov_y: f64, near: f64, far: f64) {
+    pub fn set_perspective(
+        &mut self,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> Result<(), CameraValidationError> {
+        Self::validate_perspective(fov_y, near, far)?;
         self.projection = Projection::Perspective { fov_y, near, far };
+        Ok(())
     }
 
     /// Spherical coords (radius, yaw, pitch) relative to target.
@@ -218,14 +376,19 @@ impl Camera {
     ///
     /// Maps Y-up world coordinates into Vello's Y-down pixel coordinates.
     pub fn to_vello_transform(&self) -> Affine {
+        self.to_vello_transform_with_viewport(CameraViewport::default())
+    }
+
+    /// Computes the Vello transform including presentation-only viewport fit.
+    pub fn to_vello_transform_with_viewport(&self, viewport: CameraViewport) -> Affine {
         let zoom = match self.projection {
             Projection::Orthographic { zoom } => zoom,
             _ => 1.0,
         };
-        let effective_zoom = zoom * self.viewport_scale;
+        let effective_zoom = zoom * viewport.scale;
         let z_angle = self.z_angle();
         let hw = (self.viewport_width as f64) / 2.0;
-        let hh = (self.viewport_height as f64) / 2.0 + self.viewport_offset_y;
+        let hh = (self.viewport_height as f64) / 2.0 + viewport.offset_y;
 
         Affine::translate((hw, hh))
             * Affine::scale_non_uniform(effective_zoom, -effective_zoom)
@@ -242,6 +405,16 @@ impl Camera {
         let screen_y = (1.0 - ndc.y) * 0.5 * (self.viewport_height as f64);
 
         DVec2::new(screen_x, screen_y)
+    }
+
+    /// Convert world coordinates through the authored camera and host viewport fit.
+    pub fn world_to_screen_with_viewport(&self, world: DVec3, viewport: CameraViewport) -> DVec2 {
+        let logical = self.world_to_screen(world);
+        let center = DVec2::new(
+            self.viewport_width as f64 * 0.5,
+            self.viewport_height as f64 * 0.5,
+        );
+        center + DVec2::new(0.0, viewport.offset_y) + (logical - center) * viewport.scale
     }
 
     /// Converts screen pixel coordinates (measured from top-left corner) back into a world coordinate on the Z = 0 plane.
@@ -264,6 +437,17 @@ impl Camera {
         }
     }
 
+    /// Invert [`Camera::world_to_screen_with_viewport`] on the Z=0 plane.
+    pub fn screen_to_world_with_viewport(&self, screen: DVec2, viewport: CameraViewport) -> DVec3 {
+        let center = DVec2::new(
+            self.viewport_width as f64 * 0.5,
+            self.viewport_height as f64 * 0.5,
+        );
+        let logical =
+            center + (screen - center - DVec2::new(0.0, viewport.offset_y)) / viewport.scale;
+        self.screen_to_world(logical)
+    }
+
     /// Computes a world-space ray from a screen position (for 3D picking).
     pub fn screen_to_ray(&self, screen: DVec2) -> (DVec3, DVec3) {
         let view_proj = self.projection_matrix() * self.view_matrix();
@@ -274,6 +458,21 @@ impl Camera {
         let far = inv.project_point3(DVec3::new(ndc_x, ndc_y, 1.0));
         let dir = (far - near).normalize_or_zero();
         (near, dir)
+    }
+
+    /// Compute a world ray after removing the host viewport fit.
+    pub fn screen_to_ray_with_viewport(
+        &self,
+        screen: DVec2,
+        viewport: CameraViewport,
+    ) -> (DVec3, DVec3) {
+        let center = DVec2::new(
+            self.viewport_width as f64 * 0.5,
+            self.viewport_height as f64 * 0.5,
+        );
+        let logical =
+            center + (screen - center - DVec2::new(0.0, viewport.offset_y)) / viewport.scale;
+        self.screen_to_ray(logical)
     }
 }
 
@@ -336,6 +535,56 @@ mod tests {
     }
 
     #[test]
+    fn camera_scaled_viewport_roundtrip_orthographic() {
+        let cam = Camera::ortho_2d(1280, 720);
+        let viewport = CameraViewport {
+            scale: 0.73,
+            offset_y: 41.0,
+        };
+        let world = DVec3::new(137.0, -88.0, 0.0);
+        let screen = cam.world_to_screen_with_viewport(world, viewport);
+        let restored = cam.screen_to_world_with_viewport(screen, viewport);
+        assert!((restored - world).length() < 1e-8);
+    }
+
+    #[test]
+    fn camera_scaled_viewport_roundtrip_perspective_and_ray() {
+        let mut cam = Camera::perspective_3d(1280, 720, std::f64::consts::FRAC_PI_4);
+        cam.look_at(DVec3::new(4.0, 3.0, 10.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        let viewport = CameraViewport {
+            scale: 0.8,
+            offset_y: -26.0,
+        };
+        let world = DVec3::new(1.0, -0.5, 0.0);
+        let screen = cam.world_to_screen_with_viewport(world, viewport);
+        let restored = cam.screen_to_world_with_viewport(screen, viewport);
+        assert!((restored - world).length() < 1e-7);
+        let (origin, direction) = cam.screen_to_ray_with_viewport(screen, viewport);
+        assert!((world - origin).cross(direction).length() < 1e-7);
+    }
+
+    #[test]
+    fn camera_validation_rejects_degenerate_pose_and_projection() {
+        assert_eq!(
+            Camera::validate_look_at(DVec3::ZERO, DVec3::ZERO, DVec3::Y),
+            Err(CameraValidationError::CoincidentEyeTarget)
+        );
+        assert_eq!(
+            Camera::validate_look_at(DVec3::Z, DVec3::ZERO, DVec3::Z),
+            Err(CameraValidationError::InvalidUp)
+        );
+        assert_eq!(
+            Camera::validate_perspective(std::f64::consts::PI, 0.1, 100.0),
+            Err(CameraValidationError::InvalidFov)
+        );
+        assert_eq!(
+            Camera::validate_perspective(1.0, 1.0, 0.5),
+            Err(CameraValidationError::InvalidClipping)
+        );
+    }
+
+    #[test]
     fn camera_projection_matrix_ortho() {
         let cam = Camera::ortho_2d(100, 100);
         let proj = cam.projection_matrix();
@@ -356,10 +605,10 @@ mod tests {
     #[test]
     fn debug_billboard_positions() {
         let mut cam = Camera::ortho_2d(1280, 720);
-        cam.set_perspective(0.785, 0.1, 1000.0);
-        cam.look_at(DVec3::new(8.0, 6.0, 8.0), DVec3::ZERO, DVec3::Y);
-        cam.viewport_scale = 1.0;
-        cam.viewport_offset_y = 0.0;
+        cam.set_perspective(0.785, 0.1, 1000.0).unwrap();
+        cam.look_at(DVec3::new(8.0, 6.0, 8.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        let viewport = CameraViewport::default();
         let points = [
             DVec3::new(0.0, 0.0, 0.5),
             DVec3::new(658.0, 0.0, 0.0),
@@ -375,9 +624,9 @@ mod tests {
         for pt in points {
             let screen = cam.world_to_screen(pt);
             println!("world {:?} -> screen {:?}", pt, screen);
-            let eff = cam.viewport_scale.max(0.01);
+            let eff = viewport.scale.max(0.01);
             let hw = cam.viewport_width as f64 * 0.5;
-            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport_offset_y;
+            let hh = cam.viewport_height as f64 * 0.5 + viewport.offset_y;
             let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
                 * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
             let inv = vello.inverse();

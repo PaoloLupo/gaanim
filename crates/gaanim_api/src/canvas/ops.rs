@@ -30,6 +30,7 @@ pub(crate) struct CanvasState {
     pub active_idx: usize,
     pub next_id: u32,
     pub next_segment_id: u32,
+    pub next_camera_binding_order: u64,
     pub all_drawables: Vec<ObjectId>,
     pub layout_constraints: Vec<LayoutConstraint>,
     pub layout_diagnostics: Vec<(Option<ObjectId>, String)>,
@@ -45,6 +46,7 @@ impl CanvasState {
             active_idx: 0,
             next_id: 1,
             next_segment_id: 1,
+            next_camera_binding_order: 0,
             all_drawables: Vec::new(),
             layout_constraints: Vec::new(),
             layout_diagnostics: Vec::new(),
@@ -71,10 +73,49 @@ impl CanvasState {
         self.next_segment_id += 1;
         SegmentId(id)
     }
+
+    pub fn next_camera_binding_order(&mut self) -> u64 {
+        let order = self.next_camera_binding_order;
+        self.next_camera_binding_order += 1;
+        order
+    }
 }
 
 pub(crate) type SharedCanvasState = Arc<Mutex<CanvasState>>;
 pub(crate) type SharedObjectSpec = Arc<Mutex<ObjectSpec>>;
+
+pub(crate) type SharedCameraBindingSpec = Arc<Mutex<CameraBindingSpec>>;
+
+/// Authoring-time activation window for a persistent camera constraint.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CameraBindingWindowSpec {
+    pub start: f64,
+    pub end: Option<f64>,
+}
+
+/// Deferred, unresolved channels of a native camera binding.
+#[derive(Debug, Clone)]
+pub(crate) enum CanvasCameraBindingKind {
+    TwoD {
+        center: Option<CanvasEndpoint>,
+        zoom: Option<Expr>,
+        rotation: Option<Expr>,
+    },
+    ThreeD {
+        eye: Option<CanvasEndpoint>,
+        target: Option<CanvasEndpoint>,
+        fov_y: Option<Expr>,
+        up: DVec3,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CameraBindingSpec {
+    pub order: u64,
+    pub kind: CanvasCameraBindingKind,
+    pub influence: Expr,
+    pub windows: Vec<CameraBindingWindowSpec>,
+}
 
 // -----------------------------------------------------------------------
 // Op
@@ -89,6 +130,8 @@ pub(crate) enum Op {
     /// shared so fluent setters after factory creation update the spawned
     /// object seen by compile.
     Spawn(SharedObjectSpec),
+    /// Spawn a non-rendered persistent camera binding.
+    SpawnCameraBinding(SharedCameraBindingSpec),
     /// Play a single animation sequentially (auto-queued). `active=false`
     /// means the animation was later regrouped by `Canvas::play(...)`.
     Animate {

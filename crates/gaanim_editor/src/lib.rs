@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_core::id::ObjectId;
 use gaanim_core::peniko;
-use gaanim_math::{Camera, CameraViewOverride, ResolvedCamera};
+use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
 use gaanim_scene::{
     FillBrush, GltfModelRoot, GroupMarker, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
     RenderOrder, StrokeBrush, WorldBounds,
@@ -215,6 +215,7 @@ impl Plugin for GaanimEditorPlugin {
             )
                 .chain()
                 .in_set(gaanim_scene::hierarchy::SceneSet::Camera)
+                .after(gaanim_timeline::camera_rig_system)
                 .before(gaanim_scene::systems::resolve_camera_system),
         )
         .add_systems(EguiPrimaryContextPass, editor_ui_system)
@@ -2103,6 +2104,7 @@ fn preview_mode_keys_system(
 fn preview_interactive_input_system(
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
+    viewport: Res<CameraViewport>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -2160,7 +2162,7 @@ fn preview_interactive_input_system(
         if step.abs() > 1e-6 {
             let factor = (1.0 - step as f64).clamp(0.5, 2.0);
             if is_perspective {
-                cam.dolly(factor);
+                let _ = cam.dolly(factor);
             } else {
                 interactive.user_zoom = (interactive.user_zoom * factor).clamp(0.1, 20.0);
             }
@@ -2185,14 +2187,14 @@ fn preview_interactive_input_system(
                 kdelta.y -= speed;
             }
             if kdelta.length_squared() > 1e-9 {
-                cam.pan_screen_delta(kdelta);
+                cam.pan_screen_delta_with_viewport(kdelta, *viewport);
             }
         } else {
             let proj_zoom = match cam.projection {
                 gaanim_math::Projection::Orthographic { zoom } => zoom,
                 _ => 1.0,
             };
-            let effective = (cam.viewport_scale * proj_zoom).max(0.1);
+            let effective = (viewport.scale * proj_zoom).max(0.1);
             let speed = 400.0 / effective * time.delta_secs_f64();
             let mut kdelta = glam::DVec2::ZERO;
             if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
@@ -2255,16 +2257,16 @@ fn preview_interactive_input_system(
     };
     if is_perspective {
         if is_orbiting {
-            cam.orbit_around_target(delta.x * 0.005, -delta.y * 0.005);
+            let _ = cam.orbit_around_target(delta.x * 0.005, -delta.y * 0.005);
         } else if is_panning_3d {
-            cam.pan_screen_delta(delta);
+            cam.pan_screen_delta_with_viewport(delta, *viewport);
         }
     } else {
         let proj_zoom = match cam.projection {
             gaanim_math::Projection::Orthographic { zoom } => zoom,
             _ => 1.0,
         };
-        let effective = (cam.viewport_scale * proj_zoom).max(0.1);
+        let effective = (viewport.scale * proj_zoom).max(0.1);
         interactive.pan.x -= delta.x / effective;
         interactive.pan.y += delta.y / effective;
     }
@@ -2313,7 +2315,8 @@ fn editor_picking_system(
         state.selected = None;
         return;
     };
-    let camera = &camera.0;
+    let viewport = camera.viewport;
+    let camera = &camera.camera;
 
     let mut best_z = i32::MIN;
     let mut best_entity: Option<Entity> = None;
@@ -2340,9 +2343,8 @@ fn editor_picking_system(
         let mut picking_camera = *camera;
         let fit_scale = (viewport_frame.size.x / viewport_frame.output_size.x.max(1.0)).max(1e-6);
         if let gaanim_math::Projection::Orthographic { ref mut zoom } = picking_camera.projection {
-            *zoom *= picking_camera.viewport_scale / fit_scale;
+            *zoom *= viewport.scale / fit_scale;
         }
-        picking_camera.viewport_scale = 1.0;
         let world_pos = picking_camera.screen_to_world(viewport_pos);
         for (entity, bounds, render_order) in &entities {
             if bounds
@@ -2447,7 +2449,7 @@ fn frame_free_camera_system(
     let radius = (bounds.size().length() * 0.5).max(0.5);
     let distance = (radius / (fov * 0.5).tan() * 1.35).max(2.0);
     let direction = glam::DVec3::new(1.0, 0.75, 1.25).normalize();
-    camera.look_at(center + direction * distance, center, glam::DVec3::Y);
+    let _ = camera.look_at(center + direction * distance, center, glam::DVec3::Y);
     interactive.free_camera = Some(camera);
     interactive.needs_frame = false;
 }
@@ -2463,7 +2465,9 @@ fn viewport_adjust_system(
     inset: Res<ViewportInset>,
     interactive: Res<PreviewInteractive>,
     authored: Option<Res<Camera>>,
+    rig: Option<Res<gaanim_math::CameraRigCamera>>,
     mut view_override: ResMut<CameraViewOverride>,
+    mut camera_viewport: ResMut<CameraViewport>,
     mut viewport_frame: ResMut<ViewportFrame>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,
@@ -2471,13 +2475,20 @@ fn viewport_adjust_system(
 ) {
     if presentation.active || export_state.active {
         view_override.0 = None;
+        *camera_viewport = CameraViewport::default();
         return;
     }
-    let Some(authored) = authored else { return };
+    let Some(base_camera) = rig
+        .as_deref()
+        .map(|rig| rig.0)
+        .or_else(|| authored.as_deref().copied())
+    else {
+        return;
+    };
     let mut cam = if interactive.enabled && interactive.view == PreviewView::Free3D {
-        interactive.free_camera.unwrap_or(*authored)
+        interactive.free_camera.unwrap_or(base_camera)
     } else {
-        *authored
+        base_camera
     };
     let Ok(window) = windows.single() else { return };
 
@@ -2487,7 +2498,7 @@ fn viewport_adjust_system(
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     if available_h < 1.0 {
-        view_override.0 = Some(cam);
+        view_override.0 = interactive.enabled.then_some(cam);
         return;
     }
 
@@ -2506,20 +2517,20 @@ fn viewport_adjust_system(
     viewport_frame.output_size = glam::DVec2::new(anim_w, anim_h);
 
     if is_perspective {
-        cam.viewport_scale = fit_scale;
+        camera_viewport.scale = fit_scale;
     } else if interactive.enabled {
-        cam.viewport_scale = fit_scale * interactive.user_zoom.clamp(0.1, 20.0);
+        camera_viewport.scale = fit_scale * interactive.user_zoom.clamp(0.1, 20.0);
         cam.position.x += interactive.pan.x;
         cam.position.y += interactive.pan.y;
     } else {
-        cam.viewport_scale = fit_scale;
+        camera_viewport.scale = fit_scale;
         // Leave cam.position as set by the timeline (CameraZoom/Position lenses).
     }
 
     // Shift the Vello centre upward so the animation sits above the timeline.
     // When there is no timeline panel (inset.bottom == 0) the offset is 0.
-    cam.viewport_offset_y = -(inset.bottom as f64) / 2.0;
-    view_override.0 = Some(cam);
+    camera_viewport.offset_y = -(inset.bottom as f64) / 2.0;
+    view_override.0 = interactive.enabled.then_some(cam);
 }
 
 #[cfg(test)]
@@ -2558,6 +2569,40 @@ mod tests {
             Some(glam::DVec2::new(1280.0, 720.0))
         );
         assert_eq!(frame.window_to_output(glam::DVec2::new(99.0, 200.0)), None);
+    }
+
+    #[test]
+    fn viewport_fit_does_not_mask_the_reactive_camera_rig() {
+        let authored = Camera::ortho_2d(1280, 720);
+        let mut rig = authored;
+        rig.position.x = 240.0;
+
+        let mut app = App::new();
+        app.insert_resource(ViewportInset::default())
+            .insert_resource(PreviewInteractive::default())
+            .insert_resource(authored)
+            .insert_resource(gaanim_math::CameraRigCamera(rig))
+            .insert_resource(CameraViewOverride::default())
+            .insert_resource(CameraViewport::default())
+            .insert_resource(ViewportFrame::default())
+            .insert_resource(PresentationMode::default())
+            .insert_resource(export::ExportState::default())
+            .add_systems(Update, viewport_adjust_system);
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(1280, 720),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CameraViewOverride>().0,
+            None,
+            "viewport fitting must not override follow, shake, or camera bindings"
+        );
     }
 
     #[test]

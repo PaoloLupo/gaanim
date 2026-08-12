@@ -1,12 +1,12 @@
 use crate::tween::DeltaTime;
-use bevy::prelude::Component;
+use bevy::prelude::{Children, Component};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::BezPath;
 use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
-use gaanim_scene::{LocalBounds, Path2D, PathSource};
+use gaanim_scene::{LocalBounds, Path2D, PathSource, WorldBounds};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -1109,6 +1109,37 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
     }
 }
 
+/// Resolve an endpoint plus an offset expressed in world or endpoint-local axes.
+pub fn resolve_tracking_endpoint_with_offset(
+    endpoint: &TrackingEndpoint,
+    offset: DVec3,
+    offset_space: FollowOffsetSpace,
+    world: &World,
+) -> Option<DVec3> {
+    let origin = resolve_tracking_endpoint(endpoint, world)?;
+    let offset = match offset_space {
+        FollowOffsetSpace::World => offset,
+        FollowOffsetSpace::Local => endpoint_basis(endpoint, world).transform_vector3(offset),
+    };
+    Some(origin + offset)
+}
+
+/// Resolve current world bounds without depending on propagation system order.
+pub fn resolve_entity_bounds(entity: Entity, world: &World) -> Option<gaanim_math::Bounds3D> {
+    let own = world.get::<LocalBounds>(entity).and_then(|local| {
+        entity_world_matrix(entity, world).map(|matrix| local.0.transform_mat4(&matrix))
+    });
+    let descendants = world
+        .get::<Children>(entity)
+        .into_iter()
+        .flat_map(|children| children.iter())
+        .filter_map(|child| resolve_entity_bounds(*child, world));
+    own.into_iter()
+        .chain(descendants)
+        .reduce(|left, right| left.union(&right))
+        .or_else(|| world.get::<WorldBounds>(entity).map(|bounds| bounds.0))
+}
+
 fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
     match ep {
         TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
@@ -1792,6 +1823,32 @@ mod tests {
             .x += 7.0;
         let moved = resolve_tracking_endpoint(&endpoint, &world).unwrap();
         assert!((moved.x - actual.x - 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn entity_bounds_include_renderable_descendants_of_structural_roots() {
+        let mut world = World::new();
+        let root = world.spawn(SpatialTransform::new_2d(10.0, 20.0)).id();
+        world.spawn((
+            SpatialTransform::new_2d(5.0, -3.0),
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-2.0, -1.0, 2.0, 1.0)),
+            ChildOf(root),
+        ));
+
+        let bounds = resolve_entity_bounds(root, &world).expect("descendant bounds");
+        assert!((bounds.min.x - 13.0).abs() < 1e-9);
+        assert!((bounds.max.x - 17.0).abs() < 1e-9);
+        assert!((bounds.min.y - 16.0).abs() < 1e-9);
+        assert!((bounds.max.y - 18.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn entity_bounds_fall_back_to_propagated_structural_bounds() {
+        let mut world = World::new();
+        let expected = gaanim_math::Bounds3D::new_2d(-345.0, -95.0, -175.0, 75.0);
+        let root = world.spawn(WorldBounds(expected)).id();
+
+        assert_eq!(resolve_entity_bounds(root, &world), Some(expected));
     }
 
     #[test]

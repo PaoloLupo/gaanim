@@ -1,4 +1,5 @@
 pub use crate::GaanimAnimationPlugin;
+pub use crate::camera::{CameraBinding, CameraBindingKind, CameraBindingWindow};
 pub use crate::signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec,
     PositionBinding, Signal, SignalBinding, SpecValue, Vec3Signal,

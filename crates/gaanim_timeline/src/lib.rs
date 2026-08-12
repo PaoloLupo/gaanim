@@ -35,7 +35,12 @@ impl Plugin for GaanimTimelinePlugin {
                         .in_set(SceneSet::Animation)
                         .before(timeline_seek_system),
                     timeline_seek_system.in_set(SceneSet::Animation),
-                    camera_follow_system.in_set(SceneSet::Layout),
+                    camera_binding_system
+                        .in_set(SceneSet::Camera)
+                        .before(camera_rig_system),
+                    camera_rig_system
+                        .in_set(SceneSet::Camera)
+                        .before(gaanim_scene::systems::resolve_camera_system),
                 ),
             );
     }
@@ -234,40 +239,338 @@ pub fn timeline_seek_system(world: &mut World) {
     }
 }
 
-/// Updates active camera-follow clips after reactive updaters have moved their targets.
-pub fn camera_follow_system(
-    timeline: Res<Timeline>,
-    targets: Query<(&gaanim_scene::MobjectId, &gaanim_math::SpatialTransform)>,
-    camera: Option<ResMut<gaanim_math::Camera>>,
-) {
-    let Some(mut camera) = camera else {
+/// Evaluate persistent native camera bindings against the fully updated world.
+pub fn camera_binding_system(world: &mut World) {
+    let time = world
+        .get_resource::<Timeline>()
+        .map_or(0.0, |timeline| timeline.current_time);
+    let Some(authored) = world.get_resource::<gaanim_math::Camera>().copied() else {
         return;
     };
-    let target_id = timeline
+    gaanim_animation::apply_camera_bindings(world, time);
+    let evaluated = world
+        .get_resource::<gaanim_math::Camera>()
+        .copied()
+        .unwrap_or(authored);
+    world.insert_resource(authored);
+    world.insert_resource(gaanim_math::CameraRigCamera(evaluated));
+}
+
+/// Resolves temporary camera constraints and additive modifiers after reactive
+/// updaters/layout, immediately before the presentation camera is copied.
+pub fn camera_rig_system(world: &mut World) {
+    let Some(timeline) = world.get_resource::<Timeline>() else {
+        return;
+    };
+    let current_time = timeline.current_time;
+    let follow = timeline
         .clips
         .values()
-        .filter(|clip| clip.start <= timeline.current_time && timeline.current_time < clip.end())
+        .filter(|clip| clip.start <= current_time && current_time < clip.end())
         .filter_map(|clip| match &clip.payload {
-            clip::ClipPayload::Animation(anim) => match anim.lens {
-                clip::PropertyLensSpec::CameraFollow { target } => Some((clip.start, target)),
+            clip::ClipPayload::Animation(anim) => match &anim.lens {
+                clip::PropertyLensSpec::CameraFollow { .. }
+                | clip::PropertyLensSpec::CameraFollowEndpoint { .. } => {
+                    Some((clip.start, clip.duration, anim.lens.clone()))
+                }
                 _ => None,
             },
             _ => None,
         })
-        .max_by(|(left, _), (right, _)| left.total_cmp(right))
-        .map(|(_, target)| target);
-    let Some(target_id) = target_id else {
+        .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
+    let dynamic_frame = timeline
+        .clips
+        .values()
+        .filter(|clip| clip.start <= current_time && current_time < clip.end())
+        .filter_map(|clip| match &clip.payload {
+            clip::ClipPayload::Animation(anim) => match &anim.lens {
+                clip::PropertyLensSpec::CameraFrameDynamic { .. } => Some((
+                    clip.start,
+                    clip.duration,
+                    anim.rate_func.clone(),
+                    anim.lens.clone(),
+                )),
+                _ => None,
+            },
+            _ => None,
+        })
+        .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
+    let mut shake_offset = gaanim_core::glam::DVec3::ZERO;
+    for clip in timeline
+        .clips
+        .values()
+        .filter(|clip| clip.start <= current_time && current_time < clip.end())
+    {
+        let clip::ClipPayload::Animation(anim) = &clip.payload else {
+            continue;
+        };
+        let clip::PropertyLensSpec::CameraShake {
+            origin: _,
+            amplitude,
+            frequency,
+        } = &anim.lens
+        else {
+            continue;
+        };
+        let progress = if clip.duration > 0.0 {
+            ((current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let t = anim.rate_func.evaluate(progress);
+        let phase = t * *frequency * std::f64::consts::TAU;
+        let envelope = (1.0 - t).max(0.0);
+        shake_offset += gaanim_core::glam::DVec3::new(
+            phase.sin() * *amplitude * envelope,
+            (phase * 1.618_033_988_75).sin() * *amplitude * 0.6 * envelope,
+            0.0,
+        );
+    }
+
+    let follow_position = follow.and_then(|(start, _duration, lens)| match lens {
+        clip::PropertyLensSpec::CameraFollow { target } => {
+            let mut query =
+                world.query::<(&gaanim_scene::MobjectId, &gaanim_math::SpatialTransform)>();
+            query
+                .iter(world)
+                .find_map(|(id, transform)| (id.0 == target).then_some(transform.translation))
+                .map(|position| (start, position))
+        }
+        clip::PropertyLensSpec::CameraFollowEndpoint {
+            target,
+            from,
+            offset,
+            offset_space,
+            lag,
+        } => {
+            let desired = gaanim_animation::resolve_tracking_endpoint_with_offset(
+                &target,
+                offset,
+                offset_space,
+                world,
+            )?;
+            let influence = if lag <= f64::EPSILON {
+                1.0
+            } else {
+                1.0 - (-(current_time - start).max(0.0) / lag).exp()
+            };
+            Some((start, from.lerp(desired, influence)))
+        }
+        _ => None,
+    });
+
+    let frame_result = dynamic_frame.and_then(|(start, duration, rate_func, lens)| {
+        let clip::PropertyLensSpec::CameraFrameDynamic {
+            targets,
+            from_position,
+            from_zoom,
+            margins,
+            frame_width,
+            frame_height,
+        } = lens
+        else {
+            return None;
+        };
+        let bounds = targets
+            .iter()
+            .filter_map(|entity| gaanim_animation::resolve_entity_bounds(*entity, world))
+            .reduce(|left, right| left.union(&right))?;
+        let [top, right, bottom, left] = margins;
+        let framed = gaanim_math::Bounds3D::new_2d(
+            bounds.min.x - left,
+            bounds.min.y - bottom,
+            bounds.max.x + right,
+            bounds.max.y + top,
+        );
+        let desired_zoom =
+            (frame_width / framed.width().max(1.0)).min(frame_height / framed.height().max(1.0));
+        let progress = if duration > 0.0 {
+            ((current_time - start) / duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let influence = rate_func.evaluate(progress);
+        Some((
+            start,
+            from_position.lerp(framed.center(), influence),
+            from_zoom + (desired_zoom - from_zoom) * influence,
+        ))
+    });
+
+    let Some(mut camera) = world.get_resource_mut::<gaanim_math::CameraRigCamera>() else {
         return;
     };
-    if let Some((_, transform)) = targets.iter().find(|(id, _)| id.0 == target_id) {
-        camera.position.x = transform.translation.x;
-        camera.position.y = transform.translation.y;
+    let selected_position = match (follow_position, frame_result) {
+        (Some((follow_start, follow)), Some((frame_start, frame, zoom))) => {
+            if frame_start >= follow_start {
+                camera.0.projection = gaanim_math::Projection::Orthographic { zoom };
+                Some(frame)
+            } else {
+                Some(follow)
+            }
+        }
+        (Some((_, follow)), None) => Some(follow),
+        (None, Some((_, frame, zoom))) => {
+            camera.0.projection = gaanim_math::Projection::Orthographic { zoom };
+            Some(frame)
+        }
+        (None, None) => None,
+    };
+    if let Some(position) = selected_position {
+        camera.0.position.x = position.x;
+        camera.0.position.y = position.y;
+        if position.z != 0.0 {
+            camera.0.position.z = position.z;
+        }
     }
+    camera.0.position += shake_offset;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scalar(value: f64) -> gaanim_animation::TrackingScalar {
+        gaanim_animation::TrackingScalar {
+            expression: gaanim_expr::Expr::constant(value),
+            parameters: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn shake_is_additive_after_bindings_without_mutating_authored_camera() {
+        let mut world = World::new();
+        let mut authored = gaanim_math::Camera::ortho_2d(1280, 720);
+        authored.position.x = 10.0;
+        world.insert_resource(authored);
+        world.spawn(gaanim_animation::CameraBinding {
+            order: 0,
+            kind: gaanim_animation::CameraBindingKind::TwoD {
+                center: Some(gaanim_animation::TrackingEndpoint::Static(
+                    gaanim_core::glam::DVec3::new(20.0, 0.0, 0.0),
+                )),
+                zoom: None,
+                rotation: None,
+            },
+            influence: scalar(1.0),
+            windows: vec![gaanim_animation::CameraBindingWindow {
+                start: 0.0,
+                end: None,
+            }],
+        });
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            clip::ClipPayload::Animation(clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_raw(0),
+                lens: clip::PropertyLensSpec::CameraShake {
+                    origin: authored.position,
+                    amplitude: 12.0,
+                    frequency: 1.0,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.current_time = 0.25;
+        world.insert_resource(timeline);
+
+        camera_binding_system(&mut world);
+        camera_rig_system(&mut world);
+
+        assert_eq!(*world.resource::<gaanim_math::Camera>(), authored);
+        let rig = world.resource::<gaanim_math::CameraRigCamera>().0;
+        assert!((rig.position.x - 29.0).abs() < 1e-9);
+        assert!((rig.position.y - 3.049_028_386_654_035_7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scene_camera_phase_publishes_bound_camera_to_resolved_resource() {
+        let mut app = App::new();
+        app.add_plugins((
+            gaanim_scene::hierarchy::GaanimScenePlugin,
+            GaanimTimelinePlugin,
+        ));
+        app.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+        app.insert_resource(gaanim_animation::DeltaTime { dt: 0.0 });
+        app.world_mut().spawn(gaanim_animation::CameraBinding {
+            order: 0,
+            kind: gaanim_animation::CameraBindingKind::TwoD {
+                center: Some(gaanim_animation::TrackingEndpoint::Static(
+                    gaanim_core::glam::DVec3::new(125.0, -30.0, 0.0),
+                )),
+                zoom: Some(scalar(1.5)),
+                rotation: None,
+            },
+            influence: scalar(1.0),
+            windows: vec![gaanim_animation::CameraBindingWindow {
+                start: 0.0,
+                end: None,
+            }],
+        });
+
+        app.update();
+
+        let resolved = app.world().resource::<gaanim_math::ResolvedCamera>();
+        assert_eq!(resolved.position.x, 125.0);
+        assert_eq!(resolved.position.y, -30.0);
+        assert!(matches!(
+            resolved.projection,
+            gaanim_math::Projection::Orthographic { zoom: 1.5 }
+        ));
+    }
+
+    #[test]
+    fn follow_lag_is_bitwise_identical_for_direct_incremental_and_rewind_evaluation() {
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            10.0,
+            clip::ClipPayload::Animation(clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_raw(0),
+                lens: clip::PropertyLensSpec::CameraFollowEndpoint {
+                    target: gaanim_animation::TrackingEndpoint::Static(
+                        gaanim_core::glam::DVec3::new(100.0, -40.0, 0.0),
+                    ),
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    offset: gaanim_core::glam::DVec3::ZERO,
+                    offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    lag: 0.5,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        world.insert_resource(timeline);
+
+        let evaluate = |world: &mut World, time: f64| {
+            world.resource_mut::<Timeline>().current_time = time;
+            camera_binding_system(world);
+            camera_rig_system(world);
+            world.resource::<gaanim_math::CameraRigCamera>().0.position
+        };
+
+        let direct = evaluate(&mut world, 2.0);
+        let _ = evaluate(&mut world, 0.25);
+        let _ = evaluate(&mut world, 0.75);
+        let incremental = evaluate(&mut world, 2.0);
+        let _ = evaluate(&mut world, 0.1);
+        let rewind = evaluate(&mut world, 2.0);
+
+        assert_eq!(direct.x.to_bits(), incremental.x.to_bits());
+        assert_eq!(direct.y.to_bits(), incremental.y.to_bits());
+        assert_eq!(direct.x.to_bits(), rewind.x.to_bits());
+        assert_eq!(direct.y.to_bits(), rewind.y.to_bits());
+    }
 
     #[test]
     fn interactive_stop_controls_are_optional_in_headless_apps() {

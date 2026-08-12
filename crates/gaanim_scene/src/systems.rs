@@ -17,11 +17,18 @@ use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 /// Resolve the timeline-authored camera and an optional presentation override.
 pub fn resolve_camera_system(
     authored: Option<Res<gaanim_math::Camera>>,
+    rig: Option<Res<gaanim_math::CameraRigCamera>>,
     view_override: Res<gaanim_math::CameraViewOverride>,
+    viewport: Res<gaanim_math::CameraViewport>,
     mut resolved: ResMut<gaanim_math::ResolvedCamera>,
 ) {
-    if let Some(camera) = view_override.0.or_else(|| authored.as_deref().copied()) {
-        resolved.0 = camera;
+    if let Some(camera) = view_override
+        .0
+        .or_else(|| rig.as_deref().map(|rig| rig.0))
+        .or_else(|| authored.as_deref().copied())
+    {
+        resolved.camera = camera;
+        resolved.viewport = *viewport;
     }
 }
 use std::collections::HashSet;
@@ -699,9 +706,9 @@ pub fn billboard_system(
             // Project 3D world position to screen, then map to fixed Vello world.
             let world_pos = gaanim_core::glam::DVec3::new(trans.x, trans.y, trans.z);
             let screen = cam.world_to_screen(world_pos);
-            let eff = cam.viewport_scale.max(0.01);
+            let eff = cam.viewport.scale.max(0.01);
             let hw = cam.viewport_width as f64 * 0.5;
-            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport_offset_y;
+            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport.offset_y;
             // Fixed Vello transform: translate to center + scale (no rotation, no cam pos)
             let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
                 * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);

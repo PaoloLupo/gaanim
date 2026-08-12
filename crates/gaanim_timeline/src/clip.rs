@@ -213,6 +213,11 @@ pub enum PropertyLensSpec {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraPositionSource {
+        from: gaanim_core::glam::DVec3,
+        to: gaanim_animation::TrackingEndpoint,
+    },
     CameraRotation {
         from: gaanim_core::glam::DQuat,
         to: gaanim_core::glam::DQuat,
@@ -221,9 +226,50 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraZoomSource {
+        from: f64,
+        to: gaanim_animation::TrackingScalar,
+    },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraRotationSource {
+        from: f64,
+        to: gaanim_animation::TrackingScalar,
+    },
+    /// Select orthographic projection while tweening its zoom.
+    CameraOrthographic {
+        from: f64,
+        to: f64,
+    },
+    /// Restore the complete authored camera rig to its 2D defaults.
+    CameraReset {
+        from_position: gaanim_core::glam::DVec3,
+        from_rotation: gaanim_core::glam::DQuat,
+        from_target: gaanim_core::glam::DVec3,
+        from_up: gaanim_core::glam::DVec3,
+        from_zoom: f64,
+        to_zoom: f64,
+    },
     /// Center the camera on a moving mobject for the lifetime of the clip.
     CameraFollow {
         target: ObjectId,
+    },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraFollowEndpoint {
+        target: gaanim_animation::TrackingEndpoint,
+        from: gaanim_core::glam::DVec3,
+        offset: gaanim_core::glam::DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
+    },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraFrameDynamic {
+        targets: Vec<bevy::prelude::Entity>,
+        from_position: gaanim_core::glam::DVec3,
+        from_zoom: f64,
+        margins: [f64; 4],
+        frame_width: f64,
+        frame_height: f64,
     },
     /// A deterministic damped shake around `origin`.
     CameraShake {
@@ -235,6 +281,15 @@ pub enum PropertyLensSpec {
     CameraTarget {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
+    },
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CameraLookAtSource {
+        from_position: gaanim_core::glam::DVec3,
+        from_target: gaanim_core::glam::DVec3,
+        from_rotation: gaanim_core::glam::DQuat,
+        eye: gaanim_animation::TrackingEndpoint,
+        target: gaanim_animation::TrackingEndpoint,
+        up: gaanim_core::glam::DVec3,
     },
     /// Tween perspective projection fov/near/far.
     CameraPerspective {
@@ -321,6 +376,10 @@ impl PropertyLensSpec {
                 from: *from,
                 to: *to,
             },
+            Self::CameraPositionSource { from, to } => PropertyLens::CameraPositionSource {
+                from: *from,
+                to: to.clone(),
+            },
             Self::CameraRotation { from, to } => PropertyLens::CameraRotation {
                 from: *from,
                 to: *to,
@@ -329,7 +388,62 @@ impl PropertyLensSpec {
                 from: *from,
                 to: *to,
             },
+            Self::CameraZoomSource { from, to } => PropertyLens::CameraZoomSource {
+                from: *from,
+                to: to.clone(),
+            },
+            Self::CameraRotationSource { from, to } => PropertyLens::CameraRotationSource {
+                from: *from,
+                to: to.clone(),
+            },
+            Self::CameraOrthographic { from, to } => PropertyLens::CameraOrthographic {
+                from: *from,
+                to: *to,
+            },
+            Self::CameraReset {
+                from_position,
+                from_rotation,
+                from_target,
+                from_up,
+                from_zoom,
+                to_zoom,
+            } => PropertyLens::CameraReset {
+                from_position: *from_position,
+                from_rotation: *from_rotation,
+                from_target: *from_target,
+                from_up: *from_up,
+                from_zoom: *from_zoom,
+                to_zoom: *to_zoom,
+            },
             Self::CameraFollow { target } => PropertyLens::CameraFollow { target: *target },
+            Self::CameraFollowEndpoint {
+                target,
+                from,
+                offset,
+                offset_space,
+                lag,
+            } => PropertyLens::CameraFollowEndpoint {
+                target: target.clone(),
+                from: *from,
+                offset: *offset,
+                offset_space: *offset_space,
+                lag: *lag,
+            },
+            Self::CameraFrameDynamic {
+                targets,
+                from_position,
+                from_zoom,
+                margins,
+                frame_width,
+                frame_height,
+            } => PropertyLens::CameraFrameDynamic {
+                targets: targets.clone(),
+                from_position: *from_position,
+                from_zoom: *from_zoom,
+                margins: *margins,
+                frame_width: *frame_width,
+                frame_height: *frame_height,
+            },
             Self::CameraShake {
                 origin,
                 amplitude,
@@ -342,6 +456,21 @@ impl PropertyLensSpec {
             Self::CameraTarget { from, to } => PropertyLens::CameraTarget {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraLookAtSource {
+                from_position,
+                from_target,
+                from_rotation,
+                eye,
+                target,
+                up,
+            } => PropertyLens::CameraLookAtSource {
+                from_position: *from_position,
+                from_target: *from_target,
+                from_rotation: *from_rotation,
+                eye: eye.clone(),
+                target: target.clone(),
+                up: *up,
             },
             Self::CameraPerspective {
                 from_fov,

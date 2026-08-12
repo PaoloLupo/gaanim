@@ -1,9 +1,11 @@
+pub mod camera;
 pub mod prelude;
 pub mod signals;
 pub mod tween;
 pub mod updaters;
 pub mod writing;
 
+pub use camera::{CameraBinding, CameraBindingKind, CameraBindingWindow, apply_camera_bindings};
 pub use signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, CurvatureOnCurve, FloatSignal,
     MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, ReactiveReadout,
@@ -25,10 +27,10 @@ pub use updaters::{
     TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by, advance_x_updater,
     angle_label_placement_system, bob_updater, dimension_label_placement_system,
     endpoint_angle_system, endpoint_distance_system, endpoint_follow_system, follow_updater,
-    mechanism_binding_system, orbit_updater, pulse_updater, resolve_tracking_endpoint,
-    rotate_updater, seek_updaters, traced_path_3d_system, traced_path_system,
-    tracking_angle_system, tracking_line_system, tracking_vector_head_system,
-    tracking_world_to_local, updater_system,
+    mechanism_binding_system, orbit_updater, pulse_updater, resolve_entity_bounds,
+    resolve_tracking_endpoint, resolve_tracking_endpoint_with_offset, rotate_updater,
+    seek_updaters, traced_path_3d_system, traced_path_system, tracking_angle_system,
+    tracking_line_system, tracking_vector_head_system, tracking_world_to_local, updater_system,
 };
 pub use writing::{
     FillDrawProgress, PathReveal, PathSource, WriteTipGlow, path_source_seed_added_system,

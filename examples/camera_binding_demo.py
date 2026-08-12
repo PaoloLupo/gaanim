@@ -1,0 +1,46 @@
+"""Native reactive camera bindings in orthographic and perspective modes."""
+
+import os
+
+from gaanim import BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
+
+
+scene = Scene(960, 540, background=BLACK)
+scene.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.text("Reactive camera rig", role="title").fill(WHITE).at(0, 220)
+marker = scene.dot(18).fill(GOLD)
+scene.circle(150).no_fill().stroke(BLUE, 3)
+cube = scene.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-1.8, -0.5, 0)
+sphere = scene.sphere(1.25, material=Material3D.metal(CYAN)).at_3d(1.8, -0.5, 0)
+theta = scene.parameter(0.0)
+focus = scene.point_ref(theta * 260 - 130, (theta * 3.14159).sin() * 90)
+marker.follow(focus)
+
+rig_2d = scene.camera.bind_2d(
+    center=focus,
+    zoom=1.0 + theta * 0.35,
+    rotation=(theta - 0.5) * 0.12,
+)
+scene.play([theta.animate_to(1.0, duration=2.0), marker.fade_in(duration=0.3)])
+rig_2d.disable()
+
+target_x = scene.parameter(0.0)
+focus_3d = scene.point_ref((target_x - 0.5) * 3.0, -0.5)
+rig_3d = scene.camera.bind_3d(
+    eye=(7.0, 4.5, 10.0), target=focus_3d, fov_y=0.72,
+)
+scene.play(
+    [
+        target_x.animate_to(1.0, duration=2.0),
+        cube.create(duration=0.5),
+        sphere.create(duration=0.5),
+    ]
+)
+rig_3d.disable()
+scene.camera.reset(duration=0.7)
+
+snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
+if snapshot_dir:
+    scene.snapshots(snapshot_dir, [0.0, 0.5, 1.0, 1.8, 2.1, 2.8, 3.8, 4.4, 4.7])
+
+scene.render()

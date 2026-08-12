@@ -298,6 +298,60 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_camera_rig_contract(module: object) -> list[str]:
+    """Exercise the semantic camera facade and removed compatibility surface."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    marker = scene.dot(5.0)
+    parameter = scene.parameter(1.0)
+    point = scene.point_ref(parameter * 20.0, 10.0)
+
+    constraint = scene.camera.bind_2d(center=point, zoom=parameter)
+    if not isinstance(constraint, module.CameraConstraint):
+        failures.append("Camera.bind_2d did not return CameraConstraint")
+    constraint.disable()
+    constraint.enable()
+    scene.camera.bind_3d(eye=(4.0, 3.0, 8.0), target=point, fov_y=0.8).disable()
+
+    animations = (
+        scene.camera.pan_to(point, duration=0.0),
+        scene.camera.zoom_to(parameter, duration=0.0),
+        scene.camera.rotate_to(parameter * 0.1, duration=0.0),
+        scene.camera.frame_to([marker], margin=(10.0, 20.0), dynamic=True, duration=0.0),
+        scene.camera.follow(point, offset=(2.0, 3.0), lag=0.2, duration=0.1),
+        scene.camera.look_at((4.0, 3.0, 8.0), point, duration=0.0),
+        scene.camera.orthographic(1.0, duration=0.0),
+        scene.camera.reset(duration=0.0),
+    )
+    if not all(isinstance(animation, module.Anim) for animation in animations):
+        failures.append("one or more camera rig operations did not return Anim")
+
+    for removed in (
+        "camera_pan_to",
+        "camera_zoom_to",
+        "camera_frame_to",
+        "camera_rotate_to",
+        "camera_follow",
+        "camera_shake",
+    ):
+        if hasattr(module.Scene, removed):
+            failures.append(f"removed Scene.{removed} remains public")
+
+    invalid_calls = (
+        lambda: scene.camera.perspective(3.141592653589793),
+        lambda: scene.camera.look_at((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+        lambda: scene.camera.bind_2d(center=point, influence=1.5),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("camera validation accepted an invalid authored value")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -327,6 +381,7 @@ def main() -> int:
     missing.extend(validate_visualization_contract(module))
     missing.extend(validate_layout_detach_contract(module))
     missing.extend(validate_reactive_connector_contract(module))
+    missing.extend(validate_camera_rig_contract(module))
     missing.extend(documented_text_api_failures(tree))
 
     if missing:

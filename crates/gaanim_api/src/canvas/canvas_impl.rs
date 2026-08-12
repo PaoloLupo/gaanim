@@ -16,7 +16,8 @@ use gaanim_timeline::transition::TransitionType;
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
-    CanvasEndpoint, CanvasRay, CanvasState, LocalSegmentStop, Op, PointRef, Segment,
+    CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
+    CanvasState, LocalSegmentStop, Op, PointRef, Segment, SharedCameraBindingSpec,
     SharedCanvasState,
 };
 use crate::canvas::types::{
@@ -109,6 +110,75 @@ pub struct ForceVectorHandle {
     pub label: Option<DrawableHandle>,
     pub number: Option<DrawableHandle>,
     pub unit: Option<DrawableHandle>,
+}
+
+/// A persistent native camera constraint authored on the scene timeline.
+#[derive(Clone)]
+pub struct CameraConstraintHandle {
+    spec: SharedCameraBindingSpec,
+    state: SharedCanvasState,
+}
+
+impl std::fmt::Debug for CameraConstraintHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("CameraConstraintHandle").finish()
+    }
+}
+
+impl CameraConstraintHandle {
+    fn current_time(&self) -> f64 {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .segments
+            .iter()
+            .map(|segment| segment.cursor)
+            .sum()
+    }
+
+    /// Enable this constraint at the current timeline cursor.
+    pub fn enable(&self) {
+        let time = self.current_time();
+        let mut spec = self.spec.lock().expect("camera binding poisoned");
+        if spec
+            .windows
+            .last()
+            .is_some_and(|window| window.end.is_none())
+        {
+            return;
+        }
+        spec.windows.push(CameraBindingWindowSpec {
+            start: time,
+            end: None,
+        });
+    }
+
+    /// Disable this constraint at the current timeline cursor.
+    pub fn disable(&self) {
+        let time = self.current_time();
+        let mut spec = self.spec.lock().expect("camera binding poisoned");
+        if let Some(window) = spec.windows.last_mut()
+            && window.end.is_none()
+        {
+            window.end = Some(time.max(window.start));
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CameraBindingError {
+    #[error("camera binding must control at least one channel")]
+    Empty,
+    #[error("camera up vector must be finite and non-zero")]
+    InvalidUp,
+    #[error("camera influence must be finite and within 0..1")]
+    InvalidInfluence,
+    #[error("orthographic zoom must be finite and greater than zero")]
+    InvalidZoom,
+    #[error("perspective fov_y must be finite and satisfy 0 < fov_y < pi")]
+    InvalidFov,
+    #[error("2D camera centers cannot contain a non-zero z coordinate")]
+    InvalidDimension,
 }
 
 /// Optional annotation behavior for [`Canvas::dimension_between_with_options`].
@@ -1607,11 +1677,21 @@ impl Canvas {
         self.camera_anim(AnimationType::CameraPosition { to }, duration)
     }
 
+    /// Pan toward any native reactive endpoint.
+    pub fn camera_pan_to_endpoint(&mut self, target: CanvasEndpoint, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraPositionSource { target }, duration)
+    }
+
     /// Animate orthographic zoom. Values above one zoom in.
     pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) -> Anim {
-        let to = zoom.max(0.01);
+        let to = zoom;
         self.camera_zoom = to;
         self.camera_anim(AnimationType::CameraZoom { to }, duration)
+    }
+
+    /// Animate orthographic zoom toward a native scalar source.
+    pub fn camera_zoom_to_source(&mut self, to: Expr, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraZoomSource { to }, duration)
     }
 
     /// Pan and zoom to keep `target` inside the viewport with a uniform margin.
@@ -1619,10 +1699,33 @@ impl Canvas {
         self.camera_anim(
             AnimationType::CameraFrame {
                 target: target.id,
-                margin: margin.max(0.0),
+                margin,
             },
             duration,
         )
+    }
+
+    /// Frame one or more drawables using CSS-order margins.
+    pub fn camera_frame_many(
+        &mut self,
+        targets: &[DrawableHandle],
+        margins: [f64; 4],
+        dynamic: bool,
+        duration: f64,
+    ) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraFrameMany {
+                targets: targets.iter().map(|target| target.id).collect(),
+                margins,
+                dynamic,
+            },
+            duration,
+        )
+    }
+
+    /// Rotate the 2D camera toward a reactive angle in radians.
+    pub fn camera_rotate_to_source(&mut self, to: Expr, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraRotationSource { to }, duration)
     }
 
     /// Rotate the 2D camera around the viewport center, in radians.
@@ -1637,12 +1740,32 @@ impl Canvas {
         self.camera_anim(AnimationType::CameraFollow { target: target.id }, duration)
     }
 
+    /// Follow any native endpoint, optionally in its local axes with deterministic lag.
+    pub fn camera_follow_endpoint(
+        &mut self,
+        target: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
+        duration: f64,
+    ) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraFollowEndpoint {
+                target,
+                offset,
+                offset_space,
+                lag,
+            },
+            duration,
+        )
+    }
+
     /// Apply a deterministic camera shake that settles back at its start position.
     pub fn camera_shake(&mut self, amplitude: f64, frequency: f64, duration: f64) -> Anim {
         self.camera_anim(
             AnimationType::CameraShake {
-                amplitude: amplitude.max(0.0),
-                frequency: frequency.max(0.0),
+                amplitude,
+                frequency,
             },
             duration,
         )
@@ -1662,6 +1785,20 @@ impl Canvas {
         self.camera_anim(AnimationType::CameraLookAt { eye, target, up }, duration)
     }
 
+    /// Aim the camera using native reactive endpoints.
+    pub fn camera_look_at_endpoints(
+        &mut self,
+        eye: CanvasEndpoint,
+        target: CanvasEndpoint,
+        up: DVec3,
+        duration: f64,
+    ) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraLookAtSource { eye, target, up },
+            duration,
+        )
+    }
+
     /// Orbit around current target by yaw/pitch radians.
     pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> Anim {
         self.camera_anim(
@@ -1676,18 +1813,123 @@ impl Canvas {
     /// Animate perspective projection parameters.
     pub fn camera_perspective(&mut self, fov_y: f64, near: f64, far: f64, duration: f64) -> Anim {
         self.camera_anim(
-            AnimationType::CameraPerspective {
-                fov_y,
-                near: near.max(0.01),
-                far: far.max(near + 0.1),
-            },
+            AnimationType::CameraPerspective { fov_y, near, far },
             duration,
         )
+    }
+
+    /// Select orthographic projection and animate to the requested zoom.
+    pub fn camera_orthographic(&mut self, zoom: f64, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraOrthographic { zoom }, duration)
+    }
+
+    /// Restore the complete authored camera rig to its default 2D pose.
+    pub fn camera_reset(&mut self, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraReset, duration)
     }
 
     /// Dolly camera toward/away from target (factor <1 closer).
     pub fn camera_dolly(&mut self, factor: f64, duration: f64) -> Anim {
         self.camera_anim(AnimationType::CameraDolly { factor }, duration)
+    }
+
+    fn camera_binding(
+        &mut self,
+        kind: CanvasCameraBindingKind,
+        influence: Expr,
+        enabled: bool,
+    ) -> CameraConstraintHandle {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let start = state.segments.iter().map(|segment| segment.cursor).sum();
+        let order = state.next_camera_binding_order();
+        let spec = Arc::new(Mutex::new(CameraBindingSpec {
+            order,
+            kind,
+            influence,
+            windows: enabled
+                .then_some(CameraBindingWindowSpec { start, end: None })
+                .into_iter()
+                .collect(),
+        }));
+        state
+            .active_mut()
+            .ops
+            .push(Op::SpawnCameraBinding(spec.clone()));
+        drop(state);
+        CameraConstraintHandle {
+            spec,
+            state: self.state.clone(),
+        }
+    }
+
+    /// Bind orthographic camera channels to native reactive sources.
+    pub fn camera_bind_2d(
+        &mut self,
+        center: Option<CanvasEndpoint>,
+        zoom: Option<Expr>,
+        rotation: Option<Expr>,
+        influence: Expr,
+        enabled: bool,
+    ) -> Result<CameraConstraintHandle, CameraBindingError> {
+        if center.is_none() && zoom.is_none() && rotation.is_none() {
+            return Err(CameraBindingError::Empty);
+        }
+        if matches!(&center, Some(CanvasEndpoint::Static(position)) if position.z.abs() > f64::EPSILON)
+        {
+            return Err(CameraBindingError::InvalidDimension);
+        }
+        if matches!(&zoom, Some(Expr::Constant(value)) if !value.is_finite() || *value <= 0.0) {
+            return Err(CameraBindingError::InvalidZoom);
+        }
+        if matches!(&influence, Expr::Constant(value) if !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err(CameraBindingError::InvalidInfluence);
+        }
+        Ok(self.camera_binding(
+            CanvasCameraBindingKind::TwoD {
+                center,
+                zoom,
+                rotation,
+            },
+            influence,
+            enabled,
+        ))
+    }
+
+    /// Bind perspective camera channels to native reactive sources.
+    pub fn camera_bind_3d(
+        &mut self,
+        eye: Option<CanvasEndpoint>,
+        target: Option<CanvasEndpoint>,
+        fov_y: Option<Expr>,
+        up: DVec3,
+        influence: Expr,
+        enabled: bool,
+    ) -> Result<CameraConstraintHandle, CameraBindingError> {
+        if eye.is_none() && target.is_none() && fov_y.is_none() {
+            return Err(CameraBindingError::Empty);
+        }
+        if !up.is_finite() || up.length_squared() <= f64::EPSILON {
+            return Err(CameraBindingError::InvalidUp);
+        }
+        if matches!(&fov_y, Some(Expr::Constant(value)) if !value.is_finite() || !(0.0..std::f64::consts::PI).contains(value) || *value == 0.0)
+        {
+            return Err(CameraBindingError::InvalidFov);
+        }
+        if matches!(&influence, Expr::Constant(value) if !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err(CameraBindingError::InvalidInfluence);
+        }
+        Ok(self.camera_binding(
+            CanvasCameraBindingKind::ThreeD {
+                eye,
+                target,
+                fov_y,
+                up,
+            },
+            influence,
+            enabled,
+        ))
     }
 
     // -- Time controls --

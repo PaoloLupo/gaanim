@@ -8,9 +8,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
-    AngleDimensionOptions, Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint,
-    CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionOptions, ImageCrop, ImageFit,
-    ImageOptions, LabelMode, PresentationBrand, SegmentHandle, ThemeFont,
+    AngleDimensionOptions, Axes3DConfig, AxesConfig, CameraConstraintHandle, Canvas as ApiCanvas,
+    CanvasEndpoint, CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionOptions,
+    ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand, SegmentHandle, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -825,6 +825,26 @@ pub struct PyCamera {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// Stable handle for a persistent native camera constraint.
+#[pyclass(name = "CameraConstraint", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCameraConstraint {
+    inner: CameraConstraintHandle,
+}
+
+#[pymethods]
+impl PyCameraConstraint {
+    /// Enable this constraint at the current timeline cursor.
+    fn enable(&self) {
+        self.inner.enable();
+    }
+
+    /// Disable this constraint at the current timeline cursor.
+    fn disable(&self) {
+        self.inner.disable();
+    }
+}
+
 fn require_finite(value: f64, name: &str) -> PyResult<f64> {
     if value.is_finite() {
         Ok(value)
@@ -871,44 +891,109 @@ fn validate_force_metrics(
 #[pymethods]
 impl PyCamera {
     /// Pan to a world-space point.
-    #[pyo3(signature = (x, y, duration=1.0))]
-    fn pan_to(&self, x: f64, y: f64, duration: f64) -> PyResult<PyCanvasAnim> {
-        let (x, y, duration) = (
-            require_finite(x, "x")?,
-            require_finite(y, "y")?,
-            require_duration(duration)?,
-        );
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_pan_to(x, y, duration);
+    #[pyo3(signature = (target, y=None, duration=1.0))]
+    fn pan_to(
+        &self,
+        target: Bound<'_, PyAny>,
+        y: Option<f64>,
+        duration: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = if let Some(y) = y {
+            let x = target.extract::<f64>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "the two-coordinate overload requires numeric x and y",
+                )
+            })?;
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_pan_to(require_finite(x, "x")?, require_finite(y, "y")?, duration)
+        } else {
+            let endpoint = resolve_endpoint(&target)?;
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_pan_to_endpoint(endpoint, duration)
+        };
         Ok(PyCanvasAnim { inner })
     }
 
     /// Set the orthographic zoom. Values above one zoom in.
     #[pyo3(signature = (zoom, duration=1.0))]
-    fn zoom_to(&self, zoom: f64, duration: f64) -> PyResult<PyCanvasAnim> {
-        if !zoom.is_finite() || zoom <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "zoom must be finite and positive",
-            ));
+    fn zoom_to(&self, zoom: Bound<'_, PyAny>, duration: f64) -> PyResult<PyCanvasAnim> {
+        if let Ok(value) = zoom.extract::<f64>() {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "zoom must be finite and positive",
+                ));
+            }
         }
         let duration = require_duration(duration)?;
+        let zoom = extract_expr(zoom)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_zoom_to(zoom, duration);
+            .camera_zoom_to_source(zoom, duration);
         Ok(PyCanvasAnim { inner })
     }
 
     /// Pan and zoom in parallel so the target fits inside the safe viewport.
-    #[pyo3(signature = (target, margin=40.0, duration=1.0))]
-    fn frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) -> PyResult<PyCanvasAnim> {
-        if !margin.is_finite() || margin < 0.0 {
+    #[pyo3(signature = (targets, margin=None, duration=1.0, *, dynamic=false))]
+    fn frame_to(
+        &self,
+        targets: Bound<'_, PyAny>,
+        margin: Option<Bound<'_, PyAny>>,
+        duration: f64,
+        dynamic: bool,
+    ) -> PyResult<PyCanvasAnim> {
+        let margins = if let Some(margin) = margin {
+            if let Ok(value) = margin.extract::<f64>() {
+                [value; 4]
+            } else if let Ok((vertical, horizontal)) = margin.extract::<(f64, f64)>() {
+                [vertical, horizontal, vertical, horizontal]
+            } else if let Ok(values) = margin.extract::<(f64, f64, f64, f64)>() {
+                [values.0, values.1, values.2, values.3]
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "margin must be a scalar, (vertical, horizontal), or (top, right, bottom, left)",
+                ));
+            }
+        } else {
+            [40.0; 4]
+        };
+        if margins
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "margin must be finite and non-negative",
+            ));
+        }
+        let targets = if let Ok(drawable) = targets.extract::<PyRef<'_, PyDrawable>>() {
+            vec![drawable.0.clone()]
+        } else {
+            let sequence = targets.cast::<PySequence>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "targets must be a Drawable or a non-empty sequence of Drawable values",
+                )
+            })?;
+            let mut drawables = Vec::new();
+            for item in sequence.try_iter()? {
+                let item = item?;
+                let drawable = item.extract::<PyRef<'_, PyDrawable>>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "every frame_to target must be a Drawable",
+                    )
+                })?;
+                drawables.push(drawable.0.clone());
+            }
+            drawables
+        };
+        if targets.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "targets must contain at least one Drawable",
             ));
         }
         let duration = require_duration(duration)?;
@@ -916,31 +1001,67 @@ impl PyCamera {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_frame_to(&target.0, margin, duration);
+            .camera_frame_many(&targets, margins, dynamic, duration);
         Ok(PyCanvasAnim { inner })
     }
 
     /// Rotate the camera around the viewport center, in radians.
     #[pyo3(signature = (angle, duration=1.0))]
-    fn rotate_to(&self, angle: f64, duration: f64) -> PyResult<PyCanvasAnim> {
-        let (angle, duration) = (require_finite(angle, "angle")?, require_duration(duration)?);
+    fn rotate_to(&self, angle: Bound<'_, PyAny>, duration: f64) -> PyResult<PyCanvasAnim> {
+        if let Ok(value) = angle.extract::<f64>() {
+            require_finite(value, "angle")?;
+        }
+        let duration = require_duration(duration)?;
+        let angle = extract_expr(angle)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_rotate_to(angle, duration);
+            .camera_rotate_to_source(angle, duration);
         Ok(PyCanvasAnim { inner })
     }
 
     /// Keep the camera centered on a drawable while it moves.
-    #[pyo3(signature = (target, duration=1.0))]
-    fn follow(&self, target: &PyDrawable, duration: f64) -> PyResult<PyCanvasAnim> {
+    #[pyo3(signature = (target, *, offset=(0.0, 0.0), offset_space="world", lag=0.0, duration=1.0))]
+    fn follow(
+        &self,
+        target: Bound<'_, PyAny>,
+        offset: (f64, f64),
+        offset_space: &str,
+        lag: f64,
+        duration: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        if !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "offset must be finite",
+            ));
+        }
+        if !lag.is_finite() || lag < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "lag must be finite and non-negative",
+            ));
+        }
+        let offset_space = match offset_space {
+            "world" => gaanim_animation::FollowOffsetSpace::World,
+            "local" => gaanim_animation::FollowOffsetSpace::Local,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "offset_space must be 'world' or 'local'",
+                ));
+            }
+        };
         let duration = require_duration(duration)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_follow(&target.0, duration);
+            .camera_follow_endpoint(
+                resolve_endpoint(&target)?,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                offset_space,
+                lag,
+                duration,
+            );
         Ok(PyCanvasAnim { inner })
     }
 
@@ -970,30 +1091,44 @@ impl PyCamera {
     #[pyo3(signature = (eye, target, up=None, duration=1.0))]
     fn look_at(
         &self,
-        eye: (f64, f64, f64),
-        target: (f64, f64, f64),
+        eye: Bound<'_, PyAny>,
+        target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
         duration: f64,
     ) -> PyResult<PyCanvasAnim> {
-        if ![eye.0, eye.1, eye.2, target.0, target.1, target.2]
-            .iter()
-            .all(|v| v.is_finite())
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "eye and target must be finite",
-            ));
-        }
         if let Some(up) = up {
             if ![up.0, up.1, up.2].iter().all(|v| v.is_finite()) {
                 return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
             }
+        }
+        let up_tuple = up.unwrap_or((0.0, 1.0, 0.0));
+        let up_vec = gaanim_core::glam::DVec3::new(up_tuple.0, up_tuple.1, up_tuple.2);
+        if up_vec.length_squared() <= f64::EPSILON {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "up must be non-zero",
+            ));
+        }
+        if let (Ok(eye_tuple), Ok(target_tuple)) = (
+            eye.extract::<(f64, f64, f64)>(),
+            target.extract::<(f64, f64, f64)>(),
+        ) {
+            let eye_vec = gaanim_core::glam::DVec3::new(eye_tuple.0, eye_tuple.1, eye_tuple.2);
+            let target_vec =
+                gaanim_core::glam::DVec3::new(target_tuple.0, target_tuple.1, target_tuple.2);
+            gaanim_math::Camera::validate_look_at(eye_vec, target_vec, up_vec)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         }
         let duration = require_duration(duration)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_look_at(eye, target, up, duration);
+            .camera_look_at_endpoints(
+                resolve_endpoint_3d(&eye)?,
+                resolve_endpoint_3d(&target)?,
+                up_vec,
+                duration,
+            );
         Ok(PyCanvasAnim { inner })
     }
 
@@ -1025,6 +1160,7 @@ impl PyCamera {
     ) -> PyResult<PyCanvasAnim> {
         if ![fov_y, near, far].iter().all(|v| v.is_finite())
             || fov_y <= 0.0
+            || fov_y >= std::f64::consts::PI
             || near <= 0.0
             || far <= near
         {
@@ -1038,6 +1174,35 @@ impl PyCamera {
             .lock()
             .expect("scene canvas poisoned")
             .camera_perspective(fov_y, near, far, duration);
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Select orthographic projection. Values above one zoom in.
+    #[pyo3(signature = (zoom=1.0, duration=0.0))]
+    fn orthographic(&self, zoom: f64, duration: f64) -> PyResult<PyCanvasAnim> {
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "zoom must be finite and positive",
+            ));
+        }
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_orthographic(zoom, duration);
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Restore the default authored 2D pose and projection.
+    #[pyo3(signature = (duration=1.0))]
+    fn reset(&self, duration: f64) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_reset(duration);
         Ok(PyCanvasAnim { inner })
     }
 
@@ -1056,6 +1221,60 @@ impl PyCamera {
             .expect("scene canvas poisoned")
             .camera_dolly(factor, duration);
         Ok(PyCanvasAnim { inner })
+    }
+
+    /// Persistently bind orthographic camera channels to native reactive sources.
+    #[pyo3(signature = (*, center=None, zoom=None, rotation=None, influence=None, enabled=true))]
+    fn bind_2d(
+        &self,
+        center: Option<Bound<'_, PyAny>>,
+        zoom: Option<Bound<'_, PyAny>>,
+        rotation: Option<Bound<'_, PyAny>>,
+        influence: Option<Bound<'_, PyAny>>,
+        enabled: bool,
+    ) -> PyResult<PyCameraConstraint> {
+        let center = center.as_ref().map(resolve_endpoint).transpose()?;
+        let zoom = zoom.map(extract_expr).transpose()?;
+        let rotation = rotation.map(extract_expr).transpose()?;
+        let influence = influence
+            .map(extract_expr)
+            .transpose()?
+            .unwrap_or_else(|| gaanim_expr::Expr::constant(1.0));
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_bind_2d(center, zoom, rotation, influence, enabled)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraConstraint { inner: handle })
+    }
+
+    /// Persistently bind perspective camera channels to native reactive sources.
+    #[pyo3(signature = (*, eye=None, target=None, fov_y=None, up=(0.0, 1.0, 0.0), influence=None, enabled=true))]
+    fn bind_3d(
+        &self,
+        eye: Option<Bound<'_, PyAny>>,
+        target: Option<Bound<'_, PyAny>>,
+        fov_y: Option<Bound<'_, PyAny>>,
+        up: (f64, f64, f64),
+        influence: Option<Bound<'_, PyAny>>,
+        enabled: bool,
+    ) -> PyResult<PyCameraConstraint> {
+        let eye = eye.as_ref().map(resolve_endpoint_3d).transpose()?;
+        let target = target.as_ref().map(resolve_endpoint_3d).transpose()?;
+        let fov_y = fov_y.map(extract_expr).transpose()?;
+        let influence = influence
+            .map(extract_expr)
+            .transpose()?
+            .unwrap_or_else(|| gaanim_expr::Expr::constant(1.0));
+        let up = gaanim_core::glam::DVec3::new(up.0, up.1, up.2);
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_bind_3d(eye, target, fov_y, up, influence, enabled)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraConstraint { inner: handle })
     }
 }
 
@@ -3591,54 +3810,6 @@ impl PyScene {
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 
-    #[pyo3(signature = (x, y, duration=1.0))]
-    fn camera_pan_to(&self, x: f64, y: f64, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_pan_to(x, y, duration);
-    }
-
-    #[pyo3(signature = (zoom, duration=1.0))]
-    fn camera_zoom_to(&self, zoom: f64, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_zoom_to(zoom, duration);
-    }
-
-    #[pyo3(signature = (target, margin=40.0, duration=1.0))]
-    fn camera_frame_to(&self, target: &PyDrawable, margin: f64, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_frame_to(&target.0, margin, duration);
-    }
-
-    #[pyo3(signature = (angle, duration=1.0))]
-    fn camera_rotate_to(&self, angle: f64, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_rotate_to(angle, duration);
-    }
-
-    #[pyo3(signature = (target, duration=1.0))]
-    fn camera_follow(&self, target: &PyDrawable, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_follow(&target.0, duration);
-    }
-
-    #[pyo3(signature = (amplitude=12.0, frequency=8.0, duration=0.5))]
-    fn camera_shake(&self, amplitude: f64, frequency: f64, duration: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_shake(amplitude, frequency, duration);
-    }
-
     #[pyo3(signature = (name, transition=None, *, notes=None, template=None))]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
@@ -4798,7 +4969,7 @@ impl PyScene {
 }
 
 /// Resolve a Python object into a CanvasEndpoint.
-/// Accepts a PyDrawable (entity) or a tuple (x, y) (static position).
+/// Accepts a drawable, anchor, point reference, or static 2D/3D tuple.
 pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))
@@ -4806,13 +4977,37 @@ pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoin
         Ok(CanvasEndpoint::Anchor(anchor.0))
     } else if let Ok(point) = obj.extract::<PyRef<PyPointRef>>() {
         Ok(point.0 .0.clone())
+    } else if let Ok(tuple) = obj.extract::<(f64, f64, f64)>() {
+        Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+            tuple.0, tuple.1, tuple.2,
+        )))
     } else if let Ok(tuple) = obj.extract::<(f64, f64)>() {
         Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
             tuple.0, tuple.1, 0.0,
         )))
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
-            "Endpoint must be a Drawable, AnchorPoint, PointRef, or a (x, y) tuple",
+            "Endpoint must be a Drawable, AnchorPoint, PointRef, or a 2D/3D tuple",
+        ))
+    }
+}
+
+/// Resolve a 3D camera endpoint. Static tuples must declare all three axes;
+/// drawable, anchor, and PointRef endpoints retain their native world Z.
+fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
+    if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
+        Ok(CanvasEndpoint::Entity(drawable.0.id))
+    } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {
+        Ok(CanvasEndpoint::Anchor(anchor.0))
+    } else if let Ok(point) = obj.extract::<PyRef<PyPointRef>>() {
+        Ok(point.0 .0.clone())
+    } else if let Ok(tuple) = obj.extract::<(f64, f64, f64)>() {
+        Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+            tuple.0, tuple.1, tuple.2,
+        )))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "3D Endpoint must be a Drawable, AnchorPoint, PointRef, or a (x, y, z) tuple",
         ))
     }
 }

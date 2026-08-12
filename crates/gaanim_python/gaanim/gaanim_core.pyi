@@ -1250,7 +1250,8 @@ class Support(Drawable):
     @property
     def hatching(self) -> Drawable: ...
 
-Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float]
+Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float] | tuple[float, float, float]
+ScalarSource: TypeAlias = float | Parameter | Variable | _Expr
 AngleRay: TypeAlias = Direction | Endpoint
 
 class Material3D:
@@ -1723,7 +1724,17 @@ class Segment:
         """
         ...
 
+class CameraConstraint:
+    """Persistent native camera binding with timeline-recorded activation."""
+    def enable(self) -> None:
+        """Enable the binding at the current timeline cursor."""
+        ...
+    def disable(self) -> None:
+        """Disable the binding at the current timeline cursor."""
+        ...
+
 class Camera:
+    @overload
     def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
         """Configure the camera with pan to.
 
@@ -1731,7 +1742,9 @@ class Camera:
             scene.camera.pan_to(1.0, 1.0)
         """
         ...
-    def zoom_to(self, zoom: float, duration: float = 1.0) -> Anim:
+    @overload
+    def pan_to(self, target: Endpoint, duration: float = 1.0) -> Anim: ...
+    def zoom_to(self, zoom: ScalarSource, duration: float = 1.0) -> Anim:
         """Configure the camera with zoom to.
 
         Example:
@@ -1740,9 +1753,11 @@ class Camera:
         ...
     def frame_to(
         self,
-        target: Drawable,
-        margin: float = 40.0,
+        targets: Drawable | Sequence[Drawable],
+        margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None,
         duration: float = 1.0,
+        *,
+        dynamic: bool = False,
     ) -> Anim:
         """Configure the camera with frame to.
 
@@ -1750,14 +1765,22 @@ class Camera:
             scene.camera.frame_to(target)
         """
         ...
-    def rotate_to(self, angle: float, duration: float = 1.0) -> Anim:
+    def rotate_to(self, angle: ScalarSource, duration: float = 1.0) -> Anim:
         """Configure the camera with rotate to.
 
         Example:
             scene.camera.rotate_to(1.0)
         """
         ...
-    def follow(self, target: Drawable, duration: float = 1.0) -> Anim:
+    def follow(
+        self,
+        target: Endpoint,
+        *,
+        offset: tuple[float, float] = (0.0, 0.0),
+        offset_space: Literal["world", "local"] = "world",
+        lag: float = 0.0,
+        duration: float = 1.0,
+    ) -> Anim:
         """Configure the camera with follow.
 
         Example:
@@ -1778,8 +1801,8 @@ class Camera:
         ...
     def look_at(
         self,
-        eye: tuple[float, float, float],
-        target: tuple[float, float, float],
+        eye: Endpoint,
+        target: Endpoint,
         up: Optional[tuple[float, float, float]] = None,
         duration: float = 1.0,
     ) -> Anim:
@@ -1837,6 +1860,49 @@ class Camera:
 
         Example:
             scene.camera.dolly(factor=0.85, duration=0.6)
+        """
+        ...
+
+    def orthographic(self, zoom: float = 1.0, duration: float = 0.0) -> Anim:
+        """Select orthographic projection; ``zoom`` must be positive."""
+        ...
+
+    def reset(self, duration: float = 1.0) -> Anim:
+        """Restore the default 2D pose, up vector, target, and projection."""
+        ...
+
+    def bind_2d(
+        self,
+        *,
+        center: Optional[Endpoint] = None,
+        zoom: Optional[ScalarSource] = None,
+        rotation: Optional[ScalarSource] = None,
+        influence: Optional[ScalarSource] = None,
+        enabled: bool = True,
+    ) -> CameraConstraint:
+        """Bind orthographic channels to native reactive sources.
+
+        ``rotation`` is in radians. ``zoom`` must evaluate to a finite positive
+        value and ``influence`` defaults to ``1`` (``None`` at runtime means
+        the default). At least one channel is required.
+        """
+        ...
+
+    def bind_3d(
+        self,
+        *,
+        eye: Optional[Endpoint] = None,
+        target: Optional[Endpoint] = None,
+        fov_y: Optional[ScalarSource] = None,
+        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        influence: Optional[ScalarSource] = None,
+        enabled: bool = True,
+    ) -> CameraConstraint:
+        """Bind perspective pose or FOV channels to native reactive sources.
+
+        ``fov_y`` is a vertical field of view in radians. ``up`` must be
+        finite and non-zero. At least one of ``eye``, ``target``, or ``fov_y``
+        is required.
         """
         ...
 
@@ -2894,48 +2960,6 @@ class Scene:
         ...
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
         """Import a local glTF 2.0 ``.gltf`` or ``.glb`` model."""
-        ...
-    def camera_pan_to(self, x: float, y: float, duration: float = 1.0) -> None:
-        """Configure or query the scene with camera pan to.
-
-        Example:
-            scene.camera_pan_to(1.0, 1.0)
-        """
-        ...
-    def camera_zoom_to(self, zoom: float, duration: float = 1.0) -> None:
-        """Configure or query the scene with camera zoom to.
-
-        Example:
-            scene.camera_zoom_to(1.0)
-        """
-        ...
-    def camera_frame_to(self, target: Drawable, margin: float = 40.0, duration: float = 1.0) -> None:
-        """Configure or query the scene with camera frame to.
-
-        Example:
-            scene.camera_frame_to(target)
-        """
-        ...
-    def camera_rotate_to(self, angle: float, duration: float = 1.0) -> None:
-        """Configure or query the scene with camera rotate to.
-
-        Example:
-            scene.camera_rotate_to(1.0)
-        """
-        ...
-    def camera_follow(self, target: Drawable, duration: float = 1.0) -> None:
-        """Configure or query the scene with camera follow.
-
-        Example:
-            scene.camera_follow(target)
-        """
-        ...
-    def camera_shake(self, amplitude: float = 12.0, frequency: float = 8.0, duration: float = 0.5) -> None:
-        """Configure or query the scene with camera shake.
-
-        Example:
-            scene.camera_shake()
-        """
         ...
     def group(self, members: Sequence[Drawable]) -> Drawable:
         """Create a group drawable in the scene.

@@ -28,9 +28,9 @@ pub use visualization::{
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
-    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, Canvas,
-    DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, SceneObjectError,
-    SupportHandle, ThemeError,
+    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError,
+    CameraBindingError, CameraConstraintHandle, Canvas, DimensionHandle, DimensionOptions,
+    ForceVectorHandle, ImageLoadError, SceneObjectError, SupportHandle, ThemeError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

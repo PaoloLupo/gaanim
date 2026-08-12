@@ -41,7 +41,7 @@ serde = [
 ]
 
 [dev-dependencies]
+gaanim_expr = { path = "../gaanim_expr" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_objects = { path = "../gaanim_objects" }
-
 

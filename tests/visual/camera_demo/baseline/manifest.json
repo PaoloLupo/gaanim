@@ -29,19 +29,39 @@
       "file": "seek_0004_t_3_200000.png"
     },
     {
-      "id": "seek_0005_t_4_100000",
-      "time_seconds": 4.1,
-      "file": "seek_0005_t_4_100000.png"
+      "id": "seek_0005_t_4_050000",
+      "time_seconds": 4.05,
+      "file": "seek_0005_t_4_050000.png"
     },
     {
-      "id": "seek_0006_t_5_150000",
-      "time_seconds": 5.15,
-      "file": "seek_0006_t_5_150000.png"
+      "id": "seek_0006_t_4_600000",
+      "time_seconds": 4.6,
+      "file": "seek_0006_t_4_600000.png"
     },
     {
-      "id": "seek_0007_t_5_500000",
-      "time_seconds": 5.5,
-      "file": "seek_0007_t_5_500000.png"
+      "id": "seek_0007_t_5_400000",
+      "time_seconds": 5.4,
+      "file": "seek_0007_t_5_400000.png"
+    },
+    {
+      "id": "seek_0008_t_5_900000",
+      "time_seconds": 5.9,
+      "file": "seek_0008_t_5_900000.png"
+    },
+    {
+      "id": "seek_0009_t_6_300000",
+      "time_seconds": 6.3,
+      "file": "seek_0009_t_6_300000.png"
+    },
+    {
+      "id": "seek_0010_t_6_750000",
+      "time_seconds": 6.75,
+      "file": "seek_0010_t_6_750000.png"
+    },
+    {
+      "id": "seek_0011_t_7_100000",
+      "time_seconds": 7.1,
+      "file": "seek_0011_t_7_100000.png"
     }
   ]
 }

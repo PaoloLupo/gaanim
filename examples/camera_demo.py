@@ -18,12 +18,21 @@ scene.camera.frame_to(right, margin=70, duration=0.9)
 scene.camera.zoom_to(1.0, 0.7)
 scene.camera.rotate_to(0.16, 0.6)
 scene.camera.rotate_to(0.0, 0.4)
-scene.camera.follow(guide, duration=1.2)
+scene.play(
+    [
+        scene.camera.follow(guide, duration=1.6),
+        scene.camera.shake(amplitude=30, frequency=4, duration=1.2),
+    ]
+)
 guide.remove_updater()
-scene.camera.shake(amplitude=14, frequency=7, duration=0.5)
+scene.camera.frame_to([left, right], margin=(48, 72), dynamic=True, duration=1.0)
+scene.camera.reset(duration=0.7)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    scene.snapshots(snapshot_dir, [0.0, 0.5, 1.1, 1.9, 3.2, 4.1, 5.15, 5.5])
+    scene.snapshots(
+        snapshot_dir,
+        [0.0, 0.5, 1.1, 1.9, 3.2, 4.05, 4.6, 5.4, 5.9, 6.3, 6.75, 7.1],
+    )
 
 scene.render()

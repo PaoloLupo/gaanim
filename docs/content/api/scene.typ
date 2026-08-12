@@ -489,9 +489,9 @@ of the outgoing scene introduces the following section.
 ```python
 scene.camera.pan_to(-160, 40, duration=0.8)
 scene.camera.zoom_to(1.5, duration=0.6)
-scene.camera.frame_to(circle, margin=48, duration=0.9)
+scene.camera.frame_to([circle, label], margin=(32, 48), duration=0.9, dynamic=True)
 scene.camera.rotate_to(0.15, duration=0.5)
-scene.camera.follow(circle, duration=2.0)
+scene.camera.follow(circle.anchor(Anchor.TOP), offset=(0, 24), lag=0.2, duration=2.0)
 scene.camera.shake(amplitude=12, frequency=8, duration=0.4)
 
 # Camera animations return Anim and can run beside drawable animations.
@@ -501,15 +501,49 @@ scene.play([
 ])
 ```
 
-`camera.frame_to` derives a pan and orthographic zoom from the target's current
-bounds and runs both in parallel, keeping it inside the safe viewport.
-`camera.follow` follows a mobject while reactive updaters are active, and
+`camera.frame_to` accepts one drawable or a sequence, with scalar, two-side, or
+CSS-order four-side margins. With `dynamic=True`, it recomputes the union after
+updaters and layout in the same frame. `camera.pan_to`, `camera.follow`, and
+`camera.look_at` accept a `Drawable`, `AnchorPoint`, `PointRef`, or a 2D/3D
+tuple. Zoom and rotation also accept `Parameter`, `Variable`, and `_Expr`.
+`camera.follow` supports world/local offsets and deterministic absolute-time
+lag. `camera.orthographic(...)` changes projection explicitly, while
+`camera.reset()` restores pose, target, up, and default orthographic projection.
 `camera.shake` is deterministic so previews, seeks, and exports match. The
 camera methods return `Anim`: discarded results retain the existing sequential
 behavior, while passing them to `scene.play` regroups them with drawable or
 glTF Action animations at the same timeline start. Fluent `Anim` controls such
 as `.duration()`, `.delay()`, `.smooth()`, and `.linear()` also apply. The
-legacy `scene.camera_*` methods remain available for existing projects.
+old flat `scene.camera_*` methods are removed; `scene.camera.*` is the sole
+public camera surface.
+
+=== Bindings reactivos persistentes
+
+Bindings are non-rendered ECS constraints with stable creation order. They are
+active from creation unless `enabled=False`, remain active across segments,
+and record `enable()` / `disable()` at the current timeline cursor. Each
+constraint owns only declared channels. Influence is a scalar source in
+`0..1`; later constraints compose over earlier ones. Temporary follow/dynamic
+framing runs after bindings, and shake is always an additive final modifier.
+
+```python
+theta = scene.parameter(0.0)
+focus = scene.point_ref(theta * 180, (theta * 2).sin() * 80)
+rig2d = scene.camera.bind_2d(center=focus, zoom=1 + theta * 0.3)
+scene.play([theta.animate_to(1.0, duration=2.0)])
+rig2d.disable()
+
+rig3d = scene.camera.bind_3d(
+    eye=(6, 4, 8), target=focus, fov_y=0.8, influence=0.75,
+)
+rig3d.disable()
+```
+
+`bind_2d` requires `center`, `zoom`, or `rotation` and selects orthographic
+projection. `bind_3d` requires `eye`, `target`, or `fov_y` and selects
+perspective. Camera APIs reject non-finite values, invalid zoom/FOV/clipping,
+degenerate look-at poses, and influence outside `0..1`; there are no silent
+clamps.
 
 === Cámara 3D
 
@@ -523,7 +557,7 @@ positive duration for an animated camera move. Angles are in radians.
   signature: "perspective(fov_y, near=0.1, far=1000.0, duration=1.0) -> Anim",
   params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
   returns: (type: "Anim", desc: [A composable perspective projection animation.]),
-  desc: [Switches the scene to perspective projection. Require `0 < near < far` and a positive finite field of view.],
+  desc: [Switches the scene to perspective projection. Requires `0 < near < far` and `0 < fov_y < pi`.],
 )[
 ```python
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
@@ -534,9 +568,9 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
   name: "Camera.look_at",
   kind: "method",
   signature: "look_at(eye, target, up=None, duration=1.0) -> Anim",
-  params: ((name: "eye", type: "(float,float,float)", default: none, desc: [Camera position in world space.]), (name: "target", type: "(float,float,float)", default: none, desc: [Point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
+  params: ((name: "eye", type: "Endpoint", default: none, desc: [Reactive camera position in world space.]), (name: "target", type: "Endpoint", default: none, desc: [Reactive point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
   returns: (type: "Anim", desc: [A composable camera orientation and position animation.]),
-  desc: [Positions the camera at `eye` and aims it at `target`. All coordinates must be finite.],
+  desc: [Positions the camera at `eye` and aims it at `target`. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear.],
 )[
 ```python
 scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)

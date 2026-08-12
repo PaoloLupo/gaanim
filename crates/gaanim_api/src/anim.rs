@@ -1,7 +1,10 @@
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
+use gaanim_expr::Expr;
 use gaanim_math::RateFunc;
+
+use crate::canvas::CanvasEndpoint;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DrawAnimationConfig {
@@ -70,18 +73,38 @@ pub enum AnimationType {
     CameraPosition {
         to: DVec3,
     },
+    CameraPositionSource {
+        target: CanvasEndpoint,
+    },
     CameraZoom {
         to: f64,
     },
+    CameraZoomSource {
+        to: Expr,
+    },
     CameraRotation {
         to: DQuat,
+    },
+    CameraRotationSource {
+        to: Expr,
     },
     CameraFrame {
         target: ObjectId,
         margin: f64,
     },
+    CameraFrameMany {
+        targets: Vec<ObjectId>,
+        margins: [f64; 4],
+        dynamic: bool,
+    },
     CameraFollow {
         target: ObjectId,
+    },
+    CameraFollowEndpoint {
+        target: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
     },
     CameraShake {
         amplitude: f64,
@@ -90,6 +113,11 @@ pub enum AnimationType {
     CameraLookAt {
         eye: DVec3,
         target: DVec3,
+        up: DVec3,
+    },
+    CameraLookAtSource {
+        eye: CanvasEndpoint,
+        target: CanvasEndpoint,
         up: DVec3,
     },
     CameraOrbit {
@@ -101,6 +129,10 @@ pub enum AnimationType {
         near: f64,
         far: f64,
     },
+    CameraOrthographic {
+        zoom: f64,
+    },
+    CameraReset,
     CameraDolly {
         factor: f64,
     },
@@ -418,14 +450,22 @@ impl AnimationType {
         matches!(
             self,
             Self::CameraPosition { .. }
+                | Self::CameraPositionSource { .. }
                 | Self::CameraZoom { .. }
+                | Self::CameraZoomSource { .. }
                 | Self::CameraRotation { .. }
+                | Self::CameraRotationSource { .. }
                 | Self::CameraFrame { .. }
+                | Self::CameraFrameMany { .. }
                 | Self::CameraFollow { .. }
+                | Self::CameraFollowEndpoint { .. }
                 | Self::CameraShake { .. }
                 | Self::CameraLookAt { .. }
+                | Self::CameraLookAtSource { .. }
                 | Self::CameraOrbit { .. }
                 | Self::CameraPerspective { .. }
+                | Self::CameraOrthographic { .. }
+                | Self::CameraReset
                 | Self::CameraDolly { .. }
         )
     }
@@ -433,6 +473,7 @@ impl AnimationType {
     pub fn default_rate_func(&self) -> RateFunc {
         match self {
             Self::CameraFollow { .. }
+            | Self::CameraFollowEndpoint { .. }
             | Self::CameraShake { .. }
             | Self::GltfAnimation { .. }
             | Self::Write { .. }

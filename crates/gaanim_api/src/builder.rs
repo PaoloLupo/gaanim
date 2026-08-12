@@ -752,14 +752,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
             AnimationType::CameraPosition { .. }
+            | AnimationType::CameraPositionSource { .. }
             | AnimationType::CameraZoom { .. }
+            | AnimationType::CameraZoomSource { .. }
             | AnimationType::CameraRotation { .. }
+            | AnimationType::CameraRotationSource { .. }
             | AnimationType::CameraFrame { .. }
+            | AnimationType::CameraFrameMany { .. }
             | AnimationType::CameraFollow { .. }
+            | AnimationType::CameraFollowEndpoint { .. }
             | AnimationType::CameraShake { .. }
             | AnimationType::CameraLookAt { .. }
+            | AnimationType::CameraLookAtSource { .. }
             | AnimationType::CameraOrbit { .. }
             | AnimationType::CameraPerspective { .. }
+            | AnimationType::CameraOrthographic { .. }
+            | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. } => "Camera",
             AnimationType::GltfAnimation { .. } => "Action",
             AnimationType::Properties { .. } => "Properties",
@@ -2156,14 +2164,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 PropertyLensSpec::Scale { from, to }
             }
             AnimationType::CameraPosition { .. }
+            | AnimationType::CameraPositionSource { .. }
             | AnimationType::CameraZoom { .. }
+            | AnimationType::CameraZoomSource { .. }
             | AnimationType::CameraRotation { .. }
+            | AnimationType::CameraRotationSource { .. }
             | AnimationType::CameraFrame { .. }
+            | AnimationType::CameraFrameMany { .. }
             | AnimationType::CameraFollow { .. }
+            | AnimationType::CameraFollowEndpoint { .. }
             | AnimationType::CameraShake { .. }
             | AnimationType::CameraLookAt { .. }
+            | AnimationType::CameraLookAtSource { .. }
             | AnimationType::CameraOrbit { .. }
             | AnimationType::CameraPerspective { .. }
+            | AnimationType::CameraOrthographic { .. }
+            | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
             | AnimationType::GltfAnimation { .. }
             | AnimationType::Write { .. }

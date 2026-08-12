@@ -235,11 +235,11 @@ pub struct HudOverlay;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mesh3DMarker;
 
-/// Marker for a Bevy presentation camera that must follow the authored scene camera.
+/// Marker for a Bevy presentation camera that must follow the scene camera rig.
 ///
 /// Editor inspection cameras intentionally consume [`gaanim_math::ResolvedCamera`],
-/// while presenter/export views remain coupled to the timeline-owned
-/// [`gaanim_math::Camera`].
+/// while presenter/export views ignore editor overrides but retain timeline camera
+/// bindings and temporary rig constraints.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AuthoritativeCameraView;
 

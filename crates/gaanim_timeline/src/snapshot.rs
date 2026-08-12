@@ -90,6 +90,9 @@ pub struct EntitySnapshot {
 pub struct WorldSnapshot {
     /// A map from unique object IDs to their captured snapshots.
     pub entities: HashMap<ObjectId, EntitySnapshot>,
+    /// Complete authored camera state. Presentation viewport fit is excluded.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub camera: Option<gaanim_math::Camera>,
 }
 
 /// Insert or update all components of an `EntitySnapshot` onto a Bevy entity.
@@ -321,6 +324,7 @@ impl WorldSnapshot {
     /// Captures a new `WorldSnapshot` of all Mobjects currently registered in the Bevy `World`.
     pub fn capture(world: &mut World) -> Self {
         let mut entities = HashMap::new();
+        let camera = world.get_resource::<gaanim_math::Camera>().copied();
 
         // Query all entities with a MobjectId component
         let mut query = world.query::<(Entity, &MobjectId)>();
@@ -420,11 +424,14 @@ impl WorldSnapshot {
             entities.insert(id, snapshot);
         }
 
-        Self { entities }
+        Self { entities, camera }
     }
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
+        if let Some(camera) = self.camera {
+            world.insert_resource(camera);
+        }
         // 1. Gather all existing entities and build a dynamic mapping of ObjectIds to Bevy Entities
         let mut existing_entities = Vec::new();
         let mut entity_map = HashMap::new();
@@ -615,5 +622,29 @@ mod tests {
         schedule.add_systems(gaanim_scene::systems::style_propagation_system);
         schedule.run(&mut world);
         assert_eq!(world.get::<FillBrush>(child), Some(&expected));
+    }
+
+    #[test]
+    fn snapshot_restores_complete_authored_camera_state() {
+        let mut world = World::new();
+        let mut authored = gaanim_math::Camera::perspective_3d(1920, 1080, 0.9);
+        authored
+            .look_at(
+                gaanim_core::glam::DVec3::new(7.0, 4.0, 9.0),
+                gaanim_core::glam::DVec3::new(1.0, 2.0, -3.0),
+                gaanim_core::glam::DVec3::Y,
+            )
+            .unwrap();
+        world.insert_resource(authored);
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let mut changed = gaanim_math::Camera::ortho_2d(320, 240);
+        changed.position = gaanim_core::glam::DVec3::splat(42.0);
+        changed.target = gaanim_core::glam::DVec3::X;
+        changed.up = gaanim_core::glam::DVec3::Z;
+        world.insert_resource(changed);
+        snapshot.restore(&mut world);
+
+        assert_eq!(*world.resource::<gaanim_math::Camera>(), authored);
     }
 }

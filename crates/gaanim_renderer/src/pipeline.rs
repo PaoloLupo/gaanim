@@ -52,6 +52,7 @@ pub struct ExtractedElement {
 fn canvas_background_geometry(
     background: &CanvasBackground,
     camera: Option<&gaanim_math::Camera>,
+    viewport_scale: f64,
 ) -> (kurbo::Rect, kurbo::Affine) {
     let Some(camera) = camera else {
         let b = &background.bounds;
@@ -61,7 +62,7 @@ fn canvas_background_geometry(
         );
     };
     let zoom = match camera.projection {
-        gaanim_math::Projection::Orthographic { zoom } => zoom * camera.viewport_scale,
+        gaanim_math::Projection::Orthographic { zoom } => zoom * viewport_scale,
         _ => 1.0,
     }
     .max(0.01);
@@ -181,11 +182,11 @@ pub fn sync_gaanim_camera_to_bevy_system(
         // HUD and 2D background incorrectly and break the projection.
         let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
         let effective_zoom = match cam.projection {
-            gaanim_math::Projection::Orthographic { zoom } => zoom * cam.viewport_scale,
-            _ => cam.viewport_scale,
+            gaanim_math::Projection::Orthographic { zoom } => zoom * cam.viewport.scale,
+            _ => cam.viewport.scale,
         };
         let offset_world_y = if effective_zoom > 0.0 {
-            cam.viewport_offset_y / effective_zoom
+            cam.viewport.offset_y / effective_zoom
         } else {
             0.0
         };
@@ -194,8 +195,8 @@ pub fn sync_gaanim_camera_to_bevy_system(
             transform.translation.y = (-offset_world_y) as f32;
             transform.rotation = Quat::IDENTITY;
             if let Projection::Orthographic(ortho) = projection.as_mut() {
-                let scale = if cam.viewport_scale > 0.0 {
-                    1.0 / cam.viewport_scale as f32
+                let scale = if cam.viewport.scale > 0.0 {
+                    1.0 / cam.viewport.scale as f32
                 } else {
                     1.0
                 };
@@ -213,7 +214,7 @@ pub fn sync_gaanim_camera_to_bevy_system(
             if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
                 // Apply viewport_scale so the scene maintains its aspect ratio
                 // when the window dimensions differ from the scene's native resolution.
-                let effective = zoom * cam.viewport_scale;
+                let effective = zoom * cam.viewport.scale;
                 let scale = if effective > 0.0 {
                     1.0 / effective as f32
                 } else {
@@ -234,9 +235,10 @@ pub fn sync_gaanim_camera_to_bevy_system(
 /// the 3D camera is still updated with the same position/rotation for consistency.
 fn fitted_canvas_viewport(
     cam: &gaanim_math::Camera,
+    viewport: gaanim_math::CameraViewport,
     window: &Window,
 ) -> Option<bevy::camera::Viewport> {
-    let fit = cam.viewport_scale;
+    let fit = viewport.scale;
     if !fit.is_finite() || fit <= 0.0 || cam.viewport_width == 0 || cam.viewport_height == 0 {
         return None;
     }
@@ -250,7 +252,7 @@ fn fitted_canvas_viewport(
     let viewport_width = (cam.viewport_width as f64 * fit).min(window_width);
     let viewport_height = (cam.viewport_height as f64 * fit).min(window_height);
     let left = ((window_width - viewport_width) * 0.5).max(0.0);
-    let center_y = window_height * 0.5 + cam.viewport_offset_y;
+    let center_y = window_height * 0.5 + viewport.offset_y;
     let top =
         (center_y - viewport_height * 0.5).clamp(0.0, (window_height - viewport_height).max(0.0));
     let scale_factor = window.scale_factor() as f64;
@@ -271,6 +273,7 @@ fn fitted_canvas_viewport(
 pub fn sync_gaanim_camera_to_bevy_3d_system(
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     authored_camera: Option<Res<gaanim_math::Camera>>,
+    rig_camera: Option<Res<gaanim_math::CameraRigCamera>>,
     mut bevy_cameras: Query<
         (
             &mut Camera,
@@ -292,9 +295,13 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
         &mut bevy_cameras
     {
         let cam: &gaanim_math::Camera = if authoritative_view.is_some() {
-            authored_camera.as_deref().unwrap_or(&resolved_camera.0)
+            rig_camera
+                .as_deref()
+                .map(|rig| &rig.0)
+                .or(authored_camera.as_deref())
+                .unwrap_or(&resolved_camera.camera)
         } else {
-            &resolved_camera.0
+            &resolved_camera.camera
         };
         transform.translation = Vec3::new(
             cam.position.x as f32,
@@ -310,6 +317,9 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
         );
         match cam.projection {
             gaanim_math::Projection::Perspective { fov_y, near, far } => {
+                if !matches!(projection.as_ref(), Projection::Perspective(_)) {
+                    *projection = Projection::Perspective(Default::default());
+                }
                 let target_window = match render_target {
                     bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Primary) => {
                         primary_window
@@ -320,7 +330,8 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
                     _ => None,
                 };
                 if let Some(window) = target_window.and_then(|entity| windows.get(entity).ok()) {
-                    bevy_camera.viewport = fitted_canvas_viewport(&cam, window);
+                    bevy_camera.viewport =
+                        fitted_canvas_viewport(cam, resolved_camera.viewport, window);
                 }
                 if let Projection::Perspective(persp) = projection.as_mut() {
                     persp.fov = fov_y as f32;
@@ -336,8 +347,22 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
                 }
             }
             gaanim_math::Projection::Orthographic { zoom } => {
+                // Camera3d starts with a perspective projection. Assign the
+                // orthographic variant explicitly when the authored rig resets
+                // to 2D; merely updating an existing variant leaves the old
+                // perspective frustum active and can magnify nearby meshes into
+                // edge-wide colour bands.
+                if !matches!(projection.as_ref(), Projection::Orthographic(_)) {
+                    *projection = Projection::Orthographic(
+                        bevy::camera::OrthographicProjection::default_3d(),
+                    );
+                }
+                // Perspective uses a fitted canvas viewport. Orthographic 2D
+                // rendering returns to the complete target, so retaining that
+                // crop would expose stale pixels around the canvas.
+                bevy_camera.viewport = None;
                 if let Projection::Orthographic(ortho) = projection.as_mut() {
-                    let effective = zoom * cam.viewport_scale;
+                    let effective = zoom * resolved_camera.viewport.scale;
                     ortho.scale = if effective > 0.0 {
                         1.0 / effective as f32
                     } else {
@@ -387,7 +412,7 @@ pub fn compile_scene_from_world(
 
     let cam_bounds = camera.and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let effective = zoom * cam.viewport_scale;
+            let effective = zoom;
             let hw = (cam.viewport_width as f64) / (2.0 * effective);
             let hh = (cam.viewport_height as f64) / (2.0 * effective);
             let margin = 100.0 / effective.max(0.1);
@@ -715,7 +740,7 @@ pub fn compile_scene_from_world(
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-            let (rect, transform) = canvas_background_geometry(canvas_bg, camera);
+            let (rect, transform) = canvas_background_geometry(canvas_bg, camera, 1.0);
             main_scene.fill(
                 peniko::Fill::NonZero,
                 transform,
@@ -832,7 +857,7 @@ pub fn gaanim_render_system(
     // 1. Calculate orthographic camera bounds for culling
     let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let effective = zoom * cam.viewport_scale;
+            let effective = zoom * cam.viewport.scale;
             let hw = (cam.viewport_width as f64) / (2.0 * effective);
             let hh = (cam.viewport_height as f64) / (2.0 * effective);
             // Generous margin to avoid popping at boundaries
@@ -1198,6 +1223,9 @@ pub fn gaanim_render_system(
             let (rect, transform) = canvas_background_geometry(
                 canvas_bg,
                 gaanim_camera.as_deref().map(|camera| &**camera),
+                gaanim_camera
+                    .as_ref()
+                    .map_or(1.0, |camera| camera.viewport.scale),
             );
             main_scene.fill(
                 peniko::Fill::NonZero,
@@ -1316,11 +1344,11 @@ mod tests {
 
     #[test]
     fn perspective_viewport_keeps_canvas_size_in_taller_window() {
-        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
-        cam.viewport_scale = 1.0;
+        let cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
+        let viewport = gaanim_math::CameraViewport::default();
 
-        let original = fitted_canvas_viewport(&cam, &window(1280, 720)).unwrap();
-        let taller = fitted_canvas_viewport(&cam, &window(1280, 1000)).unwrap();
+        let original = fitted_canvas_viewport(&cam, viewport, &window(1280, 720)).unwrap();
+        let taller = fitted_canvas_viewport(&cam, viewport, &window(1280, 1000)).unwrap();
 
         assert_eq!(original.physical_size, UVec2::new(1280, 720));
         assert_eq!(taller.physical_size, original.physical_size);
@@ -1329,10 +1357,13 @@ mod tests {
 
     #[test]
     fn perspective_viewport_scales_with_the_fitted_logical_canvas() {
-        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
-        cam.viewport_scale = 0.5;
+        let cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.7);
+        let viewport = gaanim_math::CameraViewport {
+            scale: 0.5,
+            offset_y: 0.0,
+        };
 
-        let viewport = fitted_canvas_viewport(&cam, &window(640, 500)).unwrap();
+        let viewport = fitted_canvas_viewport(&cam, viewport, &window(640, 500)).unwrap();
 
         assert_eq!(viewport.physical_size, UVec2::new(640, 360));
         assert_eq!(viewport.physical_position, UVec2::new(0, 70));
@@ -1340,25 +1371,33 @@ mod tests {
 
     #[test]
     fn perspective_viewport_offset_is_measured_in_window_pixels() {
-        let mut cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
-        cam.viewport_scale = 0.5;
-        cam.viewport_offset_y = -100.0;
-        let viewport = fitted_canvas_viewport(&cam, &window(1280, 720)).unwrap();
+        let cam = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
+        let mapping = gaanim_math::CameraViewport {
+            scale: 0.5,
+            offset_y: -100.0,
+        };
+        let viewport = fitted_canvas_viewport(&cam, mapping, &window(1280, 720)).unwrap();
 
         assert_eq!(viewport.physical_size, UVec2::new(640, 360));
         assert_eq!(viewport.physical_position, UVec2::new(320, 80));
     }
 
     #[test]
-    fn presentation_camera_uses_authored_camera_instead_of_editor_override() {
+    fn presentation_camera_uses_rig_camera_instead_of_editor_override() {
         let mut authored = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
         authored.position = gaanim_core::glam::DVec3::new(1.0, 2.0, 3.0);
+        let mut rig = authored;
+        rig.position = gaanim_core::glam::DVec3::new(4.0, 5.0, 6.0);
         let mut resolved = authored.clone();
         resolved.position = gaanim_core::glam::DVec3::new(9.0, 8.0, 7.0);
 
         let mut app = App::new();
         app.insert_resource(authored)
-            .insert_resource(gaanim_math::ResolvedCamera(resolved))
+            .insert_resource(gaanim_math::CameraRigCamera(rig))
+            .insert_resource(gaanim_math::ResolvedCamera::new(
+                resolved,
+                gaanim_math::CameraViewport::default(),
+            ))
             .add_systems(Update, sync_gaanim_camera_to_bevy_3d_system);
         let presentation = app
             .world_mut()
@@ -1374,7 +1413,7 @@ mod tests {
                 .get::<Transform>()
                 .unwrap()
                 .translation,
-            Vec3::new(1.0, 2.0, 3.0)
+            Vec3::new(4.0, 5.0, 6.0)
         );
         assert_eq!(
             app.world()
@@ -1383,6 +1422,44 @@ mod tests {
                 .unwrap()
                 .translation,
             Vec3::new(9.0, 8.0, 7.0)
+        );
+    }
+
+    #[test]
+    fn pbr_camera_switches_back_to_orthographic_and_releases_perspective_viewport() {
+        let camera = gaanim_math::Camera::ortho_2d(960, 540);
+        let mut app = App::new();
+        app.insert_resource(camera)
+            .insert_resource(gaanim_math::ResolvedCamera::new(
+                camera,
+                gaanim_math::CameraViewport::default(),
+            ))
+            .add_systems(Update, sync_gaanim_camera_to_bevy_3d_system);
+        let entity = app.world_mut().spawn(Camera3d::default()).id();
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<Camera>()
+            .unwrap()
+            .viewport = Some(bevy::camera::Viewport {
+            physical_position: UVec2::new(30, 0),
+            physical_size: UVec2::new(900, 540),
+            depth: 0.0..1.0,
+        });
+
+        app.update();
+
+        assert!(matches!(
+            app.world().entity(entity).get::<Projection>(),
+            Some(Projection::Orthographic(_))
+        ));
+        assert!(
+            app.world()
+                .entity(entity)
+                .get::<Camera>()
+                .unwrap()
+                .viewport
+                .is_none(),
+            "the fitted perspective viewport must not survive a reset to 2D"
         );
     }
 }
