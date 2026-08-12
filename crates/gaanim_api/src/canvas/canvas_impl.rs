@@ -2278,7 +2278,7 @@ impl Canvas {
         let handle = self
             .spawn(SpawnKind::TrackingLine)
             .fill(Color::WHITE)
-            .stroke(Color::WHITE, 2.0);
+            .no_stroke();
         handle.defer_visibility_until_play();
         let id = handle.id;
         self.state
@@ -2305,7 +2305,7 @@ impl Canvas {
     ) -> Result<DimensionHandle, gaanim_text::prelude::TextSpecError> {
         let mut line = self.dimension_between(from.clone(), to.clone(), offset);
         if let Some(color) = options.color {
-            line = line.fill(color).stroke(color, 2.0);
+            line = line.fill(color).no_stroke();
         }
         if options.label.is_none() && !options.show_value {
             return Ok(DimensionHandle {
@@ -3741,6 +3741,23 @@ mod tests {
         assert!(
             dimension_path.0.elements().len() >= 14,
             "dimension must include two extension lines, a baseline, and two arrowheads"
+        );
+        assert_eq!(
+            dimension_path
+                .0
+                .elements()
+                .iter()
+                .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::ClosePath))
+                .count(),
+            5,
+            "dimension geometry must be three filled line quads plus two solid triangles"
+        );
+        assert!(
+            world
+                .get::<gaanim_scene::FillBrush>(dimension_line)
+                .and_then(|fill| fill.0.as_ref())
+                .is_some(),
+            "dimension silhouette must carry a fill brush"
         );
         assert!(dimension.label.is_some());
         assert!(dimension.number.is_some());

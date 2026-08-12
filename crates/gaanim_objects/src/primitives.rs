@@ -996,16 +996,14 @@ pub fn spring_path(
     path
 }
 
-/// Builds a technical dimension with open extension/measurement lines and
-/// closed triangular arrowhead subpaths suitable for solid filling.
+/// Builds a filled technical-dimension silhouette from three thin line quads
+/// and two solid triangular arrowheads.
 pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let length = dx.hypot(dy);
     let mut path = kurbo::BezPath::new();
     if length <= f64::EPSILON {
-        path.move_to(start);
-        path.line_to(end);
         return path;
     }
 
@@ -1014,15 +1012,36 @@ pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> ku
     let dimension_start =
         kurbo::Point::new(start.x + normal.0 * offset, start.y + normal.1 * offset);
     let dimension_end = kurbo::Point::new(end.x + normal.0 * offset, end.y + normal.1 * offset);
-    path.move_to(start);
-    path.line_to(dimension_start);
-    path.move_to(end);
-    path.line_to(dimension_end);
-    path.move_to(dimension_start);
-    path.line_to(dimension_end);
-
-    let head = (length * 0.12).clamp(6.0, 12.0);
+    let head = (length * 0.12).clamp(6.0, 12.0).min(length * 0.45);
     let wing = head * 0.55;
+    let add_line_quad = |path: &mut kurbo::BezPath, from: kurbo::Point, to: kurbo::Point| {
+        let segment = to - from;
+        let segment_length = segment.hypot();
+        if segment_length <= f64::EPSILON {
+            return;
+        }
+        let half_width = 1.0;
+        let nx = -segment.y / segment_length * half_width;
+        let ny = segment.x / segment_length * half_width;
+        path.move_to(kurbo::Point::new(from.x + nx, from.y + ny));
+        path.line_to(kurbo::Point::new(to.x + nx, to.y + ny));
+        path.line_to(kurbo::Point::new(to.x - nx, to.y - ny));
+        path.line_to(kurbo::Point::new(from.x - nx, from.y - ny));
+        path.close_path();
+    };
+    add_line_quad(&mut path, start, dimension_start);
+    add_line_quad(&mut path, end, dimension_end);
+    add_line_quad(
+        &mut path,
+        kurbo::Point::new(
+            dimension_start.x + direction.0 * head,
+            dimension_start.y + direction.1 * head,
+        ),
+        kurbo::Point::new(
+            dimension_end.x - direction.0 * head,
+            dimension_end.y - direction.1 * head,
+        ),
+    );
     let add_head = |path: &mut kurbo::BezPath, tip: kurbo::Point, sign: f64| {
         let back = kurbo::Point::new(
             tip.x + direction.0 * head * sign,
@@ -1460,8 +1479,8 @@ mod arrow_tests {
                 .iter()
                 .filter(|element| matches!(element, kurbo::PathEl::ClosePath))
                 .count(),
-            2,
-            "both arrowheads must be closed triangular fill geometry"
+            5,
+            "three line quads and both arrowheads must be closed fill geometry"
         );
         assert!(path.elements().iter().any(|element| {
             matches!(element, kurbo::PathEl::LineTo(point) if (point.y - 30.0).abs() < 1e-6)

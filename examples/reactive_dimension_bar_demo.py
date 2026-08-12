@@ -2,13 +2,13 @@
 
 import os
 
-from gaanim import BLACK, GRAY, WHITE, Anchor, Scene
+from gaanim import BLACK, GRAY, RED, WHITE, Anchor, Scene
 
 scene = Scene(1280, 720, background=WHITE)
 
 # A nested frame proves that anchors use local bounds plus the full hierarchy.
-outer = scene.rect(720, 190).fill(GRAY).stroke(BLACK, 7)
-inner = scene.rect(660, 130).no_fill().stroke(BLACK, 4)
+outer = scene.rect(720, 190).no_fill().stroke(BLACK, 7)
+inner = scene.rect(660, 130).fill(WHITE).stroke(BLACK, 4)
 frame = scene.group([outer, inner]).at(0, 0)
 
 left_support = (-420.0, 245.0)
@@ -21,7 +21,7 @@ right_bar = scene.bar_between(right_support, right_corner, width=10)
 left_pin = scene.dot(9).fill(WHITE).stroke(BLACK, 5).at(*left_support)
 right_pin = scene.dot(9).fill(WHITE).stroke(BLACK, 5).at(*right_support)
 
-mass = scene.rect(105, 105).fill(WHITE).stroke(BLACK, 5).at(-80, 0)
+mass = scene.rect(105, 105).fill(RED).stroke(BLACK, 5).at(-80, 0)
 left_spring = (
     scene.spring_between(
         frame.anchor_point(Anchor.LEFT, offset=(32, 0)),
@@ -78,7 +78,7 @@ centerline = scene.dashed_line(-470, 0, 470, 0, dash_length=14, gap_length=10).s
 
 scene.play(
     [
-        frame.create().duration(0.9),
+        frame.write().duration(0.9),
         centerline.create().duration(0.6),
         left_bar.fade_in().duration(0.4),
         right_bar.fade_in().duration(0.4),
