@@ -5,6 +5,7 @@ use bevy_egui::egui;
 use crossbeam_channel::Receiver;
 use gaanim_api::host::ReloadPayload;
 use gaanim_api::runtime;
+use std::time::Instant;
 
 use gaanim_editor::export::StashedReplay;
 use gaanim_scene::MobjectId;
@@ -20,7 +21,10 @@ pub struct ReloadReceiver {
 #[derive(Resource)]
 pub struct ReloadStatus {
     pub last_message: String,
+    /// Time spent executing Python up to `scene.render()`.
     pub compile_duration_seconds: Option<f64>,
+    /// Time spent replaying the canvas, including text compilation.
+    pub replay_duration_seconds: Option<f64>,
     /// `Some(seconds_since_startup)` when the message was set.
     pub shown_at: Option<f64>,
 }
@@ -30,6 +34,7 @@ impl Default for ReloadStatus {
         Self {
             last_message: String::new(),
             compile_duration_seconds: None,
+            replay_duration_seconds: None,
             shown_at: None,
         }
     }
@@ -122,7 +127,9 @@ pub fn reload_listener_system(world: &mut World) {
     let width = payload.canvas.width;
     let height = payload.canvas.height;
     let compile_duration = payload.compile_duration.as_secs_f64();
+    let replay_started_at = Instant::now();
     reload_with(world, payload.canvas);
+    let replay_duration = replay_started_at.elapsed().as_secs_f64();
 
     // Restore playback position after rebuild.
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
@@ -138,10 +145,10 @@ pub fn reload_listener_system(world: &mut World) {
     let now = world.resource::<Time>().elapsed_secs_f64();
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.compile_duration_seconds = Some(compile_duration);
-        status.last_message = format!(
-            "Hot reload · {:.2}s · {}x{}",
-            compile_duration, width, height
-        );
+        status.replay_duration_seconds = Some(replay_duration);
+        status.last_message =
+            reload_status_message(compile_duration, replay_duration, width, height);
+        eprintln!("[gaanim] {}", status.last_message);
         status.shown_at = Some(now);
     }
     // Éxito limpia el error previo
@@ -149,6 +156,22 @@ pub fn reload_listener_system(world: &mut World) {
         err.message = None;
         err.updated_at = None;
     }
+}
+
+fn reload_status_message(
+    python_duration: f64,
+    replay_duration: f64,
+    width: u32,
+    height: u32,
+) -> String {
+    format!(
+        "Scene ready · Python {:.2}s · replay {:.2}s · total {:.2}s · {}x{}",
+        python_duration,
+        replay_duration,
+        python_duration + replay_duration,
+        width,
+        height
+    )
 }
 
 fn reload_target_time(saved_time: f64, timeline: &Timeline) -> f64 {
@@ -201,6 +224,14 @@ mod tests {
         timeline.cached_duration = 4.0;
 
         assert_eq!(reload_target_time(4.75, &timeline), 4.0);
+    }
+
+    #[test]
+    fn reload_status_separates_python_from_scene_replay() {
+        assert_eq!(
+            reload_status_message(0.125, 1.5, 1920, 1080),
+            "Scene ready · Python 0.12s · replay 1.50s · total 1.62s · 1920x1080"
+        );
     }
 }
 

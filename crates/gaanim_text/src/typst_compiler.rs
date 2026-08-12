@@ -75,22 +75,116 @@ struct TypstCacheKey {
     math_size_bits: Option<u64>,
     fill_debug: String,
     stroke_debug: String,
+    font_universe: FontUniverseKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FontUniverseKey(Vec<(String, Arc<[u8]>)>);
+
+impl FontUniverseKey {
+    fn from_registry(font_registry: &FontRegistry) -> Self {
+        let mut fonts = font_registry
+            .registered
+            .iter()
+            .map(|(family, bytes)| (family.clone(), bytes.clone()))
+            .collect::<Vec<_>>();
+        fonts.sort_by(|left, right| left.0.cmp(&right.0));
+        Self(fonts)
+    }
+}
+
+struct SharedTypstResources {
+    files: FileStore<UniverseFileLoader>,
+    fonts: typst_kit::fonts::FontStore,
+    library: LazyHash<Library>,
+}
+
+struct TypstResources {
+    shared: &'static SharedTypstResources,
+    font_book: LazyHash<FontBook>,
+    extra_fonts: Vec<Font>,
+    system_font_count: usize,
 }
 
 static TYPST_HIERARCHY_CACHE: OnceLock<Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>>> =
+    OnceLock::new();
+static SHARED_TYPST_RESOURCES: OnceLock<SharedTypstResources> = OnceLock::new();
+static TYPST_RESOURCES_CACHE: OnceLock<Mutex<HashMap<FontUniverseKey, Arc<TypstResources>>>> =
     OnceLock::new();
 
 fn typst_hierarchy_cache() -> &'static Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>> {
     TYPST_HIERARCHY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn shared_typst_resources() -> &'static SharedTypstResources {
+    SHARED_TYPST_RESOURCES.get_or_init(|| {
+        let mut fonts = typst_kit::fonts::FontStore::new();
+        fonts.extend(typst_kit::fonts::embedded());
+        fonts.extend(typst_kit::fonts::system());
+
+        if fonts.book().families().next().is_none() {
+            eprintln!(
+                "GaanimTypstWorld: no system or embedded fonts available. \
+                 Typst compilation will fail with 'no font could be found'."
+            );
+        }
+
+        SharedTypstResources {
+            files: FileStore::new(UniverseFileLoader::new()),
+            fonts,
+            library: LazyHash::new(Library::builder().build()),
+        }
+    })
+}
+
+fn typst_resources_cache() -> &'static Mutex<HashMap<FontUniverseKey, Arc<TypstResources>>> {
+    TYPST_RESOURCES_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn typst_resources_for(font_registry: &FontRegistry) -> (FontUniverseKey, Arc<TypstResources>) {
+    let key = FontUniverseKey::from_registry(font_registry);
+    if let Some(resources) = typst_resources_cache()
+        .lock()
+        .expect("Typst resources cache poisoned")
+        .get(&key)
+        .cloned()
+    {
+        return (key, resources);
+    }
+
+    let shared = shared_typst_resources();
+    let system_font_count = shared
+        .fonts
+        .book()
+        .families()
+        .map(|(_, indices)| indices.count())
+        .sum();
+    let mut font_book = shared.fonts.book().clone();
+    let mut extra_fonts = Vec::new();
+    for (_, bytes) in &key.0 {
+        if let Some(font) = Font::new(Bytes::new(bytes.clone()), 0) {
+            font_book.push(font.info().clone());
+            extra_fonts.push(font);
+        }
+    }
+
+    let resources = Arc::new(TypstResources {
+        shared,
+        font_book,
+        extra_fonts,
+        system_font_count,
+    });
+    typst_resources_cache()
+        .lock()
+        .expect("Typst resources cache poisoned")
+        .insert(key.clone(), resources.clone());
+    (key, resources)
+}
+
 /// A custom self-contained implementation of `typst::World` for math and document vector compilation.
 pub struct GaanimTypstWorld {
     source: Source,
-    files: FileStore<UniverseFileLoader>,
-    fonts: Vec<Font>,
-    font_book: LazyHash<FontBook>,
-    library: LazyHash<Library>,
+    resources: Arc<TypstResources>,
     main_id: FileId,
 }
 
@@ -122,49 +216,20 @@ impl GaanimTypstWorld {
     /// Creates a new `GaanimTypstWorld` with the user source, Typst default fonts,
     /// system fonts, and any additional fonts registered in the `FontRegistry`.
     pub fn new(source_code: &str, font_registry: &FontRegistry) -> Self {
+        let (_, resources) = typst_resources_for(font_registry);
+        Self::with_resources(source_code, resources)
+    }
+
+    fn with_resources(source_code: &str, resources: Arc<TypstResources>) -> Self {
         let main_id = FileId::unique(RootedPath::new(
             VirtualRoot::Project,
             VirtualPath::new("/main.typ").unwrap(),
         ));
         let source = Source::new(main_id, source_code.to_string());
 
-        // 1. Load Typst embedded defaults + system fonts via typst-kit.
-        let mut font_store = typst_kit::fonts::FontStore::new();
-        font_store.extend(typst_kit::fonts::embedded());
-        font_store.extend(typst_kit::fonts::system());
-
-        let mut font_book = font_store.book().clone();
-        let mut fonts = Vec::new();
-        let mut idx = 0;
-        while let Some(font) = font_store.font(idx) {
-            fonts.push(font);
-            idx += 1;
-        }
-
-        // 2. Append any extra fonts the user registered manually
-        //    (system fonts are already loaded by `FontSearcher` above).
-        for bytes in font_registry.registered.values() {
-            if let Some(font) = Font::new(Bytes::new(bytes.clone()), 0) {
-                font_book.push(font.info().clone());
-                fonts.push(font);
-            }
-        }
-
-        if fonts.is_empty() {
-            eprintln!(
-                "GaanimTypstWorld: no fonts available. \
-                 Typst compilation will fail with 'no font could be found'."
-            );
-        }
-
-        let library = LazyHash::new(Library::builder().build());
-
         Self {
             source,
-            files: FileStore::new(UniverseFileLoader::new()),
-            fonts,
-            font_book,
-            library,
+            resources,
             main_id,
         }
     }
@@ -172,11 +237,11 @@ impl GaanimTypstWorld {
 
 impl World for GaanimTypstWorld {
     fn library(&self) -> &LazyHash<Library> {
-        &self.library
+        &self.resources.shared.library
     }
 
     fn book(&self) -> &LazyHash<FontBook> {
-        &self.font_book
+        &self.resources.font_book
     }
 
     fn main(&self) -> FileId {
@@ -187,16 +252,23 @@ impl World for GaanimTypstWorld {
         if id == self.main_id {
             Ok(self.source.clone())
         } else {
-            self.files.source(id)
+            self.resources.shared.files.source(id)
         }
     }
 
     fn file(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
-        self.files.file(id)
+        self.resources.shared.files.file(id)
     }
 
     fn font(&self, index: usize) -> Option<Font> {
-        self.fonts.get(index).cloned()
+        if index < self.resources.system_font_count {
+            self.resources.shared.fonts.font(index)
+        } else {
+            self.resources
+                .extra_fonts
+                .get(index - self.resources.system_font_count)
+                .cloned()
+        }
     }
 
     fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
@@ -457,6 +529,7 @@ fn extract_frame_items(
 }
 
 fn build_typst_cache_key(
+    font_universe: FontUniverseKey,
     source: &str,
     is_math: bool,
     text_font: Option<&str>,
@@ -475,11 +548,31 @@ fn build_typst_cache_key(
         math_size_bits: math_size.map(f64::to_bits),
         fill_debug: format!("{fill:?}"),
         stroke_debug: format!("{stroke:?}"),
+        font_universe,
     }
 }
 
+#[cfg(test)]
 fn compile_typst_source(
     font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: &Option<peniko::Brush>,
+    stroke: &StrokeBrush,
+) -> Result<CachedTypstHierarchy, Vec<String>> {
+    let (_, resources) = typst_resources_for(font_registry);
+    compile_typst_source_with_resources(
+        resources, source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_typst_source_with_resources(
+    resources: Arc<TypstResources>,
     source: &str,
     is_math: bool,
     text_font: Option<&str>,
@@ -523,7 +616,7 @@ fn compile_typst_source(
         format!("{}{}", directives, source)
     };
 
-    let world = GaanimTypstWorld::new(&full_source, font_registry);
+    let world = GaanimTypstWorld::with_resources(&full_source, resources);
     let result = typst::compile::<PagedDocument>(&world);
 
     for warning in &result.warnings {
@@ -603,8 +696,17 @@ fn cached_typst_hierarchy(
     fill: &Option<peniko::Brush>,
     stroke: &StrokeBrush,
 ) -> Result<Arc<CachedTypstHierarchy>, Vec<String>> {
+    let (font_universe, resources) = typst_resources_for(font_registry);
     let cache_key = build_typst_cache_key(
-        source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
+        font_universe,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        fill,
+        stroke,
     );
     if let Some(cached) = typst_hierarchy_cache()
         .lock()
@@ -614,16 +716,8 @@ fn cached_typst_hierarchy(
     {
         return Ok(cached);
     }
-    let compiled = Arc::new(compile_typst_source(
-        font_registry,
-        source,
-        is_math,
-        text_font,
-        math_font,
-        text_size,
-        math_size,
-        fill,
-        stroke,
+    let compiled = Arc::new(compile_typst_source_with_resources(
+        resources, source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
     )?);
     typst_hierarchy_cache()
         .lock()
@@ -765,18 +859,69 @@ mod tests {
         let registry = FontRegistry::new();
         let world = GaanimTypstWorld::new("", &registry);
         assert!(
-            !world.fonts.is_empty(),
-            "World fonts list must not be empty"
+            world.book().families().next().is_some(),
+            "World font book must not be empty"
         );
 
         let has_math_font = world
-            .fonts
-            .iter()
-            .any(|font| font.info().family.as_str().eq("New Computer Modern Math"));
+            .book()
+            .families()
+            .any(|(family, _)| family == "New Computer Modern Math");
         assert!(
             has_math_font,
             "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld"
         );
+    }
+
+    #[test]
+    fn typst_resources_are_reused_for_the_same_registered_fonts() {
+        let registry = FontRegistry::new();
+        let (first_key, first) = typst_resources_for(&registry);
+        let (second_key, second) = typst_resources_for(&registry);
+
+        assert_eq!(first_key, second_key);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "each text should reuse the same Typst resources"
+        );
+        assert!(std::ptr::eq(first.shared, second.shared));
+    }
+
+    #[test]
+    fn typst_resource_and_hierarchy_keys_include_registered_font_contents() {
+        let first = FontRegistry::new();
+        let mut second = FontRegistry::new();
+        second.register_font("cache-identity-test", vec![1, 2, 3, 4]);
+
+        let (first_key, first_resources) = typst_resources_for(&first);
+        let (second_key, second_resources) = typst_resources_for(&second);
+
+        assert_ne!(first_key, second_key);
+        assert!(!Arc::ptr_eq(&first_resources, &second_resources));
+
+        let first_hierarchy_key = build_typst_cache_key(
+            first_key,
+            "same source",
+            false,
+            None,
+            None,
+            None,
+            None,
+            &None,
+            &StrokeBrush::transparent(),
+        );
+        let second_hierarchy_key = build_typst_cache_key(
+            second_key,
+            "same source",
+            false,
+            None,
+            None,
+            None,
+            None,
+            &None,
+            &StrokeBrush::transparent(),
+        );
+        assert_ne!(first_hierarchy_key, second_hierarchy_key);
     }
 
     #[test]
