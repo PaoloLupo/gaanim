@@ -26,10 +26,16 @@ scene.play([floor.fade_in(0.6)])
 scene.play([cube.create(0.9), sphere.create(0.9), cylinder.create(0.9), cone.create(0.9)])
 scene.play(
     [
-        cube.material_to(Material3D.metal(CORAL)).duration(1.2),
-        sphere.material_to(Material3D.emissive(WHITE, strength=2.5)).duration(1.2),
-        cylinder.rotate_by_3d("y", 1.2).duration(1.2),
-        cone.rotate_by_3d("y", -1.2).duration(1.2),
+        cube.animate()
+        .material(Material3D.metal(CORAL))
+        .rotate_by_3d("y", 1.2)
+        .duration(1.2),
+        sphere.animate()
+        .material(Material3D.emissive(WHITE, strength=2.5))
+        .scale(1.15)
+        .duration(1.2),
+        cylinder.animate().color(GOLD).rotate_by_3d("y", 1.2).duration(1.2),
+        cone.animate().move_3d(0, 0.4, 0).rotate_by_3d("y", -1.2).duration(1.2),
     ]
 )
 scene.camera.orbit(delta_yaw=0.55, delta_pitch=0.08, duration=1.5)

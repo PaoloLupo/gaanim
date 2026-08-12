@@ -395,6 +395,60 @@ class Transition:
         ...
 
 class Anim:
+    def fill(self, color: ColorLike) -> Anim:
+        """Target a solid fill color in a compound ``Drawable.animate()`` animation.
+
+        On ``Primitive3D`` this targets the PBR material base color instead.
+        """
+        ...
+    def color(self, color: ColorLike) -> Anim:
+        """Target currently visible vector paints, or a Primitive3D base color."""
+        ...
+    def stroke(self, color: ColorLike, width: float) -> Anim:
+        """Target vector stroke color and width; unavailable for Primitive3D."""
+        ...
+    def stroke_color(self, color: ColorLike) -> Anim:
+        """Target only the vector stroke color."""
+        ...
+    def material(self, material: Material3D) -> Anim:
+        """Target every animatable PBR channel of a native Primitive3D."""
+        ...
+    def opacity(self, value: float) -> Anim:
+        """Target drawable opacity, clamped to the 0..1 range."""
+        ...
+    def move(self, dx: float, dy: float) -> Anim:
+        """Target a relative 2D translation in a compound property animation."""
+        ...
+    def move_to(self, x: float, y: float) -> Anim:
+        """Target an absolute 2D position in scene units."""
+        ...
+    def move_3d(self, dx: float, dy: float, dz: float) -> Anim:
+        """Target a relative 3D translation in scene units."""
+        ...
+    def move_to_3d(self, x: float, y: float, z: float) -> Anim:
+        """Target an absolute 3D position in scene units."""
+        ...
+    def scale(self, factor: float) -> Anim:
+        """Multiply the current uniform scale by ``factor``."""
+        ...
+    def scale_to(self, factor: float) -> Anim:
+        """Target an absolute uniform scale."""
+        ...
+    def scale_to_3d(self, x: float, y: float, z: float) -> Anim:
+        """Target absolute scale independently on three axes."""
+        ...
+    def rotate(self, radians: float) -> Anim:
+        """Target a relative Z rotation in radians."""
+        ...
+    def rotate_to(self, radians: float) -> Anim:
+        """Target an absolute Z rotation in radians."""
+        ...
+    def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Anim:
+        """Target a relative rotation around one 3D axis."""
+        ...
+    def rotate_to_3d(self, x: float, y: float, z: float) -> Anim:
+        """Target an absolute XYZ Euler orientation in radians."""
+        ...
     def duration(self, d: float) -> Anim:
         """Configure this animation with duration.
 
@@ -459,7 +513,7 @@ class Anim:
         """
         ...
     def stroke_width(self, value: float) -> Anim:
-        """Configure this animation with stroke width.
+        """Target stroke width in a property animation or configure a draw animation.
 
         Example:
             result = animation.stroke_width(1.0)
@@ -545,6 +599,17 @@ class Drawable:
 
     def parts(self) -> tuple[str, ...]: ...
     def animations(self) -> tuple[str, ...]: ...
+    def animate(self) -> Anim:
+        """Start a typed compound property animation.
+
+        Chain transform, opacity, fill, stroke, color, or material targets and
+        pass the result to ``scene.play``. All selected channels share timing
+        and easing and run concurrently.
+
+        Example:
+            scene.play([drawable.animate().move_to(120, 0).fill(BLUE).duration(1.5)])
+        """
+        ...
     def animation(
         self,
         name: str,

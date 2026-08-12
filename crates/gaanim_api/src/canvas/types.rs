@@ -1,14 +1,17 @@
 //! Core types: coordinate system, mobject kinds, specs, and queued Anim.
 
 use gaanim_core::ObjectId;
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DQuat, DVec3, EulerRot};
 use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
 use std::path::PathBuf;
 
-use crate::anim::{AnimationBuilder, AnimationType};
+use crate::anim::{
+    AnimationBuilder, AnimationType, PropertyAnimation, PropertyRotation, PropertyScale,
+    PropertyTranslation,
+};
 use crate::canvas::ops::{Op, SharedCanvasState};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -764,6 +767,8 @@ impl ObjectSpec {
 pub struct Anim {
     pub inner: AnimationBuilder,
     queued: Option<QueuedAnim>,
+    pending_queue: Option<PendingQueuedAnim>,
+    property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -771,6 +776,12 @@ struct QueuedAnim {
     state: SharedCanvasState,
     segment_idx: usize,
     op_idx: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PendingQueuedAnim {
+    state: SharedCanvasState,
+    segment_idx: usize,
 }
 
 impl Anim {
@@ -784,7 +795,24 @@ impl Anim {
                 delay: 0.0,
             },
             queued: None,
+            pending_queue: None,
+            property_spec: None,
         }
+    }
+
+    pub(crate) fn properties(
+        target: ObjectId,
+        state: SharedCanvasState,
+        segment_idx: usize,
+        spec: std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+    ) -> Self {
+        let mut anim = Self::new(
+            target,
+            AnimationType::Properties(PropertyAnimation::default()),
+        );
+        anim.pending_queue = Some(PendingQueuedAnim { state, segment_idx });
+        anim.property_spec = Some(spec);
+        anim
     }
 
     pub(crate) fn queued(
@@ -811,6 +839,255 @@ impl Anim {
             op_idx,
         });
         anim
+    }
+
+    fn activate_pending_queue(&mut self) {
+        if self.queued.is_some() || self.inner.anim_type.is_empty_properties() {
+            return;
+        }
+        let Some(pending) = self.pending_queue.take() else {
+            return;
+        };
+        let mut guard = pending.state.lock().expect("canvas state poisoned");
+        let segment = &mut guard.segments[pending.segment_idx];
+        let op_idx = segment.ops.len();
+        segment.cursor += self.inner.duration;
+        segment.ops.push(Op::Animate {
+            anim: self.inner.clone(),
+            active: true,
+        });
+        drop(guard);
+        self.queued = Some(QueuedAnim {
+            state: pending.state,
+            segment_idx: pending.segment_idx,
+            op_idx,
+        });
+    }
+
+    fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
+        let AnimationType::Properties(properties) = &mut self.inner.anim_type else {
+            panic!("property modifiers require an animation created by Drawable.animate()");
+        };
+        update(properties);
+        self.activate_pending_queue();
+        self.sync_queued(None);
+        self
+    }
+
+    fn configured_pivot(&self) -> Option<DVec3> {
+        self.property_spec.as_ref().and_then(|spec| {
+            let spec = spec.lock().ok()?;
+            spec.layout_ops.iter().rev().find_map(|op| match op {
+                LayoutOp::SetPivot(pivot) => Some(*pivot),
+                _ => None,
+            })
+        })
+    }
+
+    fn assert_free_position(&self) {
+        let layout_owned = self
+            .property_spec
+            .as_ref()
+            .and_then(|spec| spec.lock().ok().and_then(|spec| spec.layout_owner))
+            .is_some();
+        assert!(
+            !layout_owned,
+            "layout owns this drawable's translation; animate the LayoutItem offset instead"
+        );
+    }
+
+    #[doc(hidden)]
+    pub fn property_position_is_free(&self) -> bool {
+        self.property_spec
+            .as_ref()
+            .and_then(|spec| spec.lock().ok().map(|spec| spec.layout_owner.is_none()))
+            .unwrap_or(true)
+    }
+
+    #[doc(hidden)]
+    pub fn property_target_is_primitive_3d(&self) -> bool {
+        self.property_spec
+            .as_ref()
+            .and_then(|spec| {
+                spec.lock()
+                    .ok()
+                    .map(|spec| matches!(spec.kind, SpawnKind::Primitive3D(_)))
+            })
+            .unwrap_or(false)
+    }
+
+    fn material_target(&self) -> Option<gaanim_scene::Material3D> {
+        let spec = self.property_spec.as_ref()?;
+        let spec = spec.lock().ok()?;
+        let SpawnKind::Primitive3D(mesh) = &spec.kind else {
+            return None;
+        };
+        Some(
+            spec.material_animation_cursor
+                .or(mesh.material)
+                .unwrap_or_default(),
+        )
+    }
+
+    fn set_material_target(
+        mut self,
+        from: gaanim_scene::Material3D,
+        to: gaanim_scene::Material3D,
+    ) -> Self {
+        if let Some(spec) = &self.property_spec {
+            spec.lock()
+                .expect("object spec poisoned")
+                .material_animation_cursor = Some(to);
+        }
+        self = self.update_properties(|properties| {
+            let baseline = properties
+                .material
+                .map(|(baseline, _)| baseline)
+                .unwrap_or(from);
+            properties.material = Some((baseline, to));
+            properties.visible_color = None;
+            properties.fill = None;
+        });
+        self
+    }
+
+    /// Animate all PBR channels of a native 3D primitive.
+    pub fn material(self, material: gaanim_scene::Material3D) -> Self {
+        let from = self
+            .material_target()
+            .expect("material() requires a native Primitive3D animation");
+        self.set_material_target(from, material)
+    }
+
+    /// Animate the visible color. For Primitive3D this changes its PBR base color.
+    pub fn color(self, color: Color) -> Self {
+        if let Some(from) = self.material_target() {
+            let mut to = from;
+            to.color = color;
+            return self.set_material_target(from, to);
+        }
+        self.update_properties(|properties| {
+            properties.visible_color = Some(color);
+            properties.fill = None;
+            properties.stroke_color = None;
+        })
+    }
+
+    /// Animate fill color, or the PBR base color for a Primitive3D.
+    pub fn fill(self, color: Color) -> Self {
+        if let Some(from) = self.material_target() {
+            let mut to = from;
+            to.color = color;
+            return self.set_material_target(from, to);
+        }
+        self.update_properties(|properties| properties.fill = Some(color))
+    }
+
+    pub fn stroke(self, color: Color, width: f64) -> Self {
+        assert!(
+            !self.property_target_is_primitive_3d(),
+            "stroke() is only available for vector drawables"
+        );
+        self.update_properties(|properties| {
+            properties.stroke_color = Some(color);
+            properties.stroke_width = Some(width.max(0.0));
+        })
+    }
+
+    pub fn stroke_color(self, color: Color) -> Self {
+        assert!(
+            !self.property_target_is_primitive_3d(),
+            "stroke_color() is only available for vector drawables"
+        );
+        self.update_properties(|properties| properties.stroke_color = Some(color))
+    }
+
+    pub fn opacity(self, opacity: f32) -> Self {
+        self.update_properties(|properties| properties.opacity = Some(opacity.clamp(0.0, 1.0)))
+    }
+
+    pub fn r#move(self, dx: f64, dy: f64) -> Self {
+        self.assert_free_position();
+        self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::By(DVec3::new(dx, dy, 0.0)))
+        })
+    }
+
+    pub fn move_to(self, x: f64, y: f64) -> Self {
+        self.assert_free_position();
+        self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::To(DVec3::new(x, y, 0.0)))
+        })
+    }
+
+    pub fn move_3d(self, dx: f64, dy: f64, dz: f64) -> Self {
+        self.assert_free_position();
+        self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::By(DVec3::new(dx, dy, dz)))
+        })
+    }
+
+    pub fn move_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.assert_free_position();
+        self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::To(DVec3::new(x, y, z)))
+        })
+    }
+
+    pub fn scale(self, factor: f64) -> Self {
+        self.update_properties(|properties| properties.scale = Some(PropertyScale::Uniform(factor)))
+    }
+
+    pub fn scale_to(self, factor: f64) -> Self {
+        self.update_properties(|properties| {
+            properties.scale = Some(PropertyScale::To(DVec3::splat(factor)))
+        })
+    }
+
+    pub fn scale_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.update_properties(|properties| {
+            properties.scale = Some(PropertyScale::To(DVec3::new(x, y, z)))
+        })
+    }
+
+    pub fn rotate(self, radians: f64) -> Self {
+        let pivot = self.configured_pivot();
+        self.update_properties(|properties| {
+            properties.rotation = Some(PropertyRotation::By2D { radians, pivot })
+        })
+    }
+
+    pub fn rotate_to(self, radians: f64) -> Self {
+        self.update_properties(|properties| {
+            properties.rotation = Some(PropertyRotation::To(DQuat::from_rotation_z(radians)))
+        })
+    }
+
+    pub fn rotate_by_3d(self, axis: &str, radians: f64) -> Result<Self, String> {
+        let delta = match axis.to_ascii_lowercase().as_str() {
+            "x" => DQuat::from_rotation_x(radians),
+            "y" => DQuat::from_rotation_y(radians),
+            "z" => DQuat::from_rotation_z(radians),
+            _ => {
+                return Err(format!(
+                    "invalid rotation axis {axis:?}; expected x, y, or z"
+                ));
+            }
+        };
+        Ok(self.update_properties(|properties| {
+            properties.rotation = Some(PropertyRotation::By3D(delta))
+        }))
+    }
+
+    pub fn rotate_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.update_properties(|properties| {
+            properties.rotation = Some(PropertyRotation::To(DQuat::from_euler(
+                EulerRot::XYZ,
+                x,
+                y,
+                z,
+            )))
+        })
     }
 
     pub fn into_builder(self) -> AnimationBuilder {
@@ -902,6 +1179,15 @@ impl Anim {
     }
 
     pub fn stroke_width(mut self, stroke_width: f64) -> Self {
+        if matches!(self.inner.anim_type, AnimationType::Properties(_)) {
+            assert!(
+                !self.property_target_is_primitive_3d(),
+                "stroke_width() is only available for vector drawables"
+            );
+            return self.update_properties(|properties| {
+                properties.stroke_width = Some(stroke_width.max(0.0));
+            });
+        }
         self.inner = self.inner.stroke_width(stroke_width);
         self.sync_queued(None);
         self

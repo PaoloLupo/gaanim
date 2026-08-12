@@ -10,10 +10,63 @@ pub struct DrawAnimationConfig {
     pub pen_tip: bool,
 }
 
+/// Typed targets collected by `DrawableHandle::animate()`.
+///
+/// Each populated channel is expanded into an ordinary timeline animation at
+/// compile time, so compound animations retain deterministic seek behavior.
+#[derive(Debug, Clone, Default)]
+pub struct PropertyAnimation {
+    pub translation: Option<PropertyTranslation>,
+    pub rotation: Option<PropertyRotation>,
+    pub scale: Option<PropertyScale>,
+    pub opacity: Option<f32>,
+    pub fill: Option<Color>,
+    pub stroke_color: Option<Color>,
+    pub stroke_width: Option<f64>,
+    /// Manim-style color shortcut for currently visible vector paints.
+    pub visible_color: Option<Color>,
+    pub material: Option<(gaanim_scene::Material3D, gaanim_scene::Material3D)>,
+}
+
+impl PropertyAnimation {
+    pub fn is_empty(&self) -> bool {
+        self.translation.is_none()
+            && self.rotation.is_none()
+            && self.scale.is_none()
+            && self.opacity.is_none()
+            && self.fill.is_none()
+            && self.stroke_color.is_none()
+            && self.stroke_width.is_none()
+            && self.visible_color.is_none()
+            && self.material.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PropertyTranslation {
+    To(DVec3),
+    By(DVec3),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PropertyRotation {
+    To(DQuat),
+    By2D { radians: f64, pivot: Option<DVec3> },
+    By3D(DQuat),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PropertyScale {
+    To(DVec3),
+    Uniform(f64),
+}
+
 /// High-level, developer-friendly animation types that do not require explicitly defining
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
 pub enum AnimationType {
+    /// Several typed property targets evaluated concurrently.
+    Properties(PropertyAnimation),
     CameraPosition {
         to: DVec3,
     },
@@ -357,6 +410,10 @@ impl AnimationBuilder {
 }
 
 impl AnimationType {
+    pub fn is_empty_properties(&self) -> bool {
+        matches!(self, Self::Properties(properties) if properties.is_empty())
+    }
+
     pub(crate) fn is_camera(&self) -> bool {
         matches!(
             self,

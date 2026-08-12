@@ -13,6 +13,41 @@
 
 Every method on `Drawable` returns an `Anim`. Pass them to `Scene.play([...])` — calls are sequential, lists run in parallel.
 
+== Compound property animations
+
+`Drawable.animate() -> Anim` starts a typed property animation. Chain several
+targets on the returned `Anim`; they share duration, easing, and delay and are
+sampled concurrently from the timeline:
+
+```python
+scene.play([
+  circle.animate()
+    .move_to(160, 40)
+    .scale(1.4)
+    .fill(BLUE)
+    .stroke(WHITE, 5)
+    .opacity(0.8)
+    .duration(1.5)
+    .smooth()
+])
+```
+
+The proxy supports 2D and 3D movement, absolute 3D scale, relative or absolute
+rotation, opacity, solid fill, and vector stroke. `color(c)` recolors only
+vector paints that are already visible. Calling `fill(c)` from `no_fill()` or
+`stroke(c, width)` from `no_stroke()` reveals the paint smoothly from
+transparent; a new stroke also grows from zero width.
+
+For a native `Primitive3D`, `fill(c)` and `color(c)` target the PBR base color
+while preserving roughness, metallic, and emission. Use
+`primitive.animate().material(Material3D(...))` to interpolate the complete PBR
+material together with transforms and opacity. Vector stroke methods on a 3D
+primitive raise `TypeError`.
+
+Only the first property activates the deferred animation queue, so an unused
+`animate()` proxy does not advance scene time. Position targets retain the
+usual layout-ownership restriction.
+
 == glTF Actions
 
 ```python

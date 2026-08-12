@@ -1,11 +1,12 @@
 //! Thin PyDrawable wrapper over gaanim_api DrawableHandle.
 
-use pyo3::exceptions::{PyKeyError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
+use crate::py3d::PyMaterial3D;
 use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression};
 use crate::pystyle::PyStrokeStyle;
 use crate::updater::PyUpdater;
@@ -18,6 +19,145 @@ pub struct PyCanvasAnim {
 
 #[pymethods]
 impl PyCanvasAnim {
+    fn fill(&self, color: PyColor) -> Self {
+        Self {
+            inner: self.inner.clone().fill(color.0),
+        }
+    }
+
+    fn color(&self, color: PyColor) -> Self {
+        Self {
+            inner: self.inner.clone().color(color.0),
+        }
+    }
+
+    fn stroke(&self, color: PyColor, width: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_primitive_3d() {
+            return Err(PyTypeError::new_err(
+                "stroke() is only available for vector drawables; animate material() or color() on Primitive3D",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().stroke(color.0, width),
+        })
+    }
+
+    fn stroke_color(&self, color: PyColor) -> PyResult<Self> {
+        if self.inner.property_target_is_primitive_3d() {
+            return Err(PyTypeError::new_err(
+                "stroke_color() is only available for vector drawables",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().stroke_color(color.0),
+        })
+    }
+
+    fn material(&self, material: PyMaterial3D) -> PyResult<Self> {
+        if !self.inner.property_target_is_primitive_3d() {
+            return Err(PyTypeError::new_err(
+                "material() is only available for native Primitive3D drawables",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().material(material.0),
+        })
+    }
+
+    fn opacity(&self, value: f32) -> Self {
+        Self {
+            inner: self.inner.clone().opacity(value),
+        }
+    }
+
+    fn r#move(&self, dx: f64, dy: f64) -> PyResult<Self> {
+        if !self.inner.property_position_is_free() {
+            return Err(crate::LayoutOwnershipError::new_err(
+                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().r#move(dx, dy),
+        })
+    }
+
+    fn move_to(&self, x: f64, y: f64) -> PyResult<Self> {
+        if !self.inner.property_position_is_free() {
+            return Err(crate::LayoutOwnershipError::new_err(
+                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().move_to(x, y),
+        })
+    }
+
+    fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
+        if !self.inner.property_position_is_free() {
+            return Err(crate::LayoutOwnershipError::new_err(
+                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().move_3d(dx, dy, dz),
+        })
+    }
+
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        if !self.inner.property_position_is_free() {
+            return Err(crate::LayoutOwnershipError::new_err(
+                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().move_to_3d(x, y, z),
+        })
+    }
+
+    fn scale(&self, factor: f64) -> Self {
+        Self {
+            inner: self.inner.clone().scale(factor),
+        }
+    }
+
+    fn scale_to(&self, factor: f64) -> Self {
+        Self {
+            inner: self.inner.clone().scale_to(factor),
+        }
+    }
+
+    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            inner: self.inner.clone().scale_to_3d(x, y, z),
+        }
+    }
+
+    fn rotate(&self, radians: f64) -> Self {
+        Self {
+            inner: self.inner.clone().rotate(radians),
+        }
+    }
+
+    fn rotate_to(&self, radians: f64) -> Self {
+        Self {
+            inner: self.inner.clone().rotate_to(radians),
+        }
+    }
+
+    fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
+        self.inner
+            .clone()
+            .rotate_by_3d(axis, radians)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
+    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            inner: self.inner.clone().rotate_to_3d(x, y, z),
+        }
+    }
+
     fn duration(&self, d: f64) -> Self {
         Self {
             inner: self.inner.clone().duration(d),
@@ -173,6 +313,13 @@ impl PyDrawable {
 
     fn animations(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         Ok(PyTuple::new(py, self.0.animations())?.unbind())
+    }
+
+    /// Start a typed compound property animation.
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.0.animate(),
+        }
     }
 
     #[pyo3(signature = (name, *, duration=None, speed=1.0, r#loop=false, reverse=false, transition=0.0, start_time=0.0))]

@@ -9,10 +9,9 @@ use gaanim_core::glam::{DQuat, DVec2, DVec3, EulerRot};
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
-use gaanim_math::RateFunc;
 use gaanim_objects::prelude::GltfAnimationMetadata;
 
-use crate::anim::{AnimationBuilder, AnimationType, DrawAnimationConfig, TextSelectionEffect};
+use crate::anim::{AnimationType, DrawAnimationConfig, TextSelectionEffect};
 use crate::canvas::ops::{
     FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
@@ -974,6 +973,13 @@ impl DrawableHandle {
     //   obj.fade_in(2.0)     — 2.0s
     //   obj.fade_in(None)    — default 1.0s
 
+    /// Build one typed animation that can target several drawable properties.
+    /// The first property modifier activates the usual deferred auto-queue.
+    pub fn animate(&self) -> Anim {
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::properties(self.id, self.state.clone(), active_idx, self.spec.clone())
+    }
+
     pub fn r#move(&self, dx: f64, dy: f64) -> Anim {
         self.anim(AnimationType::TranslateBy {
             delta: DVec3::new(dx, dy, 0.0),
@@ -1307,19 +1313,6 @@ impl DrawableHandle {
                 source: source.id,
                 axes,
             });
-    }
-
-    /// Start the legacy `.animate()` compound builder. This intentionally does
-    /// not auto-enqueue because the old builder is incomplete until a concrete
-    /// animation kind is selected.
-    pub fn animate(&self) -> AnimationBuilder {
-        AnimationBuilder {
-            target: self.id,
-            anim_type: AnimationType::TranslateBy { delta: DVec3::ZERO },
-            duration: 1.0,
-            rate_func: RateFunc::Smooth,
-            delay: 0.0,
-        }
     }
 }
 

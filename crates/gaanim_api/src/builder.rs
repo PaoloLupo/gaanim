@@ -762,6 +762,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraPerspective { .. }
             | AnimationType::CameraDolly { .. } => "Camera",
             AnimationType::GltfAnimation { .. } => "Action",
+            AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
             AnimationType::Create3D => "Create3D",
@@ -1753,6 +1754,86 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        if let AnimationType::Properties(properties) = anim.anim_type.clone() {
+            if properties.is_empty() {
+                return;
+            }
+
+            let visible_paints = self
+                .states
+                .get(anim.target)
+                .map(|state| (state.fill.is_some(), state.stroke.brush.is_some()));
+            let mut channels = Vec::new();
+            if let Some(translation) = properties.translation {
+                channels.push(match translation {
+                    crate::anim::PropertyTranslation::To(to) => AnimationType::TranslateTo { to },
+                    crate::anim::PropertyTranslation::By(delta) => {
+                        AnimationType::TranslateBy { delta }
+                    }
+                });
+            }
+            if let Some(rotation) = properties.rotation {
+                channels.push(match rotation {
+                    crate::anim::PropertyRotation::To(to) => AnimationType::RotateTo { to },
+                    crate::anim::PropertyRotation::By2D { radians, pivot } => {
+                        AnimationType::RotateBy {
+                            angle_radians: radians,
+                            pivot,
+                        }
+                    }
+                    crate::anim::PropertyRotation::By3D(delta) => {
+                        AnimationType::RotateBy3D { delta }
+                    }
+                });
+            }
+            if let Some(scale) = properties.scale {
+                channels.push(match scale {
+                    crate::anim::PropertyScale::To(to) => AnimationType::ScaleTo { to },
+                    crate::anim::PropertyScale::Uniform(factor) => {
+                        AnimationType::ScaleUniform { factor }
+                    }
+                });
+            }
+            if let Some(opacity) = properties.opacity {
+                channels.push(AnimationType::FadeTo { to: opacity });
+            }
+            let fill = properties.fill.or_else(|| {
+                properties
+                    .visible_color
+                    .filter(|_| visible_paints.is_some_and(|paints| paints.0))
+            });
+            if let Some(fill) = fill {
+                channels.push(AnimationType::FillColorTo { to: fill });
+            }
+            // Width is deliberately scheduled before color so a missing stroke
+            // starts at width zero before the color lens makes it visible.
+            if let Some(width) = properties.stroke_width {
+                channels.push(AnimationType::StrokeWidthTo { to: width });
+            }
+            let stroke_color = properties.stroke_color.or_else(|| {
+                properties
+                    .visible_color
+                    .filter(|_| visible_paints.is_some_and(|paints| paints.1))
+            });
+            if let Some(stroke_color) = stroke_color {
+                channels.push(AnimationType::StrokeColorTo { to: stroke_color });
+            }
+            if let Some((from, to)) = properties.material {
+                channels.push(AnimationType::Material3DTo { from, to });
+            }
+
+            for anim_type in channels {
+                self.play_internal(AnimationBuilder {
+                    target: anim.target,
+                    anim_type,
+                    duration: anim.duration,
+                    delay: anim.delay,
+                    rate_func: anim.rate_func.clone(),
+                });
+            }
+            return;
+        }
+
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
         let track = self.ensure_track(anim.target);
 
@@ -2027,7 +2108,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FillColorTo { to } => {
                 let from = match &state.fill {
                     Some(Brush::Solid(c)) => *c,
-                    _ => Color::WHITE,
+                    _ => {
+                        let rgba = to.to_rgba8();
+                        Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
+                    }
                 };
                 state.fill = Some(Brush::Solid(to));
                 PropertyLensSpec::FillColor { from, to }
@@ -2035,17 +2119,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::StrokeColorTo { to } => {
                 let from = match &state.stroke.brush {
                     Some(Brush::Solid(c)) => *c,
-                    _ => Color::WHITE,
+                    _ => {
+                        let rgba = to.to_rgba8();
+                        Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
+                    }
                 };
                 state.stroke.brush = Some(Brush::Solid(to));
                 PropertyLensSpec::StrokeColor { from, to }
             }
             AnimationType::StrokeWidthTo { to } => {
-                let from = state.stroke.style.width;
+                let from = if state.stroke.brush.is_some() {
+                    state.stroke.style.width
+                } else {
+                    0.0
+                };
                 state.stroke.style.width = to;
                 PropertyLensSpec::StrokeWidth { from, to }
             }
             AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
+            AnimationType::Properties(_) => {
+                unreachable!("property animations expand before lens resolution")
+            }
             AnimationType::GrowFromCenter => {
                 let to = state.transform.scale;
                 let from = gaanim_core::glam::DVec3::ZERO;

@@ -1598,6 +1598,7 @@ impl Canvas {
         let lag = lag.max(0.0);
         let builders: Vec<AnimationBuilder> = anims
             .into_iter()
+            .filter(|anim| !anim.inner.anim_type.is_empty_properties())
             .enumerate()
             .map(|(idx, anim)| {
                 anim.deactivate_auto_queue();
@@ -2733,6 +2734,77 @@ mod tests {
         assert_eq!(anims.len(), 2);
         assert!((anims[0].delay - 0.0).abs() < 1e-9);
         assert!((anims[1].delay - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compound_property_animation_queues_once_and_regroups_as_one_anim() {
+        let mut canvas = Canvas::new(1280, 720);
+        let shape = canvas.circle(20.0).fill(Color::WHITE);
+
+        let pending = shape.animate().duration(2.0);
+        {
+            let guard = canvas.state.lock().expect("canvas state poisoned");
+            assert_eq!(guard.active().cursor, 0.0);
+        }
+
+        let animation = pending
+            .move_to_3d(12.0, 24.0, 3.0)
+            .scale_to_3d(2.0, 3.0, 4.0)
+            .fill(Color::from_rgb8(20, 40, 220))
+            .stroke(Color::WHITE, 5.0)
+            .opacity(0.6);
+        {
+            let guard = canvas.state.lock().expect("canvas state poisoned");
+            assert_eq!(guard.active().cursor, 2.0);
+            let Some(Op::Animate { anim, active: true }) = guard.active().ops.last() else {
+                panic!("compound animation should auto-queue on the first property");
+            };
+            let AnimationType::Properties(properties) = &anim.anim_type else {
+                panic!("expected typed property animation");
+            };
+            assert!(properties.translation.is_some());
+            assert!(properties.scale.is_some());
+            assert!(properties.fill.is_some());
+            assert!(properties.stroke_color.is_some());
+            assert_eq!(properties.stroke_width, Some(5.0));
+            assert_eq!(properties.opacity, Some(0.6));
+        }
+
+        canvas.play(vec![animation]);
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        assert_eq!(guard.active().cursor, 2.0);
+        let Some(Op::Play(anims)) = guard.active().ops.last() else {
+            panic!("scene.play should regroup the compound animation");
+        };
+        assert_eq!(anims.len(), 1);
+        assert!(matches!(anims[0].anim_type, AnimationType::Properties(_)));
+    }
+
+    #[test]
+    fn primitive_3d_color_property_preserves_other_material_channels() {
+        let mut canvas = Canvas::new(640, 360);
+        let original = gaanim_scene::Material3D::metal(Color::WHITE);
+        let cube = canvas.cube(2.0, original).expect("valid cube");
+        let target_color = Color::from_rgb8(32, 96, 224);
+
+        let animation = cube
+            .animate()
+            .color(target_color)
+            .rotate_to_3d(0.2, 0.4, 0.6);
+        let AnimationType::Properties(properties) = &animation.inner.anim_type else {
+            panic!("expected typed property animation");
+        };
+        let Some((from, to)) = properties.material else {
+            panic!("Primitive3D color should target Material3D");
+        };
+        assert_eq!(from, original);
+        assert_eq!(to.color, target_color);
+        assert_eq!(to.roughness, original.roughness);
+        assert_eq!(to.metallic, original.metallic);
+        assert_eq!(to.emissive, original.emissive);
+        assert_eq!(to.emissive_strength, original.emissive_strength);
+        assert!(properties.rotation.is_some());
+        assert!(properties.fill.is_none());
     }
 
     #[test]
