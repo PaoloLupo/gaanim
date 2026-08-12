@@ -2,18 +2,18 @@
 #import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
-  title: "Mobjects",
-  description: "Every drawable factory on Scene — primitives, paths, text, media, editorial",
+  title: "Objetos",
+  description: "Fábricas de objetos de Scene: primitivas, trayectorias, texto, medios y composición",
   route: "/api/mobjects/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Mobjects
+= Objetos
 
 Every factory on `Scene` returns a `Drawable`. Chain style, layout and animation fluently.
 
-== Theme classes and complete strokes
+== Clases de tema y trazos completos
 
 #api-entry(
   name: "Drawable.style_class",
@@ -52,7 +52,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Imported glTF models
+== Modelos glTF importados
 
 ```python
 Scene.gltf(path: str, *, scene: str | int | None = None) -> Drawable
@@ -65,7 +65,7 @@ The model and every selected node support the complete 3D transform surface:
 `at_3d(x,y,z)`, `scaled_3d(x,y,z)`, `rotated_3d(x,y,z)`, and
 `with_pivot_3d(x,y,z)`. Euler rotations use XYZ order and radians.
 
-== Native PBR primitives
+== Primitivas PBR nativas
 
 `Primitive3D` extends `Drawable`, so position, rotation, scale, opacity, and
 the PBR material are animatable and deterministic under timeline seek. Geometry
@@ -102,7 +102,7 @@ while fading it in; vector-only `write()` is rejected explicitly.
 
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 40+ FACTORIES · ALL RETURN Drawable —])
 
-== Primitives
+== Primitivas
 
 #api-entry(
   name: "Scene.circle",
@@ -213,7 +213,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Lines & Arrows
+== Líneas y flechas
 
 #api-entry(
   name: "Scene.line",
@@ -359,7 +359,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Polygons & Symbols
+== Polígonos y símbolos
 
 #api-entry(
   name: "Scene.polygon",
@@ -525,7 +525,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Paths
+== Trayectorias
 
 #api-entry(
   name: "Scene.path",
@@ -599,7 +599,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== 3D Geometry
+== Geometría 3D
 
 Gaanim uses ordinary Python tuples for 3D points: `(x, y, z)`. The same
 `Drawable` handle can be styled and animated after it is placed in world space.
@@ -611,7 +611,7 @@ and the perspective camera:
 from gaanim import Axis, BLACK, BLUE, GOLD, RED, WHITE, Scene, Updater
 scene = Scene(640, 360, background=BLACK)
 
-axes = scene.axes_3d(
+axes = scene.cartesian_3d(
     Axis.linear(-3, 3).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("y").style(color=WHITE),
     Axis.linear(-2, 2).ticks(1).label("z").style(color=WHITE),
@@ -637,15 +637,15 @@ scene.export("3d-quickstart.webp", fps=30)
 ```
 
 #api-entry(
-  name: "Scene.axes_3d",
+  name: "Scene.cartesian_3d",
   kind: "factory",
-  signature: "axes_3d(x: Axis, y: Axis, z: Axis, *, size=(10,8,6), grid=True) -> CoordinateSpace3D",
+  signature: "cartesian_3d(x: Axis, y: Axis, z: Axis, *, size=(10,8,6), grid=True) -> Cartesian3D",
   params: ((name: "x / y / z", type: "Axis", default: none, desc: [Reusable linear or temporal axis specifications.]), (name: "size", type: "(float,float,float)", default: "(10,8,6)", desc: [Positive world-space size; choose it relative to the camera distance.]), (name: "grid", type: "bool", default: "True", desc: [Show the three grid planes.]),),
   returns: (type: "CoordinateSpace3D", desc: [Typed space with surface and parametric methods.]),
   desc: [Creates Cartesian axes and up to three grid planes. Use `surface` and `parametric` on the returned space so data coordinates share the same mapping.],
 )[
 ```python
-axes = scene.axes_3d(
+axes = scene.cartesian_3d(
     Axis.linear(-5, 5).ticks(1).label("x"),
     Axis.linear(-5, 5).ticks(1).label("y"),
     Axis.linear(-3, 3).ticks(1).label("z"),
@@ -714,7 +714,7 @@ scene.play([trail.fade_in()])
 ```
 ]
 
-== Plots
+== Gráficos
 
 Plots are no longer free `Scene` factories. They are children of a typed
 coordinate space, which owns scales, conversions, clipping, and sampling.
@@ -726,13 +726,13 @@ and calculus helpers.
 from gaanim import Axis, BLUE, Expr, Scene
 
 scene = Scene(480, 270, background="#0f172a")
-space = scene.number_plane(Axis.linear(-4, 4), Axis.linear(-2, 2))
+space = scene.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
 x = Expr.var("x")
-curve = space.plot(x.sin()).stroke(BLUE, 3)
+curve = space.function(x.sin()).stroke(BLUE, 3)
 scene.play([space.create(), curve.create()])
 ```
 
-== Text & Math
+== Texto y matemáticas
 
 This page keeps a compact factory index. The canonical, complete reference is
 #link("/api/text/", "Text — content, math, style, flow, selections, Layout, and animation").
@@ -848,7 +848,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Media
+== Medios
 
 #api-entry(
   name: "Scene.image",
@@ -928,7 +928,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Editorial
+== Composición editorial
 
 #api-entry(
   name: "Scene.callout",
@@ -1005,18 +1005,19 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "CoordinateSpace.bars",
+  name: "ChartSpec.mark('bar')",
   kind: "factory",
-  signature: "bars(source: DataSource, x: str, y: str, *, width=0.8, baseline=0) -> Drawable",
+  signature: "ChartSpec(data).mark('bar').encode(x=..., y=...) -> ChartSpec",
   params: ((name: "source", type: "DataSource", default: none, desc: [Replaceable tabular data.]), (name: "x / y", type: "str", default: none, desc: [Numeric column names.]),),
-  returns: (type: "Drawable", desc: [Batched bars parented to the coordinate space.]),
-  desc: [Use a categorical `Axis` for labels. The mark regenerates natively after data replacement or append.],
+  returns: (type: "ChartSpec", desc: [Immutable batched bar-chart specification.]),
+  desc: [Materialize with `scene.chart(spec)`; build a new spec after replacing a `DataSource` to capture its new immutable version.],
 )[
 ```python
-from gaanim import Axis, BLUE, DataSource
-data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
-space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
-chart = space.bars(data, "x", "value").fill(BLUE)
+from gaanim import Axis, ChartSpec
+spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
+  .mark("bar").encode(x="x", y="value") \
+  .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
+chart = scene.chart(spec)
 ```
 ]
 
@@ -1038,7 +1039,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Native reactivity
+== Reactividad nativa
 
 Reactive values are traced once when a scene is built. Use `Parameter` as an
 invisible scalar, `Variable` when the scalar must also be visible, and
@@ -1064,8 +1065,8 @@ from gaanim import Axis, Scene, math as gm
 
 scene = Scene(640, 360)
 amplitude = scene.parameter(1.0)
-axes = scene.axes(Axis.linear(-4, 4), Axis.linear(-2, 2))
-curve = axes.plot(lambda x: amplitude * gm.sin(x))
+axes = scene.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
+curve = axes.function(lambda x: amplitude * gm.sin(x))
 scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2)])
 ```
 ]
@@ -1105,7 +1106,7 @@ scene.play([area.create(), radius.animate_to(3.0, duration=1.5)])
 ```
 ]
 
-== Reactive Geometry
+== Geometría reactiva
 
 #api-entry(
   name: "Drawable.anchor_point",
@@ -1403,7 +1404,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Drawable Styling & Layout
+== Estilo y layout de Drawable
 
 Reference for the fluent handle returned by every factory. All return `Drawable` for chaining unless noted.
 

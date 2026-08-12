@@ -1,14 +1,14 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Layout v2",
-  description: "Responsive trees, grid tracks, relational constraints, and animated reflow",
+  title: "Layout",
+  description: "Árboles responsive, tracks de grid, constraints relacionales y reflow animado",
   route: "/api/layout/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Layout v2
+= Layout
 
 Layout v2 is the single public composition model in Gaanim. A `Layout` is a
 `Drawable` and owns the translation of its direct children. Build responsive
@@ -60,7 +60,7 @@ Responsive text is composed with the width offered by its final row, column,
 grid track, or stack box. Its tighter visible glyph bounds do not become a new
 wrap limit during materialization.
 
-== Layout possibility atlas
+== Atlas de posibilidades de layout
 
 This section is a compact catalogue of the complete public Layout v2 design
 space. The features are orthogonal: a grid can be nested in a column, a stack
@@ -87,7 +87,7 @@ the resulting tree can still be constrained and animated.
   [Reusable pages], [`scene.template(...)` / `segment.bind(...)`], [Typed slots, built-in presentation patterns, and theme-driven spacing tokens.],
 )
 
-=== Complete scene without coordinates
+=== Escena completa sin coordenadas
 
 The following scene uses a nested `column -> row -> stack -> column` tree. No
 child calls `at()`: the outer tree decides every translation, and the text is
@@ -155,7 +155,7 @@ scene.play([page.fade_in().duration(0.6)])
 scene.render()
 ```
 
-=== Sizing, padding, and flexible space
+=== Tamaños, padding y espacio flexible
 
 `"hug"` measures intrinsic content, a number fixes the outer box in canvas
 units, and `"fill"` consumes the available constraint. `grow` distributes
@@ -190,7 +190,7 @@ Padding accepts `padding=24`, `padding=(vertical, horizontal)`, or
 `padding=(top, right, bottom, left)`. Rows and columns use one `gap`; grids can
 override it with `row_gap` and `column_gap`.
 
-=== Alignment and distribution
+=== Alineación y distribución
 
 `align` controls the cross axis and accepts `start`, `center`, `end`, or
 `stretch`. `justify` controls the main axis and accepts `start`, `center`,
@@ -219,7 +219,7 @@ With `wrap=True`, rows start another row when the next child exceeds the
 available width; columns use the corresponding vertical rule and start another
 column. Absolute children never consume flow space.
 
-=== Every per-item rule
+=== Reglas por elemento
 
 #table(
   columns: (0.95fr, 1.15fr, 2.7fr),
@@ -251,7 +251,7 @@ page.configure_item(
 )
 ```
 
-=== Responsive roots and nested trees
+=== Raíces responsive y árboles anidados
 
 Use `within="safe"` for presentation content that respects scene margins and
 `within="frame"` for full-bleed backgrounds. Nested layouts normally leave
@@ -283,7 +283,7 @@ The same tree can target 16:9 and 9:16. Flow wrapping, fractional tracks,
 `grow`, and responsive text adapt to the offered viewport; use separate trees
 only when the editorial hierarchy itself changes.
 
-== Grid and overlays
+== Grid y overlays
 
 Grid tracks accept fixed values, `"auto"`, and fractional strings such as
 `"2fr"`. Items can select a row/column and span tracks. Omitted positions use
@@ -311,7 +311,7 @@ Explicit cells and their spans are reserved before auto-placement, independent
 of child order. An explicit collision, an out-of-range span, or a grid without
 enough free cells aborts layout resolution with the involved node ID.
 
-== Ownership and reflow
+== Propiedad y reflow
 
 After a drawable is attached, positional calls such as `at`, `next_to`,
 `align_to`, `to_edge`, or manual movement animations raise
@@ -352,7 +352,7 @@ animates only the remaining children's reflow; the detached child stays
 visible and fixed until explicitly animated. With `None`, the timeline records
 an instant, deterministic transition.
 
-== Linear constraints
+== Constraints lineales
 
 Every drawable exposes `left`, `right`, `top`, `bottom`, `center_x`, `center_y`,
 `width`, and `height`. Expressions are linear: addition/subtraction and scalar
@@ -378,7 +378,7 @@ invalid responsive Typst content does not terminate editor hot reload.
 conflict message includes its label or canonical index and involved node IDs.
 Expressions cannot mix drawables from different scenes.
 
-== Responsive Text and templates
+== Texto responsive y plantillas
 
 `scene.text(..., flow=TextFlow(wrap="auto"))` is the only responsive text
 leaf. Free text receives the safe-frame width; managed text consumes the width

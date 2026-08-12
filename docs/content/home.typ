@@ -2,18 +2,19 @@
 
 #show: docs-chapter.with(
   title: "Gaanim",
-  description: "GPU-accelerated 2D vector animation engine for Python",
+  description: "Motor de animación vectorial 2D acelerado por GPU para Python",
   route: "/",
   code-langs: (),
 )
 
 #html.div(class: "home-hero", [
   #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-gold); margin-bottom: 10px;", [● REC &nbsp;·&nbsp; GPU · Vello · Bevy · Python])
-  #html.h1(style: "margin: 0;", [Animate like you mean it.])
+  #html.h1(style: "margin: 0;", [Da vida a tus ideas.])
   #html.div(class: "home-hero-desc", [Manim-style, GPU-accelerated. Escribe Python, exporta MP4/WebM/WebP/GIF. Timeline fluida, 30+ animaciones, tipografía y math con Typst. Hecho para quienes viven en el viewport.])
   #html.div(class: "home-hero-cta", [
-    #html.a(href: "getting-started/", class: "primary", [Empezar →])
-    #html.a(href: "api/scene/", class: "secondary", [API Reference])
+    #html.a(href: "guia/antes-de-empezar/", class: "primary", [Leer la guía →])
+    #html.a(href: "getting-started/", class: "secondary", [Instalar])
+    #html.a(href: "api/", class: "secondary", [Referencia de la API])
     #html.a(href: "examples/basic/", class: "secondary", [Ver ejemplos])
   ])
 ])
@@ -65,4 +66,4 @@ scene.export("demo.mp4", fps=30)
 
 == Siguiente
 
-#link("/getting-started/", "Getting Started →") · #link("/api/scene/", "API Reference →") · #link("/examples/basic/", "Ejemplos →") · #link("/guides/slides/", "Slides →")
+#link("/guia/antes-de-empezar/", "Empezar la guía →") · #link("/api/", "Referencia de la API →") · #link("/guides/projects/", "Proyectos →") · #link("/guides/slides/", "Presentaciones →")

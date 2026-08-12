@@ -1,14 +1,14 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Assets",
-  description: "Portable image, SVG, and glTF paths, manifests, and preloading",
+  title: "Recursos",
+  description: "Rutas portables de imágenes, SVG y glTF, manifiestos y precarga",
   route: "/api/assets/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Assets
+= Recursos
 
 Set one asset directory per scene so relative image, SVG, and glTF paths remain
 portable when a project is moved or rendered from another working directory.
@@ -26,7 +26,7 @@ robot = scene.gltf("robot.glb")
 
 Absolute paths continue to work and take precedence over `assets_dir`.
 
-== Project manifest
+== Manifiesto del proyecto
 
 Create a complete starter from the CLI:
 
@@ -58,7 +58,7 @@ The CLI accepts either the entry script or its project directory (`gaanim my-dec
 not the process working directory. `load_project("path/to/gaanim.toml")` accepts
 an explicit manifest path.
 
-== Preloading
+== Precarga
 
 Use `preload` to validate raster, SVG, and glTF files before playback. Raster images
 are decoded into the same cache used by `scene.image`.
@@ -71,7 +71,7 @@ Failures identify the asset that could not be resolved or decoded. The scene cur
 consumes `assets_dir`; `name`, `kind`, `entry`, and `output_dir` describe the project
 workflow and leave room for future export presets.
 
-== Refreshing changed files
+== Actualización de archivos modificados
 
 When a raster asset changes on disk without restarting the process, clear the
 decoded image cache before rebuilding the affected drawables:
@@ -87,7 +87,7 @@ glTF metadata is cached by canonical path and modification time. `reload_assets(
 also clears this cache; the editor then removes the old native scene instance and
 all of its descendants before rebuilding it.
 
-== glTF 3D models
+== Modelos 3D glTF
 
 `Scene.gltf(path, *, scene=None) -> Drawable` imports local glTF 2.0 `.gltf`
 and `.glb` files. `scene` accepts a scene name, a zero-based index, or `None`
@@ -118,7 +118,7 @@ Blender-authored node transform and skeletal/morph animation instead of
 overwriting it. Materials are cloned per instance so opacity animation cannot
 mutate another import of the same file.
 
-== Advanced SVG
+== SVG avanzado
 
 `scene.svg(...)` keeps the document as vector geometry. The importer resolves:
 

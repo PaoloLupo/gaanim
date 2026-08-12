@@ -22,7 +22,11 @@
 ) = context {
   assert.ne(name, none, message: "api-entry: name is required")
 
-  let kind-label = upper(kind)
+  let kind-label = upper(if kind == "factory" { "fábrica" }
+    else if kind == "method" { "método" }
+    else if kind == "class" { "clase" }
+    else if kind == "function" { "función" }
+    else { kind })
 
   if target() != "bundle" {
     block(
@@ -47,24 +51,24 @@
         ]
         #if params.len() > 0 [
           #v(6pt)
-          #text(weight: "bold", size: 9pt, [Parameters:])
+          #text(weight: "bold", size: 9pt, [Parámetros:])
           #v(2pt)
           #table(
             columns: (auto, auto, auto, 1fr),
             stroke: 0.3pt + rgb("#cbd5e1"),
             fill: (x, y) => if y == 0 { rgb("#f1f5f9") } else { none },
-            [*Name*], [*Type*], [*Default*], [*Description*],
+            [*Nombre*], [*Tipo*], [*Predeterminado*], [*Descripción*],
             ..params.map(p => (
               raw(p.at("name", default: "-")),
               raw(p.at("type", default: "-")),
-              if p.at("default", default: none) == none { text(fill: rgb("#dc2626"), [required]) } else { raw(str(p.at("default"))) },
+              if p.at("default", default: none) == none { text(fill: rgb("#dc2626"), [obligatorio]) } else { raw(str(p.at("default"))) },
               p.at("desc", default: [-]),
             )).flatten()
           )
         ]
         #if returns != none [
           #v(4pt)
-          #text(weight: "bold", size: 9pt, [Returns: ])
+          #text(weight: "bold", size: 9pt, [Devuelve: ])
           #raw(returns.at("type", default: "-"))
           #if returns.at("desc", default: none) != none [
             — #returns.at("desc")
@@ -72,7 +76,7 @@
         ]
         #if body != none [
           #v(6pt)
-          #text(weight: "bold", size: 9pt, [Example:])
+          #text(weight: "bold", size: 9pt, [Ejemplo:])
           #v(2pt)
           #show raw.where(lang: "python"): it => {
             if it.has("label") and it.label == <_stop> {
@@ -108,13 +112,13 @@
       // params table
       if params.len() > 0 {
         html.div(class: "api-params", {
-          html.div(class: "api-params-title", "Parameters")
+          html.div(class: "api-params-title", "Parámetros")
           html.table({
             html.thead(html.tr({
-              html.th("Name")
-              html.th("Type")
-              html.th("Default")
-              html.th("Description")
+              html.th("Nombre")
+              html.th("Tipo")
+              html.th("Predeterminado")
+              html.th("Descripción")
             }))
             html.tbody({
               for p in params {
@@ -122,7 +126,7 @@
                   html.td(html.elem("code", p.at("name", default: "-")))
                   html.td(html.elem("code", p.at("type", default: "-")))
                   let def = p.at("default", default: none)
-                  html.td(if def == none { html.span(class: "api-required", "required") } else { html.elem("code", str(def)) })
+                  html.td(if def == none { html.span(class: "api-required", "obligatorio") } else { html.elem("code", str(def)) })
                   html.td(p.at("desc", default: [-]))
                 })
               }
@@ -134,7 +138,7 @@
       // returns
       if returns != none {
         html.div(class: "api-returns", {
-          html.span(class: "api-returns-label", "Returns: ")
+          html.span(class: "api-returns-label", "Devuelve: ")
           html.elem("code", returns.at("type", default: "-"))
           if returns.at("desc", default: none) != none {
             html.span(" — ")
@@ -147,7 +151,7 @@
       // Only blocks with `# show-code: true` or `# output:` are executed; plain fragments stay static.
       if body != none {
         html.div(class: "api-example", {
-          html.div(class: "api-example-label", "Example")
+          html.div(class: "api-example-label", "Ejemplo")
           [
             #show raw.where(lang: "python"): it => {
               if it.has("label") and it.label == <_stop> {

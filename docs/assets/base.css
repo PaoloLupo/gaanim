@@ -424,7 +424,26 @@ h2 {
     margin-bottom: 16px;
     color: var(--text-main);
 }
-h3 { font-family: var(--font-display); font-size: 1rem; font-weight: 700; margin-top: 24px; border-bottom: var(--border-w) solid var(--code-border); padding-bottom: 6px; }
+h3 {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 750;
+    margin-top: 28px;
+    margin-bottom: 10px;
+    padding: 7px 10px;
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--accent-blue) 7%, transparent);
+    border-left: 2px solid color-mix(in srgb, var(--accent-blue) 55%, transparent);
+}
+h4 {
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 800;
+    margin-top: 22px;
+    margin-bottom: 8px;
+    color: var(--accent-blue);
+    letter-spacing: 0.01em;
+}
 h1, h2, h3, h4 { position: relative; }
 p { text-wrap: pretty; font-size: 0.94rem; color: #334155; }
 :root[data-theme="dark"] p { color: #cbd5e1; }

@@ -173,7 +173,7 @@ Para contribuir o compilar desde fuente:
 - Rust estable (`rustup`), Python >=3.12, `just` (#link("https://just.systems")[just.systems]), Git.
 - En Windows, PowerShell. En Linux/macOS, bash.
 
-== Bootstrap y build
+== Preparación y compilación
 
 ```powershell
 git clone https://github.com/<tu-org>/gaanim
@@ -209,7 +209,7 @@ target/wheels/gaanim-0.1.0-*.whl
 
 En dev, `cargo run -p gaanim_editor -- examples/quickstart.py` requiere `PATH` con Python. Por eso `just run` en Windows usa el launcher (`cargo run -p gaanim_launcher`). Para debug directo del core, el `just` anterior ya no inyecta `$env:PATH`.
 
-== Release local
+== Versión local de distribución
 
 ```powershell
 cargo build -p gaanim_launcher --release
@@ -220,7 +220,7 @@ cargo build -p gaanim_editor --release --bin gaanim-core
 
 El workflow `.github/workflows/release.yml` hace lo mismo en `windows-latest` al pushear `v0.1.0`.
 
-== Troubleshooting
+== Solución de problemas
 
 - `exit -1073741515 / python3.dll not found`: el launcher no encontró Python. Verifica `py --version` o crea `.venv` con `uv venv --python 3.12`. El core solo (`gaanim-core.exe`) siempre fallará sin launcher si `PATH` no contiene Python.
 - `gaanim check: could not load project`: revisa `gaanim.toml` `entry` sea relativo y exista, y que `assets/` exista si `scene.load_project` lo usa.

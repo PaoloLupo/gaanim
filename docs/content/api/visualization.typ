@@ -2,164 +2,165 @@
 #import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
-  title: "Visualization API",
-  description: "Coordinate spaces, functions, data, statistics, and calculus",
+  title: "API de visualización",
+  description: "Gráficos inmutables y espacios científicos tipados en 2D y 3D",
   route: "/api/visualization/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Visualization
+= Visualización
 
-The visualization API is intentionally centered on a typed coordinate space.
-An `Axis` describes a reusable scale; `Scene` creates a space; plots and data
-marks are then created by that space. This keeps coordinates, layout,
-transformations, clipping, and sampling in one native hierarchy.
+The visualization API separates tabular storytelling from scientific geometry:
+
+- `ChartSpec` is an immutable grammar for data, encodings, marks, scales, axes,
+  guides, and stable-key transitions.
+- `Cartesian2D`, `Cartesian3D`, `PolarSpace`, and `ComplexSpace` are typed spaces
+  for functions, calculus, vector fields, and custom geometry.
+
+Constructing `ChartSpec` immediately snapshots mappings, dataframes,
+`DataTable`, or `DataSource`. Later external mutation cannot alter an earlier
+timeline seek.
 
 ```python
-from gaanim import Axis, BLUE, Scene, math as gm
+from gaanim import Axis, ChartSpec, Field, Guide, Scale, Scene, Value, BLUE
 
 scene = Scene(1280, 720)
-x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(2).label("x")
-y_axis = Axis.linear(-3, 3).ticks(1).label("f(x)")
-plane = scene.number_plane(x_axis, y_axis, width=1000, height=520)
-
-amplitude = scene.parameter(1.0)
-curve = plane.plot(lambda x: amplitude * gm.sin(x)).stroke(BLUE, 3)
-
-scene.play([plane.create(), curve.create()])
-scene.play([amplitude.animate_to(2.0).duration(1.2)])
+spec = (
+  ChartSpec({
+    "id": ["a", "b", "c"],
+    "x": [-2, 0, 2],
+    "y": [1, 3, 2],
+    "group": ["A", "B", "A"],
+  }, key="id")
+  .mark("point")
+  .encode(
+    x="x",
+    y="y",
+    color=Field("group", scale=Scale.category()),
+    size=Value(8),
+  )
+  .axes(
+    x=Axis.linear(-3, 3).ticks(1).label("x"),
+    y=Axis.linear(0, 4).ticks(1).label("y"),
+  )
+  .guides(color=Guide.legend(title="Grupo"))
+)
+chart = scene.chart(spec)
+scene.play(chart.create())
 ```
 
-Lambdas are traced once with `gaanim.math` and then evaluated and
-differentiated in Rust. A traced expression that references a `Parameter` is
-resampled while that parameter animates without a Python callback per frame.
-
-== Axis
+== ChartSpec
 
 #api-entry(
-  name: "Axis",
+  name: "ChartSpec",
   kind: "builder",
-  signature: "Axis.linear/log/symlog/power/time/category(...) -> Axis",
+  signature: "ChartSpec(data, *, key=None) -> ChartSpec",
   params: (
-    (name: "domain", type: "float pair or categories", default: none, desc: [Valid values represented by the axis.]),
-    (name: "ticks", type: "float", default: "automatic", desc: [Major tick step; `minor_ticks(n)` adds subdivisions.]),
-    (name: "numbers", type: "format", default: "auto", desc: [Fixed, scientific, percent, fraction, pi, or datetime labels.]),
+    (name: "data", type: "mapping | dataframe | DataTable | DataSource", default: none, desc: [Input captured immediately as an owned immutable snapshot.]),
+    (name: "key", type: "str | None", default: "None", desc: [Stable identity column. Null or duplicate values fail eagerly.]),
   ),
-  returns: (type: "Axis", desc: [Immutable reusable axis specification.]),
-  desc: [`label`, `crossing`, `numbers`, `ticks`, `minor_ticks`, and `style` return a new configured axis. Numeric domains must be finite and increasing; logarithmic domains must be positive.],
+  returns: (type: "ChartSpec", desc: [Immutable declarative chart specification.]),
+  desc: [`mark`, `encode`, `axes`, and `guides` return new specifications and never mutate an existing one.],
 )[
-```python
-linear = Axis.linear(-10, 10).ticks(2).label("x")
-log_y = Axis.log(0.01, 1000, base=10).numbers("scientific")
-signed = Axis.symlog(-100, 100, threshold=1)
-classes = Axis.category(["control", "pilot", "final"])
-```
+Channels are `x`, `y`, `z`, `color`, `size`, `opacity`, and `label`. A channel
+accepts a column name, `Field(column, scale=...)`, or `Value(constant)`.
+
+Marks are `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`,
+`error_bar`, `heatmap`, and `surface`. Point, line, and bar have native 2D/3D
+morph compatibility; heatmap and surface are compatible on a shared grid.
 ]
 
-== Coordinate spaces
+== Escalas, ejes y guías
 
-`scene.number_line(axis)`, `scene.axes(x, y)`, `scene.number_plane(x, y)`,
-`scene.polar_plane(radial)`, `scene.complex_plane(...)`, and
-`scene.axes_3d(x, y, z)` return typed handles rather than generic axes
-drawables. Cartesian and complex spaces expose:
-
-- `coord(x, y) -> CoordinateRef` and `drawable.at_coordinate(ref)`;
-- immediate `data_to_local` and `local_to_data` conversions;
-- `layer("grid" | "minor_grid" | "axes" | "ticks" | "numbers" | "labels")`;
-- root `at`, `scaled`, `rotated`, `create`, `fade_in`, and `fade_out` operations.
-- `animate_view(x_domain, y_domain, duration=...)` for an affine pan/zoom of
-  linear or temporal views.
-
-A `CoordinateRef` is resolved as a child of the space, so the placed drawable
-continues to follow later moves, scaling, rotation, and layout of the space.
+`Scale.linear`, `log`, `symlog`, `power`, `time`, and `category` configure an
+encoding. The same scale drives normalized positions, colors, legends, and
+colorbars. `Axis` remains the immutable visual scale builder and supports the
+same numeric, temporal, and categorical families.
 
 ```python
-space = scene.axes(Axis.linear(-4, 4), Axis.linear(-2, 6))
-marker = scene.dot(6).at_coordinate(space.coord(1.5, 3.0))
-scene.play([space.create(), marker.fade_in()])
-scene.play(space.animate_view((-2, 2), (-1, 4), duration=1.2))
+color = Field("temperature", scale=Scale.symlog((-100, 100), threshold=1))
+x = Axis.log(0.1, 1000, base=10).ticks(10).label("frequency")
+guide = Guide.colorbar(title="temperature")
 ```
 
-Polar plots use `polar.plot(lambda angle: radius, domain=(0, 2*pi))`. A 3D
-space exposes `surface(function, resolution=(64, 48))`,
-`parametric(function, domain, samples=320)`, and the batched static
-`vector_field(function, resolution=(8, 8, 6))`. Surfaces receive a native
-height colormap. Static Python callbacks are never kept as per-frame updaters.
+== Gráfico materializado y transiciones
 
-== Functions and fields
+`scene.chart(spec)` returns a `Chart`. Its stable layers are `marks`, `axes`,
+`grid`, and `guides`; each is a regular drawable. Marks are materialized as a
+constant number of retained vector or mesh batches rather than one ECS entity
+per record.
 
-#api-entry(
-  name: "CoordinateSpace.plot",
-  kind: "factory",
-  signature: "plot(callable, domain=None, *, samples=None, tolerance=0.75, derivative=0) -> Drawable",
-  params: (
-    (name: "function", type: "callable", default: none, desc: [Scalar function y=f(x), traced once with `gaanim.math`.]),
-    (name: "domain", type: "(float,float)", default: "x axis domain", desc: [Sampling interval.]),
-    (name: "samples", type: "int", default: "adaptive", desc: [Set for fixed sampling.]),
-    (name: "tolerance", type: "float", default: "0.75", desc: [Maximum visual error for adaptive sampling.]),
-  ),
-  returns: (type: "Drawable", desc: [A retained vector path parented to the space.]),
-  desc: [Adaptive sampling separates invalid regions and visual discontinuities.],
-)[
-```python
-curve = space.plot(lambda x: 1 / x, domain=(-4, 4)).stroke(BLUE, 3)
-orbit = space.parametric(lambda t: (2*cos(t), sin(t)), (0, 2*pi))
-level = space.implicit(lambda x, y: x*x + y*y - 1)
-levels = space.contour(lambda x, y: x*x - y*y, [-2, -1, 0, 1, 2])
-field = space.vector_field(lambda x, y: (-y, x), resolution=(20, 12))
-```
-]
-
-== Data and statistics
-
-`DataTable` accepts Python columns, NumPy-like columns with `tolist`, and
-dataframe objects with `to_dict("list")`; neither NumPy nor pandas is a required
-dependency. `DataSource` owns replaceable/appendable data. Its marks regenerate
-natively after `replace` or `append`; an optional stable `key` validates the
-identity column for future keyed transitions.
+Chart opacity propagates through both vector and native 3D mesh layers, so
+`fade_in`, `fade_out`, and parent opacity remain consistent in mixed scenes.
+For inferred bar axes, the numeric baseline is included automatically and the
+outer domain reserves enough space to keep the first and last bars away from
+the plot boundary. An explicitly authored axis domain is never changed.
 
 ```python
-from gaanim import DataSource
-
-data = DataSource({
-  "id": ["a", "b", "c"],
-  "x": [0, 1, 2],
-  "value": [18, 42, 31],
-}, key="id")
-
-bars = space.bars(data, "x", "value", width=0.8)
-points = space.scatter(data, "x", "value")
-data.replace({"id": ["a", "b", "c"], "x": [0, 1, 2], "value": [24, 35, 48]})
+target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))
+scene.play([
+  chart.to(target).duration(1.4),
+  scene.camera.look_at(eye=(8, 6, 8), target=(0, 0, 0)).duration(1.4),
+])
 ```
 
-Available marks are `line`, `step`, `area`, `scatter`, `bars`, `histogram`,
-`box_plot`, `violin`, `error_bars`, and quantized `heatmap`. Line-like marks
-default to `gap` for missing/non-finite values; policies are `gap`, `drop`, and
-`error`. Aggregated statistics ignore missing values.
+Key matching is the default and requires both specs to define the same valid
+key column. Without a key, request `match_="index"` explicitly. Incompatible
+mark families raise an error unless `fallback="crossfade"` is explicit.
+`Chart.to` never moves the global camera implicitly.
 
-== Educational constructions
+`chart.inspect(fields=(...), format="...")` opts into preview metadata. The
+inspection flag and fields are excluded from snapshots and exports.
 
-Coordinate spaces provide `projections`, `secant`, `tangent`, `normal`,
-`area_under`, and `riemann_sum`. `Expr.derivative(variable)` supplies a native
-symbolic derivative for a second plot.
+== Espacios científicos tipados
 
 ```python
-tangent = space.tangent(lambda x: sin(x), 1.0, length=3.0)
-normal = space.normal(lambda x: sin(x), 1.0, length=2.0)
-area = space.area_under(lambda x: sin(x) + 1, (0, pi), baseline=0)
-rects = space.riemann_sum(lambda x: x*x, (0, 3), rectangles=16)
+from gaanim import Axis, Scene, math as gm
 
-x = Expr.var("x")
-derivative = space.plot((x.sin() * x).derivative("x"))
+scene = Scene()
+plane = scene.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
+a = scene.parameter(1.0)
+curve = plane.function(lambda x: a * gm.sin(x))
+
+world = scene.cartesian_3d(
+  Axis.log(0.1, 1000),
+  Axis.symlog(-100, 100),
+  Axis.power(0, 16, 0.5),
+)
+surface = world.surface(lambda x, y: x * y)
 ```
 
-== Current boundaries
+`Cartesian2D` exposes `function`, `parametric`, `implicit`, `contour`, and
+`vector_field`, plus calculus constructions. `Cartesian3D` exposes `surface`,
+`parametric`, and `vector_field`. Its scale-aware `grid`, `axes`, `ticks`,
+`numbers`, and billboard `labels` are independent layers. `scene.polar(...)`,
+`scene.complex(...)`, and `scene.number_line(...)` cover the other typed spaces.
 
-This API intentionally does not integrate trajectories or implement ODEs,
-phase portraits, PDEs, volume rendering, dashboards, faceting, or symbolic
-algebra beyond expression differentiation. Three-dimensional axes currently
-accept linear and temporal scales. Python callbacks are static; use `Expr` and
-`Parameter` for per-frame reactivity. `animate_view` currently performs an
-affine view animation and therefore preserves alignment but does not regenerate
-tick labels during the tween.
+`Expr` and `Parameter` remain the per-frame reactive path. Python lambdas for
+traced scalar functions execute once; sampling and reactive evaluation stay in
+Rust.
+
+== Migración desde la API anterior
+
+#table(
+  columns: (1fr, 1fr),
+  table.header([Legacy], [Current]),
+  [`scene.axes(x, y)`], [`scene.cartesian_2d(x, y, grid=False)`],
+  [`scene.number_plane(x, y)`], [`scene.cartesian_2d(x, y, grid=True)`],
+  [`scene.axes_3d(x, y, z)`], [`scene.cartesian_3d(x, y, z)`],
+  [`scene.polar_plane(axis)`], [`scene.polar(axis)`],
+  [`scene.complex_plane()`], [`scene.complex()`],
+  [`space.plot(f)`], [`space.function(f)`],
+  [`space.scatter/bars/...`], [`ChartSpec(...).mark(...).encode(...)`],
+)
+
+The legacy entry points in this table are not aliases in the primary Python
+API. Migrate them explicitly so a scene has one unambiguous coordinate-space
+contract.
+
+== Límites y responsabilidades
+
+Interaction is preview-only. Interactive export, dashboards, facets,
+streamlines and ODE solvers, volumes, and isosurfaces are deferred to a later
+milestone. Camera animation remains global, explicit, and composable.

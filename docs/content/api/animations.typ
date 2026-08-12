@@ -2,18 +2,18 @@
 #import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
-  title: "Animations",
-  description: "Every Anim on Drawable — move, fade, write, transform, and timing",
+  title: "Animaciones",
+  description: "Animaciones de Drawable: movimiento, fundido, escritura, transformación y tiempo",
   route: "/api/animations/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Animations
+= Animaciones
 
 Every method on `Drawable` returns an `Anim`. Pass them to `Scene.play([...])` — calls are sequential, lists run in parallel.
 
-== Compound property animations
+== Animaciones de propiedades compuestas
 
 `Drawable.animate() -> Anim` starts a typed property animation. Chain several
 targets on the returned `Anim`; they share duration, easing, and delay and are
@@ -48,7 +48,7 @@ Only the first property activates the deferred animation queue, so an unused
 `animate()` proxy does not advance scene time. Position targets retain the
 usual layout-ownership restriction.
 
-== glTF Actions
+== Acciones glTF
 
 ```python
 model.animation(
@@ -72,7 +72,7 @@ Animation players remain paused and are sampled from the timeline's absolute
 time. Forward seeks, backwards scrubbing, export frames, and snapshots therefore
 resolve the same Action pose.
 
-== 3D transforms
+== Transformaciones 3D
 
 ```python
 part.move_3d(dx, dy, dz) -> Anim
@@ -94,7 +94,7 @@ raises `TypeError` with guidance to use `create()`.
 
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 22 ANIMS · ALL ON Drawable —])
 
-== Motion
+== Movimiento
 
 #api-entry(
   name: "Drawable.move",
@@ -224,7 +224,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Fades
+== Fundidos
 
 #api-entry(
   name: "Drawable.fade_in / fade_out / fade_to",
@@ -265,7 +265,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Write & Create
+== Escritura y creación
 
 #api-entry(
   name: "Drawable.write / unwrite",
@@ -324,7 +324,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Emphasis
+== Énfasis
 
 #api-entry(
   name: "Drawable.grow_from_center / shrink_to_center",
@@ -336,13 +336,15 @@ scene.export("preview.webp", fps=30)
 )[
 ```python
 # show-code: true
-from gaanim import Axis, BLUE, DataSource, Scene
+# Visualization uses immutable ChartSpec batches.
+from gaanim import Axis, BLUE, ChartSpec, Scene
 scene = Scene(480, 270, background="#0f172a")
-data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
-space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
-chart = space.bars(data, "x", "value").fill(BLUE)
-scene.play([chart.grow_from_center().duration(0.7).spring()])
-scene.play([chart.shrink_to_center().duration(0.5)])
+spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
+  .mark("bar").encode(x="x", y="value") \
+  .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
+chart = scene.chart(spec)
+scene.play([chart.layer("marks").grow_from_center().duration(0.7).spring()])
+scene.play([chart.layer("marks").shrink_to_center().duration(0.5)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -403,7 +405,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Structured text transitions
+== Transiciones de texto estructurado
 
 The complete text-specific surface, including selections, annotations,
 ownership, and error behavior, is documented in
@@ -486,7 +488,7 @@ scene.play([energy["mass"].copy_to(momentum["mass"], duration=0.8)])
 ```
 ]
 
-== Transforms
+== Transformaciones
 
 #api-entry(
   name: "Drawable.transform / fade_transform / replacement_transform",
@@ -529,7 +531,7 @@ scene.play([e1.morph_to(e2, duration=1.6)])
 ```
 ]
 
-== Reactive simulation
+== Simulación reactiva
 
 #api-entry(
   name: "Drawable.add_updater_fn",
@@ -572,7 +574,7 @@ scene.export("simulation.webp", fps=30)
 For a coupled example with a tracking rod, dimension and trail, see
 `examples/pendulum_simulation.py`.
 
-== Timing & Easing
+== Tiempo y easing
 
 Configure any `Anim` fluently before passing to `play`:
 

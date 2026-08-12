@@ -2,8 +2,8 @@
 #import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
-  title: "Scene API",
-  description: "The canonical public API for Gaanim animations",
+  title: "API de Scene",
+  description: "API pública canónica para construir animaciones con Gaanim",
   route: "/api/scene/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -15,7 +15,7 @@
 timeline, rendering, export, and named segments. Create a `Scene` for every
 animation; `Canvas` is retained only as a deprecated compatibility constructor.
 
-== Constructor and viewport
+== Constructor y viewport
 
 #api-entry(
   name: "Scene",
@@ -56,7 +56,7 @@ Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
 `set_safe_area(top=..., right=..., bottom=..., left=...)` when a brand or
 platform requires custom insets.
 
-== 3D lighting and editor camera
+== Iluminación 3D y cámara del editor
 
 `scene.lighting_3d(preset="studio", intensity=1.0, shadows=True)` installs one
 friendly ambient/key/fill rig for native PBR primitives and glTF content. Use
@@ -83,7 +83,7 @@ orthographic unless inspection is enabled manually.
 Timeline and compact seek-bar snapping are disabled while the compiled scene
 contains 3D content. Purely 2D scenes retain the regular snapping behavior.
 
-== Spawning mobjects
+== Creación de objetos
 
 Every factory returns a `Drawable` handle with fluent style and layout methods.
 Unified `Text` uses the bundled New Computer Modern scientific theme by
@@ -115,7 +115,7 @@ guide = scene.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
 measure_arrow = scene.double_arrow(-140, -160, 140, -160)
 measure = scene.dimension(-80, 80, 80, 80, 24)
 spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
-axes = scene.axes(
+axes = scene.cartesian_2d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
 )
@@ -159,14 +159,14 @@ typed visualization API. Build immutable `Axis` specifications, create a
 ```python
 from gaanim import Axis, BLUE, Expr
 
-space = scene.number_plane(
+space = scene.cartesian_2d(
     Axis.linear(-3, 3).ticks(1).label("x"),
     Axis.linear(-2, 2).ticks(1).label("f(x)"),
     width=900,
     height=480,
 )
 x = Expr.var("x")
-curve = space.plot(x.sin()).stroke(BLUE, 3)
+curve = space.function(x.sin()).stroke(BLUE, 3)
 marker = scene.dot(6).at_coordinate(space.coord(1, 1))
 ```
 
@@ -202,7 +202,7 @@ explicit center/radius arc. Both use radians, while
 `dimension(x1, y1, x2, y2, offset)` draws extension lines and a perpendicular
 double-headed measurement arrow.
 
-== Reactive geometry
+== Geometría reactiva
 
 `ValueTracker` animates a scalar independently of visible mobjects. Use
 `always_redraw_arc` to regenerate a curved arrow from that value each frame.
@@ -287,14 +287,17 @@ agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
 scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
 ```
 
-Charts are data marks owned by a coordinate space. This gives them the same
-scales, conversions, layout, and native updates as function plots.
+Charts are immutable tabular specifications materialized into stable semantic
+layers. Their marks remain batched independently from row count.
 
 ```python
-data = DataSource({"x": [0, 1, 2], "value": [18, 42, 31]})
-space = scene.axes(Axis.category(["Q1", "Q2", "Q3"]), Axis.linear(0, 50))
-chart = space.bars(data, "x", "value")
-scene.play([space.create(), chart.grow_from_center().duration(0.6)])
+from gaanim import Axis, ChartSpec
+
+spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
+  .mark("bar").encode(x="x", y="value") \
+  .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
+chart = scene.chart(spec)
+scene.play([chart.layer("axes").create(), chart.layer("marks").grow_from_center().duration(0.6)])
 ```
 
 `table(headers, rows)` creates a compact table with a restrained blue header and
@@ -367,7 +370,7 @@ generated visuals, including `attach_to`, `bind_*`, curve markers, tracking
 lines, springs, dimensions, and traced paths, remain hidden until their own
 entry animation is included in `scene.play(...)`.
 
-== Timeline
+== Línea de tiempo
 
 `play` receives a list of animations; calls are sequential and animations in a
 single list run in parallel.
@@ -447,7 +450,7 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
-== Presentation segments and branding
+== Segmentos de presentación e identidad visual
 
 Configure the deck identity once before declaring presentation segments:
 
@@ -481,7 +484,7 @@ scene.stop("comparison-ready")
 scene-space point before revealing the next segment. It is useful when a detail
 of the outgoing scene introduces the following section.
 
-== Camera
+== Cámara
 
 ```python
 scene.camera.pan_to(-160, 40, duration=0.8)
@@ -508,7 +511,7 @@ glTF Action animations at the same timeline start. Fluent `Anim` controls such
 as `.duration()`, `.delay()`, `.smooth()`, and `.linear()` also apply. The
 legacy `scene.camera_*` methods remain available for existing projects.
 
-=== 3D camera
+=== Cámara 3D
 
 The 3D camera uses world-space `(x, y, z)` coordinates. Camera operations are
 queued on the scene timeline; use `duration=0.0` for an immediate setup and a
@@ -570,7 +573,7 @@ scene.camera.dolly(factor=0.85, duration=0.6)
 ```
 ]
 
-== Clipping and masks
+== Recorte y máscaras
 
 Use any vector drawable as clipping geometry for another drawable or a nested
 group. The mask keeps its own visibility; make it transparent when it should
@@ -585,7 +588,7 @@ Mask and target transforms are resolved in world space, so they can be placed,
 scaled, rotated, or nested independently. `rule="evenodd"` supports paths with
 holes, and `drawable.no_clip()` removes a previously assigned mask.
 
-== Output
+== Salida
 
 ```python
 scene.render()                         # Interactive Gaanim viewer

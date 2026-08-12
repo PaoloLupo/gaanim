@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Audio",
-  description: "Timeline-aligned tracks mixed directly into video exports",
+  description: "Pistas alineadas con la línea de tiempo y mezcladas en la exportación de video",
   route: "/api/audio/",
   code-langs: (),
   updated: datetime.today().display(),

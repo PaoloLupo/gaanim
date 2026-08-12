@@ -1,8 +1,8 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Slides",
-  description: "Crea, previsualiza y presenta decks semánticos reutilizables",
+  title: "Presentaciones",
+  description: "Crea, previsualiza y presenta diapositivas semánticas reutilizables",
   route: "/guides/slides/",
   updated: datetime.today().display(),
   code-langs: (),

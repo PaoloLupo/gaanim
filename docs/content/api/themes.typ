@@ -1,14 +1,14 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Themes and colors",
-  description: "Centralized visual rules, CSS colors, and reusable palettes",
+  title: "Temas y colores",
+  description: "Reglas visuales centralizadas, colores CSS y paletas reutilizables",
   route: "/api/themes/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Themes and colors
+= Temas y colores
 
 Use a scene background and the exported color constants to define the visual
 language of an animation. Built-in themes are available through `scene.canvas`.
@@ -35,7 +35,7 @@ from gaanim import Color
 scene.canvas.background = Color(40, 42, 54)
 ```
 
-== Built-in themes
+== Temas incluidos
 
 `technical` is the sober dark default for mathematical explanations and
 technical documentation. `presentation` is optimized for projection: deep navy
@@ -62,7 +62,7 @@ equation = scene.text("$F(k) = integral f(x) e^(-i k x) dif x$")
 The aliases `scientific`, `deck`, and `light` map to `technical`,
 `presentation`, and `paper`. The former `thesis` alias is no longer accepted.
 
-== Known color schemes
+== Esquemas de color conocidos
 
 The same short API includes established editor and terminal palettes:
 
@@ -80,7 +80,7 @@ scene.canvas.set_theme("catppuccin-latte")
 Use `Theme.schemes()` when a tool or GUI needs to enumerate every built-in
 scheme.
 
-== Custom and derived themes
+== Temas personalizados y derivados
 
 `Theme` is the single configuration object for semantic colors, structured
 typography, selector rules, data palettes, layout tokens, and font files. It
@@ -132,7 +132,7 @@ The `text` dictionary reuses the same `TextStyle` accepted by structured
 from the semantic role. `TextPart` styles and explicit drawable methods retain
 higher priority.
 
-== Selector cascade
+== Cascada de selectores
 
 Theme rules may target a family (`shape`, `line`, `text`, `axes`, `plot`), an
 exact factory name (`circle`, `rounded_rect`, `arrow`), a semantic part such as
@@ -207,7 +207,7 @@ Built-in color roles are `background`, `foreground`, `muted`, `title`, `accent`,
 `colors` dictionary may also define arbitrary non-empty tokens for selector
 rules.
 
-== CSS Color 4 and Tailwind
+== CSS Color 4 y Tailwind
 
 Every `ColorLike` position accepts CSS Color 4 syntax. `Color(...)` also accepts
 a literal directly, and the explicit constructors are useful when values are
@@ -235,7 +235,7 @@ Layout templates consume named spacing values through
 `lower_third_offset`. Custom themes may override these or add project-specific
 tokens through the `layout={...}` argument.
 
-== Theme tokens and readability
+== Tokens de tema y legibilidad
 
 Manual vector objects can consume the same semantic tokens as components:
 
@@ -268,7 +268,7 @@ if warnings:
 Validation is advisory rather than automatic rejection, so intentional
 low-contrast animation states remain possible.
 
-== Brushes and gradients
+== Pinceles y gradientes
 
 `Drawable.fill(...)` and `Drawable.stroke(...)` accept either an ordinary
 `ColorLike` value or a reusable `Brush`. Gradient coordinates use the
@@ -311,7 +311,7 @@ ring = scene.circle(110).no_fill().stroke(
 ramps. Sweep angles are expressed in degrees; linear points and radial radii
 use scene units.
 
-== Visual effects
+== Efectos visuales
 
 Effects use the same fluent `Drawable` surface. Defaults keep common calls
 short, while radius, intensity, offset, and blur remain configurable:
@@ -327,7 +327,7 @@ unchanged effects are cached. They work on vector fills and strokes, including
 gradient brushes. `no_effects()` removes all three without changing the
 drawable's fill or stroke.
 
-== Color constants
+== Constantes de color
 
 #table(
   columns: (1fr, 1fr, 1fr),
@@ -349,7 +349,7 @@ drawable's fill or stroke.
   [`TEAL`], [`#14b8a6`], [Teal],
 )
 
-== Custom colors
+== Colores personalizados
 
 `Color` receives RGBA channels from 0 through 255:
 

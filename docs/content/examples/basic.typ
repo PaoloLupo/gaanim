@@ -1,18 +1,18 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Basic examples",
-  description: "Small runnable scenes using the public API",
+  title: "Ejemplos básicos",
+  description: "Escenas pequeñas y ejecutables que usan la API pública",
   route: "/examples/basic/",
   updated: datetime.today().display(),
 )
 
-= Basic examples
+= Ejemplos básicos
 
-Each example starts with `Scene`; animations are built on drawables and passed to
-`scene.play` as a list.
+Cada ejemplo comienza con `Scene`. Las animaciones se construyen sobre objetos
+dibujables y se entregan a `scene.play` como una lista.
 
-== Circle and rectangle
+== Círculo y rectángulo
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
@@ -27,10 +27,10 @@ scene.play([
 ])
 scene.wait(0.5)
 scene.play([circle.move(180, 0).duration(1.0), rect.fade_out().duration(0.5)])
-# Run this file with: gaanim basic_circle.py
+# Ejecuta este archivo con: gaanim basic_circle.py
 ```
 
-== Text and math
+== Texto y matemáticas
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
@@ -43,10 +43,10 @@ caption = scene.text("Energy and mass are related", role="subtitle").fill(BLUE).
 scene.play([title.write().duration(1.0), equation.write().duration(1.5)])
 scene.play([caption.fade_in().duration(0.8)])
 scene.wait(1.0)
-# Run this file with: gaanim text_and_math.py
+# Ejecuta este archivo con: gaanim text_and_math.py
 ```
 
-== Shapes gallery
+== Galería de figuras
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
@@ -66,5 +66,5 @@ scene.play([
     arrow.create().duration(0.8),
 ], lag=0.1)
 scene.wait(1.0)
-# Run this file with: gaanim shapes_gallery.py
+# Ejecuta este archivo con: gaanim shapes_gallery.py
 ```

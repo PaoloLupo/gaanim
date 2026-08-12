@@ -8,11 +8,62 @@
   body,
 ) = context {
   if target() != "bundle" {
+    let book-body(content) = {
+      set heading(offset: 1)
+      show heading.where(level: 2): it => if repr(it.body) == "[" + title + "]" {
+        none
+      } else {
+        block(
+          width: 100%,
+          breakable: false,
+          above: 1.45em,
+          below: 0.58em,
+        )[
+          #line(length: 34pt, stroke: 2.2pt + rgb("#6366f1"))
+          #v(4pt)
+          #text(size: 15.5pt, weight: "bold", fill: rgb("#1e293b"), it)
+        ]
+      }
+      show heading.where(level: 3): it => block(
+        width: 100%,
+        breakable: false,
+        above: 1.05em,
+        below: 0.34em,
+        inset: (left: 8pt),
+        stroke: (left: 1.6pt + rgb("#a5b4fc")),
+      )[
+        #text(size: 11.7pt, weight: "bold", fill: rgb("#334155"), it)
+      ]
+      show heading.where(level: 4): it => block(
+        breakable: false,
+        above: 0.82em,
+        below: 0.22em,
+      )[
+        #text(size: 9.9pt, weight: "bold", fill: rgb("#4f46e5"), it)
+      ]
+      content
+    }
+
     [
-      #heading(level: 1, title)
-      #v(0.5em)
-      #body
-      #v(1em)
+      #block(
+        width: 100%,
+        breakable: false,
+        inset: (left: 18pt, right: 18pt, top: 16pt, bottom: 18pt),
+        stroke: (left: 4pt + rgb("#4f46e5")),
+        fill: rgb("#f5f3ff"),
+        radius: (right: 6pt),
+      )[
+        #text(size: 8pt, weight: "bold", tracking: 0.12em, fill: rgb("#6366f1"))[CAPÍTULO]
+        #v(5pt)
+        #heading(level: 1, title)
+        #if description != none [
+          #v(4pt)
+          #text(size: 10pt, fill: rgb("#475569"), description)
+        ]
+      ]
+      #v(1.4em)
+      #book-body(body)
+      #v(1.5em)
     ]
   } else {
     let path-segments = route.split("/").filter(seg => seg.len() != 0)
@@ -29,7 +80,7 @@
       asset-base: prefix + "assets/",
     )
 
-    document(route + "index.html", title: title, html.html(lang: "en", {
+    document(route + "index.html", title: title, html.html(lang: "es", {
       html.head({
         html.meta(charset: "utf-8")
         html.meta(
@@ -54,31 +105,37 @@
         let chapter-label = label("chap-" + route.replace(regex("[^a-zA-Z0-9]"), "-"))
 
         let site-map = (
-          "Home": "",
-          "Getting Started": (
-            "Overview": "getting-started/",
-            "Instalación": "getting-started/installation/",
+          "Inicio": "",
+          "Guía de usuario": (
+            "1. Antes de empezar": "guia/antes-de-empezar/",
+            "2. Primera escena": "guia/primera-escena/",
+            "3. Objetos y estilo": "guia/objetos-estilo/",
+            "4. Animar el tiempo": "guia/animar-tiempo/",
+            "5. Componer y explicar": "guia/componer-explicar/",
+            "6. Dar vida a la escena": "guia/reactividad/",
+            "7. Del círculo al seno": "guia/circulo-al-seno/",
+            "8. Terminar el proyecto": "guia/terminar-proyecto/",
           ),
-          "Guides": (
+          "Flujos de trabajo": (
             "Proyectos": "guides/projects/",
-            "Slides": "guides/slides/",
+            "Presentaciones": "guides/slides/",
             "Regresión visual": "guides/visual-regression/",
-            "Layout proposal": "guides/layout-proposal/",
           ),
-            "API Reference": (
-              "Overview": "api/",
-              "Scene": "api/scene/",
-              "Visualization": "api/visualization/",
+            "Referencia de la API": (
+              "Índice": "api/",
+              "Escena": "api/scene/",
+              "Visualización": "api/visualization/",
               "Layouts": "api/layout/",
-              "Mobjects": "api/mobjects/",
-              "Animations": "api/animations/",
-              "Colors": "api/themes/",
-              "Assets": "api/assets/",
+              "Objetos": "api/mobjects/",
+              "Animaciones": "api/animations/",
+              "Texto": "api/text/",
+              "Colores y temas": "api/themes/",
+              "Recursos": "api/assets/",
               "Audio": "api/audio/",
             ),
-          "Examples": (
-            "Basic": "examples/basic/",
-            "Advanced": "examples/advanced/",
+          "Ejemplos": (
+            "Básicos": "examples/basic/",
+            "Avanzados": "examples/advanced/",
           ),
         )
 
@@ -86,7 +143,7 @@
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
             html.h3("GaanIm")
             html.div(class: "docs-search", {
-              html.div(class: "docs-search-label", "SEARCH DOCUMENTATION")
+              html.div(class: "docs-search-label", "BUSCAR EN LA DOCUMENTACIÓN")
               html.elem(
                 "input",
                 attrs: (
@@ -141,7 +198,7 @@
 
           if kind == "Chapter" {
             html.aside(class: "toc-sidebar", {
-              html.h3("CONTENTS")
+              html.h3("CONTENIDO")
 
               outline(
                 title: none,
@@ -182,9 +239,9 @@
     let content = it
     if it.level == 1 and updated != none {
       if target() == "bundle" {
-        content = [#it #html.div(class: "last-updated", [Last updated: #updated])]
+        content = [#it #html.div(class: "last-updated", [Última actualización: #updated])]
       } else {
-        content = [#it #text(fill: rgb("#64748b"), size: 8.5pt, [ (Last updated: #updated)])]
+        content = [#it #text(fill: rgb("#64748b"), size: 8.5pt, [ (Última actualización: #updated)])]
       }
     }
     content
@@ -323,9 +380,15 @@
   assert.ne(route, none, message: "route is required")
   assert.ne(title, none, message: "title is required")
 
-  set text(lang: "en")
+  set text(lang: "es")
   set heading(numbering: "1.1.")
   set math.equation(numbering: "1.")
+
+  // Mantener el salto fuera del contexto diferido de html-section evita que
+  // algunas aperturas queden desplazadas por encima del area imprimible.
+  context if target() != "bundle" {
+    pagebreak(to: "odd")
+  }
 
   [#metadata((
     title: title,

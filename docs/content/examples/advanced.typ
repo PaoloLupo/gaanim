@@ -1,15 +1,15 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Advanced examples",
-  description: "Transforms, groups, segments, and reactive paths",
+  title: "Ejemplos avanzados",
+  description: "Transformaciones, grupos, segmentos y trayectorias reactivas",
   route: "/examples/advanced/",
   updated: datetime.today().display(),
 )
 
-= Advanced examples
+= Ejemplos avanzados
 
-== Transforms across segments
+== Transformaciones entre segmentos
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
@@ -25,10 +25,10 @@ scene.play([circle.replacement_transform(headline).duration(1.4).spring()])
 
 formula = scene.text("$E = m c^2$").fill(GREEN).at(0, -150)
 scene.play([headline.transform(formula).duration(1.4).smooth()])
-# Run this file with: gaanim transforms.py
+# Ejecuta este archivo con: gaanim transforms.py
 ```
 
-== Groups
+== Grupos
 
 ```python
 from gaanim import BLACK, BLUE, GREEN, RED, Scene
@@ -41,10 +41,10 @@ group = scene.group([left, middle, right])
 
 scene.play([group.grow_from_center().duration(1.0).spring()])
 scene.play([group.move(0, 120).duration(1.0), group.rotate(3.14159).duration(1.0)])
-# Run this file with: gaanim groups.py
+# Ejecuta este archivo con: gaanim groups.py
 ```
 
-== Reactive path
+== Trayectoria reactiva
 
 ```python
 from gaanim import BLACK, Color, Scene, Updater
@@ -57,5 +57,5 @@ trail = scene.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
 scene.play([dot.fade_in().duration(0.3), trail.fade_in().duration(0.3)])
 scene.wait(4.0)
 dot.remove_updater()
-# Run this file with: gaanim reactive_path.py
+# Ejecuta este archivo con: gaanim reactive_path.py
 ```

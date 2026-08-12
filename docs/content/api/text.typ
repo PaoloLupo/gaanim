@@ -3,7 +3,7 @@
 
 #show: docs-chapter.with(
   title: "Text",
-  description: "Unified prose, math, semantic parts, responsive flow, selections, and structural animation",
+  description: "Prosa, matemáticas, partes semánticas, flujo responsive, selecciones y animación estructural",
   route: "/api/text/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -38,7 +38,7 @@ not have compatibility aliases. Use a role or `$...$` instead. `scene.typst()`
 remains available for arbitrary Typst documents, but it does not provide the
 structured `Text` selection API described here.
 
-== Responsibility boundaries
+== Responsabilidades
 
 - `TextStyle` controls glyph appearance and typographic metrics.
 - `TextFlow` controls internal line composition.
@@ -104,13 +104,13 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
            -> local part style -> later TextSelection.fill / Text.fill
 ```
 
-== Structured content and mathematics
+== Contenido estructurado y matemáticas
 
 Strings and `TextPart` values form one ordered content tree. The tree remains
 available after compilation, so semantic paths are more stable than manual
 character ranges.
 
-=== Inline emphasis markup
+=== Marcado de énfasis en línea
 
 Ordinary strings accept a small Typst-inspired markup language. `*strong*`
 selects a bold face, `_emphasis_` selects italic, and the delimiters may be
@@ -174,7 +174,7 @@ scene.export("text_parts.webp", fps=30)
 ```
 ]
 
-=== Math delimiters
+=== Delimitadores matemáticos
 
 - `$...$` switches the unified Typst compositor into mathematics.
 - `$$...$$` currently uses the same vector math compositor; it does not create
@@ -232,7 +232,7 @@ Nested parts resolve font, size, weight, italic, color, spacing, decoration, and
 baseline through the structured Typst tree. A later fluent `text.fill(...)`,
 `text.stroke(...)`, or `text.opacity(...)` updates the complete drawable.
 
-== TextFlow and wrapping
+== TextFlow y ajuste de líneas
 
 #api-entry(
   name: "TextFlow",
@@ -272,7 +272,7 @@ scene.export("text_flow.webp", fps=30)
 `"ellipsis"` is a distinct public/cache value but currently uses the same
 visual clipping as `"clip"`; an ellipsis glyph is not emitted yet.
 
-== Layout v2 integration
+== Integración con Layout
 
 A free `Text` and that same `Text` inside a row, column, grid, stack, or nested
 layout use the same intrinsic text measurer. `wrap="auto"` makes the leaf
@@ -289,7 +289,7 @@ as `at`, `move`, `next_to`, and positional animations; configure its
 `scene.item(...)` or Layout owner instead. Cross-scene or incompatible-owner
 transition targets raise `LayoutOwnershipError`.
 
-== Queries and selections
+== Consultas y selecciones
 
 #api-entry(
   name: "TextSelection and TextQuery",
@@ -324,7 +324,7 @@ source. It does not expose lines created only by responsive wrapping. `parts`
 is depth-first over the semantic tree. A selection remains attached to one
 `Text`, so it cannot be inserted separately into Layout.
 
-=== TextSelection surface
+=== Superficie de TextSelection
 
 ```text
 selection.fill(color) -> TextSelection
@@ -350,9 +350,9 @@ mark and dims the glyphs; the next replacing text transition retires both.
 `brace` and `annotate` use canvas-unit geometry around the selected glyphs.
 Every animation descriptor above can be placed directly in `scene.play([...])`.
 
-== Complete-Text animations
+== Animaciones de texto completo
 
-=== Entry and exit
+=== Entrada y salida
 
 ```text
 text.write(duration=None, *, by="grapheme", order="forward", stagger=0) -> Anim
@@ -374,7 +374,7 @@ and `text.write(0.8, by="word")` are the intended forms. In the current
 renderer, `by="part"` has a dedicated semantic schedule; the other grouping,
 order, and stagger values are validated but share the vector write schedule.
 
-=== Emphasis and annotation
+=== Énfasis y anotación
 
 ```text
 text.indicate(duration=None) -> Anim
@@ -391,7 +391,7 @@ text.annotate(label, *, offset=(120, 80), duration=None) -> Anim
 These operate on the complete `Text`; their selection equivalents use the
 same engine on a local subset.
 
-== Structural transitions
+== Transiciones estructurales
 
 #api-entry(
   name: "Text structural transitions",
@@ -429,7 +429,7 @@ Matching behavior:
 - `selection.morph_to`: replaces one local selection with another.
 - `selection.copy_to`: preserves the source while moving a copy to the target.
 
-== Content replacement with become
+== Sustitución de contenido con become
 
 ```text
 text.become(
@@ -451,7 +451,7 @@ content, delimiters, metrics, flow, or duration raise `TypeError` or
 copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 ```
 
-== Inherited Drawable capabilities
+== Capacidades heredadas de Drawable
 
 `Text` remains a `Drawable`. It preserves its specialized subtype through the
 common fluent methods:
@@ -469,7 +469,7 @@ scale, fade transforms, or replacement transforms. Prefer the structural text
 transitions when semantic matching matters. Layout-managed text retains visual
 effects and non-positional transforms, but its owner controls translation.
 
-== Errors and edge cases
+== Errores y casos límite
 
 - `TypeError`: content is not `str` or `TextPart`; query keys or explicit
   match mappings have the wrong type.
@@ -482,7 +482,7 @@ effects and non-positional transforms, but its owner controls translation.
 - `LayoutOwnershipError`: manual positioning of managed text or a transition
   across scenes/incompatible owners.
 
-== See also
+== Véase también
 
 - #link("/api/layout/", "Layout v2 — outer boxes, ownership, constraints, and reflow")
 - #link("/api/animations/", "Animations — generic Drawable animations and timing")

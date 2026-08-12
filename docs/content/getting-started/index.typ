@@ -1,24 +1,24 @@
 #import "../../components/section.typ": docs-chapter
 
 #show: docs-chapter.with(
-  title: "Getting Started",
-  description: "Install gaanim and create your first animation",
+  title: "Instalación y primeros pasos",
+  description: "Instala Gaanim y crea tu primera animación",
   route: "/getting-started/",
   updated: datetime.today().display(),
 )
 
-= Installation — resumen
+= Instalación — resumen
 
 Para la guía completa (usuario final con zip + `uv`, y desarrollo local desde fuente) ver #link("/getting-started/installation/")[Instalación].
 
-== Prerequisitos
+== Requisitos previos
 
 - *Rust* (edition 2024) — via #link("https://rustup.rs", "rustup")
 - *Python >=3.12* — 3.12 mínimo, 3.14 también soportado
 - *uv recomendado* — #link("https://docs.astral.sh/uv/")[uv] para venvs
 - *GPU con Vulkan* — para Vello/Bevy
 
-== Setup rápido (dev)
+== Preparación rápida para desarrollo
 
 ```bash
 git clone https://github.com/user/gaanim
@@ -30,16 +30,16 @@ just doctor           # verifica build y gaanim --help via launcher
 
 El zip de usuario final (`gaanim-v0.1.0-windows-x64.zip`) ya contiene `gaanim.exe` (launcher) + `gaanim-core.exe` y no requiere compilar. Ver detalle en #link("/getting-started/installation/")[Instalación / Usuario final].
 
-== Verify Installation
+== Verifica la instalación
 
 ```bash
 just doctor           # compila y prueba launcher
 gaanim --help         # si tienes el zip en PATH
 ```
 
-= Your First Animation
+= Tu primera animación
 
-Create a file `my_animation.py`:
+Crea un archivo llamado `my_animation.py`:
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, Scene
@@ -63,17 +63,17 @@ scene.play([
 # Run with: gaanim my_animation.py
 ```
 
-Run it:
+Ejecútalo:
 
 ```bash
 gaanim my_animation.py
 ```
 
-This opens the Gaanim preview window. Press `Escape` to close.
+Se abrirá la ventana de previsualización de Gaanim. Pulsa `Escape` para cerrarla.
 
-= Exporting
+= Exportación
 
-To export instead of previewing:
+Para exportar en lugar de abrir la previsualización:
 
 ```python
 <<< # MP4
@@ -89,11 +89,12 @@ To export instead of previewing:
 <<< scene.export("tiktok.mp4", fps=30)
 ```
 
-= Next Steps
+= Siguientes pasos
 
-- #link("/guides/slides/", "Slides") - flujo completo para presentaciones en vivo
+- #link("/manual/guia-rapida/", "Guía rápida") — crea un proyecto de movimiento circular
+- #link("/guides/slides/", "Presentaciones") — flujo completo para presentaciones en vivo
 
-- #link("/api/scene/", "Scene API") — learn the core Scene class
-- #link("/api/mobjects/", "Mobjects") — all available shapes and objects
-- #link("/api/animations/", "Animations") — animation types and rate functions
-- #link("/examples/basic/", "Examples") — complete working examples
+- #link("/api/scene/", "API de Scene") — consulta el contrato técnico de la escena
+- #link("/api/mobjects/", "Objetos") — explora las figuras y objetos disponibles
+- #link("/api/animations/", "Animaciones") — consulta animaciones y funciones de tiempo
+- #link("/examples/basic/", "Ejemplos") — escenas completas y ejecutables
