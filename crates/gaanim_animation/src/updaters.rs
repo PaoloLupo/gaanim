@@ -818,6 +818,13 @@ pub enum TrackingEndpoint {
         x: TrackingScalar,
         y: TrackingScalar,
     },
+    /// Point evaluated in the local frame of an entity, including hierarchy transforms.
+    LocalExpression {
+        space: Entity,
+        x: TrackingScalar,
+        y: TrackingScalar,
+        z: TrackingScalar,
+    },
     /// Reactive scene-space displacement from another endpoint.
     Offset {
         origin: Box<TrackingEndpoint>,
@@ -1071,6 +1078,10 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
         TrackingEndpoint::Expression { x, y } => {
             Some(DVec3::new(x.evaluate(world)?, y.evaluate(world)?, 0.0))
         }
+        TrackingEndpoint::LocalExpression { space, x, y, z } => {
+            let local = DVec3::new(x.evaluate(world)?, y.evaluate(world)?, z.evaluate(world)?);
+            entity_world_matrix(*space, world).map(|matrix| matrix.transform_point3(local))
+        }
         TrackingEndpoint::Offset { origin, dx, dy } => {
             let origin = resolve_tracking_endpoint(origin, world)?;
             Some(origin + DVec3::new(dx.evaluate(world)?, dy.evaluate(world)?, 0.0))
@@ -1102,6 +1113,9 @@ fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
     match ep {
         TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
             entity_world_matrix(*entity, world).unwrap_or(DMat4::IDENTITY)
+        }
+        TrackingEndpoint::LocalExpression { space, .. } => {
+            entity_world_matrix(*space, world).unwrap_or(DMat4::IDENTITY)
         }
         TrackingEndpoint::Offset { origin, .. } | TrackingEndpoint::Polar { origin, .. } => {
             endpoint_basis(origin, world)
@@ -1954,6 +1968,31 @@ mod tests {
                 .abs()
                 < 1e-9
         );
+    }
+
+    #[test]
+    fn local_expression_endpoint_respects_space_transform() {
+        let mut world = World::new();
+        let space = world
+            .spawn(
+                SpatialTransform::new_2d(10.0, 20.0)
+                    .with_scale_2d(2.0, 3.0)
+                    .with_rotation_2d(std::f64::consts::FRAC_PI_2),
+            )
+            .id();
+        let scalar = |value| TrackingScalar {
+            expression: Expr::constant(value),
+            parameters: Vec::new(),
+        };
+        let endpoint = TrackingEndpoint::LocalExpression {
+            space,
+            x: scalar(4.0),
+            y: scalar(5.0),
+            z: scalar(0.0),
+        };
+
+        let resolved = resolve_tracking_endpoint(&endpoint, &world).unwrap();
+        assert!(resolved.distance(DVec3::new(-5.0, 28.0, 0.0)) < 1e-9);
     }
 
     #[test]

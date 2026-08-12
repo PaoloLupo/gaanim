@@ -67,6 +67,12 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pylayout::PyLayout>()?;
     m.add_class::<updater::PyUpdater>()?;
     m.add_class::<visualization::PyAxis>()?;
+    m.add_class::<visualization::PyScale>()?;
+    m.add_class::<visualization::PyField>()?;
+    m.add_class::<visualization::PyValue>()?;
+    m.add_class::<visualization::PyGuide>()?;
+    m.add_class::<visualization::PyChartSpec>()?;
+    m.add_class::<visualization::PyChart>()?;
     m.add_class::<visualization::PyExpr>()?;
     m.add_class::<visualization::PyParameter>()?;
     m.add_class::<visualization::PyReadout>()?;
@@ -78,6 +84,18 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyPolarSpace>()?;
     m.add_class::<visualization::PyDataTable>()?;
     m.add_class::<visualization::PyDataSource>()?;
+    m.add(
+        "Cartesian2D",
+        _py.get_type::<visualization::PyCoordinateSpace>(),
+    )?;
+    m.add(
+        "Cartesian3D",
+        _py.get_type::<visualization::PyCoordinateSpace3D>(),
+    )?;
+    m.add(
+        "ComplexSpace",
+        _py.get_type::<visualization::PyCoordinateSpace>(),
+    )?;
 
     m.add(
         "GOLD",

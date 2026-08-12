@@ -141,6 +141,54 @@ surface = world.surface(lambda x, y: x * y)
 traced scalar functions execute once; sampling and reactive evaluation stay in
 Rust.
 
+== NumberLine reactivo
+
+#api-entry(
+  name: "NumberLine.point_ref",
+  kind: "method",
+  signature: "point_ref(value, *, normal_offset=None) -> PointRef",
+  params: (
+    (name: "value", type: "float | Parameter | Expr", default: none, desc: [Value mapped through the line's continuous scale.]),
+    (name: "normal_offset", type: "float | Parameter | Expr | None", default: "None", desc: [Perpendicular displacement in local canvas units; `None` means zero.]),
+  ),
+  returns: (type: "PointRef", desc: [A non-rendered reactive endpoint that follows the line's transforms.]),
+  desc: [The point remains attached when the number line moves, rotates, or scales. Categorical scales reject reactive scalar values with `ValueError`.],
+)[]
+
+#api-entry(
+  name: "NumberLine.function",
+  kind: "method",
+  signature: "function(function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75) -> Drawable",
+  params: (
+    (name: "function", type: "Callable[[float], scalar]", default: none, desc: [Callable traced once with `gaanim.math`.]),
+    (name: "domain", type: "(float, float) | None", default: "None", desc: [Sampling interval; defaults to the axis domain.]),
+    (name: "normal_scale", type: "float", default: "120.0", desc: [Positive local distance assigned to a function output of one.]),
+    (name: "reveal", type: "float | Parameter | Expr | None", default: "None", desc: [Exact data-space end of the visible curve.]),
+    (name: "samples", type: "int | None", default: "None", desc: [Fixed sample count, or adaptive sampling when omitted.]),
+    (name: "tolerance", type: "float", default: "0.75", desc: [Positive adaptive error tolerance in local canvas units.]),
+  ),
+  returns: (type: "Drawable", desc: [Retained vector curve parented to the number line.]),
+  desc: [Sampling and reactive parameter updates run in Rust without Python callbacks per frame. A reactive `reveal` shares the same scalar value with moving points, avoiding arc-length drift. Invalid domains, sampling settings, or non-positive scales raise `ValueError`.],
+)[
+```python
+import math
+from gaanim import Axis, Scene, math as gm
+
+scene = Scene()
+theta = scene.parameter(0.0)
+line = scene.number_line(
+  Axis.linear(0, 3 * math.pi).ticks(math.pi).numbers("pi", denominator=1),
+  length=760,
+)
+curve = line.function(lambda t: gm.sin(t), normal_scale=120, reveal=theta)
+point = scene.dot(8).follow(
+  line.point_ref(theta, normal_offset=120 * gm.sin(theta))
+)
+scene.play([line.create(), curve.fade_in(duration=0.01), point.fade_in()])
+scene.play([theta.animate_to(3 * math.pi, duration=4)])
+```
+]
+
 == Migración desde la API anterior
 
 #table(

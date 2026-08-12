@@ -111,11 +111,11 @@ def validate_visualization_contract(module: object) -> list[str]:
     scene = module.Scene(640, 360)
     x_axis = module.Axis.linear(-4.0, 4.0).ticks(1.0).label("x")
     y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y")
-    space = scene.number_plane(x_axis, y_axis, width=520.0, height=280.0)
+    space = scene.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
 
     amplitude = scene.parameter(1.0)
     from gaanim import math as gm
-    space.plot(lambda x: amplitude * gm.sin(x))
+    space.function(lambda x: amplitude * gm.sin(x))
     readout = scene.readout(lambda: amplitude * 2.0, label="$a$")
     variable = scene.variable(1.0, label="$k$")
     if not isinstance(readout, module.Drawable) or not isinstance(variable, module.Drawable):
@@ -128,14 +128,12 @@ def validate_visualization_contract(module: object) -> list[str]:
     space.tangent(lambda value: value * value, 1.0)
     space.riemann_sum(lambda value: value * value, (0.0, 2.0), rectangles=4)
 
-    source = module.DataSource(
-        {"id": ["a", "b"], "x": [0.0, 1.0], "y": [1.0, 2.0]},
-        key="id",
-    )
-    space.line(source, "x", "y")
-    source.replace({"id": ["a", "b"], "x": [0.0, 1.0], "y": [2.0, 3.0]})
-    if source.version != 1:
-        failures.append("DataSource.version did not advance after replace")
+    chart_spec = module.ChartSpec(
+        {"id": ["a", "b"], "x": [0.0, 1.0], "y": [1.0, 2.0]}, key="id"
+    ).mark("line").encode(x="x", y="y")
+    chart = scene.chart(chart_spec)
+    if not isinstance(chart.drawable(), module.Drawable):
+        failures.append("Scene.chart did not materialize a Drawable hierarchy")
 
     coordinate = space.coord(1.0, 2.0)
     coordinate.place(scene.dot(3.0))
@@ -144,14 +142,14 @@ def validate_visualization_contract(module: object) -> list[str]:
     if abs(round_trip[0] - 1.0) > 1e-9 or abs(round_trip[1] - 2.0) > 1e-9:
         failures.append("CoordinateSpace data/local round trip failed")
 
-    linear_space = scene.axes(
+    linear_space = scene.cartesian_2d(
         module.Axis.linear(-4.0, 4.0),
         module.Axis.linear(-3.0, 3.0),
     )
     if len(linear_space.animate_view((-2.0, 2.0), (-1.5, 1.5))) != 2:
         failures.append("CoordinateSpace.animate_view did not return pan/zoom animations")
 
-    space_3d = scene.axes_3d(
+    space_3d = scene.cartesian_3d(
         module.Axis.linear(-2.0, 2.0),
         module.Axis.linear(-2.0, 2.0),
         module.Axis.linear(-2.0, 2.0),
@@ -160,6 +158,13 @@ def validate_visualization_contract(module: object) -> list[str]:
     space_3d.surface(lambda px, py: px * px - py * py, resolution=(8, 8))
     space_3d.parametric(lambda t: (t, t * t, t * t * t), (-1.0, 1.0), samples=16)
     space_3d.vector_field(lambda px, py, pz: (-py, px, -pz), resolution=(2, 2, 2))
+
+    for removed in ("axes", "number_plane", "axes_3d", "polar_plane", "complex_plane"):
+        if hasattr(module.Scene, removed):
+            failures.append(f"v1 Scene.{removed} remains public")
+    for removed in ("line", "step", "area", "scatter", "bars", "histogram", "box_plot", "violin", "error_bars", "heatmap"):
+        if hasattr(module.CoordinateSpace, removed):
+            failures.append(f"tabular CoordinateSpace.{removed} remains public")
 
     for removed in ("plot", "get_graph", "function_graph", "parametric_curve", "bar_chart"):
         if hasattr(module.Scene, removed):

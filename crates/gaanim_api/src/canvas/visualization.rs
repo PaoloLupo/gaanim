@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use gaanim_core::ObjectId;
@@ -8,14 +8,15 @@ use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
 use gaanim_objects::prelude::SvgPath;
 use gaanim_visualization::{
-    Axis, CartesianSpace, CoordinateMap2D, CoordinateMap3D, NonFinitePolicy, NumberLine, PlotFrame,
-    PolarSpace, Sampling, Scale, SpaceLayer, area_path, bars, box_stats, error_bar_path, histogram,
-    implicit_contours, line_path, sample_function, sample_parametric, sample_surface,
-    sample_vector_field, scatter_points, step_path, violin_path,
+    Axis, CartesianSpace, Channel, ChartSpec, ConstantValue, CoordinateMap2D, CoordinateMap3D,
+    DataMarkKind, Encoding, MarkKind, MatchPolicy, NonFinitePolicy, NumberLine, PlotFrame,
+    PolarSpace, Sampling, Scale, SpaceLayer, TransitionFallback, area_path, bars, box_stats,
+    error_bar_path, histogram, implicit_contours, line_path, sample_function, sample_parametric,
+    sample_surface, sample_vector_field, scatter_points, step_path, violin_path,
 };
 
 use super::ops::Op;
-use super::{Canvas, DrawableHandle, SpawnKind};
+use super::{Canvas, CanvasEndpoint, DrawableHandle, PointRef, SpawnKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum VisualizationError {
@@ -23,6 +24,8 @@ pub enum VisualizationError {
     Axis(#[from] gaanim_visualization::AxisError),
     #[error(transparent)]
     Sampling(#[from] gaanim_visualization::SamplingError),
+    #[error(transparent)]
+    Chart(#[from] gaanim_visualization::ChartError),
     #[error("data columns must have the same non-zero length")]
     LengthMismatch,
     #[error("mark dimensions must be finite and positive")]
@@ -35,6 +38,8 @@ pub enum VisualizationError {
     UnsupportedAnimatedView,
     #[error("parameter values must be finite")]
     InvalidParameter,
+    #[error("mark {0:?} does not have a 3D batch materializer")]
+    UnsupportedChartMark3D(MarkKind),
 }
 
 /// A point expressed in one coordinate space's local data mapping.
@@ -106,6 +111,212 @@ pub struct CoordinateSpaceHandle {
 pub struct CoordinateSpace3DHandle {
     pub(crate) root: DrawableHandle,
     pub(crate) map: CoordinateMap3D,
+    pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
+}
+
+/// Materialized declarative chart with stable semantic layers.
+#[derive(Debug, Clone)]
+pub struct ChartHandle {
+    pub(crate) root: DrawableHandle,
+    pub(crate) marks: DrawableHandle,
+    pub(crate) axes: DrawableHandle,
+    pub(crate) grid: Option<DrawableHandle>,
+    pub(crate) guides: Option<DrawableHandle>,
+    pub(crate) spec: ChartSpec,
+}
+
+impl ChartHandle {
+    pub fn drawable(&self) -> &DrawableHandle {
+        &self.root
+    }
+
+    pub fn spec(&self) -> &ChartSpec {
+        &self.spec
+    }
+
+    pub fn layer(&self, name: &str) -> Option<&DrawableHandle> {
+        match name {
+            "marks" => Some(&self.marks),
+            "axes" => Some(&self.axes),
+            "grid" => self.grid.as_ref(),
+            "guides" => self.guides.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn at(self, x: f64, y: f64) -> Self {
+        self.root.clone().at(x, y);
+        self
+    }
+
+    pub fn at_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.root.clone().at_3d(x, y, z);
+        self
+    }
+
+    pub fn scaled(self, factor: f64) -> Self {
+        self.root.clone().scaled(factor);
+        self
+    }
+
+    pub fn transition_to(
+        &self,
+        target: &ChartHandle,
+        matching: MatchPolicy,
+        fallback: TransitionFallback,
+    ) -> Result<super::types::Anim, VisualizationError> {
+        let transition = self.spec.transition_to(&target.spec, matching, fallback)?;
+        Ok(match transition.kind {
+            // Charts are composite retained hierarchies and can cross the
+            // vector/mesh renderer boundary.  Replacement preserves the
+            // morph proxy during the clip, then atomically hands ownership to
+            // the complete target hierarchy at the exact endpoint.
+            gaanim_visualization::TransitionKind::Morph
+                if transition.source.dimensions == transition.target.dimensions =>
+            {
+                self.root.replacement_transform(&target.root)
+            }
+            // Crossing the vector/mesh renderer boundary cannot use a path
+            // proxy: the vector root has no triangle geometry to interpolate.
+            // A hierarchy-aware fade keeps both retained batches alive and
+            // hands visibility to the native 3D target deterministically.
+            gaanim_visualization::TransitionKind::Morph => self.root.fade_transform(&target.root),
+            gaanim_visualization::TransitionKind::Crossfade => {
+                self.root.fade_transform(&target.root)
+            }
+        })
+    }
+}
+
+fn chart_field(spec: &ChartSpec, channel: Channel) -> Result<String, VisualizationError> {
+    spec.encodings()
+        .get(&channel)
+        .and_then(Encoding::column)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            gaanim_visualization::ChartError::MissingRequiredEncoding(spec.mark_spec().kind).into()
+        })
+}
+
+fn chart_option_number(spec: &ChartSpec, name: &str, default: f64) -> f64 {
+    match spec.mark_spec().options.get(name) {
+        Some(ConstantValue::Number(value)) if value.is_finite() => *value,
+        _ => default,
+    }
+}
+
+fn chart_option_usize(spec: &ChartSpec, name: &str, default: usize) -> usize {
+    chart_option_number(spec, name, default as f64)
+        .round()
+        .max(1.0) as usize
+}
+
+fn chart_option_field(spec: &ChartSpec, name: &str) -> Result<String, VisualizationError> {
+    match spec.mark_spec().options.get(name) {
+        Some(ConstantValue::Text(value)) => Ok(value.clone()),
+        _ => Err(
+            gaanim_visualization::ChartError::MissingRequiredEncoding(spec.mark_spec().kind).into(),
+        ),
+    }
+}
+
+fn chart_series_color(canvas: &Canvas) -> Color {
+    canvas
+        .theme_style
+        .as_ref()
+        .and_then(|theme| theme.series.first().copied())
+        .unwrap_or(Color::from_rgb8(0x2E, 0x86, 0xAB))
+}
+
+fn chart_encoding_number(spec: &ChartSpec, channel: Channel, default: f64) -> f64 {
+    match spec.encodings().get(&channel) {
+        Some(Encoding::Value(ConstantValue::Number(value))) if value.is_finite() => *value,
+        _ => default,
+    }
+}
+
+fn chart_encoding_color(spec: &ChartSpec) -> Option<Color> {
+    match spec.encodings().get(&Channel::Color) {
+        Some(Encoding::Value(ConstantValue::Color(color))) => Some(*color),
+        _ => None,
+    }
+}
+
+fn color_with_opacity(color: Color, opacity: f64) -> Color {
+    let rgba = color.to_rgba8();
+    Color::from_rgba8(
+        rgba.r,
+        rgba.g,
+        rgba.b,
+        (f64::from(rgba.a) * opacity.clamp(0.0, 1.0)).round() as u8,
+    )
+}
+
+fn normalized_local(position: [f64; 3], size: [f64; 3]) -> [f32; 3] {
+    [
+        ((position[0] - 0.5) * size[0]) as f32,
+        ((position[1] - 0.5) * size[1]) as f32,
+        ((position[2] - 0.5) * size[2]) as f32,
+    ]
+}
+
+fn append_octahedron(
+    vertices: &mut Vec<[f32; 3]>,
+    indices: &mut Vec<u32>,
+    center: [f32; 3],
+    radius: f32,
+) {
+    let base = vertices.len() as u32;
+    vertices.extend_from_slice(&[
+        [center[0] + radius, center[1], center[2]],
+        [center[0] - radius, center[1], center[2]],
+        [center[0], center[1] + radius, center[2]],
+        [center[0], center[1] - radius, center[2]],
+        [center[0], center[1], center[2] + radius],
+        [center[0], center[1], center[2] - radius],
+    ]);
+    for triangle in [
+        [0, 2, 4],
+        [2, 1, 4],
+        [1, 3, 4],
+        [3, 0, 4],
+        [2, 0, 5],
+        [1, 2, 5],
+        [3, 1, 5],
+        [0, 3, 5],
+    ] {
+        indices.extend(triangle.map(|index| base + index));
+    }
+}
+
+fn append_box(vertices: &mut Vec<[f32; 3]>, indices: &mut Vec<u32>, min: [f32; 3], max: [f32; 3]) {
+    let base = vertices.len() as u32;
+    vertices.extend_from_slice(&[
+        [min[0], min[1], min[2]],
+        [max[0], min[1], min[2]],
+        [max[0], max[1], min[2]],
+        [min[0], max[1], min[2]],
+        [min[0], min[1], max[2]],
+        [max[0], min[1], max[2]],
+        [max[0], max[1], max[2]],
+        [min[0], max[1], max[2]],
+    ]);
+    for triangle in [
+        [0, 2, 1],
+        [0, 3, 2],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [1, 2, 6],
+        [1, 6, 5],
+        [2, 3, 7],
+        [2, 7, 6],
+        [3, 0, 4],
+        [3, 4, 7],
+    ] {
+        indices.extend(triangle.map(|index| base + index));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +340,24 @@ impl NumberLineHandle {
 
     pub fn data_to_local(&self, value: f64) -> Result<f64, VisualizationError> {
         self.line.data_to_local(value).map_err(Into::into)
+    }
+
+    pub fn domain(&self) -> (f64, f64) {
+        self.line.axis.domain()
+    }
+
+    /// Create a non-rendered reactive point in the line's local frame.
+    pub fn point_ref(
+        &self,
+        value: Expr,
+        normal_offset: Expr,
+    ) -> Result<PointRef, VisualizationError> {
+        Ok(PointRef(CanvasEndpoint::LocalExpression {
+            space: self.root.id,
+            x: self.line.data_to_local_expr(value)?,
+            y: normal_offset,
+            z: Expr::constant(0.0),
+        }))
     }
 
     pub fn layer(&self, layer: SpaceLayer) -> Option<&DrawableHandle> {
@@ -176,6 +405,10 @@ impl CoordinateSpace3DHandle {
 
     pub fn local_to_data(&self, point: [f64; 3]) -> Result<[f64; 3], VisualizationError> {
         self.map.local_to_data(point).map_err(Into::into)
+    }
+
+    pub fn layer(&self, layer: SpaceLayer) -> Option<&DrawableHandle> {
+        self.layers.get(&layer)
     }
 
     pub fn at(self, point: [f64; 3]) -> Self {
@@ -307,6 +540,366 @@ impl Canvas {
         })
     }
 
+    /// Materialize an immutable declarative chart into stable semantic layers.
+    pub fn chart(&mut self, spec: ChartSpec) -> Result<ChartHandle, VisualizationError> {
+        spec.validate()?;
+        let mut axes = spec.resolved_axes()?;
+        if spec.mark_spec().kind == MarkKind::Histogram && !axes.contains_key(&Channel::Y) {
+            let column =
+                chart_field(&spec, Channel::X).or_else(|_| chart_field(&spec, Channel::Y))?;
+            let values: Vec<f64> = spec
+                .data()
+                .numeric_column(&column)
+                .map_err(gaanim_visualization::ChartError::from)?
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+            let bins = chart_option_usize(&spec, "bins", 20);
+            let maximum = histogram(&values, bins)
+                .and_then(|result| result.counts.into_iter().max())
+                .unwrap_or(1)
+                .max(1) as f64;
+            axes.insert(Channel::Y, Axis::linear(0.0, maximum * 1.1)?);
+        }
+        let dimensions = spec.batch()?.dimensions;
+        let width = (self.width as f64 * 0.72).max(320.0);
+        let height = (self.height as f64 * 0.62).max(220.0);
+        let guides = if spec.guides_specs().is_empty() {
+            None
+        } else {
+            let titles: Vec<String> = spec
+                .guides_specs()
+                .values()
+                .filter_map(|guide| match guide {
+                    gaanim_visualization::GuideSpec::None => None,
+                    gaanim_visualization::GuideSpec::Legend { title }
+                    | gaanim_visualization::GuideSpec::ColorBar { title } => title.clone(),
+                })
+                .collect();
+            if titles.is_empty() {
+                None
+            } else {
+                let labels: Vec<_> = titles
+                    .iter()
+                    .enumerate()
+                    .map(|(index, title)| {
+                        self.text(title)
+                            .at(width * 0.5 + 70.0, height * 0.5 - index as f64 * 34.0)
+                    })
+                    .collect();
+                let refs: Vec<_> = labels.iter().collect();
+                Some(self.group_no_center(&refs))
+            }
+        };
+
+        if dimensions == 2 {
+            let x = axes
+                .get(&Channel::X)
+                .cloned()
+                .unwrap_or(Axis::linear(0.0, 1.0)?);
+            let y = axes
+                .get(&Channel::Y)
+                .cloned()
+                .unwrap_or(Axis::linear(0.0, 1.0)?);
+            let space = self.coordinate_axes(x, y, Some(width), Some(height), true)?;
+            let source = gaanim_visualization::DataSource::new(spec.data().clone());
+            let mark = match spec.mark_spec().kind {
+                MarkKind::Point => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Scatter {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        radius: chart_option_number(
+                            &spec,
+                            "radius",
+                            chart_encoding_number(&spec, Channel::Size, 6.0),
+                        ),
+                        policy: NonFinitePolicy::Gap,
+                    },
+                )?,
+                MarkKind::Line => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Line {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        policy: NonFinitePolicy::Gap,
+                    },
+                )?,
+                MarkKind::Step => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Step {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        policy: NonFinitePolicy::Gap,
+                    },
+                )?,
+                MarkKind::Area => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Area {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        baseline: chart_option_number(&spec, "baseline", 0.0),
+                    },
+                )?,
+                MarkKind::Bar => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Bars {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        width: chart_option_number(&spec, "width", 0.8),
+                        baseline: chart_option_number(&spec, "baseline", 0.0),
+                    },
+                )?,
+                MarkKind::Histogram => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Histogram {
+                        column: chart_field(&spec, Channel::X)
+                            .or_else(|_| chart_field(&spec, Channel::Y))?,
+                        bins: chart_option_usize(&spec, "bins", 20),
+                    },
+                )?,
+                MarkKind::Box => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Box {
+                        column: chart_field(&spec, Channel::Y)
+                            .or_else(|_| chart_field(&spec, Channel::X))?,
+                        center: chart_option_number(&spec, "center", 0.0),
+                        width: chart_option_number(&spec, "width", 0.8),
+                    },
+                )?,
+                MarkKind::Violin => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::Violin {
+                        column: chart_field(&spec, Channel::Y)
+                            .or_else(|_| chart_field(&spec, Channel::X))?,
+                        center: chart_option_number(&spec, "center", 0.0),
+                        bandwidth: chart_option_number(&spec, "bandwidth", 0.3),
+                        width: chart_option_number(&spec, "width", 0.8),
+                    },
+                )?,
+                MarkKind::ErrorBar => self.data_mark(
+                    &space,
+                    source,
+                    DataMarkKind::ErrorBars {
+                        x: chart_field(&spec, Channel::X)?,
+                        y: chart_field(&spec, Channel::Y)?,
+                        low: chart_option_field(&spec, "low")?,
+                        high: chart_option_field(&spec, "high")?,
+                        cap_width: chart_option_number(&spec, "cap_width", 0.12),
+                    },
+                )?,
+                MarkKind::Heatmap => self.heatmap_plot(
+                    &space,
+                    source,
+                    chart_field(&spec, Channel::X)?,
+                    chart_field(&spec, Channel::Y)?,
+                    chart_field(&spec, Channel::Color)?,
+                    [
+                        chart_option_number(&spec, "cell_width", 1.0),
+                        chart_option_number(&spec, "cell_height", 1.0),
+                    ],
+                    chart_option_usize(&spec, "bands", 12),
+                )?,
+                MarkKind::Surface => {
+                    return Err(VisualizationError::UnsupportedChartMark3D(
+                        MarkKind::Surface,
+                    ));
+                }
+            };
+            let mark = match spec.mark_spec().kind {
+                // A chart without an explicit color encoding still needs a
+                // visible semantic series color. Heatmap owns one fill per
+                // quantized band, so its derived gradient must remain intact.
+                MarkKind::Heatmap => mark,
+                MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => mark.stroke(
+                    chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self)),
+                    3.0,
+                ),
+                _ => mark
+                    .fill(chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self))),
+            };
+            let mark = mark
+                .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
+                .z_index(0);
+            let axes_layer = space
+                .layer(SpaceLayer::Axes)
+                .cloned()
+                .unwrap_or_else(|| space.drawable().clone())
+                .z_index(20);
+            let grid = space
+                .layer(SpaceLayer::MajorGrid)
+                .cloned()
+                .map(|layer| layer.z_index(-20));
+            if let Some(guide) = &guides {
+                self.attach_to_space(&space, guide);
+            }
+            Ok(ChartHandle {
+                root: space.drawable().clone(),
+                marks: mark,
+                axes: axes_layer,
+                grid,
+                guides,
+                spec,
+            })
+        } else {
+            let x = axes
+                .get(&Channel::X)
+                .cloned()
+                .unwrap_or(Axis::linear(0.0, 1.0)?);
+            let y = axes
+                .get(&Channel::Y)
+                .cloned()
+                .unwrap_or(Axis::linear(0.0, 1.0)?);
+            let z = axes
+                .get(&Channel::Z)
+                .cloned()
+                .unwrap_or(Axis::linear(0.0, 1.0)?);
+            let size = [10.0, 8.0, 6.0];
+            let space = self.coordinate_axes_3d(x, y, z, size, true)?;
+            let batch = spec.batch()?;
+            let color = chart_series_color(self);
+            let mark = match spec.mark_spec().kind {
+                MarkKind::Point => {
+                    let mut vertices = Vec::with_capacity(batch.data.len() * 6);
+                    let mut indices = Vec::with_capacity(batch.data.len() * 24);
+                    let mut colors = Vec::with_capacity(batch.data.len() * 6);
+                    for datum in &batch.data {
+                        if datum.position.iter().all(|value| value.is_finite()) {
+                            append_octahedron(
+                                &mut vertices,
+                                &mut indices,
+                                normalized_local(datum.position, size),
+                                (datum.size * 0.0125).max(0.025) as f32,
+                            );
+                            colors.extend(std::iter::repeat_n(
+                                color_with_opacity(datum.color.unwrap_or(color), datum.opacity),
+                                6,
+                            ));
+                        }
+                    }
+                    self.surface_mesh_with_colors(vertices, indices, colors)
+                }
+                MarkKind::Line => {
+                    let mut points = Vec::with_capacity(batch.data.len());
+                    let mut colors = Vec::with_capacity(batch.data.len());
+                    for datum in &batch.data {
+                        if datum.position.iter().all(|value| value.is_finite()) {
+                            points.push(normalized_local(datum.position, size));
+                            colors.push(color_with_opacity(
+                                datum.color.unwrap_or(color),
+                                datum.opacity,
+                            ));
+                        }
+                    }
+                    self.polyline_3d_with_colors(points, colors)
+                }
+                MarkKind::Bar => {
+                    let mut vertices = Vec::with_capacity(batch.data.len() * 8);
+                    let mut indices = Vec::with_capacity(batch.data.len() * 36);
+                    let mut colors = Vec::with_capacity(batch.data.len() * 8);
+                    for datum in &batch.data {
+                        let center = normalized_local(datum.position, size);
+                        let half_x =
+                            chart_option_number(&spec, "width", 0.08) as f32 * size[0] as f32 * 0.5;
+                        let half_y =
+                            chart_option_number(&spec, "depth", 0.08) as f32 * size[1] as f32 * 0.5;
+                        append_box(
+                            &mut vertices,
+                            &mut indices,
+                            [
+                                center[0] - half_x,
+                                center[1] - half_y,
+                                -size[2] as f32 * 0.5,
+                            ],
+                            [center[0] + half_x, center[1] + half_y, center[2]],
+                        );
+                        colors.extend(std::iter::repeat_n(
+                            color_with_opacity(datum.color.unwrap_or(color), datum.opacity),
+                            8,
+                        ));
+                    }
+                    self.surface_mesh_with_colors(vertices, indices, colors)
+                }
+                MarkKind::Surface | MarkKind::Heatmap => {
+                    let mut xs: Vec<f64> =
+                        batch.data.iter().map(|datum| datum.position[0]).collect();
+                    let mut ys: Vec<f64> =
+                        batch.data.iter().map(|datum| datum.position[1]).collect();
+                    xs.sort_by(f64::total_cmp);
+                    ys.sort_by(f64::total_cmp);
+                    xs.dedup_by(|left, right| left.to_bits() == right.to_bits());
+                    ys.dedup_by(|left, right| left.to_bits() == right.to_bits());
+                    let mut vertices = Vec::with_capacity(batch.data.len());
+                    let mut lookup = BTreeMap::new();
+                    for datum in &batch.data {
+                        let index = vertices.len() as u32;
+                        vertices.push(normalized_local(datum.position, size));
+                        lookup.insert(
+                            (datum.position[0].to_bits(), datum.position[1].to_bits()),
+                            index,
+                        );
+                    }
+                    let mut indices = Vec::new();
+                    for y_pair in ys.windows(2) {
+                        for x_pair in xs.windows(2) {
+                            let keys = [
+                                (x_pair[0].to_bits(), y_pair[0].to_bits()),
+                                (x_pair[1].to_bits(), y_pair[0].to_bits()),
+                                (x_pair[0].to_bits(), y_pair[1].to_bits()),
+                                (x_pair[1].to_bits(), y_pair[1].to_bits()),
+                            ];
+                            if let [Some(a), Some(b), Some(c), Some(d)] =
+                                keys.map(|key| lookup.get(&key).copied())
+                            {
+                                indices.extend_from_slice(&[a, b, d, a, d, c]);
+                            }
+                        }
+                    }
+                    let colors = vertices
+                        .iter()
+                        .zip(&batch.data)
+                        .map(|(vertex, datum)| {
+                            let generated = || {
+                                let t = (vertex[2] / size[2] as f32 + 0.5).clamp(0.0, 1.0);
+                                Color::from_rgb8(
+                                    (40.0 + t * 200.0) as u8,
+                                    (80.0 + (1.0 - t) * 100.0) as u8,
+                                    (220.0 - t * 140.0) as u8,
+                                )
+                            };
+                            color_with_opacity(datum.color.unwrap_or_else(generated), datum.opacity)
+                        })
+                        .collect();
+                    self.surface_mesh_with_colors(vertices, indices, colors)
+                }
+                kind => return Err(VisualizationError::UnsupportedChartMark3D(kind)),
+            };
+            self.attach_to_space_3d(&space, &mark);
+            let axes_layer = space
+                .layer(SpaceLayer::Axes)
+                .cloned()
+                .unwrap_or_else(|| space.drawable().clone());
+            let grid = space.layer(SpaceLayer::MajorGrid).cloned();
+            Ok(ChartHandle {
+                root: space.drawable().clone(),
+                marks: mark,
+                axes: axes_layer,
+                grid,
+                guides,
+                spec,
+            })
+        }
+    }
+
     fn visualization_path(
         &mut self,
         path: BezPath,
@@ -365,6 +958,23 @@ impl Canvas {
             });
     }
 
+    fn attach_to_number_line(&mut self, line: &NumberLineHandle, child: &DrawableHandle) {
+        child
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .exclude_from_parent_draw = true;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachToGroup {
+                group: line.root.id,
+                child: child.id,
+            });
+    }
+
     /// Build a typed 3D Cartesian coordinate space.
     pub fn coordinate_axes_3d(
         &mut self,
@@ -374,61 +984,114 @@ impl Canvas {
         size: [f64; 3],
         grid: bool,
     ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
-        for axis in [&x, &y, &z] {
-            if !matches!(axis.scale(), Scale::Linear | Scale::Time) {
-                return Err(VisualizationError::Unsupported3DScale);
+        let map = CoordinateMap3D::new(x.clone(), y.clone(), z.clone(), size)?;
+        let min = [-size[0] * 0.5, -size[1] * 0.5, -size[2] * 0.5];
+        let max = [size[0] * 0.5, size[1] * 0.5, size[2] * 0.5];
+        let as_point = |point: [f64; 3]| [point[0] as f32, point[1] as f32, point[2] as f32];
+        let mut axis_points = Vec::new();
+        let mut axis_colors = Vec::new();
+        let mut push_axis = |from: [f64; 3], to: [f64; 3], color: Color| {
+            axis_points.extend_from_slice(&[as_point(from), as_point(to)]);
+            axis_colors.extend_from_slice(&[color, color]);
+        };
+        push_axis(min, [max[0], min[1], min[2]], x.style_value().color);
+        push_axis(min, [min[0], max[1], min[2]], y.style_value().color);
+        push_axis(min, [min[0], min[1], max[2]], z.style_value().color);
+        let axes = self.line_segments_3d_with_colors(axis_points, axis_colors);
+
+        let mut grid_points = Vec::new();
+        let mut grid_colors = Vec::new();
+        let mut tick_points = Vec::new();
+        let mut tick_colors = Vec::new();
+        let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
+        let mut numbers = Vec::new();
+        for (dimension, axis) in [x.clone(), y.clone(), z.clone()].into_iter().enumerate() {
+            for tick in axis.ticks_values(7)? {
+                let normalized = axis.normalize(tick.value)?;
+                let coordinate = min[dimension] + normalized * size[dimension];
+                let color = axis.style_value().color;
+                if tick.major && grid {
+                    let lines = match dimension {
+                        0 => [
+                            ([coordinate, min[1], min[2]], [coordinate, max[1], min[2]]),
+                            ([coordinate, min[1], min[2]], [coordinate, min[1], max[2]]),
+                        ],
+                        1 => [
+                            ([min[0], coordinate, min[2]], [max[0], coordinate, min[2]]),
+                            ([min[0], coordinate, min[2]], [min[0], coordinate, max[2]]),
+                        ],
+                        _ => [
+                            ([min[0], min[1], coordinate], [max[0], min[1], coordinate]),
+                            ([min[0], min[1], coordinate], [min[0], max[1], coordinate]),
+                        ],
+                    };
+                    for (from, to) in lines {
+                        grid_points.extend_from_slice(&[as_point(from), as_point(to)]);
+                        let grid_color = Color::from_rgba8(0x80, 0x80, 0x80, 0x60);
+                        grid_colors.extend_from_slice(&[grid_color, grid_color]);
+                    }
+                }
+                let (from, to, label_position) = match dimension {
+                    0 => (
+                        [coordinate, min[1] - tick_half, min[2]],
+                        [coordinate, min[1] + tick_half, min[2]],
+                        [coordinate, min[1] - tick_half * 4.0, min[2]],
+                    ),
+                    1 => (
+                        [min[0] - tick_half, coordinate, min[2]],
+                        [min[0] + tick_half, coordinate, min[2]],
+                        [min[0] - tick_half * 4.0, coordinate, min[2]],
+                    ),
+                    _ => (
+                        [min[0] - tick_half, min[1], coordinate],
+                        [min[0] + tick_half, min[1], coordinate],
+                        [min[0] - tick_half * 4.0, min[1], coordinate],
+                    ),
+                };
+                tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
+                tick_colors.extend_from_slice(&[color, color]);
+                if tick.major && !tick.label.is_empty() {
+                    numbers.push(
+                        self.text(&tick.label)
+                            .fill(axis.style_value().number_color)
+                            .at_3d(label_position[0], label_position[1], label_position[2])
+                            .billboard()
+                            .scaled(0.012),
+                    );
+                }
             }
         }
-        let map = CoordinateMap3D::new(x.clone(), y.clone(), z.clone(), size)?;
-        let tick_step = |axis: &Axis| -> Result<f64, VisualizationError> {
-            let major: Vec<f64> = axis
-                .ticks_values(7)?
-                .into_iter()
-                .filter(|tick| tick.major)
-                .map(|tick| tick.value)
-                .collect();
-            Ok(major
-                .windows(2)
-                .next()
-                .map(|pair| (pair[1] - pair[0]).abs())
-                .filter(|step| *step > 0.0)
-                .unwrap_or_else(|| {
-                    let domain = axis.domain();
-                    (domain.1 - domain.0) / 5.0
-                }))
-        };
-        let xd = x.domain();
-        let yd = y.domain();
-        let zd = z.domain();
-        let style = x.style_value();
-        let config = super::types::Axes3DConfig {
-            grid,
-            xy_grid: grid,
-            xz_grid: grid,
-            yz_grid: grid,
-            x_label: x.label_text().map(str::to_owned),
-            y_label: y.label_text().map(str::to_owned),
-            z_label: z.label_text().map(str::to_owned),
-            axis_color: style.color,
-            tick_color: style.color,
-            number_color: style.number_color,
-            label_color: style.label_color,
-            axis_width: style.width,
-            tick_width: style.tick_width,
-            tick_length: style.tick_length,
-            auto_fit: false,
-            x_length: Some(size[0]),
-            y_length: Some(size[1]),
-            z_length: Some(size[2]),
-            ..Default::default()
-        };
-        let root = self.axes_3d(
-            (xd.0, xd.1, tick_step(&x)?),
-            (yd.0, yd.1, tick_step(&y)?),
-            (zd.0, zd.1, tick_step(&z)?),
-            config,
-        );
-        Ok(CoordinateSpace3DHandle { root, map })
+        let grid_handle = self.line_segments_3d_with_colors(grid_points, grid_colors);
+        let ticks = self.line_segments_3d_with_colors(tick_points, tick_colors);
+        let number_refs: Vec<_> = numbers.iter().collect();
+        let numbers = self.group_no_center(&number_refs);
+        let mut labels = Vec::new();
+        for (axis, position) in [
+            (&x, [max[0] + tick_half * 5.0, min[1], min[2]]),
+            (&y, [min[0], max[1] + tick_half * 5.0, min[2]]),
+            (&z, [min[0], min[1], max[2] + tick_half * 5.0]),
+        ] {
+            if let Some(label) = axis.label_text() {
+                labels.push(
+                    self.text(label)
+                        .fill(axis.style_value().label_color)
+                        .at_3d(position[0], position[1], position[2])
+                        .billboard()
+                        .scaled(0.015),
+                );
+            }
+        }
+        let label_refs: Vec<_> = labels.iter().collect();
+        let labels = self.group_no_center(&label_refs);
+        let root = self.group_no_center(&[&grid_handle, &axes, &ticks, &numbers, &labels]);
+        let layers = HashMap::from([
+            (SpaceLayer::MajorGrid, grid_handle),
+            (SpaceLayer::Axes, axes),
+            (SpaceLayer::Ticks, ticks),
+            (SpaceLayer::Numbers, numbers),
+            (SpaceLayer::Labels, labels),
+        ]);
+        Ok(CoordinateSpace3DHandle { root, map, layers })
     }
 
     /// Sample a static Python/Rust callable once into a retained 3D mesh.
@@ -822,12 +1485,29 @@ impl Canvas {
         let length = length.unwrap_or_else(|| self.safe_frame().width());
         let line = NumberLine::new(axis.clone(), length)?;
         let style = axis.style_value();
+        let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
+        let number_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/numbers"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| size / body_size)
+            .unwrap_or(0.75);
+        let label_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/labels"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| size / body_size)
+            .unwrap_or(0.875);
         let mut axis_path = BezPath::new();
         axis_path.move_to(Point::new(-length * 0.5, 0.0));
         axis_path.line_to(Point::new(length * 0.5, 0.0));
         let bounds = gaanim_math::Bounds3D::new_2d(
             -length * 0.5,
-            -style.tick_length - 32.0,
+            -style.tick_length - 44.0,
             length * 0.5,
             style.tick_length + 32.0,
         );
@@ -849,8 +1529,8 @@ impl Canvas {
                 number_handles.push(
                     self.text(&tick.label)
                         .fill(style.number_color)
-                        .scaled(0.45)
-                        .at(x, -style.tick_length - 14.0),
+                        .scaled(number_scale)
+                        .at(x, -style.tick_length - 18.0),
                 );
             }
         }
@@ -867,13 +1547,15 @@ impl Canvas {
             let label = self
                 .text(label)
                 .fill(style.label_color)
-                .scaled(0.55)
-                .at(length * 0.5 + 18.0, 0.0);
+                .scaled(label_scale)
+                .at(length * 0.5 + 24.0, 0.0);
             self.group(&[&label])
         } else {
             self.group(&[])
         };
-        let root = self.group(&[&axis_handle, &ticks, &numbers, &labels]);
+        // A coordinate space must preserve its authored origin. Centering this
+        // group would make `coord(0)` depend on label bounds.
+        let root = self.group_no_center(&[&axis_handle, &ticks, &numbers, &labels]);
         let layers = HashMap::from([
             (SpaceLayer::Axes, axis_handle),
             (SpaceLayer::Ticks, ticks),
@@ -894,6 +1576,15 @@ impl Canvas {
         }
         let space = PolarSpace::new(radial.clone(), radius)?;
         let style = radial.style_value();
+        let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
+        let number_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/numbers"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| size / body_size)
+            .unwrap_or(0.75);
         let bounds = gaanim_math::Bounds3D::new_2d(-radius, -radius, radius, radius);
         let mut grid_path = BezPath::new();
         let mut numbers_handles = Vec::new();
@@ -905,8 +1596,8 @@ impl Canvas {
                     numbers_handles.push(
                         self.text(&tick.label)
                             .fill(style.number_color)
-                            .scaled(0.4)
-                            .at(ring_radius, -12.0),
+                            .scaled(number_scale)
+                            .at(ring_radius, -16.0),
                     );
                 }
             }
@@ -1023,9 +1714,49 @@ impl Canvas {
             expression,
             variable,
             domain,
+            reveal: None,
             sampling,
         });
         self.attach_to_space(space, &handle);
+        Ok(handle)
+    }
+
+    /// Plot a dimensionless scalar function perpendicular to a number line.
+    /// Values `-1` and `1` map to `-normal_scale` and `normal_scale` local units.
+    pub fn number_line_expression_plot(
+        &mut self,
+        line: &NumberLineHandle,
+        expression: Expr,
+        variable: impl Into<String>,
+        domain: (f64, f64),
+        normal_scale: f64,
+        reveal: Option<Expr>,
+        sampling: Sampling,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        if !normal_scale.is_finite() || normal_scale <= 0.0 {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let map = CoordinateMap2D::new(
+            line.line.axis.clone(),
+            Axis::linear(-1.0, 1.0)?,
+            PlotFrame::new(line.line.length, normal_scale * 2.0)?,
+        );
+        let variable = variable.into();
+        if variable.trim().is_empty() {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        let handle = self.spawn(SpawnKind::ExpressionPlot {
+            map,
+            expression,
+            variable,
+            domain,
+            reveal,
+            sampling,
+        });
+        self.attach_to_number_line(line, &handle);
         Ok(handle)
     }
 
@@ -1483,6 +2214,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn number_line_point_ref_uses_reactive_local_coordinates() {
+        let mut canvas = Canvas::new(640, 360);
+        let line = canvas
+            .coordinate_number_line(
+                Axis::linear(0.0, std::f64::consts::TAU).unwrap(),
+                Some(600.0),
+            )
+            .unwrap();
+        let point = line
+            .point_ref(Expr::constant(std::f64::consts::PI), Expr::constant(42.0))
+            .unwrap();
+
+        let CanvasEndpoint::LocalExpression { space, x, y, z } = point.0 else {
+            panic!("number-line points must stay in the line's local frame");
+        };
+        assert_eq!(space, line.drawable().id);
+        let context = gaanim_expr::EvalContext::new();
+        assert!(x.eval(&context).unwrap().abs() < 1e-10);
+        assert!((y.eval(&context).unwrap() - 42.0).abs() < 1e-10);
+        assert!(z.eval(&context).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn number_line_function_uses_one_native_reactive_path() {
+        let mut canvas = Canvas::new(640, 360);
+        let amplitude = canvas.parameter(1.0).unwrap();
+        let line = canvas
+            .coordinate_number_line(Axis::linear(0.0, 6.0).unwrap(), Some(480.0))
+            .unwrap();
+        canvas
+            .number_line_expression_plot(
+                &line,
+                amplitude.expression() * Expr::variable("x").sin(),
+                "x",
+                (0.0, 6.0),
+                80.0,
+                None,
+                Sampling::Fixed { samples: 128 },
+            )
+            .unwrap();
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::AlwaysRedrawRegen>()
+                .iter(&world)
+                .count(),
+            1,
+            "a sampled number-line function must remain one retained path",
+        );
+    }
+
+    #[test]
     fn animated_view_targets_internal_view_and_preserves_layout_root() {
         let mut canvas = Canvas::new(640, 360);
         let space = canvas
@@ -1618,5 +2408,191 @@ mod tests {
                     !line.strip && !line.points.is_empty() && colors.len() == line.points.len()
                 }))
         );
+    }
+
+    #[test]
+    fn declarative_scatter_keeps_one_reactive_batch_for_ten_thousand_rows() {
+        let mut canvas = Canvas::new(1920, 1080);
+        let table = gaanim_visualization::DataTable::numeric([
+            (
+                "x".to_owned(),
+                (0..10_000).map(|index| index as f64).collect(),
+            ),
+            (
+                "y".to_owned(),
+                (0..10_000)
+                    .map(|index| (index as f64 * 0.01).sin())
+                    .collect(),
+            ),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(MarkKind::Point, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+
+        let chart = canvas.chart(spec).unwrap();
+        assert_eq!(chart.layer("marks").unwrap().id, chart.marks.id);
+        assert!(!canvas.has_native_3d_content());
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::AlwaysRedrawRegen>()
+                .iter(&world)
+                .count(),
+            1,
+            "row count must not change the number of reactive mark entities",
+        );
+    }
+
+    #[test]
+    fn three_dimensional_axes_accept_nonlinear_scales_and_expose_layers() {
+        let mut canvas = Canvas::new(1280, 720);
+        let space = canvas
+            .coordinate_axes_3d(
+                Axis::log(0.1, 1_000.0, 10.0).unwrap(),
+                Axis::symlog(-100.0, 100.0, 10.0, 1.0).unwrap(),
+                Axis::power(0.0, 16.0, 0.5).unwrap(),
+                [10.0, 8.0, 6.0],
+                true,
+            )
+            .unwrap();
+
+        for layer in [
+            SpaceLayer::MajorGrid,
+            SpaceLayer::Axes,
+            SpaceLayer::Ticks,
+            SpaceLayer::Numbers,
+            SpaceLayer::Labels,
+        ] {
+            assert!(space.layer(layer).is_some());
+        }
+        let point = [10.0, -12.5, 9.0];
+        let local = space.data_to_local(point).unwrap();
+        let restored = space.local_to_data(local).unwrap();
+        for (actual, expected) in restored.into_iter().zip(point) {
+            assert!((actual - expected).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn declarative_marks_receive_a_visible_default_series_style() {
+        let table = gaanim_visualization::DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("y".to_owned(), vec![1.0, 2.0, 1.5]),
+        ])
+        .unwrap();
+        let base = ChartSpec::new(table, None)
+            .unwrap()
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+
+        let mut point_canvas = Canvas::new(640, 360);
+        let points = point_canvas.chart(base.clone()).unwrap();
+        assert!(
+            points
+                .marks
+                .spec
+                .lock()
+                .expect("point mark spec poisoned")
+                .fill
+                .is_some(),
+            "point marks without a color encoding must still be visible",
+        );
+
+        let mut line_canvas = Canvas::new(640, 360);
+        let line = line_canvas
+            .chart(base.mark(MarkKind::Line, BTreeMap::new()))
+            .unwrap();
+        assert!(
+            line.marks
+                .spec
+                .lock()
+                .expect("line mark spec poisoned")
+                .stroke
+                .is_some(),
+            "line marks without a color encoding must still be visible",
+        );
+    }
+
+    #[test]
+    fn declarative_axes_render_above_bar_marks() {
+        let table = gaanim_visualization::DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("y".to_owned(), vec![3.0, 2.0, 1.0]),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(MarkKind::Bar, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+
+        let mut canvas = Canvas::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        let mark_z = chart
+            .marks
+            .spec
+            .lock()
+            .expect("bar mark spec poisoned")
+            .z_index;
+        let axis_z = chart.axes.spec.lock().expect("axes spec poisoned").z_index;
+        assert!(
+            axis_z > mark_z,
+            "semantic axes must remain readable when a bar intersects them",
+        );
+    }
+
+    #[test]
+    fn cross_renderer_chart_transition_uses_hierarchy_aware_handoff() {
+        let table = gaanim_visualization::DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 0.0, 1.0]),
+            ("y".to_owned(), vec![0.0, 0.0, 1.0, 1.0]),
+            ("value".to_owned(), vec![0.0, 1.0, 1.0, 0.0]),
+        ])
+        .unwrap();
+        let heatmap = ChartSpec::new(table.clone(), None)
+            .unwrap()
+            .mark(MarkKind::Heatmap, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap()
+            .encode(Channel::Color, Encoding::field("value"))
+            .unwrap();
+        let surface = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(MarkKind::Surface, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap()
+            .encode(Channel::Z, Encoding::field("value"))
+            .unwrap();
+
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.chart(heatmap).unwrap();
+        let target = canvas.chart(surface).unwrap();
+        let animation = source
+            .transition_to(&target, MatchPolicy::Index, TransitionFallback::Error)
+            .unwrap();
+        assert!(matches!(
+            animation.inner.anim_type,
+            crate::anim::AnimationType::FadeTransform { .. }
+        ));
     }
 }

@@ -45,7 +45,7 @@ scene.line(-510, -30, -190, -30)
 
 x = Axis.linear(-3, 3).ticks(1).label("x")
 y = Axis.linear(-2, 2).ticks(1).label("y")
-scene.axes(x, y, width=560, height=330).at(260, -70)
+scene.cartesian_2d(x, y, width=560, height=330).at(260, -70)
 
 scene.wait(1.0)
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

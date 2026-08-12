@@ -22,8 +22,8 @@ pub use drawable::{
 };
 mod visualization;
 pub use visualization::{
-    CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle, Parameter,
-    PolarSpaceHandle, VisualizationError,
+    ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle,
+    Parameter, PolarSpaceHandle, VisualizationError,
 };
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};

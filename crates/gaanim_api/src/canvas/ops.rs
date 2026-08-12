@@ -496,6 +496,13 @@ pub enum CanvasEndpoint {
     Anchor(AnchorPoint),
     /// Point evaluated from two native scalar expressions.
     Expression { x: Expr, y: Expr },
+    /// Native expressions evaluated in an object's local coordinate frame.
+    LocalExpression {
+        space: ObjectId,
+        x: Expr,
+        y: Expr,
+        z: Expr,
+    },
     /// Reactive scene-space displacement from another endpoint.
     Offset {
         origin: Box<CanvasEndpoint>,

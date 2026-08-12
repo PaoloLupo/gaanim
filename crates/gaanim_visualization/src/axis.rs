@@ -1,4 +1,5 @@
 use gaanim_core::peniko::Color;
+use gaanim_expr::Expr;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AxisError {
@@ -18,6 +19,8 @@ pub enum AxisError {
     InvalidTickStep,
     #[error("value cannot be represented on this scale")]
     OutOfDomain,
+    #[error("categorical scales cannot map reactive scalar expressions")]
+    ReactiveCategory,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,6 +272,53 @@ impl Axis {
         Ok((transform(value)? - min) / (max - min))
     }
 
+    /// Build the native expression that maps a data value into `[0, 1]`.
+    ///
+    /// This is the reactive counterpart of [`Axis::normalize`]. Categorical
+    /// axes reject scalar expressions because their mapping is defined by
+    /// discrete string identity rather than a continuous value.
+    pub fn normalize_expr(&self, value: Expr) -> Result<Expr, AxisError> {
+        let transform = |value: Expr| -> Result<Expr, AxisError> {
+            match &self.scale {
+                Scale::Linear | Scale::Time => Ok(value),
+                Scale::Category { .. } => Err(AxisError::ReactiveCategory),
+                Scale::Log { base } => Ok(value.ln() / base.ln()),
+                Scale::SymLog { base, threshold } => {
+                    let sign = value
+                        .clone()
+                        .if_positive(1.0, (-value.clone()).if_positive(-1.0, 0.0));
+                    Ok(sign * (1.0 + value.abs() / *threshold).ln() / base.ln())
+                }
+                Scale::Power { exponent } => {
+                    let sign = value
+                        .clone()
+                        .if_positive(1.0, (-value.clone()).if_positive(-1.0, 0.0));
+                    Ok(sign * value.abs().pow(*exponent))
+                }
+            }
+        };
+        let min = self.transformed_bound(self.min)?;
+        let max = self.transformed_bound(self.max)?;
+        Ok((transform(value)? - min) / (max - min))
+    }
+
+    fn transformed_bound(&self, value: f64) -> Result<f64, AxisError> {
+        match &self.scale {
+            Scale::Linear | Scale::Time | Scale::Category { .. } => Ok(value),
+            Scale::Log { base } => {
+                if value <= 0.0 {
+                    Err(AxisError::OutOfDomain)
+                } else {
+                    Ok(value.log(*base))
+                }
+            }
+            Scale::SymLog { base, threshold } => {
+                Ok(value.signum() * (1.0 + value.abs() / threshold).log(*base))
+            }
+            Scale::Power { exponent } => Ok(value.signum() * value.abs().powf(*exponent)),
+        }
+    }
+
     pub fn denormalize(&self, normalized: f64) -> Result<f64, AxisError> {
         if !normalized.is_finite() {
             return Err(AxisError::OutOfDomain);
@@ -458,6 +508,57 @@ mod tests {
                 .map(|tick| tick.label.as_str())
                 .collect::<Vec<_>>(),
             ["A", "B", "C"]
+        );
+    }
+
+    #[test]
+    fn reactive_normalization_matches_scalar_scales() {
+        use gaanim_expr::EvalContext;
+
+        let axes_and_values = [
+            (Axis::linear(-2.0, 6.0).unwrap(), -0.75),
+            (
+                Axis::time(1_700_000_000.0, 1_800_000_000.0).unwrap(),
+                1_750_000_000.0,
+            ),
+            (Axis::log(0.1, 1_000.0, 10.0).unwrap(), 12.5),
+            (Axis::symlog(-100.0, 100.0, 10.0, 1.0).unwrap(), -12.5),
+            (Axis::power(-8.0, 8.0, 3.0).unwrap(), -2.5),
+        ];
+
+        for (axis, value) in axes_and_values {
+            let expression = axis.normalize_expr(Expr::variable("value")).unwrap();
+            let evaluated = expression
+                .eval(&EvalContext::new().with_variable("value", value))
+                .unwrap();
+            assert!((evaluated - axis.normalize(value).unwrap()).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn categorical_axes_reject_reactive_scalars() {
+        let axis = Axis::category(["A", "B"].map(str::to_owned)).unwrap();
+        assert_eq!(
+            axis.normalize_expr(Expr::variable("value")).unwrap_err(),
+            AxisError::ReactiveCategory
+        );
+    }
+
+    #[test]
+    fn pi_ticks_cover_number_line_domain_exactly() {
+        let ticks = Axis::linear(0.0, 3.0 * std::f64::consts::PI)
+            .unwrap()
+            .ticks(std::f64::consts::PI)
+            .unwrap()
+            .numbers(NumberFormat::Pi { denominator: 1 })
+            .ticks_values(9)
+            .unwrap();
+        assert_eq!(
+            ticks
+                .iter()
+                .map(|tick| tick.label.as_str())
+                .collect::<Vec<_>>(),
+            ["0", "\u{03c0}", "2\u{03c0}", "3\u{03c0}"]
         );
     }
 

@@ -1,12 +1,18 @@
 //! Coordinate systems and data visualization geometry for Gaanim.
 
 pub mod axis;
+pub mod chart;
 pub mod data;
 pub mod sampling;
 pub mod space;
 pub mod statistics;
 
 pub use axis::{Axis, AxisError, AxisStyle, Crossing, NumberFormat, Scale, Tick};
+pub use chart::{
+    BatchDatum, Channel, ChartError, ChartSpec, ConstantValue, DatumKey, DatumMatch, Encoding,
+    GuideSpec, MarkBatch, MarkKind, MarkSpec, MarkTransition, MatchPolicy, ScaleKind, ScaleSpec,
+    TransitionFallback, TransitionKind,
+};
 pub use data::{Column, DataError, DataSource, DataTable, DataValue};
 pub use sampling::{
     SampledPath, Sampling, SamplingError, SurfaceMesh, VectorGlyph, implicit_contours,

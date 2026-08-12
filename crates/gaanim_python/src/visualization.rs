@@ -1,15 +1,18 @@
 //! Python bindings for native coordinate spaces, expressions, and data marks.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    Canvas as ApiCanvas, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
-    NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
+    Canvas as ApiCanvas, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
+    CoordinateSpaceHandle, NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
-    Axis as NativeAxis, AxisStyle, Column, Crossing, DataMarkKind, DataSource as NativeDataSource,
-    DataTable as NativeDataTable, NonFinitePolicy, NumberFormat, Sampling, SpaceLayer,
+    Axis as NativeAxis, AxisStyle, Channel, ChartSpec as NativeChartSpec, Column, ConstantValue,
+    Crossing, DataMarkKind, DataSource as NativeDataSource, DataTable as NativeDataTable, Encoding,
+    GuideSpec, MarkKind, MatchPolicy, NonFinitePolicy, NumberFormat, Sampling,
+    ScaleSpec as NativeScaleSpec, SpaceLayer, TransitionFallback,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -17,7 +20,7 @@ use pyo3::pyclass_init::PyClassInitializer;
 use pyo3::types::{PyAny, PyDict};
 
 use crate::color::PyColor;
-use crate::pycanvas::PyScene;
+use crate::pycanvas::{PyPointRef, PyScene};
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 
 fn value_error(error: impl ToString) -> PyErr {
@@ -39,6 +42,32 @@ fn trace_readout_source(source: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
     } else {
         extract_expr(source)
     }
+}
+
+fn trace_scalar_function(
+    function: Bound<'_, PyAny>,
+    variable: &str,
+    owner: &str,
+) -> PyResult<NativeExpr> {
+    if let Ok(expr) = function.extract::<PyRef<'_, PyExpr>>() {
+        return Ok(expr.0.clone());
+    }
+    if !function.is_callable() {
+        return Err(PyTypeError::new_err("function must be callable"));
+    }
+    // Invoke Python once with a symbolic probe. Sampling and reactive updates
+    // remain native after the expression tree has been captured.
+    let probe = Py::new(function.py(), PyExpr(NativeExpr::variable(variable)))?;
+    let result = function.call1((probe,)).map_err(|_| {
+        PyTypeError::new_err(format!(
+            "{owner} lambda must return a scalar traced with gaanim.math; Python math/control flow cannot be traced"
+        ))
+    })?;
+    extract_expr(result).map_err(|_| {
+        PyTypeError::new_err(format!(
+            "{owner} lambda must return a scalar traced with gaanim.math"
+        ))
+    })
 }
 
 fn build_readout_parts(
@@ -110,15 +139,6 @@ fn sampling(samples: Option<usize>, tolerance: f64) -> PyResult<Sampling> {
         })
     } else {
         Err(value_error("tolerance must be finite and positive"))
-    }
-}
-
-fn non_finite_policy(value: &str) -> PyResult<NonFinitePolicy> {
-    match value {
-        "gap" => Ok(NonFinitePolicy::Gap),
-        "drop" => Ok(NonFinitePolicy::Drop),
-        "error" => Ok(NonFinitePolicy::Error),
-        _ => Err(value_error("non_finite must be 'gap', 'drop', or 'error'")),
     }
 }
 
@@ -278,6 +298,275 @@ impl PyAxis {
     #[getter]
     fn domain(&self) -> (f64, f64) {
         self.0.domain()
+    }
+}
+
+/// Immutable scale specification for non-positional and inferred channels.
+#[pyclass(name = "Scale", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyScale(pub NativeScaleSpec);
+
+#[pymethods]
+impl PyScale {
+    #[staticmethod]
+    #[pyo3(signature = (domain=None, *, clamp=false))]
+    fn linear(domain: Option<(f64, f64)>, clamp: bool) -> PyResult<Self> {
+        NativeScaleSpec::linear(domain)
+            .map(|scale| Self(scale.clamp(clamp)))
+            .map_err(value_error)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (domain=None, *, base=10.0, clamp=false))]
+    fn log(domain: Option<(f64, f64)>, base: f64, clamp: bool) -> PyResult<Self> {
+        NativeScaleSpec::log(domain, base)
+            .map(|scale| Self(scale.clamp(clamp)))
+            .map_err(value_error)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (domain=None, *, base=10.0, threshold=1.0, clamp=false))]
+    fn symlog(
+        domain: Option<(f64, f64)>,
+        base: f64,
+        threshold: f64,
+        clamp: bool,
+    ) -> PyResult<Self> {
+        NativeScaleSpec::symlog(domain, base, threshold)
+            .map(|scale| Self(scale.clamp(clamp)))
+            .map_err(value_error)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (domain=None, *, exponent=1.0, clamp=false))]
+    fn power(domain: Option<(f64, f64)>, exponent: f64, clamp: bool) -> PyResult<Self> {
+        NativeScaleSpec::power(domain, exponent)
+            .map(|scale| Self(scale.clamp(clamp)))
+            .map_err(value_error)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (domain=None, *, clamp=false))]
+    fn time(domain: Option<(f64, f64)>, clamp: bool) -> PyResult<Self> {
+        NativeScaleSpec::time(domain)
+            .map(|scale| Self(scale.clamp(clamp)))
+            .map_err(value_error)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (values=None))]
+    fn category(values: Option<Vec<String>>) -> PyResult<Self> {
+        NativeScaleSpec::category(values.unwrap_or_default())
+            .map(Self)
+            .map_err(value_error)
+    }
+
+    fn colors(&self, colors: Vec<PyColor>) -> Self {
+        Self(
+            self.0
+                .clone()
+                .colors(colors.into_iter().map(|color| color.0)),
+        )
+    }
+}
+
+/// A column-backed chart encoding.
+#[pyclass(name = "Field", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyField(pub Encoding);
+
+#[pymethods]
+impl PyField {
+    #[new]
+    #[pyo3(signature = (column, *, scale=None))]
+    fn new(column: String, scale: Option<&PyScale>) -> PyResult<Self> {
+        if column.trim().is_empty() {
+            return Err(value_error("field column must be non-empty"));
+        }
+        Ok(Self(match scale {
+            Some(scale) => Encoding::scaled_field(column, scale.0.clone()),
+            None => Encoding::field(column),
+        }))
+    }
+}
+
+fn constant_from_python(value: &Bound<'_, PyAny>) -> PyResult<ConstantValue> {
+    if let Ok(color) = value.extract::<PyRef<'_, PyColor>>() {
+        Ok(ConstantValue::Color(color.0))
+    } else if let Ok(number) = value.extract::<f64>() {
+        if number.is_finite() {
+            Ok(ConstantValue::Number(number))
+        } else {
+            Err(value_error("chart constants must be finite"))
+        }
+    } else if let Ok(text) = value.extract::<String>() {
+        Ok(ConstantValue::Text(text))
+    } else {
+        Err(PyTypeError::new_err(
+            "chart constants must be float, str, or Color",
+        ))
+    }
+}
+
+/// A constant chart encoding.
+#[pyclass(name = "Value", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyValue(pub ConstantValue);
+
+#[pymethods]
+impl PyValue {
+    #[new]
+    fn new(value: Bound<'_, PyAny>) -> PyResult<Self> {
+        constant_from_python(&value).map(Self)
+    }
+}
+
+/// Legend or continuous colorbar configuration.
+#[pyclass(name = "Guide", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyGuide(pub GuideSpec);
+
+#[pymethods]
+impl PyGuide {
+    #[staticmethod]
+    #[pyo3(signature = (*, title=None))]
+    fn legend(title: Option<String>) -> Self {
+        Self(GuideSpec::Legend { title })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (*, title=None))]
+    fn colorbar(title: Option<String>) -> Self {
+        Self(GuideSpec::ColorBar { title })
+    }
+
+    #[staticmethod]
+    fn disabled() -> Self {
+        Self(GuideSpec::None)
+    }
+}
+
+fn encoding_from_python(value: &Bound<'_, PyAny>) -> PyResult<Encoding> {
+    if let Ok(field) = value.extract::<PyRef<'_, PyField>>() {
+        Ok(field.0.clone())
+    } else if let Ok(value) = value.extract::<PyRef<'_, PyValue>>() {
+        Ok(Encoding::Value(value.0.clone()))
+    } else if let Ok(column) = value.extract::<String>() {
+        Ok(Encoding::field(column))
+    } else {
+        Err(PyTypeError::new_err(
+            "encoding must be a column name, Field, or Value",
+        ))
+    }
+}
+
+/// Immutable declarative chart description.
+#[pyclass(name = "ChartSpec", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyChartSpec(pub NativeChartSpec);
+
+#[pymethods]
+impl PyChartSpec {
+    #[new]
+    #[pyo3(signature = (data, *, key=None))]
+    fn new(data: Bound<'_, PyAny>, key: Option<String>) -> PyResult<Self> {
+        let table = if let Ok(source) = data.extract::<PyRef<'_, PyDataSource>>() {
+            source.inner.snapshot()
+        } else if let Ok(table) = data.extract::<PyRef<'_, PyDataTable>>() {
+            table.0.clone()
+        } else {
+            table_from_python(&data)?
+        };
+        NativeChartSpec::new(table, key)
+            .map(Self)
+            .map_err(value_error)
+    }
+
+    #[pyo3(signature = (kind, **options))]
+    fn mark(&self, kind: &str, options: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let kind = MarkKind::parse(kind).map_err(value_error)?;
+        let mut native = BTreeMap::new();
+        if let Some(options) = options {
+            for (name, value) in options.iter() {
+                native.insert(name.extract::<String>()?, constant_from_python(&value)?);
+            }
+        }
+        Ok(Self(self.0.clone().mark(kind, native)))
+    }
+
+    #[pyo3(signature = (*, x=None, y=None, z=None, color=None, size=None, opacity=None, label=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn encode(
+        &self,
+        x: Option<Bound<'_, PyAny>>,
+        y: Option<Bound<'_, PyAny>>,
+        z: Option<Bound<'_, PyAny>>,
+        color: Option<Bound<'_, PyAny>>,
+        size: Option<Bound<'_, PyAny>>,
+        opacity: Option<Bound<'_, PyAny>>,
+        label: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let mut spec = self.0.clone();
+        for (channel, value) in [
+            (Channel::X, x),
+            (Channel::Y, y),
+            (Channel::Z, z),
+            (Channel::Color, color),
+            (Channel::Size, size),
+            (Channel::Opacity, opacity),
+            (Channel::Label, label),
+        ] {
+            if let Some(value) = value {
+                spec = spec
+                    .encode(channel, encoding_from_python(&value)?)
+                    .map_err(value_error)?;
+            }
+        }
+        Ok(Self(spec))
+    }
+
+    #[pyo3(signature = (*, x=None, y=None, z=None))]
+    fn axes(&self, x: Option<&PyAxis>, y: Option<&PyAxis>, z: Option<&PyAxis>) -> PyResult<Self> {
+        let mut spec = self.0.clone();
+        for (channel, axis) in [(Channel::X, x), (Channel::Y, y), (Channel::Z, z)] {
+            if let Some(axis) = axis {
+                spec = spec.axis(channel, axis.0.clone()).map_err(value_error)?;
+            }
+        }
+        Ok(Self(spec))
+    }
+
+    #[pyo3(signature = (*, color=None, size=None, opacity=None))]
+    fn guides(
+        &self,
+        color: Option<&PyGuide>,
+        size: Option<&PyGuide>,
+        opacity: Option<&PyGuide>,
+    ) -> Self {
+        let mut spec = self.0.clone();
+        for (channel, guide) in [
+            (Channel::Color, color),
+            (Channel::Size, size),
+            (Channel::Opacity, opacity),
+        ] {
+            if let Some(guide) = guide {
+                spec = spec.guide(channel, guide.0.clone());
+            }
+        }
+        Self(spec)
+    }
+
+    fn validate(&self) -> PyResult<()> {
+        self.0.validate().map_err(value_error)
+    }
+
+    #[getter]
+    fn key(&self) -> Option<String> {
+        self.0.key().map(str::to_owned)
+    }
+
+    fn __len__(&self) -> usize {
+        self.0.data().len()
     }
 }
 
@@ -868,10 +1157,142 @@ pub struct PyCoordinateSpace3D {
     canvas: Arc<Mutex<ApiCanvas>>,
 }
 
+/// Materialized declarative chart with stable semantic layers.
+#[pyclass(name = "Chart", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyChart {
+    inner: ChartHandle,
+    canvas: Arc<Mutex<ApiCanvas>>,
+    inspection_fields: Vec<String>,
+    inspection_format: Option<String>,
+}
+
+impl PyChart {
+    fn new(inner: ChartHandle, canvas: Arc<Mutex<ApiCanvas>>) -> Self {
+        Self {
+            inner,
+            canvas,
+            inspection_fields: Vec::new(),
+            inspection_format: None,
+        }
+    }
+}
+
+#[pymethods]
+impl PyChart {
+    fn drawable(&self) -> PyDrawable {
+        PyDrawable(self.inner.drawable().clone())
+    }
+
+    fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        self.inner
+            .layer(name)
+            .cloned()
+            .map(PyDrawable)
+            .ok_or_else(|| value_error("layer must be marks, axes, grid, or guides"))
+    }
+
+    fn at(&self, x: f64, y: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().at(x, y);
+        result
+    }
+
+    fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().at_3d(x, y, z);
+        result
+    }
+
+    fn scaled(&self, factor: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().scaled(factor);
+        result
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().write(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().fade_in(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().fade_out(duration),
+        }
+    }
+
+    #[pyo3(name = "to", signature = (target, *, match_="key", fallback="error"))]
+    fn transition_to(
+        &self,
+        target: &PyChartSpec,
+        match_: &str,
+        fallback: &str,
+    ) -> PyResult<PyCanvasAnim> {
+        let matching = match match_ {
+            "key" => MatchPolicy::Key,
+            "index" => MatchPolicy::Index,
+            _ => return Err(value_error("match_ must be 'key' or 'index'")),
+        };
+        let fallback = match fallback {
+            "error" => TransitionFallback::Error,
+            "crossfade" => TransitionFallback::Crossfade,
+            _ => return Err(value_error("fallback must be 'error' or 'crossfade'")),
+        };
+        let target = self
+            .canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .chart(target.0.clone())
+            .map_err(value_error)?;
+        self.inner
+            .transition_to(&target, matching, fallback)
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(value_error)
+    }
+
+    #[pyo3(signature = (fields, *, format=None))]
+    fn inspect(&self, fields: Vec<String>, format: Option<String>) -> PyResult<Self> {
+        for field in &fields {
+            self.inner
+                .spec()
+                .data()
+                .column(field)
+                .map_err(value_error)?;
+        }
+        let mut result = self.clone();
+        result.inspection_fields = fields;
+        result.inspection_format = format;
+        Ok(result)
+    }
+
+    #[getter]
+    fn inspection_enabled(&self) -> bool {
+        !self.inspection_fields.is_empty()
+    }
+}
+
 #[pyclass(name = "NumberLine", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyNumberLine {
     inner: NumberLineHandle,
+    canvas: Arc<Mutex<ApiCanvas>>,
 }
 
 #[pymethods]
@@ -889,6 +1310,51 @@ impl PyNumberLine {
 
     fn data_to_local(&self, value: f64) -> PyResult<f64> {
         self.inner.data_to_local(value).map_err(value_error)
+    }
+
+    #[pyo3(signature = (value, *, normal_offset=None))]
+    fn point_ref(
+        &self,
+        value: Bound<'_, PyAny>,
+        normal_offset: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyPointRef> {
+        let value = extract_expr(value)?;
+        let normal_offset = normal_offset
+            .map(extract_expr)
+            .transpose()?
+            .unwrap_or_else(|| NativeExpr::constant(0.0));
+        self.inner
+            .point_ref(value, normal_offset)
+            .map(PyPointRef)
+            .map_err(value_error)
+    }
+
+    #[pyo3(signature = (function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75))]
+    fn function(
+        &self,
+        function: Bound<'_, PyAny>,
+        domain: Option<(f64, f64)>,
+        normal_scale: f64,
+        reveal: Option<Bound<'_, PyAny>>,
+        samples: Option<usize>,
+        tolerance: f64,
+    ) -> PyResult<PyDrawable> {
+        let expression = trace_scalar_function(function, "x", "number-line function")?;
+        let reveal = reveal.map(extract_expr).transpose()?;
+        self.canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .number_line_expression_plot(
+                &self.inner,
+                expression,
+                "x",
+                domain.unwrap_or_else(|| self.inner.domain()),
+                normal_scale,
+                reveal,
+                sampling(samples, tolerance)?,
+            )
+            .map(PyDrawable)
+            .map_err(value_error)
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
@@ -1003,6 +1469,26 @@ impl PyCoordinateSpace3D {
 impl PyCoordinateSpace3D {
     fn drawable(&self) -> PyDrawable {
         PyDrawable(self.inner.drawable().clone())
+    }
+
+    fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        let layer = match name {
+            "grid" => SpaceLayer::MajorGrid,
+            "axis" | "axes" => SpaceLayer::Axes,
+            "ticks" => SpaceLayer::Ticks,
+            "numbers" => SpaceLayer::Numbers,
+            "labels" => SpaceLayer::Labels,
+            _ => {
+                return Err(value_error(
+                    "layer must be grid, axes, ticks, numbers, or labels",
+                ));
+            }
+        };
+        self.inner
+            .layer(layer)
+            .cloned()
+            .map(PyDrawable)
+            .ok_or_else(|| value_error(format!("layer {name:?} is not present")))
     }
 
     fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
@@ -1121,15 +1607,6 @@ impl PyCoordinateSpace {
     fn new(inner: CoordinateSpaceHandle, canvas: Arc<Mutex<ApiCanvas>>) -> Self {
         Self { inner, canvas }
     }
-
-    fn data_mark(&self, source: &PyDataSource, kind: DataMarkKind) -> PyResult<PyDrawable> {
-        self.canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .data_mark(&self.inner, source.inner.clone(), kind)
-            .map(PyDrawable)
-            .map_err(value_error)
-    }
 }
 
 #[pymethods]
@@ -1243,30 +1720,25 @@ impl PyCoordinateSpace {
     ) -> PyResult<PyDrawable> {
         let domain = domain.unwrap_or_else(|| self.inner.map().x.domain());
         let sampling = sampling(samples, tolerance)?;
-        let expression = if let Ok(expr) = function.extract::<PyRef<'_, PyExpr>>() {
-            expr.0.clone()
-        } else if function.is_callable() {
-            // The lambda is invoked once with a symbolic probe.  From this
-            // point on sampling and all reactive updates stay in Rust.
-            let probe = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
-            let result = function.call1((probe,)).map_err(|_| {
-                PyTypeError::new_err(
-                    "plot lambda must return a scalar traced with gaanim.math; ".to_owned()
-                        + "Python math/control flow cannot be traced",
-                )
-            })?;
-            extract_expr(result).map_err(|_| {
-                PyTypeError::new_err("plot lambda must return a scalar traced with gaanim.math")
-            })?
-        } else {
-            return Err(PyTypeError::new_err("function must be callable"));
-        };
+        let expression = trace_scalar_function(function, "x", "plot")?;
         let expression = (0..derivative).fold(expression, |value, _| value.derivative("x"));
         let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
         canvas
             .expression_plot(&self.inner, expression, "x", domain, sampling)
             .map(PyDrawable)
             .map_err(value_error)
+    }
+
+    #[pyo3(name = "function", signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=0))]
+    fn function_plot(
+        &self,
+        function: Bound<'_, PyAny>,
+        domain: Option<(f64, f64)>,
+        samples: Option<usize>,
+        tolerance: f64,
+        derivative: usize,
+    ) -> PyResult<PyDrawable> {
+        self.plot(function, domain, samples, tolerance, derivative)
     }
 
     #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75))]
@@ -1366,189 +1838,6 @@ impl PyCoordinateSpace {
                         .and_then(|value| value.extract::<(f64, f64)>())
                         .ok()
                 },
-            )
-            .map(PyDrawable)
-            .map_err(value_error)
-    }
-
-    #[pyo3(signature = (source, x, y, *, non_finite="gap"))]
-    fn line(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        non_finite: &str,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Line {
-                x,
-                y,
-                policy: non_finite_policy(non_finite)?,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, x, y, *, non_finite="gap"))]
-    fn step(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        non_finite: &str,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Step {
-                x,
-                y,
-                policy: non_finite_policy(non_finite)?,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, x, y, *, baseline=0.0))]
-    fn area(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        baseline: f64,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(source, DataMarkKind::Area { x, y, baseline })
-    }
-
-    #[pyo3(signature = (source, x, y, *, radius=4.0, non_finite="drop"))]
-    fn scatter(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        radius: f64,
-        non_finite: &str,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Scatter {
-                x,
-                y,
-                radius,
-                policy: non_finite_policy(non_finite)?,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, x, y, *, width=0.8, baseline=0.0))]
-    fn bars(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        width: f64,
-        baseline: f64,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Bars {
-                x,
-                y,
-                width,
-                baseline,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, column, *, bins=10))]
-    fn histogram(
-        &self,
-        source: &PyDataSource,
-        column: String,
-        bins: usize,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(source, DataMarkKind::Histogram { column, bins })
-    }
-
-    #[pyo3(signature = (source, column, *, center=0.0, width=0.8))]
-    fn box_plot(
-        &self,
-        source: &PyDataSource,
-        column: String,
-        center: f64,
-        width: f64,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Box {
-                column,
-                center,
-                width,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, column, *, center=0.0, bandwidth=0.3, width=0.8))]
-    fn violin(
-        &self,
-        source: &PyDataSource,
-        column: String,
-        center: f64,
-        bandwidth: f64,
-        width: f64,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::Violin {
-                column,
-                center,
-                bandwidth,
-                width,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, x, y, low, high, *, cap_width=0.12))]
-    fn error_bars(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        low: String,
-        high: String,
-        cap_width: f64,
-    ) -> PyResult<PyDrawable> {
-        self.data_mark(
-            source,
-            DataMarkKind::ErrorBars {
-                x,
-                y,
-                low,
-                high,
-                cap_width,
-            },
-        )
-    }
-
-    #[pyo3(signature = (source, x, y, value, *, cell_size=(1.0, 1.0), bands=8))]
-    fn heatmap(
-        &self,
-        source: &PyDataSource,
-        x: String,
-        y: String,
-        value: String,
-        cell_size: (f64, f64),
-        bands: usize,
-    ) -> PyResult<PyDrawable> {
-        self.canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .heatmap_plot(
-                &self.inner,
-                source.inner.clone(),
-                x,
-                y,
-                value,
-                [cell_size.0, cell_size.1],
-                bands,
             )
             .map(PyDrawable)
             .map_err(value_error)
@@ -1954,19 +2243,60 @@ impl PyScene {
         )
     }
 
-    #[pyo3(signature = (axis, *, length=None))]
-    fn number_line(&self, axis: &PyAxis, length: Option<f64>) -> PyResult<PyNumberLine> {
+    fn chart(&self, spec: &PyChartSpec) -> PyResult<PyChart> {
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_number_line(axis.0.clone(), length)
+            .chart(spec.0.clone())
             .map_err(value_error)?;
-        Ok(PyNumberLine { inner })
+        Ok(PyChart::new(inner, self.inner.clone()))
+    }
+
+    #[pyo3(signature = (x, y, *, width=None, height=None, grid=true))]
+    fn cartesian_2d(
+        &self,
+        x: &PyAxis,
+        y: &PyAxis,
+        width: Option<f64>,
+        height: Option<f64>,
+        grid: bool,
+    ) -> PyResult<PyCoordinateSpace> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .coordinate_axes(x.0.clone(), y.0.clone(), width, height, grid)
+            .map_err(value_error)?;
+        Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
+    }
+
+    #[pyo3(signature = (x, y, z, *, size=(10.0, 8.0, 6.0), grid=true))]
+    fn cartesian_3d(
+        &self,
+        x: &PyAxis,
+        y: &PyAxis,
+        z: &PyAxis,
+        size: (f64, f64, f64),
+        grid: bool,
+    ) -> PyResult<PyCoordinateSpace3D> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .coordinate_axes_3d(
+                x.0.clone(),
+                y.0.clone(),
+                z.0.clone(),
+                [size.0, size.1, size.2],
+                grid,
+            )
+            .map_err(value_error)?;
+        Ok(PyCoordinateSpace3D::new(inner, self.inner.clone()))
     }
 
     #[pyo3(signature = (radial, *, radius=220.0, angle_divisions=12))]
-    fn polar_plane(
+    fn polar(
         &self,
         radial: &PyAxis,
         radius: f64,
@@ -1984,42 +2314,8 @@ impl PyScene {
         })
     }
 
-    #[pyo3(signature = (x, y, *, width=None, height=None))]
-    fn axes(
-        &self,
-        x: &PyAxis,
-        y: &PyAxis,
-        width: Option<f64>,
-        height: Option<f64>,
-    ) -> PyResult<PyCoordinateSpace> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .coordinate_axes(x.0.clone(), y.0.clone(), width, height, false)
-            .map_err(value_error)?;
-        Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
-    }
-
-    #[pyo3(signature = (x, y, *, width=None, height=None))]
-    fn number_plane(
-        &self,
-        x: &PyAxis,
-        y: &PyAxis,
-        width: Option<f64>,
-        height: Option<f64>,
-    ) -> PyResult<PyCoordinateSpace> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .coordinate_axes(x.0.clone(), y.0.clone(), width, height, true)
-            .map_err(value_error)?;
-        Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
-    }
-
     #[pyo3(signature = (x=None, y=None, *, width=None, height=None))]
-    fn complex_plane(
+    fn complex(
         &self,
         x: Option<&PyAxis>,
         y: Option<&PyAxis>,
@@ -2045,27 +2341,17 @@ impl PyScene {
         Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
     }
 
-    #[pyo3(signature = (x, y, z, *, size=(10.0, 8.0, 6.0), grid=true))]
-    fn axes_3d(
-        &self,
-        x: &PyAxis,
-        y: &PyAxis,
-        z: &PyAxis,
-        size: (f64, f64, f64),
-        grid: bool,
-    ) -> PyResult<PyCoordinateSpace3D> {
+    #[pyo3(signature = (axis, *, length=None))]
+    fn number_line(&self, axis: &PyAxis, length: Option<f64>) -> PyResult<PyNumberLine> {
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_axes_3d(
-                x.0.clone(),
-                y.0.clone(),
-                z.0.clone(),
-                [size.0, size.1, size.2],
-                grid,
-            )
+            .coordinate_number_line(axis.0.clone(), length)
             .map_err(value_error)?;
-        Ok(PyCoordinateSpace3D::new(inner, self.inner.clone()))
+        Ok(PyNumberLine {
+            inner,
+            canvas: self.inner.clone(),
+        })
     }
 }

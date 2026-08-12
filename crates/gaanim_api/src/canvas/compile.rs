@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DVec2, DVec3};
-use gaanim_core::kurbo::{Point, Rect, Shape, Vec2};
+use gaanim_core::kurbo::{BezPath, Point, Rect, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform};
 use gaanim_scene::{
@@ -41,6 +41,39 @@ use gaanim_animation::{
     TrackingVectorHead, Updater,
 };
 use gaanim_math::{RateFunc, SpatialTransform};
+
+fn sampled_expression_path(
+    map: &gaanim_visualization::CoordinateMap2D,
+    expression: &gaanim_expr::Expr,
+    variable: &str,
+    domain: (f64, f64),
+    reveal: Option<&gaanim_expr::Expr>,
+    sampling: gaanim_visualization::Sampling,
+    context: &gaanim_expr::EvalContext,
+) -> BezPath {
+    let sampled_domain = if let Some(reveal) = reveal {
+        let Ok(end) = reveal.eval(context) else {
+            return BezPath::new();
+        };
+        let end = end.clamp(domain.0, domain.1);
+        if end <= domain.0 {
+            return BezPath::new();
+        }
+        (domain.0, end)
+    } else {
+        domain
+    };
+    gaanim_visualization::sample_expression(
+        map,
+        expression,
+        variable,
+        sampled_domain,
+        sampling,
+        context,
+    )
+    .map(|sampled| sampled.to_bez_path())
+    .unwrap_or_default()
+}
 
 fn compile_tracking_scalar(
     expression: &gaanim_expr::Expr,
@@ -88,6 +121,16 @@ fn compile_tracking_endpoint(
             x: compile_tracking_scalar(x, id_map, states),
             y: compile_tracking_scalar(y, id_map, states),
         },
+        CanvasEndpoint::LocalExpression { space, x, y, z } => id_map
+            .get(space)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::LocalExpression {
+                space: state.entity,
+                x: compile_tracking_scalar(x, id_map, states),
+                y: compile_tracking_scalar(y, id_map, states),
+                z: compile_tracking_scalar(z, id_map, states),
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::Offset { origin, dx, dy } => TrackingEndpoint::Offset {
             origin: Box::new(compile_tracking_endpoint(origin, id_map, states)),
             dx: compile_tracking_scalar(dx, id_map, states),
@@ -5133,11 +5176,17 @@ impl Canvas {
                 expression,
                 variable,
                 domain,
+                reveal,
                 sampling,
             } => {
+                let mut parameter_ids = expression.parameter_ids();
+                if let Some(reveal) = reveal {
+                    parameter_ids.extend(reveal.parameter_ids());
+                    parameter_ids.sort_unstable();
+                    parameter_ids.dedup();
+                }
                 let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
-                    expression
-                        .parameter_ids()
+                    parameter_ids
                         .into_iter()
                         .filter_map(|logical| {
                             let actual = id_map.get(&logical).copied()?;
@@ -5153,11 +5202,15 @@ impl Canvas {
                         context.set_parameter(*logical, value);
                     }
                 }
-                let path = gaanim_visualization::sample_expression(
-                    map, expression, variable, *domain, *sampling, &context,
-                )
-                .map(|sampled| sampled.to_bez_path())
-                .unwrap_or_default();
+                let path = sampled_expression_path(
+                    map,
+                    expression,
+                    variable,
+                    *domain,
+                    reveal.as_ref(),
+                    *sampling,
+                    &context,
+                );
                 let svg_path = gaanim_objects::prelude::SvgPath {
                     id: "ExpressionPlot".to_owned(),
                     path,
@@ -5175,6 +5228,7 @@ impl Canvas {
                     let expression = expression.clone();
                     let variable = variable.clone();
                     let domain = *domain;
+                    let reveal = reveal.clone();
                     let sampling = *sampling;
                     let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
                         let mut context = gaanim_expr::EvalContext::new();
@@ -5185,16 +5239,15 @@ impl Canvas {
                                 context.set_parameter(*logical, signal.value);
                             }
                         }
-                        gaanim_visualization::sample_expression(
+                        sampled_expression_path(
                             &map,
                             &expression,
                             &variable,
                             domain,
+                            reveal.as_ref(),
                             sampling,
                             &context,
                         )
-                        .map(|sampled| sampled.to_bez_path())
-                        .unwrap_or_default()
                     });
                     builder.commands.entity(state.entity).insert(redraw);
                 }
@@ -6155,6 +6208,40 @@ mod tests {
     use gaanim_core::peniko::Brush;
     use gaanim_scene::LocalBounds;
     use gaanim_timeline::snapshot::WorldSnapshot;
+
+    #[test]
+    fn expression_reveal_ends_at_exact_data_coordinate() {
+        let map = gaanim_visualization::CoordinateMap2D::new(
+            gaanim_visualization::Axis::linear(0.0, 3.0 * std::f64::consts::PI).unwrap(),
+            gaanim_visualization::Axis::linear(-1.0, 1.0).unwrap(),
+            gaanim_visualization::PlotFrame::new(600.0, 240.0).unwrap(),
+        );
+        let expression = gaanim_expr::Expr::variable("x").sin();
+        let reveal = gaanim_expr::Expr::constant(std::f64::consts::FRAC_PI_2);
+        let path = sampled_expression_path(
+            &map,
+            &expression,
+            "x",
+            (0.0, 3.0 * std::f64::consts::PI),
+            Some(&reveal),
+            gaanim_visualization::Sampling::Fixed { samples: 65 },
+            &gaanim_expr::EvalContext::new(),
+        );
+
+        assert!((path.bounding_box().x1 + 200.0).abs() < 1e-9);
+        assert!(
+            sampled_expression_path(
+                &map,
+                &expression,
+                "x",
+                (0.0, 3.0 * std::f64::consts::PI),
+                Some(&gaanim_expr::Expr::constant(0.0)),
+                gaanim_visualization::Sampling::Fixed { samples: 65 },
+                &gaanim_expr::EvalContext::new(),
+            )
+            .is_empty()
+        );
+    }
 
     trait UnifiedTextFixture {
         fn math_text(&mut self, source: &str) -> DrawableHandle;

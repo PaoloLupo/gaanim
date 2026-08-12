@@ -3067,8 +3067,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             None => return,
         };
         let target_visual_opacity = target_state.opacity;
-        let source_has_children = !source_state.child_spans.is_empty();
-        let target_has_children = !target_state.child_spans.is_empty();
+        let source_has_children =
+            !source_state.child_spans.is_empty() || !source_state.children.is_empty();
+        let target_has_children =
+            !target_state.child_spans.is_empty() || !target_state.children.is_empty();
         let morph_end_time = self.current_time + anim.duration;
 
         // Carry the source into the current scene at the scene boundary. A
@@ -3110,16 +3112,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Treat the target as a state template: it should stay hidden while
         // the source morphs toward its final geometry and styling.
         self.hide_visuals_now(&target_state);
+        for descendant in self.hierarchy_ids(target) {
+            if let Some(state) = self.states.get(descendant) {
+                self.commands.entity(state.entity).insert(Opacity(0.0));
+            }
+        }
 
         // Text and math are rendered as child hierarchies. During a transform,
         // use the source root as a temporary flattened vector proxy. Scheduling
         // this swap on the timeline (instead of changing the initial ECS state)
         // preserves earlier Write/Create animations on the source children.
         if source_has_children {
-            for child in &source_state.child_spans {
+            for child in self
+                .hierarchy_ids(anim.target)
+                .into_iter()
+                .filter(|child| *child != anim.target)
+            {
                 let child_opacity = self
                     .states
-                    .get(child.id)
+                    .get(child)
                     .map(|state| state.opacity)
                     .unwrap_or(1.0);
                 self.timeline.add_clip(
@@ -3127,7 +3138,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     self.current_time,
                     0.0,
                     ClipPayload::Animation(AnimationSpec {
-                        target: child.id,
+                        target: child,
                         lens: PropertyLensSpec::Opacity {
                             from: child_opacity,
                             to: 0.0,
@@ -3159,14 +3170,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 label: None,
             }),
         );
-        for child in &target_state.child_spans {
-            let child_opacity = self.states.get(child.id).map(|s| s.opacity).unwrap_or(1.0);
+        for child in self
+            .hierarchy_ids(target)
+            .into_iter()
+            .filter(|child| *child != target)
+        {
+            let child_opacity = self.states.get(child).map(|s| s.opacity).unwrap_or(1.0);
             self.timeline.add_clip(
                 parent_track,
                 self.current_time,
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
-                    target: child.id,
+                    target: child,
                     lens: PropertyLensSpec::Opacity {
                         from: child_opacity,
                         to: 0.0,

@@ -467,6 +467,8 @@ pub enum SpawnKind {
         expression: gaanim_expr::Expr,
         variable: String,
         domain: (f64, f64),
+        /// Optional data-space end value used to reveal the path exactly.
+        reveal: Option<gaanim_expr::Expr>,
         sampling: gaanim_visualization::Sampling,
     },
     /// Numeric text evaluated from a native expression without Python callbacks.

@@ -1885,6 +1885,97 @@ class Axis:
     @property
     def domain(self) -> tuple[float, float]: ...
 
+class Scale:
+    """Immutable channel scale used by :class:`Field` encodings."""
+    @staticmethod
+    def linear(domain: Optional[tuple[float, float]] = None, *, clamp: bool = False) -> Scale:
+        """Create a linear scale with an optional fixed finite domain."""
+        ...
+    @staticmethod
+    def log(domain: Optional[tuple[float, float]] = None, *, base: float = 10.0, clamp: bool = False) -> Scale:
+        """Create a positive logarithmic scale with a valid non-unit base."""
+        ...
+    @staticmethod
+    def symlog(domain: Optional[tuple[float, float]] = None, *, base: float = 10.0, threshold: float = 1.0, clamp: bool = False) -> Scale:
+        """Create a signed logarithmic scale with a linear zero region."""
+        ...
+    @staticmethod
+    def power(domain: Optional[tuple[float, float]] = None, *, exponent: float = 1.0, clamp: bool = False) -> Scale:
+        """Create a signed power scale with a finite non-zero exponent."""
+        ...
+    @staticmethod
+    def time(domain: Optional[tuple[float, float]] = None, *, clamp: bool = False) -> Scale:
+        """Create a timestamp scale whose numeric values are seconds."""
+        ...
+    @staticmethod
+    def category(values: Optional[Sequence[str]] = None) -> Scale:
+        """Create a categorical scale; omitted values are inferred from data order."""
+        ...
+    def colors(self, colors: Sequence[Color]) -> Scale:
+        """Return a copy with an explicit ordered color range."""
+        ...
+
+class Field:
+    """Reference a data column and optionally configure its channel scale."""
+    def __init__(self, column: str, *, scale: Optional[Scale] = None) -> None:
+        """Create a non-empty column encoding."""
+        ...
+
+class Value:
+    """Wrap a finite number, string, or color as a constant encoding."""
+    def __init__(self, value: float | str | Color) -> None:
+        """Create a constant channel value; non-finite numbers raise ``ValueError``."""
+        ...
+
+class Guide:
+    """Configuration for a legend or continuous colorbar."""
+    @staticmethod
+    def legend(*, title: Optional[str] = None) -> Guide:
+        """Create a discrete legend guide."""
+        ...
+    @staticmethod
+    def colorbar(*, title: Optional[str] = None) -> Guide:
+        """Create a continuous colorbar guide."""
+        ...
+    @staticmethod
+    def disabled() -> Guide:
+        """Disable the guide for one encoded channel."""
+        ...
+
+EncodingLike: TypeAlias = str | Field | Value
+ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface"]
+
+class ChartSpec:
+    """Immutable declarative chart spec that snapshots its input data eagerly."""
+    def __init__(self, data: DataTable | DataSource | Mapping[str, Sequence[float | str | None]] | Any, *, key: Optional[str] = None) -> None:
+        """Capture data and validate a non-null unique key when supplied."""
+        ...
+    def mark(self, kind: ChartMark, **options: float | str | Color) -> ChartSpec:
+        """Return a copy using the requested mark and mark-specific options."""
+        ...
+    def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None) -> ChartSpec:
+        """Return a copy with validated positional and visual channel encodings."""
+        ...
+    def axes(self, *, x: Optional[Axis] = None, y: Optional[Axis] = None, z: Optional[Axis] = None) -> ChartSpec:
+        """Return a copy with explicit positional axes; omitted axes are inferred.
+
+        Inferred bar axes include the baseline and reserve an outer margin so
+        the first and last bars do not touch the plot boundary. Explicit axis
+        domains are preserved exactly.
+        """
+        ...
+    def guides(self, *, color: Optional[Guide] = None, size: Optional[Guide] = None, opacity: Optional[Guide] = None) -> ChartSpec:
+        """Return a copy with guides derived from the corresponding channel scales."""
+        ...
+    def validate(self) -> None:
+        """Validate required channels, referenced columns, keys, scales, and options."""
+        ...
+    @property
+    def key(self) -> Optional[str]:
+        """Return the stable identity column used for semantic transitions."""
+        ...
+    def __len__(self) -> int: ...
+
 class _Expr:
     """Internal traced scalar returned by reactive arithmetic."""
     def __init__(self, value: float) -> None: ...
@@ -2013,6 +2104,46 @@ class DataSource:
     def version(self) -> int: ...
     def __len__(self) -> int: ...
 
+class Chart:
+    """Materialized chart with stable marks, axes, grid, and guide layers."""
+    def drawable(self) -> Drawable:
+        """Return the root drawable used by layout and generic transforms."""
+        ...
+    def layer(self, name: Literal["marks", "axes", "grid", "guides"]) -> Drawable:
+        """Return one semantic layer without exposing its internal batches."""
+        ...
+    def at(self, x: float, y: float) -> Chart:
+        """Return a chart handle translated in the 2D canvas plane."""
+        ...
+    def at_3d(self, x: float, y: float, z: float) -> Chart:
+        """Return a chart handle translated in world coordinates."""
+        ...
+    def scaled(self, factor: float) -> Chart:
+        """Return a uniformly scaled chart handle."""
+        ...
+    def create(self, duration: Optional[float] = None) -> Anim:
+        """Animate the chart root with the native create transition."""
+        ...
+    def write(self, duration: Optional[float] = None) -> Anim:
+        """Animate the chart root with the native write transition."""
+        ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Fade all vector and native 3D mesh layers of the chart into the scene."""
+        ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Fade all vector and native 3D mesh layers of the chart out of the scene."""
+        ...
+    def to(self, target: ChartSpec, *, match_: Literal["key", "index"] = "key", fallback: Literal["error", "crossfade"] = "error") -> Anim:
+        """Build a deterministic transition after validating identity and morph compatibility."""
+        ...
+    def inspect(self, fields: Sequence[str], *, format: Optional[str] = None) -> Chart:
+        """Enable preview-only inspection metadata for the selected data fields."""
+        ...
+    @property
+    def inspection_enabled(self) -> bool:
+        """Report whether preview inspection was enabled for this handle."""
+        ...
+
 class CoordinateSpace:
     def drawable(self) -> Drawable: ...
     def at(self, x: float, y: float) -> CoordinateSpace: ...
@@ -2035,20 +2166,21 @@ class CoordinateSpace:
         tolerance: float = 0.75,
         derivative: int = 0,
     ) -> Drawable: ...
+    def function(
+        self,
+        function: Callable[[float], _TracedScalar],
+        domain: Optional[tuple[float, float]] = None,
+        *,
+        samples: Optional[int] = None,
+        tolerance: float = 0.75,
+        derivative: int = 0,
+    ) -> Drawable:
+        """Sample a scalar function in this space; reactive expressions remain native."""
+        ...
     def parametric(self, function: Callable[[float], tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.75) -> Drawable: ...
     def implicit(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def contour(self, function: Callable[[float, float], float], levels: Sequence[float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def vector_field(self, function: Callable[[float, float], tuple[float, float]], *, resolution: tuple[int, int] = (20, 12), max_length: float = 28.0) -> Drawable: ...
-    def line(self, source: DataSource, x: str, y: str, *, non_finite: Literal["gap", "drop", "error"] = "gap") -> Drawable: ...
-    def step(self, source: DataSource, x: str, y: str, *, non_finite: Literal["gap", "drop", "error"] = "gap") -> Drawable: ...
-    def area(self, source: DataSource, x: str, y: str, *, baseline: float = 0.0) -> Drawable: ...
-    def scatter(self, source: DataSource, x: str, y: str, *, radius: float = 4.0, non_finite: Literal["gap", "drop", "error"] = "drop") -> Drawable: ...
-    def bars(self, source: DataSource, x: str, y: str, *, width: float = 0.8, baseline: float = 0.0) -> Drawable: ...
-    def histogram(self, source: DataSource, column: str, *, bins: int = 10) -> Drawable: ...
-    def box_plot(self, source: DataSource, column: str, *, center: float = 0.0, width: float = 0.8) -> Drawable: ...
-    def violin(self, source: DataSource, column: str, *, center: float = 0.0, bandwidth: float = 0.3, width: float = 0.8) -> Drawable: ...
-    def error_bars(self, source: DataSource, x: str, y: str, low: str, high: str, *, cap_width: float = 0.12) -> Drawable: ...
-    def heatmap(self, source: DataSource, x: str, y: str, value: str, *, cell_size: tuple[float, float] = (1.0, 1.0), bands: int = 8) -> Drawable: ...
     def projections(self, x: float, y: float) -> Drawable: ...
     def secant(self, function: Callable[[float], float], x0: float, x1: float) -> Drawable: ...
     def tangent(self, function: Callable[[float], float], x: float, *, length: Optional[float] = None, dx: Optional[float] = None) -> Drawable: ...
@@ -2057,11 +2189,48 @@ class CoordinateSpace:
     def riemann_sum(self, function: Callable[[float], float], domain: tuple[float, float], *, rectangles: int = 12, method: Literal["left", "midpoint", "middle", "right"] = "midpoint", baseline: float = 0.0) -> Drawable: ...
 
 class NumberLine:
+    """A one-dimensional typed coordinate space with scale-aware labels and reactive points."""
     def drawable(self) -> Drawable: ...
     def coord(self, value: float) -> CoordinateRef: ...
     def data_to_local(self, value: float) -> float: ...
+    def point_ref(
+        self,
+        value: _TracedScalar,
+        *,
+        normal_offset: Optional[_TracedScalar] = None,
+    ) -> PointRef:
+        """Map a scalar into a reactive point in the line's local frame.
+
+        ``normal_offset`` is measured perpendicular to the line in local canvas
+        units; ``None`` means zero. Continuous scales are supported. A
+        categorical axis raises ``ValueError`` for reactive scalar values.
+        """
+        ...
+    def function(
+        self,
+        function: Callable[[float], _TracedScalar],
+        domain: Optional[tuple[float, float]] = None,
+        *,
+        normal_scale: float = 120.0,
+        reveal: Optional[_TracedScalar] = None,
+        samples: Optional[int] = None,
+        tolerance: float = 0.75,
+    ) -> Drawable:
+        """Plot a traced scalar function perpendicular to this number line.
+
+        Function outputs ``-1`` and ``1`` map to ``-normal_scale`` and
+        ``normal_scale`` local canvas units. The callable runs once to capture
+        a native expression. When ``reveal`` is provided, it is the exact
+        data-space end of the visible curve, allowing a point and the path to
+        share one ``Parameter`` without arc-length drift. Sampling and
+        parameter updates remain in Rust.
+        Invalid domains, sampling settings, or non-positive scales raise
+        ``ValueError``.
+        """
+        ...
     def layer(self, name: Literal["axis", "ticks", "numbers", "labels"]) -> Drawable: ...
     def create(self, duration: Optional[float] = None) -> Anim: ...
+    def write(self, duration: Optional[float] = None) -> Anim: ...
 
 class PolarSpace:
     def drawable(self) -> Drawable: ...
@@ -2072,6 +2241,9 @@ class PolarSpace:
 
 class CoordinateSpace3D:
     def drawable(self) -> Drawable: ...
+    def layer(self, name: Literal["grid", "axes", "ticks", "numbers", "labels"]) -> Drawable:
+        """Return an independently animatable scale-aware 3D axes layer."""
+        ...
     def at_3d(self, x: float, y: float, z: float) -> CoordinateSpace3D: ...
     def scaled(self, factor: float) -> CoordinateSpace3D: ...
     def create(self, duration: Optional[float] = None) -> Anim: ...
@@ -2080,6 +2252,10 @@ class CoordinateSpace3D:
     def surface(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (64, 48)) -> Drawable: ...
     def parametric(self, function: Callable[[float], tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320) -> Drawable: ...
     def vector_field(self, function: Callable[[float, float, float], tuple[float, float, float]], *, resolution: tuple[int, int, int] = (8, 8, 6), max_length: float = 24.0) -> Drawable: ...
+
+Cartesian2D: TypeAlias = CoordinateSpace
+Cartesian3D: TypeAlias = CoordinateSpace3D
+ComplexSpace: TypeAlias = CoordinateSpace
 
 class Scene:
     def __init__(
@@ -2097,53 +2273,30 @@ class Scene:
         """
         ...
     def parameter(self, initial: float) -> Parameter: ...
+    def chart(self, spec: ChartSpec) -> Chart:
+        """Materialize an immutable declarative chart using batched semantic layers."""
+        ...
+    def cartesian_2d(self, x: Axis, y: Axis, *, width: Optional[float] = None, height: Optional[float] = None, grid: bool = True) -> Cartesian2D:
+        """Create a typed 2D Cartesian space for scientific functions and geometry."""
+        ...
+    def cartesian_3d(self, x: Axis, y: Axis, z: Axis, *, size: tuple[float, float, float] = (10.0, 8.0, 6.0), grid: bool = True) -> Cartesian3D:
+        """Create a typed scale-aware 3D Cartesian space with independent layers."""
+        ...
+    def polar(self, radial: Axis, *, radius: float = 220.0, angle_divisions: int = 12) -> PolarSpace:
+        """Create a typed polar space for scientific functions and geometry."""
+        ...
+    def complex(self, x: Optional[Axis] = None, y: Optional[Axis] = None, *, width: Optional[float] = None, height: Optional[float] = None) -> ComplexSpace:
+        """Create a Cartesian complex plane with real and imaginary axes."""
+        ...
     def readout(self, source: _TracedScalar | Callable[[], _TracedScalar], *, label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms."""
         ...
     def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Variable:
         """Create an animatable scalar displayed as an aligned equation row."""
         ...
-    def number_line(self, axis: Axis, *, length: Optional[float] = None) -> NumberLine: ...
-    def axes(
-        self,
-        x: Axis,
-        y: Axis,
-        *,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-    ) -> CoordinateSpace: ...
-    def number_plane(
-        self,
-        x: Axis,
-        y: Axis,
-        *,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-    ) -> CoordinateSpace: ...
-    def polar_plane(
-        self,
-        radial: Axis,
-        *,
-        radius: float = 220.0,
-        angle_divisions: int = 12,
-    ) -> PolarSpace: ...
-    def complex_plane(
-        self,
-        x: Optional[Axis] = None,
-        y: Optional[Axis] = None,
-        *,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-    ) -> CoordinateSpace: ...
-    def axes_3d(
-        self,
-        x: Axis,
-        y: Axis,
-        z: Axis,
-        *,
-        size: tuple[float, float, float] = (10.0, 8.0, 6.0),
-        grid: bool = True,
-    ) -> CoordinateSpace3D: ...
+    def number_line(self, axis: Axis, *, length: Optional[float] = None) -> NumberLine:
+        """Create a standalone typed number line using the axis scale and formatting."""
+        ...
     @property
     def canvas(self) -> Canvas:
         """Read the canvas value from this Scene.

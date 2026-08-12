@@ -808,6 +808,9 @@ pub fn build_3d_meshes_system(
             .colors
             .as_ref()
             .is_some_and(|colors| colors.len() == mesh.count_vertices());
+        let has_transparent_vertex_colors = data.colors.as_ref().is_some_and(|colors| {
+            colors.len() == mesh.count_vertices() && colors.iter().any(|color| color[3] < 0.999)
+        });
         if let Some(colors) = &data.colors
             && colors.len() == mesh.count_vertices()
         {
@@ -836,7 +839,7 @@ pub fn build_3d_meshes_system(
             bevy_color(source.color)
         };
         let alpha = source_color.alpha();
-        let alpha_mode = if alpha < 0.999 {
+        let alpha_mode = if has_transparent_vertex_colors || alpha < 0.999 {
             bevy::render::alpha::AlphaMode::Blend
         } else {
             bevy::render::alpha::AlphaMode::Opaque
@@ -863,9 +866,10 @@ pub fn build_3d_meshes_system(
             bevy::prelude::Transform::default(),
             bevy::prelude::Visibility::default(),
             Mesh3DMarker,
+            Material3DBaseline { alpha, alpha_mode },
         ));
         if pbr.is_some() {
-            entity_commands.insert((source, Material3DBaseline { alpha, alpha_mode }));
+            entity_commands.insert(source);
         }
     }
 
@@ -887,6 +891,9 @@ pub fn build_3d_meshes_system(
         // Per-vertex colors (colormap) — if present, use vertex colors instead of uniform material tint.
         // StandardMaterial will multiply base_color * vertex_color, so we set base to WHITE.
         let has_vertex_colors = data.colors.as_ref().is_some_and(|c| !c.is_empty());
+        let has_transparent_vertex_colors = data.colors.as_ref().is_some_and(|colors| {
+            colors.len() == mesh.count_vertices() && colors.iter().any(|color| color[3] < 0.999)
+        });
         if let Some(cols) = &data.colors
             && cols.len() == mesh.count_vertices()
         {
@@ -894,18 +901,27 @@ pub fn build_3d_meshes_system(
         }
         let mesh_handle = meshes.add(mesh);
         let (base_color, alpha_mode) = if has_vertex_colors {
-            // Vertex colors carry the gradient; keep base white and enable alpha blending for transparency.
+            // Vertex colors carry the gradient; keep base white and blend only
+            // when at least one authored vertex is actually transparent.
             (
                 bevy::color::Color::WHITE,
-                bevy::render::alpha::AlphaMode::Blend,
+                if has_transparent_vertex_colors {
+                    bevy::render::alpha::AlphaMode::Blend
+                } else {
+                    bevy::render::alpha::AlphaMode::Opaque
+                },
             )
         } else {
             let rgba = data.color.to_rgba8();
-            (
-                bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a),
-                bevy::render::alpha::AlphaMode::Opaque,
-            )
+            let color = bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
+            let mode = if color.alpha() < 0.999 {
+                bevy::render::alpha::AlphaMode::Blend
+            } else {
+                bevy::render::alpha::AlphaMode::Opaque
+            };
+            (color, mode)
         };
+        let alpha = base_color.alpha();
         let mat = materials.add(bevy::pbr::StandardMaterial {
             base_color,
             alpha_mode,
@@ -918,6 +934,7 @@ pub fn build_3d_meshes_system(
             bevy::prelude::Transform::default(),
             bevy::prelude::Visibility::default(),
             Mesh3DMarker,
+            Material3DBaseline { alpha, alpha_mode },
         ));
     }
 }
@@ -928,22 +945,30 @@ pub fn sync_material_3d_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     query: Query<
         (
-            &Material3D,
+            Option<&Material3D>,
             &GlobalOpacity,
             &Material3DBaseline,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        Or<(Changed<Material3D>, Changed<GlobalOpacity>)>,
+        Or<(
+            Changed<Material3D>,
+            Changed<GlobalOpacity>,
+            Added<Material3DBaseline>,
+        )>,
     >,
 ) {
     for (source, opacity, baseline, handle) in &query {
         if let Some(material) = materials.get_mut(&handle.0) {
-            let mut color = bevy_color(source.color);
-            color.set_alpha((color.alpha() * opacity.0).clamp(0.0, 1.0));
+            let mut color = source
+                .map(|source| bevy_color(source.color))
+                .unwrap_or(material.base_color);
+            color.set_alpha((baseline.alpha * opacity.0).clamp(0.0, 1.0));
             material.base_color = color;
-            material.emissive = bevy_emissive(*source);
-            material.perceptual_roughness = source.roughness;
-            material.metallic = source.metallic;
+            if let Some(source) = source {
+                material.emissive = bevy_emissive(*source);
+                material.perceptual_roughness = source.roughness;
+                material.metallic = source.metallic;
+            }
             material.alpha_mode = if color.alpha() < 0.999 {
                 bevy::render::alpha::AlphaMode::Blend
             } else {
@@ -1119,6 +1144,52 @@ mod tests {
         assert!((material.perceptual_roughness - 0.3).abs() < 1e-6);
         assert!((material.metallic - 0.8).abs() < 1e-6);
         assert_eq!(*world.get::<Material3D>(entity).unwrap(), source);
+    }
+
+    #[test]
+    fn unlit_mesh_material_tracks_propagated_opacity() {
+        let mut world = World::new();
+        world.insert_resource(Assets::<bevy::mesh::Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        let mut triangle = lit_triangle();
+        triangle.material = None;
+        triangle.colors = Some(vec![[0.2, 0.4, 0.8, 1.0]; 3]);
+        let entity = world
+            .spawn((triangle, GlobalOpacity(0.25), Opacity(1.0)))
+            .id();
+
+        let mut build = Schedule::default();
+        build.add_systems(build_3d_meshes_system);
+        build.run(&mut world);
+        let handle = world
+            .get::<MeshMaterial3d<StandardMaterial>>(entity)
+            .expect("compiled unlit material handle")
+            .0
+            .clone();
+
+        let mut sync = Schedule::default();
+        sync.add_systems(sync_material_3d_system);
+        sync.run(&mut world);
+        let material = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap();
+        assert!(material.unlit);
+        assert!((material.base_color.alpha() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(material.alpha_mode, bevy::render::alpha::AlphaMode::Blend);
+
+        world.entity_mut(entity).insert(GlobalOpacity(1.0));
+        sync.run(&mut world);
+        let material = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap();
+        assert!((material.base_color.alpha() - 1.0).abs() < f32::EPSILON);
+        assert_eq!(
+            material.alpha_mode,
+            bevy::render::alpha::AlphaMode::Opaque,
+            "opaque vertex colors restore their authored opaque mode",
+        );
     }
 
     #[test]

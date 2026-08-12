@@ -24,7 +24,7 @@ from gaanim import Axis, Scene, Color, WHITE, GOLD, CYAN
 # ---------------------------------------------------------------------------
 scene = Scene(1920, 1080, background=Color(10, 10, 14))
 
-axes = scene.axes_3d(
+axes = scene.cartesian_3d(
     Axis.linear(-30, 30).ticks(10).label("x").style(color=WHITE),
     Axis.linear(-30, 30).ticks(10).label("y").style(color=WHITE),
     Axis.linear(0, 50).ticks(10).label("z").style(color=WHITE),
