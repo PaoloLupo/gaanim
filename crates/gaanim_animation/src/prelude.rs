@@ -5,6 +5,9 @@ pub use crate::signals::{
 };
 pub use crate::tween::{AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState};
 pub use crate::updaters::{
-    PlaybackState, TracedPath, TrackingEndpoint, TrackingLine, Updater, advance_x_updater,
-    bob_updater, follow_updater, orbit_updater, pulse_updater, rotate_updater,
+    AngleArrowheads, AngleLabelPlacement, AngleSweep, EndpointAngle, EndpointFollow,
+    FollowOffsetSpace, PlaybackState, RotationBinding, RotationTranslationBinding, TracedPath,
+    TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
+    TrackingVectorHead, Updater, advance_x_updater, bob_updater, follow_updater, orbit_updater,
+    pulse_updater, rotate_updater,
 };

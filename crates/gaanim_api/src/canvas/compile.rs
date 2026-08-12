@@ -23,7 +23,7 @@ use crate::builder::{
     EquationTransitionMode, MobjectRef, MobjectState, MobjectStateMap, SceneBuilder,
 };
 use crate::canvas::canvas_impl::Canvas;
-use crate::canvas::ops::{CanvasEndpoint, FragmentRevealStyle, Op, Segment};
+use crate::canvas::ops::{CanvasEndpoint, CanvasRay, FragmentRevealStyle, Op, Segment};
 use crate::canvas::types::{
     AxesConfig, LayoutOp, LayoutTreeSnapshot, LayoutWithin, ObjectSpec, SpawnKind,
 };
@@ -34,10 +34,100 @@ use gaanim_text::prelude::{
 };
 
 use gaanim_animation::{
-    CurvatureOnCurve, DimensionLabelPlacement, EndpointDistance, NormalOnCurve, PointOnCurve,
-    PositionBinding, TangentOnCurve, TracedPath, TrackingEndpoint, TrackingLine, Updater,
+    AngleLabelPlacement, CurvatureOnCurve, DimensionLabelPlacement, EndpointAngle,
+    EndpointDistance, EndpointFollow, NormalOnCurve, PointOnCurve, PositionBinding,
+    RotationBinding, RotationTranslationBinding, TangentOnCurve, TracedPath, TrackingAngle,
+    TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
+    TrackingVectorHead, Updater,
 };
 use gaanim_math::{RateFunc, SpatialTransform};
+
+fn compile_tracking_scalar(
+    expression: &gaanim_expr::Expr,
+    id_map: &HashMap<ObjectId, ObjectId>,
+    states: &MobjectStateMap,
+) -> TrackingScalar {
+    let parameters = expression
+        .parameter_ids()
+        .into_iter()
+        .filter_map(|id| {
+            id_map
+                .get(&id)
+                .and_then(|runtime| states.get(*runtime))
+                .map(|state| (id, state.entity))
+        })
+        .collect();
+    TrackingScalar {
+        expression: expression.clone(),
+        parameters,
+    }
+}
+
+fn compile_tracking_endpoint(
+    endpoint: &CanvasEndpoint,
+    id_map: &HashMap<ObjectId, ObjectId>,
+    states: &MobjectStateMap,
+) -> TrackingEndpoint {
+    match endpoint {
+        CanvasEndpoint::Static(position) => TrackingEndpoint::Static(*position),
+        CanvasEndpoint::Entity(id) => id_map
+            .get(id)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::Entity(state.entity))
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+        CanvasEndpoint::Anchor(anchor) => id_map
+            .get(&anchor.object)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::EntityAnchor {
+                entity: state.entity,
+                normalized: anchor.normalized,
+                offset: anchor.offset,
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+        CanvasEndpoint::Expression { x, y } => TrackingEndpoint::Expression {
+            x: compile_tracking_scalar(x, id_map, states),
+            y: compile_tracking_scalar(y, id_map, states),
+        },
+        CanvasEndpoint::Offset { origin, dx, dy } => TrackingEndpoint::Offset {
+            origin: Box::new(compile_tracking_endpoint(origin, id_map, states)),
+            dx: compile_tracking_scalar(dx, id_map, states),
+            dy: compile_tracking_scalar(dy, id_map, states),
+        },
+        CanvasEndpoint::Between {
+            from,
+            to,
+            alpha,
+            offset,
+        } => TrackingEndpoint::Between {
+            from: Box::new(compile_tracking_endpoint(from, id_map, states)),
+            to: Box::new(compile_tracking_endpoint(to, id_map, states)),
+            alpha: *alpha,
+            offset: *offset,
+        },
+        CanvasEndpoint::Polar {
+            origin,
+            radius,
+            angle,
+        } => TrackingEndpoint::Polar {
+            origin: Box::new(compile_tracking_endpoint(origin, id_map, states)),
+            radius: compile_tracking_scalar(radius, id_map, states),
+            angle: compile_tracking_scalar(angle, id_map, states),
+        },
+    }
+}
+
+fn compile_tracking_ray(
+    ray: &CanvasRay,
+    id_map: &HashMap<ObjectId, ObjectId>,
+    states: &MobjectStateMap,
+) -> TrackingRay {
+    match ray {
+        CanvasRay::Direction(direction) => TrackingRay::Direction(*direction),
+        CanvasRay::Endpoint(endpoint) => TrackingRay::Endpoint(Box::new(
+            compile_tracking_endpoint(endpoint, id_map, states),
+        )),
+    }
+}
 
 #[derive(Clone)]
 struct CompiledTextMeasure {
@@ -3631,36 +3721,38 @@ impl Canvas {
                     }
                 }
 
+                Op::AttachEndpointFollow {
+                    target,
+                    endpoint,
+                    offset,
+                    offset_space,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_state) = builder.states.get(target_id)
+                    {
+                        builder
+                            .commands
+                            .entity(target_state.entity)
+                            .insert(EndpointFollow {
+                                endpoint: compile_tracking_endpoint(
+                                    endpoint,
+                                    &id_map,
+                                    &builder.states,
+                                ),
+                                offset: *offset,
+                                offset_space: *offset_space,
+                            });
+                    }
+                }
+
                 Op::AttachTrackingLine { target, from, to } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
-                            match ep {
-                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
-                                CanvasEndpoint::Entity(oid) => {
-                                    if let Some(rid) = id_map.get(oid).copied() {
-                                        if let Some(s) = builder.states.get(rid) {
-                                            TrackingEndpoint::Entity(s.entity)
-                                        } else {
-                                            TrackingEndpoint::Static(DVec3::ZERO)
-                                        }
-                                    } else {
-                                        TrackingEndpoint::Static(DVec3::ZERO)
-                                    }
-                                }
-                                CanvasEndpoint::Anchor(anchor) => id_map
-                                    .get(&anchor.object)
-                                    .and_then(|rid| builder.states.get(*rid))
-                                    .map(|state| TrackingEndpoint::EntityAnchor {
-                                        entity: state.entity,
-                                        normalized: anchor.normalized,
-                                        offset: anchor.offset,
-                                    })
-                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                            }
-                        };
-                        let line = TrackingLine::new(resolve_endpoint(from), resolve_endpoint(to));
+                        let line = TrackingLine::new(
+                            compile_tracking_endpoint(from, &id_map, &builder.states),
+                            compile_tracking_endpoint(to, &id_map, &builder.states),
+                        );
                         builder.commands.entity(st.entity).insert(line);
                     }
                 }
@@ -3678,27 +3770,8 @@ impl Canvas {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
-                            match ep {
-                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
-                                CanvasEndpoint::Entity(oid) => id_map
-                                    .get(oid)
-                                    .and_then(|rid| builder.states.get(*rid))
-                                    .map(|state| TrackingEndpoint::Entity(state.entity))
-                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                                CanvasEndpoint::Anchor(anchor) => id_map
-                                    .get(&anchor.object)
-                                    .and_then(|rid| builder.states.get(*rid))
-                                    .map(|state| TrackingEndpoint::EntityAnchor {
-                                        entity: state.entity,
-                                        normalized: anchor.normalized,
-                                        offset: anchor.offset,
-                                    })
-                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                            }
-                        };
-                        let from = resolve_endpoint(from);
-                        let to = resolve_endpoint(to);
+                        let from = compile_tracking_endpoint(from, &id_map, &builder.states);
+                        let to = compile_tracking_endpoint(to, &id_map, &builder.states);
                         let coils = *coils;
                         let amplitude = *amplitude;
                         let crossing = *crossing;
@@ -3746,27 +3819,8 @@ impl Canvas {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
-                            match ep {
-                                CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
-                                CanvasEndpoint::Entity(oid) => id_map
-                                    .get(oid)
-                                    .and_then(|rid| builder.states.get(*rid))
-                                    .map(|state| TrackingEndpoint::Entity(state.entity))
-                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                                CanvasEndpoint::Anchor(anchor) => id_map
-                                    .get(&anchor.object)
-                                    .and_then(|rid| builder.states.get(*rid))
-                                    .map(|state| TrackingEndpoint::EntityAnchor {
-                                        entity: state.entity,
-                                        normalized: anchor.normalized,
-                                        offset: anchor.offset,
-                                    })
-                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                            }
-                        };
-                        let from = resolve_endpoint(from);
-                        let to = resolve_endpoint(to);
+                        let from = compile_tracking_endpoint(from, &id_map, &builder.states);
+                        let to = compile_tracking_endpoint(to, &id_map, &builder.states);
                         let offset = *offset;
                         let target_entity = st.entity;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
@@ -3801,31 +3855,12 @@ impl Canvas {
                     to,
                     scale,
                 } => {
-                    let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
-                        match ep {
-                            CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
-                            CanvasEndpoint::Entity(oid) => id_map
-                                .get(oid)
-                                .and_then(|rid| builder.states.get(*rid))
-                                .map(|state| TrackingEndpoint::Entity(state.entity))
-                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                            CanvasEndpoint::Anchor(anchor) => id_map
-                                .get(&anchor.object)
-                                .and_then(|rid| builder.states.get(*rid))
-                                .map(|state| TrackingEndpoint::EntityAnchor {
-                                    entity: state.entity,
-                                    normalized: anchor.normalized,
-                                    offset: anchor.offset,
-                                })
-                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                        }
-                    };
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
                         builder.commands.entity(st.entity).insert(EndpointDistance {
-                            from: resolve_endpoint(from),
-                            to: resolve_endpoint(to),
+                            from: compile_tracking_endpoint(from, &id_map, &builder.states),
+                            to: compile_tracking_endpoint(to, &id_map, &builder.states),
                             scale: *scale,
                         });
                     }
@@ -3840,25 +3875,6 @@ impl Canvas {
                     gap,
                     orientation,
                 } => {
-                    let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
-                        match ep {
-                            CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
-                            CanvasEndpoint::Entity(oid) => id_map
-                                .get(oid)
-                                .and_then(|rid| builder.states.get(*rid))
-                                .map(|state| TrackingEndpoint::Entity(state.entity))
-                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                            CanvasEndpoint::Anchor(anchor) => id_map
-                                .get(&anchor.object)
-                                .and_then(|rid| builder.states.get(*rid))
-                                .map(|state| TrackingEndpoint::EntityAnchor {
-                                    entity: state.entity,
-                                    normalized: anchor.normalized,
-                                    offset: anchor.offset,
-                                })
-                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-                        }
-                    };
                     if let (Some(target_id), Some(label_id)) =
                         (id_map.get(target).copied(), id_map.get(label).copied())
                         && let (Some(target_state), Some(label_state)) =
@@ -3867,11 +3883,172 @@ impl Canvas {
                         builder.commands.entity(target_state.entity).insert(
                             DimensionLabelPlacement {
                                 label: label_state.entity,
-                                from: resolve_endpoint(from),
-                                to: resolve_endpoint(to),
+                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
                                 offset: *offset,
                                 gap: *gap,
                                 orientation: *orientation,
+                            },
+                        );
+                    }
+                }
+
+                Op::AttachTrackingAngle {
+                    arc,
+                    arrows,
+                    extensions,
+                    vertex,
+                    from,
+                    to,
+                    radius,
+                    sweep,
+                    arrowheads,
+                } => {
+                    let vertex = compile_tracking_endpoint(vertex, &id_map, &builder.states);
+                    let from = compile_tracking_ray(from, &id_map, &builder.states);
+                    let to = compile_tracking_ray(to, &id_map, &builder.states);
+                    for (target, part) in [
+                        (arc, TrackingAnglePart::Arc),
+                        (arrows, TrackingAnglePart::Arrows),
+                        (extensions, TrackingAnglePart::Extensions),
+                    ] {
+                        if let Some(runtime) = id_map.get(target).copied()
+                            && let Some(state) = builder.states.get(runtime)
+                        {
+                            builder.commands.entity(state.entity).insert(TrackingAngle {
+                                vertex: vertex.clone(),
+                                from: from.clone(),
+                                to: to.clone(),
+                                radius: *radius,
+                                sweep: *sweep,
+                                arrowheads: *arrowheads,
+                                part,
+                            });
+                        }
+                    }
+                }
+
+                Op::AttachEndpointAngle {
+                    target,
+                    vertex,
+                    from,
+                    to,
+                    sweep,
+                    scale,
+                } => {
+                    if let Some(runtime) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(runtime)
+                    {
+                        builder.commands.entity(state.entity).insert(EndpointAngle {
+                            vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
+                            from: compile_tracking_ray(from, &id_map, &builder.states),
+                            to: compile_tracking_ray(to, &id_map, &builder.states),
+                            sweep: *sweep,
+                            scale: *scale,
+                        });
+                    }
+                }
+
+                Op::AttachAngleLabelPlacement {
+                    target,
+                    label,
+                    vertex,
+                    from,
+                    to,
+                    radius,
+                    gap,
+                    sweep,
+                    orientation,
+                } => {
+                    if let (Some(target_runtime), Some(label_runtime)) =
+                        (id_map.get(target).copied(), id_map.get(label).copied())
+                        && let (Some(target_state), Some(label_state)) = (
+                            builder.states.get(target_runtime),
+                            builder.states.get(label_runtime),
+                        )
+                    {
+                        builder
+                            .commands
+                            .entity(target_state.entity)
+                            .insert(AngleLabelPlacement {
+                                label: label_state.entity,
+                                vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
+                                from: compile_tracking_ray(from, &id_map, &builder.states),
+                                to: compile_tracking_ray(to, &id_map, &builder.states),
+                                radius: *radius,
+                                gap: *gap,
+                                sweep: *sweep,
+                                orientation: *orientation,
+                            });
+                    }
+                }
+
+                Op::AttachTrackingVectorHead {
+                    target,
+                    from,
+                    to,
+                    length,
+                    width,
+                } => {
+                    if let Some(runtime) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(runtime)
+                    {
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert(TrackingVectorHead {
+                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                                length: *length,
+                                width: *width,
+                            });
+                    }
+                }
+
+                Op::AttachRotationBinding {
+                    target,
+                    source,
+                    ratio,
+                    phase,
+                } => {
+                    if let (Some(target_runtime), Some(source_runtime)) =
+                        (id_map.get(target).copied(), id_map.get(source).copied())
+                        && let (Some(target_state), Some(source_state)) = (
+                            builder.states.get(target_runtime),
+                            builder.states.get(source_runtime),
+                        )
+                    {
+                        builder
+                            .commands
+                            .entity(target_state.entity)
+                            .insert(RotationBinding {
+                                source: source_state.entity,
+                                ratio: *ratio,
+                                phase: *phase,
+                            });
+                    }
+                }
+
+                Op::AttachRotationTranslationBinding {
+                    target,
+                    source,
+                    axis,
+                    scale,
+                } => {
+                    if let (Some(target_runtime), Some(source_runtime)) =
+                        (id_map.get(target).copied(), id_map.get(source).copied())
+                        && let (Some(target_state), Some(source_state)) = (
+                            builder.states.get(target_runtime),
+                            builder.states.get(source_runtime),
+                        )
+                    {
+                        builder.commands.entity(target_state.entity).insert(
+                            RotationTranslationBinding {
+                                source: source_state.entity,
+                                axis: *axis,
+                                scale: *scale,
+                                base_position: None,
+                                base_angle: None,
                             },
                         );
                     }

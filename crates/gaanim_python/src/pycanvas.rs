@@ -8,9 +8,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
-    Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
-    CurveElement, DimensionOptions, ImageCrop, ImageFit, ImageOptions, LabelMode,
-    PresentationBrand, SegmentHandle, ThemeFont,
+    AngleDimensionOptions, Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint,
+    CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionOptions, ImageCrop, ImageFit,
+    ImageOptions, LabelMode, PresentationBrand, SegmentHandle, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -28,7 +28,11 @@ use crate::pylayout::{
 use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
-use crate::visualization::{PyParameter, PyVariable};
+use crate::visualization::{extract_expr, PyParameter, PyVariable};
+
+#[pyclass(name = "PointRef", module = "gaanim_core", frozen, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyPointRef(pub gaanim_api::canvas::PointRef);
 
 fn reactive_scalar(value: Bound<'_, PyAny>) -> PyResult<(gaanim_api::canvas::DrawableHandle, f64)> {
     if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
@@ -55,6 +59,156 @@ pub struct PyDimension {
     label: Option<PyDrawable>,
     number: Option<PyDrawable>,
     unit: Option<PyDrawable>,
+}
+
+#[pyclass(name = "AngleDimension", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyAngleDimension {
+    arc: PyDrawable,
+    arrows: PyDrawable,
+    extensions: PyDrawable,
+    label: Option<PyDrawable>,
+    number: Option<PyDrawable>,
+    unit: Option<PyDrawable>,
+}
+
+impl PyAngleDimension {
+    fn initializer(handle: gaanim_api::canvas::AngleDimensionHandle) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.drawable)).add_subclass(Self {
+            arc: PyDrawable(handle.arc),
+            arrows: PyDrawable(handle.arrows),
+            extensions: PyDrawable(handle.extensions),
+            label: handle.label.map(PyDrawable),
+            number: handle.number.map(PyDrawable),
+            unit: handle.unit.map(PyDrawable),
+        })
+    }
+}
+
+#[pymethods]
+impl PyAngleDimension {
+    #[getter]
+    fn arc(&self) -> PyDrawable {
+        self.arc.clone()
+    }
+    #[getter]
+    fn arrows(&self) -> PyDrawable {
+        self.arrows.clone()
+    }
+    #[getter]
+    fn extensions(&self) -> PyDrawable {
+        self.extensions.clone()
+    }
+    #[getter]
+    fn label(&self) -> Option<PyDrawable> {
+        self.label.clone()
+    }
+    #[getter]
+    fn number(&self) -> Option<PyDrawable> {
+        self.number.clone()
+    }
+    #[getter]
+    fn unit(&self) -> Option<PyDrawable> {
+        self.unit.clone()
+    }
+}
+
+#[pyclass(name = "Support", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PySupport {
+    joint: PyDrawable,
+    body: PyDrawable,
+    ground: PyDrawable,
+    rollers: PyDrawable,
+    guides: PyDrawable,
+    hatching: PyDrawable,
+}
+
+#[pyclass(name = "ForceVector", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyForceVector {
+    shaft: PyDrawable,
+    head: PyDrawable,
+    label: Option<PyDrawable>,
+    number: Option<PyDrawable>,
+    unit: Option<PyDrawable>,
+}
+
+impl PyForceVector {
+    fn initializer(handle: gaanim_api::canvas::ForceVectorHandle) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.drawable)).add_subclass(Self {
+            shaft: PyDrawable(handle.shaft),
+            head: PyDrawable(handle.head),
+            label: handle.label.map(PyDrawable),
+            number: handle.number.map(PyDrawable),
+            unit: handle.unit.map(PyDrawable),
+        })
+    }
+}
+
+#[pymethods]
+impl PyForceVector {
+    #[getter]
+    fn shaft(&self) -> PyDrawable {
+        self.shaft.clone()
+    }
+    #[getter]
+    fn head(&self) -> PyDrawable {
+        self.head.clone()
+    }
+    #[getter]
+    fn label(&self) -> Option<PyDrawable> {
+        self.label.clone()
+    }
+    #[getter]
+    fn number(&self) -> Option<PyDrawable> {
+        self.number.clone()
+    }
+    #[getter]
+    fn unit(&self) -> Option<PyDrawable> {
+        self.unit.clone()
+    }
+}
+
+impl PySupport {
+    fn initializer(handle: gaanim_api::canvas::SupportHandle) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.drawable)).add_subclass(Self {
+            joint: PyDrawable(handle.joint),
+            body: PyDrawable(handle.body),
+            ground: PyDrawable(handle.ground),
+            rollers: PyDrawable(handle.rollers),
+            guides: PyDrawable(handle.guides),
+            hatching: PyDrawable(handle.hatching),
+        })
+    }
+}
+
+#[pymethods]
+impl PySupport {
+    #[getter]
+    fn joint(&self) -> PyDrawable {
+        self.joint.clone()
+    }
+    #[getter]
+    fn body(&self) -> PyDrawable {
+        self.body.clone()
+    }
+    #[getter]
+    fn ground(&self) -> PyDrawable {
+        self.ground.clone()
+    }
+    #[getter]
+    fn rollers(&self) -> PyDrawable {
+        self.rollers.clone()
+    }
+    #[getter]
+    fn guides(&self) -> PyDrawable {
+        self.guides.clone()
+    }
+    #[getter]
+    fn hatching(&self) -> PyDrawable {
+        self.hatching.clone()
+    }
 }
 
 impl PyDimension {
@@ -689,6 +843,29 @@ fn require_duration(duration: f64) -> PyResult<f64> {
             "duration must be finite and non-negative",
         ))
     }
+}
+
+fn validate_force_metrics(
+    visual_scale: f64,
+    label_gap: f64,
+    font_size: Option<f64>,
+) -> PyResult<()> {
+    if !visual_scale.is_finite() || visual_scale <= 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "visual_scale must be finite and greater than zero",
+        ));
+    }
+    if !label_gap.is_finite() || label_gap < 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "label_gap must be finite and non-negative",
+        ));
+    }
+    if font_size.is_some_and(|size| !size.is_finite() || size <= 0.0) {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "font_size must be finite and greater than zero",
+        ));
+    }
+    Ok(())
 }
 
 #[pymethods]
@@ -3924,6 +4101,77 @@ impl PyScene {
         ))
     }
 
+    fn point_ref(&self, x: Bound<'_, PyAny>, y: Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        let point = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .point_ref(extract_expr(x)?, extract_expr(y)?);
+        Ok(PyPointRef(point))
+    }
+
+    fn offset_point(
+        &self,
+        origin: Bound<'_, PyAny>,
+        dx: Bound<'_, PyAny>,
+        dy: Bound<'_, PyAny>,
+    ) -> PyResult<PyPointRef> {
+        let point = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .offset_point(
+                resolve_endpoint(&origin)?,
+                extract_expr(dx)?,
+                extract_expr(dy)?,
+            );
+        Ok(PyPointRef(point))
+    }
+
+    #[pyo3(signature = (from, to, *, alpha=0.5, offset=(0.0, 0.0)))]
+    fn point_between(
+        &self,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        alpha: f64,
+        offset: (f64, f64),
+    ) -> PyResult<PyPointRef> {
+        if !alpha.is_finite() || !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "alpha and offset must be finite",
+            ));
+        }
+        let point = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .point_between(
+                resolve_endpoint(&from)?,
+                resolve_endpoint(&to)?,
+                alpha,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+            );
+        Ok(PyPointRef(point))
+    }
+
+    fn polar_point(
+        &self,
+        origin: Bound<'_, PyAny>,
+        radius: Bound<'_, PyAny>,
+        angle: Bound<'_, PyAny>,
+    ) -> PyResult<PyPointRef> {
+        let point = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .polar_point(
+                resolve_endpoint(&origin)?,
+                extract_expr(radius)?,
+                extract_expr(angle)?,
+            );
+        Ok(PyPointRef(point))
+    }
+
     #[pyo3(signature = (from, to, *, width=8.0))]
     fn bar_between(
         &self,
@@ -4057,22 +4305,528 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Py::new(py, PyDimension::initializer(handle))
     }
+
+    #[pyo3(signature = (vertex, from, to, *, radius=64.0, label=None, show_value=false, format=".1f", unit="deg", sweep="minor", arrowheads="both", label_gap=12.0, label_orientation="upright", show_extensions=true, font_size=None, color=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn angle_between<'py>(
+        &self,
+        py: Python<'py>,
+        vertex: Bound<'_, PyAny>,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        radius: f64,
+        label: Option<String>,
+        show_value: bool,
+        format: &str,
+        unit: &str,
+        sweep: &str,
+        arrowheads: &str,
+        label_gap: f64,
+        label_orientation: &str,
+        show_extensions: bool,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PyAngleDimension>> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "radius must be finite and positive",
+            ));
+        }
+        if !label_gap.is_finite() || label_gap < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "label_gap must be finite and non-negative",
+            ));
+        }
+        if !matches!(unit, "deg" | "rad") {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "unit must be 'deg' or 'rad'",
+            ));
+        }
+        let sweep = match sweep {
+            "minor" => gaanim_animation::AngleSweep::Minor,
+            "major" => gaanim_animation::AngleSweep::Major,
+            "cw" => gaanim_animation::AngleSweep::Clockwise,
+            "ccw" => gaanim_animation::AngleSweep::CounterClockwise,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "sweep must be 'minor', 'major', 'cw', or 'ccw'",
+                ))
+            }
+        };
+        let arrowheads = match arrowheads {
+            "none" => gaanim_animation::AngleArrowheads::None,
+            "start" => gaanim_animation::AngleArrowheads::Start,
+            "end" => gaanim_animation::AngleArrowheads::End,
+            "both" => gaanim_animation::AngleArrowheads::Both,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "arrowheads must be 'none', 'start', 'end', or 'both'",
+                ))
+            }
+        };
+        let orientation = match label_orientation {
+            "upright" => gaanim_animation::DimensionLabelOrientation::Upright,
+            "aligned" => gaanim_animation::DimensionLabelOrientation::Aligned,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "label_orientation must be 'upright' or 'aligned'",
+                ))
+            }
+        };
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .angle_between_with_options(
+                resolve_endpoint(&vertex)?,
+                resolve_ray(&from)?,
+                resolve_ray(&to)?,
+                radius,
+                AngleDimensionOptions {
+                    label,
+                    show_value,
+                    format: format.into(),
+                    unit: unit.into(),
+                    sweep,
+                    arrowheads,
+                    label_gap,
+                    label_orientation: orientation,
+                    show_extensions,
+                    font_size,
+                    color: color.map(|value| value.0),
+                },
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyAngleDimension::initializer(handle))
+    }
+
+    #[pyo3(signature = (from, to, *, label=None, show_value=false, format=".1f", unit=None, scale=1.0, label_gap=14.0, font_size=None, color=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn vector_between(
+        &self,
+        py: Python<'_>,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        label: Option<String>,
+        show_value: bool,
+        format: &str,
+        unit: Option<String>,
+        scale: f64,
+        label_gap: f64,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PyForceVector>> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "scale must be finite and greater than zero",
+            ));
+        }
+        if !label_gap.is_finite() || label_gap < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "label_gap must be finite and non-negative",
+            ));
+        }
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .vector_between_with_parts(
+                resolve_endpoint(&from)?,
+                resolve_endpoint(&to)?,
+                label,
+                show_value,
+                format.into(),
+                unit,
+                scale,
+                label_gap,
+                font_size,
+                color.map(|value| value.0),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyForceVector::initializer(handle))
+    }
+
+    #[pyo3(signature = (origin, magnitude, *, direction=None, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=14.0, font_size=None, color=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn force_at(
+        &self,
+        py: Python<'_>,
+        origin: Bound<'_, PyAny>,
+        magnitude: Bound<'_, PyAny>,
+        direction: Option<Bound<'_, PyAny>>,
+        visual_scale: f64,
+        label: Option<String>,
+        show_value: bool,
+        format: &str,
+        unit: &str,
+        label_gap: f64,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PyForceVector>> {
+        validate_force_metrics(visual_scale, label_gap, font_size)?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .force_at(
+                resolve_endpoint(&origin)?,
+                extract_expr(magnitude)?,
+                direction
+                    .map(extract_expr)
+                    .transpose()?
+                    .unwrap_or_else(|| gaanim_expr::Expr::constant(0.0)),
+                visual_scale,
+                label,
+                show_value,
+                format.into(),
+                Some(unit.to_owned()),
+                label_gap,
+                font_size,
+                color.map(|value| value.0),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyForceVector::initializer(handle))
+    }
+
+    #[pyo3(signature = (origin, fx, fy, *, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=14.0, font_size=None, color=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn force_from_components(
+        &self,
+        py: Python<'_>,
+        origin: Bound<'_, PyAny>,
+        fx: Bound<'_, PyAny>,
+        fy: Bound<'_, PyAny>,
+        visual_scale: f64,
+        label: Option<String>,
+        show_value: bool,
+        format: &str,
+        unit: &str,
+        label_gap: f64,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PyForceVector>> {
+        validate_force_metrics(visual_scale, label_gap, font_size)?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .force_from_components(
+                resolve_endpoint(&origin)?,
+                extract_expr(fx)?,
+                extract_expr(fy)?,
+                visual_scale,
+                label,
+                show_value,
+                format.into(),
+                Some(unit.to_owned()),
+                label_gap,
+                font_size,
+                color.map(|value| value.0),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyForceVector::initializer(handle))
+    }
+
+    #[pyo3(signature = (point, *, kind="pin", direction=None, size=48.0, ground_length=70.0, color=None))]
+    fn support_at<'py>(
+        &self,
+        py: Python<'py>,
+        point: Bound<'_, PyAny>,
+        kind: &str,
+        direction: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        ground_length: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PySupport>> {
+        if !matches!(
+            kind,
+            "fixed" | "pin" | "roller" | "simple" | "guided" | "prismatic" | "cable" | "spring"
+        ) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "unknown support kind",
+            ));
+        }
+        if !size.is_finite() || size <= 0.0 || !ground_length.is_finite() || ground_length <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "size and ground_length must be finite and positive",
+            ));
+        }
+        let direction = direction
+            .map(|value| value.0.to_vector())
+            .unwrap_or(gaanim_core::glam::DVec3::Y);
+        if direction.length_squared() <= 1e-12 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "direction cannot be zero",
+            ));
+        }
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .support_at(
+                resolve_endpoint(&point)?,
+                kind,
+                direction,
+                size,
+                ground_length,
+                color.map(|value| value.0),
+            );
+        Py::new(py, PySupport::initializer(handle))
+    }
+
+    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    fn fixed_support<'py>(
+        &self,
+        py: Python<'py>,
+        point: Bound<'_, PyAny>,
+        direction: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        ground_length: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PySupport>> {
+        self.support_at(py, point, "fixed", direction, size, ground_length, color)
+    }
+
+    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    fn pin_support<'py>(
+        &self,
+        py: Python<'py>,
+        point: Bound<'_, PyAny>,
+        direction: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        ground_length: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PySupport>> {
+        self.support_at(py, point, "pin", direction, size, ground_length, color)
+    }
+
+    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    fn roller_support<'py>(
+        &self,
+        py: Python<'py>,
+        point: Bound<'_, PyAny>,
+        direction: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        ground_length: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PySupport>> {
+        self.support_at(py, point, "roller", direction, size, ground_length, color)
+    }
+
+    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    fn guided_support<'py>(
+        &self,
+        py: Python<'py>,
+        point: Bound<'_, PyAny>,
+        direction: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        ground_length: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PySupport>> {
+        self.support_at(py, point, "guided", direction, size, ground_length, color)
+    }
+
+    #[pyo3(signature = (point, *, kind="revolute", axis=None, size=36.0, color=None))]
+    fn joint_at(
+        &self,
+        point: Bound<'_, PyAny>,
+        kind: &str,
+        axis: Option<crate::pylayout::PyDirection>,
+        size: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if !matches!(kind, "revolute" | "prismatic") {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "kind must be 'revolute' or 'prismatic'",
+            ));
+        }
+        let axis = axis
+            .map(|value| value.0.to_vector())
+            .unwrap_or(gaanim_core::glam::DVec3::X);
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").joint_at(
+                resolve_endpoint(&point)?,
+                kind,
+                axis,
+                size,
+                color.map(|value| value.0),
+            ),
+        ))
+    }
+
+    #[pyo3(signature = (radius, teeth, *, bore_radius=8.0, color=None))]
+    fn gear(
+        &self,
+        radius: f64,
+        teeth: usize,
+        bore_radius: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if !radius.is_finite()
+            || radius <= 0.0
+            || teeth < 4
+            || !bore_radius.is_finite()
+            || bore_radius < 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "radius must be positive, teeth >= 4, and bore_radius non-negative",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").gear(
+                radius,
+                teeth,
+                bore_radius,
+                color.map(|value| value.0),
+            ),
+        ))
+    }
+
+    #[pyo3(signature = (length, teeth, *, color=None))]
+    fn rack(&self, length: f64, teeth: usize, color: Option<PyColor>) -> PyResult<PyDrawable> {
+        if !length.is_finite() || length <= 0.0 || teeth == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "length and teeth must be positive",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").rack(
+                length,
+                teeth,
+                color.map(|value| value.0),
+            ),
+        ))
+    }
+
+    #[pyo3(signature = (samples, *, bore_radius=8.0, color=None))]
+    fn cam_profile(
+        &self,
+        samples: Vec<(f64, f64)>,
+        bore_radius: f64,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if samples.len() < 3
+            || samples
+                .iter()
+                .any(|(angle, radius)| !angle.is_finite() || !radius.is_finite() || *radius <= 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "samples need at least three finite positive radii",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .cam_profile(&samples, bore_radius, color.map(|value| value.0)),
+        ))
+    }
+
+    #[pyo3(signature = (curve, tracker, *, tangent_length=80.0, normal_length=80.0))]
+    fn contact_on_curve(
+        &self,
+        curve: &PyDrawable,
+        tracker: Bound<'_, PyAny>,
+        tangent_length: f64,
+        normal_length: f64,
+    ) -> PyResult<PyDrawable> {
+        let (tracker, _) = reactive_scalar(tracker)?;
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .contact_on_curve(&curve.0, &tracker, tangent_length, normal_length),
+        ))
+    }
+
+    #[pyo3(signature = (center, radius, *, direction="ccw", label=None, color=None))]
+    fn moment_about(
+        &self,
+        center: Bound<'_, PyAny>,
+        radius: f64,
+        direction: &str,
+        label: Option<String>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let ccw = match direction {
+            "ccw" => true,
+            "cw" => false,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "direction must be 'cw' or 'ccw'",
+                ))
+            }
+        };
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .moment_about(
+                resolve_endpoint(&center)?,
+                radius,
+                ccw,
+                label,
+                color.map(|value| value.0),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyDrawable(handle))
+    }
+
+    #[pyo3(signature = (origin, x_direction, *, length=70.0, labels=None, color=None))]
+    fn coordinate_frame_at(
+        &self,
+        origin: Bound<'_, PyAny>,
+        x_direction: crate::pylayout::PyDirection,
+        length: f64,
+        labels: Option<(String, String)>,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .coordinate_frame_at(
+                resolve_endpoint(&origin)?,
+                x_direction.0.to_vector(),
+                length,
+                labels,
+                color.map(|value| value.0),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyDrawable(handle))
+    }
 }
 
 /// Resolve a Python object into a CanvasEndpoint.
 /// Accepts a PyDrawable (entity) or a tuple (x, y) (static position).
-fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
+pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))
     } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {
         Ok(CanvasEndpoint::Anchor(anchor.0))
+    } else if let Ok(point) = obj.extract::<PyRef<PyPointRef>>() {
+        Ok(point.0 .0.clone())
     } else if let Ok(tuple) = obj.extract::<(f64, f64)>() {
         Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
             tuple.0, tuple.1, 0.0,
         )))
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
-            "Endpoint must be a Drawable, AnchorPoint, or a (x, y) tuple",
+            "Endpoint must be a Drawable, AnchorPoint, PointRef, or a (x, y) tuple",
         ))
+    }
+}
+
+fn resolve_ray(obj: &Bound<'_, PyAny>) -> PyResult<CanvasRay> {
+    if let Ok(direction) = obj.extract::<PyRef<crate::pylayout::PyDirection>>() {
+        let vector = direction.0.to_vector();
+        if vector.length_squared() <= 1e-12 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "angle direction cannot be zero",
+            ));
+        }
+        Ok(CanvasRay::Direction(vector))
+    } else {
+        resolve_endpoint(obj).map(CanvasRay::Endpoint)
     }
 }

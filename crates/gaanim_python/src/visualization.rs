@@ -290,7 +290,7 @@ impl PyAxis {
 #[derive(Clone)]
 pub struct PyExpr(pub NativeExpr);
 
-fn extract_expr(value: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
+pub(crate) fn extract_expr(value: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
     if let Ok(expr) = value.extract::<PyRef<'_, PyExpr>>() {
         Ok(expr.0.clone())
     } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
@@ -486,6 +486,101 @@ impl PyParameter {
         })
     }
 
+    /// Drive this scalar directly from a Python callback.
+    #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
+    fn add_updater_fn(
+        &self,
+        callback: Py<PyAny>,
+        reset: Option<Py<PyAny>>,
+        fixed_dt: Option<f64>,
+    ) -> PyResult<Self> {
+        if !Python::attach(|py| callback.bind(py).is_callable()) {
+            return Err(PyValueError::new_err("callback must be callable"));
+        }
+        if let Some(reset) = reset.as_ref() {
+            if !Python::attach(|py| reset.bind(py).is_callable()) {
+                return Err(PyValueError::new_err("reset must be callable"));
+            }
+        }
+        match (reset.is_some(), fixed_dt.is_some()) {
+            (true, false) => {
+                return Err(PyValueError::new_err(
+                    "reset requires fixed_dt for deterministic replay",
+                ));
+            }
+            (false, true) => {
+                return Err(PyValueError::new_err(
+                    "fixed_dt requires reset so seeks and exports can rebuild simulation state",
+                ));
+            }
+            _ => {}
+        }
+
+        let callback_clone = callback.clone();
+        let parameter = self.inner.clone();
+        let updater_fn = move |dt: f64,
+                               elapsed: f64,
+                               entity: gaanim_scene::prelude::Entity,
+                               world: &mut gaanim_scene::prelude::World| {
+            let current = world
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .map(|signal| signal.value)
+                .unwrap_or(0.0);
+            let result = Python::attach(|py| {
+                callback_clone
+                    .bind(py)
+                    .call1((current, dt, elapsed))?
+                    .extract::<f64>()
+            });
+            match result {
+                Ok(value) if value.is_finite() => {
+                    parameter.set_runtime_current(value);
+                    if let Some(mut signal) = world.get_mut::<gaanim_animation::FloatSignal>(entity)
+                    {
+                        signal.value = value;
+                    }
+                    true
+                }
+                Ok(_) => {
+                    Python::attach(|py| {
+                        PyValueError::new_err("callback must return a finite scalar").print(py)
+                    });
+                    false
+                }
+                Err(error) => {
+                    Python::attach(|py| error.print(py));
+                    false
+                }
+            }
+        };
+
+        let updater = if let (Some(reset), Some(fixed_dt)) = (reset, fixed_dt) {
+            let reset_clone = reset.clone();
+            let reset_fn =
+                move |_entity: gaanim_scene::prelude::Entity,
+                      _world: &mut gaanim_scene::prelude::World| {
+                    match Python::attach(|py| reset_clone.bind(py).call0().map(|_| ())) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            Python::attach(|py| error.print(py));
+                            false
+                        }
+                    }
+                };
+            gaanim_animation::Updater::new_simulation(updater_fn, reset_fn, fixed_dt).map_err(
+                |_| PyValueError::new_err("fixed_dt must be finite and greater than zero"),
+            )?
+        } else {
+            gaanim_animation::Updater::new(updater_fn)
+        };
+        self.inner.drawable().add_custom_updater(updater);
+        Ok(self.clone())
+    }
+
+    fn remove_updater(&self) {
+        self.inner.drawable().remove_updater();
+    }
+
     fn __neg__(&self) -> PyExpr {
         PyExpr(-self.inner.expression())
     }
@@ -595,6 +690,21 @@ impl PyVariable {
         Ok(PyCanvasAnim {
             inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
         })
+    }
+
+    #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
+    fn add_updater_fn(
+        &self,
+        callback: Py<PyAny>,
+        reset: Option<Py<PyAny>>,
+        fixed_dt: Option<f64>,
+    ) -> PyResult<()> {
+        self.parameter.add_updater_fn(callback, reset, fixed_dt)?;
+        Ok(())
+    }
+
+    fn remove_updater(&self) {
+        self.parameter.remove_updater();
     }
 
     #[getter]

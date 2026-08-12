@@ -1285,6 +1285,124 @@ scene.export("preview.webp", fps=30)
 ```
 ]
 
+#api-entry(
+  name: "PointRef and Drawable.follow",
+  kind: "reactive geometry",
+  signature: "point_ref(x,y) · point_between(from,to,alpha=.5,offset=(0,0)) · polar_point(origin,radius,angle) · drawable.follow(endpoint,offset=(0,0),offset_space=\"world\")",
+  returns: (type: "PointRef | Drawable", desc: [Non-rendered points and a fluent same-frame follower.]),
+  desc: [`PointRef` is accepted anywhere an `Endpoint` is accepted. Scalars can be `float`, `Parameter`, `Variable`, or traced expressions. `offset_space="local"` rotates and scales offsets with drawable and anchor sources; invalid values raise `ValueError`. `follow_to` remains available for compatibility.],
+)[
+```python
+# show-code: true
+from gaanim import BLACK, GOLD, Scene
+scene = Scene(480, 270)
+theta = scene.parameter(0.2)
+tip = scene.polar_point((0, 0), 85, theta)
+bar = scene.bar_between((0, 0), tip).stroke(BLACK, 7)
+label = scene.text("tip").fill(GOLD).follow(tip, offset=(0, 18))
+scene.play([bar.fade_in(), label.write(), theta.animate_to(2.2).duration(1.4)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Scene.angle_between",
+  kind: "factory",
+  signature: "angle_between(vertex, from, to, *, radius=64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
+  returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
+  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
+)[
+```python
+# show-code: true
+from gaanim import Direction, GOLD, Scene
+scene = Scene(480, 270)
+bob = scene.dot(10).at(80, -90)
+theta = scene.angle_between((0,0), Direction.DOWN, bob, label="$theta$", show_value=True, color=GOLD)
+scene.play([theta.fade_in(), bob.move(90, 35).duration(1.2)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Mechanism annotations",
+  kind: "factories",
+  signature: "vector_between(...) / moment_about(...) / coordinate_frame_at(...) / contact_on_curve(...) ",
+  returns: (type: "Drawable", desc: [Composable reactive technical annotations.]),
+  desc: [`vector_between` provides a solid head and optional formatted magnitude; `moment_about` follows a center; `coordinate_frame_at` builds orthogonal labeled axes; `contact_on_curve` groups the existing point, tangent, and normal helpers.],
+)[
+```python
+# show-code: true
+from gaanim import Direction, GOLD, Scene
+scene = Scene(480, 270)
+force = scene.vector_between((-100, 0), (70, 45), label="$F$", color=GOLD)
+moment = scene.moment_about((120, -40), radius=42, label="$M$")
+frame = scene.coordinate_frame_at((0, -80), Direction.RIGHT, labels=("$e_1$", "$e_2$"))
+scene.play([force.fade_in(), moment.fade_in(), frame.fade_in()])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Reactive force vectors",
+  kind: "factories",
+  signature: "offset_point(origin, dx, dy) / force_at(origin, magnitude, direction=0, visual_scale=1, ...) / force_from_components(origin, fx, fy, visual_scale=1, ...) -> ForceVector",
+  returns: (type: "PointRef | ForceVector", desc: [Reactive relative geometry or a drawable exposing `shaft`, `head`, `label`, `number`, and `unit`.]),
+  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GREEN, Scene
+scene = Scene(480, 270)
+body = scene.circle(24)
+magnitude = scene.parameter(30)
+force = scene.force_at(
+  body.anchor_point(), magnitude, direction=0.5, visual_scale=2,
+  label="$F$", show_value=True, unit="N", color=GREEN,
+)
+scene.play([body.fade_in(), force.fade_in(), magnitude.animate_to(80, duration=1.5)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Mechanical supports and joints",
+  kind: "factories",
+  signature: "support_at(point,kind=\"pin\",direction=UP,size=48,ground_length=70,color=None) -> Support",
+  returns: (type: "Support", desc: [Theme-aware vector symbol exposing `joint`, `body`, `ground`, `rollers`, `guides`, and `hatching`.]),
+  desc: [Kinds are `fixed`, `pin`, `roller`, `simple`, `guided`, `prismatic`, `cable`, and `spring`. Direction runs from base toward connection, so `UP` places ground below and `DOWN` creates ceiling supports. Convenience methods are `fixed_support`, `pin_support`, `roller_support`, and `guided_support`; `joint_at` creates standalone revolute/prismatic joints.],
+)[
+```python
+# show-code: true
+from gaanim import Direction, Scene
+scene = Scene(480, 270)
+pin = scene.pin_support((-100, 0), direction=Direction.UP)
+roller = scene.roller_support((100, 0), direction=Direction.UP)
+scene.play([pin.fade_in(), roller.fade_in()])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Transmission primitives",
+  kind: "factories and bindings",
+  signature: "gear(radius,teeth,bore_radius=8) / rack(length,teeth) / cam_profile(samples,bore_radius=8)",
+  returns: (type: "Drawable", desc: [Editorial, styleable mechanism geometry.]),
+  desc: [Use `bind_rotation_from(source,ratio,phase)` for gear coupling and `bind_translation_from_rotation(source,axis,scale)` for rack motion. These are visual relationships, not a kinematic/contact solver. Gear teeth are schematic rather than manufacturing involutes.],
+)[
+```python
+# show-code: true
+from gaanim import Direction, Scene
+scene = Scene(480, 270)
+driver = scene.gear(55, 20).at(-55, 20)
+driven = scene.gear(33, 12).at(33, 20).bind_rotation_from(driver, ratio=-5/3)
+rack = scene.rack(220, 18).at(0, -65).bind_translation_from_rotation(
+  driver, axis=Direction.RIGHT, scale=55,
+)
+scene.play([driver.fade_in(), driven.fade_in(), rack.fade_in(), driver.rotate(2.0)])
+scene.export("preview.webp", fps=30)
+```
+]
+
 == Drawable Styling & Layout
 
 Reference for the fluent handle returned by every factory. All return `Drawable` for chaining unless noted.

@@ -16,7 +16,8 @@ use gaanim_timeline::transition::TransitionType;
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
-    CanvasEndpoint, CanvasState, LocalSegmentStop, Op, Segment, SharedCanvasState,
+    CanvasEndpoint, CanvasRay, CanvasState, LocalSegmentStop, Op, PointRef, Segment,
+    SharedCanvasState,
 };
 use crate::canvas::types::{
     Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
@@ -36,6 +37,75 @@ pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 pub struct DimensionHandle {
     pub drawable: DrawableHandle,
     pub line: DrawableHandle,
+    pub label: Option<DrawableHandle>,
+    pub number: Option<DrawableHandle>,
+    pub unit: Option<DrawableHandle>,
+}
+
+/// Public pieces of a reactive angular dimension.
+#[derive(Debug, Clone)]
+pub struct AngleDimensionHandle {
+    pub drawable: DrawableHandle,
+    pub arc: DrawableHandle,
+    pub arrows: DrawableHandle,
+    pub extensions: DrawableHandle,
+    pub label: Option<DrawableHandle>,
+    pub number: Option<DrawableHandle>,
+    pub unit: Option<DrawableHandle>,
+}
+
+/// Optional annotation and geometry behavior for a reactive angular dimension.
+#[derive(Debug, Clone)]
+pub struct AngleDimensionOptions {
+    pub label: Option<String>,
+    pub show_value: bool,
+    pub format: String,
+    pub unit: String,
+    pub sweep: gaanim_animation::AngleSweep,
+    pub arrowheads: gaanim_animation::AngleArrowheads,
+    pub label_gap: f64,
+    pub label_orientation: gaanim_animation::DimensionLabelOrientation,
+    pub show_extensions: bool,
+    pub font_size: Option<f64>,
+    pub color: Option<Color>,
+}
+
+impl Default for AngleDimensionOptions {
+    fn default() -> Self {
+        Self {
+            label: None,
+            show_value: false,
+            format: ".1f".to_owned(),
+            unit: "deg".to_owned(),
+            sweep: gaanim_animation::AngleSweep::Minor,
+            arrowheads: gaanim_animation::AngleArrowheads::Both,
+            label_gap: 12.0,
+            label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+            show_extensions: true,
+            font_size: None,
+            color: None,
+        }
+    }
+}
+
+/// Public, independently styleable pieces of a mechanical support symbol.
+#[derive(Debug, Clone)]
+pub struct SupportHandle {
+    pub drawable: DrawableHandle,
+    pub joint: DrawableHandle,
+    pub body: DrawableHandle,
+    pub ground: DrawableHandle,
+    pub rollers: DrawableHandle,
+    pub guides: DrawableHandle,
+    pub hatching: DrawableHandle,
+}
+
+/// Public, independently styleable pieces of a reactive force vector.
+#[derive(Debug, Clone)]
+pub struct ForceVectorHandle {
+    pub drawable: DrawableHandle,
+    pub shaft: DrawableHandle,
+    pub head: DrawableHandle,
     pub label: Option<DrawableHandle>,
     pub number: Option<DrawableHandle>,
     pub unit: Option<DrawableHandle>,
@@ -2156,6 +2226,937 @@ impl Canvas {
             });
     }
 
+    /// Create a non-rendered point from two native scalar expressions.
+    pub fn point_ref(&self, x: Expr, y: Expr) -> PointRef {
+        PointRef(CanvasEndpoint::Expression { x, y })
+    }
+
+    /// Create a non-rendered point displaced from an endpoint by reactive scene-space components.
+    pub fn offset_point(&self, origin: CanvasEndpoint, dx: Expr, dy: Expr) -> PointRef {
+        PointRef(CanvasEndpoint::Offset {
+            origin: Box::new(origin),
+            dx,
+            dy,
+        })
+    }
+
+    /// Create a non-rendered affine point between two reactive endpoints.
+    pub fn point_between(
+        &self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        alpha: f64,
+        offset: DVec3,
+    ) -> PointRef {
+        PointRef(CanvasEndpoint::Between {
+            from: Box::new(from),
+            to: Box::new(to),
+            alpha,
+            offset,
+        })
+    }
+
+    /// Create a non-rendered polar point around another endpoint.
+    pub fn polar_point(&self, origin: CanvasEndpoint, radius: Expr, angle: Expr) -> PointRef {
+        PointRef(CanvasEndpoint::Polar {
+            origin: Box::new(origin),
+            radius,
+            angle,
+        })
+    }
+
+    fn mechanism_colors(&self, requested: Option<Color>) -> (Color, Color) {
+        let background = self
+            .background
+            .or_else(|| self.theme_color("background").ok())
+            .unwrap_or(Color::WHITE);
+        let luminance = |color: Color| {
+            let rgba = color.to_rgba8();
+            0.2126 * f64::from(rgba.r) + 0.7152 * f64::from(rgba.g) + 0.0722 * f64::from(rgba.b)
+        };
+        let automatic = self.theme_color("foreground").unwrap_or(Color::BLACK);
+        let foreground = requested.unwrap_or_else(|| {
+            if (luminance(automatic) - luminance(background)).abs() >= 96.0 {
+                automatic
+            } else if luminance(background) < 128.0 {
+                Color::WHITE
+            } else {
+                Color::BLACK
+            }
+        });
+        (foreground, background)
+    }
+
+    fn annotation_text(
+        &mut self,
+        text: &str,
+        font_size: Option<f64>,
+        color: Option<Color>,
+    ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
+        let mut style = gaanim_text::prelude::TextStyle::default();
+        style.size = font_size;
+        style.color = color;
+        gaanim_text::prelude::TextSpec::new(
+            vec![text.into()],
+            None,
+            style,
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .map(|spec| self.text_spec(spec))
+    }
+
+    /// Build a reactive angular technical dimension.
+    pub fn angle_between_with_options(
+        &mut self,
+        vertex: CanvasEndpoint,
+        from: CanvasRay,
+        to: CanvasRay,
+        radius: f64,
+        options: AngleDimensionOptions,
+    ) -> Result<AngleDimensionHandle, gaanim_text::prelude::TextSpecError> {
+        let (color, _) = self.mechanism_colors(options.color);
+        let arc = self
+            .spawn(SpawnKind::TrackingLine)
+            .no_fill()
+            .stroke(color, 3.0);
+        let arrows = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
+        let mut extensions = self
+            .spawn(SpawnKind::TrackingLine)
+            .no_fill()
+            .stroke(color, 2.0);
+        if !options.show_extensions {
+            extensions = extensions.opacity(0.0);
+        }
+        for part in [&arc, &arrows, &extensions] {
+            part.defer_visibility_until_play();
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingAngle {
+                arc: arc.id,
+                arrows: arrows.id,
+                extensions: extensions.id,
+                vertex: vertex.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                radius,
+                sweep: options.sweep,
+                arrowheads: options.arrowheads,
+            });
+
+        let label = options
+            .label
+            .as_deref()
+            .map(|text| self.annotation_text(text, options.font_size, Some(color)))
+            .transpose()?;
+        let mut number = None;
+        let mut unit = None;
+        let annotation = if options.show_value {
+            let tracker = self.value_tracker(0.0);
+            let scale = if options.unit == "deg" {
+                180.0 / std::f64::consts::PI
+            } else {
+                1.0
+            };
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachEndpointAngle {
+                    target: tracker.id,
+                    vertex: vertex.clone(),
+                    from: from.clone(),
+                    to: to.clone(),
+                    sweep: options.sweep,
+                    scale,
+                });
+            let number_handle = self
+                .expression_readout(
+                    Expr::Parameter(tracker.id),
+                    options.format.clone(),
+                    "",
+                    "",
+                    "—",
+                    options.font_size,
+                )
+                .fill(color);
+            let equals = label
+                .as_ref()
+                .map(|_| self.annotation_text("=", options.font_size, Some(color)))
+                .transpose()?;
+            let unit_text = if options.unit == "deg" { "°" } else { "rad" };
+            let unit_handle = self.annotation_text(unit_text, options.font_size, Some(color))?;
+            let group = self.reactive_readout_group(
+                label.as_ref(),
+                equals.as_ref(),
+                &number_handle,
+                Some(&unit_handle),
+                8.0,
+            );
+            number = Some(number_handle);
+            unit = Some(unit_handle);
+            Some(group)
+        } else {
+            label.clone()
+        };
+
+        if let Some(annotation) = &annotation {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachAngleLabelPlacement {
+                    target: arc.id,
+                    label: annotation.id,
+                    vertex,
+                    from,
+                    to,
+                    radius,
+                    gap: options.label_gap,
+                    sweep: options.sweep,
+                    orientation: options.label_orientation,
+                });
+        }
+        let mut members = vec![&extensions, &arc, &arrows];
+        if let Some(annotation) = &annotation {
+            members.push(annotation);
+        }
+        let drawable = self.group_no_center(&members);
+        Ok(AngleDimensionHandle {
+            drawable,
+            arc,
+            arrows,
+            extensions,
+            label,
+            number,
+            unit,
+        })
+    }
+
+    /// Create a reactive vector with a solid head and optional magnitude readout.
+    #[allow(clippy::too_many_arguments)]
+    pub fn vector_between_with_parts(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        label_text: Option<String>,
+        show_value: bool,
+        format: String,
+        unit_text: Option<String>,
+        scale: f64,
+        label_gap: f64,
+        font_size: Option<f64>,
+        requested_color: Option<Color>,
+    ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
+        let (color, _) = self.mechanism_colors(requested_color);
+        let shaft = self
+            .tracking_line(from.clone(), to.clone())
+            .no_fill()
+            .stroke(color, 4.0);
+        let head = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
+        head.defer_visibility_until_play();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingVectorHead {
+                target: head.id,
+                from: from.clone(),
+                to: to.clone(),
+                length: 16.0,
+                width: 12.0,
+            });
+        let label = label_text
+            .as_deref()
+            .map(|text| self.annotation_text(text, font_size, Some(color)))
+            .transpose()?;
+        let mut number_part = None;
+        let mut unit_part = None;
+        let annotation = if show_value {
+            let tracker = self.value_tracker(0.0);
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachEndpointDistance {
+                    target: tracker.id,
+                    from: from.clone(),
+                    to: to.clone(),
+                    scale,
+                });
+            let number = self
+                .expression_readout(Expr::Parameter(tracker.id), format, "", "", "—", font_size)
+                .fill(color);
+            let equals = label
+                .as_ref()
+                .map(|_| self.annotation_text("=", font_size, Some(color)))
+                .transpose()?;
+            let unit = unit_text
+                .as_deref()
+                .map(|text| self.annotation_text(text, font_size, Some(color)))
+                .transpose()?;
+            let group = self.reactive_readout_group(
+                label.as_ref(),
+                equals.as_ref(),
+                &number,
+                unit.as_ref(),
+                8.0,
+            );
+            number_part = Some(number);
+            unit_part = unit;
+            Some(group)
+        } else {
+            label.clone()
+        };
+        if let Some(annotation) = &annotation {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachDimensionLabelPlacement {
+                    target: shaft.id,
+                    label: annotation.id,
+                    from,
+                    to,
+                    offset: 0.0,
+                    gap: label_gap,
+                    orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+                });
+        }
+        let mut members = vec![&shaft, &head];
+        if let Some(annotation) = &annotation {
+            members.push(annotation);
+        }
+        let drawable = self.group_no_center(&members);
+        Ok(ForceVectorHandle {
+            drawable,
+            shaft,
+            head,
+            label,
+            number: number_part,
+            unit: unit_part,
+        })
+    }
+
+    /// Create a reactive vector with a solid head and optional magnitude readout.
+    #[allow(clippy::too_many_arguments)]
+    pub fn vector_between(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        label_text: Option<String>,
+        show_value: bool,
+        format: String,
+        unit_text: Option<String>,
+        scale: f64,
+        label_gap: f64,
+        font_size: Option<f64>,
+        requested_color: Option<Color>,
+    ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
+        self.vector_between_with_parts(
+            from,
+            to,
+            label_text,
+            show_value,
+            format,
+            unit_text,
+            scale,
+            label_gap,
+            font_size,
+            requested_color,
+        )
+        .map(|force| force.drawable)
+    }
+
+    /// Create a force from a reactive physical magnitude and direction in radians.
+    #[allow(clippy::too_many_arguments)]
+    pub fn force_at(
+        &mut self,
+        origin: CanvasEndpoint,
+        magnitude: Expr,
+        direction: Expr,
+        visual_scale: f64,
+        label_text: Option<String>,
+        show_value: bool,
+        format: String,
+        unit_text: Option<String>,
+        label_gap: f64,
+        font_size: Option<f64>,
+        requested_color: Option<Color>,
+    ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
+        let tip = CanvasEndpoint::Polar {
+            origin: Box::new(origin.clone()),
+            radius: magnitude * visual_scale,
+            angle: direction,
+        };
+        self.vector_between_with_parts(
+            origin,
+            tip,
+            label_text,
+            show_value,
+            format,
+            unit_text,
+            1.0 / visual_scale,
+            label_gap,
+            font_size,
+            requested_color,
+        )
+    }
+
+    /// Create a force from reactive physical X/Y components.
+    #[allow(clippy::too_many_arguments)]
+    pub fn force_from_components(
+        &mut self,
+        origin: CanvasEndpoint,
+        fx: Expr,
+        fy: Expr,
+        visual_scale: f64,
+        label_text: Option<String>,
+        show_value: bool,
+        format: String,
+        unit_text: Option<String>,
+        label_gap: f64,
+        font_size: Option<f64>,
+        requested_color: Option<Color>,
+    ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
+        let tip = CanvasEndpoint::Offset {
+            origin: Box::new(origin.clone()),
+            dx: fx * visual_scale,
+            dy: fy * visual_scale,
+        };
+        self.vector_between_with_parts(
+            origin,
+            tip,
+            label_text,
+            show_value,
+            format,
+            unit_text,
+            1.0 / visual_scale,
+            label_gap,
+            font_size,
+            requested_color,
+        )
+    }
+
+    fn transform_symbol_point(point: DVec2, endpoint: DVec2, direction: DVec2) -> DVec2 {
+        let direction = direction.normalize_or_zero();
+        let tangent = DVec2::new(-direction.y, direction.x);
+        endpoint + tangent * point.x + direction * point.y
+    }
+
+    /// Create a polished, vector-native structural support that follows an endpoint.
+    pub fn support_at(
+        &mut self,
+        point: CanvasEndpoint,
+        kind: &str,
+        direction: DVec3,
+        size: f64,
+        ground_length: f64,
+        requested_color: Option<Color>,
+    ) -> SupportHandle {
+        let (foreground, background) = self.mechanism_colors(requested_color);
+        let s = size;
+        let ground_y = -s * 0.82;
+        let transform =
+            |xy: DVec2| Self::transform_symbol_point(xy, DVec2::ZERO, direction.truncate());
+        let line_from_points = |canvas: &mut Canvas, points: &[DVec2], width: f64, color: Color| {
+            let points = points
+                .iter()
+                .map(|point| {
+                    let p = transform(*point);
+                    (p.x, p.y)
+                })
+                .collect::<Vec<_>>();
+            canvas.polyline(&points).no_fill().stroke(color, width)
+        };
+        let polygon_from_points = |canvas: &mut Canvas, points: &[DVec2]| {
+            let points = points
+                .iter()
+                .map(|point| {
+                    let p = transform(*point);
+                    (p.x, p.y)
+                })
+                .collect::<Vec<_>>();
+            canvas
+                .polygon(points)
+                .fill(background)
+                .stroke(foreground, s * 0.075)
+        };
+
+        // A fixed support is a continuous stem welded into the hatched plate;
+        // drawing a pin at the attachment would communicate the wrong joint.
+        let joint = if kind == "fixed" {
+            self.group_no_center(&[])
+        } else {
+            self.dot(s * 0.13)
+                .fill(background)
+                .stroke(foreground, s * 0.075)
+        };
+        let mut body_parts = Vec::new();
+        let mut roller_parts = Vec::new();
+        let mut guide_parts = Vec::new();
+        let mut hatch_parts = Vec::new();
+        let mut ground_parts = Vec::new();
+
+        match kind {
+            "fixed" => {
+                let plate_y = -s * 0.22;
+                let plate = line_from_points(
+                    self,
+                    &[
+                        DVec2::new(-ground_length * 0.5, plate_y),
+                        DVec2::new(ground_length * 0.5, plate_y),
+                    ],
+                    s * 0.10,
+                    foreground,
+                );
+                ground_parts.push(plate);
+                for x in (-3..=3).map(|index| index as f64 * ground_length / 7.0) {
+                    hatch_parts.push(line_from_points(
+                        self,
+                        &[
+                            DVec2::new(x - s * 0.16, plate_y - s * 0.22),
+                            DVec2::new(x + s * 0.10, plate_y - s * 0.02),
+                        ],
+                        s * 0.045,
+                        foreground,
+                    ));
+                }
+                body_parts.push(line_from_points(
+                    self,
+                    &[DVec2::ZERO, DVec2::new(0.0, plate_y)],
+                    s * 0.10,
+                    foreground,
+                ));
+            }
+            "pin" | "roller" => {
+                body_parts.push(polygon_from_points(
+                    self,
+                    &[
+                        DVec2::ZERO,
+                        DVec2::new(-s * 0.42, ground_y + s * 0.12),
+                        DVec2::new(s * 0.42, ground_y + s * 0.12),
+                    ],
+                ));
+                let roller_shift = if kind == "roller" { s * 0.19 } else { 0.0 };
+                if kind == "roller" {
+                    for x in [-s * 0.24, s * 0.24] {
+                        let center = transform(DVec2::new(x, ground_y));
+                        roller_parts.push(
+                            self.dot(s * 0.11)
+                                .fill(background)
+                                .stroke(foreground, s * 0.055)
+                                .at(center.x, center.y),
+                        );
+                    }
+                }
+                let base_y = ground_y - roller_shift;
+                ground_parts.push(line_from_points(
+                    self,
+                    &[
+                        DVec2::new(-ground_length * 0.5, base_y),
+                        DVec2::new(ground_length * 0.5, base_y),
+                    ],
+                    s * 0.07,
+                    foreground,
+                ));
+                for x in (-3..=3).map(|index| index as f64 * ground_length / 7.0) {
+                    hatch_parts.push(line_from_points(
+                        self,
+                        &[
+                            DVec2::new(x - s * 0.14, base_y - s * 0.20),
+                            DVec2::new(x + s * 0.10, base_y - s * 0.02),
+                        ],
+                        s * 0.04,
+                        foreground,
+                    ));
+                }
+            }
+            "simple" => {
+                roller_parts.push(
+                    self.dot(s * 0.13)
+                        .fill(background)
+                        .stroke(foreground, s * 0.06),
+                );
+                ground_parts.push(line_from_points(
+                    self,
+                    &[
+                        DVec2::new(-ground_length * 0.5, -s * 0.28),
+                        DVec2::new(ground_length * 0.5, -s * 0.28),
+                    ],
+                    s * 0.07,
+                    foreground,
+                ));
+            }
+            "guided" | "prismatic" => {
+                let center = transform(DVec2::new(0.0, -s * 0.34));
+                body_parts.push(
+                    self.rounded_rect(s * 0.72, s * 0.42, s * 0.08)
+                        .fill(background)
+                        .stroke(foreground, s * 0.065)
+                        .at(center.x, center.y)
+                        .rotated(direction.y.atan2(direction.x) - std::f64::consts::FRAC_PI_2),
+                );
+                if kind == "guided" {
+                    for x in [-s * 0.48, s * 0.48] {
+                        guide_parts.push(line_from_points(
+                            self,
+                            &[DVec2::new(x, -s * 0.72), DVec2::new(x, s * 0.04)],
+                            s * 0.055,
+                            foreground,
+                        ));
+                    }
+                } else {
+                    guide_parts.push(line_from_points(
+                        self,
+                        &[
+                            DVec2::new(-s * 0.82, -s * 0.34),
+                            DVec2::new(s * 0.82, -s * 0.34),
+                        ],
+                        s * 0.055,
+                        foreground,
+                    ));
+                }
+            }
+            "cable" => {
+                body_parts.push(line_from_points(
+                    self,
+                    &[DVec2::ZERO, DVec2::new(0.0, -s * 0.88)],
+                    s * 0.075,
+                    foreground,
+                ));
+                let lower = transform(DVec2::new(0.0, -s * 0.88));
+                roller_parts.push(
+                    self.dot(s * 0.10)
+                        .fill(background)
+                        .stroke(foreground, s * 0.055)
+                        .at(lower.x, lower.y),
+                );
+            }
+            "spring" => {
+                let mut points = vec![DVec2::ZERO, DVec2::new(0.0, -s * 0.12)];
+                for index in 0..=10 {
+                    let y = -s * 0.12 + (ground_y + s * 0.24) * index as f64 / 10.0;
+                    let x = if index == 0 || index == 10 {
+                        0.0
+                    } else if index % 2 == 0 {
+                        s * 0.19
+                    } else {
+                        -s * 0.19
+                    };
+                    points.push(DVec2::new(x, y));
+                }
+                points.push(DVec2::new(0.0, ground_y));
+                body_parts.push(line_from_points(self, &points, s * 0.055, foreground));
+                ground_parts.push(line_from_points(
+                    self,
+                    &[
+                        DVec2::new(-ground_length * 0.5, ground_y),
+                        DVec2::new(ground_length * 0.5, ground_y),
+                    ],
+                    s * 0.07,
+                    foreground,
+                ));
+                for x in (-3..=3).map(|index| index as f64 * ground_length / 7.0) {
+                    hatch_parts.push(line_from_points(
+                        self,
+                        &[
+                            DVec2::new(x - s * 0.14, ground_y - s * 0.20),
+                            DVec2::new(x + s * 0.10, ground_y - s * 0.02),
+                        ],
+                        s * 0.04,
+                        foreground,
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        let empty_group = |canvas: &mut Canvas| canvas.group_no_center(&[]);
+        let body_refs = body_parts.iter().collect::<Vec<_>>();
+        let ground_refs = ground_parts.iter().collect::<Vec<_>>();
+        let roller_refs = roller_parts.iter().collect::<Vec<_>>();
+        let guide_refs = guide_parts.iter().collect::<Vec<_>>();
+        let hatch_refs = hatch_parts.iter().collect::<Vec<_>>();
+        let body = if body_refs.is_empty() {
+            empty_group(self)
+        } else {
+            self.group_no_center(&body_refs)
+        };
+        let ground = if ground_refs.is_empty() {
+            empty_group(self)
+        } else {
+            self.group_no_center(&ground_refs)
+        };
+        let rollers = if roller_refs.is_empty() {
+            empty_group(self)
+        } else {
+            self.group_no_center(&roller_refs)
+        };
+        let guides = if guide_refs.is_empty() {
+            empty_group(self)
+        } else {
+            self.group_no_center(&guide_refs)
+        };
+        let hatching = if hatch_refs.is_empty() {
+            empty_group(self)
+        } else {
+            self.group_no_center(&hatch_refs)
+        };
+        let drawable =
+            self.group_no_center(&[&ground, &hatching, &guides, &body, &rollers, &joint]);
+        drawable.follow_endpoint(
+            point,
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        SupportHandle {
+            drawable,
+            joint,
+            body,
+            ground,
+            rollers,
+            guides,
+            hatching,
+        }
+    }
+
+    /// Create a standalone revolute or prismatic joint symbol.
+    pub fn joint_at(
+        &mut self,
+        point: CanvasEndpoint,
+        kind: &str,
+        axis: DVec3,
+        size: f64,
+        requested_color: Option<Color>,
+    ) -> DrawableHandle {
+        let (foreground, background) = self.mechanism_colors(requested_color);
+        let joint = match kind {
+            "prismatic" => self
+                .rounded_rect(size, size * 0.56, size * 0.1)
+                .fill(background)
+                .stroke(foreground, size * 0.08)
+                .rotated(axis.y.atan2(axis.x)),
+            _ => self
+                .dot(size * 0.28)
+                .fill(background)
+                .stroke(foreground, size * 0.10),
+        };
+        joint.follow_endpoint(
+            point,
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        )
+    }
+
+    /// Create an editorial gear silhouette with equally spaced teeth.
+    pub fn gear(
+        &mut self,
+        radius: f64,
+        teeth: usize,
+        bore_radius: f64,
+        requested_color: Option<Color>,
+    ) -> DrawableHandle {
+        let (foreground, background) = self.mechanism_colors(requested_color);
+        let mut points = Vec::with_capacity(teeth * 4);
+        for index in 0..teeth * 4 {
+            let angle = std::f64::consts::TAU * index as f64 / (teeth * 4) as f64;
+            let r = if index % 4 == 1 || index % 4 == 2 {
+                radius * 1.13
+            } else {
+                radius
+            };
+            points.push((r * angle.cos(), r * angle.sin()));
+        }
+        let rim = self
+            .polygon(points)
+            .fill(background)
+            .stroke(foreground, (radius * 0.06).clamp(2.0, 6.0));
+        let bore = self
+            .dot(bore_radius)
+            .fill(background)
+            .stroke(foreground, (radius * 0.05).clamp(2.0, 5.0));
+        self.group_no_center(&[&rim, &bore])
+    }
+
+    /// Create an editorial straight rack with trapezoidal teeth.
+    pub fn rack(
+        &mut self,
+        length: f64,
+        teeth: usize,
+        requested_color: Option<Color>,
+    ) -> DrawableHandle {
+        let (foreground, background) = self.mechanism_colors(requested_color);
+        let pitch = length / teeth as f64;
+        let height = pitch * 1.25;
+        let mut points = vec![(-length * 0.5, -height)];
+        for tooth in 0..teeth {
+            let x = -length * 0.5 + tooth as f64 * pitch;
+            points.extend([
+                (x, 0.0),
+                (x + pitch * 0.25, height * 0.45),
+                (x + pitch * 0.75, height * 0.45),
+                (x + pitch, 0.0),
+            ]);
+        }
+        points.push((length * 0.5, -height));
+        self.polygon(points)
+            .fill(background)
+            .stroke(foreground, (pitch * 0.18).clamp(2.0, 5.0))
+    }
+
+    /// Create a closed radial cam profile from `(angle, radius)` samples.
+    pub fn cam_profile(
+        &mut self,
+        samples: &[(f64, f64)],
+        bore_radius: f64,
+        requested_color: Option<Color>,
+    ) -> DrawableHandle {
+        let (foreground, background) = self.mechanism_colors(requested_color);
+        let points = samples
+            .iter()
+            .map(|(angle, radius)| (radius * angle.cos(), radius * angle.sin()))
+            .collect();
+        let profile = self
+            .polygon(points)
+            .fill(background)
+            .stroke(foreground, 4.0);
+        let bore = self
+            .dot(bore_radius)
+            .fill(background)
+            .stroke(foreground, 3.0);
+        self.group_no_center(&[&profile, &bore])
+    }
+
+    /// Group point, tangent, and normal helpers for a curve contact visualization.
+    pub fn contact_on_curve(
+        &mut self,
+        curve: &DrawableHandle,
+        tracker: &DrawableHandle,
+        tangent_length: f64,
+        normal_length: f64,
+    ) -> DrawableHandle {
+        let point = self.point_on_curve(curve, tracker);
+        let tangent = self.tangent_on_curve(curve, tracker, tangent_length);
+        let normal = self.normal_on_curve(curve, tracker, normal_length);
+        self.group_no_center(&[&tangent, &normal, &point])
+    }
+
+    /// Create a curved moment arrow around a reactive center.
+    pub fn moment_about(
+        &mut self,
+        center: CanvasEndpoint,
+        radius: f64,
+        counter_clockwise: bool,
+        label: Option<String>,
+        requested_color: Option<Color>,
+    ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
+        let (color, _) = self.mechanism_colors(requested_color);
+        let sweep = if counter_clockwise {
+            std::f64::consts::PI * 1.55
+        } else {
+            -std::f64::consts::PI * 1.55
+        };
+        let arrow = self
+            .curved_arrow_arc(0.0, 0.0, radius, -std::f64::consts::FRAC_PI_2, sweep)
+            .fill(color)
+            .no_stroke();
+        arrow.follow_endpoint(
+            center.clone(),
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        let Some(text) = label else {
+            return Ok(arrow);
+        };
+        let annotation = self.annotation_text(&text, None, Some(color))?;
+        annotation.follow_endpoint(
+            center,
+            DVec3::new(0.0, radius + 18.0, 0.0),
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        Ok(self.group_no_center(&[&arrow, &annotation]))
+    }
+
+    /// Create two reactive orthogonal coordinate-frame arrows from an origin.
+    pub fn coordinate_frame_at(
+        &mut self,
+        origin: CanvasEndpoint,
+        x_direction: DVec3,
+        length: f64,
+        labels: Option<(String, String)>,
+        requested_color: Option<Color>,
+    ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
+        let x = x_direction.truncate().normalize_or_zero();
+        let y = DVec2::new(-x.y, x.x);
+        let x_tip = PointRef(CanvasEndpoint::Between {
+            from: Box::new(origin.clone()),
+            to: Box::new(origin.clone()),
+            alpha: 0.0,
+            offset: DVec3::new(x.x * length, x.y * length, 0.0),
+        });
+        let y_tip = PointRef(CanvasEndpoint::Between {
+            from: Box::new(origin.clone()),
+            to: Box::new(origin.clone()),
+            alpha: 0.0,
+            offset: DVec3::new(y.x * length, y.y * length, 0.0),
+        });
+        let x_arrow = self.vector_between(
+            origin.clone(),
+            x_tip.0.clone(),
+            None,
+            false,
+            ".1f".into(),
+            None,
+            1.0,
+            8.0,
+            None,
+            requested_color,
+        )?;
+        let y_arrow = self.vector_between(
+            origin.clone(),
+            y_tip.0.clone(),
+            None,
+            false,
+            ".1f".into(),
+            None,
+            1.0,
+            8.0,
+            None,
+            requested_color,
+        )?;
+        let mut members = vec![&x_arrow, &y_arrow];
+        let mut label_handles = Vec::new();
+        if let Some((x_label, y_label)) = labels {
+            let (color, _) = self.mechanism_colors(requested_color);
+            let lx = self.annotation_text(&x_label, None, Some(color))?;
+            lx.follow_endpoint(
+                x_tip.0,
+                DVec3::new(x.x * 14.0, x.y * 14.0, 0.0),
+                gaanim_animation::FollowOffsetSpace::World,
+            );
+            let ly = self.annotation_text(&y_label, None, Some(color))?;
+            ly.follow_endpoint(
+                y_tip.0,
+                DVec3::new(y.x * 14.0, y.y * 14.0, 0.0),
+                gaanim_animation::FollowOffsetSpace::World,
+            );
+            label_handles.extend([lx, ly]);
+        }
+        for label in &label_handles {
+            members.push(label);
+        }
+        Ok(self.group_no_center(&members))
+    }
+
     /// Spawn a hidden tracking line — a reactive line whose endpoints follow
     /// entities or remain at fixed positions. Updated every frame and revealed
     /// by an entry animation in `Canvas::play`.
@@ -3670,6 +4671,29 @@ mod tests {
     }
 
     #[test]
+    fn spring_support_uses_local_geometry_instead_of_a_tracking_spring() {
+        let mut canvas = Canvas::new(640, 360);
+        let _support = canvas.support_at(
+            CanvasEndpoint::Static(DVec3::new(80.0, 45.0, 0.0)),
+            "spring",
+            DVec3::Y,
+            48.0,
+            70.0,
+            None,
+        );
+
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        assert!(
+            !state
+                .active()
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::AttachTrackingSpring { .. })),
+            "a support spring must remain local to its support so timeline pauses and seeks cannot place it at the scene origin"
+        );
+    }
+
+    #[test]
     fn anchored_bar_and_labeled_dimension_compile_the_reactive_contract() {
         let mut canvas = Canvas::new(640, 360);
         let frame = canvas.rect(180.0, 80.0).at(20.0, 0.0);
@@ -3762,6 +4786,64 @@ mod tests {
         assert!(dimension.label.is_some());
         assert!(dimension.number.is_some());
         assert!(dimension.unit.is_some());
+    }
+
+    #[test]
+    fn component_force_keeps_physical_readout_separate_from_visual_scale() {
+        let mut canvas = Canvas::new(640, 360);
+        let fx = canvas.parameter(3.0).unwrap();
+        let fy = canvas.parameter(4.0).unwrap();
+        let force = canvas
+            .force_from_components(
+                CanvasEndpoint::Static(DVec3::new(20.0, -10.0, 0.0)),
+                fx.expression(),
+                fy.expression(),
+                10.0,
+                Some("$F$".to_owned()),
+                true,
+                ".1f".to_owned(),
+                Some("N".to_owned()),
+                14.0,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        gaanim_animation::endpoint_distance_system(&mut world);
+        gaanim_animation::tracking_line_system(&mut world);
+        gaanim_animation::tracking_vector_head_system(&mut world);
+
+        let (_, distance) = world
+            .query::<(
+                &gaanim_animation::FloatSignal,
+                &gaanim_animation::EndpointDistance,
+            )>()
+            .iter(&world)
+            .next()
+            .expect("force magnitude signal");
+        assert!(matches!(
+            distance.to,
+            gaanim_animation::TrackingEndpoint::Offset { .. }
+        ));
+        let value = world
+            .query::<(
+                &gaanim_animation::FloatSignal,
+                &gaanim_animation::EndpointDistance,
+            )>()
+            .iter(&world)
+            .next()
+            .unwrap()
+            .0
+            .value;
+        assert!((value - 5.0).abs() < 1e-9);
+        assert!(force.number.is_some());
+        assert!(force.unit.is_some());
     }
 
     #[test]

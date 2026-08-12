@@ -899,6 +899,63 @@ impl PyDrawable {
         self.0.follow_to(&source.0, offset.0, offset.1);
     }
 
+    /// Follow any endpoint and return this drawable for fluent chaining.
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    fn follow(
+        &self,
+        source: Bound<'_, PyAny>,
+        offset: (f64, f64),
+        offset_space: &str,
+    ) -> PyResult<Self> {
+        if !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(PyValueError::new_err("offset must be finite"));
+        }
+        let space = match offset_space {
+            "world" => gaanim_animation::FollowOffsetSpace::World,
+            "local" => gaanim_animation::FollowOffsetSpace::Local,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "offset_space must be 'world' or 'local'",
+                ))
+            }
+        };
+        Ok(Self(self.0.follow_endpoint(
+            crate::pycanvas::resolve_endpoint(&source)?,
+            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+            space,
+        )))
+    }
+
+    #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]
+    fn bind_rotation_from(&self, source: &PyDrawable, ratio: f64, phase: f64) -> PyResult<Self> {
+        if !ratio.is_finite() || !phase.is_finite() {
+            return Err(PyValueError::new_err("ratio and phase must be finite"));
+        }
+        Ok(Self(self.0.bind_rotation_from(&source.0, ratio, phase)))
+    }
+
+    #[pyo3(signature = (source, *, axis=None, scale=1.0))]
+    fn bind_translation_from_rotation(
+        &self,
+        source: &PyDrawable,
+        axis: Option<PyDirection>,
+        scale: f64,
+    ) -> PyResult<Self> {
+        if !scale.is_finite() {
+            return Err(PyValueError::new_err("scale must be finite"));
+        }
+        let axis = axis
+            .map(|value| value.0.to_vector())
+            .unwrap_or(gaanim_core::glam::DVec3::X);
+        if axis.length_squared() <= 1e-12 {
+            return Err(PyValueError::new_err("axis cannot be zero"));
+        }
+        Ok(Self(
+            self.0
+                .bind_translation_from_rotation(&source.0, axis, scale),
+        ))
+    }
+
     /// Copy selected source axes each frame. ``axes`` accepts ``"x"``,
     /// ``"y"``, ``"xy"`` (the default), or ``"xyz"``.
     #[pyo3(signature = (source, axes="xy"))]

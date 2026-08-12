@@ -217,6 +217,9 @@ class Anchor:
 class AnchorPoint:
     """Non-rendered endpoint bound to a drawable's local bounds."""
 
+class PointRef:
+    """Non-rendered reactive XY point derived from endpoints or scalar expressions."""
+
 class Direction:
     UP: ClassVar[Direction]
     DOWN: ClassVar[Direction]
@@ -1122,6 +1125,19 @@ class Drawable:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
+    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world") -> Self:
+        """Follow any endpoint in the same frame and return this drawable.
+
+        World offsets remain screen-aligned; local offsets rotate and scale with
+        drawable or anchored sources. Non-finite offsets and invalid modes error.
+        """
+        ...
+    def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
+        """Copy source world rotation using ``source * ratio + phase`` in radians."""
+        ...
+    def bind_translation_from_rotation(self, source: Drawable, *, axis: Optional[Direction] = None, scale: float = 1.0) -> Self:
+        """Translate along an axis by source rotation delta times ``scale``."""
+        ...
     def bind_position_from(self, source: Drawable, axes: str = "xy") -> None:
         """Bind position and defer this visual until its entry animation is played.
 
@@ -1191,7 +1207,51 @@ class Dimension(Drawable):
     @property
     def unit(self) -> Optional[Drawable]: ...
 
-Endpoint: TypeAlias = Drawable | AnchorPoint | tuple[float, float]
+class AngleDimension(Drawable):
+    """Reactive angular dimension with separately styleable visual and text parts."""
+    @property
+    def arc(self) -> Drawable: ...
+    @property
+    def arrows(self) -> Drawable: ...
+    @property
+    def extensions(self) -> Drawable: ...
+    @property
+    def label(self) -> Optional[Drawable]: ...
+    @property
+    def number(self) -> Optional[Drawable]: ...
+    @property
+    def unit(self) -> Optional[Drawable]: ...
+
+class ForceVector(Drawable):
+    """Reactive force/vector with independently styleable shaft, solid head, and readout parts."""
+    @property
+    def shaft(self) -> Drawable: ...
+    @property
+    def head(self) -> Drawable: ...
+    @property
+    def label(self) -> Optional[Drawable]: ...
+    @property
+    def number(self) -> Optional[Drawable]: ...
+    @property
+    def unit(self) -> Optional[Drawable]: ...
+
+class Support(Drawable):
+    """Editorial mechanical support with independently styleable vector parts."""
+    @property
+    def joint(self) -> Drawable: ...
+    @property
+    def body(self) -> Drawable: ...
+    @property
+    def ground(self) -> Drawable: ...
+    @property
+    def rollers(self) -> Drawable: ...
+    @property
+    def guides(self) -> Drawable: ...
+    @property
+    def hatching(self) -> Drawable: ...
+
+Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float]
+AngleRay: TypeAlias = Direction | Endpoint
 
 class Material3D:
     """PBR material whose numeric properties interpolate in linear space."""
@@ -1859,6 +1919,20 @@ class Parameter:
     def current(self) -> float: ...
     def set(self, value: float) -> None: ...
     def animate_to(self, value: float, duration: Optional[float] = None) -> Anim: ...
+    def add_updater_fn(
+        self,
+        callback: Callable[[float, float, float], float],
+        *,
+        reset: Callable[[], None] | None = None,
+        fixed_dt: float | None = None,
+    ) -> Parameter:
+        """Drive the scalar as ``callback(current, dt, elapsed) -> value``.
+
+        Pair ``reset`` with a positive ``fixed_dt`` for deterministic seeking
+        and export. The callback must return a finite number.
+        """
+        ...
+    def remove_updater(self) -> None: ...
     def __neg__(self) -> _Expr: ...
     def __add__(self, other: object) -> _Expr: ...
     def __radd__(self, other: object) -> _Expr: ...
@@ -1889,6 +1963,16 @@ class Variable(Drawable):
     def current(self) -> float: ...
     def set(self, value: float) -> None: ...
     def animate_to(self, value: float, duration: Optional[float] = None) -> Anim: ...
+    def add_updater_fn(
+        self,
+        callback: Callable[[float, float, float], float],
+        *,
+        reset: Callable[[], None] | None = None,
+        fixed_dt: float | None = None,
+    ) -> None:
+        """Drive the visible scalar from a callback; deterministic mode requires reset and fixed_dt."""
+        ...
+    def remove_updater(self) -> None: ...
     @property
     def label(self) -> Optional[Drawable]: ...
     @property
@@ -3050,6 +3134,18 @@ class Scene:
             result = scene.tracking_line(drawable, drawable)
         """
         ...
+    def point_ref(self, x: _TracedScalar, y: _TracedScalar) -> PointRef:
+        """Create a non-rendered point whose coordinates react to scalar expressions."""
+        ...
+    def offset_point(self, origin: Endpoint, dx: _TracedScalar, dy: _TracedScalar) -> PointRef:
+        """Create a point offset from a moving origin by reactive scene-space components."""
+        ...
+    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: float = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
+        """Create an affine point between endpoints plus a world-space offset."""
+        ...
+    def polar_point(self, origin: Endpoint, radius: _TracedScalar, angle: _TracedScalar) -> PointRef:
+        """Create a reactive polar point; angle is measured in radians."""
+        ...
     def bar_between(
         self,
         from_: Endpoint,
@@ -3121,6 +3217,82 @@ class Scene:
                 left, right, 45, label="$W_f$", show_value=True, unit="mm"
             )
         """
+        ...
+    def angle_between(
+        self,
+        vertex: Endpoint,
+        from_: AngleRay,
+        to: AngleRay,
+        *,
+        radius: float = 64.0,
+        label: Optional[str] = None,
+        show_value: bool = False,
+        format: str = ".1f",
+        unit: Literal["deg", "rad"] = "deg",
+        sweep: Literal["minor", "major", "cw", "ccw"] = "minor",
+        arrowheads: Literal["none", "start", "end", "both"] = "both",
+        label_gap: float = 12.0,
+        label_orientation: Literal["upright", "aligned"] = "upright",
+        show_extensions: bool = True,
+        font_size: Optional[float] = None,
+        color: Optional[Color] = None,
+    ) -> AngleDimension:
+        """Create a same-frame angular dimension from fixed directions or endpoints.
+
+        Degenerate rays hide the geometry; invalid modes or metrics raise ``ValueError``.
+        """
+        ...
+    def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+        """Create a reactive vector with accessible shaft, solid head, and readout parts."""
+        ...
+    def force_at(self, origin: Endpoint, magnitude: _TracedScalar, *, direction: _TracedScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+        """Create a reactive force from physical magnitude and direction in radians.
+
+        ``visual_scale`` converts physical units into scene units and must be
+        positive. The optional readout reports the physical magnitude.
+        """
+        ...
+    def force_from_components(self, origin: Endpoint, fx: _TracedScalar, fy: _TracedScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+        """Create a reactive force from physical X/Y components relative to a moving origin."""
+        ...
+    def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+        """Create a theme-aware vector support following ``point``.
+
+        Direction runs from the base toward the connection; sizes are scene units.
+        """
+        ...
+    def fixed_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+        """Create a fixed or ceiling support with plate and consistent hatching."""
+        ...
+    def pin_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+        """Create a triangular pinned support with a circular joint."""
+        ...
+    def roller_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+        """Create a triangular support on two aligned rollers."""
+        ...
+    def guided_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+        """Create a guided carriage support aligned with ``direction``."""
+        ...
+    def joint_at(self, point: Endpoint, *, kind: Literal["revolute", "prismatic"] = "revolute", axis: Optional[Direction] = None, size: float = 36.0, color: Optional[Color] = None) -> Drawable:
+        """Create a standalone reactive revolute or prismatic joint symbol."""
+        ...
+    def gear(self, radius: float, teeth: int, *, bore_radius: float = 8.0, color: Optional[Color] = None) -> Drawable:
+        """Create an editorial gear silhouette; geometry is illustrative, not manufacturing involute."""
+        ...
+    def rack(self, length: float, teeth: int, *, color: Optional[Color] = None) -> Drawable:
+        """Create an editorial straight rack with evenly spaced teeth."""
+        ...
+    def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 8.0, color: Optional[Color] = None) -> Drawable:
+        """Create a closed radial cam from ``(angle_radians, radius)`` samples."""
+        ...
+    def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 80.0, normal_length: float = 80.0) -> Drawable:
+        """Group a reactive contact point, tangent, and normal on a sampled curve."""
+        ...
+    def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[Color] = None) -> Drawable:
+        """Create a curved moment arrow that follows a reactive center."""
+        ...
+    def coordinate_frame_at(self, origin: Endpoint, x_direction: Direction, *, length: float = 70.0, labels: Optional[tuple[str, str]] = None, color: Optional[Color] = None) -> Drawable:
+        """Create a reactive orthogonal 2D coordinate frame at an endpoint."""
         ...
 
 GOLD: Color

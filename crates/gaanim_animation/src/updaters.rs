@@ -1,7 +1,9 @@
 use crate::tween::DeltaTime;
 use bevy::prelude::Component;
-use gaanim_core::glam::{DMat4, DQuat, DVec3};
+use gaanim_core::ObjectId;
+use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::BezPath;
+use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
 use gaanim_scene::{LocalBounds, Path2D, PathSource};
@@ -811,6 +813,157 @@ pub enum TrackingEndpoint {
         normalized: DVec3,
         offset: DVec3,
     },
+    /// Point whose coordinates are evaluated from native scalar expressions.
+    Expression {
+        x: TrackingScalar,
+        y: TrackingScalar,
+    },
+    /// Reactive scene-space displacement from another endpoint.
+    Offset {
+        origin: Box<TrackingEndpoint>,
+        dx: TrackingScalar,
+        dy: TrackingScalar,
+    },
+    /// Affine interpolation between two reactive endpoints.
+    Between {
+        from: Box<TrackingEndpoint>,
+        to: Box<TrackingEndpoint>,
+        alpha: f64,
+        offset: DVec3,
+    },
+    /// Polar point around another reactive endpoint.
+    Polar {
+        origin: Box<TrackingEndpoint>,
+        radius: TrackingScalar,
+        angle: TrackingScalar,
+    },
+}
+
+/// Scalar expression with its construction-time parameter ids resolved to ECS entities.
+#[derive(Debug, Clone)]
+pub struct TrackingScalar {
+    pub expression: Expr,
+    pub parameters: Vec<(ObjectId, Entity)>,
+}
+
+impl TrackingScalar {
+    pub fn evaluate(&self, world: &World) -> Option<f64> {
+        let mut context = EvalContext::new();
+        for (id, entity) in &self.parameters {
+            let signal = world.get::<crate::signals::FloatSignal>(*entity)?;
+            context.set_parameter(*id, signal.value);
+        }
+        self.expression.eval(&context).ok()
+    }
+}
+
+/// A ray used by angular annotations: either a fixed direction or another endpoint.
+#[derive(Debug, Clone)]
+pub enum TrackingRay {
+    Direction(DVec3),
+    Endpoint(Box<TrackingEndpoint>),
+}
+
+/// Whether a following offset is expressed in scene axes or the source endpoint frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowOffsetSpace {
+    World,
+    Local,
+}
+
+/// Keeps a drawable centered on any reactive endpoint.
+#[derive(Component, Debug, Clone)]
+pub struct EndpointFollow {
+    pub endpoint: TrackingEndpoint,
+    pub offset: DVec3,
+    pub offset_space: FollowOffsetSpace,
+}
+
+/// Angular sweep selection used by an angle dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AngleSweep {
+    Minor,
+    Major,
+    Clockwise,
+    CounterClockwise,
+}
+
+/// Solid arrowhead selection for angular annotations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AngleArrowheads {
+    None,
+    Start,
+    End,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackingAnglePart {
+    Arc,
+    Arrows,
+    Extensions,
+}
+
+/// Regenerates one visible part of an angular dimension.
+#[derive(Component, Debug, Clone)]
+pub struct TrackingAngle {
+    pub vertex: TrackingEndpoint,
+    pub from: TrackingRay,
+    pub to: TrackingRay,
+    pub radius: f64,
+    pub sweep: AngleSweep,
+    pub arrowheads: AngleArrowheads,
+    pub part: TrackingAnglePart,
+}
+
+/// Drives a scalar signal from an angular dimension.
+#[derive(Component, Debug, Clone)]
+pub struct EndpointAngle {
+    pub vertex: TrackingEndpoint,
+    pub from: TrackingRay,
+    pub to: TrackingRay,
+    pub sweep: AngleSweep,
+    pub scale: f64,
+}
+
+/// Places an angular annotation on the bisector of its visible sweep.
+#[derive(Component, Debug, Clone)]
+pub struct AngleLabelPlacement {
+    pub label: Entity,
+    pub vertex: TrackingEndpoint,
+    pub from: TrackingRay,
+    pub to: TrackingRay,
+    pub radius: f64,
+    pub gap: f64,
+    pub sweep: AngleSweep,
+    pub orientation: DimensionLabelOrientation,
+}
+
+/// Solid head for a reactive vector annotation.
+#[derive(Component, Debug, Clone)]
+pub struct TrackingVectorHead {
+    pub from: TrackingEndpoint,
+    pub to: TrackingEndpoint,
+    pub length: f64,
+    pub width: f64,
+}
+
+/// Copies a source drawable's world rotation into a target with ratio and phase.
+#[derive(Component, Debug, Clone)]
+pub struct RotationBinding {
+    pub source: Entity,
+    pub ratio: f64,
+    pub phase: f64,
+}
+
+/// Converts a source rotation into target translation along a fixed scene axis.
+#[derive(Component, Debug, Clone)]
+pub struct RotationTranslationBinding {
+    pub source: Entity,
+    pub axis: DVec3,
+    pub scale: f64,
+    pub base_position: Option<DVec3>,
+    pub base_angle: Option<f64>,
 }
 
 /// Keeps a float signal synchronized with the XY distance between two endpoints.
@@ -914,6 +1067,126 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             let half = bounds.size() * 0.5;
             let local = center + half * *normalized + *offset;
             entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(local))
+        }
+        TrackingEndpoint::Expression { x, y } => {
+            Some(DVec3::new(x.evaluate(world)?, y.evaluate(world)?, 0.0))
+        }
+        TrackingEndpoint::Offset { origin, dx, dy } => {
+            let origin = resolve_tracking_endpoint(origin, world)?;
+            Some(origin + DVec3::new(dx.evaluate(world)?, dy.evaluate(world)?, 0.0))
+        }
+        TrackingEndpoint::Between {
+            from,
+            to,
+            alpha,
+            offset,
+        } => {
+            let from = resolve_tracking_endpoint(from, world)?;
+            let to = resolve_tracking_endpoint(to, world)?;
+            Some(from.lerp(to, *alpha) + *offset)
+        }
+        TrackingEndpoint::Polar {
+            origin,
+            radius,
+            angle,
+        } => {
+            let origin = resolve_tracking_endpoint(origin, world)?;
+            let radius = radius.evaluate(world)?;
+            let angle = angle.evaluate(world)?;
+            Some(origin + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0))
+        }
+    }
+}
+
+fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
+    match ep {
+        TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
+            entity_world_matrix(*entity, world).unwrap_or(DMat4::IDENTITY)
+        }
+        TrackingEndpoint::Offset { origin, .. } | TrackingEndpoint::Polar { origin, .. } => {
+            endpoint_basis(origin, world)
+        }
+        _ => DMat4::IDENTITY,
+    }
+}
+
+fn resolve_tracking_ray(ray: &TrackingRay, vertex: DVec3, world: &World) -> Option<DVec3> {
+    let vector = match ray {
+        TrackingRay::Direction(direction) => *direction,
+        TrackingRay::Endpoint(endpoint) => resolve_tracking_endpoint(endpoint, world)? - vertex,
+    };
+    let xy = vector.truncate();
+    (xy.length_squared() > 1e-12).then(|| DVec3::new(xy.x, xy.y, 0.0).normalize())
+}
+
+fn normalized_angle(angle: f64) -> f64 {
+    angle.rem_euclid(std::f64::consts::TAU)
+}
+
+fn selected_angle_sweep(from_angle: f64, to_angle: f64, mode: AngleSweep) -> f64 {
+    let ccw = normalized_angle(to_angle - from_angle);
+    match mode {
+        AngleSweep::CounterClockwise => ccw,
+        AngleSweep::Clockwise => {
+            if ccw <= f64::EPSILON {
+                0.0
+            } else {
+                ccw - std::f64::consts::TAU
+            }
+        }
+        AngleSweep::Minor => {
+            if ccw <= std::f64::consts::PI {
+                ccw
+            } else {
+                ccw - std::f64::consts::TAU
+            }
+        }
+        AngleSweep::Major => {
+            if ccw <= f64::EPSILON {
+                0.0
+            } else if ccw <= std::f64::consts::PI {
+                ccw - std::f64::consts::TAU
+            } else {
+                ccw
+            }
+        }
+    }
+}
+
+fn resolve_angle(
+    vertex: &TrackingEndpoint,
+    from: &TrackingRay,
+    to: &TrackingRay,
+    sweep: AngleSweep,
+    world: &World,
+) -> Option<(DVec3, f64, f64)> {
+    let vertex = resolve_tracking_endpoint(vertex, world)?;
+    let from = resolve_tracking_ray(from, vertex, world)?;
+    let to = resolve_tracking_ray(to, vertex, world)?;
+    let start = from.y.atan2(from.x);
+    let end = to.y.atan2(to.x);
+    Some((vertex, start, selected_angle_sweep(start, end, sweep)))
+}
+
+fn write_path(world: &mut World, entity: Entity, path: BezPath) {
+    let path = Arc::new(path);
+    if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
+        path_comp.0 = path.clone();
+    }
+    if let Some(mut source) = world.get_mut::<PathSource>(entity) {
+        source.0 = path.clone();
+    }
+    if let Some(mut bounds) = world.get_mut::<LocalBounds>(entity) {
+        if path.elements().is_empty() {
+            bounds.0 = gaanim_math::Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
+        } else {
+            let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
+            bounds.0 = gaanim_math::Bounds3D::new_2d(
+                rect.x0 - 12.0,
+                rect.y0 - 12.0,
+                rect.x1 + 12.0,
+                rect.y1 + 12.0,
+            );
         }
     }
 }
@@ -1028,9 +1301,300 @@ pub fn dimension_label_placement_system(world: &mut World) {
     }
 }
 
+/// Follow arbitrary endpoints after authored transforms and custom updaters.
+pub fn endpoint_follow_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &EndpointFollow)>();
+    for (entity, follow) in query.iter(world) {
+        let Some(mut position) = resolve_tracking_endpoint(&follow.endpoint, world) else {
+            continue;
+        };
+        position += match follow.offset_space {
+            FollowOffsetSpace::World => follow.offset,
+            FollowOffsetSpace::Local => {
+                endpoint_basis(&follow.endpoint, world).transform_vector3(follow.offset)
+            }
+        };
+        updates.push((entity, position));
+    }
+    for (entity, world_position) in updates {
+        let local = world
+            .get::<ChildOf>(entity)
+            .map(|relation| relation.parent())
+            .and_then(|parent| entity_world_matrix(parent, world))
+            .filter(|matrix| matrix.determinant().abs() > f64::EPSILON)
+            .map(|matrix| matrix.inverse().transform_point3(world_position))
+            .unwrap_or(world_position);
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            transform.translation = local;
+        }
+    }
+}
+
+/// Regenerate arc, arrowhead, and extension geometry for angular dimensions.
+pub fn tracking_angle_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &TrackingAngle)>();
+    for (entity, angle) in query.iter(world) {
+        let mut path = BezPath::new();
+        let Some((vertex, start, sweep)) =
+            resolve_angle(&angle.vertex, &angle.from, &angle.to, angle.sweep, world)
+        else {
+            updates.push((entity, path));
+            continue;
+        };
+        let local = |point: DVec3| tracking_world_to_local(entity, point, world);
+        let radial = |a: f64, r: f64| vertex + DVec3::new(r * a.cos(), r * a.sin(), 0.0);
+        match angle.part {
+            TrackingAnglePart::Arc => {
+                let segments =
+                    ((sweep.abs() / (std::f64::consts::PI / 36.0)).ceil() as usize).clamp(1, 144);
+                for index in 0..=segments {
+                    let a = start + sweep * index as f64 / segments as f64;
+                    let point = local(radial(a, angle.radius));
+                    if index == 0 {
+                        path.move_to((point.x, point.y));
+                    } else {
+                        path.line_to((point.x, point.y));
+                    }
+                }
+            }
+            TrackingAnglePart::Extensions => {
+                for a in [start, start + sweep] {
+                    let inner = local(radial(a, angle.radius * 0.76));
+                    let outer = local(radial(a, angle.radius * 1.12));
+                    path.move_to((inner.x, inner.y));
+                    path.line_to((outer.x, outer.y));
+                }
+            }
+            TrackingAnglePart::Arrows => {
+                let mut arrow = |at_start: bool| {
+                    let angle_at = if at_start { start } else { start + sweep };
+                    let tip_world = radial(angle_at, angle.radius);
+                    let tangent = DVec2::new(-angle_at.sin(), angle_at.cos())
+                        * if sweep >= 0.0 { 1.0 } else { -1.0 };
+                    let inward = if at_start { tangent } else { -tangent };
+                    let normal = DVec2::new(-inward.y, inward.x);
+                    let tip = local(tip_world);
+                    let base_world = tip_world + DVec3::new(inward.x * 11.0, inward.y * 11.0, 0.0);
+                    let left = local(base_world + DVec3::new(normal.x * 5.5, normal.y * 5.5, 0.0));
+                    let right = local(base_world - DVec3::new(normal.x * 5.5, normal.y * 5.5, 0.0));
+                    path.move_to((tip.x, tip.y));
+                    path.line_to((left.x, left.y));
+                    path.line_to((right.x, right.y));
+                    path.close_path();
+                };
+                if matches!(
+                    angle.arrowheads,
+                    AngleArrowheads::Start | AngleArrowheads::Both
+                ) {
+                    arrow(true);
+                }
+                if matches!(
+                    angle.arrowheads,
+                    AngleArrowheads::End | AngleArrowheads::Both
+                ) {
+                    arrow(false);
+                }
+            }
+        }
+        updates.push((entity, path));
+    }
+    for (entity, path) in updates {
+        write_path(world, entity, path);
+    }
+}
+
+/// Update angle-backed readout signals.
+pub fn endpoint_angle_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &EndpointAngle)>();
+    for (entity, angle) in query.iter(world) {
+        if let Some((_, _, sweep)) =
+            resolve_angle(&angle.vertex, &angle.from, &angle.to, angle.sweep, world)
+        {
+            updates.push((entity, sweep.abs() * angle.scale));
+        }
+    }
+    for (entity, value) in updates {
+        if let Some(mut signal) = world.get_mut::<crate::signals::FloatSignal>(entity) {
+            signal.value = value;
+        }
+    }
+}
+
+/// Place angle annotations on the visible sweep bisector.
+pub fn angle_label_placement_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<&AngleLabelPlacement>();
+    for placement in query.iter(world) {
+        let Some((vertex, start, sweep)) = resolve_angle(
+            &placement.vertex,
+            &placement.from,
+            &placement.to,
+            placement.sweep,
+            world,
+        ) else {
+            continue;
+        };
+        let bisector = start + sweep * 0.5;
+        let position = vertex
+            + DVec3::new(
+                (placement.radius + placement.gap) * bisector.cos(),
+                (placement.radius + placement.gap) * bisector.sin(),
+                0.0,
+            );
+        let mut rotation = match placement.orientation {
+            DimensionLabelOrientation::Upright => 0.0,
+            DimensionLabelOrientation::Aligned => bisector + std::f64::consts::FRAC_PI_2,
+        };
+        if placement.orientation == DimensionLabelOrientation::Aligned && rotation.cos() < 0.0 {
+            rotation += std::f64::consts::PI;
+        }
+        updates.push((placement.label, position, rotation));
+    }
+    for (label, world_position, world_rotation) in updates {
+        let (position, rotation) = if let Some(parent) = world
+            .get::<ChildOf>(label)
+            .map(|relation| relation.parent())
+            .and_then(|parent| entity_world_matrix(parent, world))
+        {
+            let (_, parent_rotation, _) = parent.to_scale_rotation_translation();
+            let (_, _, parent_angle) = parent_rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
+            (
+                parent.inverse().transform_point3(world_position),
+                world_rotation - parent_angle,
+            )
+        } else {
+            (world_position, world_rotation)
+        };
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(label) {
+            transform.translation = position;
+            transform.rotation = DQuat::from_rotation_z(rotation);
+        }
+    }
+}
+
+/// Regenerate solid triangular heads for reactive vectors.
+pub fn tracking_vector_head_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &TrackingVectorHead)>();
+    for (entity, head) in query.iter(world) {
+        let mut path = BezPath::new();
+        let (Some(from), Some(to)) = (
+            resolve_tracking_endpoint(&head.from, world),
+            resolve_tracking_endpoint(&head.to, world),
+        ) else {
+            updates.push((entity, path));
+            continue;
+        };
+        let delta = (to - from).truncate();
+        if delta.length_squared() > 1e-12 {
+            let direction = delta.normalize();
+            let normal = DVec2::new(-direction.y, direction.x);
+            let base = to - DVec3::new(direction.x * head.length, direction.y * head.length, 0.0);
+            let tip = tracking_world_to_local(entity, to, world);
+            let left = tracking_world_to_local(
+                entity,
+                base + DVec3::new(
+                    normal.x * head.width * 0.5,
+                    normal.y * head.width * 0.5,
+                    0.0,
+                ),
+                world,
+            );
+            let right = tracking_world_to_local(
+                entity,
+                base - DVec3::new(
+                    normal.x * head.width * 0.5,
+                    normal.y * head.width * 0.5,
+                    0.0,
+                ),
+                world,
+            );
+            path.move_to((tip.x, tip.y));
+            path.line_to((left.x, left.y));
+            path.line_to((right.x, right.y));
+            path.close_path();
+        }
+        updates.push((entity, path));
+    }
+    for (entity, path) in updates {
+        write_path(world, entity, path);
+    }
+}
+
+fn world_z_angle(entity: Entity, world: &World) -> Option<f64> {
+    let matrix = entity_world_matrix(entity, world)?;
+    Some(matrix.x_axis.y.atan2(matrix.x_axis.x))
+}
+
+/// Apply rotation and rotation-to-translation bindings in the connector phase.
+pub fn mechanism_binding_system(world: &mut World) {
+    let mut rotations = Vec::new();
+    let mut rotation_query = world.query::<(Entity, &RotationBinding)>();
+    for (entity, binding) in rotation_query.iter(world) {
+        if let Some(source_angle) = world_z_angle(binding.source, world) {
+            rotations.push((entity, source_angle * binding.ratio + binding.phase));
+        }
+    }
+    for (entity, world_angle) in rotations {
+        let parent_angle = world
+            .get::<ChildOf>(entity)
+            .map(|relation| relation.parent())
+            .and_then(|parent| world_z_angle(parent, world))
+            .unwrap_or(0.0);
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            transform.rotation = DQuat::from_rotation_z(world_angle - parent_angle);
+        }
+    }
+
+    let mut translations = Vec::new();
+    let mut initialized = Vec::new();
+    let mut query = world.query::<(Entity, &RotationTranslationBinding)>();
+    for (entity, binding) in query.iter(world) {
+        let Some(angle) = world_z_angle(binding.source, world) else {
+            continue;
+        };
+        let Some(position) =
+            entity_world_matrix(entity, world).map(|matrix| matrix.transform_point3(DVec3::ZERO))
+        else {
+            continue;
+        };
+        let base_position = binding.base_position.unwrap_or(position);
+        let base_angle = binding.base_angle.unwrap_or(angle);
+        if binding.base_position.is_none() || binding.base_angle.is_none() {
+            initialized.push((entity, base_position, base_angle));
+        }
+        translations.push((
+            entity,
+            base_position
+                + binding.axis.normalize_or_zero() * ((angle - base_angle) * binding.scale),
+        ));
+    }
+    for (entity, base_position, base_angle) in initialized {
+        if let Some(mut binding) = world.get_mut::<RotationTranslationBinding>(entity) {
+            binding.base_position = Some(base_position);
+            binding.base_angle = Some(base_angle);
+        }
+    }
+    for (entity, world_position) in translations {
+        let local = world
+            .get::<ChildOf>(entity)
+            .map(|relation| relation.parent())
+            .and_then(|parent| entity_world_matrix(parent, world))
+            .map(|matrix| matrix.inverse().transform_point3(world_position))
+            .unwrap_or(world_position);
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            transform.translation = local;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::BuildChildrenTransformExt;
 
     fn spawn_accelerating_simulation(world: &mut World, fixed_dt: f64) -> Entity {
         let velocity = Arc::new(Mutex::new(0.0));
@@ -1294,5 +1858,121 @@ mod tests {
         let transform = world.get::<SpatialTransform>(label).unwrap();
         assert!((transform.translation.y + 25.0).abs() < 1e-9);
         assert!(transform.z_angle().abs() < 1e-9);
+    }
+
+    #[test]
+    fn expression_between_and_polar_endpoints_are_reactive() {
+        let mut world = World::new();
+        let parameter_id = ObjectId::from_raw(42);
+        let parameter = world
+            .spawn(crate::signals::FloatSignal::new(
+                std::f64::consts::FRAC_PI_2,
+            ))
+            .id();
+        let scalar = TrackingScalar {
+            expression: Expr::parameter(parameter_id),
+            parameters: vec![(parameter_id, parameter)],
+        };
+        let polar = TrackingEndpoint::Polar {
+            origin: Box::new(TrackingEndpoint::Static(DVec3::new(10.0, 20.0, 0.0))),
+            radius: TrackingScalar {
+                expression: Expr::constant(5.0),
+                parameters: Vec::new(),
+            },
+            angle: scalar,
+        };
+        let point = resolve_tracking_endpoint(&polar, &world).unwrap();
+        assert!(point.distance(DVec3::new(10.0, 25.0, 0.0)) < 1e-9);
+
+        let midpoint = TrackingEndpoint::Between {
+            from: Box::new(TrackingEndpoint::Static(DVec3::ZERO)),
+            to: Box::new(polar),
+            alpha: 0.5,
+            offset: DVec3::new(1.0, -1.0, 0.0),
+        };
+        let point = resolve_tracking_endpoint(&midpoint, &world).unwrap();
+        assert!(point.distance(DVec3::new(6.0, 11.5, 0.0)) < 1e-9);
+
+        let offset = TrackingEndpoint::Offset {
+            origin: Box::new(TrackingEndpoint::Static(DVec3::new(-2.0, 8.0, 0.0))),
+            dx: TrackingScalar {
+                expression: Expr::constant(4.0),
+                parameters: Vec::new(),
+            },
+            dy: TrackingScalar {
+                expression: Expr::parameter(parameter_id),
+                parameters: vec![(parameter_id, parameter)],
+            },
+        };
+        let point = resolve_tracking_endpoint(&offset, &world).unwrap();
+        assert!(point.distance(DVec3::new(2.0, 8.0 + std::f64::consts::FRAC_PI_2, 0.0,)) < 1e-9);
+    }
+
+    #[test]
+    fn angle_signal_supports_minor_and_major_sweeps() {
+        let mut world = World::new();
+        let minor = world
+            .spawn((
+                crate::signals::FloatSignal::new(0.0),
+                EndpointAngle {
+                    vertex: TrackingEndpoint::Static(DVec3::ZERO),
+                    from: TrackingRay::Direction(DVec3::X),
+                    to: TrackingRay::Direction(DVec3::Y),
+                    sweep: AngleSweep::Minor,
+                    scale: 180.0 / std::f64::consts::PI,
+                },
+            ))
+            .id();
+        let major = world
+            .spawn((
+                crate::signals::FloatSignal::new(0.0),
+                EndpointAngle {
+                    vertex: TrackingEndpoint::Static(DVec3::ZERO),
+                    from: TrackingRay::Direction(DVec3::X),
+                    to: TrackingRay::Direction(DVec3::Y),
+                    sweep: AngleSweep::Major,
+                    scale: 180.0 / std::f64::consts::PI,
+                },
+            ))
+            .id();
+        endpoint_angle_system(&mut world);
+        assert!(
+            (world
+                .get::<crate::signals::FloatSignal>(minor)
+                .unwrap()
+                .value
+                - 90.0)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (world
+                .get::<crate::signals::FloatSignal>(major)
+                .unwrap()
+                .value
+                - 270.0)
+                .abs()
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn endpoint_follow_converts_world_position_into_parent_space() {
+        let mut world = World::new();
+        let parent = world.spawn(SpatialTransform::new_2d(10.0, 20.0)).id();
+        let target = world
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(DVec3::new(30.0, 50.0, 0.0)),
+                    offset: DVec3::new(2.0, -3.0, 0.0),
+                    offset_space: FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+        world.entity_mut(target).set_parent_in_place(parent);
+        endpoint_follow_system(&mut world);
+        let transform = world.get::<SpatialTransform>(target).unwrap();
+        assert!(transform.translation.distance(DVec3::new(22.0, 27.0, 0.0)) < 1e-9);
     }
 }

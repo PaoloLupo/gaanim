@@ -3,10 +3,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use gaanim_animation::{AxisMask, DimensionLabelOrientation, Updater};
+use gaanim_animation::{
+    AngleArrowheads, AngleSweep, AxisMask, DimensionLabelOrientation, FollowOffsetSpace, Updater,
+};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
+use gaanim_expr::Expr;
 use gaanim_layout::LayoutConstraint;
 use gaanim_timeline::transition::TransitionType;
 
@@ -324,6 +327,13 @@ pub(crate) enum Op {
         source: ObjectId,
         offset: DVec3,
     },
+    /// Follow any connector endpoint, including derived points and anchors.
+    AttachEndpointFollow {
+        target: ObjectId,
+        endpoint: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: FollowOffsetSpace,
+    },
     /// Attach a TrackingLine — reactive line between two endpoints.
     AttachTrackingLine {
         target: ObjectId,
@@ -364,6 +374,61 @@ pub(crate) enum Op {
         offset: f64,
         gap: f64,
         orientation: DimensionLabelOrientation,
+    },
+    /// Regenerate all visible parts of an angular dimension.
+    AttachTrackingAngle {
+        arc: ObjectId,
+        arrows: ObjectId,
+        extensions: ObjectId,
+        vertex: CanvasEndpoint,
+        from: CanvasRay,
+        to: CanvasRay,
+        radius: f64,
+        sweep: AngleSweep,
+        arrowheads: AngleArrowheads,
+    },
+    /// Drive a readout signal from a reactive angle.
+    AttachEndpointAngle {
+        target: ObjectId,
+        vertex: CanvasEndpoint,
+        from: CanvasRay,
+        to: CanvasRay,
+        sweep: AngleSweep,
+        scale: f64,
+    },
+    /// Keep an angular annotation on the arc bisector.
+    AttachAngleLabelPlacement {
+        target: ObjectId,
+        label: ObjectId,
+        vertex: CanvasEndpoint,
+        from: CanvasRay,
+        to: CanvasRay,
+        radius: f64,
+        gap: f64,
+        sweep: AngleSweep,
+        orientation: DimensionLabelOrientation,
+    },
+    /// Regenerate a solid head for a reactive vector.
+    AttachTrackingVectorHead {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        length: f64,
+        width: f64,
+    },
+    /// Couple a target's rotation to a source drawable.
+    AttachRotationBinding {
+        target: ObjectId,
+        source: ObjectId,
+        ratio: f64,
+        phase: f64,
+    },
+    /// Convert a source rotation into a target translation.
+    AttachRotationTranslationBinding {
+        target: ObjectId,
+        source: ObjectId,
+        axis: DVec3,
+        scale: f64,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {
@@ -429,6 +494,44 @@ pub enum CanvasEndpoint {
     Entity(ObjectId),
     /// A normalized anchor inside an entity's local bounds plus a local offset.
     Anchor(AnchorPoint),
+    /// Point evaluated from two native scalar expressions.
+    Expression { x: Expr, y: Expr },
+    /// Reactive scene-space displacement from another endpoint.
+    Offset {
+        origin: Box<CanvasEndpoint>,
+        dx: Expr,
+        dy: Expr,
+    },
+    /// Affine interpolation between endpoints plus a scene-space offset.
+    Between {
+        from: Box<CanvasEndpoint>,
+        to: Box<CanvasEndpoint>,
+        alpha: f64,
+        offset: DVec3,
+    },
+    /// Polar point around another endpoint.
+    Polar {
+        origin: Box<CanvasEndpoint>,
+        radius: Expr,
+        angle: Expr,
+    },
+}
+
+/// Lightweight public reference to a derived, non-rendered endpoint.
+#[derive(Debug, Clone)]
+pub struct PointRef(pub CanvasEndpoint);
+
+impl From<PointRef> for CanvasEndpoint {
+    fn from(value: PointRef) -> Self {
+        value.0
+    }
+}
+
+/// A ray for angular and local-frame annotations.
+#[derive(Debug, Clone)]
+pub enum CanvasRay {
+    Direction(DVec3),
+    Endpoint(CanvasEndpoint),
 }
 
 /// A non-rendered reactive point attached to a drawable's local bounds.

@@ -1310,6 +1310,65 @@ impl DrawableHandle {
             });
     }
 
+    /// Follow any reactive endpoint with an offset expressed in world or source-local axes.
+    pub fn follow_endpoint(
+        &self,
+        endpoint: crate::canvas::CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+    ) -> Self {
+        self.defer_visibility_until_play();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachEndpointFollow {
+                target: self.id,
+                endpoint,
+                offset,
+                offset_space,
+            });
+        self.clone()
+    }
+
+    /// Couple this drawable's world Z rotation to another drawable.
+    pub fn bind_rotation_from(&self, source: &DrawableHandle, ratio: f64, phase: f64) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachRotationBinding {
+                target: self.id,
+                source: source.id,
+                ratio,
+                phase,
+            });
+        self.clone()
+    }
+
+    /// Translate this drawable along a scene axis from a source drawable's rotation.
+    pub fn bind_translation_from_rotation(
+        &self,
+        source: &DrawableHandle,
+        axis: DVec3,
+        scale: f64,
+    ) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachRotationTranslationBinding {
+                target: self.id,
+                source: source.id,
+                axis,
+                scale,
+            });
+        self.clone()
+    }
+
     /// Copy the source entity's position on specified axes each frame.
     pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
         self.defer_visibility_until_play();

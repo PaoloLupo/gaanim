@@ -67,6 +67,12 @@ impl Parameter {
         *self.value.lock().expect("parameter poisoned")
     }
 
+    /// Update the authoring-side mirror without queuing a deferred mutation.
+    #[doc(hidden)]
+    pub fn set_runtime_current(&self, value: f64) {
+        *self.value.lock().expect("parameter poisoned") = value;
+    }
+
     pub fn set(&self, value: f64) -> Result<(), VisualizationError> {
         if !value.is_finite() {
             return Err(VisualizationError::InvalidParameter);

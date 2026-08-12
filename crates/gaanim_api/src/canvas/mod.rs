@@ -1,7 +1,9 @@
 pub mod ops;
 mod segment;
 pub use gaanim_animation::AxisMask;
-pub use ops::{AnchorPoint, CanvasEndpoint, FragmentRevealStyle, UpdaterPreset};
+pub use ops::{
+    AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
+};
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use segment::{
@@ -26,8 +28,9 @@ pub use visualization::{
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
-    AssetPreloadError, AssetRootError, Canvas, DimensionHandle, DimensionOptions, ImageLoadError,
-    SceneObjectError, ThemeError,
+    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, Canvas,
+    DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, SceneObjectError,
+    SupportHandle, ThemeError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
