@@ -9,8 +9,8 @@ use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
     Axes3DConfig, AxesConfig, Canvas as ApiCanvas, CanvasEndpoint, CanvasTheme, CurveControl,
-    CurveElement, ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand, SegmentHandle,
-    ThemeFont,
+    CurveElement, DimensionOptions, ImageCrop, ImageFit, ImageOptions, LabelMode,
+    PresentationBrand, SegmentHandle, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -20,7 +20,7 @@ use gaanim_api::export::{
 
 use crate::color::PyColor;
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
-use crate::pydrawable::{PyCanvasAnim, PyDrawable};
+use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
 use crate::pylayout::{
     column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
     stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
@@ -45,6 +45,49 @@ fn reactive_scalar(value: Bound<'_, PyAny>) -> PyResult<(gaanim_api::canvas::Dra
         Err(pyo3::exceptions::PyTypeError::new_err(
             "tracker must be a Parameter or Variable",
         ))
+    }
+}
+
+#[pyclass(name = "Dimension", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyDimension {
+    line: PyDrawable,
+    label: Option<PyDrawable>,
+    number: Option<PyDrawable>,
+    unit: Option<PyDrawable>,
+}
+
+impl PyDimension {
+    fn initializer(handle: gaanim_api::canvas::DimensionHandle) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.drawable)).add_subclass(Self {
+            line: PyDrawable(handle.line),
+            label: handle.label.map(PyDrawable),
+            number: handle.number.map(PyDrawable),
+            unit: handle.unit.map(PyDrawable),
+        })
+    }
+}
+
+#[pymethods]
+impl PyDimension {
+    #[getter]
+    fn line(&self) -> PyDrawable {
+        self.line.clone()
+    }
+
+    #[getter]
+    fn label(&self) -> Option<PyDrawable> {
+        self.label.clone()
+    }
+
+    #[getter]
+    fn number(&self) -> Option<PyDrawable> {
+        self.number.clone()
+    }
+
+    #[getter]
+    fn unit(&self) -> Option<PyDrawable> {
+        self.unit.clone()
     }
 }
 
@@ -3881,7 +3924,29 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (from, to, coils=8, amplitude=12.0, crossing=0.0))]
+    #[pyo3(signature = (from, to, *, width=8.0))]
+    fn bar_between(
+        &self,
+        from: Bound<'_, PyAny>,
+        to: Bound<'_, PyAny>,
+        width: f64,
+    ) -> PyResult<PyDrawable> {
+        if !width.is_finite() || width <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "width must be finite and greater than zero",
+            ));
+        }
+        let from = resolve_endpoint(&from)?;
+        let to = resolve_endpoint(&to)?;
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .bar_between(from, to, width),
+        ))
+    }
+
+    #[pyo3(signature = (from, to, coils=8, amplitude=12.0, crossing=0.0, start_straight=12.0, end_straight=12.0))]
     fn spring_between(
         &self,
         from: Bound<'_, PyAny>,
@@ -3889,31 +3954,108 @@ impl PyScene {
         coils: usize,
         amplitude: f64,
         crossing: f64,
+        start_straight: f64,
+        end_straight: f64,
     ) -> PyResult<PyDrawable> {
+        if !start_straight.is_finite() || start_straight < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "start_straight must be finite and non-negative",
+            ));
+        }
+        if !end_straight.is_finite() || end_straight < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "end_straight must be finite and non-negative",
+            ));
+        }
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .spring_between_with_crossing(from, to, coils, amplitude, crossing),
+                .spring_between_with_options(
+                    from,
+                    to,
+                    coils,
+                    amplitude,
+                    crossing,
+                    start_straight,
+                    end_straight,
+                ),
         ))
     }
 
-    fn dimension_between(
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn dimension_between<'py>(
         &self,
+        py: Python<'py>,
         from: Bound<'_, PyAny>,
         to: Bound<'_, PyAny>,
         offset: f64,
-    ) -> PyResult<PyDrawable> {
+        label: Option<String>,
+        show_value: bool,
+        format: &str,
+        unit: Option<String>,
+        scale: f64,
+        label_gap: f64,
+        label_orientation: &str,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+    ) -> PyResult<Py<PyDimension>> {
+        if !offset.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "offset must be finite",
+            ));
+        }
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "scale must be finite and greater than zero",
+            ));
+        }
+        if !label_gap.is_finite() || label_gap < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "label_gap must be finite and non-negative",
+            ));
+        }
+        if font_size.is_some_and(|size| !size.is_finite() || size <= 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "font_size must be finite and greater than zero",
+            ));
+        }
+        let orientation = match label_orientation {
+            "upright" => gaanim_animation::DimensionLabelOrientation::Upright,
+            "aligned" => gaanim_animation::DimensionLabelOrientation::Aligned,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "label_orientation must be 'upright' or 'aligned'",
+                ));
+            }
+        };
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .dimension_between(from, to, offset),
-        ))
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .dimension_between_with_options(
+                from,
+                to,
+                offset,
+                DimensionOptions {
+                    label,
+                    show_value,
+                    format: format.to_owned(),
+                    unit,
+                    scale,
+                    label_gap,
+                    label_orientation: orientation,
+                    font_size,
+                    color: color.map(|value| value.0),
+                },
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyDimension::initializer(handle))
     }
 }
 
@@ -3922,13 +4064,15 @@ impl PyScene {
 fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))
+    } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {
+        Ok(CanvasEndpoint::Anchor(anchor.0))
     } else if let Ok(tuple) = obj.extract::<(f64, f64)>() {
         Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
             tuple.0, tuple.1, 0.0,
         )))
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
-            "Endpoint must be a Drawable or a (x, y) tuple",
+            "Endpoint must be a Drawable, AnchorPoint, or a (x, y) tuple",
         ))
     }
 }

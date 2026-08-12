@@ -911,6 +911,11 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
 /// radius remains stable. This is what makes a reactive spring visibly deform
 /// when one of its endpoints is animated.
 ///
+/// `start_straight` and `end_straight` reserve straight scene-unit segments at
+/// the corresponding endpoints before the coils begin and after they end. If
+/// their combined length exceeds the endpoint distance, both are shortened
+/// proportionally and the path becomes a straight line.
+///
 /// `crossing` is a normalized visual interlacing amount. At `0.0` each turn is
 /// a regular sinusoidal coil; at `1.0` the turn briefly folds back along its
 /// axis, producing an e-like crossover without moving either endpoint.
@@ -920,6 +925,8 @@ pub fn spring_path(
     coils: usize,
     amplitude: f64,
     crossing: f64,
+    start_straight: f64,
+    end_straight: f64,
 ) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -934,6 +941,31 @@ pub fn spring_path(
 
     let direction = (dx / length, dy / length);
     let normal = (-direction.1, direction.0);
+    let sanitize_straight = |value: f64| value.is_finite().then_some(value.max(0.0)).unwrap_or(0.0);
+    let mut start_straight = sanitize_straight(start_straight);
+    let mut end_straight = sanitize_straight(end_straight);
+    let requested_straight = start_straight + end_straight;
+    if requested_straight > length {
+        let scale = length / requested_straight;
+        start_straight *= scale;
+        end_straight *= scale;
+    }
+    let coil_length = length - start_straight - end_straight;
+    if coil_length <= f64::EPSILON {
+        path.line_to(end);
+        return path;
+    }
+    let coil_start = kurbo::Point::new(
+        start.x + direction.0 * start_straight,
+        start.y + direction.1 * start_straight,
+    );
+    let coil_end = kurbo::Point::new(
+        end.x - direction.0 * end_straight,
+        end.y - direction.1 * end_straight,
+    );
+    if start_straight > f64::EPSILON {
+        path.line_to(coil_start);
+    }
     let turns = coils.max(1);
     let turns_f64 = turns as f64;
     let crossing = crossing.clamp(0.0, 1.0);
@@ -953,15 +985,19 @@ pub fn spring_path(
         let axial_t = (turn_index + turn_t + crossing * 0.35 * (phase.cos() - 1.0)) / turns_f64;
         let offset = amplitude * phase.sin();
         path.line_to(kurbo::Point::new(
-            start.x + dx * axial_t + normal.0 * offset,
-            start.y + dy * axial_t + normal.1 * offset,
+            coil_start.x + direction.0 * coil_length * axial_t + normal.0 * offset,
+            coil_start.y + direction.1 * coil_length * axial_t + normal.1 * offset,
         ));
     }
-    path.line_to(end);
+    path.line_to(coil_end);
+    if end_straight > f64::EPSILON {
+        path.line_to(end);
+    }
     path
 }
 
-/// Builds an open technical dimension line with extension lines and arrowheads.
+/// Builds a technical dimension with open extension/measurement lines and
+/// closed triangular arrowhead subpaths suitable for solid filling.
 pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -997,11 +1033,11 @@ pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> ku
             back.x + normal.0 * wing,
             back.y + normal.1 * wing,
         ));
-        path.move_to(tip);
         path.line_to(kurbo::Point::new(
             back.x - normal.0 * wing,
             back.y - normal.1 * wing,
         ));
+        path.close_path();
     };
     add_head(&mut path, dimension_start, 1.0);
     add_head(&mut path, dimension_end, -1.0);
@@ -1331,8 +1367,8 @@ mod arrow_tests {
         let start = kurbo::Point::new(-80.0, 10.0);
         let compact_end = kurbo::Point::new(120.0, 10.0);
         let stretched_end = kurbo::Point::new(320.0, 10.0);
-        let compact = spring_path(start, compact_end, 4, 15.0, 0.0);
-        let stretched = spring_path(start, stretched_end, 4, 15.0, 0.0);
+        let compact = spring_path(start, compact_end, 4, 15.0, 0.0, 20.0, 30.0);
+        let stretched = spring_path(start, stretched_end, 4, 15.0, 0.0, 20.0, 30.0);
         let compact_points: Vec<_> = compact
             .elements()
             .iter()
@@ -1373,7 +1409,7 @@ mod arrow_tests {
         assert!((peak - 15.0).abs() < 1e-6);
         assert!(compact_points[6].x < stretched_points[6].x);
 
-        let interlaced = spring_path(start, compact_end, 4, 15.0, 1.0);
+        let interlaced = spring_path(start, compact_end, 4, 15.0, 1.0, 20.0, 30.0);
         let interlaced_points: Vec<_> = interlaced
             .elements()
             .iter()
@@ -1398,6 +1434,18 @@ mod arrow_tests {
             interlaced.elements().last(),
             Some(kurbo::PathEl::LineTo(p)) if *p == compact_end
         ));
+        assert!(matches!(
+            compact.elements().get(1),
+            Some(kurbo::PathEl::LineTo(p)) if *p == kurbo::Point::new(-60.0, 10.0)
+        ));
+        assert!(
+            compact_points
+                .iter()
+                .rev()
+                .nth(1)
+                .is_some_and(|point| *point == kurbo::Point::new(90.0, 10.0)),
+            "the requested end straight must start where the final coil ends"
+        );
     }
 
     #[test]
@@ -1407,9 +1455,13 @@ mod arrow_tests {
             kurbo::Point::new(60.0, 0.0),
             30.0,
         );
-        assert!(
-            path.elements().len() >= 11,
-            "extensions, dimension baseline, and two arrowheads must be present"
+        assert_eq!(
+            path.elements()
+                .iter()
+                .filter(|element| matches!(element, kurbo::PathEl::ClosePath))
+                .count(),
+            2,
+            "both arrowheads must be closed triangular fill geometry"
         );
         assert!(path.elements().iter().any(|element| {
             matches!(element, kurbo::PathEl::LineTo(point) if (point.y - 30.0).abs() < 1e-6)

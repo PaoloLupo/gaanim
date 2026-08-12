@@ -1108,6 +1108,22 @@ scene.play([area.create(), radius.animate_to(3.0, duration=1.5)])
 == Reactive Geometry
 
 #api-entry(
+  name: "Drawable.anchor_point",
+  kind: "method",
+  signature: "anchor_point(anchor=Anchor.CENTER, *, offset=(0, 0)) -> AnchorPoint",
+  params: ((name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [One of the nine local-bounds anchors.]), (name: "offset", type: "vec2", default: "(0, 0)", desc: [Additional local-space displacement.]),),
+  returns: (type: "AnchorPoint", desc: [Non-rendered endpoint that follows the full transformed hierarchy.]),
+  desc: [Use anchored points with tracking lines, bars, springs, and dimensions. The local offset rotates and scales with the drawable; non-finite values raise `ValueError`. Passing a Drawable directly retains origin-tracking compatibility.],
+)[
+```python
+from gaanim import Anchor, Scene
+scene = Scene(480, 270)
+frame = scene.rect(180, 90)
+corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
+```
+]
+
+#api-entry(
   name: "Scene.value_tracker",
   kind: "factory",
   signature: "value_tracker(initial: float) -> ValueTracker",
@@ -1209,19 +1225,38 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
+  name: "Scene.bar_between",
+  kind: "factory",
+  signature: "bar_between(from, to, *, width=8) -> Drawable",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [First fixed, drawable-origin, or anchored endpoint.]), (name: "to", type: "Endpoint", default: none, desc: [Second endpoint.]), (name: "width", type: "float", default: "8", desc: [Positive scene-unit thickness.]),),
+  returns: (type: "Drawable", desc: [Round-capped bar with reactive length and angle.]),
+  desc: [The bar is regenerated in the same frame as endpoint animation or updaters. Draw articulation circles separately when required.],
+)[
+```python
+# show-code: true
+from gaanim import Anchor, BLACK, Scene
+scene = Scene(480, 270)
+body = scene.rect(150, 70).at(40, -20)
+bar = scene.bar_between((-150, 100), body.anchor_point(Anchor.TOP_LEFT), width=9).stroke(BLACK, 9)
+scene.play([bar.fade_in(), body.move(80, 0).duration(1.0)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
   name: "Scene.spring_between",
   kind: "factory",
-  signature: "spring_between(from, to, *, coils=8, amplitude=12, crossing=0) -> Drawable",
-  params: ((name: "from", type: "Drawable|vec2", default: none, desc: [Endpoint A.]), (name: "to", type: "Drawable|vec2", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]),),
+  signature: "spring_between(from, to, coils=8, amplitude=12, crossing=0, start_straight=12, end_straight=12) -> Drawable",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]), (name: "start_straight", type: "float", default: "12", desc: [Non-negative straight length before the first coil.]), (name: "end_straight", type: "float", default: "12", desc: [Non-negative straight length after the final coil.]),),
   returns: (type: "Drawable", desc: [Reactive helical spring path.]),
-  desc: [Endpoints can be drawables or (x,y). The spring is a smooth projected helix: its radius stays stable while its pitch deforms automatically as an endpoint moves. Set `crossing` above 0 to fold parts of each turn back and create e-like crossings.],
+  desc: [Endpoints can be fixed tuples, drawable origins, or AnchorPoint references inside transformed groups. By default, it has 12 scene-unit straight segments at both ends, as in a mechanical spring. The helix radius stays stable while its pitch deforms automatically as an endpoint moves. Set either straight length to `0` to coil directly from that endpoint; close endpoints shorten both segments proportionally. Negative or non-finite straight lengths raise `ValueError`. Set `crossing` above 0 to fold parts of each turn back and create e-like crossings.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(10).fill(GOLD).at(70, 0)
-spring = scene.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0).no_fill().stroke(WHITE, 3)
+spring = scene.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0, start_straight=18, end_straight=18).no_fill().stroke(WHITE, 3)
 scene.play([spring.fade_in().duration(0.3), mass.move(40, 0).duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```
@@ -1230,19 +1265,22 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.dimension_between",
   kind: "factory",
-  signature: "dimension_between(from, to, offset: float) -> Drawable",
-  params: ((name: "from", type: "Drawable|vec2", default: none, desc: [Endpoint A.]), (name: "to", type: "Drawable|vec2", default: none, desc: [Endpoint B.]),),
-  returns: (type: "Drawable", desc: [Reactive dimension.]),
-  desc: [Keeps measurement synchronized with moving endpoints.],
+  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None) -> Dimension",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]),),
+  returns: (type: "Dimension", desc: [Reactive drawable exposing `line`, `label`, `number`, and `unit`.]),
+  desc: [Keeps the extension lines, measurement line, solid triangular arrowheads, annotation position, orientation, and optional numeric value synchronized with moving endpoints. `color` initializes both the filled arrowheads, dimension stroke, and annotation; fluent styling still propagates through the returned `Dimension`. Symbolic math and reactive text share a true typographic baseline, including subscripted labels such as `$W_f$`. Invalid metrics and orientation raise `ValueError`.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
-a = scene.dot(8).at(-60, 0)
-b = scene.dot(8).at(60, 0)
-dim = scene.dimension_between(a, b, 22).stroke(WHITE, 2)
-scene.play([dim.fade_in().duration(0.3), b.move(30, 0).duration(0.9)])
+from gaanim import Anchor, BLACK, WHITE, Scene
+scene = Scene(480, 270, background=WHITE)
+frame = scene.rect(180, 80).at(0, 0)
+dim = scene.dimension_between(
+  frame.anchor_point(Anchor.TOP_LEFT),
+  frame.anchor_point(Anchor.TOP_RIGHT),
+  35, label="$W_f$", show_value=True, unit="u", color=BLACK,
+)
+scene.play([dim.fade_in().duration(0.3), frame.move(30, 0).duration(0.9)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1273,17 +1311,17 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Drawable.at / scaled / rotated / z_index",
   kind: "method",
-  signature: ".at(x,y) .scaled(factor) .rotated(radians) .z_index(int) .with_pivot(x,y)",
-  params: ((name: "x", type: "float", default: none, desc: [Position / pivot.] ),),
+  signature: ".at(x, y, anchor=Anchor.CENTER) .scaled(factor) .rotated(radians) .z_index(int) .with_pivot(x,y)",
+  params: ((name: "x / y", type: "float", default: none, desc: [Target scene-space position.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Local point placed at `(x, y)`.]),),
   returns: (type: "Drawable", desc: [Self.]),
-  desc: [Transforms in scene space. `with_pivot`/`pivot` sets rotation/scale origin.],
+  desc: [Transforms in scene space. `.at(x, y)` retains center-based positioning; pass an `Anchor` to place an edge or corner at the target. `with_pivot`/`pivot` sets rotation/scale origin.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import Anchor, BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import pi
 scene = Scene(480, 270, background="#0f172a")
-arm = scene.rect(90, 18).fill(BLUE).at(45, 0).with_pivot(0, 0)
+arm = scene.rect(90, 18).fill(BLUE).at(-200, 100, Anchor.TOP_LEFT).with_pivot(0, 0)
 scene.play([arm.rotate(pi/2.5).duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```

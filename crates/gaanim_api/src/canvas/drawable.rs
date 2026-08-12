@@ -13,7 +13,7 @@ use gaanim_objects::prelude::GltfAnimationMetadata;
 
 use crate::anim::{AnimationType, DrawAnimationConfig, TextSelectionEffect};
 use crate::canvas::ops::{
-    FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
+    AnchorPoint, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
@@ -114,6 +114,16 @@ fn math_source_terms(source: &str) -> Vec<String> {
 }
 
 impl DrawableHandle {
+    /// Return a non-rendered point bound to this drawable's local bounds.
+    pub fn anchor_point(&self, anchor: Anchor, offset: DVec3) -> AnchorPoint {
+        let normalized = anchor.to_offset();
+        AnchorPoint {
+            object: self.id,
+            normalized: DVec3::new(normalized.x, normalized.y, 0.0),
+            offset,
+        }
+    }
+
     /// Returns the immutable structured authoring snapshot for unified text.
     pub fn text_spec(&self) -> Option<gaanim_text::prelude::TextSpec> {
         let spec = self.spec.lock().expect("object spec poisoned");

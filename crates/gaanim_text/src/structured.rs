@@ -165,6 +165,10 @@ pub enum TextSpecError {
     DuplicatePart { name: String, parent: String },
     #[error("unbalanced '$' math delimiter; escape a literal dollar as '\\$'")]
     UnbalancedMath,
+    #[error("unbalanced '{delimiter}' text markup delimiter; escape it as '\\{delimiter}'")]
+    UnbalancedMarkup { delimiter: char },
+    #[error("misnested '{delimiter}' text markup delimiter")]
+    MisnestedMarkup { delimiter: char },
     #[error("text size must be finite and greater than zero")]
     InvalidSize,
     #[error("text weight must be between 1 and 1000")]
@@ -204,6 +208,9 @@ impl TextSpec {
             return Err(TextSpecError::Empty);
         }
         let parsed = parse_inline_math(&plain)?;
+        let mut markup = InlineMarkupParser::new();
+        markup.push(&plain)?;
+        markup.finish()?;
         let inferred = if parsed
             .iter()
             .all(|segment| segment.math || segment.text.trim().is_empty())
@@ -383,6 +390,145 @@ pub struct InlineSegment {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InlineMarkupKind {
+    Strong,
+    Emphasis,
+}
+
+impl InlineMarkupKind {
+    fn delimiter(self) -> char {
+        match self {
+            Self::Strong => '*',
+            Self::Emphasis => '_',
+        }
+    }
+}
+
+/// A rendered text fragment and the semantic inline emphasis active on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineMarkupSegment {
+    pub text: String,
+    pub strong: bool,
+    pub emphasis: bool,
+}
+
+/// Incremental parser for Typst-inspired `*strong*` and `_emphasis_` markup.
+///
+/// The parser is incremental so delimiters and `$...$` math may span semantic
+/// `TextPart` boundaries without turning those boundaries into shaping breaks.
+#[derive(Debug, Clone, Default)]
+pub struct InlineMarkupParser {
+    stack: Vec<InlineMarkupKind>,
+    in_math: bool,
+    previous: Option<char>,
+}
+
+impl InlineMarkupParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, text: &str) -> Result<Vec<InlineMarkupSegment>, TextSpecError> {
+        let chars = text.chars().collect::<Vec<_>>();
+        let mut segments = Vec::<InlineMarkupSegment>::new();
+        let mut index = 0;
+        while index < chars.len() {
+            let character = chars[index];
+            let next = chars.get(index + 1).copied();
+
+            if character == '\\' && !self.in_math && matches!(next, Some('*' | '_')) {
+                let literal = next.expect("escaped markup delimiter");
+                self.push_literal(&mut segments, literal);
+                self.previous = Some(literal);
+                index += 2;
+                continue;
+            }
+            if character == '\\' && next == Some('$') {
+                self.push_literal(&mut segments, character);
+                self.push_literal(&mut segments, '$');
+                self.previous = Some('$');
+                index += 2;
+                continue;
+            }
+            if character == '$' {
+                self.push_literal(&mut segments, character);
+                self.in_math = !self.in_math;
+                self.previous = Some(character);
+                index += 1;
+                continue;
+            }
+            if !self.in_math && matches!(character, '*' | '_') {
+                let kind = if character == '*' {
+                    InlineMarkupKind::Strong
+                } else {
+                    InlineMarkupKind::Emphasis
+                };
+                let previous = self.previous;
+                let repeated = previous == Some(character) || next == Some(character);
+                let closes = self.stack.last() == Some(&kind)
+                    && previous.is_some_and(|value| !value.is_whitespace())
+                    && !repeated;
+                if closes {
+                    self.stack.pop();
+                    self.previous = Some(character);
+                    index += 1;
+                    continue;
+                }
+                if self.stack.contains(&kind)
+                    && previous.is_some_and(|value| !value.is_whitespace())
+                {
+                    return Err(TextSpecError::MisnestedMarkup {
+                        delimiter: character,
+                    });
+                }
+                let inside_word = character == '_'
+                    && previous.is_some_and(char::is_alphanumeric)
+                    && next.is_some_and(char::is_alphanumeric);
+                let opens =
+                    next.is_some_and(|value| !value.is_whitespace()) && !inside_word && !repeated;
+                if opens {
+                    self.stack.push(kind);
+                    self.previous = Some(character);
+                    index += 1;
+                    continue;
+                }
+            }
+
+            self.push_literal(&mut segments, character);
+            self.previous = Some(character);
+            index += 1;
+        }
+        Ok(segments)
+    }
+
+    pub fn finish(self) -> Result<(), TextSpecError> {
+        if let Some(kind) = self.stack.last().copied() {
+            return Err(TextSpecError::UnbalancedMarkup {
+                delimiter: kind.delimiter(),
+            });
+        }
+        Ok(())
+    }
+
+    fn push_literal(&self, segments: &mut Vec<InlineMarkupSegment>, character: char) {
+        let strong = self.stack.contains(&InlineMarkupKind::Strong);
+        let emphasis = self.stack.contains(&InlineMarkupKind::Emphasis);
+        if let Some(segment) = segments.last_mut()
+            && segment.strong == strong
+            && segment.emphasis == emphasis
+        {
+            segment.text.push(character);
+        } else {
+            segments.push(InlineMarkupSegment {
+                text: character.to_string(),
+                strong,
+                emphasis,
+            });
+        }
+    }
+}
+
 /// Parse `$...$` while preserving escaped dollar signs. Both `$` and `$$`
 /// use the same inline/display vector math compositor in scene text.
 pub fn parse_inline_math(text: &str) -> Result<Vec<InlineSegment>, TextSpecError> {
@@ -420,9 +566,20 @@ pub fn parse_inline_math(text: &str) -> Result<Vec<InlineSegment>, TextSpecError
 }
 
 pub fn rendered_text(text: &str) -> String {
-    parse_inline_math(text)
+    let mut markup = InlineMarkupParser::new();
+    let Ok(markup_segments) = markup.push(text) else {
+        return text.to_string();
+    };
+    if markup.finish().is_err() {
+        return text.to_string();
+    }
+    let text = markup_segments
+        .into_iter()
+        .map(|segment| segment.text)
+        .collect::<String>();
+    parse_inline_math(&text)
         .map(|segments| segments.into_iter().map(|segment| segment.text).collect())
-        .unwrap_or_else(|_| text.to_string())
+        .unwrap_or(text)
 }
 
 #[cfg(test)]
@@ -479,6 +636,63 @@ mod tests {
                 TextFlow::default(),
             ),
             Err(TextSpecError::DuplicatePart { .. })
+        ));
+    }
+
+    #[test]
+    fn inline_markup_is_rendered_and_ignores_math_and_common_literals() {
+        let spec = TextSpec::new(
+            vec!["Texto _enfatizado_, *fuerte*, snake_case, __init__, 5 * 4 y $x_1 * 5$.".into()],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            rendered_text(&spec.plain_text()),
+            "Texto enfatizado, fuerte, snake_case, __init__, 5 * 4 y x_1 * 5."
+        );
+    }
+
+    #[test]
+    fn inline_markup_supports_nesting_escaping_and_part_boundaries() {
+        let spec = TextSpec::new(
+            vec![
+                "*_fuerte ".into(),
+                TextPart::new("word", vec!["enfatizado".into()], TextStyle::default()).into(),
+                "_* y \\*literal\\*".into(),
+            ],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            rendered_text(&spec.plain_text()),
+            "fuerte enfatizado y *literal*"
+        );
+        assert_eq!(spec.parts()[0].text, "enfatizado");
+    }
+
+    #[test]
+    fn rejects_unbalanced_or_misnested_inline_markup() {
+        assert!(matches!(
+            TextSpec::new(
+                vec!["*fuerte".into()],
+                None,
+                TextStyle::default(),
+                TextFlow::default(),
+            ),
+            Err(TextSpecError::UnbalancedMarkup { delimiter: '*' })
+        ));
+        assert!(matches!(
+            TextSpec::new(
+                vec!["*_cruzado*_".into()],
+                None,
+                TextStyle::default(),
+                TextFlow::default(),
+            ),
+            Err(TextSpecError::MisnestedMarkup { delimiter: '*' })
         ));
     }
 }

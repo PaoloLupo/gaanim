@@ -214,6 +214,9 @@ class Anchor:
     BOTTOM_LEFT: ClassVar[Anchor]
     BOTTOM_RIGHT: ClassVar[Anchor]
 
+class AnchorPoint:
+    """Non-rendered endpoint bound to a drawable's local bounds."""
+
 class Direction:
     UP: ClassVar[Direction]
     DOWN: ClassVar[Direction]
@@ -723,11 +726,32 @@ class Drawable:
             result = drawable.z_index(1)
         """
         ...
-    def at(self, x: float, y: float) -> Self:
-        """Apply at to this drawable and return the result.
+    def at(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
+        """Place ``anchor`` at ``(x, y)`` and return this drawable.
+
+        Omitting ``anchor`` uses ``Anchor.CENTER`` and preserves the existing
+        center-based behavior. The optional anchor can be passed positionally
+        or by keyword.
 
         Example:
-            result = drawable.at(1.0, 1.0)
+            result = drawable.at(1.0, 1.0, Anchor.TOP_LEFT)
+        """
+        ...
+    def anchor_point(
+        self,
+        anchor: Optional[Anchor] = None,
+        *,
+        offset: tuple[float, float] = (0.0, 0.0),
+    ) -> AnchorPoint:
+        """Create a reactive endpoint on this drawable.
+
+        ``anchor`` selects one of the nine normalized local-bounds points;
+        ``offset`` is measured in local scene units and follows parent
+        translation, rotation, and scale. Non-finite offsets raise
+        ``ValueError``.
+
+        Example:
+            corner = frame.anchor_point(Anchor.TOP_RIGHT)
         """
         ...
     def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
@@ -1155,6 +1179,19 @@ TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
 TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
 TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
 TextGrouping: TypeAlias = Literal["grapheme", "word", "line", "part"]
+
+class Dimension(Drawable):
+    """Reactive technical dimension with independently styleable parts."""
+    @property
+    def line(self) -> Drawable: ...
+    @property
+    def label(self) -> Optional[Drawable]: ...
+    @property
+    def number(self) -> Optional[Drawable]: ...
+    @property
+    def unit(self) -> Optional[Drawable]: ...
+
+Endpoint: TypeAlias = Drawable | AnchorPoint | tuple[float, float]
 
 class Material3D:
     """PBR material whose numeric properties interpolate in linear space."""
@@ -2561,15 +2598,18 @@ class Scene:
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
 
-        ``$...$`` activates math and ``\\$`` emits a literal dollar. Unbalanced
-        delimiters, duplicate sibling part names, and invalid metric options
-        raise ``ValueError``. Direct keywords override reusable style/flow
-        objects. Responsive wrapping consumes the Layout-v2 width offer or the
-        scene safe frame; outer box dimensions remain Layout properties.
+        ``*strong*`` selects bold text and ``_emphasis_`` selects italic text;
+        escape literal markers as ``\\*`` and ``\\_``. Markers inside
+        ``$...$`` remain math syntax, and ``\\$`` emits a literal dollar.
+        Unbalanced or crossed markup, unbalanced math, duplicate sibling part
+        names, and invalid metrics raise ``ValueError``. Direct keywords
+        override reusable style/flow objects. Responsive wrapping consumes the
+        Layout-v2 width offer or the scene safe frame; outer box dimensions
+        remain Layout properties.
 
         Example:
             formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
-            copy = scene.text("La energía es ", formula, role="body", flow=TextFlow(align="justify"))
+            copy = scene.text("La *energía* es ", formula, role="body", flow=TextFlow(align="justify"))
         """
         ...
     def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:
@@ -2997,30 +3037,53 @@ class Scene:
         """
     def tracking_line(
         self,
-        from_: Drawable | tuple[float, float],
-        to: Drawable | tuple[float, float],
+        from_: Endpoint,
+        to: Endpoint,
     ) -> Drawable:
-        """Create a hidden tracking line; reveal it in ``scene.play``.
+        """Create a hidden line whose endpoints react in the same frame.
+
+        Endpoints may be fixed tuples, drawable origins, or ``AnchorPoint``
+        references inside transformed hierarchies. Reveal the line in
+        ``scene.play``.
 
         Example:
             result = scene.tracking_line(drawable, drawable)
         """
         ...
+    def bar_between(
+        self,
+        from_: Endpoint,
+        to: Endpoint,
+        *,
+        width: float = 8.0,
+    ) -> Drawable:
+        """Create a round-capped reactive bar between two endpoints.
+
+        ``width`` is measured in scene units and must be finite and positive.
+        The returned drawable remains fully styleable.
+        """
+        ...
     def spring_between(
         self,
-        from_: Drawable | tuple[float, float],
-        to: Drawable | tuple[float, float],
+        from_: Endpoint,
+        to: Endpoint,
         coils: int = 8,
         amplitude: float = 12.0,
         crossing: float = 0.0,
+        start_straight: float = 12.0,
+        end_straight: float = 12.0,
     ) -> Drawable:
         """Create a hidden reactive helical spring; reveal it in ``scene.play``.
 
-        The endpoints may be drawables or fixed ``(x, y)`` positions. When a
-        drawable endpoint moves, the native helix is regenerated every frame,
-        preserving its radius while its pitch deforms with the distance.
+        Endpoints may also be ``AnchorPoint`` references inside transformed
+        groups. The native helix is regenerated every frame, preserving its
+        radius while its pitch deforms with the distance.
         ``crossing`` ranges from 0 to 1: higher values make each turn fold
         back briefly, creating e-like visual crossings.
+        ``start_straight`` and ``end_straight`` are non-negative scene-unit
+        lengths of the straight segments at each endpoint; both default to 12.
+        They are shortened proportionally when the endpoints are too close.
+        Non-finite or negative straight lengths raise ``ValueError``.
 
         Example:
             spring = scene.spring_between((0, 0), drawable)
@@ -3028,14 +3091,35 @@ class Scene:
         ...
     def dimension_between(
         self,
-        from_: Drawable | tuple[float, float],
-        to: Drawable | tuple[float, float],
+        from_: Endpoint,
+        to: Endpoint,
         offset: float,
-    ) -> Drawable:
-        """Create a hidden reactive dimension; reveal it in ``scene.play``.
+        *,
+        label: Optional[str] = None,
+        show_value: bool = False,
+        format: str = ".2f",
+        unit: Optional[str] = None,
+        scale: float = 1.0,
+        label_gap: float = 10.0,
+        label_orientation: Literal["upright", "aligned"] = "upright",
+        font_size: Optional[float] = None,
+        color: Optional[Color] = None,
+    ) -> Dimension:
+        """Create a reactive technical dimension and optional annotation.
+
+        The line follows fixed points, drawable origins, or anchored points.
+        ``label`` remains symbolic; ``show_value`` adds the current XY distance
+        multiplied by ``scale`` and formatted with ``format``/``unit``.
+        ``label_orientation`` keeps text horizontal or aligned while avoiding
+        upside-down labels. ``color`` initializes the extension lines,
+        solid triangular arrowheads, and annotation. Math labels and reactive
+        values share one typographic baseline, including subscripted formulas.
+        Invalid metrics or orientation raise ``ValueError``.
 
         Example:
-            result = scene.dimension_between(drawable, drawable, 1.0)
+            width = scene.dimension_between(
+                left, right, 45, label="$W_f$", show_value=True, unit="mm"
+            )
         """
         ...
 

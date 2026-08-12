@@ -2,7 +2,7 @@ use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity};
 use gaanim_core::{ObjectId, glam::DVec3, kurbo, peniko};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_objects::prelude::MobjectBundle;
-use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush};
+use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush, TextBaseline};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
@@ -55,7 +55,14 @@ struct CachedTypstChild {
 #[derive(Clone)]
 struct CachedTypstHierarchy {
     parent_bounds: Bounds3D,
+    baseline: f64,
     children: Vec<CachedTypstChild>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BaselineCandidate {
+    font_size: f64,
+    y: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -291,6 +298,7 @@ fn extract_frame_items(
     world: &dyn World,
     char_index_counter: &mut usize,
     extracted_children: &mut Vec<PendingTypstChild>,
+    baseline: &mut Option<BaselineCandidate>,
 ) {
     for (pos, item) in frame.items() {
         // Typst frames use Y-down coordinate system, and we convert it to Y-up
@@ -311,6 +319,7 @@ fn extract_frame_items(
                     world,
                     char_index_counter,
                     extracted_children,
+                    baseline,
                 );
             }
             FrameItem::Text(text) => {
@@ -319,6 +328,14 @@ fn extract_frame_items(
                 let upem = font.units_per_em();
                 let scale = size.to_pt() / upem;
                 let ttf = font.ttf();
+                let baseline_y = item_transform * kurbo::Point::ORIGIN;
+                let candidate = BaselineCandidate {
+                    font_size: size.to_pt(),
+                    y: baseline_y.y,
+                };
+                if baseline.is_none_or(|current| candidate.font_size > current.font_size) {
+                    *baseline = Some(candidate);
+                }
 
                 // Determine effective fill brush
                 let fill_brush = typst_paint_to_brush(&text.fill, default_fill);
@@ -526,6 +543,7 @@ fn compile_typst_source(
     let mut total_bounds: Option<Bounds3D> = None;
     let root_transform = kurbo::Affine::scale_non_uniform(1.0, -1.0);
     let mut extracted_children = Vec::new();
+    let mut baseline = None;
 
     if let Some(page) = document.pages().first() {
         let mut char_index_counter = 0;
@@ -538,6 +556,7 @@ fn compile_typst_source(
             &world,
             &mut char_index_counter,
             &mut extracted_children,
+            &mut baseline,
         );
     }
 
@@ -567,6 +586,7 @@ fn compile_typst_source(
 
     Ok(CachedTypstHierarchy {
         parent_bounds: total_bounds,
+        baseline: baseline.map_or(0.0, |candidate| candidate.y - text_center.y),
         children: centered_children,
     })
 }
@@ -655,6 +675,9 @@ fn spawn_cached_typst_hierarchy(
     parent_bundle.tag = ObjectTag(format!("Typst('{}')", source));
     parent_bundle.fill = FillBrush(None);
     let parent_entity = commands.spawn(parent_bundle).id();
+    commands
+        .entity(parent_entity)
+        .insert(TextBaseline(cached.baseline));
 
     for child in &cached.children {
         let child_id = next_id_fn();
@@ -753,6 +776,32 @@ mod tests {
         assert!(
             has_math_font,
             "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld"
+        );
+    }
+
+    #[test]
+    fn typst_math_exposes_a_real_baseline_after_centering() {
+        let registry = FontRegistry::new();
+        let source = "#set page(width: auto, height: auto, margin: 0pt)\n$W_f$";
+        let compiled = compile_typst_source(
+            &registry,
+            source,
+            false,
+            Some("New Computer Modern"),
+            Some("New Computer Modern Math"),
+            Some(32.0),
+            Some(32.0),
+            &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+            &StrokeBrush::transparent(),
+        )
+        .expect("math label should compile");
+
+        assert!(compiled.baseline.is_finite());
+        assert!(compiled.baseline > compiled.parent_bounds.min.y);
+        assert!(compiled.baseline < compiled.parent_bounds.max.y);
+        assert!(
+            compiled.baseline.abs() > 0.1,
+            "a subscripted formula baseline must not collapse to its visual center"
         );
     }
 }

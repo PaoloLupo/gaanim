@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use gaanim_animation::{AxisMask, Updater};
+use gaanim_animation::{AxisMask, DimensionLabelOrientation, Updater};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
@@ -338,6 +338,8 @@ pub(crate) enum Op {
         coils: usize,
         amplitude: f64,
         crossing: f64,
+        start_straight: f64,
+        end_straight: f64,
     },
     /// Attach a dynamic dimension line between two endpoints.
     AttachTrackingDimension {
@@ -345,6 +347,23 @@ pub(crate) enum Op {
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         offset: f64,
+    },
+    /// Drive a float signal from the current distance between two endpoints.
+    AttachEndpointDistance {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        scale: f64,
+    },
+    /// Keep a dimension annotation on the displaced midpoint of two endpoints.
+    AttachDimensionLabelPlacement {
+        target: ObjectId,
+        label: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        offset: f64,
+        gap: f64,
+        orientation: DimensionLabelOrientation,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {
@@ -408,6 +427,22 @@ pub enum CanvasEndpoint {
     Static(DVec3),
     /// Position follows an entity (referenced by Canvas ObjectId).
     Entity(ObjectId),
+    /// A normalized anchor inside an entity's local bounds plus a local offset.
+    Anchor(AnchorPoint),
+}
+
+/// A non-rendered reactive point attached to a drawable's local bounds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnchorPoint {
+    pub object: ObjectId,
+    pub normalized: DVec3,
+    pub offset: DVec3,
+}
+
+impl From<AnchorPoint> for CanvasEndpoint {
+    fn from(value: AnchorPoint) -> Self {
+        Self::Anchor(value)
+    }
 }
 
 /// Preset updater types that can be attached to entities via the Canvas API.

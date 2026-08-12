@@ -134,6 +134,15 @@ pub struct PathSource(pub Arc<BezPath>);
 #[derive(Default)]
 pub struct LocalBounds(pub Bounds3D);
 
+/// Local Y coordinate of a text object's typographic baseline.
+///
+/// Unlike visual bounds, this metric is stable across ascenders, descenders,
+/// subscripts, and glyph changes, allowing independently compiled text runs to
+/// share a true baseline.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TextBaseline(pub f64);
+
 /// The computed world bounding box of a Mobject in world coordinates.
 ///
 /// Propagated automatically down the scene hierarchy.

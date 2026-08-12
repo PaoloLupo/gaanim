@@ -110,6 +110,39 @@ Strings and `TextPart` values form one ordered content tree. The tree remains
 available after compilation, so semantic paths are more stable than manual
 character ranges.
 
+=== Inline emphasis markup
+
+Ordinary strings accept a small Typst-inspired markup language. `*strong*`
+selects a bold face, `_emphasis_` selects italic, and the delimiters may be
+nested as `*_strong emphasis_*`. Markup styling is compiled into the same
+structured Typst runs as `TextStyle`, so it works with wrapping, selections,
+animations, semantic parts, and Layout v2 measurement.
+
+```python
+# show-code: true
+from gaanim import GOLD, Scene
+
+scene = Scene(640, 360, background="#0f172a")
+copy = scene.text(
+    "Normal, _emphasis_, *strong* and *_both_*.",
+    size=36,
+).at(0, 0)
+scene.play([copy.write(1.2, by="word", stagger=0.05)])
+scene.play([copy.words[3].indicate(0.6, color=GOLD)])
+scene.export("text_inline_markup.webp", fps=30)
+```
+
+- `\\*` and `\\_` produce literal delimiters.
+- Markup may span adjacent strings and `part()` boundaries without adding a
+  shaping gap.
+- Markers inside `$...$` remain mathematical syntax; subscripts such as `x_1`
+  and multiplication with `*` are not interpreted as prose emphasis.
+- Intraword underscores (`snake_case`), repeated markers (`__init__`), and a
+  spaced expression such as `5 * 4` remain literal.
+- A valid opening delimiter without its matching close, or crossed nesting,
+  raises `ValueError`. Escape a literal adjacent marker when it could be read
+  as an opener.
+
 #api-entry(
   name: "part",
   kind: "factory",

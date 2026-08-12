@@ -11,6 +11,10 @@ use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression}
 use crate::pystyle::PyStrokeStyle;
 use crate::updater::PyUpdater;
 
+#[pyclass(name = "AnchorPoint", module = "gaanim_core", frozen, from_py_object)]
+#[derive(Clone, Copy, Debug)]
+pub struct PyAnchorPoint(pub gaanim_api::canvas::AnchorPoint);
+
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyCanvasAnim {
@@ -251,6 +255,21 @@ impl PyDrawable {
 
 #[pymethods]
 impl PyDrawable {
+    #[pyo3(signature = (anchor=None, *, offset=(0.0, 0.0)))]
+    fn anchor_point(
+        &self,
+        anchor: Option<PyAnchor>,
+        offset: (f64, f64),
+    ) -> PyResult<PyAnchorPoint> {
+        if !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(PyValueError::new_err("anchor offset must be finite"));
+        }
+        Ok(PyAnchorPoint(self.0.anchor_point(
+            anchor.map(|value| value.0).unwrap_or_default(),
+            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+        )))
+    }
+
     #[getter]
     fn left(&self) -> PyLayoutExpression {
         expression_for(&self.0, gaanim_layout::LayoutAttribute::Left)
@@ -450,9 +469,14 @@ impl PyDrawable {
     fn z_index(&self, z: i32) -> Self {
         Self(self.0.clone().z_index(z))
     }
-    fn at(&self, x: f64, y: f64) -> PyResult<Self> {
+    #[pyo3(signature = (x, y, anchor=None))]
+    fn at(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<Self> {
         self.require_free_position("at")?;
-        Ok(Self(self.0.clone().at(x, y)))
+        Ok(Self(self.0.clone().at_anchor(
+            x,
+            y,
+            anchor.map(|anchor| anchor.0).unwrap_or_default(),
+        )))
     }
     fn at_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         self.require_free_position("at_3d")?;

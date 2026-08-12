@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
 use gaanim_core::glam::{DVec2, DVec3};
-use gaanim_core::kurbo::Shape;
-use gaanim_core::peniko::Color;
+use gaanim_core::kurbo::{Cap, Shape, Stroke};
+use gaanim_core::peniko::{Brush, Color};
+use gaanim_expr::Expr;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
 use gaanim_objects::primitives3d;
 use gaanim_timeline::transition::TransitionType;
@@ -26,6 +27,49 @@ use crate::canvas::{
     SegmentSpec, SegmentStop,
 };
 use crate::export::{AudioTrack, AudioTrackError};
+
+/// Default length in scene units for the straight segments at either spring end.
+pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
+
+/// Public pieces of a reactive technical dimension.
+#[derive(Debug, Clone)]
+pub struct DimensionHandle {
+    pub drawable: DrawableHandle,
+    pub line: DrawableHandle,
+    pub label: Option<DrawableHandle>,
+    pub number: Option<DrawableHandle>,
+    pub unit: Option<DrawableHandle>,
+}
+
+/// Optional annotation behavior for [`Canvas::dimension_between_with_options`].
+#[derive(Debug, Clone)]
+pub struct DimensionOptions {
+    pub label: Option<String>,
+    pub show_value: bool,
+    pub format: String,
+    pub unit: Option<String>,
+    pub scale: f64,
+    pub label_gap: f64,
+    pub label_orientation: gaanim_animation::DimensionLabelOrientation,
+    pub font_size: Option<f64>,
+    pub color: Option<Color>,
+}
+
+impl Default for DimensionOptions {
+    fn default() -> Self {
+        Self {
+            label: None,
+            show_value: false,
+            format: ".2f".to_owned(),
+            unit: None,
+            scale: 1.0,
+            label_gap: 10.0,
+            label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+            font_size: None,
+            color: None,
+        }
+    }
+}
 
 /// Error returned when selecting a built-in visual theme by name.
 #[derive(Debug, thiserror::Error)]
@@ -2135,6 +2179,20 @@ impl Canvas {
         handle
     }
 
+    /// Spawn a thick, round-capped reactive bar between two endpoints.
+    pub fn bar_between(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        width: f64,
+    ) -> DrawableHandle {
+        let mut style = Stroke::new(width);
+        style.start_cap = Cap::Round;
+        style.end_cap = Cap::Round;
+        self.tracking_line(from, to)
+            .stroke_with_style(Brush::Solid(Color::BLACK), style)
+    }
+
     /// Spawn a hidden reactive helical spring between two endpoints.
     ///
     /// Each endpoint can be static or follow a drawable. The path is rebuilt
@@ -2162,6 +2220,33 @@ impl Canvas {
         amplitude: f64,
         crossing: f64,
     ) -> DrawableHandle {
+        self.spring_between_with_options(
+            from,
+            to,
+            coils,
+            amplitude,
+            crossing,
+            DEFAULT_SPRING_STRAIGHT,
+            DEFAULT_SPRING_STRAIGHT,
+        )
+    }
+
+    /// Spawn a reactive helical spring with configurable straight end segments.
+    ///
+    /// The straight lengths are measured from `from` and `to` toward the coil.
+    /// They are proportionally shortened when the endpoints are too close to
+    /// accommodate both segments and a coil.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spring_between_with_options(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        coils: usize,
+        amplitude: f64,
+        crossing: f64,
+        start_straight: f64,
+        end_straight: f64,
+    ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
         handle.defer_visibility_until_play();
         let id = handle.id;
@@ -2177,6 +2262,8 @@ impl Canvas {
                 coils,
                 amplitude,
                 crossing,
+                start_straight,
+                end_straight,
             });
         handle
     }
@@ -2188,7 +2275,10 @@ impl Canvas {
         to: CanvasEndpoint,
         offset: f64,
     ) -> DrawableHandle {
-        let handle = self.spawn(SpawnKind::TrackingLine);
+        let handle = self
+            .spawn(SpawnKind::TrackingLine)
+            .fill(Color::WHITE)
+            .stroke(Color::WHITE, 2.0);
         handle.defer_visibility_until_play();
         let id = handle.id;
         self.state
@@ -2203,6 +2293,120 @@ impl Canvas {
                 offset,
             });
         handle
+    }
+
+    /// Build a reactive dimension with an optional symbolic and numeric annotation.
+    pub fn dimension_between_with_options(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        offset: f64,
+        options: DimensionOptions,
+    ) -> Result<DimensionHandle, gaanim_text::prelude::TextSpecError> {
+        let mut line = self.dimension_between(from.clone(), to.clone(), offset);
+        if let Some(color) = options.color {
+            line = line.fill(color).stroke(color, 2.0);
+        }
+        if options.label.is_none() && !options.show_value {
+            return Ok(DimensionHandle {
+                drawable: line.clone(),
+                line,
+                label: None,
+                number: None,
+                unit: None,
+            });
+        }
+
+        let text_part = |canvas: &mut Canvas, text: &str| {
+            let mut style = gaanim_text::prelude::TextStyle::default();
+            style.size = options.font_size;
+            style.color = options.color;
+            gaanim_text::prelude::TextSpec::new(
+                vec![text.into()],
+                None,
+                style,
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .map(|spec| canvas.text_spec(spec))
+        };
+
+        let label = options
+            .label
+            .as_deref()
+            .map(|text| text_part(self, text))
+            .transpose()?;
+        let mut number = None;
+        let mut unit = None;
+        let annotation = if options.show_value {
+            let tracker = self.value_tracker(0.0);
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachEndpointDistance {
+                    target: tracker.id,
+                    from: from.clone(),
+                    to: to.clone(),
+                    scale: options.scale,
+                });
+            let mut number_handle = self.expression_readout(
+                Expr::Parameter(tracker.id),
+                options.format.clone(),
+                "",
+                "",
+                "—",
+                options.font_size,
+            );
+            if let Some(color) = options.color {
+                number_handle = number_handle.fill(color);
+            }
+            let equals = label.as_ref().map(|_| text_part(self, "=")).transpose()?;
+            let unit_handle = options
+                .unit
+                .as_deref()
+                .map(|text| text_part(self, text))
+                .transpose()?;
+            let group = self.reactive_readout_group(
+                label.as_ref(),
+                equals.as_ref(),
+                &number_handle,
+                unit_handle.as_ref(),
+                10.0,
+            );
+            number = Some(number_handle);
+            unit = unit_handle;
+            group
+        } else {
+            label
+                .as_ref()
+                .expect("annotation exists when label is present")
+                .clone()
+        };
+
+        let drawable = self.group_no_center(&[&line, &annotation]);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachDimensionLabelPlacement {
+                target: line.id,
+                label: annotation.id,
+                from,
+                to,
+                offset,
+                gap: options.label_gap,
+                orientation: options.label_orientation,
+            });
+
+        Ok(DimensionHandle {
+            drawable,
+            line,
+            label,
+            number,
+            unit,
+        })
     }
 
     // -- Render / export --
@@ -3463,6 +3667,84 @@ mod tests {
             path.0.elements().len() > 100,
             "spring must have enough samples for a smooth helical coil"
         );
+    }
+
+    #[test]
+    fn anchored_bar_and_labeled_dimension_compile_the_reactive_contract() {
+        let mut canvas = Canvas::new(640, 360);
+        let frame = canvas.rect(180.0, 80.0).at(20.0, 0.0);
+        let left = frame.anchor_point(Anchor::TopLeft, DVec3::ZERO);
+        let right = frame.anchor_point(Anchor::TopRight, DVec3::ZERO);
+        let _bar = canvas.bar_between(
+            CanvasEndpoint::Static(DVec3::new(-180.0, 120.0, 0.0)),
+            left.into(),
+            9.0,
+        );
+        let dimension = canvas
+            .dimension_between_with_options(
+                left.into(),
+                right.into(),
+                45.0,
+                DimensionOptions {
+                    label: Some("$W_f$".to_owned()),
+                    show_value: true,
+                    unit: Some("mm".to_owned()),
+                    scale: 0.5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        assert!(
+            world
+                .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::TrackingLine>>()
+                .iter(&world)
+                .next()
+                .is_some(),
+            "bar must compile as a reactive tracking line"
+        );
+        assert!(
+            world
+                .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::EndpointDistance>>()
+                .iter(&world)
+                .next()
+                .is_some(),
+            "numeric dimension must compile a distance-backed signal"
+        );
+        assert!(
+            world
+                .query_filtered::<
+                    bevy::prelude::Entity,
+                    With<gaanim_animation::DimensionLabelPlacement>,
+                >()
+                .iter(&world)
+                .next()
+                .is_some(),
+            "dimension annotation must keep a reactive placement binding"
+        );
+        gaanim_animation::always_redraw_regen_system(&mut world);
+        let dimension_line = world
+            .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::AlwaysRedrawRegen>>()
+            .iter(&world)
+            .next()
+            .expect("reactive dimension line");
+        let dimension_path = world
+            .get::<gaanim_scene::Path2D>(dimension_line)
+            .expect("dimension path");
+        assert!(
+            dimension_path.0.elements().len() >= 14,
+            "dimension must include two extension lines, a baseline, and two arrowheads"
+        );
+        assert!(dimension.label.is_some());
+        assert!(dimension.number.is_some());
+        assert!(dimension.unit.is_some());
     }
 
     #[test]

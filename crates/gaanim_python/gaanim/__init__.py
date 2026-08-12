@@ -5,6 +5,7 @@ import warnings
 from . import colors
 from .gaanim_core import (
     Anchor,
+    AnchorPoint,
     Direction,
     Layout,
     LayoutItem,
@@ -36,6 +37,7 @@ from .gaanim_core import (
     StrokeStyle,
     AxesStyle,
     Drawable,
+    Dimension,
     Material3D,
     Primitive3D,
     Text,
@@ -90,6 +92,7 @@ __all__ = [
     "Segment",
     "Canvas",
     "Drawable",
+    "Dimension",
     "Material3D",
     "Primitive3D",
     "Text",
@@ -110,6 +113,7 @@ __all__ = [
     "AxesStyle",
     "colors",
     "Anchor",
+    "AnchorPoint",
     "Direction",
     "Layout",
     "LayoutItem",

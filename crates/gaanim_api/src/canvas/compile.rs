@@ -34,8 +34,8 @@ use gaanim_text::prelude::{
 };
 
 use gaanim_animation::{
-    CurvatureOnCurve, NormalOnCurve, PointOnCurve, PositionBinding, TangentOnCurve, TracedPath,
-    TrackingEndpoint, TrackingLine, Updater,
+    CurvatureOnCurve, DimensionLabelPlacement, EndpointDistance, NormalOnCurve, PointOnCurve,
+    PositionBinding, TangentOnCurve, TracedPath, TrackingEndpoint, TrackingLine, Updater,
 };
 use gaanim_math::{RateFunc, SpatialTransform};
 
@@ -341,6 +341,30 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
         &StructuredTextStyle::default(),
         &mut raw_leaves,
     );
+    let mut markup = gaanim_text::structured::InlineMarkupParser::new();
+    let mut marked_leaves = Vec::new();
+    for (text, inherited_style) in raw_leaves {
+        for segment in markup
+            .push(&text)
+            .expect("TextSpec validates inline markup before compilation")
+        {
+            if segment.text.is_empty() {
+                continue;
+            }
+            let mut style = inherited_style.clone();
+            if segment.strong {
+                style.weight = Some(style.weight.unwrap_or(400).max(700));
+            }
+            if segment.emphasis {
+                style.italic = Some(true);
+            }
+            marked_leaves.push((segment.text, style));
+        }
+    }
+    markup
+        .finish()
+        .expect("TextSpec validates inline markup before compilation");
+    let mut raw_leaves = marked_leaves;
     // Typst ignores ordinary spaces inside math. At compositional boundaries,
     // however, users naturally write `part("x"), " dot ..."` and expect that
     // leading/trailing space to remain visible. Record those boundaries so we
@@ -3625,6 +3649,15 @@ impl Canvas {
                                         TrackingEndpoint::Static(DVec3::ZERO)
                                     }
                                 }
+                                CanvasEndpoint::Anchor(anchor) => id_map
+                                    .get(&anchor.object)
+                                    .and_then(|rid| builder.states.get(*rid))
+                                    .map(|state| TrackingEndpoint::EntityAnchor {
+                                        entity: state.entity,
+                                        normalized: anchor.normalized,
+                                        offset: anchor.offset,
+                                    })
+                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
                             }
                         };
                         let line = TrackingLine::new(resolve_endpoint(from), resolve_endpoint(to));
@@ -3639,6 +3672,8 @@ impl Canvas {
                     coils,
                     amplitude,
                     crossing,
+                    start_straight,
+                    end_straight,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -3651,6 +3686,15 @@ impl Canvas {
                                     .and_then(|rid| builder.states.get(*rid))
                                     .map(|state| TrackingEndpoint::Entity(state.entity))
                                     .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                                CanvasEndpoint::Anchor(anchor) => id_map
+                                    .get(&anchor.object)
+                                    .and_then(|rid| builder.states.get(*rid))
+                                    .map(|state| TrackingEndpoint::EntityAnchor {
+                                        entity: state.entity,
+                                        normalized: anchor.normalized,
+                                        offset: anchor.offset,
+                                    })
+                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
                             }
                         };
                         let from = resolve_endpoint(from);
@@ -3658,16 +3702,25 @@ impl Canvas {
                         let coils = *coils;
                         let amplitude = *amplitude;
                         let crossing = *crossing;
+                        let start_straight = *start_straight;
+                        let end_straight = *end_straight;
+                        let target_entity = st.entity;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
                             let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
                                 TrackingEndpoint::Static(position) => *position,
-                                TrackingEndpoint::Entity(entity) => world
-                                    .get::<SpatialTransform>(*entity)
-                                    .map(|transform| transform.translation)
+                                _ => gaanim_animation::resolve_tracking_endpoint(endpoint, world)
                                     .unwrap_or(DVec3::ZERO),
                             };
-                            let from = endpoint_position(&from);
-                            let to = endpoint_position(&to);
+                            let from = gaanim_animation::tracking_world_to_local(
+                                target_entity,
+                                endpoint_position(&from),
+                                world,
+                            );
+                            let to = gaanim_animation::tracking_world_to_local(
+                                target_entity,
+                                endpoint_position(&to),
+                                world,
+                            );
                             // Rebuild the projected helix every frame so an animated
                             // endpoint changes the spring pitch in lockstep.
                             gaanim_objects::primitives::spring_path(
@@ -3676,6 +3729,8 @@ impl Canvas {
                                 coils,
                                 amplitude,
                                 crossing,
+                                start_straight,
+                                end_straight,
                             )
                         });
                         builder.commands.entity(st.entity).insert(redraw);
@@ -3699,21 +3754,37 @@ impl Canvas {
                                     .and_then(|rid| builder.states.get(*rid))
                                     .map(|state| TrackingEndpoint::Entity(state.entity))
                                     .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                                CanvasEndpoint::Anchor(anchor) => id_map
+                                    .get(&anchor.object)
+                                    .and_then(|rid| builder.states.get(*rid))
+                                    .map(|state| TrackingEndpoint::EntityAnchor {
+                                        entity: state.entity,
+                                        normalized: anchor.normalized,
+                                        offset: anchor.offset,
+                                    })
+                                    .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
                             }
                         };
                         let from = resolve_endpoint(from);
                         let to = resolve_endpoint(to);
                         let offset = *offset;
+                        let target_entity = st.entity;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
                             let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
                                 TrackingEndpoint::Static(position) => *position,
-                                TrackingEndpoint::Entity(entity) => world
-                                    .get::<SpatialTransform>(*entity)
-                                    .map(|transform| transform.translation)
+                                _ => gaanim_animation::resolve_tracking_endpoint(endpoint, world)
                                     .unwrap_or(DVec3::ZERO),
                             };
-                            let from = endpoint_position(&from);
-                            let to = endpoint_position(&to);
+                            let from = gaanim_animation::tracking_world_to_local(
+                                target_entity,
+                                endpoint_position(&from),
+                                world,
+                            );
+                            let to = gaanim_animation::tracking_world_to_local(
+                                target_entity,
+                                endpoint_position(&to),
+                                world,
+                            );
                             gaanim_objects::primitives::dimension_path(
                                 Point::new(from.x, from.y),
                                 Point::new(to.x, to.y),
@@ -3721,6 +3792,88 @@ impl Canvas {
                             )
                         });
                         builder.commands.entity(st.entity).insert(redraw);
+                    }
+                }
+
+                Op::AttachEndpointDistance {
+                    target,
+                    from,
+                    to,
+                    scale,
+                } => {
+                    let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
+                        match ep {
+                            CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
+                            CanvasEndpoint::Entity(oid) => id_map
+                                .get(oid)
+                                .and_then(|rid| builder.states.get(*rid))
+                                .map(|state| TrackingEndpoint::Entity(state.entity))
+                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                            CanvasEndpoint::Anchor(anchor) => id_map
+                                .get(&anchor.object)
+                                .and_then(|rid| builder.states.get(*rid))
+                                .map(|state| TrackingEndpoint::EntityAnchor {
+                                    entity: state.entity,
+                                    normalized: anchor.normalized,
+                                    offset: anchor.offset,
+                                })
+                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                        }
+                    };
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(st.entity).insert(EndpointDistance {
+                            from: resolve_endpoint(from),
+                            to: resolve_endpoint(to),
+                            scale: *scale,
+                        });
+                    }
+                }
+
+                Op::AttachDimensionLabelPlacement {
+                    target,
+                    label,
+                    from,
+                    to,
+                    offset,
+                    gap,
+                    orientation,
+                } => {
+                    let resolve_endpoint = |ep: &CanvasEndpoint| -> TrackingEndpoint {
+                        match ep {
+                            CanvasEndpoint::Static(pos) => TrackingEndpoint::Static(*pos),
+                            CanvasEndpoint::Entity(oid) => id_map
+                                .get(oid)
+                                .and_then(|rid| builder.states.get(*rid))
+                                .map(|state| TrackingEndpoint::Entity(state.entity))
+                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                            CanvasEndpoint::Anchor(anchor) => id_map
+                                .get(&anchor.object)
+                                .and_then(|rid| builder.states.get(*rid))
+                                .map(|state| TrackingEndpoint::EntityAnchor {
+                                    entity: state.entity,
+                                    normalized: anchor.normalized,
+                                    offset: anchor.offset,
+                                })
+                                .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+                        }
+                    };
+                    if let (Some(target_id), Some(label_id)) =
+                        (id_map.get(target).copied(), id_map.get(label).copied())
+                        && let (Some(target_state), Some(label_state)) =
+                            (builder.states.get(target_id), builder.states.get(label_id))
+                    {
+                        builder.commands.entity(target_state.entity).insert(
+                            DimensionLabelPlacement {
+                                label: label_state.entity,
+                                from: resolve_endpoint(from),
+                                to: resolve_endpoint(to),
+                                offset: *offset,
+                                gap: *gap,
+                                orientation: *orientation,
+                            },
+                        );
                     }
                 }
 
@@ -4914,6 +5067,7 @@ impl Canvas {
                     size,
                 )
                 .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
+                let baseline = gaanim_animation::right_aligned_readout_baseline(bounds);
                 let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
                 let svg_path = gaanim_objects::prelude::SvgPath {
                     id: "ReactiveReadout".to_owned(),
@@ -4929,6 +5083,7 @@ impl Canvas {
                 if let Some(state) = builder.states.get(mr.id) {
                     builder.commands.entity(state.entity).insert((
                         gaanim_scene::PathSource(source_path.clone()),
+                        gaanim_scene::TextBaseline(baseline),
                         gaanim_animation::ReactiveReadout {
                             expression: expression.clone(),
                             parameters: parameter_entities,
@@ -5910,6 +6065,24 @@ mod tests {
         assert!(!source.contains("$ "));
         assert!(!source.contains(" $"));
         assert!(!source.contains("#h(0pt)"));
+    }
+
+    #[test]
+    fn structured_inline_markup_emits_typst_styles_and_skips_math() {
+        let spec = StructuredTextSpec::new(
+            vec!["Normal, _emphasis_, *strong*, *_both_* y $x_1 * 5$.".into()],
+            None,
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("valid inline markup");
+
+        let source = structured_typst_content(&spec, 32.0);
+        assert!(source.contains("style: \"italic\""));
+        assert!(source.contains("weight: 700"));
+        assert!(source.contains("$x_1 * 5$"));
+        assert!(!source.contains("_emphasis_"));
+        assert!(!source.contains("*strong*"));
     }
 
     #[test]

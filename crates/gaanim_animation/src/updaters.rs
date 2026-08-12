@@ -1,9 +1,10 @@
 use crate::tween::DeltaTime;
-use bevy::prelude::{Component, Entity, World};
-use gaanim_core::glam::DVec3;
+use bevy::prelude::Component;
+use gaanim_core::glam::{DMat4, DQuat, DVec3};
 use gaanim_core::kurbo::BezPath;
 use gaanim_math::SpatialTransform;
-use gaanim_scene::Path2D;
+use gaanim_scene::prelude::{ChildOf, Entity, World};
+use gaanim_scene::{LocalBounds, Path2D, PathSource};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -804,6 +805,38 @@ pub enum TrackingEndpoint {
     Static(DVec3),
     /// Posición del centro de una entidad (lee SpatialTransform cada frame).
     Entity(Entity),
+    /// A normalized point inside an entity's local bounds plus a local-space offset.
+    EntityAnchor {
+        entity: Entity,
+        normalized: DVec3,
+        offset: DVec3,
+    },
+}
+
+/// Keeps a float signal synchronized with the XY distance between two endpoints.
+#[derive(Component, Debug, Clone)]
+pub struct EndpointDistance {
+    pub from: TrackingEndpoint,
+    pub to: TrackingEndpoint,
+    pub scale: f64,
+}
+
+/// Orientation policy for a reactive dimension annotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DimensionLabelOrientation {
+    Upright,
+    Aligned,
+}
+
+/// Places a dimension annotation at the midpoint of its displaced baseline.
+#[derive(Component, Debug, Clone)]
+pub struct DimensionLabelPlacement {
+    pub label: Entity,
+    pub from: TrackingEndpoint,
+    pub to: TrackingEndpoint,
+    pub offset: f64,
+    pub gap: f64,
+    pub orientation: DimensionLabelOrientation,
 }
 
 /// Componente que regenera un `Path2D` de línea recta entre dos endpoints cada frame.
@@ -828,10 +861,15 @@ pub fn tracking_line_system(world: &mut World) {
 
     let mut query = world.query::<(Entity, &TrackingLine)>();
     for (entity, line) in query.iter(world) {
-        let from_pos = resolve_endpoint(&line.from, world);
-        let to_pos = resolve_endpoint(&line.to, world);
+        let from_pos = resolve_tracking_endpoint(&line.from, world);
+        let to_pos = resolve_tracking_endpoint(&line.to, world);
 
         if let (Some(from), Some(to)) = (from_pos, to_pos) {
+            let inverse = entity_world_matrix(entity, world)
+                .unwrap_or(DMat4::IDENTITY)
+                .inverse();
+            let from = inverse.transform_point3(from);
+            let to = inverse.transform_point3(to);
             let mut path = BezPath::new();
             path.move_to(gaanim_core::kurbo::Point::new(from.x, from.y));
             path.line_to(gaanim_core::kurbo::Point::new(to.x, to.y));
@@ -840,18 +878,153 @@ pub fn tracking_line_system(world: &mut World) {
     }
 
     for (entity, path) in updates {
+        let path = Arc::new(path);
         if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
-            path_comp.0 = std::sync::Arc::new(path);
+            path_comp.0 = path.clone();
+        }
+        if let Some(mut source) = world.get_mut::<PathSource>(entity) {
+            source.0 = path.clone();
+        }
+        if let Some(mut bounds) = world.get_mut::<LocalBounds>(entity) {
+            let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
+            bounds.0 = gaanim_math::Bounds3D::new_2d(
+                rect.x0 - 12.0,
+                rect.y0 - 12.0,
+                rect.x1 + 12.0,
+                rect.y1 + 12.0,
+            );
         }
     }
 }
 
-fn resolve_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
+/// Resolve the current world-space position of a reactive endpoint.
+pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
     match ep {
         TrackingEndpoint::Static(pos) => Some(*pos),
-        TrackingEndpoint::Entity(entity) => world
-            .get::<SpatialTransform>(*entity)
-            .map(|t| t.translation),
+        TrackingEndpoint::Entity(entity) => {
+            entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(DVec3::ZERO))
+        }
+        TrackingEndpoint::EntityAnchor {
+            entity,
+            normalized,
+            offset,
+        } => {
+            let bounds = world.get::<LocalBounds>(*entity)?.0;
+            let center = bounds.center();
+            let half = bounds.size() * 0.5;
+            let local = center + half * *normalized + *offset;
+            entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(local))
+        }
+    }
+}
+
+/// Convert a world-space point into the current local space of an entity.
+pub fn tracking_world_to_local(entity: Entity, point: DVec3, world: &World) -> DVec3 {
+    entity_world_matrix(entity, world)
+        .filter(|matrix| matrix.determinant().abs() > f64::EPSILON)
+        .map(|matrix| matrix.inverse().transform_point3(point))
+        .unwrap_or(point)
+}
+
+fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
+    let mut chain = Vec::new();
+    let mut current = entity;
+    for _ in 0..256 {
+        chain.push(world.get::<SpatialTransform>(current)?.to_mat4());
+        let Some(parent) = world
+            .get::<ChildOf>(current)
+            .map(|relation| relation.parent())
+        else {
+            let mut matrix = DMat4::IDENTITY;
+            for local in chain.iter().rev() {
+                matrix *= *local;
+            }
+            return Some(matrix);
+        };
+        current = parent;
+    }
+    None
+}
+
+/// Update distance-backed signals after authored transforms and custom updaters.
+pub fn endpoint_distance_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<(Entity, &EndpointDistance)>();
+    for (entity, distance) in query.iter(world) {
+        if let (Some(from), Some(to)) = (
+            resolve_tracking_endpoint(&distance.from, world),
+            resolve_tracking_endpoint(&distance.to, world),
+        ) {
+            updates.push((
+                entity,
+                from.truncate().distance(to.truncate()) * distance.scale,
+            ));
+        }
+    }
+    for (entity, value) in updates {
+        if let Some(mut signal) = world.get_mut::<crate::signals::FloatSignal>(entity) {
+            signal.value = value;
+        }
+    }
+}
+
+/// Keep dimension annotations centered on their displaced dimension baseline.
+pub fn dimension_label_placement_system(world: &mut World) {
+    let mut updates = Vec::new();
+    let mut query = world.query::<&DimensionLabelPlacement>();
+    for placement in query.iter(world) {
+        let (Some(from), Some(to)) = (
+            resolve_tracking_endpoint(&placement.from, world),
+            resolve_tracking_endpoint(&placement.to, world),
+        ) else {
+            continue;
+        };
+        let delta = to - from;
+        let length = delta.truncate().length();
+        if length <= f64::EPSILON {
+            updates.push((placement.label, from, 0.0));
+            continue;
+        }
+        let direction = delta.truncate() / length;
+        let normal = gaanim_core::glam::DVec2::new(-direction.y, direction.x);
+        let side = if placement.offset < 0.0 { -1.0 } else { 1.0 };
+        let displacement = placement.offset + side * placement.gap;
+        let midpoint =
+            (from + to) * 0.5 + DVec3::new(normal.x * displacement, normal.y * displacement, 0.0);
+        let mut angle = match placement.orientation {
+            DimensionLabelOrientation::Upright => 0.0,
+            DimensionLabelOrientation::Aligned => direction.y.atan2(direction.x),
+        };
+        if placement.orientation == DimensionLabelOrientation::Aligned && angle.cos() < 0.0 {
+            angle += std::f64::consts::PI;
+        }
+        if angle > std::f64::consts::PI {
+            angle -= std::f64::consts::TAU;
+        } else if angle < -std::f64::consts::PI {
+            angle += std::f64::consts::TAU;
+        }
+        updates.push((placement.label, midpoint, angle));
+    }
+
+    for (label, world_position, world_angle) in updates {
+        let (local_position, local_angle) = if let Some(parent) = world
+            .get::<ChildOf>(label)
+            .map(|relation| relation.parent())
+            .and_then(|parent| entity_world_matrix(parent, world))
+        {
+            let (_, parent_rotation, _) = parent.to_scale_rotation_translation();
+            let (_, _, parent_angle) = parent_rotation.to_euler(gaanim_core::glam::EulerRot::XYZ);
+            (
+                parent.inverse().transform_point3(world_position),
+                world_angle - parent_angle,
+            )
+        } else {
+            (world_position, world_angle)
+        };
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(label) {
+            transform.translation = local_position;
+            transform.rotation = DQuat::from_rotation_z(local_angle);
+        }
     }
 }
 
@@ -1005,5 +1178,121 @@ mod tests {
             );
             assert_eq!(result.unwrap_err(), InvalidFixedStep);
         }
+    }
+
+    #[test]
+    fn anchored_endpoint_uses_current_nested_rotation_and_scale() {
+        let mut world = World::new();
+        let parent_transform = SpatialTransform::new_2d(10.0, 20.0)
+            .with_rotation_2d(std::f64::consts::FRAC_PI_2)
+            .scale_uniform(2.0);
+        let parent = world.spawn(parent_transform).id();
+        let child = world
+            .spawn((
+                SpatialTransform::new_2d(5.0, 0.0),
+                LocalBounds(gaanim_math::Bounds3D::new_2d(-2.0, -1.0, 2.0, 1.0)),
+                ChildOf(parent),
+            ))
+            .id();
+        let endpoint = TrackingEndpoint::EntityAnchor {
+            entity: child,
+            normalized: DVec3::new(1.0, 1.0, 0.0),
+            offset: DVec3::new(1.0, 0.0, 0.0),
+        };
+        let expected = parent_transform.to_mat4().transform_point3(
+            SpatialTransform::new_2d(5.0, 0.0)
+                .to_mat4()
+                .transform_point3(DVec3::new(3.0, 1.0, 0.0)),
+        );
+        let actual = resolve_tracking_endpoint(&endpoint, &world).unwrap();
+        assert!(actual.distance(expected) < 1e-9);
+
+        world
+            .get_mut::<SpatialTransform>(parent)
+            .unwrap()
+            .translation
+            .x += 7.0;
+        let moved = resolve_tracking_endpoint(&endpoint, &world).unwrap();
+        assert!((moved.x - actual.x - 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn endpoint_distance_updates_signal_with_scale() {
+        let mut world = World::new();
+        let signal = world
+            .spawn((
+                crate::signals::FloatSignal::new(0.0),
+                EndpointDistance {
+                    from: TrackingEndpoint::Static(DVec3::new(0.0, 0.0, 0.0)),
+                    to: TrackingEndpoint::Static(DVec3::new(3.0, 4.0, 8.0)),
+                    scale: 2.0,
+                },
+            ))
+            .id();
+        endpoint_distance_system(&mut world);
+        assert_eq!(
+            world
+                .get::<crate::signals::FloatSignal>(signal)
+                .unwrap()
+                .value,
+            10.0
+        );
+    }
+
+    #[test]
+    fn zero_distance_and_negative_dimension_offset_are_stable() {
+        let mut world = World::new();
+        let point = DVec3::new(7.0, -3.0, 11.0);
+        let signal = world
+            .spawn((
+                crate::signals::FloatSignal::new(123.0),
+                EndpointDistance {
+                    from: TrackingEndpoint::Static(point),
+                    to: TrackingEndpoint::Static(point),
+                    scale: 0.5,
+                },
+            ))
+            .id();
+        endpoint_distance_system(&mut world);
+        assert_eq!(
+            world
+                .get::<crate::signals::FloatSignal>(signal)
+                .unwrap()
+                .value,
+            0.0
+        );
+
+        let label = world.spawn(SpatialTransform::default()).id();
+        world.spawn(DimensionLabelPlacement {
+            label,
+            from: TrackingEndpoint::Static(DVec3::new(0.0, 0.0, 0.0)),
+            to: TrackingEndpoint::Static(DVec3::new(10.0, 0.0, 0.0)),
+            offset: -20.0,
+            gap: 5.0,
+            orientation: DimensionLabelOrientation::Upright,
+        });
+        dimension_label_placement_system(&mut world);
+        let transform = world.get::<SpatialTransform>(label).unwrap();
+        assert!((transform.translation.x - 5.0).abs() < 1e-9);
+        assert!((transform.translation.y + 25.0).abs() < 1e-9);
+        assert!(transform.z_angle().abs() < 1e-9);
+    }
+
+    #[test]
+    fn aligned_dimension_label_stays_readable() {
+        let mut world = World::new();
+        let label = world.spawn(SpatialTransform::default()).id();
+        world.spawn(DimensionLabelPlacement {
+            label,
+            from: TrackingEndpoint::Static(DVec3::new(10.0, 0.0, 0.0)),
+            to: TrackingEndpoint::Static(DVec3::new(-10.0, 0.0, 0.0)),
+            offset: 20.0,
+            gap: 5.0,
+            orientation: DimensionLabelOrientation::Aligned,
+        });
+        dimension_label_placement_system(&mut world);
+        let transform = world.get::<SpatialTransform>(label).unwrap();
+        assert!((transform.translation.y + 25.0).abs() < 1e-9);
+        assert!(transform.z_angle().abs() < 1e-9);
     }
 }

@@ -5,6 +5,7 @@ use pyo3::prelude::*;
 
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
+use crate::pylayout::PyAnchor;
 
 #[pyclass(name = "Material3D", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Copy)]
@@ -129,9 +130,17 @@ impl PyPrimitive3D {
         slf
     }
 
-    fn at(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyResult<PyRef<'_, Self>> {
+    #[pyo3(signature = (x, y, anchor=None))]
+    fn at<'py>(
+        slf: PyRef<'py, Self>,
+        x: f64,
+        y: f64,
+        anchor: Option<&PyAnchor>,
+    ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        slf.handle.clone().at(x, y);
+        slf.handle
+            .clone()
+            .at_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default());
         Ok(slf)
     }
 

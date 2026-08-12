@@ -193,15 +193,31 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("Text.step_to did not return Anim")
     else:
         scene.play([text_transition])
-    chained_text = scene.text("Chain").fill(module.WHITE).at(0.0, 0.0)
+    chained_text = scene.text("Chain").fill(module.WHITE).at(
+        0.0, 0.0, module.Anchor.TOP_LEFT
+    )
     if not isinstance(chained_text, module.Text):
         failures.append("Text fluent styling or positioning erased the Text subtype")
+    anchored_drawable = scene.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
+    if not isinstance(anchored_drawable, module.Drawable):
+        failures.append("Drawable.at with an anchor did not return Drawable")
     try:
         scene.text("$unbalanced")
     except ValueError:
         pass
     else:
         failures.append("Scene.text accepted an unbalanced math delimiter")
+    inline_markup = scene.text(
+        "Normal, _emphasis_, *strong*, *_both_*, snake_case y $x_1 * 5$."
+    )
+    if not isinstance(inline_markup, module.Text):
+        failures.append("Scene.text inline markup did not return Text")
+    try:
+        scene.text("*unbalanced")
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.text accepted unbalanced inline markup")
     return failures
 
 
@@ -223,6 +239,57 @@ def validate_layout_detach_contract(module: object) -> list[str]:
     else:
         if not isinstance(movement, module.Anim):
             failures.append("a detached child move_to did not return Anim")
+    return failures
+
+
+def validate_reactive_connector_contract(module: object) -> list[str]:
+    """Exercise anchored endpoints, bars, springs, and rich dimensions."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    frame = scene.rect(240.0, 120.0)
+    corner = frame.anchor_point(module.Anchor.TOP_RIGHT, offset=(5.0, -3.0))
+    if not isinstance(corner, module.AnchorPoint):
+        failures.append("Drawable.anchor_point did not return AnchorPoint")
+
+    bar = scene.bar_between((-180.0, 120.0), corner, width=9.0)
+    spring = scene.spring_between(
+        frame, corner, coils=6, amplitude=10.0, start_straight=8.0, end_straight=14.0
+    )
+    if not isinstance(bar, module.Drawable) or not isinstance(spring, module.Drawable):
+        failures.append("reactive bar or spring did not return Drawable")
+    try:
+        scene.spring_between((0.0, 0.0), (100.0, 0.0), start_straight=-1.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.spring_between accepted a negative start_straight")
+
+    dimension = scene.dimension_between(
+        frame.anchor_point(module.Anchor.LEFT),
+        frame.anchor_point(module.Anchor.RIGHT),
+        45.0,
+        label="$W_f$",
+        show_value=True,
+        format=".1f",
+        unit="mm",
+        scale=0.5,
+        label_gap=12.0,
+        label_orientation="aligned",
+    )
+    if not isinstance(dimension, module.Dimension):
+        failures.append("Scene.dimension_between did not return Dimension")
+    elif not all(
+        isinstance(part, module.Drawable)
+        for part in (dimension.line, dimension.label, dimension.number, dimension.unit)
+    ):
+        failures.append("Dimension did not expose its line/label/number/unit parts")
+
+    try:
+        scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, scale=0.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.dimension_between accepted a non-positive scale")
     return failures
 
 
@@ -254,6 +321,7 @@ def main() -> int:
 
     missing.extend(validate_visualization_contract(module))
     missing.extend(validate_layout_detach_contract(module))
+    missing.extend(validate_reactive_connector_contract(module))
     missing.extend(documented_text_api_failures(tree))
 
     if missing:

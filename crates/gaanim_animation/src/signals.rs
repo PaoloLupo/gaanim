@@ -4,7 +4,7 @@ use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource};
+use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource, TextBaseline};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -141,6 +141,12 @@ pub fn right_align_readout_path(mut path: BezPath, _bounds: Bounds3D) -> (BezPat
     (path, Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1))
 }
 
+/// Local typographic baseline after [`right_align_readout_path`] centers a
+/// native text outline vertically.
+pub fn right_aligned_readout_baseline(bounds: Bounds3D) -> f64 {
+    -(bounds.min.y + bounds.max.y) * 0.5
+}
+
 /// Restore the cached outline after snapshot replay and only recompile it when
 /// the formatted text changes.
 pub fn reactive_readout_update_system(
@@ -150,10 +156,11 @@ pub fn reactive_readout_update_system(
         &mut Path2D,
         Option<&mut PathSource>,
         &mut LocalBounds,
+        &mut TextBaseline,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    for (mut readout, mut path, path_source, mut bounds) in &mut query {
+    for (mut readout, mut path, path_source, mut bounds, mut baseline) in &mut query {
         let mut context = EvalContext::new();
         for (id, entity) in &readout.parameters {
             if let Ok(signal) = signals.get(*entity) {
@@ -194,6 +201,7 @@ pub fn reactive_readout_update_system(
             &readout.font_family,
             readout.font_size,
         ) {
+            baseline.0 = right_aligned_readout_baseline(new_bounds);
             let (new_path, new_bounds) = right_align_readout_path(new_path, new_bounds);
             let new_path = std::sync::Arc::new(new_path);
             if let Some(mut source) = path_source {
@@ -208,12 +216,18 @@ pub fn reactive_readout_update_system(
     }
 }
 
-/// Align labels, numbers, and units on a common visual baseline, keep the
-/// equality sign on the numeric axis, and preserve an exact gap between terms.
+/// Align labels, numbers, and units on one optical text axis and preserve an
+/// exact gap between terms.
+///
+/// The parts may come from different vector text engines (Typst math and the
+/// native reactive-number shaper). Their visual bounds therefore do not carry
+/// a shared typographic baseline. Centering those bounds produces a stable,
+/// editorial row even when a symbolic label contains subscripts or accents.
 pub fn reactive_readout_layout_system(
     layouts: Query<&ReactiveReadoutLayout>,
     ids: Query<(Entity, &MobjectId)>,
     bounds: Query<&LocalBounds>,
+    baselines: Query<&TextBaseline>,
     mut transforms: Query<&mut SpatialTransform>,
 ) {
     let entities = ids
@@ -234,7 +248,11 @@ pub fn reactive_readout_layout_system(
             .filter_map(|id| {
                 let entity = *entities.get(&id)?;
                 let local = bounds.get(entity).ok()?.0;
-                Some((id, entity, local))
+                let baseline = baselines
+                    .get(entity)
+                    .map(|baseline| baseline.0)
+                    .unwrap_or((local.min.y + local.max.y) * 0.5);
+                Some((id, entity, local, baseline))
             })
             .collect::<Vec<_>>();
         if parts.is_empty() {
@@ -243,39 +261,28 @@ pub fn reactive_readout_layout_system(
 
         let widths = parts
             .iter()
-            .map(|(_, _, bounds)| (bounds.max.x - bounds.min.x).max(0.0))
+            .map(|(_, _, bounds, _)| (bounds.max.x - bounds.min.x).max(0.0))
             .collect::<Vec<_>>();
         let total_width = widths.iter().sum::<f64>()
             + layout.spacing.max(0.0) * (parts.len().saturating_sub(1) as f64);
-        let number_bounds = parts
-            .iter()
-            .find_map(|(id, _, bounds)| (*id == layout.number).then_some(*bounds))
-            .unwrap_or_default();
-        let number_axis = (number_bounds.max.y - number_bounds.min.y).max(0.0) * 0.5;
         let provisional_y = parts
             .iter()
-            .map(|(id, _, local)| {
-                if Some(*id) == layout.equals {
-                    number_axis - (local.min.y + local.max.y) * 0.5
-                } else {
-                    -local.min.y
-                }
-            })
+            .map(|(_, _, _, baseline)| -*baseline)
             .collect::<Vec<_>>();
         let row_min_y = parts
             .iter()
             .zip(&provisional_y)
-            .map(|((_, _, local), translation)| local.min.y + translation)
+            .map(|((_, _, local, _), translation)| local.min.y + translation)
             .fold(f64::INFINITY, f64::min);
         let row_max_y = parts
             .iter()
             .zip(&provisional_y)
-            .map(|((_, _, local), translation)| local.max.y + translation)
+            .map(|((_, _, local, _), translation)| local.max.y + translation)
             .fold(f64::NEG_INFINITY, f64::max);
         let vertical_centering = -(row_min_y + row_max_y) * 0.5;
         let mut cursor = -total_width * 0.5;
 
-        for (((_, entity, local), width), translation_y) in
+        for (((_, entity, local, _), width), translation_y) in
             parts.into_iter().zip(widths).zip(provisional_y)
         {
             let target_center_x = cursor + width * 0.5;
@@ -838,6 +845,7 @@ mod tests {
                 Path2D(initial_path.clone()),
                 PathSource(initial_path),
                 LocalBounds(Bounds3D::default()),
+                TextBaseline::default(),
             ))
             .id();
 
@@ -883,19 +891,20 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, reactive_readout_layout_system);
 
-        let spawn_part = |app: &mut App, id, width: f64, height: f64| {
+        let spawn_part = |app: &mut App, id, width: f64, min_y: f64, max_y: f64, baseline: f64| {
             app.world_mut()
                 .spawn((
                     MobjectId(id),
-                    LocalBounds(Bounds3D::new_2d(0.0, 0.0, width, height)),
+                    LocalBounds(Bounds3D::new_2d(0.0, min_y, width, max_y)),
+                    TextBaseline(baseline),
                     SpatialTransform::default(),
                 ))
                 .id()
         };
-        let label = spawn_part(&mut app, label_id, 20.0, 28.0);
-        let equals = spawn_part(&mut app, equals_id, 12.0, 12.0);
-        let number = spawn_part(&mut app, number_id, 40.0, 24.0);
-        let unit = spawn_part(&mut app, unit_id, 18.0, 30.0);
+        let label = spawn_part(&mut app, label_id, 20.0, -9.0, 19.0, -1.0);
+        let equals = spawn_part(&mut app, equals_id, 12.0, -5.0, 7.0, 1.0);
+        let number = spawn_part(&mut app, number_id, 40.0, -12.0, 12.0, -3.0);
+        let unit = spawn_part(&mut app, unit_id, 18.0, -7.0, 23.0, 2.0);
         app.world_mut().spawn(ReactiveReadoutLayout {
             label: Some(label_id),
             equals: Some(equals_id),
@@ -923,14 +932,19 @@ mod tests {
         assert_eq!(equals_edges.0 - label_edges.1, 10.0);
         assert_eq!(initial_number_edges.0 - equals_edges.1, 10.0);
         assert_eq!(initial_unit_edges.0 - initial_number_edges.1, 10.0);
-        assert_eq!(label_edges.2, initial_number_edges.2);
-        assert_eq!(initial_unit_edges.2, initial_number_edges.2);
-        assert_eq!(
-            (equals_edges.2 + equals_edges.3) * 0.5,
-            (initial_number_edges.2 + initial_number_edges.3) * 0.5
-        );
-        assert_eq!(initial_unit_edges.2, -15.0);
-        assert_eq!(initial_unit_edges.3, 15.0);
+        let world_baseline = |app: &App, entity| {
+            app.world().get::<TextBaseline>(entity).unwrap().0
+                + app
+                    .world()
+                    .get::<SpatialTransform>(entity)
+                    .unwrap()
+                    .translation
+                    .y
+        };
+        let expected_baseline = world_baseline(&app, number);
+        assert_eq!(world_baseline(&app, label), expected_baseline);
+        assert_eq!(world_baseline(&app, equals), expected_baseline);
+        assert_eq!(world_baseline(&app, unit), expected_baseline);
 
         app.world_mut()
             .entity_mut(number)

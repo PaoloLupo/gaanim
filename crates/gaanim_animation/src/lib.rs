@@ -11,17 +11,19 @@ pub use signals::{
     always_redraw_regen_system, curvature_on_curve_system, format_reactive_number,
     normal_on_curve_system, point_on_curve_system, position_binding_system,
     reactive_readout_layout_system, reactive_readout_update_system, right_align_readout_path,
-    signal_binding_system, tangent_on_curve_system,
+    right_aligned_readout_baseline, signal_binding_system, tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
     evaluate_custom_tweens_system, evaluate_tweens_system, sync_delta_time_system,
 };
 pub use updaters::{
-    InvalidFixedStep, PlaybackState, TracedPath, TracedPath3D, TrackingEndpoint, TrackingLine,
-    Updater, advance_updaters_by, advance_x_updater, bob_updater, follow_updater, orbit_updater,
-    pulse_updater, rotate_updater, seek_updaters, traced_path_3d_system, traced_path_system,
-    tracking_line_system, updater_system,
+    DimensionLabelOrientation, DimensionLabelPlacement, EndpointDistance, InvalidFixedStep,
+    PlaybackState, TracedPath, TracedPath3D, TrackingEndpoint, TrackingLine, Updater,
+    advance_updaters_by, advance_x_updater, bob_updater, dimension_label_placement_system,
+    endpoint_distance_system, follow_updater, orbit_updater, pulse_updater,
+    resolve_tracking_endpoint, rotate_updater, seek_updaters, traced_path_3d_system,
+    traced_path_system, tracking_line_system, tracking_world_to_local, updater_system,
 };
 pub use writing::{
     FillDrawProgress, PathReveal, PathSource, WriteTipGlow, path_source_seed_added_system,
@@ -85,7 +87,9 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 position_binding_system.after(updater_system),
                 always_redraw_regen_system.after(position_binding_system),
                 tracking_line_system.after(always_redraw_regen_system),
-                traced_path_system.after(tracking_line_system),
+                endpoint_distance_system.after(tracking_line_system),
+                dimension_label_placement_system.after(endpoint_distance_system),
+                traced_path_system.after(dimension_label_placement_system),
                 traced_path_3d_system.after(traced_path_system),
                 point_on_curve_system.after(traced_path_3d_system),
                 tangent_on_curve_system.after(point_on_curve_system),
