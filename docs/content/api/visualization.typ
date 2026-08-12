@@ -78,6 +78,11 @@ encoding. The same scale drives normalized positions, colors, legends, and
 colorbars. `Axis` remains the immutable visual scale builder and supports the
 same numeric, temporal, and categorical families.
 
+La tipografía visual predeterminada usa 32 unidades para números de ticks y 36
+para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p.
+Los selectores de tema `axes/numbers` y `axes/labels` permiten sustituir estos
+valores globalmente.
+
 ```python
 color = Field("temperature", scale=Scale.symlog((-100, 100), threshold=1))
 x = Axis.log(0.1, 1000, base=10).ticks(10).label("frequency")

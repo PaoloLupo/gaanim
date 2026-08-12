@@ -207,7 +207,7 @@ impl CartesianSpace {
             if self.numbers && tick.major && !tick.label.is_empty() {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(x, x_axis_y - style.tick_length - 14.0),
+                    position: Point::new(x, x_axis_y - style.tick_length - 18.0),
                     color: style.number_color,
                 });
             }
@@ -231,7 +231,7 @@ impl CartesianSpace {
             if self.numbers && tick.major && !tick.label.is_empty() && tick.value != x_cross {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(y_axis_x - style.tick_length - 18.0, y),
+                    position: Point::new(y_axis_x - style.tick_length - 24.0, y),
                     color: style.number_color,
                 });
             }
@@ -246,14 +246,14 @@ impl CartesianSpace {
             if let Some(label) = self.map.x.label_text() {
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(frame.width * 0.5 + 18.0, x_axis_y),
+                    position: Point::new(frame.width * 0.5 + 24.0, x_axis_y),
                     color: self.map.x.style_value().label_color,
                 });
             }
             if let Some(label) = self.map.y.label_text() {
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(y_axis_x, frame.height * 0.5 + 18.0),
+                    position: Point::new(y_axis_x, frame.height * 0.5 + 24.0),
                     color: self.map.y.style_value().label_color,
                 });
             }

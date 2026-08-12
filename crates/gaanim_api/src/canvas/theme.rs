@@ -449,7 +449,9 @@ impl CanvasTheme {
             ThemeStyle {
                 fill: Some(ThemePaint::Named("foreground".into())),
                 text: Some(TextStyle {
-                    size: Some(self.text.roles[&TextRole::Caption].size),
+                    // Tick numbers must remain readable after a 1080p frame is
+                    // scaled down inside a player or presentation viewport.
+                    size: Some(self.text.roles[&TextRole::Caption].size * (4.0 / 3.0)),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -460,7 +462,7 @@ impl CanvasTheme {
             ThemeStyle {
                 fill: Some(ThemePaint::Named("foreground".into())),
                 text: Some(TextStyle {
-                    size: Some(self.text.roles[&TextRole::Label].size),
+                    size: Some(self.text.roles[&TextRole::Label].size * (9.0 / 7.0)),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1132,5 +1134,23 @@ mod tests {
         assert_eq!(config.grid_color, theme.palette.rule);
         assert_eq!(config.label_color, theme.palette.accent);
         assert_eq!(config.label_size, Some(36.0));
+    }
+
+    #[test]
+    fn builtin_axis_typography_is_readable_at_1080p() {
+        let theme = CanvasTheme::builtin("nord").unwrap();
+        let number_size = theme.styles["axes/numbers"]
+            .text
+            .as_ref()
+            .and_then(|style| style.size)
+            .unwrap();
+        let label_size = theme.styles["axes/labels"]
+            .text
+            .as_ref()
+            .and_then(|style| style.size)
+            .unwrap();
+
+        assert_eq!(number_size, 32.0);
+        assert_eq!(label_size, 36.0);
     }
 }

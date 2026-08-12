@@ -1056,7 +1056,7 @@ impl Canvas {
                             .fill(axis.style_value().number_color)
                             .at_3d(label_position[0], label_position[1], label_position[2])
                             .billboard()
-                            .scaled(0.012),
+                            .scaled(0.016),
                     );
                 }
             }
@@ -1077,7 +1077,7 @@ impl Canvas {
                         .fill(axis.style_value().label_color)
                         .at_3d(position[0], position[1], position[2])
                         .billboard()
-                        .scaled(0.015),
+                        .scaled(0.019),
                 );
             }
         }
@@ -1413,7 +1413,7 @@ impl Canvas {
             .map(|size| {
                 size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
             })
-            .unwrap_or(0.45);
+            .unwrap_or(1.0);
         let label_scale = self
             .theme_style
             .as_ref()
@@ -1423,7 +1423,7 @@ impl Canvas {
             .map(|size| {
                 size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
             })
-            .unwrap_or(0.55);
+            .unwrap_or(1.125);
         let number_handles: Vec<DrawableHandle> = geometry
             .numbers
             .iter()
@@ -1493,7 +1493,7 @@ impl Canvas {
             .and_then(|style| style.text.as_ref())
             .and_then(|style| style.size)
             .map(|size| size / body_size)
-            .unwrap_or(0.75);
+            .unwrap_or(1.0);
         let label_scale = self
             .theme_style
             .as_ref()
@@ -1501,13 +1501,13 @@ impl Canvas {
             .and_then(|style| style.text.as_ref())
             .and_then(|style| style.size)
             .map(|size| size / body_size)
-            .unwrap_or(0.875);
+            .unwrap_or(1.125);
         let mut axis_path = BezPath::new();
         axis_path.move_to(Point::new(-length * 0.5, 0.0));
         axis_path.line_to(Point::new(length * 0.5, 0.0));
         let bounds = gaanim_math::Bounds3D::new_2d(
             -length * 0.5,
-            -style.tick_length - 44.0,
+            -style.tick_length - 56.0,
             length * 0.5,
             style.tick_length + 32.0,
         );
@@ -1530,7 +1530,7 @@ impl Canvas {
                     self.text(&tick.label)
                         .fill(style.number_color)
                         .scaled(number_scale)
-                        .at(x, -style.tick_length - 18.0),
+                        .at(x, -style.tick_length - 22.0),
                 );
             }
         }
@@ -1548,7 +1548,7 @@ impl Canvas {
                 .text(label)
                 .fill(style.label_color)
                 .scaled(label_scale)
-                .at(length * 0.5 + 24.0, 0.0);
+                .at(length * 0.5 + 30.0, 0.0);
             self.group(&[&label])
         } else {
             self.group(&[])
@@ -1584,7 +1584,7 @@ impl Canvas {
             .and_then(|style| style.text.as_ref())
             .and_then(|style| style.size)
             .map(|size| size / body_size)
-            .unwrap_or(0.75);
+            .unwrap_or(1.0);
         let bounds = gaanim_math::Bounds3D::new_2d(-radius, -radius, radius, radius);
         let mut grid_path = BezPath::new();
         let mut numbers_handles = Vec::new();
@@ -1597,7 +1597,7 @@ impl Canvas {
                         self.text(&tick.label)
                             .fill(style.number_color)
                             .scaled(number_scale)
-                            .at(ring_radius, -16.0),
+                            .at(ring_radius, -20.0),
                     );
                 }
             }
