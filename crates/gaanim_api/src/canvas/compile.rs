@@ -6997,6 +6997,76 @@ mod tests {
     }
 
     #[test]
+    fn compound_paint_animation_reaches_text_glyphs() {
+        let fill_target = PenikoColor::from_rgb8(32, 96, 224);
+        let stroke_target = PenikoColor::from_rgb8(255, 180, 0);
+        let fragment_start = PenikoColor::from_rgb8(220, 32, 64);
+        let mut canvas = Canvas::new(640, 360);
+        let text = canvas
+            .text("Color")
+            .stroke(PenikoColor::WHITE, 2.0)
+            .color_by("C", fragment_start);
+        canvas.play(vec![
+            text.animate()
+                .color(fill_target)
+                .stroke(stroke_target, 7.0)
+                .duration(1.0),
+        ]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.5);
+
+        let mut halfway_fills = world
+            .query::<(&FillBrush, &LocalBounds)>()
+            .iter(&world)
+            .filter_map(|(fill, bounds)| {
+                (bounds.0.width() > 0.0 && bounds.0.height() > 0.0)
+                    .then(|| match fill.0 {
+                        Some(Brush::Solid(color)) => Some(color.to_rgba8()),
+                        _ => None,
+                    })
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        halfway_fills.sort_by_key(|color| (color.r, color.g, color.b, color.a));
+        halfway_fills.dedup();
+        assert!(
+            halfway_fills.len() > 1,
+            "each glyph should interpolate from its own fill, including fragment overrides"
+        );
+
+        timeline.seek(&mut world, 1.0);
+
+        let painted_glyphs = world
+            .query::<(&FillBrush, &gaanim_scene::StrokeBrush, &LocalBounds)>()
+            .iter(&world)
+            .filter(|(fill, stroke, bounds)| {
+                bounds.0.width() > 0.0
+                    && bounds.0.height() > 0.0
+                    && matches!(&fill.0, Some(Brush::Solid(color)) if *color == fill_target)
+                    && matches!(&stroke.brush, Some(Brush::Solid(color)) if *color == stroke_target)
+                    && (stroke.style.width - 7.0).abs() < 1e-9
+            })
+            .count();
+
+        assert!(
+            painted_glyphs > 1,
+            "compound paint animation should update the visible text glyphs, got {painted_glyphs}"
+        );
+    }
+
+    #[test]
     fn paper_theme_applies_role_fills_to_text_glyphs() {
         let mut canvas = Canvas::new(640, 360);
         canvas

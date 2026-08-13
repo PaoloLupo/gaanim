@@ -4228,6 +4228,40 @@ mod tests {
     }
 
     #[test]
+    fn move_to_anchor_places_the_requested_anchor_at_the_target() {
+        let mut canvas = Canvas::new(640, 360);
+        let rect = canvas.rect(100.0, 60.0).at(-120.0, 0.0);
+        canvas.play(vec![
+            rect.move_to_anchor(80.0, 40.0, Anchor::TopRight)
+                .duration(1.0),
+        ]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| {
+                (id.0 == gaanim_core::ObjectId::from_raw(rect.id.as_raw() - 1)).then_some(entity)
+            })
+            .expect("rectangle entity");
+        let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.0);
+
+        let translation = world
+            .get::<SpatialTransform>(entity)
+            .expect("rectangle transform")
+            .translation;
+        assert_eq!(translation, gaanim_core::glam::DVec3::new(30.0, 10.0, 0.0));
+    }
+
+    #[test]
     fn primitive_3d_color_property_preserves_other_material_channels() {
         let mut canvas = Canvas::new(640, 360);
         let original = gaanim_scene::Material3D::metal(Color::WHITE);

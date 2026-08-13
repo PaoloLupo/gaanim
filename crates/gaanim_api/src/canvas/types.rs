@@ -1016,9 +1016,17 @@ impl Anim {
     }
 
     pub fn move_to(self, x: f64, y: f64) -> Self {
+        self.move_to_anchor(x, y, Anchor::Center)
+    }
+
+    /// Animate so the selected local bounds anchor reaches `(x, y)`.
+    pub fn move_to_anchor(self, x: f64, y: f64, anchor: Anchor) -> Self {
         self.assert_free_position();
         self.update_properties(|properties| {
-            properties.translation = Some(PropertyTranslation::To(DVec3::new(x, y, 0.0)))
+            properties.translation = Some(PropertyTranslation::ToAnchor {
+                to: DVec3::new(x, y, 0.0),
+                anchor,
+            })
         })
     }
 

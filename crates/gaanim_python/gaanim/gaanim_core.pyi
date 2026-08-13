@@ -404,17 +404,27 @@ class Anim:
     def fill(self, color: ColorLike) -> Anim:
         """Target a solid fill color in a compound ``Drawable.animate()`` animation.
 
-        On ``Primitive3D`` this targets the PBR material base color instead.
+        Text glyphs interpolate independently from their current fills, so
+        fragment-specific colors converge to this target. On ``Primitive3D``
+        this targets the PBR material base color instead.
         """
         ...
     def color(self, color: ColorLike) -> Anim:
-        """Target currently visible vector paints, or a Primitive3D base color."""
+        """Target currently visible vector paints, including every text glyph.
+
+        Glyphs interpolate from their own current colors; any fragment-specific
+        colors are replaced by the common target when the animation completes.
+        On ``Primitive3D`` this targets the PBR material base color.
+        """
         ...
     def stroke(self, color: ColorLike, width: float) -> Anim:
-        """Target vector stroke color and width; unavailable for Primitive3D."""
+        """Target vector stroke color and width, including every text glyph.
+
+        This is unavailable for ``Primitive3D``.
+        """
         ...
     def stroke_color(self, color: ColorLike) -> Anim:
-        """Target only the vector stroke color."""
+        """Target only the vector stroke color, including every text glyph."""
         ...
     def material(self, material: Material3D) -> Anim:
         """Target every animatable PBR channel of a native Primitive3D."""
@@ -425,8 +435,12 @@ class Anim:
     def move(self, dx: float, dy: float) -> Anim:
         """Target a relative 2D translation in a compound property animation."""
         ...
-    def move_to(self, x: float, y: float) -> Anim:
-        """Target an absolute 2D position in scene units."""
+    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
+        """Target an absolute 2D position, placing ``anchor`` at ``(x, y)``.
+
+        Omitting ``anchor`` uses ``Anchor.CENTER``. The returned animation can
+        be chained with other property targets.
+        """
         ...
     def move_3d(self, dx: float, dy: float, dz: float) -> Anim:
         """Target a relative 3D translation in scene units."""
@@ -894,8 +908,11 @@ class Drawable:
             result = drawable.move(1.0, 1.0)
         """
         ...
-    def move_to(self, x: float, y: float) -> Anim:
+    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
         """Create a move to animation for this drawable.
+
+        The selected ``anchor`` arrives at ``(x, y)``; omitting it uses
+        ``Anchor.CENTER``.
 
         Example:
             result = drawable.move_to(1.0, 1.0)

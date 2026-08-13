@@ -85,14 +85,19 @@ impl PyCanvasAnim {
         })
     }
 
-    fn move_to(&self, x: f64, y: f64) -> PyResult<Self> {
+    #[pyo3(signature = (x, y, anchor=None))]
+    fn move_to(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<Self> {
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
             ));
         }
         Ok(Self {
-            inner: self.inner.clone().move_to(x, y),
+            inner: self.inner.clone().move_to_anchor(
+                x,
+                y,
+                anchor.map(|anchor| anchor.0).unwrap_or_default(),
+            ),
         })
     }
 
@@ -565,10 +570,13 @@ impl PyDrawable {
             inner: self.0.r#move(dx, dy),
         })
     }
-    fn move_to(&self, x: f64, y: f64) -> PyResult<PyCanvasAnim> {
+    #[pyo3(signature = (x, y, anchor=None))]
+    fn move_to(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<PyCanvasAnim> {
         self.require_free_position("move_to")?;
         Ok(PyCanvasAnim {
-            inner: self.0.move_to(x, y),
+            inner: self
+                .0
+                .move_to_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default()),
         })
     }
     fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyCanvasAnim {

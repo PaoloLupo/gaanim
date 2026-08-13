@@ -2,6 +2,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
+use gaanim_layout::Anchor;
 use gaanim_math::RateFunc;
 
 use crate::canvas::CanvasEndpoint;
@@ -48,6 +49,7 @@ impl PropertyAnimation {
 #[derive(Debug, Clone, Copy)]
 pub enum PropertyTranslation {
     To(DVec3),
+    ToAnchor { to: DVec3, anchor: Anchor },
     By(DVec3),
 }
 
@@ -148,6 +150,11 @@ pub enum AnimationType {
     },
     TranslateTo {
         to: DVec3,
+    },
+    /// Translate so a selected local bounds anchor reaches a scene-space point.
+    TranslateAnchorTo {
+        to: DVec3,
+        anchor: Anchor,
     },
     TranslateBy {
         delta: DVec3,

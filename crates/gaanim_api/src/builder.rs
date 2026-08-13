@@ -776,7 +776,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Create3D => "Create3D",
             AnimationType::Unwrite { .. } => "Unwrite",
             AnimationType::Uncreate { .. } => "Uncreate",
-            AnimationType::TranslateTo { .. } | AnimationType::TranslateBy { .. } => "Move",
+            AnimationType::TranslateTo { .. }
+            | AnimationType::TranslateAnchorTo { .. }
+            | AnimationType::TranslateBy { .. } => "Move",
             AnimationType::RotateTo { .. }
             | AnimationType::RotateBy { .. }
             | AnimationType::RotateBy3D { .. } => "Rotate",
@@ -1775,6 +1777,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(translation) = properties.translation {
                 channels.push(match translation {
                     crate::anim::PropertyTranslation::To(to) => AnimationType::TranslateTo { to },
+                    crate::anim::PropertyTranslation::ToAnchor { to, anchor } => {
+                        AnimationType::TranslateAnchorTo { to, anchor }
+                    }
                     crate::anim::PropertyTranslation::By(delta) => {
                         AnimationType::TranslateBy { delta }
                     }
@@ -1840,6 +1845,36 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 });
             }
             return;
+        }
+
+        // Text and Typst roots carry the aggregate paint state used by the
+        // public Drawable API, but their visible geometry lives on glyph
+        // children. Resolve paint lenses for every glyph as well so each one
+        // interpolates from its own current fill/stroke (including fragment
+        // overrides) while the root state remains authoritative for later
+        // animations.
+        if matches!(
+            anim.anim_type,
+            AnimationType::FillColorTo { .. }
+                | AnimationType::StrokeColorTo { .. }
+                | AnimationType::StrokeWidthTo { .. }
+        ) {
+            let child_ids = self
+                .states
+                .get(anim.target)
+                .map(|state| {
+                    state
+                        .child_spans
+                        .iter()
+                        .map(|child| child.id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for child in child_ids {
+                let mut child_anim = anim.clone();
+                child_anim.target = child;
+                self.play_internal(child_anim);
+            }
         }
 
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
@@ -2058,6 +2093,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let lens_spec = match anim.anim_type {
             AnimationType::TranslateTo { to } => {
                 let from = state.transform.translation;
+                state.transform.translation = to;
+                PropertyLensSpec::Translation { from, to }
+            }
+            AnimationType::TranslateAnchorTo { to, anchor } => {
+                let from = state.transform.translation;
+                let to = gaanim_layout::compute_move_to(state.bounds, &state.transform, to, anchor)
+                    .translation;
                 state.transform.translation = to;
                 PropertyLensSpec::Translation { from, to }
             }

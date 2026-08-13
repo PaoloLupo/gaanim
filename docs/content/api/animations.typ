@@ -38,6 +38,12 @@ vector paints that are already visible. Calling `fill(c)` from `no_fill()` or
 `stroke(c, width)` from `no_stroke()` reveals the paint smoothly from
 transparent; a new stroke also grows from zero width.
 
+For `Text` and Typst drawables, fill and stroke channels propagate to every
+visible glyph. Each glyph interpolates from its own current paint, including
+fragment-specific colors. A whole-text `fill(c)` or `color(c)` therefore
+converges those fragment colors to the requested target, while `stroke(c,
+width)` changes the outline without replacing their distinct fills.
+
 For a native `Primitive3D`, `fill(c)` and `color(c)` target the PBR base color
 while preserving roughness, metallic, and emission. Use
 `primitive.animate().material(Material3D(...))` to interpolate the complete PBR
@@ -117,17 +123,17 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Drawable.move_to",
   kind: "method",
-  signature: ".move_to(x: float, y: float) -> Anim",
-  params: ((name: "x", type: "float", default: none, desc: [Target x.]), (name: "y", type: "float", default: none, desc: [Target y.]),),
+  signature: ".move_to(x: float, y: float, anchor: Anchor = Anchor.CENTER) -> Anim",
+  params: ((name: "x", type: "float", default: none, desc: [Target x.]), (name: "y", type: "float", default: none, desc: [Target y.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Drawable anchor that arrives at the target point.])),
   returns: (type: "Anim", desc: [Move to absolute position.]),
-  desc: [Centers drawable at (x,y).],
+  desc: [Moves the selected anchor to `(x, y)`. The default remains the drawable center.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, WHITE, Scene
+from gaanim import Anchor, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 rect = scene.rect(100, 60).fill(BLUE).stroke(WHITE, 2).at(-120, 0)
-scene.play([rect.move_to(80, 0).duration(0.9).smooth()])
+scene.play([rect.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).smooth()])
 scene.export("preview.webp", fps=30)
 ```
 ]

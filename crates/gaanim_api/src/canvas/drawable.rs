@@ -953,7 +953,9 @@ impl DrawableHandle {
     fn anim(&self, ty: AnimationType) -> Anim {
         if matches!(
             &ty,
-            AnimationType::TranslateBy { .. } | AnimationType::TranslateTo { .. }
+            AnimationType::TranslateBy { .. }
+                | AnimationType::TranslateTo { .. }
+                | AnimationType::TranslateAnchorTo { .. }
         ) {
             let mut spec = self.spec.lock().expect("object spec poisoned");
             assert!(
@@ -997,8 +999,14 @@ impl DrawableHandle {
     }
 
     pub fn move_to(&self, x: f64, y: f64) -> Anim {
-        self.anim(AnimationType::TranslateTo {
+        self.move_to_anchor(x, y, Anchor::Center)
+    }
+
+    /// Animate so the selected local bounds anchor reaches `(x, y)`.
+    pub fn move_to_anchor(&self, x: f64, y: f64, anchor: Anchor) -> Anim {
+        self.anim(AnimationType::TranslateAnchorTo {
             to: DVec3::new(x, y, 0.0),
+            anchor,
         })
     }
 

@@ -206,6 +206,16 @@ def validate_visualization_contract(module: object) -> list[str]:
     anchored_drawable = scene.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
     if not isinstance(anchored_drawable, module.Drawable):
         failures.append("Drawable.at with an anchor did not return Drawable")
+    if not isinstance(
+        anchored_drawable.move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
+        module.Anim,
+    ):
+        failures.append("Drawable.move_to with an anchor did not return Anim")
+    if not isinstance(
+        anchored_drawable.animate().move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
+        module.Anim,
+    ):
+        failures.append("Anim.move_to with an anchor did not return Anim")
     try:
         scene.text("$unbalanced")
     except ValueError:
