@@ -391,17 +391,37 @@ fn merge_text_style(
     }
 }
 
+#[derive(Clone)]
+struct StyledTextLeaf {
+    text: String,
+    style: StructuredTextStyle,
+    sibling_part_boundary: bool,
+}
+
 fn collect_styled_text_leaves(
     content: &[StructuredTextContent],
     inherited: &StructuredTextStyle,
-    leaves: &mut Vec<(String, StructuredTextStyle)>,
+    leaves: &mut Vec<StyledTextLeaf>,
 ) {
+    let mut previous_was_part = false;
     for node in content {
         match node {
-            StructuredTextContent::Literal(text) => leaves.push((text.clone(), inherited.clone())),
+            StructuredTextContent::Literal(text) => {
+                leaves.push(StyledTextLeaf {
+                    text: text.clone(),
+                    style: inherited.clone(),
+                    sibling_part_boundary: false,
+                });
+                previous_was_part = false;
+            }
             StructuredTextContent::Part(part) => {
                 let style = merge_text_style(inherited, &part.style);
+                let first_leaf = leaves.len();
                 collect_styled_text_leaves(&part.content, &style, leaves);
+                if previous_was_part && let Some(leaf) = leaves.get_mut(first_leaf) {
+                    leaf.sibling_part_boundary = true;
+                }
+                previous_was_part = true;
             }
         }
     }
@@ -488,22 +508,28 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
     );
     let mut markup = gaanim_text::structured::InlineMarkupParser::new();
     let mut marked_leaves = Vec::new();
-    for (text, inherited_style) in raw_leaves {
+    for leaf in raw_leaves {
+        let mut first_segment = true;
         for segment in markup
-            .push(&text)
+            .push(&leaf.text)
             .expect("TextSpec validates inline markup before compilation")
         {
             if segment.text.is_empty() {
                 continue;
             }
-            let mut style = inherited_style.clone();
+            let mut style = leaf.style.clone();
             if segment.strong {
                 style.weight = Some(style.weight.unwrap_or(400).max(700));
             }
             if segment.emphasis {
                 style.italic = Some(true);
             }
-            marked_leaves.push((segment.text, style));
+            marked_leaves.push(StyledTextLeaf {
+                text: segment.text,
+                style,
+                sibling_part_boundary: leaf.sibling_part_boundary && first_segment,
+            });
+            first_segment = false;
         }
     }
     markup
@@ -519,10 +545,11 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
     // markup outside math would otherwise resolve `em` against Typst's default
     // text size instead of this Text's configured size.
     let mut gap_before = vec![false; raw_leaves.len()];
+    let mut token_boundary_before = vec![false; raw_leaves.len()];
     let mut in_math = false;
     let mut escaped = false;
     for index in 0..raw_leaves.len().saturating_sub(1) {
-        for character in raw_leaves[index].0.chars() {
+        for character in raw_leaves[index].text.chars() {
             if escaped {
                 escaped = false;
             } else if character == '\\' {
@@ -535,19 +562,21 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
             continue;
         }
         let left_has_space = raw_leaves[index]
-            .0
+            .text
             .ends_with(|character| character == ' ' || character == '\t');
         let right_has_space = raw_leaves[index + 1]
-            .0
+            .text
             .starts_with(|character| character == ' ' || character == '\t');
         if left_has_space || right_has_space {
-            let trimmed_left_len = raw_leaves[index].0.trim_end_matches([' ', '\t']).len();
-            raw_leaves[index].0.truncate(trimmed_left_len);
-            raw_leaves[index + 1].0 = raw_leaves[index + 1]
-                .0
+            let trimmed_left_len = raw_leaves[index].text.trim_end_matches([' ', '\t']).len();
+            raw_leaves[index].text.truncate(trimmed_left_len);
+            raw_leaves[index + 1].text = raw_leaves[index + 1]
+                .text
                 .trim_start_matches([' ', '\t'])
                 .to_string();
             gap_before[index + 1] = true;
+        } else if raw_leaves[index + 1].sibling_part_boundary {
+            token_boundary_before[index + 1] = true;
         }
     }
     // A semantic part must not become a typographic boundary. Coalesce
@@ -555,14 +584,23 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
     // is shaped exactly like the equivalent single string, including math
     // operator spacing and kerning.
     let mut leaves: Vec<(String, StructuredTextStyle, bool)> = Vec::new();
-    for ((text, style), gap_before) in raw_leaves.into_iter().zip(gap_before) {
+    for ((leaf, gap_before), token_boundary_before) in raw_leaves
+        .into_iter()
+        .zip(gap_before)
+        .zip(token_boundary_before)
+    {
         if let Some((previous, previous_style, _)) = leaves.last_mut()
             && !gap_before
-            && *previous_style == style
+            && *previous_style == leaf.style
         {
-            previous.push_str(&text);
+            if token_boundary_before {
+                // This whitespace separates authored identifiers for Typst's
+                // math parser without introducing a fixed visual gap.
+                previous.push(' ');
+            }
+            previous.push_str(&leaf.text);
         } else {
-            leaves.push((text, style, gap_before));
+            leaves.push((leaf.text, leaf.style, gap_before));
         }
     }
     let mut output = String::new();
@@ -6678,6 +6716,65 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_sibling_parts_use_typst_spacing_only_inside_shared_math() {
+        let part = |name: &str, text: &str, style: StructuredTextStyle| {
+            gaanim_text::prelude::TextPart::new(name, vec![text.into()], style).into()
+        };
+        let spec = |content| {
+            StructuredTextSpec::new(
+                content,
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured text")
+        };
+
+        let implicit = spec(vec![
+            "$".into(),
+            part("left", "a", StructuredTextStyle::default()),
+            part("right", "b", StructuredTextStyle::default()),
+            "$".into(),
+        ]);
+        assert_eq!(structured_typst_content(&implicit, 32.0), "$a b$");
+
+        let explicit = spec(vec![
+            "$".into(),
+            part("left", "a ", StructuredTextStyle::default()),
+            part("right", " b", StructuredTextStyle::default()),
+            "$".into(),
+        ]);
+        let explicit_source = structured_typst_content(&explicit, 32.0);
+        assert_eq!(explicit_source, "$a$#h(8.96pt, weak: false)$b$");
+        assert_eq!(explicit_source.matches("#h(8.96pt").count(), 1);
+
+        let prose = spec(vec![
+            part("left", "a", StructuredTextStyle::default()),
+            part("right", "b", StructuredTextStyle::default()),
+        ]);
+        assert_eq!(structured_typst_content(&prose, 32.0), "#text(\"ab\")");
+
+        let tight_literal = spec(vec![
+            "$".into(),
+            part("variable", "x", StructuredTextStyle::default()),
+            "_1".into(),
+            "$".into(),
+        ]);
+        assert_eq!(structured_typst_content(&tight_literal, 32.0), "$x_1$");
+
+        let mut colored = StructuredTextStyle::default();
+        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let distributed_delimiters = spec(vec![
+            part("left", "$a", StructuredTextStyle::default()),
+            part("right", "b$", colored),
+        ]);
+        let distributed_source = structured_typst_content(&distributed_delimiters, 32.0);
+        assert!(!distributed_source.contains("8.96pt"));
+        assert!(distributed_source.starts_with("$a$#h(0pt)"));
+        assert!(distributed_source.contains("ff0000"));
+    }
+
+    #[test]
     fn structured_inline_markup_emits_typst_styles_and_skips_math() {
         let spec = StructuredTextSpec::new(
             vec!["Normal, _emphasis_, *strong*, *_both_* y $x_1 * 5$.".into()],
@@ -6756,6 +6853,54 @@ mod tests {
             widths[1] > widths[0] + 6.0,
             "part-boundary spaces must add visible width: {widths:?}"
         );
+    }
+
+    #[test]
+    fn implicit_sibling_part_boundary_compiles_as_valid_math_tokens() {
+        let equation = StructuredTextSpec::new(
+            vec![
+                "$".into(),
+                gaanim_text::prelude::TextPart::new(
+                    "left",
+                    vec!["m".into()],
+                    StructuredTextStyle::default(),
+                )
+                .into(),
+                gaanim_text::prelude::TextPart::new(
+                    "right",
+                    vec!["g".into()],
+                    StructuredTextStyle::default(),
+                )
+                .into(),
+                "$".into(),
+            ],
+            None,
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("valid structured equation");
+        assert_eq!(structured_typst_content(&equation, 32.0), "$m g$");
+        let mut canvas = Canvas::new(640, 360);
+        canvas.text_spec(equation);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let widths = world
+            .query::<(&LocalBounds, Option<&bevy::prelude::ChildOf>)>()
+            .iter(&world)
+            .filter_map(|(bounds, parent)| parent.is_none().then_some(bounds.0.width()))
+            .collect::<Vec<_>>();
+        assert_eq!(widths.len(), 1, "expected one text root: {widths:?}");
+        assert!(widths[0] > 0.0, "compiled math must have positive width");
     }
 
     #[test]

@@ -74,8 +74,11 @@ def documented_text_api_failures(tree: ast.Module) -> list[str]:
     failures: list[str] = []
     for node in tree.body:
         callables: list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]] = []
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "part":
-            callables.append(("part", node))
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in {"part", "parts"}
+        ):
+            callables.append((node.name, node))
         elif isinstance(node, ast.ClassDef) and node.name in TEXT_API_CLASSES:
             for child in node.body:
                 if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -175,6 +178,52 @@ def validate_visualization_contract(module: object) -> list[str]:
     for removed in REMOVED_TEXT_DRAWABLE_MEMBERS:
         if hasattr(module.Drawable, removed):
             failures.append(f"removed Drawable.{removed} remains public")
+
+    compact_parts = module.parts(mass_left="m", gravity="g sin(theta)")
+    if not isinstance(compact_parts, module.TextParts):
+        failures.append("parts() did not return TextParts")
+    compact_text = scene.text("$-", compact_parts, "$")
+    if len(compact_text.parts) != 2:
+        failures.append("TextParts did not preserve both ordered semantic entries")
+    for name in ("mass_left", "gravity"):
+        if name not in compact_text.parts:
+            failures.append(f"TextParts entry {name!r} was not expanded by Scene.text")
+        if not isinstance(compact_text[name], module.TextSelection):
+            failures.append(f"TextParts entry {name!r} was not selectable")
+
+    nested_compact = module.part(
+        "formula", "$", module.parts(left="a", right="b"), "$"
+    )
+    nested_text = scene.text(nested_compact)
+    for path in ("formula.left", "formula.right"):
+        if path not in nested_text.parts:
+            failures.append(f"TextParts did not expand inside part(): {path}")
+
+    if compact_text.become(
+        "$", module.parts(first="x", second="y"), "$", duration=0.1
+    ) is not None:
+        failures.append("Text.become with TextParts did not preserve its None return")
+    for name in ("first", "second"):
+        if name not in compact_text.parts:
+            failures.append(f"Text.become did not install TextParts entry {name!r}")
+
+    for invalid_parts in (
+        lambda: module.parts(),
+        lambda: module.parts(**{"": "m"}),
+        lambda: module.parts(empty=""),
+    ):
+        try:
+            invalid_parts()
+        except ValueError:
+            pass
+        else:
+            failures.append("parts() accepted empty names or content")
+    try:
+        module.parts(mass=1)
+    except TypeError:
+        pass
+    else:
+        failures.append("parts() accepted a non-string value")
 
     formula = module.part(
         "formula", "$E = ", module.part("mass", "m", color=module.GOLD), " c^2$"
@@ -460,7 +509,10 @@ def main() -> int:
             and not hasattr(module, node.target.id)
         ):
             missing.append(node.target.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "part":
+        elif (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in {"part", "parts"}
+        ):
             if not hasattr(module, node.name):
                 missing.append(node.name)
 

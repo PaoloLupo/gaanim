@@ -57,7 +57,7 @@ This split means there is no second text box solver. See
   kind: "factory",
   signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None) -> Text",
   params: (
-    (name: "content", type: "str | TextPart", default: none, desc: [One or more composable strings or semantic parts. The flattened result must not be empty.]),
+    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [One or more composable strings, semantic parts, or compact ordered part groups. The flattened result must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Semantic role. Fully mathematical content infers `math`; everything else infers `body`.]),
     (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable visual and metric overlay.]),
     (name: "flow", type: "TextFlow | None", default: "None", desc: [Reusable internal line-composition options.]),
@@ -106,9 +106,10 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 
 == Contenido estructurado y matemáticas
 
-Strings and `TextPart` values form one ordered content tree. The tree remains
-available after compilation, so semantic paths are more stable than manual
-character ranges.
+Strings, `TextPart`, and the compact `TextParts` group form one ordered content
+tree. `TextParts` expands to ordinary sibling parts before the tree is stored,
+so semantic paths remain identical to those created with repeated `part()`
+calls and more stable than manual character ranges.
 
 === Marcado de énfasis en línea
 
@@ -142,6 +143,33 @@ scene.export("text_inline_markup.webp", fps=30)
 - A valid opening delimiter without its matching close, or crossed nesting,
   raises `ValueError`. Escape a literal adjacent marker when it could be read
   as an opener.
+
+#api-entry(
+  name: "parts",
+  kind: "factory",
+  signature: "parts(**content: str) -> TextParts",
+  params: (
+    (name: "content", type: "keyword str entries", default: none, desc: [Ordered semantic names and their plain text.]),
+  ),
+  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `Text.become()`, and `part()`.]),
+  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, empty names, or wholly empty content raise `ValueError`; non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene, parts
+scene = Scene(640, 360, background="#0f172a")
+equation = scene.text(
+    "$-",
+    parts(mass_left="m", gravity="g sin(theta)"),
+    " = ",
+    parts(mass_right="m", length="L", acceleration="theta''"),
+    "$",
+).at(0, 0)
+equation["gravity"].fill(GOLD)
+scene.play([equation.write(1.2, by="part")])
+scene.export("compact_text_parts.webp", fps=30)
+```
+]
 
 #api-entry(
   name: "part",
@@ -186,6 +214,11 @@ scene.export("text_parts.webp", fps=30)
 - Parts may begin or end inside a math expression. A written space at a part
   boundary is preserved as a non-weak mathematical gap, so
   `part("x", "x"), " dot 5"` does not collapse against its neighbors.
+- Adjacent sibling `TextPart` values receive an implicit token separator inside
+  math. It prevents identifiers from collapsing while preserving Typst's native
+  tight spacing; it is not the fixed visible gap used for written whitespace.
+- Prose and part-to-literal boundaries remain exact. Use
+  `part("x", "x"), "_1"` when mathematical content must stay attached.
 
 == TextStyle
 

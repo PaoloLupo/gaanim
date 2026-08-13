@@ -430,6 +430,13 @@ impl CanvasTheme {
                 ..Default::default()
             },
         );
+        self.styles.insert(
+            "expression_readout".into(),
+            ThemeStyle {
+                fill: Some(ThemePaint::Named("foreground".into())),
+                ..Default::default()
+            },
+        );
         for (part, token, width) in [
             ("axis", "foreground", 3.0),
             ("grid", "rule", 1.0),
@@ -886,10 +893,11 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::Curve(_)
         | SpawnKind::TracedPathLine
         | SpawnKind::TrackingLine => "line",
-        SpawnKind::Text(_) | SpawnKind::Typst { .. } => "text",
+        SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ExpressionReadout { .. } => {
+            "text"
+        }
         SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => "axes",
         SpawnKind::ExpressionPlot { .. }
-        | SpawnKind::ExpressionReadout { .. }
         | SpawnKind::DataMark { .. }
         | SpawnKind::Polyline3D { .. }
         | SpawnKind::LineSegments3D { .. }

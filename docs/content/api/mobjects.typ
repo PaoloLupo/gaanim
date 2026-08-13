@@ -813,19 +813,19 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "TextPart and inline math",
+  name: "TextPart, TextParts, and inline math",
   kind: "factory",
-  signature: "part(name, *content, **style) -> TextPart",
-  params: ((name: "name", type: "str", default: none, desc: [Non-empty semantic name, unique among siblings.]), (name: "content", type: "str | TextPart", default: none, desc: [Nested strings and semantic parts.]), (name: "style", type: "TextStyle | keywords", default: "None", desc: [Local typography overlay for the complete subtree.])),
-  returns: (type: "TextPart", desc: [Composable semantic subtree.]),
-  desc: [Math and prose share `scene.text`; semantic paths replace manual ranges and equation tags. Whitespace written next to a part inside `$...$` is preserved as explicit mathematical spacing.],
+  signature: "part(name, *content, **style) -> TextPart | parts(**content: str) -> TextParts",
+  params: ((name: "name", type: "str", default: none, desc: [Non-empty semantic name, unique among siblings.]), (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Nested content, or ordered keyword strings for `parts()`.]), (name: "style", type: "TextStyle | keywords", default: "None", desc: [Local typography overlay for a `part()` subtree.])),
+  returns: (type: "TextPart | TextParts", desc: [Composable semantic subtree or ordered plain-part group.]),
+  desc: [Math and prose share `scene.text`; semantic paths replace manual ranges and equation tags. Adjacent sibling parts inside `$...$` remain distinct tokens with native Typst spacing; prose and part-to-literal boundaries remain exact.],
 )[
 ```python
 # show-code: true
-from gaanim import GOLD, Scene, part
+from gaanim import GOLD, Scene, parts
 scene = Scene(480, 270, background="#0f172a")
 # Fluent placement preserves the specialized Text handle.
-eq = scene.text("$", part("variable", "x"), " dot 5 = ", part("result", "25"), "$").at(0, 0)
+eq = scene.text("$", parts(variable="x", operator="dot 5 =", result="25"), "$").at(0, 0)
 eq["result"].fill(GOLD)
 scene.play([eq.write(1.0)])
 scene.export("preview.webp", fps=30)
@@ -1097,7 +1097,7 @@ scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2
   signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Variable",
   params: ((name: "label", type: "str", default: none, desc: [Visible label placed before the equality sign.]), (name: "format", type: "str", default: "'.2f'", desc: [Numeric format: width, sign, grouping, precision, and `f`, `e`, `g`, or `%`.]), (name: "unit", type: "str | None", default: none, desc: [Optional visible unit.]),),
   returns: (type: "Variable", desc: [A `Drawable` and reactive scalar at the same time.]),
-  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. The returned group retains normal create, write, fade, layout, and style operations.],
+  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
 ```python
 from gaanim import RED, Scene
@@ -1114,7 +1114,7 @@ scene.play([k.create(), k.animate_to(100, duration=1.5)])
   signature: "readout(source, *, label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Readout",
   params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [A scalar or no-argument lambda traced once.]), (name: "invalid", type: "str", default: "'—'", desc: [Text used when evaluation is invalid or non-finite.]),),
   returns: (type: "Readout", desc: [A reactive `Drawable` group.]),
-  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts with equal equation-style spacing and a shared visual baseline for textual terms.],
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts with equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[
 ```python
 from gaanim import Scene, math as gm
@@ -1289,7 +1289,7 @@ scene.export("preview.webp", fps=30)
   signature: "dimension_between(from, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None, line_width=3, extension_style=\"solid\", dash_length=12, gap_length=8) -> Dimension",
   params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Expr|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "3", desc: [Positive filled-line width.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "8", desc: [Positive dash gap.])),
   returns: (type: "Dimension", desc: [Reactive drawable exposing compatible `line`, independent `extensions`, `label`, `number`, and `unit`.]),
-  desc: [Keeps all geometry and annotations synchronized with moving endpoints. `value` accepts a number, Parameter, Variable, or traced expression; it controls only the number, so changing it never changes the line length. Without `value`, `show_value=True` displays endpoint distance multiplied by `scale`. Labels, values, and units default to 48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation; `extensions` remains independently styleable. Invalid scalar types, metrics, extension styles, and orientation raise `TypeError` or `ValueError`; non-finite reactive results display the configured invalid-value marker.],
+  desc: [Keeps all geometry and annotations synchronized with moving endpoints. `value` accepts a number, Parameter, Variable, or traced expression; it controls only the number, so changing it never changes the line length. Without `value`, `show_value=True` displays endpoint distance multiplied by `scale`. Labels, values, and units default to 48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation, including the changing number after updates and seeks; `extensions` remains independently styleable. Invalid scalar types, metrics, extension styles, and orientation raise `TypeError` or `ValueError`; non-finite reactive results display the configured invalid-value marker.],
 )[
 ```python
 # show-code: true
@@ -1333,7 +1333,7 @@ scene.export("preview.webp", fps=30)
   kind: "factory",
   signature: "angle_between(vertex, from, to, *, radius=64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
   returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
-  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
+  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
 )[
 ```python
 # show-code: true
@@ -1370,7 +1370,7 @@ scene.export("preview.webp", fps=30)
   kind: "factories",
   signature: "offset_point(origin, dx, dy) / force_at(origin, magnitude, direction=0, visual_scale=1, ...) / force_from_components(origin, fx, fy, visual_scale=1, ...) -> ForceVector",
   returns: (type: "PointRef | ForceVector", desc: [Reactive relative geometry or a drawable exposing `shaft`, `head`, `label`, `number`, and `unit`.]),
-  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
+  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. `color` paints the force, label, changing numeric value, and unit. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
 )[
 ```python
 # show-code: true

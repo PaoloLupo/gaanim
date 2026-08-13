@@ -60,10 +60,12 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pystyle::PyAxesStyle>()?;
     m.add_class::<pytext::PyTextFlow>()?;
     m.add_class::<pytext::PyTextPart>()?;
+    m.add_class::<pytext::PyTextParts>()?;
     m.add_class::<pytext::PyTextQuery>()?;
     m.add_class::<pytext::PyTextSelection>()?;
     m.add_class::<pytext::PyText>()?;
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;
+    m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
     m.add_class::<pylayout::PyLayoutItem>()?;
     m.add_class::<pylayout::PyLayout>()?;
     m.add_class::<updater::PyUpdater>()?;

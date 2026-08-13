@@ -4342,6 +4342,65 @@ mod tests {
     }
 
     #[test]
+    fn force_color_applies_to_the_reactive_numeric_value_after_fade_and_seek() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .set_theme("technical")
+            .expect("technical is a built-in theme");
+        let green = Color::from_rgb8(75, 229, 124);
+        let force = canvas
+            .force_at(
+                CanvasEndpoint::Static(DVec3::ZERO),
+                Expr::Constant(45.0),
+                Expr::Constant(0.4),
+                2.0,
+                Some("$F$".to_owned()),
+                true,
+                ".1f".to_owned(),
+                Some("N".to_owned()),
+                28.0,
+                None,
+                Some(green),
+            )
+            .expect("valid force");
+        canvas.play(vec![force.drawable.fade_in(1.0)]);
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.0);
+        app.update();
+
+        let (fill, stroke) = app
+            .world_mut()
+            .query::<(
+                &gaanim_scene::ObjectTag,
+                &gaanim_scene::FillBrush,
+                &gaanim_scene::StrokeBrush,
+            )>()
+            .iter(app.world())
+            .find_map(|(tag, fill, stroke)| {
+                (tag.0 == "SvgPath#ReactiveReadout").then_some((fill, stroke))
+            })
+            .expect("compiled force number style after seek");
+        assert!(matches!(
+            fill.0.as_ref(),
+            Some(Brush::Solid(color)) if *color == green
+        ));
+        assert!(
+            stroke.brush.is_none(),
+            "a reactive number is filled text and must not inherit the plot stroke"
+        );
+    }
+
+    #[test]
     fn presentation_theme_uses_projector_contrast() {
         use gaanim_text::prelude::TextRole;
 

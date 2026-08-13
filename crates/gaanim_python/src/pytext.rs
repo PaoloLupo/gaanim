@@ -188,21 +188,26 @@ impl PyTextFlow {
 #[derive(Clone)]
 pub struct PyTextPart(pub TextPart);
 
+#[pyclass(name = "TextParts", module = "gaanim_core", frozen, from_py_object)]
+#[derive(Clone)]
+/// Ordered plain semantic parts produced by [`text_parts`].
+pub struct PyTextParts(pub Vec<TextPart>);
+
 fn content_from_tuple(content: &Bound<'_, PyTuple>) -> PyResult<Vec<TextContent>> {
-    content
-        .iter()
-        .map(|value| {
-            if let Ok(text) = value.extract::<String>() {
-                Ok(TextContent::Literal(text))
-            } else if let Ok(part) = value.extract::<PyRef<'_, PyTextPart>>() {
-                Ok(TextContent::Part(part.0.clone()))
-            } else {
-                Err(PyTypeError::new_err(
-                    "text content must contain only str or TextPart values",
-                ))
-            }
-        })
-        .collect()
+    content.iter().try_fold(Vec::new(), |mut content, value| {
+        if let Ok(text) = value.extract::<String>() {
+            content.push(TextContent::Literal(text));
+        } else if let Ok(part) = value.extract::<PyRef<'_, PyTextPart>>() {
+            content.push(TextContent::Part(part.0.clone()));
+        } else if let Ok(parts) = value.extract::<PyRef<'_, PyTextParts>>() {
+            content.extend(parts.0.iter().cloned().map(TextContent::Part));
+        } else {
+            return Err(PyTypeError::new_err(
+                "text content must contain only str, TextPart, or TextParts values",
+            ));
+        }
+        Ok(content)
+    })
 }
 
 fn overlay_style(
@@ -291,6 +296,39 @@ pub fn text_part(
     )
     .map_err(|error| PyValueError::new_err(error.to_string()))?;
     Ok(PyTextPart(part))
+}
+
+#[pyfunction(name = "parts")]
+#[pyo3(signature = (**entries))]
+/// Build an ordered group of plain semantic text parts from keyword entries.
+pub fn text_parts(entries: Option<&Bound<'_, PyDict>>) -> PyResult<PyTextParts> {
+    let entries = entries
+        .ok_or_else(|| PyValueError::new_err("parts() requires at least one named text part"))?;
+    if entries.is_empty() {
+        return Err(PyValueError::new_err(
+            "parts() requires at least one named text part",
+        ));
+    }
+    let mut result = Vec::with_capacity(entries.len());
+    for (name, value) in entries.iter() {
+        let name = name.extract::<String>()?;
+        let text = value
+            .extract::<String>()
+            .map_err(|_| PyTypeError::new_err("parts() values must be strings"))?;
+        result.push(TextPart::new(
+            name,
+            vec![TextContent::Literal(text)],
+            TextStyle::default(),
+        ));
+    }
+    TextSpec::new(
+        result.iter().cloned().map(TextContent::Part).collect(),
+        None,
+        TextStyle::default(),
+        TextFlow::default(),
+    )
+    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    Ok(PyTextParts(result))
 }
 
 #[derive(Clone, Copy)]

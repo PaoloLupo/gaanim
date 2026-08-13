@@ -1371,7 +1371,26 @@ class TextFlow:
 class TextPart:
     """Immutable named subtree created by :func:`part`."""
 
-TextContent: TypeAlias = str | TextPart
+class TextParts:
+    """Immutable ordered group of plain named parts created by :func:`parts`."""
+
+TextContent: TypeAlias = str | TextPart | TextParts
+
+def parts(**content: str) -> TextParts:
+    """Build an ordered group of plain semantic text parts.
+
+    The keyword order is preserved. Inside ``$...$`` math, adjacent parts are
+    separated as distinct Typst tokens while retaining Typst's native tight
+    spacing. Use explicit ``part`` values when local styling or nested content
+    is needed. Calling ``parts()`` without entries, using an
+    empty name, or producing wholly empty content raises ``ValueError``; a
+    non-string value raises ``TypeError``.
+
+    Example:
+        terms = parts(mass="m", gravity="g sin(theta)")
+        equation = scene.text("$", terms, "$")
+    """
+    ...
 
 def part(
     name: str,
@@ -2405,10 +2424,17 @@ class Scene:
         """Create a Cartesian complex plane with real and imaginary axes."""
         ...
     def readout(self, source: _TracedScalar | Callable[[], _TracedScalar], *, label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Readout:
-        """Create a native numeric display with equally spaced, baseline-aligned terms."""
+        """Create a native numeric display with equally spaced, baseline-aligned terms.
+
+        ``color`` applies to the label, reactive value, and unit and remains in
+        effect when the number changes or the timeline seeks.
+        """
         ...
     def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Variable:
-        """Create an animatable scalar displayed as an aligned equation row."""
+        """Create an animatable scalar displayed as an aligned equation row.
+
+        ``color`` applies to every visible term, including the changing value.
+        """
         ...
     def number_line(self, axis: Axis, *, length: Optional[float] = None) -> NumberLine:
         """Create a standalone typed number line using the axis scale and formatting."""
@@ -3450,8 +3476,8 @@ class Scene:
         endpoints.
         ``label_orientation`` keeps text horizontal or aligned while avoiding
         upside-down labels. ``color`` initializes the extension lines,
-        solid triangular arrowheads, and annotation. Math labels and reactive
-        values share one 48-unit typographic baseline by default, including
+        solid triangular arrowheads and the complete annotation, including its
+        reactive value. Math labels and reactive values share one 48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry;
         dashed extensions use ``dash_length`` and ``gap_length``. Invalid
         metrics, extension styles, or orientation raise ``ValueError``.
@@ -3483,21 +3509,30 @@ class Scene:
     ) -> AngleDimension:
         """Create a same-frame angular dimension from fixed directions or endpoints.
 
+        ``color`` applies to the arc, arrows, label, reactive value, and unit.
         Degenerate rays hide the geometry; invalid modes or metrics raise ``ValueError``.
         """
         ...
     def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
-        """Create a reactive vector with accessible shaft, solid head, and readout parts."""
+        """Create a reactive vector with accessible shaft, solid head, and readout parts.
+
+        ``color`` applies to the vector and every readout term, including the
+        reactive numeric value after updates and seeks.
+        """
         ...
     def force_at(self, origin: Endpoint, magnitude: _TracedScalar, *, direction: _TracedScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive force from physical magnitude and direction in radians.
 
         ``visual_scale`` converts physical units into scene units and must be
-        positive. The optional readout reports the physical magnitude.
+        positive. The optional readout reports the physical magnitude, and
+        ``color`` also applies to that changing number.
         """
         ...
     def force_from_components(self, origin: Endpoint, fx: _TracedScalar, fy: _TracedScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
-        """Create a reactive force from physical X/Y components relative to a moving origin."""
+        """Create a reactive force from physical X/Y components relative to a moving origin.
+
+        ``color`` applies to the force and the complete reactive readout.
+        """
         ...
     def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
         """Create a theme-aware vector support following ``point``.
