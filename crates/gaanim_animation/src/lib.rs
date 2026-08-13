@@ -92,10 +92,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             (
                 updater_system,
                 position_binding_system.after(updater_system),
-                always_redraw_regen_system.after(position_binding_system),
-                mechanism_binding_system.after(always_redraw_regen_system),
+                mechanism_binding_system.after(position_binding_system),
                 endpoint_follow_system.after(mechanism_binding_system),
-                tracking_line_system.after(endpoint_follow_system),
+                always_redraw_regen_system.after(endpoint_follow_system),
+                tracking_line_system.after(always_redraw_regen_system),
                 tracking_angle_system.after(tracking_line_system),
                 tracking_vector_head_system.after(tracking_angle_system),
                 endpoint_distance_system.after(tracking_vector_head_system),
@@ -120,5 +120,71 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             )
                 .in_set(SceneSet::Updaters),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_core::glam::DVec3;
+    use gaanim_core::kurbo::{BezPath, PathEl, Point};
+    use gaanim_math::{Bounds3D, SpatialTransform};
+    use gaanim_scene::{LocalBounds, Path2D, PathSource};
+    use std::sync::Arc;
+
+    #[test]
+    fn reactive_regeneration_observes_endpoint_follow_in_the_same_frame() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(gaanim_text::font::FontRegistry::new())
+            .add_plugins((
+                gaanim_scene::hierarchy::GaanimScenePlugin,
+                GaanimAnimationPlugin,
+            ));
+
+        let expected = DVec3::new(40.0, 20.0, 0.0);
+        let follower = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(expected),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+
+        let empty = Arc::new(BezPath::new());
+        let reactive = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(Bounds3D::default()),
+                AlwaysRedrawRegen::new(move |world| {
+                    let position =
+                        resolve_tracking_endpoint(&TrackingEndpoint::Entity(follower), world)
+                            .expect("followed endpoint");
+                    let mut path = BezPath::new();
+                    path.move_to(Point::new(position.x, position.y));
+                    path.line_to(Point::new(position.x + 1.0, position.y));
+                    path
+                }),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(matches!(
+            app.world()
+                .get::<Path2D>(reactive)
+                .expect("regenerated path")
+                .0
+                .elements()
+                .first(),
+            Some(PathEl::MoveTo(point)) if *point == Point::new(expected.x, expected.y)
+        ));
     }
 }

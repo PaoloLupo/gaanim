@@ -2071,4 +2071,36 @@ mod tests {
         let transform = world.get::<SpatialTransform>(target).unwrap();
         assert!(transform.translation.distance(DVec3::new(22.0, 27.0, 0.0)) < 1e-9);
     }
+
+    #[test]
+    fn tracking_line_respects_active_path_reveal() {
+        let mut world = World::new();
+        let empty = Arc::new(BezPath::new());
+        let line = world
+            .spawn((
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                crate::writing::PathReveal(0.5),
+                TrackingLine::new(
+                    TrackingEndpoint::Static(DVec3::ZERO),
+                    TrackingEndpoint::Static(DVec3::new(100.0, 0.0, 0.0)),
+                ),
+            ))
+            .id();
+
+        tracking_line_system(&mut world);
+
+        let source = world.get::<PathSource>(line).expect("full tracking path");
+        assert!(matches!(
+            source.0.elements().last(),
+            Some(gaanim_core::kurbo::PathEl::LineTo(point)) if (point.x - 100.0).abs() < 1e-9
+        ));
+        let visible = world.get::<Path2D>(line).expect("revealed tracking path");
+        assert!(matches!(
+            visible.0.elements().last(),
+            Some(gaanim_core::kurbo::PathEl::LineTo(point)) if (point.x - 50.0).abs() < 1e-9
+        ));
+    }
 }
