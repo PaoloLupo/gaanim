@@ -44,6 +44,16 @@ impl PropertyAnimation {
             && self.visible_color.is_none()
             && self.material.is_none()
     }
+
+    pub(crate) fn is_transform_only(&self) -> bool {
+        (self.translation.is_some() || self.rotation.is_some() || self.scale.is_some())
+            && self.opacity.is_none()
+            && self.fill.is_none()
+            && self.stroke_color.is_none()
+            && self.stroke_width.is_none()
+            && self.visible_color.is_none()
+            && self.material.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

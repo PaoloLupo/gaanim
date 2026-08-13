@@ -194,6 +194,9 @@ pub enum CameraBindingError {
 pub struct DimensionOptions {
     pub label: Option<String>,
     pub show_value: bool,
+    /// Optional semantic value shown by the readout. When present it implies
+    /// `show_value` and takes precedence over measured distance and `scale`.
+    pub value: Option<Expr>,
     pub format: String,
     pub unit: Option<String>,
     pub scale: f64,
@@ -212,6 +215,7 @@ impl Default for DimensionOptions {
         Self {
             label: None,
             show_value: false,
+            value: None,
             format: ".2f".to_owned(),
             unit: None,
             scale: 1.0,
@@ -1453,13 +1457,6 @@ impl Canvas {
     }
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
-        let defer_visibility = members.iter().any(|member| {
-            member
-                .spec
-                .lock()
-                .expect("object spec poisoned")
-                .defer_visibility_until_play
-        });
         let handle = self
             .spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
             .with_style_targets(
@@ -1468,9 +1465,6 @@ impl Canvas {
                     .flat_map(|member| member.inherited_style_targets())
                     .collect(),
             );
-        if defer_visibility {
-            handle.defer_visibility_until_play();
-        }
         handle
     }
 
@@ -3168,11 +3162,18 @@ impl Canvas {
         };
         let drawable =
             self.group_no_center(&[&ground, &hatching, &guides, &body, &rollers, &joint]);
-        drawable.follow_endpoint(
-            point,
-            DVec3::ZERO,
-            gaanim_animation::FollowOffsetSpace::World,
-        );
+        match point {
+            CanvasEndpoint::Static(position) => {
+                drawable.clone().at_3d(position.x, position.y, position.z);
+            }
+            point => {
+                drawable.follow_endpoint(
+                    point,
+                    DVec3::ZERO,
+                    gaanim_animation::FollowOffsetSpace::World,
+                );
+            }
+        }
         SupportHandle {
             drawable,
             joint,
@@ -3587,7 +3588,8 @@ impl Canvas {
             extension_dash,
             color,
         );
-        if options.label.is_none() && !options.show_value {
+        let explicit_value = options.value.clone();
+        if options.label.is_none() && !options.show_value && explicit_value.is_none() {
             return Ok(DimensionHandle {
                 drawable: visual.clone(),
                 line: visual,
@@ -3618,21 +3620,26 @@ impl Canvas {
             .transpose()?;
         let mut number = None;
         let mut unit = None;
-        let annotation = if options.show_value {
-            let tracker = self.value_tracker(0.0);
-            self.state
-                .lock()
-                .expect("canvas state poisoned")
-                .active_mut()
-                .ops
-                .push(Op::AttachEndpointDistance {
-                    target: tracker.id,
-                    from: from.clone(),
-                    to: to.clone(),
-                    scale: options.scale,
-                });
+        let annotation = if options.show_value || explicit_value.is_some() {
+            let value_expr = if let Some(value) = explicit_value {
+                value
+            } else {
+                let tracker = self.value_tracker(0.0);
+                self.state
+                    .lock()
+                    .expect("canvas state poisoned")
+                    .active_mut()
+                    .ops
+                    .push(Op::AttachEndpointDistance {
+                        target: tracker.id,
+                        from: from.clone(),
+                        to: to.clone(),
+                        scale: options.scale,
+                    });
+                Expr::Parameter(tracker.id)
+            };
             let mut number_handle = self.expression_readout(
-                Expr::Parameter(tracker.id),
+                value_expr,
                 options.format.clone(),
                 "",
                 "",
@@ -4059,6 +4066,190 @@ mod tests {
     }
 
     #[test]
+    fn moving_a_group_does_not_reveal_unentered_deferred_children() {
+        let mut canvas = Canvas::new(320, 180);
+        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
+        let mass = canvas.dot(8.0).at(60.0, 0.0);
+        let spring = canvas.spring_between(
+            CanvasEndpoint::Entity(anchor.id),
+            CanvasEndpoint::Entity(mass.id),
+            6,
+            10.0,
+        );
+        let group = canvas.group(&[&anchor, &mass, &spring]);
+        canvas.play(vec![group.animate().r#move(40.0, 0.0).duration(1.0)]);
+        canvas.play(vec![spring.fade_in(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let group_id = gaanim_core::ObjectId::from_raw(group.id.as_raw() - 1);
+        let group_entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == group_id).then_some(entity))
+            .expect("compiled group");
+        assert_eq!(
+            world.get::<Opacity>(group_entity).unwrap().0,
+            1.0,
+            "a deferred child must not hide the group or its already-visible siblings"
+        );
+
+        let spring_id = gaanim_core::ObjectId::from_raw(spring.id.as_raw() - 1);
+        let spring_entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == spring_id).then_some(entity))
+            .expect("compiled deferred spring");
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            world.get::<Opacity>(spring_entity).unwrap().0,
+            0.0,
+            "the parent movement must not serve as the spring entry animation"
+        );
+
+        timeline.seek(&mut world, 1.5);
+        let entered = world.get::<Opacity>(spring_entity).unwrap().0;
+        assert!(entered > 0.0 && entered < 1.0);
+    }
+
+    #[test]
+    fn moving_a_group_to_a_target_carries_a_fixed_support_and_ordinary_member_together() {
+        let mut canvas = Canvas::new(320, 180);
+        let support = canvas.support_at(
+            CanvasEndpoint::Static(DVec3::new(-60.0, 40.0, 0.0)),
+            "fixed",
+            DVec3::Y,
+            48.0,
+            70.0,
+            None,
+        );
+        let mass = canvas.dot(8.0).at(60.0, -40.0);
+        let group = canvas.group(&[&support.drawable, &mass]);
+        canvas.play(vec![group.move_to(40.0, 0.0).duration(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let entity_for = |world: &mut World, id: gaanim_core::ObjectId| {
+            let compiled_id = gaanim_core::ObjectId::from_raw(id.as_raw() - 1);
+            world
+                .query::<(bevy::prelude::Entity, &MobjectId)>()
+                .iter(world)
+                .find_map(|(entity, object_id)| (object_id.0 == compiled_id).then_some(entity))
+                .expect("compiled group member")
+        };
+        let support_entity = entity_for(&mut world, support.drawable.id);
+        let mass_entity = entity_for(&mut world, mass.id);
+        let before_support = gaanim_animation::resolve_tracking_endpoint(
+            &gaanim_animation::TrackingEndpoint::Entity(support_entity),
+            &world,
+        )
+        .unwrap();
+        let before_mass = gaanim_animation::resolve_tracking_endpoint(
+            &gaanim_animation::TrackingEndpoint::Entity(mass_entity),
+            &world,
+        )
+        .unwrap();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut world, 0.5);
+        gaanim_animation::endpoint_follow_system(&mut world);
+
+        let after_support = gaanim_animation::resolve_tracking_endpoint(
+            &gaanim_animation::TrackingEndpoint::Entity(support_entity),
+            &world,
+        )
+        .unwrap();
+        let after_mass = gaanim_animation::resolve_tracking_endpoint(
+            &gaanim_animation::TrackingEndpoint::Entity(mass_entity),
+            &world,
+        )
+        .unwrap();
+        assert!((after_support.x - before_support.x) > 1.0);
+        assert_eq!(
+            after_support - before_support,
+            after_mass - before_mass,
+            "fixed support and mass must share the parent movement"
+        );
+    }
+
+    #[test]
+    fn writing_or_creating_a_group_keeps_updater_coordinates_and_reveals_deferred_members() {
+        for use_write in [true, false] {
+            let mut canvas = Canvas::new(320, 180);
+            let mass = canvas.dot(8.0).at(60.0, -40.0);
+            mass.add_custom_updater(gaanim_animation::Updater::new(
+                |_dt, _elapsed, entity, world| {
+                    if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                        transform.translation = DVec3::new(60.0, -40.0, 0.0);
+                    }
+                    true
+                },
+            ));
+            let trace = canvas.traced_path_with_options(&mass, Some(1.0), Some(100), 0.5);
+            let group = canvas.group(&[&mass, &trace]);
+            let entry = if use_write {
+                group.write(1.0)
+            } else {
+                group.create(1.0)
+            };
+            canvas.play(vec![entry]);
+
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_animation::PlaybackState::default());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+
+            let entity_for = |world: &mut World, id: gaanim_core::ObjectId| {
+                let compiled_id = gaanim_core::ObjectId::from_raw(id.as_raw() - 1);
+                world
+                    .query::<(bevy::prelude::Entity, &MobjectId)>()
+                    .iter(world)
+                    .find_map(|(entity, object_id)| (object_id.0 == compiled_id).then_some(entity))
+                    .expect("compiled group member")
+            };
+            let mass_entity = entity_for(&mut world, mass.id);
+            let trace_entity = entity_for(&mut world, trace.id);
+            let snapshot = WorldSnapshot::capture(&mut world);
+            let mut timeline = world.remove_resource::<Timeline>().unwrap();
+            timeline.add_keyframe(0.0, snapshot);
+            timeline.seek(&mut world, 0.5);
+            gaanim_animation::seek_updaters(&mut world, 0.5);
+
+            let position = gaanim_animation::resolve_tracking_endpoint(
+                &gaanim_animation::TrackingEndpoint::Entity(mass_entity),
+                &world,
+            )
+            .unwrap();
+            assert_eq!(position, DVec3::new(60.0, -40.0, 0.0));
+            assert!(
+                world.get::<Opacity>(trace_entity).unwrap().0 > 0.0,
+                "Write/Create on the group is an explicit entry for deferred descendants"
+            );
+        }
+    }
+
+    #[test]
     fn paper_theme_uses_dark_text_fills() {
         use gaanim_text::prelude::TextRole;
 
@@ -4080,6 +4271,74 @@ mod tests {
         ] {
             assert_eq!(config.roles[&role].fill_color, Color::BLACK);
         }
+    }
+
+    #[test]
+    fn angle_color_applies_to_the_reactive_numeric_value() {
+        let mut canvas = Canvas::new(640, 360);
+        let gold = Color::from_rgb8(255, 200, 0);
+        let angle = canvas
+            .angle_between_with_options(
+                CanvasEndpoint::Static(DVec3::ZERO),
+                CanvasRay::Direction(DVec3::X),
+                CanvasRay::Direction(DVec3::Y),
+                64.0,
+                AngleDimensionOptions {
+                    label: Some("$theta$".to_owned()),
+                    show_value: true,
+                    color: Some(gold),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for text_part in [angle.label.as_ref(), angle.unit.as_ref()] {
+            assert_eq!(
+                text_part
+                    .expect("angle annotation text")
+                    .text_spec()
+                    .expect("angle annotation text spec")
+                    .style
+                    .color,
+                Some(gold),
+                "the explicit angle color must override the theme for symbols and units"
+            );
+        }
+        let _number = angle.number.as_ref().expect("numeric angle readout");
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut style_schedule = bevy::prelude::Schedule::default();
+        style_schedule.add_systems(gaanim_scene::systems::style_propagation_system);
+        style_schedule.run(&mut world);
+
+        let fill = world
+            .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::FillBrush)>()
+            .iter(&world)
+            .find_map(|(tag, fill)| (tag.0 == "SvgPath#ReactiveReadout").then_some(fill))
+            .expect("compiled angle number fill");
+        assert!(matches!(
+            fill.0.as_ref(),
+            Some(Brush::Solid(color)) if *color == gold
+        ));
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.seek(&mut world, 0.0);
+        let fill_after_seek = world
+            .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::FillBrush)>()
+            .iter(&world)
+            .find_map(|(tag, fill)| (tag.0 == "SvgPath#ReactiveReadout").then_some(fill))
+            .expect("angle number fill after seek");
+        assert!(matches!(
+            fill_after_seek.0.as_ref(),
+            Some(Brush::Solid(color)) if *color == gold
+        ));
     }
 
     #[test]
@@ -4966,14 +5225,14 @@ mod tests {
         let transform = query
             .iter(&world)
             .find_map(|(_, transform)| {
-                (transform.anchor == gaanim_core::glam::DVec3::new(10.0, -18.0, 0.0))
+                (transform.anchor == gaanim_core::glam::DVec3::new(100.0, -18.0, 0.0))
                     .then_some(transform)
             })
             .expect("group transform");
 
         assert_eq!(
             transform.anchor,
-            gaanim_core::glam::DVec3::new(10.0, -18.0, 0.0)
+            gaanim_core::glam::DVec3::new(100.0, -18.0, 0.0)
         );
     }
 
@@ -5207,6 +5466,68 @@ mod tests {
         assert!(dimension.label.is_some());
         assert!(dimension.number.is_some());
         assert!(dimension.unit.is_some());
+    }
+
+    #[test]
+    fn explicit_dimension_value_uses_parameter_without_driving_geometry() {
+        let mut canvas = Canvas::new(640, 360);
+        let value = canvas.parameter(12.0).unwrap();
+        let dimension = canvas
+            .dimension_between_with_options(
+                CanvasEndpoint::Static(DVec3::new(-80.0, 0.0, 0.0)),
+                CanvasEndpoint::Static(DVec3::new(80.0, 0.0, 0.0)),
+                35.0,
+                DimensionOptions {
+                    value: Some(value.expression()),
+                    format: ".1f".to_owned(),
+                    unit: Some("m".to_owned()),
+                    scale: 99.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(dimension.number.is_some(), "value must imply show_value");
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        assert!(
+            world
+                .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::EndpointDistance>>()
+                .iter(&world)
+                .next()
+                .is_none(),
+            "an explicit semantic value must not create a distance-backed signal"
+        );
+        let readout = world
+            .query::<&gaanim_animation::ReactiveReadout>()
+            .single(&world)
+            .expect("dimension readout");
+        assert_eq!(readout.last_text, "12.0");
+        assert_eq!(readout.parameters.len(), 1);
+        let (_, signal_entity) = readout.parameters[0];
+        assert_eq!(
+            world
+                .get::<gaanim_animation::FloatSignal>(signal_entity)
+                .expect("value parameter signal")
+                .value,
+            12.0
+        );
+        assert!(
+            world
+                .query_filtered::<
+                    bevy::prelude::Entity,
+                    With<gaanim_animation::DimensionLabelPlacement>,
+                >()
+                .iter(&world)
+                .next()
+                .is_some(),
+            "the annotation placement must remain endpoint-driven"
+        );
     }
 
     #[test]

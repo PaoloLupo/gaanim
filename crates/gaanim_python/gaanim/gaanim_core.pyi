@@ -1101,7 +1101,9 @@ class Drawable:
         ``callback(position, dt, elapsed)`` returns the new local ``(x, y, z)``
         position. For stateful simulations, provide both ``reset`` and a positive
         ``fixed_dt``. Gaanim calls ``reset()`` before replaying fixed substeps for
-        timeline seeks and exports.
+        timeline seeks and exports. Fixed-step simulations run before ordinary
+        callbacks, so dependent force parameters and labels observe the rebuilt
+        state in the same frame.
 
         Example:
             bob.add_updater_fn(step, reset=reset_state, fixed_dt=1 / 240)
@@ -1526,6 +1528,7 @@ class TextSelection:
 class TextQuery:
     """Deferred indexable view over rendered text units."""
     def __len__(self) -> int: ...
+    def __contains__(self, value: str) -> bool: ...
     @overload
     def __getitem__(self, index: int) -> TextSelection: ...
     @overload
@@ -2131,7 +2134,9 @@ class Parameter:
         """Drive the scalar as ``callback(current, dt, elapsed) -> value``.
 
         Pair ``reset`` with a positive ``fixed_dt`` for deterministic seeking
-        and export. The callback must return a finite number.
+        and export. Fixed-step drawable simulations run first, so this callback
+        can derive a force or readout from their same-frame state. The callback
+        must return a finite number.
         """
         ...
     def remove_updater(self) -> None: ...
@@ -3009,6 +3014,12 @@ class Scene:
     def group(self, members: Sequence[Drawable]) -> Drawable:
         """Create a group drawable in the scene.
 
+        Grouping preserves each member's authored local coordinates, including
+        coordinates returned by ``add_updater_fn``. Existing visible members do
+        not become hidden merely because the group also contains a deferred
+        force or trace; ``write()`` and ``create()`` on the group explicitly
+        reveal those deferred descendants.
+
         Example:
             result = scene.group([drawable])
         """
@@ -3415,6 +3426,7 @@ class Scene:
         *,
         label: Optional[str] = None,
         show_value: bool = False,
+        value: Optional[_TracedScalar] = None,
         format: str = ".2f",
         unit: Optional[str] = None,
         scale: float = 1.0,
@@ -3431,7 +3443,11 @@ class Scene:
 
         The line follows fixed points, drawable origins, or anchored points.
         ``label`` remains symbolic; ``show_value`` adds the current XY distance
-        multiplied by ``scale`` and formatted with ``format``/``unit``.
+        multiplied by ``scale`` and formatted with ``format``/``unit``. Passing
+        ``value`` (a number, ``Parameter``, ``Variable``, or traced expression)
+        implies the numeric readout and takes precedence over both measured
+        distance and ``scale`` while the dimension geometry keeps following its
+        endpoints.
         ``label_orientation`` keeps text horizontal or aligned while avoiding
         upside-down labels. ``color`` initializes the extension lines,
         solid triangular arrowheads, and annotation. Math labels and reactive

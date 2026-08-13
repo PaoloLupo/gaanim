@@ -383,6 +383,16 @@ impl PyTextQuery {
             occurrence: Some(occurrence),
         })
     }
+
+    fn contains_name(&self, name: &str) -> bool {
+        match self.kind {
+            QueryKind::Part => self.spec.parts().into_iter().any(|part| {
+                part.path.join(".") == name
+                    || part.path.last().is_some_and(|part_name| part_name == name)
+            }),
+            _ => self.values().iter().any(|(value, _, _)| value == name),
+        }
+    }
 }
 
 fn occurrences(values: Vec<String>) -> Vec<(String, Option<usize>, Vec<String>)> {
@@ -415,6 +425,10 @@ impl PyTextQuery {
                 "text query indices must be int or slice",
             ))
         }
+    }
+
+    fn __contains__(&self, value: &str) -> bool {
+        self.contains_name(value)
     }
 }
 
@@ -455,7 +469,9 @@ impl PyTextSelection {
     }
 
     fn fill(&self, color: PyColor) -> Self {
-        self.inner().fill(color.0);
+        if !self.handle.fill_text_part(&self.path, color.0) {
+            self.inner().fill(color.0);
+        }
         self.clone()
     }
 

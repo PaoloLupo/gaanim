@@ -406,6 +406,49 @@ impl DrawableHandle {
             .collect()
     }
 
+    /// Apply a semantic part fill before structured text is compiled. Typst
+    /// then carries the style through math shaping, including identifiers such
+    /// as `theta` whose rendered glyphs no longer match the authored source.
+    #[doc(hidden)]
+    pub fn fill_text_part(&self, path: &[String], color: Color) -> bool {
+        fn fill_part(
+            content: &mut [gaanim_text::prelude::TextContent],
+            path: &[String],
+            color: Color,
+        ) -> bool {
+            let Some((name, remainder)) = path.split_first() else {
+                return false;
+            };
+            for item in content {
+                let gaanim_text::prelude::TextContent::Part(part) = item else {
+                    continue;
+                };
+                if &part.name != name {
+                    continue;
+                }
+                if remainder.is_empty() {
+                    part.style.color = Some(color);
+                    return true;
+                }
+                return fill_part(&mut part.content, remainder, color);
+            }
+            false
+        }
+
+        if path.is_empty() {
+            return false;
+        }
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Text(text) = &mut spec.kind else {
+            return false;
+        };
+        let changed = fill_part(&mut text.content, path, color);
+        if changed {
+            text.version = text.version.saturating_add(1);
+        }
+        changed
+    }
+
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
         self.named_parts = Some(Arc::new(parts));
         self

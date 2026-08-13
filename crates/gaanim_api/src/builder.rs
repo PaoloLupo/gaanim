@@ -472,6 +472,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.schedule_show_hierarchy(root_id, &state, track, time);
     }
 
+    /// Make only the requested hierarchy root visible. This is used by
+    /// transform-only animations on aggregate groups so that moving a parent
+    /// does not become an implicit entry animation for deferred descendants.
+    pub(crate) fn schedule_show_root_at(&mut self, root_id: ObjectId, time: f64) {
+        let Some(state) = self.states.get(root_id) else {
+            return;
+        };
+        let opacity = state.opacity;
+        let track = self.ensure_track(root_id);
+        self.timeline.add_clip(
+            track,
+            time,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: root_id,
+                lens: PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: opacity,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+    }
+
     /// Schedule visibility for every descendant except the root. The root is
     /// omitted when its entry animation owns the root opacity, for example
     /// `FadeIn` and `FadeInFrom`.
@@ -4603,9 +4629,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Creates a hierarchical group of Mobjects.
     ///
     /// The group is a Mobject itself (with a GroupMarker component).
-    /// The children are reparented under the group using Bevy's hierarchy,
-    /// and their local transforms are adjusted relative to the group's center
-    /// to avoid any spatial offset jumps.
+    /// The children are reparented under the group using Bevy's hierarchy while
+    /// retaining their authored coordinate frame. The group keeps its visual
+    /// center as the transform pivot, so rotations and scales remain centered
+    /// without rewriting coordinates consumed by child updaters.
     pub fn group(&mut self, children: &[MobjectRef]) -> MobjectRef {
         let id = self.next_id();
 
@@ -4627,13 +4654,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        // 2. Set the group's transform translation to the center of the union bounds
+        // 2. Keep the group matrix at identity and use the visual center only as
+        // its pivot. Re-centering every child would change the local coordinate
+        // system seen by custom updaters after grouping.
         let center = if has_bounds {
             union_bounds.center()
         } else {
             gaanim_core::glam::DVec3::ZERO
         };
-        let group_transform = SpatialTransform::new_2d(center.x, center.y);
+        let group_transform = SpatialTransform::identity().with_anchor(center);
 
         // 3. Spawn the group entity with GroupMarker, Opacity, WorldBounds etc.
         // Include Bevy Transform/Visibility so that any 3D child with GlobalTransform
@@ -4649,12 +4678,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 Visibility::default(),
                 Opacity(1.0),
                 gaanim_scene::GlobalOpacity(1.0),
-                LocalBounds(Bounds3D::new_2d(
-                    union_bounds.min.x - center.x,
-                    union_bounds.min.y - center.y,
-                    union_bounds.max.x - center.x,
-                    union_bounds.max.y - center.y,
-                )),
+                LocalBounds(union_bounds),
                 WorldBounds(union_bounds),
                 gaanim_scene::RenderOrder::default(),
                 Visible,
@@ -4663,17 +4687,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         self.tag_entity(group_entity);
 
-        // 4. Reparent children and adjust their local transforms
-        let inv_group_affine = group_transform.to_affine_2d().inverse();
+        // 4. Reparent children without changing the authored coordinates of
+        // root members. A member already parented elsewhere is first flattened
+        // to world space because it is leaving that previous coordinate frame.
         let mut child_ids = Vec::new();
 
         for child in children {
             child_ids.push(child.id);
             let child_world = self.get_world_transform(child.id);
             if let Some(state) = self.states.get_mut(child.id) {
-                // child_local = group_inv * child_world
-                let child_local_affine = inv_group_affine * child_world.to_affine_2d();
-                let child_local = SpatialTransform::from_affine_2d(&child_local_affine);
+                let child_local = if state.parent.is_none() {
+                    state.transform
+                } else {
+                    child_world
+                };
 
                 state.transform = child_local;
                 state.parent = Some(id); // Track parent for world transform calculation
@@ -4695,12 +4722,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // 6. Store group state
         let group_state = MobjectState {
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
-            bounds: Bounds3D::new_2d(
-                union_bounds.min.x - center.x,
-                union_bounds.min.y - center.y,
-                union_bounds.max.x - center.x,
-                union_bounds.max.y - center.y,
-            ),
+            bounds: union_bounds,
             transform: group_transform,
             opacity: 1.0,
             fill: None,
@@ -6714,6 +6736,29 @@ mod tests {
         schedule.run(&mut world);
 
         assert_eq!(world.get::<FillBrush>(child_entity), Some(&expected));
+    }
+
+    #[test]
+    fn group_preserves_the_authored_child_coordinate_frame() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let child = builder.rectangle(40.0, 30.0).at(120.0, -45.0).spawn();
+        let authored = builder.states.get(child.id).unwrap().transform;
+        let group = builder.group(&[child]);
+
+        assert_eq!(builder.states.get(child.id).unwrap().transform, authored);
+        assert_eq!(builder.get_world_transform(child.id), authored);
+        assert_eq!(
+            builder.states.get(group.id).unwrap().transform.to_mat4(),
+            gaanim_core::glam::DMat4::IDENTITY,
+            "creating a group must not replace the coordinate system used by child updaters"
+        );
     }
 
     #[test]

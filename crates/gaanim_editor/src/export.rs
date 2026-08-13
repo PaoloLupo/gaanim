@@ -6,7 +6,7 @@ use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -36,6 +36,9 @@ pub struct ExportState {
     pub message: String,
     pub elapsed_seconds: Option<f64>,
     pub encoder_label: Option<String>,
+    /// Absolute path retained after an export completes successfully.
+    pub completed_output_path: Option<PathBuf>,
+    pub completed_successfully: bool,
     pub progress_shared: Arc<Mutex<Option<ExportProgress>>>,
 }
 
@@ -111,6 +114,8 @@ impl Default for ExportState {
             message: String::new(),
             elapsed_seconds: None,
             encoder_label: None,
+            completed_output_path: None,
+            completed_successfully: false,
             progress_shared: Arc::new(Mutex::new(None)),
         }
     }
@@ -143,6 +148,7 @@ pub fn export_dialog_system(
     let mut trigger_export = false;
     let mut trigger_cancel = false;
     let mut trigger_ok = false;
+    let mut trigger_open = false;
 
     if state.show_complete {
         let mut complete_open = true;
@@ -160,17 +166,40 @@ pub fn export_dialog_system(
                 if let Some(encoder) = &state.encoder_label {
                     ui.label(format!("Encoder: {encoder}"));
                 }
+                let displayed_path = state
+                    .completed_output_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy())
+                    .unwrap_or_else(|| state.output_path.as_str().into());
                 ui.add(
-                    egui::Label::new(format!("Output: {}", state.output_path))
+                    egui::Label::new(format!("Output: {displayed_path}"))
                         .wrap_mode(egui::TextWrapMode::Truncate),
                 );
                 ui.add_space(8.0);
-                if ui.button(egui::RichText::new("OK").size(14.0)).clicked() {
-                    trigger_ok = true;
-                }
+                ui.horizontal(|ui| {
+                    if state.completed_successfully
+                        && state.completed_output_path.is_some()
+                        && ui.button("Open exported file").clicked()
+                    {
+                        trigger_open = true;
+                    }
+                    if ui.button(egui::RichText::new("OK").size(14.0)).clicked() {
+                        trigger_ok = true;
+                    }
+                });
             });
         if !complete_open {
             trigger_ok = true;
+        }
+    }
+
+    if trigger_open && let Some(path) = state.completed_output_path.clone() {
+        match open_exported_file(&path) {
+            Ok(()) => trigger_ok = true,
+            Err(error) => {
+                state.message =
+                    format!("Export completed, but the exported file could not be opened: {error}");
+            }
         }
     }
 
@@ -199,9 +228,10 @@ pub fn export_dialog_system(
         };
 
         if prog_done {
-            let (message, encoder_label, elapsed_seconds) = {
+            let (message, encoder_label, elapsed_seconds, succeeded) = {
                 let lock = state.progress_shared.lock().unwrap();
                 if let Some(progress) = lock.as_ref() {
+                    let succeeded = matches!(progress.result.as_ref(), Some(Ok(())));
                     let message = match progress.result.as_ref() {
                         Some(Ok(())) => "Export completed successfully".to_string(),
                         Some(Err(error)) => format!("Export failed: {error}"),
@@ -211,18 +241,24 @@ pub fn export_dialog_system(
                         message,
                         progress.telemetry.encoder(),
                         progress.started_at.elapsed().as_secs_f64(),
+                        succeeded,
                     )
                 } else {
                     (
                         "Export finished without a result".to_string(),
                         encoder_label,
                         0.0,
+                        false,
                     )
                 }
             };
             state.message = message;
             state.elapsed_seconds = Some(elapsed_seconds);
             state.encoder_label = encoder_label;
+            state.completed_successfully = succeeded;
+            if !succeeded {
+                state.completed_output_path = None;
+            }
             state.show_complete = true;
             state.active = false;
             *state.progress_shared.lock().unwrap() = None;
@@ -365,21 +401,30 @@ pub fn export_dialog_system(
     if trigger_export {
         if !has_replay {
             state.message = "No replay data available".to_string();
+            state.completed_output_path = None;
+            state.completed_successfully = false;
             state.show_complete = true;
             state.dialog_open = false;
         } else {
             let out_raw = state.output_path.clone();
-            // Resolve relative output against project_dir so gaanim.toml's output_dir is respected
-            let out = if let Some(ref proj) = project_paths {
-                let p = PathBuf::from(&out_raw);
-                if p.is_absolute() {
-                    out_raw
-                } else {
-                    proj.project_dir.join(p).to_string_lossy().to_string()
+            // Resolve relative output against project_dir so gaanim.toml's output_dir is respected.
+            let out_path = match resolve_output_path(
+                &out_raw,
+                project_paths
+                    .as_ref()
+                    .map(|paths| paths.project_dir.as_path()),
+            ) {
+                Ok(path) => path,
+                Err(error) => {
+                    state.message = format!("Export failed: {error}");
+                    state.completed_output_path = None;
+                    state.completed_successfully = false;
+                    state.show_complete = true;
+                    state.dialog_open = false;
+                    return;
                 }
-            } else {
-                out_raw
             };
+            let out = out_path.to_string_lossy().into_owned();
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
@@ -392,6 +437,9 @@ pub fn export_dialog_system(
 
             state.active = true;
             state.dialog_open = false;
+            state.output_path = out.clone();
+            state.completed_output_path = Some(out_path);
+            state.completed_successfully = false;
             state.elapsed_seconds = None;
             state.encoder_label = None;
 
@@ -439,6 +487,30 @@ pub fn export_dialog_system(
             });
         }
     }
+}
+
+fn resolve_output_path(raw: &str, project_dir: Option<&Path>) -> Result<PathBuf, String> {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    let base = match project_dir {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_dir()
+            .map_err(|error| format!("could not resolve the current directory: {error}"))?,
+    };
+    Ok(base.join(path))
+}
+
+fn open_exported_file(path: &Path) -> Result<(), String> {
+    open_exported_file_with(path, |path| open::that(path))
+}
+
+fn open_exported_file_with<E: std::fmt::Display>(
+    path: &Path,
+    opener: impl FnOnce(&Path) -> Result<(), E>,
+) -> Result<(), String> {
+    opener(path).map_err(|error| format!("{} ({error})", path.display()))
 }
 
 fn forward_worker_line(line: &str, telemetry: &ExportTelemetry) {
@@ -545,7 +617,10 @@ pub fn export_per_frame_system() {}
 
 #[cfg(test)]
 mod tests {
-    use super::{ExportTelemetry, forward_worker_line};
+    use super::{
+        ExportTelemetry, forward_worker_line, open_exported_file_with, resolve_output_path,
+    };
+    use std::path::Path;
 
     #[test]
     fn worker_progress_markers_update_shared_telemetry_without_polluting_log() {
@@ -569,5 +644,47 @@ mod tests {
             telemetry.logs(),
             vec!["INFO export initialized", "Frame 1/2"]
         );
+    }
+
+    #[test]
+    fn relative_export_paths_resolve_against_the_project_as_absolute_paths() {
+        let project = if cfg!(windows) {
+            Path::new(r"C:\projects\demo")
+        } else {
+            Path::new("/projects/demo")
+        };
+        let resolved = resolve_output_path("exports/demo.mp4", Some(project)).unwrap();
+
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, project.join("exports/demo.mp4"));
+    }
+
+    #[test]
+    fn absolute_export_paths_are_preserved() {
+        let absolute = if cfg!(windows) {
+            Path::new(r"C:\exports\demo.webp")
+        } else {
+            Path::new("/exports/demo.webp")
+        };
+
+        assert_eq!(
+            resolve_output_path(absolute.to_str().unwrap(), None).unwrap(),
+            absolute
+        );
+    }
+
+    #[test]
+    fn opener_errors_include_the_exported_path() {
+        let path = Path::new("missing.mp4");
+        let error = open_exported_file_with(path, |_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no default application",
+            ))
+        })
+        .unwrap_err();
+
+        assert!(error.contains("missing.mp4"));
+        assert!(error.contains("no default application"));
     }
 }

@@ -935,7 +935,7 @@ scene.export("preview.webp", fps=30)
   signature: "group(members: list[Drawable]) -> Drawable",
   params: ((name: "members", type: "list[Drawable]", default: none, desc: [Members to group.]),),
   returns: (type: "Drawable", desc: [Group drawable.]),
-  desc: [Move/rotate/scale as one. Use `Scene.row`, `column`, `grid`, or `stack` for layout.],
+  desc: [Move/rotate/scale as one while preserving the authored coordinate frame used by member updaters. A deferred trace, force, or connector no longer hides already-visible siblings merely by joining the group. A group `move` keeps deferred members hidden until their own entry; `write`, `create`, and fades on the group are explicit entries for the complete subtree. Use `Scene.row`, `column`, `grid`, or `stack` for layout.],
 )[
 ```python
 # show-code: true
@@ -1286,23 +1286,24 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.dimension_between",
   kind: "factory",
-  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None, line_width=3, extension_style=\"solid\", dash_length=12, gap_length=8) -> Dimension",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "3", desc: [Positive filled-line width.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "8", desc: [Positive dash gap.])),
+  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None, line_width=3, extension_style=\"solid\", dash_length=12, gap_length=8) -> Dimension",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Expr|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "3", desc: [Positive filled-line width.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "8", desc: [Positive dash gap.])),
   returns: (type: "Dimension", desc: [Reactive drawable exposing compatible `line`, independent `extensions`, `label`, `number`, and `unit`.]),
-  desc: [Keeps all geometry and annotations synchronized with moving endpoints. Labels, values, and units default to 48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation; `extensions` remains independently styleable. Invalid metrics, extension styles, and orientation raise `ValueError`.],
+  desc: [Keeps all geometry and annotations synchronized with moving endpoints. `value` accepts a number, Parameter, Variable, or traced expression; it controls only the number, so changing it never changes the line length. Without `value`, `show_value=True` displays endpoint distance multiplied by `scale`. Labels, values, and units default to 48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation; `extensions` remains independently styleable. Invalid scalar types, metrics, extension styles, and orientation raise `TypeError` or `ValueError`; non-finite reactive results display the configured invalid-value marker.],
 )[
 ```python
 # show-code: true
 from gaanim import Anchor, BLACK, WHITE, Scene
 scene = Scene(480, 270, background=WHITE)
 frame = scene.rect(180, 80).at(0, 0)
+physical_width = scene.parameter(2.5)
 dim = scene.dimension_between(
   frame.anchor_point(Anchor.TOP_LEFT),
   frame.anchor_point(Anchor.TOP_RIGHT),
-  35, label="$W_f$", show_value=True, unit="u", color=BLACK,
+  35, label="$W_f$", value=physical_width, unit="m", color=BLACK,
   extension_style="dashed", line_width=3, dash_length=12, gap_length=8,
 )
-scene.play([dim.fade_in().duration(0.3), frame.move(30, 0).duration(0.9)])
+scene.play([dim.fade_in().duration(0.3), physical_width.animate_to(4.0, duration=0.9)])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1369,7 +1370,7 @@ scene.export("preview.webp", fps=30)
   kind: "factories",
   signature: "offset_point(origin, dx, dy) / force_at(origin, magnitude, direction=0, visual_scale=1, ...) / force_from_components(origin, fx, fy, visual_scale=1, ...) -> ForceVector",
   returns: (type: "PointRef | ForceVector", desc: [Reactive relative geometry or a drawable exposing `shaft`, `head`, `label`, `number`, and `unit`.]),
-  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
+  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -1512,10 +1513,10 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "TextSelection and TextQuery",
   kind: "method",
-  signature: "text[name] / text[index_or_slice] / text.graphemes|words|lines|parts[index] -> TextSelection",
+  signature: "text[name] / text[index_or_slice] / text.graphemes|words|lines|parts[index] -> TextSelection; name in text.parts -> bool",
   params: ((name: "name", type: "str", default: none, desc: [Nested semantic path from `part()`.]), (name: "index", type: "int | slice", default: none, desc: [Rendered unit selection, Unicode-grapheme safe.])),
   returns: (type: "TextSelection", desc: [Deferred local selection; never a Layout leaf.]),
-  desc: [Selections support persistent `fill`, animated `color_to`/`opacity_to`, compound `animate().fill().opacity()`, emphasis, braces, annotations, and structural morph/copy transitions. The compound builder rejects non-local transform and stroke channels.],
+  desc: [Selections support persistent `fill`, animated `color_to`/`opacity_to`, compound `animate().fill().opacity()`, emphasis, braces, annotations, and structural morph/copy transitions. Use `"mass" in text.parts` before optional styling; membership recognizes both leaf names and dotted nested paths such as `"formula.mass"`. The compound builder rejects non-local transform and stroke channels.],
 )[
 ```python
 # show-code: true
@@ -1523,7 +1524,8 @@ from gaanim import GOLD, RED, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 # TextSelection animations compose with complete-Text animations.
 eq = scene.text("$E = ", part("mass", "m"), " c^2$").at(0, 0)
-eq["mass"].fill(GOLD)
+if "mass" in eq.parts:
+  eq["mass"].fill(GOLD)
 scene.play([
     eq.write(0.8),
     eq["mass"].animate().fill(RED).opacity(0.7).duration(0.8),

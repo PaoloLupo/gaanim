@@ -4412,7 +4412,7 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None, line_width=3.0, extension_style="solid", dash_length=12.0, gap_length=8.0))]
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None, line_width=3.0, extension_style="solid", dash_length=12.0, gap_length=8.0))]
     #[allow(clippy::too_many_arguments)]
     fn dimension_between<'py>(
         &self,
@@ -4422,6 +4422,7 @@ impl PyScene {
         offset: f64,
         label: Option<String>,
         show_value: bool,
+        value: Option<Bound<'py, PyAny>>,
         format: &str,
         unit: Option<String>,
         scale: f64,
@@ -4488,6 +4489,7 @@ impl PyScene {
         };
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
+        let value = value.map(extract_expr).transpose()?;
         let handle = self
             .inner
             .lock()
@@ -4499,6 +4501,7 @@ impl PyScene {
                 DimensionOptions {
                     label,
                     show_value,
+                    value,
                     format: format.to_owned(),
                     unit,
                     scale,

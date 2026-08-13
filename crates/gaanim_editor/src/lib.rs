@@ -576,6 +576,7 @@ fn editor_ui_system(
         .map(|s| s.name.clone())
         .unwrap_or_default();
     let presentation_name = timeline.segment_label();
+    let active_scene_loop_range = current_scene_loop_range(&timeline);
     let total = timeline.cached_duration.max(0.0);
     let current = timeline.current_time.clamp(0.0, total);
 
@@ -981,12 +982,22 @@ fn editor_ui_system(
                             ui.add_space(6.0);
                             if let Some(presentation_name) = &presentation_name {
                                 let display = truncate_with_ellipsis(presentation_name, 22);
-                                ui.label(
-                                    egui::RichText::new(display)
-                                        .color(egui::Color32::from_rgb(170, 210, 255))
-                                        .strong()
-                                        .size(13.0),
-                                );
+                                let response = ui
+                                    .add(
+                                        egui::Label::new(
+                                            egui::RichText::new(display)
+                                                .color(egui::Color32::from_rgb(170, 210, 255))
+                                                .strong()
+                                                .size(13.0),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text("Double-click to loop this scene");
+                                if response.double_clicked()
+                                    && let Some(range) = active_scene_loop_range
+                                {
+                                    toggle_scene_loop_range(&mut timeline, range);
+                                }
                                 ui.add_space(4.0);
                             } else if !scene_name.is_empty() {
                                 let display = truncate_with_ellipsis(&scene_name, 20);
@@ -997,12 +1008,22 @@ fn editor_ui_system(
                                 } else {
                                     egui::Color32::from_rgb(150, 180, 220)
                                 };
-                                ui.label(
-                                    egui::RichText::new(scene_text)
-                                        .color(scene_color)
-                                        .strong()
-                                        .size(13.0),
-                                );
+                                let response = ui
+                                    .add(
+                                        egui::Label::new(
+                                            egui::RichText::new(scene_text)
+                                                .color(scene_color)
+                                                .strong()
+                                                .size(13.0),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text("Double-click to loop this scene");
+                                if response.double_clicked()
+                                    && let Some(range) = active_scene_loop_range
+                                {
+                                    toggle_scene_loop_range(&mut timeline, range);
+                                }
                                 ui.add_space(4.0);
                             } else if !scene_segs.is_empty() {
                                 ui.label(
@@ -1213,6 +1234,45 @@ fn format_time(seconds: f64) -> String {
     let secs = (total_cs % 6000) / 100;
     let cs = total_cs % 100;
     format!("{}:{:02}.{:02}", mins, secs, cs)
+}
+
+fn current_scene_loop_range(timeline: &Timeline) -> Option<(f64, f64)> {
+    if let Some(position) = timeline.segment_position_at(timeline.current_time)
+        && let Some(segment) = timeline
+            .segments
+            .iter()
+            .find(|segment| segment.id == position.segment_id)
+    {
+        return Some((segment.start_time, segment.end_time));
+    }
+    timeline
+        .scene_at(timeline.current_time)
+        .and_then(|scene| timeline.scene_bounds(scene))
+}
+
+fn toggle_scene_loop_range(timeline: &mut Timeline, range: (f64, f64)) {
+    const EPSILON: f64 = 1e-6;
+    let (start, end) = (range.0.min(range.1), range.0.max(range.1));
+    if !start.is_finite() || !end.is_finite() || end - start <= EPSILON {
+        timeline.loop_range = None;
+        timeline.seek_request = start.is_finite().then_some(start);
+        timeline.is_playing = false;
+        return;
+    }
+
+    let same_range = timeline
+        .loop_range
+        .is_some_and(|(active_start, active_end)| {
+            (active_start - start).abs() <= EPSILON && (active_end - end).abs() <= EPSILON
+        });
+    if same_range {
+        timeline.loop_range = None;
+        return;
+    }
+
+    timeline.loop_range = Some((start, end));
+    timeline.seek_request = Some(start);
+    timeline.is_playing = true;
 }
 
 /// A scene's time range, precomputed for the seek bar.
@@ -2536,6 +2596,67 @@ fn viewport_adjust_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaanim_timeline::timeline::SegmentMetadata;
+
+    #[test]
+    fn scene_loop_range_resolves_first_and_last_semantic_scenes() {
+        let mut timeline = Timeline::new();
+        timeline.set_segments(vec![
+            SegmentMetadata {
+                id: 1,
+                name: "first".into(),
+                notes: None,
+                start_time: 0.0,
+                end_time: 1.25,
+                stops: Vec::new(),
+            },
+            SegmentMetadata {
+                id: 2,
+                name: "last".into(),
+                notes: None,
+                start_time: 1.25,
+                end_time: 3.0,
+                stops: Vec::new(),
+            },
+        ]);
+
+        timeline.current_time = 0.25;
+        assert_eq!(current_scene_loop_range(&timeline), Some((0.0, 1.25)));
+        timeline.current_time = 2.5;
+        assert_eq!(current_scene_loop_range(&timeline), Some((1.25, 3.0)));
+    }
+
+    #[test]
+    fn scene_loop_replaces_a_previous_range_and_repeated_toggle_disables_it() {
+        let mut timeline = Timeline::new();
+        timeline.loop_range = Some((0.0, 8.0));
+        timeline.playback_rate = 1.75;
+
+        toggle_scene_loop_range(&mut timeline, (2.0, 4.5));
+        assert_eq!(timeline.loop_range, Some((2.0, 4.5)));
+        assert_eq!(timeline.seek_request, Some(2.0));
+        assert!(timeline.is_playing);
+        assert_eq!(timeline.playback_rate, 1.75);
+
+        timeline.seek_request = None;
+        toggle_scene_loop_range(&mut timeline, (2.0, 4.5));
+        assert_eq!(timeline.loop_range, None);
+        assert_eq!(timeline.seek_request, None);
+        assert_eq!(timeline.playback_rate, 1.75);
+    }
+
+    #[test]
+    fn zero_duration_scene_never_creates_an_invalid_loop() {
+        let mut timeline = Timeline::new();
+        timeline.loop_range = Some((0.0, 2.0));
+        timeline.is_playing = true;
+
+        toggle_scene_loop_range(&mut timeline, (1.0, 1.0));
+
+        assert_eq!(timeline.loop_range, None);
+        assert_eq!(timeline.seek_request, Some(1.0));
+        assert!(!timeline.is_playing);
+    }
 
     #[test]
     fn compact_seek_snapping_is_bypassed_for_3d_content() {

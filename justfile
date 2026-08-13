@@ -55,6 +55,13 @@ build-release:
     cargo build -p gaanim_editor --release
     cargo build -p gaanim_launcher --release
 
+[windows]
+build-release-install: build-release wheel
+    New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
+    Copy-Item -Path "./target/release/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path "./target/release/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
+
 # Install the Python extension in the local virtual environment.
 python-develop:
     {{ python }} -m maturin develop --manifest-path crates/gaanim_python/Cargo.toml

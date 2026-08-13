@@ -67,11 +67,15 @@ width_dimension = scene.dimension_between(
     dash_length=12,
     gap_length=8,
 )
+displayed_x = scene.parameter(2.5)
 mass_dimension = scene.dimension_between(
     mass.anchor_point(Anchor.TOP_LEFT),
     mass.anchor_point(Anchor.TOP_RIGHT),
     50,
     label="$x$",
+    value=displayed_x,
+    format=".1f",
+    unit="$m$",
     label_orientation="aligned",
     color=BLACK,
 )
@@ -101,6 +105,7 @@ scene.play(
         frame.move(55, 0).duration(1.4).smooth(),
         mass.move(185, 0).duration(1.4).smooth(),
         bob.move(245, 35).duration(1.4).smooth(),
+        displayed_x.animate_to(4.0, duration=1.4),
     ]
 )
 scene.wait(1)

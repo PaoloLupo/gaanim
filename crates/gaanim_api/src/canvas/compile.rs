@@ -438,16 +438,26 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
     if text.is_empty() {
         return String::new();
     }
+    let mut wrapper_style = style.clone();
     let content = if math {
         let text = text.trim();
         if text.is_empty() {
             return String::new();
         }
+        // Math glyphs do not inherit an outer `#text(fill: ...)` wrapper.
+        // Typst's math-mode `text` function accepts mathematical content and
+        // applies its paint to every resulting glyph and shape.
+        let text = if let Some(color) = style.color {
+            wrapper_style.color = None;
+            format!("text(fill: #rgb(\"{}\"), {text})", color_to_hex(color))
+        } else {
+            text.to_owned()
+        };
         format!("${text}$")
     } else {
         format!("#text(\"{}\")", escape_typst_string(text))
     };
-    let args = typst_style_arguments(style);
+    let args = typst_style_arguments(&wrapper_style);
     let mut content = if args.is_empty() {
         content
     } else {
@@ -4470,16 +4480,45 @@ impl Canvas {
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
     ) {
-        if !deferred_visibility.contains(&anim.target)
-            || !Self::animation_reveals_deferred(&anim.anim_type)
-            || !revealed_deferred.insert(anim.target)
-        {
+        if !Self::animation_reveals_deferred(&anim.anim_type) {
             return;
         }
 
         let Some(&actual) = id_map.get(&anim.target) else {
             return;
         };
+
+        let hierarchy: HashSet<ObjectId> = builder.hierarchy_ids(actual).into_iter().collect();
+        let pending: Vec<ObjectId> = deferred_visibility
+            .iter()
+            .filter(|logical| {
+                !revealed_deferred.contains(logical)
+                    && id_map
+                        .get(logical)
+                        .is_some_and(|runtime| hierarchy.contains(runtime))
+            })
+            .copied()
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+
+        // Moving an aggregate is not an entry animation for its deferred
+        // descendants. A deferred root itself may still need to become visible,
+        // but children such as forces and traces retain their own entry point.
+        if matches!(
+            &anim.anim_type,
+            AnimationType::Properties(properties) if properties.is_transform_only()
+        ) {
+            if deferred_visibility.contains(&anim.target) && revealed_deferred.insert(anim.target) {
+                builder.schedule_show_root_at(actual, builder.current_time + anim.delay.max(0.0));
+            }
+            return;
+        }
+
+        for logical in pending {
+            revealed_deferred.insert(logical);
+        }
 
         // FadeIn/FadeInFrom already author their own root opacity lens, but
         // composite deferred objects still need their descendants restored.
@@ -6145,7 +6184,9 @@ impl Canvas {
         let mut styled = spec.clone();
         if !styled.fill_overridden {
             styled.fill = Some(gaanim_core::peniko::Brush::Solid(color));
-            styled.fill_overridden = true;
+            // The Typst source already applies this inherited/default paint.
+            // Keep it non-overridden so `post_apply` does not flatten the
+            // locally styled fills of semantic text parts back to one color.
         }
         styled
     }
@@ -6375,7 +6416,11 @@ impl Canvas {
         for op in &spec.layout_ops {
             match op {
                 LayoutOp::SetTranslation(translation) => {
-                    transform.translation = *translation;
+                    transform.translation = if matches!(spec.kind, SpawnKind::Group(_)) {
+                        *translation - bounds.center()
+                    } else {
+                        *translation
+                    };
                 }
                 LayoutOp::SetScale(factor) => {
                     transform.scale = original_transform.scale * *factor;
@@ -7819,6 +7864,93 @@ mod tests {
                 .iter()
                 .any(|values| !values.is_empty() && values.iter().all(|value| *value > 0.99)),
             "all target glyphs must remain visible after animating one selection: {child_opacities:?}"
+        );
+    }
+
+    #[test]
+    fn equation_part_colors_survive_morph_handoff_and_seek() {
+        let red = PenikoColor::from_rgb8(0xef, 0x44, 0x44);
+        let equation = |term: &str| {
+            StructuredTextSpec::new(
+                vec![
+                    "$".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "term",
+                        vec![term.into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    " + 1 = 2$".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured equation")
+        };
+        let mut canvas = Canvas::new(640, 360);
+        let source = canvas.text_spec(equation("x"));
+        let target = canvas.text_spec(equation("theta''"));
+        assert!(target.fill_text_part(&["term".to_owned()], red));
+        let target_spec = target.text_spec().expect("target text spec");
+        let target_source = structured_text_typst_source(
+            &target_spec,
+            Some(640.0),
+            48.0,
+            "New Computer Modern",
+            PenikoColor::BLACK,
+        );
+        assert!(target_source.contains("ef4444"), "{target_source}");
+        canvas.play(vec![source.morph_to(&target, 0.8).unwrap()]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        assert!(
+            world
+                .query::<&gaanim_scene::FillBrush>()
+                .iter(&world)
+                .any(|fill| matches!(fill.0.as_ref(), Some(gaanim_core::peniko::Brush::Solid(color)) if *color == red)),
+            "the semantic target must compile with its authored part fill"
+        );
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.8);
+
+        let red_states = world
+            .query::<(
+                bevy::prelude::Entity,
+                &Opacity,
+                &gaanim_scene::FillBrush,
+                Option<&bevy::prelude::ChildOf>,
+                Option<&gaanim_scene::ObjectTag>,
+            )>()
+            .iter(&world)
+            .filter_map(|(entity, opacity, fill, parent, tag)| {
+                matches!(fill.0.as_ref(), Some(gaanim_core::peniko::Brush::Solid(color)) if *color == red)
+                    .then_some((entity, opacity.0, parent.map(|parent| parent.parent()), tag.map(|tag| tag.0.clone())))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            world
+                .query::<(&Opacity, &gaanim_scene::FillBrush)>()
+                .iter(&world)
+                .any(|(opacity, fill)| {
+                    opacity.0 > 0.99
+                        && matches!(
+                            fill.0.as_ref(),
+                            Some(gaanim_core::peniko::Brush::Solid(color)) if *color == red
+                        )
+                }),
+            "the visible target term must retain its selected fill after the handoff: {red_states:?}"
         );
     }
 

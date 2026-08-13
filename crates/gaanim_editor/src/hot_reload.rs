@@ -198,6 +198,8 @@ pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaanim_core::ObjectId;
+    use gaanim_scene::ObjectTag;
     use gaanim_timeline::timeline::SegmentMetadata;
 
     #[test]
@@ -232,6 +234,36 @@ mod tests {
             reload_status_message(0.125, 1.5, 1920, 1080),
             "Scene ready · Python 0.12s · replay 1.50s · total 1.62s · 1920x1080"
         );
+    }
+
+    #[test]
+    fn repeated_hot_reload_clears_force_and_angle_labels_without_residue() {
+        let mut world = World::new();
+        world.insert_resource(Timeline::default());
+        let editor_entity = world.spawn_empty().id();
+
+        for revision in 0..2 {
+            world.spawn((
+                MobjectId(ObjectId::from_raw(10 + revision)),
+                ObjectTag("force_at label".to_owned()),
+            ));
+            world.spawn((
+                MobjectId(ObjectId::from_raw(20 + revision)),
+                ObjectTag("theta angle label".to_owned()),
+            ));
+
+            clear_scene_entities(&mut world);
+
+            assert_eq!(
+                world.query::<&MobjectId>().iter(&world).count(),
+                0,
+                "every visual entity from the previous replay must be removed"
+            );
+            assert!(
+                world.get_entity(editor_entity).is_ok(),
+                "editor-owned entities must survive scene clearing"
+            );
+        }
     }
 }
 

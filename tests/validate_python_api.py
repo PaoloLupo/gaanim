@@ -176,12 +176,18 @@ def validate_visualization_contract(module: object) -> list[str]:
         if hasattr(module.Drawable, removed):
             failures.append(f"removed Drawable.{removed} remains public")
 
-    formula = module.part("formula", "$E = ", module.part("mass", "m"), " c^2$")
+    formula = module.part(
+        "formula", "$E = ", module.part("mass", "m", color=module.GOLD), " c^2$"
+    )
     text = scene.text("Energy: ", formula)
     if not isinstance(text, module.Text):
         failures.append("Scene.text did not return Text")
     if not isinstance(text["formula"]["mass"], module.TextSelection):
         failures.append("nested semantic text selection did not return TextSelection")
+    if "mass" not in text.parts or "formula.mass" not in text.parts:
+        failures.append("Text.parts membership did not resolve semantic part names")
+    if not isinstance(text["formula"]["mass"].fill(module.RED), module.TextSelection):
+        failures.append("TextSelection.fill did not preserve the semantic selection")
     positional_write = text.write(0.6, by="word")
     if not isinstance(positional_write, module.Anim):
         failures.append("Text.write did not accept positional duration")
@@ -208,7 +214,12 @@ def validate_visualization_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("TextSelection.animate accepted an unsupported scale target")
-    target_text = scene.text("Energy: ", module.part("formula", "$E = mc^2$"))
+    target_text = scene.text(
+        "Energy: ",
+        module.part(
+            "formula", "$E = ", module.part("mass", "m", color=module.BLUE), " c^2$"
+        ),
+    )
     text_transition = text.step_to(target_text)
     if not isinstance(text_transition, module.Anim):
         failures.append("Text.step_to did not return Anim")
@@ -324,6 +335,32 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
         )
     ):
         failures.append("Dimension did not expose its line/label/number/unit parts")
+
+    physical_width = scene.parameter(2.5)
+    semantic_dimension = scene.dimension_between(
+        frame.anchor_point(module.Anchor.LEFT),
+        frame.anchor_point(module.Anchor.RIGHT),
+        65.0,
+        label="$W$",
+        value=physical_width,
+        format=".1f",
+        unit="m",
+        scale=100.0,
+    )
+    if not isinstance(semantic_dimension.number, module.Drawable):
+        failures.append("dimension_between(value=parameter) did not imply a number readout")
+    value_animation = physical_width.animate_to(4.0, duration=0.4)
+    if not isinstance(value_animation, module.Anim):
+        failures.append("dimension value Parameter did not remain animatable")
+    else:
+        scene.play([value_animation])
+
+    try:
+        scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, value="invalid")
+    except TypeError:
+        pass
+    else:
+        failures.append("Scene.dimension_between accepted an invalid semantic value")
 
     for invalid in (
         {"line_width": 0.0},

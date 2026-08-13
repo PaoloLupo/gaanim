@@ -197,7 +197,8 @@ fn run_updater_jobs(world: &mut World, jobs: Vec<UpdaterJob>) {
 /// subpasos fijos como correspondan y conservan el residuo para el siguiente frame.
 pub fn advance_updaters_by(world: &mut World, dt: f64) {
     let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
-    let mut jobs = Vec::new();
+    let mut simulation_jobs = Vec::new();
+    let mut frame_jobs = Vec::new();
     let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
     for (entity, mut updater, transform) in query.iter_mut(world) {
         if updater.fixed_dt.is_some() && updater.initial_translation.is_none() {
@@ -222,7 +223,7 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
             let first_elapsed = updater.simulation_elapsed + fixed_dt;
             updater.simulation_elapsed += steps as f64 * fixed_dt;
             if steps > 0 {
-                jobs.push(UpdaterJob {
+                simulation_jobs.push(UpdaterJob {
                     entity,
                     func: updater.func.clone(),
                     reset: None,
@@ -233,7 +234,7 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
                 });
             }
         } else if next_elapsed + f64::EPSILON >= updater.start_at {
-            jobs.push(UpdaterJob {
+            frame_jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
                 reset: None,
@@ -245,7 +246,12 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
         }
     }
 
-    run_updater_jobs(world, jobs);
+    // Deterministic simulations establish the frame state first. Ordinary
+    // updaters may derive parameters (forces, labels, readouts) from that state
+    // and therefore must observe it in the same frame regardless of ECS
+    // archetype iteration order.
+    run_updater_jobs(world, simulation_jobs);
+    run_updater_jobs(world, frame_jobs);
 }
 
 /// Reconstruye todos los updaters en un instante absoluto de la timeline.
@@ -259,7 +265,8 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
     } else {
         0.0
     };
-    let mut jobs = Vec::new();
+    let mut simulation_jobs = Vec::new();
+    let mut frame_jobs = Vec::new();
     let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
     for (entity, mut updater, transform) in query.iter_mut(world) {
         let elapsed = updater
@@ -276,7 +283,7 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
             let steps = fixed_step_count(active_elapsed, fixed_dt);
             updater.simulation_elapsed = steps as f64 * fixed_dt;
             updater.accumulator = (active_elapsed - updater.simulation_elapsed).max(0.0);
-            jobs.push(UpdaterJob {
+            simulation_jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
                 reset: updater.reset.clone(),
@@ -286,7 +293,7 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
                 steps,
             });
         } else if elapsed + f64::EPSILON >= updater.start_at {
-            jobs.push(UpdaterJob {
+            frame_jobs.push(UpdaterJob {
                 entity,
                 func: updater.func.clone(),
                 reset: None,
@@ -298,7 +305,8 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
         }
     }
 
-    run_updater_jobs(world, jobs);
+    run_updater_jobs(world, simulation_jobs);
+    run_updater_jobs(world, frame_jobs);
 }
 
 /// Sistema Bevy que ejecuta todos los updaters activos con acceso exclusivo al World.
@@ -552,9 +560,9 @@ pub fn traced_path_system(world: &mut World) {
     for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in
         trace_jobs
     {
-        let source_pos = world
-            .get::<SpatialTransform>(source_entity)
-            .map(|t| t.translation);
+        let source_pos = entity_world_matrix(source_entity, world)
+            .map(|matrix| matrix.transform_point3(DVec3::ZERO))
+            .map(|position| tracking_world_to_local(trace_entity, position, world));
 
         // Obtenemos acceso mutable al TracedPath específico de forma aislada
         if let Some(mut traced_path) = world.get_mut::<TracedPath>(trace_entity) {
@@ -1674,6 +1682,49 @@ mod tests {
         world.spawn((SpatialTransform::default(), updater)).id()
     }
 
+    #[test]
+    fn seek_rebuilds_fixed_simulations_before_dependent_frame_updaters() {
+        let mut world = World::new();
+        let simulated = Arc::new(Mutex::new(0.0));
+        let observed = Arc::new(Mutex::new(0.0));
+
+        let observed_value = observed.clone();
+        let simulated_for_observer = simulated.clone();
+        world.spawn((
+            SpatialTransform::default(),
+            Updater::new(move |_dt, _elapsed, _entity, _world| {
+                *observed_value.lock().unwrap() = *simulated_for_observer.lock().unwrap();
+                true
+            }),
+        ));
+
+        let simulated_step = simulated.clone();
+        let simulated_reset = simulated.clone();
+        world.spawn((
+            SpatialTransform::default(),
+            Updater::new_simulation(
+                move |dt, _elapsed, _entity, _world| {
+                    *simulated_step.lock().unwrap() += dt;
+                    true
+                },
+                move |_entity, _world| {
+                    *simulated_reset.lock().unwrap() = 0.0;
+                    true
+                },
+                0.25,
+            )
+            .unwrap(),
+        ));
+
+        seek_updaters(&mut world, 1.0);
+        assert_eq!(*simulated.lock().unwrap(), 1.0);
+        assert_eq!(
+            *observed.lock().unwrap(),
+            1.0,
+            "derived parameters must observe the reconstructed simulation state"
+        );
+    }
+
     fn x(world: &World, entity: Entity) -> f64 {
         world.get::<SpatialTransform>(entity).unwrap().translation.x
     }
@@ -1785,6 +1836,52 @@ mod tests {
                 .collect::<Vec<_>>(),
             [1.0, 2.0]
         );
+    }
+
+    #[test]
+    fn traced_path_samples_the_source_in_the_trace_local_space() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+
+        let source_parent = world
+            .spawn(
+                SpatialTransform::new_2d(120.0, -35.0)
+                    .with_rotation_2d(std::f64::consts::FRAC_PI_2)
+                    .with_scale_2d(2.0, 3.0),
+            )
+            .id();
+        let source = world
+            .spawn(SpatialTransform::new_2d(10.0, 4.0))
+            .set_parent_in_place(source_parent)
+            .id();
+
+        let trace_parent = world
+            .spawn(SpatialTransform::new_2d(-40.0, 25.0).with_scale_2d(0.5, 2.0))
+            .id();
+        let trace = world
+            .spawn((
+                SpatialTransform::new_2d(6.0, -8.0),
+                TracedPath::new(source, 0.0, None),
+                Path2D(Arc::new(BezPath::new())),
+            ))
+            .set_parent_in_place(trace_parent)
+            .id();
+
+        traced_path_system(&mut world);
+
+        let expected_world = entity_world_matrix(source, &world)
+            .unwrap()
+            .transform_point3(DVec3::ZERO);
+        let expected_local = tracking_world_to_local(trace, expected_world, &world);
+        let sampled = world.get::<TracedPath>(trace).unwrap().points[0];
+        assert!(sampled.distance(expected_local) < 1e-9);
+
+        let path = world.get::<Path2D>(trace).unwrap();
+        assert!(matches!(
+            path.0.elements().first(),
+            Some(gaanim_core::kurbo::PathEl::MoveTo(point))
+                if DVec3::new(point.x, point.y, 0.0).distance(expected_local) < 1e-9
+        ));
     }
 
     #[test]
