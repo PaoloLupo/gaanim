@@ -5,8 +5,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySlice, PyTuple};
 
 use gaanim_text::prelude::{
-    TextAlign, TextContent, TextDirection, TextFlow, TextOverflow, TextPart, TextRole, TextSpec,
-    TextStyle, TextWrap,
+    flatten_content, TextAlign, TextContent, TextDirection, TextFlow, TextOverflow, TextPart,
+    TextRole, TextSpec, TextStyle, TextWrap,
 };
 
 use crate::brush::PyPaint;
@@ -1210,6 +1210,7 @@ fn validate_grouping(by: &str, order: &str, stagger: f64) -> PyResult<()> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_text_spec(
     content: &Bound<'_, PyTuple>,
+    equation: bool,
     role_name: Option<&str>,
     style: Option<PyTextStyle>,
     flow: Option<PyTextFlow>,
@@ -1266,11 +1267,14 @@ pub(crate) fn build_text_spec(
     if let Some(value) = hyphenate {
         flow.hyphenate = value;
     }
-    TextSpec::new(
-        content_from_tuple(content)?,
-        parse_role(role_name)?,
-        style,
-        flow,
-    )
-    .map_err(|error| PyValueError::new_err(error.to_string()))
+    let mut content = content_from_tuple(content)?;
+    if equation {
+        if flatten_content(&content).is_empty() {
+            return Err(PyValueError::new_err("equation content must not be empty"));
+        }
+        content.insert(0, TextContent::Literal("$ ".to_owned()));
+        content.push(TextContent::Literal(" $".to_owned()));
+    }
+    TextSpec::new(content, parse_role(role_name)?, style, flow)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }

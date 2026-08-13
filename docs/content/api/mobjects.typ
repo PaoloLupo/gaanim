@@ -761,7 +761,7 @@ This page keeps a compact factory index. The canonical, complete reference is
   name: "Scene.text",
   kind: "factory",
   signature: "text(*content, role=None, style=None, flow=None, **overrides) -> Text",
-  params: ((name: "content", type: "str | TextPart", default: none, desc: [Composable strings and semantic parts.]), (name: "role", type: "str | None", default: "None", desc: [title|subtitle|heading|body|caption|label|code|math]),),
+  params: ((name: "content", type: "str | TextPart | TextParts", default: none, desc: [Composable strings and semantic parts.]), (name: "role", type: "str | None", default: "None", desc: [title|subtitle|heading|body|caption|label|code|math]),),
   returns: (type: "Text", desc: [Structured, measurable vector text.]),
   desc: [`$...$` enables math, `\$` emits a literal dollar, and unbalanced delimiters raise `ValueError`.],
 )[
@@ -771,6 +771,25 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).at(0, 0)
 scene.play([label.write(0.9)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
+  name: "Scene.equation",
+  kind: "factory",
+  signature: "equation(*content, role=None, style=None, flow=None, **overrides) -> Text",
+  params: ((name: "content", type: "str | TextPart | TextParts", default: none, desc: [Equation content without surrounding `$` delimiters.]),),
+  returns: (type: "Text", desc: [Standalone display equation with the complete structured-text API.]),
+  desc: [Adds and preserves `$ ... $` internally so Typst composes a block equation. It otherwise shares `Scene.text` styling, flow, selections, and animations; content boundaries use ordinary Typst whitespace.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene, part, parts
+scene = Scene(480, 270, background="#0f172a")
+eq = scene.equation(part("force", "sum F_t"), "=", parts(mass="m", acceleration="a_t"))
+eq["acceleration"].fill(GOLD)
+scene.play([eq.write(1.0, by="part")])
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -818,14 +837,14 @@ scene.export("preview.webp", fps=30)
   signature: "part(name, *content, **style) -> TextPart | parts(**content: str) -> TextParts",
   params: ((name: "name", type: "str", default: none, desc: [Non-empty semantic name, unique among siblings.]), (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Nested content, or ordered keyword strings for `parts()`.]), (name: "style", type: "TextStyle | keywords", default: "None", desc: [Local typography overlay for a `part()` subtree.])),
   returns: (type: "TextPart | TextParts", desc: [Composable semantic subtree or ordered plain-part group.]),
-  desc: [Math and prose share `scene.text`; semantic paths replace manual ranges and equation tags. Adjacent sibling parts inside `$...$` remain distinct tokens with native Typst spacing; prose and part-to-literal boundaries remain exact.],
+  desc: [Math and prose share structured `Text`; `scene.equation` supplies display delimiters. Semantic paths replace manual ranges and equation tags. Every content boundary inside math becomes ordinary Typst whitespace, while prose boundaries remain exact. Local part styles remain inside one Typst equation and never introduce synthetic `#h()` gaps.],
 )[
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, parts
 scene = Scene(480, 270, background="#0f172a")
 # Fluent placement preserves the specialized Text handle.
-eq = scene.text("$", parts(variable="x", operator="dot 5 =", result="25"), "$").at(0, 0)
+eq = scene.equation(parts(variable="x", operator="dot 5 =", result="25")).at(0, 0)
 eq["result"].fill(GOLD)
 scene.play([eq.write(1.0)])
 scene.export("preview.webp", fps=30)

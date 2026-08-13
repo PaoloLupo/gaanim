@@ -22,7 +22,6 @@ REMOVED_TEXT_SCENE_MEMBERS = {
     "title",
     "subtitle",
     "paragraph",
-    "equation",
     "transform_equation",
     "copy_equation_terms",
     "expand_equation",
@@ -93,10 +92,10 @@ def documented_text_api_failures(tree: ast.Module) -> list[str]:
                 callables.append((f"{node.name}.{child.name}", child))
         elif isinstance(node, ast.ClassDef) and node.name == "Scene":
             callables.extend(
-                ("Scene.text", child)
+                (f"Scene.{child.name}", child)
                 for child in node.body
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and child.name == "text"
+                and child.name in {"text", "equation"}
             )
 
         for name, callable_node in callables:
@@ -206,6 +205,28 @@ def validate_visualization_contract(module: object) -> list[str]:
     for name in ("first", "second"):
         if name not in compact_text.parts:
             failures.append(f"Text.become did not install TextParts entry {name!r}")
+
+    equation = scene.equation(
+        module.part("sum_force", "sum F_t"),
+        "=",
+        module.parts(mass="m", acceleration="a_t"),
+        size=42,
+    )
+    if not isinstance(equation, module.Text):
+        failures.append("Scene.equation did not return Text")
+    for name in ("sum_force", "mass", "acceleration"):
+        if name not in equation.parts:
+            failures.append(f"Scene.equation lost semantic part {name!r}")
+        if not isinstance(equation[name], module.TextSelection):
+            failures.append(f"Scene.equation part {name!r} was not selectable")
+    if not isinstance(equation.write(0.5, by="part"), module.Anim):
+        failures.append("Scene.equation did not preserve Text animations")
+    try:
+        scene.equation()
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.equation accepted empty content")
 
     for invalid_parts in (
         lambda: module.parts(),

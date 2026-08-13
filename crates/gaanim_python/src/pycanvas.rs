@@ -2699,6 +2699,66 @@ impl PyScene {
     ) -> PyResult<Py<PyText>> {
         let spec = build_text_spec(
             content,
+            false,
+            role,
+            style,
+            flow,
+            font,
+            math_font,
+            size,
+            weight,
+            italic,
+            color,
+            opacity,
+            letter_spacing,
+            word_spacing,
+            baseline,
+            wrap,
+            text_align,
+            line_spacing,
+            max_lines,
+            overflow,
+            direction,
+            hyphenate,
+        )?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .text_spec(spec.clone());
+        Py::new(py, PyText::initializer(handle, spec))
+    }
+
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn equation<'py>(
+        &self,
+        py: Python<'py>,
+        content: &Bound<'py, PyTuple>,
+        role: Option<&str>,
+        style: Option<PyTextStyle>,
+        flow: Option<PyTextFlow>,
+        font: Option<String>,
+        math_font: Option<String>,
+        size: Option<f64>,
+        weight: Option<u16>,
+        italic: Option<bool>,
+        color: Option<PyColor>,
+        opacity: Option<f32>,
+        letter_spacing: Option<f64>,
+        word_spacing: Option<f64>,
+        baseline: Option<f64>,
+        wrap: Option<&Bound<'py, PyAny>>,
+        text_align: Option<&str>,
+        line_spacing: Option<f64>,
+        max_lines: Option<usize>,
+        overflow: Option<&str>,
+        direction: Option<&str>,
+        hyphenate: Option<bool>,
+    ) -> PyResult<Py<PyText>> {
+        let spec = build_text_spec(
+            content,
+            true,
             role,
             style,
             flow,

@@ -88,6 +88,9 @@ contains 3D content. Purely 2D scenes retain the regular snapping behavior.
 Every factory returns a `Drawable` handle with fluent style and layout methods.
 Unified `Text` uses the bundled New Computer Modern scientific theme by
 default; `$...$` spans use the matching New Computer Modern Math face.
+Use `scene.text("$a + b = 2$")` for inline math and
+`scene.equation("a + b = 2")` for a standalone block equation compiled as
+`$ a + b = 2 $`.
 
 ```python
 from gaanim import Axis, BLUE, GOLD, WHITE, Scene

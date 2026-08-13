@@ -395,7 +395,7 @@ fn merge_text_style(
 struct StyledTextLeaf {
     text: String,
     style: StructuredTextStyle,
-    sibling_part_boundary: bool,
+    content_boundary_before: bool,
 }
 
 fn collect_styled_text_leaves(
@@ -403,27 +403,26 @@ fn collect_styled_text_leaves(
     inherited: &StructuredTextStyle,
     leaves: &mut Vec<StyledTextLeaf>,
 ) {
-    let mut previous_was_part = false;
+    let mut has_previous_node = false;
     for node in content {
+        let first_leaf = leaves.len();
         match node {
             StructuredTextContent::Literal(text) => {
                 leaves.push(StyledTextLeaf {
                     text: text.clone(),
                     style: inherited.clone(),
-                    sibling_part_boundary: false,
+                    content_boundary_before: false,
                 });
-                previous_was_part = false;
             }
             StructuredTextContent::Part(part) => {
                 let style = merge_text_style(inherited, &part.style);
-                let first_leaf = leaves.len();
                 collect_styled_text_leaves(&part.content, &style, leaves);
-                if previous_was_part && let Some(leaf) = leaves.get_mut(first_leaf) {
-                    leaf.sibling_part_boundary = true;
-                }
-                previous_was_part = true;
             }
         }
+        if let Some(leaf) = leaves.get_mut(first_leaf) {
+            leaf.content_boundary_before = has_previous_node;
+        }
+        has_previous_node = true;
     }
 }
 
@@ -454,30 +453,61 @@ fn typst_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
     args
 }
 
+fn typst_math_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(font) = style.math_font.as_ref().or(style.font.as_ref()) {
+        args.push(format!("font: \"{}\"", escape_typst_string(font)));
+    }
+    if let Some(size) = style.size {
+        args.push(format!("size: #{size}pt"));
+    }
+    if let Some(weight) = style.weight {
+        args.push(format!("weight: #{weight}"));
+    }
+    if let Some(italic) = style.italic {
+        args.push(format!(
+            "style: \"{}\"",
+            if italic { "italic" } else { "normal" }
+        ));
+    }
+    if let Some(color) = style.color {
+        args.push(format!("fill: #rgb(\"{}\")", color_to_hex(color)));
+    }
+    if let Some(spacing) = style.letter_spacing {
+        args.push(format!("tracking: #{spacing}pt"));
+    }
+    if let Some(spacing) = style.word_spacing {
+        args.push(format!("spacing: #{spacing}pt"));
+    }
+    args
+}
+
 fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> String {
     if text.is_empty() {
         return String::new();
     }
-    let mut wrapper_style = style.clone();
-    let content = if math {
-        let text = text.trim();
-        if text.is_empty() {
-            return String::new();
-        }
-        // Math glyphs do not inherit an outer `#text(fill: ...)` wrapper.
-        // Typst's math-mode `text` function accepts mathematical content and
-        // applies its paint to every resulting glyph and shape.
-        let text = if let Some(color) = style.color {
-            wrapper_style.color = None;
-            format!("text(fill: #rgb(\"{}\"), {text})", color_to_hex(color))
-        } else {
+    if math {
+        let args = typst_math_style_arguments(style);
+        let mut content = if args.is_empty() {
             text.to_owned()
+        } else {
+            format!("text({}, {text})", args.join(", "))
         };
-        format!("${text}$")
-    } else {
-        format!("#text(\"{}\")", escape_typst_string(text))
-    };
-    let args = typst_style_arguments(&wrapper_style);
+        for decoration in &style.decorations {
+            content = match decoration.as_str() {
+                "underline" => format!("underline({content})"),
+                "strike" | "strikethrough" => format!("strike({content})"),
+                _ => content,
+            };
+        }
+        if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
+            content = format!("#move(dy: {}pt)[${content}$]", -baseline);
+        }
+        return content;
+    }
+
+    let args = typst_style_arguments(style);
+    let content = format!("#text(\"{}\")", escape_typst_string(text));
     let mut content = if args.is_empty() {
         content
     } else {
@@ -499,7 +529,7 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
 /// Compile structured leaves without discarding the semantic style stack.
 /// Math delimiters are tracked across part boundaries, so a styled nested
 /// part may safely live inside a `$...$` expression.
-fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String {
+fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> String {
     let mut raw_leaves = Vec::new();
     collect_styled_text_leaves(
         &spec.content,
@@ -527,7 +557,7 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
             marked_leaves.push(StyledTextLeaf {
                 text: segment.text,
                 style,
-                sibling_part_boundary: leaf.sibling_part_boundary && first_segment,
+                content_boundary_before: leaf.content_boundary_before && first_segment,
             });
             first_segment = false;
         }
@@ -536,15 +566,10 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
         .finish()
         .expect("TextSpec validates inline markup before compilation");
     let mut raw_leaves = marked_leaves;
-    // Typst ignores ordinary spaces inside math. At compositional boundaries,
-    // however, users naturally write `part("x"), " dot ..."` and expect that
-    // leading/trailing space to remain visible. Record those boundaries so we
-    // can emit a non-weak gap between inline math runs. Keeping the gap outside
-    // each run prevents Typst from discarding it at the edge of a locally
-    // styled part. Use an absolute length derived from the resolved font size:
-    // markup outside math would otherwise resolve `em` against Typst's default
-    // text size instead of this Text's configured size.
-    let mut gap_before = vec![false; raw_leaves.len()];
+    // Preserve every authored content boundary in math as ordinary Typst
+    // whitespace. Typst remains responsible for deciding whether that
+    // whitespace separates identifiers, participates in math syntax, or has
+    // no visual effect. Boundary whitespace is normalized to one token.
     let mut token_boundary_before = vec![false; raw_leaves.len()];
     let mut in_math = false;
     let mut escaped = false;
@@ -567,59 +592,58 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
         let right_has_space = raw_leaves[index + 1]
             .text
             .starts_with(|character| character == ' ' || character == '\t');
-        if left_has_space || right_has_space {
+        let display_open = left_has_space
+            && raw_leaves[index]
+                .text
+                .trim_end_matches([' ', '\t'])
+                .ends_with('$');
+        let display_close = right_has_space
+            && raw_leaves[index + 1]
+                .text
+                .trim_start_matches([' ', '\t'])
+                .starts_with('$');
+        let delimiter_open = raw_leaves[index]
+            .text
+            .trim_end_matches([' ', '\t'])
+            .ends_with('$');
+        let delimiter_close = raw_leaves[index + 1]
+            .text
+            .trim_start_matches([' ', '\t'])
+            .starts_with('$');
+        if (left_has_space || right_has_space) && !display_open && !display_close {
             let trimmed_left_len = raw_leaves[index].text.trim_end_matches([' ', '\t']).len();
             raw_leaves[index].text.truncate(trimmed_left_len);
             raw_leaves[index + 1].text = raw_leaves[index + 1]
                 .text
                 .trim_start_matches([' ', '\t'])
                 .to_string();
-            gap_before[index + 1] = true;
-        } else if raw_leaves[index + 1].sibling_part_boundary {
+        }
+        if raw_leaves[index + 1].content_boundary_before && !delimiter_open && !delimiter_close {
             token_boundary_before[index + 1] = true;
         }
     }
-    // A semantic part must not become a typographic boundary. Coalesce
-    // adjacent leaves with the same resolved style so a structured equation
-    // is shaped exactly like the equivalent single string, including math
-    // operator spacing and kerning.
+    // Coalesce adjacent leaves with the same resolved style into one Typst
+    // expression. This makes the structured form shape exactly like the
+    // equivalent source string containing ordinary spaces between contents.
     let mut leaves: Vec<(String, StructuredTextStyle, bool)> = Vec::new();
-    for ((leaf, gap_before), token_boundary_before) in raw_leaves
-        .into_iter()
-        .zip(gap_before)
-        .zip(token_boundary_before)
-    {
+    for (leaf, token_boundary_before) in raw_leaves.into_iter().zip(token_boundary_before) {
         if let Some((previous, previous_style, _)) = leaves.last_mut()
-            && !gap_before
             && *previous_style == leaf.style
         {
             if token_boundary_before {
-                // This whitespace separates authored identifiers for Typst's
-                // math parser without introducing a fixed visual gap.
+                // This is parser whitespace, not an authored fixed-width gap.
                 previous.push(' ');
             }
             previous.push_str(&leaf.text);
         } else {
-            leaves.push((leaf.text, leaf.style, gap_before));
+            leaves.push((leaf.text, leaf.style, token_boundary_before));
         }
     }
     let mut output = String::new();
     let mut in_math = false;
-    let append_chunk = |output: &mut String, chunk: String| {
-        if chunk.is_empty() {
-            return;
-        }
-        // Two adjacent inline-math fragments would produce `$$`, which Typst
-        // parses as block math. A zero-width markup separator preserves the
-        // inline flow and keeps semantic part boundaries measurable.
-        if output.ends_with('$') && chunk.starts_with('$') {
-            output.push_str("#h(0pt)");
-        }
-        output.push_str(&chunk);
-    };
-    for (text, style, gap_before) in leaves {
-        if gap_before && in_math {
-            output.push_str(&format!("#h({}pt, weak: false)", font_size * 0.28));
+    for (text, style, token_boundary_before) in leaves {
+        if token_boundary_before && in_math {
+            output.push(' ');
         }
         let mut chunk = String::new();
         let mut escaped = false;
@@ -639,8 +663,9 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
                 continue;
             }
             if character == '$' {
-                append_chunk(&mut output, styled_typst_chunk(&chunk, in_math, &style));
+                output.push_str(&styled_typst_chunk(&chunk, in_math, &style));
                 chunk.clear();
+                output.push('$');
                 in_math = !in_math;
             } else {
                 chunk.push(character);
@@ -649,7 +674,7 @@ fn structured_typst_content(spec: &StructuredTextSpec, font_size: f64) -> String
         if escaped {
             chunk.push('\\');
         }
-        append_chunk(&mut output, styled_typst_chunk(&chunk, in_math, &style));
+        output.push_str(&styled_typst_chunk(&chunk, in_math, &style));
     }
     output
 }
@@ -6679,7 +6704,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_math_parts_remain_inline_across_semantic_boundaries() {
+    fn structured_math_parts_preserve_native_typst_whitespace() {
         let spec = StructuredTextSpec::new(
             vec![
                 "$".into(),
@@ -6705,13 +6730,8 @@ mod tests {
         .expect("valid structured equation");
 
         let source = structured_typst_content(&spec, 32.0);
-        assert_eq!(
-            source,
-            "$x$#h(8.96pt, weak: false)$dot 5 =$#h(8.96pt, weak: false)$25$"
-        );
+        assert_eq!(source, "$x dot 5 = 25$");
         assert!(!source.contains("$$"));
-        assert!(!source.contains("$ "));
-        assert!(!source.contains(" $"));
         assert!(!source.contains("#h(0pt)"));
     }
 
@@ -6745,8 +6765,7 @@ mod tests {
             "$".into(),
         ]);
         let explicit_source = structured_typst_content(&explicit, 32.0);
-        assert_eq!(explicit_source, "$a$#h(8.96pt, weak: false)$b$");
-        assert_eq!(explicit_source.matches("#h(8.96pt").count(), 1);
+        assert_eq!(explicit_source, "$a b$");
 
         let prose = spec(vec![
             part("left", "a", StructuredTextStyle::default()),
@@ -6760,7 +6779,7 @@ mod tests {
             "_1".into(),
             "$".into(),
         ]);
-        assert_eq!(structured_typst_content(&tight_literal, 32.0), "$x_1$");
+        assert_eq!(structured_typst_content(&tight_literal, 32.0), "$x _1$");
 
         let mut colored = StructuredTextStyle::default();
         colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
@@ -6769,9 +6788,74 @@ mod tests {
             part("right", "b$", colored),
         ]);
         let distributed_source = structured_typst_content(&distributed_delimiters, 32.0);
-        assert!(!distributed_source.contains("8.96pt"));
-        assert!(distributed_source.starts_with("$a$#h(0pt)"));
+        assert!(!distributed_source.contains("#h("));
+        assert!(distributed_source.starts_with("$a text("));
         assert!(distributed_source.contains("ff0000"));
+    }
+
+    #[test]
+    fn all_math_content_boundaries_receive_typst_whitespace() {
+        let part = |name: &str, text: &str, style: StructuredTextStyle| {
+            gaanim_text::prelude::TextPart::new(name, vec![text.into()], style).into()
+        };
+        let spec = |content| {
+            StructuredTextSpec::new(
+                content,
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid structured equation")
+        };
+
+        let equation = spec(vec![
+            "$".into(),
+            part("sum_force", "sum F_t", StructuredTextStyle::default()),
+            "=".into(),
+            part("mass", "m", StructuredTextStyle::default()),
+            part("acceleration", "a_t", StructuredTextStyle::default()),
+            "$".into(),
+        ]);
+        assert_eq!(
+            structured_typst_content(&equation, 32.0),
+            "$sum F_t = m a_t$"
+        );
+
+        let tight_syntax = spec(vec![
+            "$-".into(),
+            part("variable", "x", StructuredTextStyle::default()),
+            "_1".into(),
+            "$".into(),
+        ]);
+        assert_eq!(structured_typst_content(&tight_syntax, 32.0), "$- x _1$");
+
+        let mut colored = StructuredTextStyle::default();
+        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let styled_right = spec(vec![
+            "$".into(),
+            part("left", "x", StructuredTextStyle::default()),
+            "=".into(),
+            part("right", "y", colored),
+            "$".into(),
+        ]);
+        let styled_source = structured_typst_content(&styled_right, 32.0);
+        assert!(styled_source.starts_with("$x = text("));
+        assert!(!styled_source.contains("#h("));
+        assert!(styled_source.contains("ff0000"));
+
+        let display_wrapped = spec(vec![
+            "$ ".into(),
+            part("variable", "x", StructuredTextStyle::default()),
+            "= 1".into(),
+            " $".into(),
+        ]);
+        assert_eq!(
+            structured_typst_content(&display_wrapped, 32.0),
+            "$ x = 1 $"
+        );
+
+        let inline = spec(vec!["$x".into(), "+".into(), "1$".into()]);
+        assert_eq!(structured_typst_content(&inline, 32.0), "$x + 1$");
     }
 
     #[test]
@@ -6793,7 +6877,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_math_boundary_spaces_increase_the_compiled_width() {
+    fn explicit_math_boundary_spaces_match_implicit_typst_whitespace() {
         let equation = |with_boundary_spaces: bool| {
             StructuredTextSpec::new(
                 vec![
@@ -6850,8 +6934,171 @@ mod tests {
             "expected two compiled text roots: {widths:?}"
         );
         assert!(
-            widths[1] > widths[0] + 6.0,
-            "part-boundary spaces must add visible width: {widths:?}"
+            (widths[1] - widths[0]).abs() < 0.01,
+            "explicit and implicit boundary spaces must compile identically: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn local_math_fill_preserves_unstyled_typst_spacing_and_width() {
+        let equation = |colored: bool| {
+            let mut gravity_style = StructuredTextStyle::default();
+            let mut acceleration_style = StructuredTextStyle::default();
+            if colored {
+                gravity_style.color = Some(PenikoColor::from_rgb8(255, 215, 0));
+                acceleration_style.color = Some(PenikoColor::from_rgb8(255, 215, 0));
+            }
+            StructuredTextSpec::new(
+                vec![
+                    "$ ".into(),
+                    "-".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "mass_left",
+                        vec!["m".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "gravity",
+                        vec!["g sin(theta)".into()],
+                        gravity_style,
+                    )
+                    .into(),
+                    "=".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "mass_right",
+                        vec!["m".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "length",
+                        vec!["L".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "acceleration",
+                        vec!["theta''".into()],
+                        acceleration_style,
+                    )
+                    .into(),
+                    " $".into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .expect("valid display equation")
+        };
+
+        let plain_source = structured_typst_content(&equation(false), 32.0);
+        let colored_source = structured_typst_content(&equation(true), 32.0);
+        assert_eq!(plain_source, "$ - m g sin(theta) = m L theta'' $");
+        assert!(
+            !colored_source.contains("#h("),
+            "local color must not replace Typst parser spacing: {colored_source}"
+        );
+
+        let mut canvas = Canvas::new(640, 360);
+        canvas.text_spec(equation(false));
+        canvas.text_spec(equation(true));
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let mut widths = world
+            .query::<(&LocalBounds, Option<&bevy::prelude::ChildOf>)>()
+            .iter(&world)
+            .filter_map(|(bounds, parent)| parent.is_none().then_some(bounds.0.width()))
+            .collect::<Vec<_>>();
+        widths.sort_by(f64::total_cmp);
+        assert_eq!(widths.len(), 2, "expected two text roots: {widths:?}");
+        assert!(
+            (widths[1] - widths[0]).abs() < 0.01,
+            "local fill changed equation width: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn every_local_math_style_stays_inside_one_typst_equation() {
+        let style = StructuredTextStyle {
+            font: Some("New Computer Modern".to_owned()),
+            math_font: Some("New Computer Modern Math".to_owned()),
+            fallbacks: vec!["Consolas".to_owned()],
+            size: Some(36.0),
+            weight: Some(700),
+            italic: Some(false),
+            color: Some(PenikoColor::from_rgb8(255, 215, 0)),
+            stroke_color: Some(PenikoColor::from_rgb8(20, 20, 20)),
+            stroke_width: Some(0.25),
+            opacity: Some(0.8),
+            letter_spacing: Some(0.25),
+            word_spacing: Some(0.5),
+            decorations: vec!["underline".to_owned()],
+            baseline: Some(1.0),
+            ..StructuredTextStyle::default()
+        };
+        let equation = StructuredTextSpec::new(
+            vec![
+                "$ ".into(),
+                gaanim_text::prelude::TextPart::new(
+                    "left",
+                    vec!["x".into()],
+                    StructuredTextStyle::default(),
+                )
+                .into(),
+                "=".into(),
+                gaanim_text::prelude::TextPart::new("right", vec!["y".into()], style).into(),
+                " $".into(),
+            ],
+            None,
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("valid styled display equation");
+
+        let source = structured_typst_content(&equation, 32.0);
+        assert!(
+            source.starts_with("$ ") && source.ends_with(" $"),
+            "{source}"
+        );
+        assert!(!source.contains("#h("), "{source}");
+
+        let mut canvas = Canvas::new(640, 360);
+        canvas.text_spec(equation);
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+        assert_eq!(
+            world
+                .query::<(&LocalBounds, Option<&bevy::prelude::ChildOf>)>()
+                .iter(&world)
+                .filter(|(_, parent)| parent.is_none())
+                .count(),
+            1
+        );
+        assert!(
+            world
+                .query::<&bevy::prelude::ChildOf>()
+                .iter(&world)
+                .count()
+                > 0,
+            "the styled equation must compile vector children"
         );
     }
 

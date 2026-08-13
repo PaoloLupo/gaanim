@@ -6492,6 +6492,27 @@ mod tests {
     }
 
     #[test]
+    fn typst_selection_resolves_semantic_source_that_renders_as_symbols() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let source = "$ - m text(fill: #rgb(\"ffd700\"), g sin(theta)) = m L theta'' $";
+        let equation = builder.typst(source, false, None, None, Some(32.0), None);
+
+        let selected = builder
+            .select_occurrence(equation, "g sin(theta)", Some(0))
+            .child_ids;
+        assert!(
+            !selected.is_empty(),
+            "semantic Typst source must resolve even when theta renders as θ"
+        );
+    }
+
+    #[test]
     fn indicate_hops_up_from_visual_center_without_diagonal_drift() {
         let world = World::new();
         let mut queue = CommandQueue::default();

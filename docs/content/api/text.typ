@@ -11,10 +11,11 @@
 
 = Text
 
-`scene.text()` is the only factory for prose, titles, paragraphs, mathematics,
-and mixed content. It returns a specialized `Text`: a vector `Drawable` that
-keeps semantic structure, is measured intrinsically by Layout v2, and exposes
-local selections and text-specific animations.
+`scene.text()` is the general factory for prose, titles, paragraphs,
+mathematics, and mixed content. `scene.equation()` is its display-math
+convenience wrapper. Both return the same specialized `Text`: a vector
+`Drawable` that keeps semantic structure, is measured intrinsically by Layout
+v2, and exposes local selections and text-specific animations.
 
 ```python
 from gaanim import GOLD, Scene, TextFlow, TextStyle, part
@@ -33,10 +34,11 @@ scene.play([copy.write(1.2, by="part", stagger=0.06)])
 scene.play([copy["formula"]["mass"].indicate(0.6)])
 ```
 
-The old `title`, `subtitle`, `paragraph`, `equation`, and `math` factories do
-not have compatibility aliases. Use a role or `$...$` instead. `scene.typst()`
-remains available for arbitrary Typst documents, but it does not provide the
-structured `Text` selection API described here.
+The old `title`, `subtitle`, `paragraph`, and `math` factories do not have
+compatibility aliases. Use a role for prose or `scene.equation()` for a
+standalone equation. `scene.typst()` remains available for arbitrary Typst
+documents, but it does not provide the structured `Text` selection API
+described here.
 
 == Responsabilidades
 
@@ -82,7 +84,35 @@ scene.export("text_factory.webp", fps=30)
 ```
 ]
 
-=== Roles
+== Scene.equation
+
+#api-entry(
+  name: "Scene.equation",
+  kind: "factory",
+  signature: "equation(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None) -> Text",
+  params: (
+    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Equation source without surrounding math delimiters.]),
+    (name: "options", type: "same as Scene.text", default: "None", desc: [The complete style and flow surface is shared with `scene.text()`.]),
+  ),
+  returns: (type: "Text", desc: [A standalone structured equation with normal `Text` selections and animations.]),
+  desc: [Wraps content internally as `$ ... $`. Those spaces are preserved because Typst uses them to distinguish a block equation from inline `$...$`. Every content boundary inside math becomes ordinary Typst whitespace, so Typst itself determines operator and identifier spacing. Empty content raises `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene, part, parts
+scene = Scene(640, 360, background="#0f172a")
+equation = scene.equation(
+    part("sum_force", "sum F_t"),
+    "=",
+    parts(mass="m", acceleration="a_t"),
+).at(0, 0)
+equation["acceleration"].fill(GOLD)
+scene.play([equation.write(1.0, by="part")])
+scene.export("equation_factory.webp", fps=30)
+```
+]
+
+== Roles
 
 The accepted roles are:
 
@@ -151,19 +181,18 @@ scene.export("text_inline_markup.webp", fps=30)
   params: (
     (name: "content", type: "keyword str entries", default: none, desc: [Ordered semantic names and their plain text.]),
   ),
-  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `Text.become()`, and `part()`.]),
+  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.equation()`, `Text.become()`, and `part()`.]),
   desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, empty names, or wholly empty content raise `ValueError`; non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
 )[
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, parts
 scene = Scene(640, 360, background="#0f172a")
-equation = scene.text(
-    "$-",
+equation = scene.equation(
+    "-",
     parts(mass_left="m", gravity="g sin(theta)"),
-    " = ",
+    "=",
     parts(mass_right="m", length="L", acceleration="theta''"),
-    "$",
 ).at(0, 0)
 equation["gravity"].fill(GOLD)
 scene.play([equation.write(1.2, by="part")])
@@ -205,20 +234,25 @@ scene.export("text_parts.webp", fps=30)
 === Delimitadores matemáticos
 
 - `$...$` switches the unified Typst compositor into mathematics.
+- `scene.equation(*content)` supplies `$ ... $` for a standalone equation;
+  omit those delimiters from its content.
 - `$$...$$` currently uses the same vector math compositor; it does not create
   a separate public display-math object.
 - `\$` produces a literal dollar sign.
 - An unmatched delimiter raises `ValueError`.
 - If every non-whitespace segment is mathematical, the inferred role is
   `math`; mixed prose and math infer `body` unless `role` is explicit.
-- Parts may begin or end inside a math expression. A written space at a part
-  boundary is preserved as a non-weak mathematical gap, so
-  `part("x", "x"), " dot 5"` does not collapse against its neighbors.
-- Adjacent sibling `TextPart` values receive an implicit token separator inside
-  math. It prevents identifiers from collapsing while preserving Typst's native
-  tight spacing; it is not the fixed visible gap used for written whitespace.
-- Prose and part-to-literal boundaries remain exact. Use
-  `part("x", "x"), "_1"` when mathematical content must stay attached.
+- Every boundary between content nodes inside math becomes one ordinary Typst
+  whitespace token. Typst itself determines the resulting operator and word
+  spacing, so writing `"= "` is unnecessary.
+- Local part properties stay inside the same Typst equation. Changing a
+  part's color, font, size, weight, italic style, spacing, decoration, or
+  baseline never introduces a synthetic `#h()` gap.
+- Outside math, boundaries remain exact and no whitespace is inserted.
+- Math syntax may still span boundaries. For example,
+  `part("x", "x"), "_1"` is compiled as `x _1`; Typst keeps `_1` attached as
+  the subscript rather than treating the inserted source whitespace as a
+  fixed visual gap.
 
 == TextStyle
 
@@ -356,6 +390,10 @@ The current `lines` query follows explicit `\n` boundaries in the structured
 source. It does not expose lines created only by responsive wrapping. `parts`
 is depth-first over the semantic tree. A selection remains attached to one
 `Text`, so it cannot be inserted separately into Layout.
+
+`selection.fill(color)` recompiles a semantic part with its local paint. In
+math, the styled part remains in the same Typst equation as its neighbors, so
+the color change does not add whitespace or move adjacent terms.
 
 === Superficie de TextSelection
 

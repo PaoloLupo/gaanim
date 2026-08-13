@@ -1425,6 +1425,10 @@ class TextSelection:
     def fill(self, color: Color) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
+        In mathematics, the selected part remains inside the same Typst
+        equation, so changing its fill does not insert spacing or alter the
+        positions of neighboring unstyled terms.
+
         Example:
             formula["mass"].fill(GOLD)
         """
@@ -2989,6 +2993,49 @@ class Scene:
         Example:
             formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
             copy = scene.text("La *energía* es ", formula, role="body", flow=TextFlow(align="justify"))
+        """
+        ...
+    def equation(
+        self,
+        *content: TextContent,
+        role: Optional[TextRole] = None,
+        style: Optional[TextStyle] = None,
+        flow: Optional[TextFlow] = None,
+        font: Optional[str] = None,
+        math_font: Optional[str] = None,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        italic: Optional[bool] = None,
+        color: Optional[Color] = None,
+        opacity: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+        baseline: Optional[float] = None,
+        wrap: Optional[TextWrap] = None,
+        text_align: Optional[TextAlign] = None,
+        line_spacing: Optional[float] = None,
+        max_lines: Optional[int] = None,
+        overflow: Optional[TextOverflow] = None,
+        direction: Optional[TextDirection] = None,
+        hyphenate: Optional[bool] = None,
+    ) -> Text:
+        """Create a standalone display equation as structured vector text.
+
+        The content is wrapped internally as ``$ ... $`` and accepts the same
+        semantic parts, styles, flow options, selections, and animations as
+        :meth:`text`. Omit the surrounding math delimiters. The spaces next to
+        those delimiters are preserved to select Typst block math. Every
+        content boundary becomes ordinary Typst whitespace, so ``"="`` does
+        not need a written trailing space. Empty content and invalid
+        mathematics raise ``ValueError``.
+
+        Example:
+            equation = scene.equation(
+                part("sum_force", "sum F_t"),
+                "=",
+                parts(mass="m", acceleration="a_t"),
+            )
+            scene.play([equation.write(1.0, by="part")])
         """
         ...
     def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:
