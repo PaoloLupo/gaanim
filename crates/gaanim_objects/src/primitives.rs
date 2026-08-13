@@ -996,9 +996,29 @@ pub fn spring_path(
     path
 }
 
-/// Builds a filled technical-dimension silhouette from three thin line quads
-/// and two solid triangular arrowheads.
-pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
+fn add_filled_segment(path: &mut kurbo::BezPath, from: kurbo::Point, to: kurbo::Point, width: f64) {
+    let segment = to - from;
+    let segment_length = segment.hypot();
+    if segment_length <= f64::EPSILON {
+        return;
+    }
+    let half_width = width * 0.5;
+    let nx = -segment.y / segment_length * half_width;
+    let ny = segment.x / segment_length * half_width;
+    path.move_to(kurbo::Point::new(from.x + nx, from.y + ny));
+    path.line_to(kurbo::Point::new(to.x + nx, to.y + ny));
+    path.line_to(kurbo::Point::new(to.x - nx, to.y - ny));
+    path.line_to(kurbo::Point::new(from.x - nx, from.y - ny));
+    path.close_path();
+}
+
+/// Builds the filled measurement baseline and two solid triangular arrowheads.
+pub fn dimension_measure_path(
+    start: kurbo::Point,
+    end: kurbo::Point,
+    offset: f64,
+    line_width: f64,
+) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let length = dx.hypot(dy);
@@ -1014,24 +1034,7 @@ pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> ku
     let dimension_end = kurbo::Point::new(end.x + normal.0 * offset, end.y + normal.1 * offset);
     let head = (length * 0.12).clamp(6.0, 12.0).min(length * 0.45);
     let wing = head * 0.55;
-    let add_line_quad = |path: &mut kurbo::BezPath, from: kurbo::Point, to: kurbo::Point| {
-        let segment = to - from;
-        let segment_length = segment.hypot();
-        if segment_length <= f64::EPSILON {
-            return;
-        }
-        let half_width = 1.0;
-        let nx = -segment.y / segment_length * half_width;
-        let ny = segment.x / segment_length * half_width;
-        path.move_to(kurbo::Point::new(from.x + nx, from.y + ny));
-        path.line_to(kurbo::Point::new(to.x + nx, to.y + ny));
-        path.line_to(kurbo::Point::new(to.x - nx, to.y - ny));
-        path.line_to(kurbo::Point::new(from.x - nx, from.y - ny));
-        path.close_path();
-    };
-    add_line_quad(&mut path, start, dimension_start);
-    add_line_quad(&mut path, end, dimension_end);
-    add_line_quad(
+    add_filled_segment(
         &mut path,
         kurbo::Point::new(
             dimension_start.x + direction.0 * head,
@@ -1041,6 +1044,7 @@ pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> ku
             dimension_end.x - direction.0 * head,
             dimension_end.y - direction.1 * head,
         ),
+        line_width,
     );
     let add_head = |path: &mut kurbo::BezPath, tip: kurbo::Point, sign: f64| {
         let back = kurbo::Point::new(
@@ -1060,6 +1064,60 @@ pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> ku
     };
     add_head(&mut path, dimension_start, 1.0);
     add_head(&mut path, dimension_end, -1.0);
+    path
+}
+
+/// Builds the two extension lines of a technical dimension as filled geometry.
+pub fn dimension_extensions_path(
+    start: kurbo::Point,
+    end: kurbo::Point,
+    offset: f64,
+    line_width: f64,
+    dash: Option<(f64, f64)>,
+) -> kurbo::BezPath {
+    let delta = end - start;
+    let length = delta.hypot();
+    let mut path = kurbo::BezPath::new();
+    if length <= f64::EPSILON {
+        return path;
+    }
+    let normal = (-delta.y / length, delta.x / length);
+    let dash = dash.filter(|(dash_length, gap_length)| {
+        dash_length.is_finite() && *dash_length > 0.0 && gap_length.is_finite() && *gap_length > 0.0
+    });
+    for origin in [start, end] {
+        let tip = kurbo::Point::new(origin.x + normal.0 * offset, origin.y + normal.1 * offset);
+        if let Some((dash_length, gap_length)) = dash {
+            let extension_length = offset.abs();
+            let direction = if offset >= 0.0 { 1.0 } else { -1.0 };
+            let mut travelled = 0.0;
+            while travelled < extension_length {
+                let finish = (travelled + dash_length).min(extension_length);
+                add_filled_segment(
+                    &mut path,
+                    kurbo::Point::new(
+                        origin.x + normal.0 * travelled * direction,
+                        origin.y + normal.1 * travelled * direction,
+                    ),
+                    kurbo::Point::new(
+                        origin.x + normal.0 * finish * direction,
+                        origin.y + normal.1 * finish * direction,
+                    ),
+                    line_width,
+                );
+                travelled = finish + gap_length;
+            }
+        } else {
+            add_filled_segment(&mut path, origin, tip, line_width);
+        }
+    }
+    path
+}
+
+/// Builds the complete default technical-dimension silhouette.
+pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
+    let mut path = dimension_extensions_path(start, end, offset, 2.0, None);
+    path.extend(dimension_measure_path(start, end, offset, 2.0));
     path
 }
 
@@ -1485,5 +1543,41 @@ mod arrow_tests {
         assert!(path.elements().iter().any(|element| {
             matches!(element, kurbo::PathEl::LineTo(point) if (point.y - 30.0).abs() < 1e-6)
         }));
+    }
+
+    #[test]
+    fn dimension_extensions_support_solid_dashed_and_degenerate_geometry() {
+        let start = kurbo::Point::new(0.0, 0.0);
+        let end = kurbo::Point::new(100.0, 0.0);
+        let solid = dimension_extensions_path(start, end, 40.0, 3.0, None);
+        let dashed = dimension_extensions_path(start, end, 40.0, 3.0, Some((12.0, 8.0)));
+        let close_count = |path: &kurbo::BezPath| {
+            path.elements()
+                .iter()
+                .filter(|element| matches!(element, kurbo::PathEl::ClosePath))
+                .count()
+        };
+        assert_eq!(close_count(&solid), 2);
+        assert_eq!(close_count(&dashed), 4);
+        let bounds = kurbo::Shape::bounding_box(&solid);
+        assert!(
+            (bounds.width() - 103.0).abs() < 1e-9,
+            "line width must be preserved"
+        );
+        assert!(
+            dimension_extensions_path(start, start, 40.0, 3.0, None)
+                .elements()
+                .is_empty()
+        );
+
+        let vertical = dimension_measure_path(
+            kurbo::Point::new(0.0, -50.0),
+            kurbo::Point::new(0.0, 50.0),
+            -30.0,
+            3.0,
+        );
+        let diagonal = dimension_measure_path(start, kurbo::Point::new(80.0, 60.0), 25.0, 3.0);
+        assert_eq!(close_count(&vertical), 3);
+        assert_eq!(close_count(&diagonal), 3);
     }
 }

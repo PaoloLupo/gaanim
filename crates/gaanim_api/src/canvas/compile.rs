@@ -3919,41 +3919,63 @@ impl Canvas {
                 }
 
                 Op::AttachTrackingDimension {
-                    target,
+                    line,
+                    extensions,
                     from,
                     to,
                     offset,
+                    line_width,
+                    extension_dash,
                 } => {
-                    if let Some(target_id) = id_map.get(target).copied()
-                        && let Some(st) = builder.states.get(target_id)
-                    {
-                        let from = compile_tracking_endpoint(from, &id_map, &builder.states);
-                        let to = compile_tracking_endpoint(to, &id_map, &builder.states);
-                        let offset = *offset;
-                        let target_entity = st.entity;
-                        let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
-                            let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint {
-                                TrackingEndpoint::Static(position) => *position,
-                                _ => gaanim_animation::resolve_tracking_endpoint(endpoint, world)
-                                    .unwrap_or(DVec3::ZERO),
-                            };
-                            let from = gaanim_animation::tracking_world_to_local(
-                                target_entity,
-                                endpoint_position(&from),
-                                world,
-                            );
-                            let to = gaanim_animation::tracking_world_to_local(
-                                target_entity,
-                                endpoint_position(&to),
-                                world,
-                            );
-                            gaanim_objects::primitives::dimension_path(
-                                Point::new(from.x, from.y),
-                                Point::new(to.x, to.y),
-                                offset,
-                            )
-                        });
-                        builder.commands.entity(st.entity).insert(redraw);
+                    let from = compile_tracking_endpoint(from, &id_map, &builder.states);
+                    let to = compile_tracking_endpoint(to, &id_map, &builder.states);
+                    let offset = *offset;
+                    let line_width = *line_width;
+                    let extension_dash = *extension_dash;
+                    for (target, is_extensions) in [(line, false), (extensions, true)] {
+                        if let Some(target_id) = id_map.get(target).copied()
+                            && let Some(st) = builder.states.get(target_id)
+                        {
+                            let from = from.clone();
+                            let to = to.clone();
+                            let target_entity = st.entity;
+                            let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                                let endpoint_position = |endpoint: &TrackingEndpoint| match endpoint
+                                {
+                                    TrackingEndpoint::Static(position) => *position,
+                                    _ => {
+                                        gaanim_animation::resolve_tracking_endpoint(endpoint, world)
+                                            .unwrap_or(DVec3::ZERO)
+                                    }
+                                };
+                                let from = gaanim_animation::tracking_world_to_local(
+                                    target_entity,
+                                    endpoint_position(&from),
+                                    world,
+                                );
+                                let to = gaanim_animation::tracking_world_to_local(
+                                    target_entity,
+                                    endpoint_position(&to),
+                                    world,
+                                );
+                                let start = Point::new(from.x, from.y);
+                                let end = Point::new(to.x, to.y);
+                                if is_extensions {
+                                    gaanim_objects::primitives::dimension_extensions_path(
+                                        start,
+                                        end,
+                                        offset,
+                                        line_width,
+                                        extension_dash,
+                                    )
+                                } else {
+                                    gaanim_objects::primitives::dimension_measure_path(
+                                        start, end, offset, line_width,
+                                    )
+                                }
+                            });
+                            builder.commands.entity(st.entity).insert(redraw);
+                        }
                     }
                 }
 

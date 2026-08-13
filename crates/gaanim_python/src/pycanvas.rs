@@ -9,8 +9,9 @@ use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
     AngleDimensionOptions, Axes3DConfig, AxesConfig, CameraConstraintHandle, Canvas as ApiCanvas,
-    CanvasEndpoint, CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionOptions,
-    ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand, SegmentHandle, ThemeFont,
+    CanvasEndpoint, CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionExtensionStyle,
+    DimensionOptions, ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand,
+    SegmentHandle, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -56,6 +57,7 @@ fn reactive_scalar(value: Bound<'_, PyAny>) -> PyResult<(gaanim_api::canvas::Dra
 #[derive(Clone)]
 pub struct PyDimension {
     line: PyDrawable,
+    extensions: PyDrawable,
     label: Option<PyDrawable>,
     number: Option<PyDrawable>,
     unit: Option<PyDrawable>,
@@ -215,6 +217,7 @@ impl PyDimension {
     fn initializer(handle: gaanim_api::canvas::DimensionHandle) -> PyClassInitializer<Self> {
         PyClassInitializer::from(PyDrawable(handle.drawable)).add_subclass(Self {
             line: PyDrawable(handle.line),
+            extensions: PyDrawable(handle.extensions),
             label: handle.label.map(PyDrawable),
             number: handle.number.map(PyDrawable),
             unit: handle.unit.map(PyDrawable),
@@ -227,6 +230,11 @@ impl PyDimension {
     #[getter]
     fn line(&self) -> PyDrawable {
         self.line.clone()
+    }
+
+    #[getter]
+    fn extensions(&self) -> PyDrawable {
+        self.extensions.clone()
     }
 
     #[getter]
@@ -4404,7 +4412,7 @@ impl PyScene {
         ))
     }
 
-    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None))]
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None, line_width=3.0, extension_style="solid", dash_length=12.0, gap_length=8.0))]
     #[allow(clippy::too_many_arguments)]
     fn dimension_between<'py>(
         &self,
@@ -4421,6 +4429,10 @@ impl PyScene {
         label_orientation: &str,
         font_size: Option<f64>,
         color: Option<PyColor>,
+        line_width: f64,
+        extension_style: &str,
+        dash_length: f64,
+        gap_length: f64,
     ) -> PyResult<Py<PyDimension>> {
         if !offset.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -4442,6 +4454,29 @@ impl PyScene {
                 "font_size must be finite and greater than zero",
             ));
         }
+        if !line_width.is_finite() || line_width <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "line_width must be finite and greater than zero",
+            ));
+        }
+        if !dash_length.is_finite()
+            || dash_length <= 0.0
+            || !gap_length.is_finite()
+            || gap_length <= 0.0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dash_length and gap_length must be finite and greater than zero",
+            ));
+        }
+        let extension_style = match extension_style {
+            "solid" => DimensionExtensionStyle::Solid,
+            "dashed" => DimensionExtensionStyle::Dashed,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "extension_style must be 'solid' or 'dashed'",
+                ))
+            }
+        };
         let orientation = match label_orientation {
             "upright" => gaanim_animation::DimensionLabelOrientation::Upright,
             "aligned" => gaanim_animation::DimensionLabelOrientation::Aligned,
@@ -4471,6 +4506,10 @@ impl PyScene {
                     label_orientation: orientation,
                     font_size,
                     color: color.map(|value| value.0),
+                    line_width,
+                    extension_style,
+                    dash_length,
+                    gap_length,
                 },
             )
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;

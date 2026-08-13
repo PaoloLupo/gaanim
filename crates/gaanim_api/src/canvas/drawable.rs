@@ -1419,6 +1419,18 @@ impl FragmentSelection {
         .with_duration(duration)
     }
 
+    /// Build a compound fill/opacity animation scoped to this selection.
+    pub fn animate_properties(self) -> Anim {
+        let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
+        Anim::text_selection_properties(
+            self.target,
+            self.fragment,
+            self.occurrence,
+            self.state,
+            active_idx,
+        )
+    }
+
     /// Instantly colors this selected fragment.
     pub fn fill(self, color: Color) -> Self {
         if !self.fragment.trim().is_empty() {
@@ -1483,6 +1495,14 @@ impl FragmentSelection {
     /// Animates this fragment's fill to `color`.
     pub fn color_to(self, color: Color, duration: impl OptDuration) -> Anim {
         self.animate(TextSelectionEffect::ColorTo(color), duration)
+    }
+
+    /// Animates this fragment's opacity to `opacity`.
+    pub fn opacity_to(self, opacity: f32, duration: impl OptDuration) -> Anim {
+        self.animate(
+            TextSelectionEffect::OpacityTo(opacity.clamp(0.0, 1.0)),
+            duration,
+        )
     }
 
     /// Morphs this selection into `target`, pairing matching glyphs in order.

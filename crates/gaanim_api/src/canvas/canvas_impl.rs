@@ -38,9 +38,17 @@ pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 pub struct DimensionHandle {
     pub drawable: DrawableHandle,
     pub line: DrawableHandle,
+    pub extensions: DrawableHandle,
     pub label: Option<DrawableHandle>,
     pub number: Option<DrawableHandle>,
     pub unit: Option<DrawableHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DimensionExtensionStyle {
+    #[default]
+    Solid,
+    Dashed,
 }
 
 /// Public pieces of a reactive angular dimension.
@@ -193,6 +201,10 @@ pub struct DimensionOptions {
     pub label_orientation: gaanim_animation::DimensionLabelOrientation,
     pub font_size: Option<f64>,
     pub color: Option<Color>,
+    pub line_width: f64,
+    pub extension_style: DimensionExtensionStyle,
+    pub dash_length: f64,
+    pub gap_length: f64,
 }
 
 impl Default for DimensionOptions {
@@ -205,8 +217,12 @@ impl Default for DimensionOptions {
             scale: 1.0,
             label_gap: 10.0,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
-            font_size: None,
+            font_size: Some(48.0),
             color: None,
+            line_width: 3.0,
+            extension_style: DimensionExtensionStyle::Solid,
+            dash_length: 12.0,
+            gap_length: 8.0,
         }
     }
 }
@@ -2933,8 +2949,8 @@ impl Canvas {
                 .stroke(foreground, s * 0.075)
         };
 
-        // A fixed support is a continuous stem welded into the hatched plate;
-        // drawing a pin at the attachment would communicate the wrong joint.
+        // A fixed support connects directly to its plate; drawing a pin at the
+        // attachment would communicate the wrong joint.
         let joint = if kind == "fixed" {
             self.group_no_center(&[])
         } else {
@@ -2950,7 +2966,10 @@ impl Canvas {
 
         match kind {
             "fixed" => {
-                let plate_y = -s * 0.22;
+                // The fixed boundary itself is the connection point. Connected
+                // members therefore terminate directly on the plate instead of
+                // on a short stem that can be mistaken for another member.
+                let plate_y = 0.0;
                 let plate = line_from_points(
                     self,
                     &[
@@ -2972,12 +2991,6 @@ impl Canvas {
                         foreground,
                     ));
                 }
-                body_parts.push(line_from_points(
-                    self,
-                    &[DVec2::ZERO, DVec2::new(0.0, plate_y)],
-                    s * 0.10,
-                    foreground,
-                ));
             }
             "pin" | "roller" => {
                 body_parts.push(polygon_from_points(
@@ -3518,24 +3531,41 @@ impl Canvas {
         to: CanvasEndpoint,
         offset: f64,
     ) -> DrawableHandle {
-        let handle = self
-            .spawn(SpawnKind::TrackingLine)
-            .fill(Color::WHITE)
-            .no_stroke();
-        handle.defer_visibility_until_play();
-        let id = handle.id;
+        let (line, extensions, drawable) =
+            self.dimension_between_parts(from, to, offset, 3.0, None, Color::WHITE);
+        let _ = (line, extensions);
+        drawable
+    }
+
+    fn dimension_between_parts(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        offset: f64,
+        line_width: f64,
+        extension_dash: Option<(f64, f64)>,
+        color: Color,
+    ) -> (DrawableHandle, DrawableHandle, DrawableHandle) {
+        let line = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
+        let extensions = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
+        line.defer_visibility_until_play();
+        extensions.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
             .active_mut()
             .ops
             .push(Op::AttachTrackingDimension {
-                target: id,
+                line: line.id,
+                extensions: extensions.id,
                 from,
                 to,
                 offset,
+                line_width,
+                extension_dash,
             });
-        handle
+        let drawable = self.group_no_center(&[&extensions, &line]);
+        (line, extensions, drawable)
     }
 
     /// Build a reactive dimension with an optional symbolic and numeric annotation.
@@ -3546,14 +3576,22 @@ impl Canvas {
         offset: f64,
         options: DimensionOptions,
     ) -> Result<DimensionHandle, gaanim_text::prelude::TextSpecError> {
-        let mut line = self.dimension_between(from.clone(), to.clone(), offset);
-        if let Some(color) = options.color {
-            line = line.fill(color).no_stroke();
-        }
+        let color = options.color.unwrap_or(Color::WHITE);
+        let extension_dash = (options.extension_style == DimensionExtensionStyle::Dashed)
+            .then_some((options.dash_length, options.gap_length));
+        let (measure, extensions, visual) = self.dimension_between_parts(
+            from.clone(),
+            to.clone(),
+            offset,
+            options.line_width,
+            extension_dash,
+            color,
+        );
         if options.label.is_none() && !options.show_value {
             return Ok(DimensionHandle {
-                drawable: line.clone(),
-                line,
+                drawable: visual.clone(),
+                line: visual,
+                extensions,
                 label: None,
                 number: None,
                 unit: None,
@@ -3562,7 +3600,7 @@ impl Canvas {
 
         let text_part = |canvas: &mut Canvas, text: &str| {
             let mut style = gaanim_text::prelude::TextStyle::default();
-            style.size = options.font_size;
+            style.size = Some(options.font_size.unwrap_or(48.0));
             style.color = options.color;
             gaanim_text::prelude::TextSpec::new(
                 vec![text.into()],
@@ -3599,7 +3637,7 @@ impl Canvas {
                 "",
                 "",
                 "—",
-                options.font_size,
+                Some(options.font_size.unwrap_or(48.0)),
             );
             if let Some(color) = options.color {
                 number_handle = number_handle.fill(color);
@@ -3627,14 +3665,14 @@ impl Canvas {
                 .clone()
         };
 
-        let drawable = self.group_no_center(&[&line, &annotation]);
+        let drawable = self.group_no_center(&[&visual, &annotation]);
         self.state
             .lock()
             .expect("canvas state poisoned")
             .active_mut()
             .ops
             .push(Op::AttachDimensionLabelPlacement {
-                target: line.id,
+                target: measure.id,
                 label: annotation.id,
                 from,
                 to,
@@ -3645,7 +3683,8 @@ impl Canvas {
 
         Ok(DimensionHandle {
             drawable,
-            line,
+            line: visual,
+            extensions,
             label,
             number,
             unit,
@@ -3676,6 +3715,7 @@ mod tests {
     use bevy::prelude::World;
     use gaanim_math::SpatialTransform;
     use gaanim_scene::{MobjectId, Opacity};
+    use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
     use gaanim_timeline::scene::SceneMember;
     use gaanim_timeline::snapshot::WorldSnapshot;
     use gaanim_timeline::timeline::Timeline;
@@ -3750,6 +3790,71 @@ mod tests {
             pairs,
             &vec![("x".to_string(), Some(1), "y".to_string(), Some(0),)]
         );
+    }
+
+    #[test]
+    fn text_selection_compound_properties_seek_only_selected_glyphs() {
+        let mut canvas = Canvas::new(320, 180);
+        let text = canvas.text("ABC");
+        let selection = text.select("B");
+        let red = Color::from_rgb8(255, 0, 0);
+        canvas.play(vec![
+            selection
+                .animate_properties()
+                .fill(red)
+                .opacity(0.25)
+                .duration(1.0),
+        ]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+        let animated_targets = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(animation)
+                    if matches!(
+                        animation.lens,
+                        PropertyLensSpec::FillColor { .. } | PropertyLensSpec::Opacity { .. }
+                    ) =>
+                {
+                    Some(animation.target)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            animated_targets.len(),
+            2,
+            "one selected glyph must receive two channels"
+        );
+        assert_eq!(animated_targets[0], animated_targets[1]);
+        let entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == animated_targets[0]).then_some(entity))
+            .expect("selected glyph entity");
+
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.0);
+        let start_opacity = world.get::<Opacity>(entity).expect("start opacity").0;
+        timeline.seek(&mut world, 0.5);
+        let mid_opacity = world.get::<Opacity>(entity).expect("mid opacity").0;
+        timeline.seek(&mut world, 1.0);
+        let end_opacity = world.get::<Opacity>(entity).expect("end opacity").0;
+        assert!((start_opacity - 1.0).abs() < 1e-6);
+        assert!(mid_opacity < start_opacity && mid_opacity > end_opacity);
+        assert!((end_opacity - 0.25).abs() < 1e-6);
+        assert!(matches!(
+            world.get::<gaanim_scene::FillBrush>(entity).and_then(|fill| fill.0.as_ref()),
+            Some(Brush::Solid(color)) if *color == red
+        ));
     }
 
     #[test]
@@ -4970,6 +5075,32 @@ mod tests {
     }
 
     #[test]
+    fn fixed_support_uses_connection_plate_without_a_stem() {
+        let mut canvas = Canvas::new(640, 360);
+        let support = canvas.support_at(
+            CanvasEndpoint::Static(DVec3::ZERO),
+            "fixed",
+            DVec3::Y,
+            48.0,
+            70.0,
+            None,
+        );
+        assert!(matches!(
+            &support.body.spec.lock().expect("body spec").kind,
+            SpawnKind::GroupNoCenter(children) if children.is_empty()
+        ));
+        let ground_children = match &support.ground.spec.lock().expect("ground spec").kind {
+            SpawnKind::GroupNoCenter(children) => children.clone(),
+            other => panic!("expected fixed-support ground group, got {other:?}"),
+        };
+        assert_eq!(
+            ground_children.len(),
+            1,
+            "fixed support must contain one connection plate"
+        );
+    }
+
+    #[test]
     fn anchored_bar_and_labeled_dimension_compile_the_reactive_contract() {
         let mut canvas = Canvas::new(640, 360);
         let frame = canvas.rect(180.0, 80.0).at(20.0, 0.0);
@@ -4994,6 +5125,15 @@ mod tests {
                 },
             )
             .unwrap();
+        assert_eq!(
+            dimension
+                .label
+                .as_ref()
+                .and_then(DrawableHandle::text_spec)
+                .and_then(|spec| spec.style.size),
+            Some(48.0),
+            "dimension labels default to a 1080p-readable size"
+        );
 
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -5030,33 +5170,38 @@ mod tests {
             "dimension annotation must keep a reactive placement binding"
         );
         gaanim_animation::always_redraw_regen_system(&mut world);
-        let dimension_line = world
+        let dimension_parts = world
             .query_filtered::<bevy::prelude::Entity, With<gaanim_animation::AlwaysRedrawRegen>>()
             .iter(&world)
-            .next()
-            .expect("reactive dimension line");
-        let dimension_path = world
-            .get::<gaanim_scene::Path2D>(dimension_line)
-            .expect("dimension path");
-        assert!(
-            dimension_path.0.elements().len() >= 14,
-            "dimension must include two extension lines, a baseline, and two arrowheads"
-        );
+            .collect::<Vec<_>>();
         assert_eq!(
-            dimension_path
-                .0
-                .elements()
-                .iter()
-                .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::ClosePath))
-                .count(),
+            dimension_parts.len(),
+            2,
+            "dimension geometry must use two reactive parts"
+        );
+        let close_counts = dimension_parts
+            .iter()
+            .map(|entity| {
+                world
+                    .get::<gaanim_scene::Path2D>(*entity)
+                    .expect("dimension part path")
+                    .0
+                    .elements()
+                    .iter()
+                    .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::ClosePath))
+                    .count()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            close_counts.iter().sum::<usize>(),
             5,
-            "dimension geometry must be three filled line quads plus two solid triangles"
+            "dimension geometry must contain two extensions, one baseline, and two heads"
         );
         assert!(
-            world
-                .get::<gaanim_scene::FillBrush>(dimension_line)
+            dimension_parts.iter().all(|entity| world
+                .get::<gaanim_scene::FillBrush>(*entity)
                 .and_then(|fill| fill.0.as_ref())
-                .is_some(),
+                .is_some()),
             "dimension silhouette must carry a fill brush"
         );
         assert!(dimension.label.is_some());

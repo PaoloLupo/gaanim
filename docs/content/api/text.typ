@@ -328,6 +328,9 @@ is depth-first over the semantic tree. A selection remains attached to one
 
 ```text
 selection.fill(color) -> TextSelection
+selection.color_to(color, duration=None) -> Anim
+selection.opacity_to(opacity, duration=None) -> Anim
+selection.animate().fill(color).opacity(value) -> Anim
 
 selection.indicate(duration=None) -> Anim
 selection.pulse(duration=None) -> Anim
@@ -345,7 +348,9 @@ selection.morph_to(target_selection, *, duration=None) -> Anim
 selection.copy_to(target_selection, *, duration=None) -> Anim
 ```
 
-`reveal` accepts `fade`, `wipe`, or `from_below`. `cancel` draws a diagonal
+The compound `animate()` builder is deliberately local: it accepts fill/color
+and opacity, while transform, scale, rotation, material, and stroke targets
+raise `TypeError`. `reveal` accepts `fade`, `wipe`, or `from_below`. `cancel` draws a diagonal
 mark and dims the glyphs; the next replacing text transition retires both.
 `brace` and `annotate` use canvas-unit geometry around the selected glyphs.
 Every animation descriptor above can be placed directly in `scene.play([...])`.

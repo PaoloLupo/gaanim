@@ -61,8 +61,11 @@ width_dimension = scene.dimension_between(
     format=".0f",
     unit="$u$",
     label_gap=18,
-    font_size=28,
     color=BLACK,
+    line_width=3,
+    extension_style="dashed",
+    dash_length=12,
+    gap_length=8,
 )
 mass_dimension = scene.dimension_between(
     mass.anchor_point(Anchor.TOP_LEFT),
@@ -70,7 +73,6 @@ mass_dimension = scene.dimension_between(
     50,
     label="$x$",
     label_orientation="aligned",
-    font_size=25,
     color=BLACK,
 )
 

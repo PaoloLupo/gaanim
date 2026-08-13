@@ -788,6 +788,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::FadeOut
             | AnimationType::FadeInFrom { .. } => "Fade",
             AnimationType::FillColorTo { .. } => "Fill",
+            AnimationType::TextSelectionProperties { .. } => "TextSelectionProperties",
             AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -1745,6 +1746,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                             RateFunc::Smooth,
                             0.0,
                         ),
+                        TextSelectionEffect::OpacityTo(opacity) => (
+                            AnimationType::FadeTo { to: *opacity },
+                            RateFunc::Smooth,
+                            0.0,
+                        ),
                         TextSelectionEffect::Focus
                         | TextSelectionEffect::Cancel
                         | TextSelectionEffect::Brace { .. }
@@ -1972,6 +1978,26 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } = anim.anim_type.clone()
         {
             self.play_text_selection_internal(anim, fragment, occurrence, effect);
+            return;
+        }
+        if let AnimationType::TextSelectionProperties {
+            fragment,
+            occurrence,
+            properties,
+        } = anim.anim_type.clone()
+        {
+            let selected = self
+                .select_occurrence(MobjectRef { id: anim.target }, &fragment, occurrence)
+                .child_ids;
+            for target in selected {
+                self.play_internal(AnimationBuilder {
+                    target,
+                    anim_type: AnimationType::Properties(properties.clone()),
+                    duration: anim.duration,
+                    delay: anim.delay,
+                    rate_func: anim.rate_func.clone(),
+                });
+            }
             return;
         }
 
@@ -2233,6 +2259,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Indicate { .. }
             | AnimationType::TextTransition { .. }
             | AnimationType::TextSelection { .. }
+            | AnimationType::TextSelectionProperties { .. }
             | AnimationType::TextSelectionTransform { .. }
             | AnimationType::FadeTransform { .. }
             | AnimationType::Wiggle

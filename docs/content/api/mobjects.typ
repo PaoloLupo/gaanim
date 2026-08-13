@@ -34,6 +34,26 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
+  name: "Scene.tracking_line",
+  kind: "reactive factory",
+  signature: "tracking_line(from, to) -> Drawable",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Fixed point, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "to", type: "Endpoint", default: none, desc: [Second same-frame endpoint.])),
+  returns: (type: "Drawable", desc: [Hidden reactive line; reveal it with `create`, `write`, or another entry animation.]),
+  desc: [Regenerates its full path whenever either endpoint moves while preserving active path-reveal progress. The public name is `tracking_line`; there is no `tracked_line` alias.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, WHITE, Scene
+scene = Scene(480, 270, background="#0f172a")
+tip = scene.dot(9).fill(GOLD).at(100, 30)
+rod = scene.tracking_line((-100, -30), tip).no_fill().stroke(WHITE, 4)
+scene.play([rod.create(0.8), tip.move(-40, 80).duration(0.8)])
+scene.play([rod.write(0.8), tip.move(80, -50).duration(0.8)])
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
   name: "Drawable.stroke_style",
   kind: "method",
   signature: "stroke_style(style: StrokeStyle) -> Self",
@@ -1266,10 +1286,10 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.dimension_between",
   kind: "factory",
-  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None) -> Dimension",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]),),
-  returns: (type: "Dimension", desc: [Reactive drawable exposing `line`, `label`, `number`, and `unit`.]),
-  desc: [Keeps the extension lines, measurement line, solid triangular arrowheads, annotation position, orientation, and optional numeric value synchronized with moving endpoints. `color` initializes both the filled dimension silhouette and annotation; fluent styling still propagates through the returned `Dimension`. Symbolic math and reactive text share a true typographic baseline, including subscripted labels such as `$W_f$`. Invalid metrics and orientation raise `ValueError`.],
+  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, format=\".2f\", unit=None, scale=1, label_gap=10, label_orientation=\"upright\", font_size=None, color=None, line_width=3, extension_style=\"solid\", dash_length=12, gap_length=8) -> Dimension",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units.]), (name: "label_gap", type: "float", default: "10", desc: [Non-negative outward annotation gap.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "3", desc: [Positive filled-line width.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "8", desc: [Positive dash gap.])),
+  returns: (type: "Dimension", desc: [Reactive drawable exposing compatible `line`, independent `extensions`, `label`, `number`, and `unit`.]),
+  desc: [Keeps all geometry and annotations synchronized with moving endpoints. Labels, values, and units default to 48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation; `extensions` remains independently styleable. Invalid metrics, extension styles, and orientation raise `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -1280,6 +1300,7 @@ dim = scene.dimension_between(
   frame.anchor_point(Anchor.TOP_LEFT),
   frame.anchor_point(Anchor.TOP_RIGHT),
   35, label="$W_f$", show_value=True, unit="u", color=BLACK,
+  extension_style="dashed", line_width=3, dash_length=12, gap_length=8,
 )
 scene.play([dim.fade_in().duration(0.3), frame.move(30, 0).duration(0.9)])
 scene.export("preview.webp", fps=30)
@@ -1494,18 +1515,18 @@ scene.export("preview.webp", fps=30)
   signature: "text[name] / text[index_or_slice] / text.graphemes|words|lines|parts[index] -> TextSelection",
   params: ((name: "name", type: "str", default: none, desc: [Nested semantic path from `part()`.]), (name: "index", type: "int | slice", default: none, desc: [Rendered unit selection, Unicode-grapheme safe.])),
   returns: (type: "TextSelection", desc: [Deferred local selection; never a Layout leaf.]),
-  desc: [Selections support styling, emphasis, braces, annotations, and structural morph/copy transitions.],
+  desc: [Selections support persistent `fill`, animated `color_to`/`opacity_to`, compound `animate().fill().opacity()`, emphasis, braces, annotations, and structural morph/copy transitions. The compound builder rejects non-local transform and stroke channels.],
 )[
 ```python
 # show-code: true
-from gaanim import GOLD, Scene, part
+from gaanim import GOLD, RED, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 # TextSelection animations compose with complete-Text animations.
 eq = scene.text("$E = ", part("mass", "m"), " c^2$").at(0, 0)
 eq["mass"].fill(GOLD)
 scene.play([
     eq.write(0.8),
-    eq["mass"].indicate(0.8),
+    eq["mass"].animate().fill(RED).opacity(0.7).duration(0.8),
 ])
 scene.export("preview.webp", fps=30)
 ```

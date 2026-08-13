@@ -459,6 +459,32 @@ impl PyTextSelection {
         self.clone()
     }
 
+    /// Start a compound fill/opacity animation scoped to this selection.
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner().animate_properties(),
+        }
+    }
+
+    #[pyo3(signature = (color, duration=None))]
+    fn color_to(&self, color: PyColor, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner().color_to(color.0, duration),
+        }
+    }
+
+    #[pyo3(signature = (opacity, duration=None))]
+    fn opacity_to(&self, opacity: f32, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
+        if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+            return Err(PyValueError::new_err(
+                "opacity must be finite and within 0..1",
+            ));
+        }
+        Ok(PyCanvasAnim {
+            inner: self.inner().opacity_to(opacity, duration),
+        })
+    }
+
     #[pyo3(signature = (duration=None))]
     fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {

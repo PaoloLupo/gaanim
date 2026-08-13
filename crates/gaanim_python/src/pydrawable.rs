@@ -36,6 +36,11 @@ impl PyCanvasAnim {
     }
 
     fn stroke(&self, color: PyColor, width: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if self.inner.property_target_is_primitive_3d() {
             return Err(PyTypeError::new_err(
                 "stroke() is only available for vector drawables; animate material() or color() on Primitive3D",
@@ -47,6 +52,11 @@ impl PyCanvasAnim {
     }
 
     fn stroke_color(&self, color: PyColor) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if self.inner.property_target_is_primitive_3d() {
             return Err(PyTypeError::new_err(
                 "stroke_color() is only available for vector drawables",
@@ -58,6 +68,11 @@ impl PyCanvasAnim {
     }
 
     fn material(&self, material: PyMaterial3D) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if !self.inner.property_target_is_primitive_3d() {
             return Err(PyTypeError::new_err(
                 "material() is only available for native Primitive3D drawables",
@@ -75,6 +90,11 @@ impl PyCanvasAnim {
     }
 
     fn r#move(&self, dx: f64, dy: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
@@ -87,6 +107,11 @@ impl PyCanvasAnim {
 
     #[pyo3(signature = (x, y, anchor=None))]
     fn move_to(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
@@ -102,6 +127,11 @@ impl PyCanvasAnim {
     }
 
     fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
@@ -113,6 +143,11 @@ impl PyCanvasAnim {
     }
 
     fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
@@ -123,37 +158,67 @@ impl PyCanvasAnim {
         })
     }
 
-    fn scale(&self, factor: f64) -> Self {
-        Self {
+    fn scale(&self, factor: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
+        Ok(Self {
             inner: self.inner.clone().scale(factor),
-        }
+        })
     }
 
-    fn scale_to(&self, factor: f64) -> Self {
-        Self {
+    fn scale_to(&self, factor: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
+        Ok(Self {
             inner: self.inner.clone().scale_to(factor),
-        }
+        })
     }
 
-    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        Self {
+    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
+        Ok(Self {
             inner: self.inner.clone().scale_to_3d(x, y, z),
-        }
+        })
     }
 
-    fn rotate(&self, radians: f64) -> Self {
-        Self {
+    fn rotate(&self, radians: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
+        Ok(Self {
             inner: self.inner.clone().rotate(radians),
-        }
+        })
     }
 
-    fn rotate_to(&self, radians: f64) -> Self {
-        Self {
-            inner: self.inner.clone().rotate_to(radians),
+    fn rotate_to(&self, radians: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
         }
+        Ok(Self {
+            inner: self.inner.clone().rotate_to(radians),
+        })
     }
 
     fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
         self.inner
             .clone()
             .rotate_by_3d(axis, radians)
@@ -161,10 +226,15 @@ impl PyCanvasAnim {
             .map_err(PyValueError::new_err)
     }
 
-    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        Self {
-            inner: self.inner.clone().rotate_to_3d(x, y, z),
+    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
         }
+        Ok(Self {
+            inner: self.inner.clone().rotate_to_3d(x, y, z),
+        })
     }
 
     fn duration(&self, d: f64) -> Self {

@@ -580,6 +580,16 @@ scene.export("simulation.webp", fps=30)
 For a coupled example with a tracking rod, dimension and trail, see
 `examples/pendulum_simulation.py`.
 
+Reactive `tracking_line` drawables support both `create()` and `write()`.
+Their endpoints may continue moving during the reveal because regeneration
+updates the full path source and reapplies the current draw progress:
+
+```python
+rod = scene.tracking_line(anchor, mass).no_fill().stroke(WHITE, 4)
+scene.play([rod.create(0.8), mass.move(120, 0).duration(0.8)])
+scene.play([rod.write(0.8), mass.move(-80, 40).duration(0.8)])
+```
+
 == Tiempo y easing
 
 Configure any `Anim` fluently before passing to `play`:

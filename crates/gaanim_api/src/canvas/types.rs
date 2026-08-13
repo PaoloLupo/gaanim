@@ -817,6 +817,25 @@ impl Anim {
         anim
     }
 
+    pub(crate) fn text_selection_properties(
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+        state: SharedCanvasState,
+        segment_idx: usize,
+    ) -> Self {
+        let mut anim = Self::new(
+            target,
+            AnimationType::TextSelectionProperties {
+                fragment,
+                occurrence,
+                properties: PropertyAnimation::default(),
+            },
+        );
+        anim.pending_queue = Some(PendingQueuedAnim { state, segment_idx });
+        anim
+    }
+
     pub(crate) fn queued(
         target: ObjectId,
         anim_type: AnimationType,
@@ -867,8 +886,10 @@ impl Anim {
     }
 
     fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
-        let AnimationType::Properties(properties) = &mut self.inner.anim_type else {
-            panic!("property modifiers require an animation created by Drawable.animate()");
+        let properties = match &mut self.inner.anim_type {
+            AnimationType::Properties(properties)
+            | AnimationType::TextSelectionProperties { properties, .. } => properties,
+            _ => panic!("property modifiers require a compound property animation"),
         };
         update(properties);
         self.activate_pending_queue();
@@ -916,6 +937,14 @@ impl Anim {
                     .map(|spec| matches!(spec.kind, SpawnKind::Primitive3D(_)))
             })
             .unwrap_or(false)
+    }
+
+    #[doc(hidden)]
+    pub fn property_target_is_text_selection(&self) -> bool {
+        matches!(
+            self.inner.anim_type,
+            AnimationType::TextSelectionProperties { .. }
+        )
     }
 
     fn material_target(&self) -> Option<gaanim_scene::Material3D> {

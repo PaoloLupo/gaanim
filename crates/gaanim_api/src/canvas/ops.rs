@@ -396,10 +396,13 @@ pub(crate) enum Op {
     },
     /// Attach a dynamic dimension line between two endpoints.
     AttachTrackingDimension {
-        target: ObjectId,
+        line: ObjectId,
+        extensions: ObjectId,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         offset: f64,
+        line_width: f64,
+        extension_dash: Option<(f64, f64)>,
     },
     /// Drive a float signal from the current distance between two endpoints.
     AttachEndpointDistance {

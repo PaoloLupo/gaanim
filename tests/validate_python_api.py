@@ -192,6 +192,22 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("TextSelection.indicate did not return Anim")
     else:
         scene.play([selection_anim])
+    selection_color = text["formula"]["mass"].color_to(module.RED, duration=0.4)
+    selection_opacity = text["formula"]["mass"].opacity_to(0.6, duration=0.4)
+    selection_compound = text["formula"]["mass"].animate().fill(module.BLUE).opacity(0.8)
+    if not all(
+        isinstance(anim, module.Anim)
+        for anim in (selection_color, selection_opacity, selection_compound)
+    ):
+        failures.append("TextSelection color/opacity animations did not return Anim")
+    else:
+        scene.play([selection_color, selection_opacity, selection_compound])
+    try:
+        text["formula"]["mass"].animate().scale(2.0)
+    except TypeError:
+        pass
+    else:
+        failures.append("TextSelection.animate accepted an unsupported scale target")
     target_text = scene.text("Energy: ", module.part("formula", "$E = mc^2$"))
     text_transition = text.step_to(target_text)
     if not isinstance(text_transition, module.Anim):
@@ -290,14 +306,37 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
         scale=0.5,
         label_gap=12.0,
         label_orientation="aligned",
+        extension_style="dashed",
+        line_width=3.0,
+        dash_length=12.0,
+        gap_length=8.0,
     )
     if not isinstance(dimension, module.Dimension):
         failures.append("Scene.dimension_between did not return Dimension")
     elif not all(
         isinstance(part, module.Drawable)
-        for part in (dimension.line, dimension.label, dimension.number, dimension.unit)
+        for part in (
+            dimension.line,
+            dimension.extensions,
+            dimension.label,
+            dimension.number,
+            dimension.unit,
+        )
     ):
         failures.append("Dimension did not expose its line/label/number/unit parts")
+
+    for invalid in (
+        {"line_width": 0.0},
+        {"extension_style": "dots"},
+        {"dash_length": 0.0},
+        {"gap_length": float("nan")},
+    ):
+        try:
+            scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, **invalid)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"Scene.dimension_between accepted invalid options: {invalid}")
 
     try:
         scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, scale=0.0)

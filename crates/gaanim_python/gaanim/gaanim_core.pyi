@@ -1218,6 +1218,10 @@ class Dimension(Drawable):
     @property
     def line(self) -> Drawable: ...
     @property
+    def extensions(self) -> Drawable:
+        """Return the reactive extension-line group for independent styling."""
+        ...
+    @property
     def label(self) -> Optional[Drawable]: ...
     @property
     def number(self) -> Optional[Drawable]: ...
@@ -1402,6 +1406,30 @@ class TextSelection:
 
         Example:
             formula["mass"].fill(GOLD)
+        """
+        ...
+    def animate(self) -> Anim:
+        """Start a compound animation scoped to the selected glyphs.
+
+        Only ``fill``/``color`` and ``opacity`` targets are supported; other
+        property channels raise ``TypeError``.
+
+        Example:
+            scene.play([formula["mass"].animate().fill(RED).opacity(0.6)])
+        """
+        ...
+    def color_to(self, color: Color, duration: Optional[float] = None) -> Anim:
+        """Animate only the selected glyph fills to ``color``.
+
+        Example:
+            scene.play([formula["mass"].color_to(RED, duration=0.6)])
+        """
+        ...
+    def opacity_to(self, opacity: float, duration: Optional[float] = None) -> Anim:
+        """Animate selected glyph opacity to a finite value within 0..1.
+
+        Example:
+            scene.play([formula["mass"].opacity_to(0.5, duration=0.6)])
         """
         ...
     def indicate(self, duration: Optional[float] = None) -> Anim:
@@ -3394,6 +3422,10 @@ class Scene:
         label_orientation: Literal["upright", "aligned"] = "upright",
         font_size: Optional[float] = None,
         color: Optional[Color] = None,
+        line_width: float = 3.0,
+        extension_style: Literal["solid", "dashed"] = "solid",
+        dash_length: float = 12.0,
+        gap_length: float = 8.0,
     ) -> Dimension:
         """Create a reactive technical dimension and optional annotation.
 
@@ -3403,8 +3435,10 @@ class Scene:
         ``label_orientation`` keeps text horizontal or aligned while avoiding
         upside-down labels. ``color`` initializes the extension lines,
         solid triangular arrowheads, and annotation. Math labels and reactive
-        values share one typographic baseline, including subscripted formulas.
-        Invalid metrics or orientation raise ``ValueError``.
+        values share one 48-unit typographic baseline by default, including
+        subscripted formulas. ``line_width`` controls the filled line geometry;
+        dashed extensions use ``dash_length`` and ``gap_length``. Invalid
+        metrics, extension styles, or orientation raise ``ValueError``.
 
         Example:
             width = scene.dimension_between(

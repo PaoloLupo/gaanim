@@ -72,6 +72,12 @@ pub enum PropertyScale {
 pub enum AnimationType {
     /// Several typed property targets evaluated concurrently.
     Properties(PropertyAnimation),
+    /// Fill/opacity targets applied only to glyphs resolved by a text selection.
+    TextSelectionProperties {
+        fragment: String,
+        occurrence: Option<usize>,
+        properties: PropertyAnimation,
+    },
     CameraPosition {
         to: DVec3,
     },
@@ -347,6 +353,7 @@ pub enum TextSelectionEffect {
     RevealWipe,
     RevealFromBelow,
     ColorTo(Color),
+    OpacityTo(f32),
     Brace { label: String, above: bool },
     Annotate { label: String, offset: DVec3 },
 }
@@ -451,6 +458,7 @@ impl AnimationBuilder {
 impl AnimationType {
     pub fn is_empty_properties(&self) -> bool {
         matches!(self, Self::Properties(properties) if properties.is_empty())
+            || matches!(self, Self::TextSelectionProperties { properties, .. } if properties.is_empty())
     }
 
     pub(crate) fn is_camera(&self) -> bool {
