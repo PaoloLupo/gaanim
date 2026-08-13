@@ -2,6 +2,7 @@ use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTra
 use bevy::prelude::{
     BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
 };
+use codex::{Def as CodexDef, ModifierSet};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Shape};
@@ -23,7 +24,10 @@ use gaanim_timeline::{
     timeline::Timeline,
     transition::TransitionType,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::OnceLock;
+use typst_syntax::ast::{MathFieldAccess, MathIdent, MathPrimes, MathShorthand};
+use typst_syntax::{SyntaxNode, parse_math};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DrawMode {
@@ -53,6 +57,183 @@ struct EquationTransitionPlan {
     pairs: Vec<(ObjectId, ObjectId)>,
     leaving: Vec<ObjectId>,
     entering: Vec<ObjectId>,
+}
+
+/// Resolve a Typst math symbol access through the same Codex table used by
+/// Typst itself. Unknown identifiers are intentionally left to the caller.
+fn codex_math_symbol(access: &str) -> Option<&'static str> {
+    let (name, modifiers) = access
+        .split_once('.')
+        .map_or((access, ""), |(name, modifiers)| (name, modifiers));
+    let binding = codex::SYM.get(name)?;
+    let CodexDef::Symbol(symbol) = binding.def else {
+        return None;
+    };
+    symbol
+        .get(ModifierSet::from_raw_dotted(modifiers))
+        .map(|(value, _)| value)
+}
+
+fn codex_math_primes(count: usize) -> Option<String> {
+    let access = match count {
+        1 => "prime",
+        2 => "prime.double",
+        3 => "prime.triple",
+        4 => "prime.quad",
+        _ => {
+            let prime = codex_math_symbol("prime")?;
+            return Some(prime.repeat(count));
+        }
+    };
+    codex_math_symbol(access).map(str::to_owned)
+}
+
+/// Convert authored Typst math into the characters its parser resolves before
+/// layout. This covers named Codex symbols, official math shorthands, and the
+/// dedicated prime syntax while preserving unknown identifiers verbatim.
+fn typst_math_selection_source(source: &str) -> String {
+    fn append_node(node: &SyntaxNode, output: &mut String) {
+        if node.cast::<MathFieldAccess>().is_some() {
+            let source = node.full_text();
+            output.push_str(codex_math_symbol(source.as_str()).unwrap_or(source.as_str()));
+            return;
+        }
+        if let Some(identifier) = node.cast::<MathIdent>() {
+            let source = identifier.as_str();
+            output.push_str(codex_math_symbol(source).unwrap_or(source));
+            return;
+        }
+        if let Some(shorthand) = node.cast::<MathShorthand>() {
+            output.push(shorthand.get());
+            return;
+        }
+        if let Some(primes) = node.cast::<MathPrimes>() {
+            if let Some(value) = codex_math_primes(primes.count()) {
+                output.push_str(&value);
+            } else {
+                output.push_str(node.leaf_text());
+            }
+            return;
+        }
+
+        if node.children().next().is_none() {
+            output.push_str(node.leaf_text());
+        } else {
+            for child in node.children() {
+                append_node(child, output);
+            }
+        }
+    }
+
+    let root = parse_math(source);
+    let mut output = String::with_capacity(source.len());
+    append_node(&root, &mut output);
+    output
+}
+
+/// Invert Codex's mathematical styling table so authored and rendered text
+/// share one search domain without maintaining a parallel Unicode table.
+fn standard_math_char(c: char) -> char {
+    static REVERSE_STYLES: OnceLock<HashMap<char, char>> = OnceLock::new();
+    let reverse = REVERSE_STYLES.get_or_init(|| {
+        use codex::styling::MathStyle;
+
+        const STYLES: &[MathStyle] = &[
+            MathStyle::Bold,
+            MathStyle::Italic,
+            MathStyle::BoldItalic,
+            MathStyle::Script,
+            MathStyle::BoldScript,
+            MathStyle::Fraktur,
+            MathStyle::BoldFraktur,
+            MathStyle::SansSerif,
+            MathStyle::SansSerifBold,
+            MathStyle::SansSerifItalic,
+            MathStyle::SansSerifBoldItalic,
+            MathStyle::Monospace,
+            MathStyle::Isolated,
+            MathStyle::Initial,
+            MathStyle::Tailed,
+            MathStyle::Stretched,
+            MathStyle::Looped,
+            MathStyle::DoubleStruck,
+            MathStyle::DoubleStruckItalic,
+            MathStyle::Chancery,
+            MathStyle::BoldChancery,
+            MathStyle::Roundhand,
+            MathStyle::BoldRoundhand,
+            MathStyle::Hebrew,
+        ];
+
+        let mut base_characters = ('0'..='9')
+            .chain('A'..='Z')
+            .chain('a'..='z')
+            .collect::<BTreeSet<_>>();
+        for (_, binding) in codex::SYM.iter() {
+            let CodexDef::Symbol(symbol) = binding.def else {
+                continue;
+            };
+            for (_, value, _) in symbol.variants() {
+                base_characters.extend(value.chars());
+            }
+        }
+
+        let mut reverse = HashMap::new();
+        for base in base_characters {
+            for &style in STYLES {
+                let styled = codex::styling::to_style(base, style).collect::<Vec<_>>();
+                if let [styled] = styled.as_slice()
+                    && *styled != base
+                {
+                    reverse.entry(*styled).or_insert(base);
+                }
+            }
+        }
+        reverse
+    });
+    reverse.get(&c).copied().unwrap_or(c)
+}
+
+fn normalize_text_selection(source: &str) -> String {
+    let mut normalized = String::new();
+    for raw in source.chars() {
+        if raw.is_whitespace() || raw == '^' || raw == '_' {
+            continue;
+        }
+        normalized.extend(standard_math_char(raw).to_lowercase());
+    }
+    normalized
+}
+
+fn normalized_match_spans(
+    normalized_text: &str,
+    index_mapping: &[usize],
+    normalized_query: &str,
+) -> Vec<Vec<usize>> {
+    let mut matches = Vec::new();
+    if normalized_query.is_empty() {
+        return matches;
+    }
+
+    let mut search_from = 0;
+    while search_from < normalized_text.len() {
+        let Some(relative_start) = normalized_text[search_from..].find(normalized_query) else {
+            break;
+        };
+        let start = search_from + relative_start;
+        let end = start + normalized_query.len();
+        let mut span_indices = Vec::new();
+        for byte_index in start..end {
+            if let Some(&span_index) = index_mapping.get(byte_index)
+                && !span_indices.contains(&span_index)
+            {
+                span_indices.push(span_index);
+            }
+        }
+        matches.push(span_indices);
+        search_from = end;
+    }
+    matches
 }
 
 fn adaptive_lag_ratio(item_count: usize) -> f64 {
@@ -6208,8 +6389,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Selects a subset of characters/shapes in a text or equation Mobject by exact substring.
-    /// This implementation is robust: it is case-insensitive, whitespace-insensitive,
-    /// format-insensitive (ignores ^, _, $), and correctly maps UTF-8 byte offsets back to glyph IDs.
+    /// Matching is case-insensitive, whitespace-insensitive, and tolerant of
+    /// mathematical styling. If a literal query has no matches, Typst math
+    /// identifiers, shorthands, and primes are resolved to their rendered
+    /// Unicode representation through Typst's parser and Codex.
     pub fn select<'q>(
         &'q mut self,
         target: MobjectRef,
@@ -6219,138 +6402,61 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Selects the zero-based occurrence of a substring. Passing `None`
-    /// selects every non-overlapping occurrence.
+    /// selects every non-overlapping occurrence. Literal matches take
+    /// precedence over the Typst/Codex fallback.
     pub fn select_occurrence<'q>(
         &'q mut self,
         target: MobjectRef,
         substring: &str,
         occurrence: Option<usize>,
     ) -> MobjectSelection<'q, 'w, 's, 'a> {
-        // Helper function to normalize mathematical italic/bold alphanumeric characters back to standard Latin/numeric equivalents.
-        fn to_standard_char(c: char) -> char {
-            let cp = c as u32;
-            match cp {
-                // Planck constant U+210E -> 'h'
-                0x210E => 'h',
-                // Mathematical Bold (Capitals & Smalls)
-                0x1D400..=0x1D419 => char::from_u32(cp - 0x1D400 + 0x41).unwrap_or(c),
-                0x1D41A..=0x1D433 => char::from_u32(cp - 0x1D41A + 0x61).unwrap_or(c),
-                // Mathematical Italic (Capitals & Smalls)
-                0x1D434..=0x1D44D => char::from_u32(cp - 0x1D434 + 0x41).unwrap_or(c),
-                0x1D44E..=0x1D467 => char::from_u32(cp - 0x1D44E + 0x61).unwrap_or(c),
-                // Mathematical Bold Italic (Capitals & Smalls)
-                0x1D468..=0x1D481 => char::from_u32(cp - 0x1D468 + 0x41).unwrap_or(c),
-                0x1D482..=0x1D49B => char::from_u32(cp - 0x1D482 + 0x61).unwrap_or(c),
-                // Script (Capitals & Smalls)
-                0x1D49C..=0x1D4B5 => char::from_u32(cp - 0x1D49C + 0x41).unwrap_or(c),
-                0x1D4B6..=0x1D4CF => char::from_u32(cp - 0x1D4B6 + 0x61).unwrap_or(c),
-                // Bold Script (Capitals & Smalls)
-                0x1D4D0..=0x1D4E9 => char::from_u32(cp - 0x1D4D0 + 0x41).unwrap_or(c),
-                0x1D4EA..=0x1D503 => char::from_u32(cp - 0x1D4EA + 0x61).unwrap_or(c),
-                // Fraktur (Capitals & Smalls)
-                0x1D504..=0x1D51D => char::from_u32(cp - 0x1D504 + 0x41).unwrap_or(c),
-                0x1D51E..=0x1D537 => char::from_u32(cp - 0x1D51E + 0x61).unwrap_or(c),
-                // Double-struck (Capitals & Smalls)
-                0x1D538..=0x1D551 => char::from_u32(cp - 0x1D538 + 0x41).unwrap_or(c),
-                0x1D552..=0x1D56B => char::from_u32(cp - 0x1D552 + 0x61).unwrap_or(c),
-                // Bold Fraktur (Capitals & Smalls)
-                0x1D56C..=0x1D585 => char::from_u32(cp - 0x1D56C + 0x41).unwrap_or(c),
-                0x1D586..=0x1D59F => char::from_u32(cp - 0x1D586 + 0x61).unwrap_or(c),
-                // Sans-serif (Capitals & Smalls)
-                0x1D5A0..=0x1D5B9 => char::from_u32(cp - 0x1D5A0 + 0x41).unwrap_or(c),
-                0x1D5BA..=0x1D5D3 => char::from_u32(cp - 0x1D5BA + 0x61).unwrap_or(c),
-                // Sans-serif Bold (Capitals & Smalls)
-                0x1D5D4..=0x1D5ED => char::from_u32(cp - 0x1D5D4 + 0x41).unwrap_or(c),
-                0x1D5EE..=0x1D607 => char::from_u32(cp - 0x1D5EE + 0x61).unwrap_or(c),
-                // Sans-serif Italic (Capitals & Smalls)
-                0x1D608..=0x1D621 => char::from_u32(cp - 0x1D608 + 0x41).unwrap_or(c),
-                0x1D622..=0x1D63B => char::from_u32(cp - 0x1D622 + 0x61).unwrap_or(c),
-                // Sans-serif Bold Italic (Capitals & Smalls)
-                0x1D63C..=0x1D655 => char::from_u32(cp - 0x1D63C + 0x41).unwrap_or(c),
-                0x1D656..=0x1D66F => char::from_u32(cp - 0x1D656 + 0x61).unwrap_or(c),
-                // Monospace (Capitals & Smalls)
-                0x1D670..=0x1D689 => char::from_u32(cp - 0x1D670 + 0x41).unwrap_or(c),
-                0x1D68A..=0x1D6A3 => char::from_u32(cp - 0x1D68A + 0x61).unwrap_or(c),
-                // Mathematical Numbers (Bold, Double-struck, Sans-serif Bold, Sans-serif Italic, Monospace)
-                0x1D7CE..=0x1D7FF => char::from_u32(0x30 + (cp - 0x1D7CE) % 10).unwrap_or(c),
-                _ => c,
-            }
-        }
-
         let mut child_ids = Vec::new();
         if let Some(state) = self.states.get(target.id) {
-            // 1. Build a normalized representation of flat_text and keep track of original child_spans indices
             let mut normalized_text = String::new();
-            let mut index_mapping = Vec::new(); // maps each byte offset in normalized_text to child_spans index
+            let mut index_mapping = Vec::new();
 
             for (span_idx, child) in state.child_spans.iter().enumerate() {
                 let raw_c = child.span.character;
-                // Ignore spaces, subscripts, superscripts, and generic shape markers
                 if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
                     continue;
                 }
 
-                // Map mathematical alphanumeric variants to standard equivalents
-                let c = to_standard_char(raw_c);
-
-                // Keep the lowercase version
-                let lower_chars: Vec<char> = c.to_lowercase().collect();
-                for lc in lower_chars {
+                for lower in standard_math_char(raw_c).to_lowercase() {
                     let start_byte = normalized_text.len();
-                    normalized_text.push(lc);
+                    normalized_text.push(lower);
                     let end_byte = normalized_text.len();
-                    // Map each byte of this character in normalized_text back to span_idx
                     for _ in start_byte..end_byte {
                         index_mapping.push(span_idx);
                     }
                 }
             }
 
-            // 2. Build the normalized query string
-            let mut normalized_query = String::new();
-            for raw_c in substring.chars() {
-                if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
-                    continue;
-                }
-                let c = to_standard_char(raw_c);
-                for lc in c.to_lowercase() {
-                    normalized_query.push(lc);
+            let literal_query = normalize_text_selection(substring);
+            let mut matches =
+                normalized_match_spans(&normalized_text, &index_mapping, &literal_query);
+            if matches.is_empty() {
+                let typst_source = typst_math_selection_source(substring);
+                let typst_query = normalize_text_selection(&typst_source);
+                if typst_query != literal_query {
+                    matches =
+                        normalized_match_spans(&normalized_text, &index_mapping, &typst_query);
                 }
             }
 
-            // 3. Match normalized query against normalized text
-            if !normalized_query.is_empty() {
-                let mut search_from = 0;
-                let mut match_index = 0;
-                while search_from < normalized_text.len() {
-                    let Some(relative_start) =
-                        normalized_text[search_from..].find(&normalized_query)
-                    else {
-                        break;
-                    };
-                    let start_byte_idx = search_from + relative_start;
-                    let end_byte_idx = start_byte_idx + normalized_query.len();
-                    if occurrence.is_none_or(|index| index == match_index) {
-                        // Gather unique child spans that fall within this matched range.
-                        let mut matched_span_indices = Vec::new();
-                        for byte_idx in start_byte_idx..end_byte_idx {
-                            if let Some(&span_idx) = index_mapping.get(byte_idx)
-                                && !matched_span_indices.contains(&span_idx)
-                            {
-                                matched_span_indices.push(span_idx);
-                            }
-                        }
-                        for span_idx in matched_span_indices {
-                            if let Some(child) = state.child_spans.get(span_idx) {
-                                child_ids.push(child.id);
-                            }
-                        }
-                        if occurrence.is_some() {
-                            break;
-                        }
+            let mut append_match = |span_indices: &[usize]| {
+                for &span_idx in span_indices {
+                    if let Some(child) = state.child_spans.get(span_idx) {
+                        child_ids.push(child.id);
                     }
-                    match_index += 1;
-                    search_from = end_byte_idx;
+                }
+            };
+            if let Some(index) = occurrence {
+                if let Some(span_indices) = matches.get(index) {
+                    append_match(span_indices);
+                }
+            } else {
+                for span_indices in &matches {
+                    append_match(span_indices);
                 }
             }
         }
@@ -6492,6 +6598,16 @@ mod tests {
     }
 
     #[test]
+    fn typst_selection_source_uses_codex_and_typst_syntax() {
+        assert_eq!(typst_math_selection_source("g sin(theta)"), "g sin(θ)");
+        assert_eq!(typst_math_selection_source("theta''"), "θ″");
+        assert_eq!(typst_math_selection_source("sum F_t"), "∑ F_t");
+        assert_eq!(typst_math_selection_source("arrow.r.long"), "⟶");
+        assert_eq!(typst_math_selection_source("a <= b"), "a ≤ b");
+        assert_eq!(typst_math_selection_source("sin(x)"), "sin(x)");
+    }
+
+    #[test]
     fn typst_selection_resolves_semantic_source_that_renders_as_symbols() {
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -6503,13 +6619,103 @@ mod tests {
         let source = "$ - m text(fill: #rgb(\"ffd700\"), g sin(theta)) = m L theta'' $";
         let equation = builder.typst(source, false, None, None, Some(32.0), None);
 
-        let selected = builder
+        let gravity = builder
             .select_occurrence(equation, "g sin(theta)", Some(0))
             .child_ids;
+        let acceleration = builder
+            .select_occurrence(equation, "theta''", Some(0))
+            .child_ids;
+        let state = builder
+            .states
+            .get(equation.id)
+            .expect("compiled equation state");
+        let rendered = state
+            .child_spans
+            .iter()
+            .map(|child| child.span.character)
+            .collect::<String>();
         assert!(
-            !selected.is_empty(),
-            "semantic Typst source must resolve even when theta renders as θ"
+            !gravity.is_empty(),
+            "semantic Typst source must resolve even when theta renders as θ; rendered={rendered:?}"
         );
+        assert!(
+            !acceleration.is_empty(),
+            "Typst prime syntax must resolve to its rendered Unicode glyph; rendered={rendered:?}"
+        );
+        assert!(gravity.len() < state.child_spans.len());
+        assert!(acceleration.len() < state.child_spans.len());
+        assert!(gravity.iter().all(|id| !acceleration.contains(id)));
+
+        let symbols = builder.typst(
+            "$sum F_t arrow.r.long theta.alt$",
+            false,
+            None,
+            None,
+            Some(32.0),
+            None,
+        );
+        assert!(
+            !builder
+                .select_occurrence(symbols, "sum F_t", Some(0))
+                .child_ids
+                .is_empty()
+        );
+        assert!(
+            !builder
+                .select_occurrence(symbols, "arrow.r.long", Some(0))
+                .child_ids
+                .is_empty()
+        );
+        assert!(
+            !builder
+                .select_occurrence(symbols, "theta.alt", Some(0))
+                .child_ids
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn typst_selection_preserves_literal_precedence_and_occurrence() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let repeated = builder.typst("$theta + theta$", false, None, None, Some(32.0), None);
+        let first = builder
+            .select_occurrence(repeated, "theta", Some(0))
+            .child_ids;
+        let second = builder
+            .select_occurrence(repeated, "theta", Some(1))
+            .child_ids;
+        assert!(!first.is_empty());
+        assert!(!second.is_empty());
+        assert!(first.iter().all(|id| !second.contains(id)));
+
+        let mixed = builder.typst(
+            "#text(\"theta\") $theta$",
+            false,
+            None,
+            None,
+            Some(32.0),
+            None,
+        );
+        let literal = builder.select(mixed, "theta").child_ids;
+        let state = builder.states.get(mixed.id).expect("compiled mixed text");
+        let selected_text = literal
+            .iter()
+            .filter_map(|id| {
+                state
+                    .child_spans
+                    .iter()
+                    .find(|child| child.id == *id)
+                    .map(|child| child.span.character)
+            })
+            .collect::<String>();
+        assert_eq!(selected_text, "theta");
     }
 
     #[test]

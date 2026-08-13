@@ -1420,7 +1420,13 @@ def part(
     ...
 
 class TextSelection:
-    """Deferred grapheme, word, line, or semantic-part selection."""
+    """Deferred grapheme, word, line, or semantic-part selection.
+
+    Mathematical animations first match the authored fragment literally. If
+    that produces no glyphs, Typst symbol names, modifiers, shorthands, and
+    prime syntax are resolved to their rendered Unicode through Typst Codex;
+    for example, ``g sin(theta)`` targets the rendered ``g sin(θ)``.
+    """
     def __getitem__(self, name: str) -> TextSelection: ...
     def fill(self, color: Color) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.

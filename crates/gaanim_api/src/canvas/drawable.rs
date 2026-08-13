@@ -754,8 +754,10 @@ impl DrawableHandle {
     /// Colors every matching text or equation fragment in this drawable.
     ///
     /// Matching is case-insensitive and tolerant of math formatting, so a
-    /// query such as `"mc"` can target `m c` in a Typst equation. Later calls
-    /// take precedence when selections overlap.
+    /// query such as `"mc"` can target `m c` in a Typst equation. Typst symbol
+    /// names such as `theta` and `sum` resolve to their rendered Unicode when
+    /// no literal match exists. Later calls take precedence when selections
+    /// overlap.
     pub fn color_by(self, fragment: impl Into<String>, color: Color) -> Self {
         let fragment = fragment.into();
         self.update_spec(|spec| {
@@ -766,6 +768,8 @@ impl DrawableHandle {
     }
 
     /// Creates a deferred selection for glyph-level styling and emphasis.
+    /// Typst symbol names are resolved through Codex when literal matching
+    /// finds nothing.
     pub fn select(&self, fragment: impl Into<String>) -> FragmentSelection {
         FragmentSelection {
             target: self.id,
@@ -777,6 +781,7 @@ impl DrawableHandle {
     }
 
     /// Creates a deferred selection for one zero-based occurrence of a fragment.
+    /// Literal occurrences take precedence over Typst/Codex symbol matching.
     pub fn select_nth(&self, fragment: impl Into<String>, occurrence: usize) -> FragmentSelection {
         FragmentSelection {
             target: self.id,

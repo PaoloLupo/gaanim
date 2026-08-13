@@ -194,8 +194,9 @@ equation = scene.equation(
     "=",
     parts(mass_right="m", length="L", acceleration="theta''"),
 ).at(0, 0)
-equation["gravity"].fill(GOLD)
 scene.play([equation.write(1.2, by="part")])
+scene.play([equation["gravity"].indicate(0.6)])
+scene.play([equation["acceleration"].color_to(GOLD, duration=0.6)])
 scene.export("compact_text_parts.webp", fps=30)
 ```
 ]
@@ -394,6 +395,13 @@ is depth-first over the semantic tree. A selection remains attached to one
 `selection.fill(color)` recompiles a semantic part with its local paint. In
 math, the styled part remains in the same Typst equation as its neighbors, so
 the color change does not add whitespace or move adjacent terms.
+
+Selection animations resolve the authored mathematical source to the glyphs
+that Typst emitted. Literal matching has priority; when it finds nothing,
+Typst's math parser and Codex convert symbol names and modifiers such as
+`theta`, `sum`, or `arrow.r.long`, official shorthands such as `<=`, and prime
+syntax such as `theta''` to the same Unicode used by the rendered equation.
+Unknown identifiers such as `sin` remain unchanged.
 
 === Superficie de TextSelection
 

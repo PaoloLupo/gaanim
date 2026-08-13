@@ -221,6 +221,17 @@ def validate_visualization_contract(module: object) -> list[str]:
             failures.append(f"Scene.equation part {name!r} was not selectable")
     if not isinstance(equation.write(0.5, by="part"), module.Anim):
         failures.append("Scene.equation did not preserve Text animations")
+    codex_equation = scene.equation(
+        module.parts(gravity="g sin(theta)", acceleration="theta''")
+    )
+    codex_animations = (
+        codex_equation["gravity"].indicate(0.3),
+        codex_equation["acceleration"].color_to(module.GOLD, duration=0.3),
+    )
+    if not all(isinstance(animation, module.Anim) for animation in codex_animations):
+        failures.append("Typst/Codex semantic selections did not return animations")
+    else:
+        scene.play(list(codex_animations))
     try:
         scene.equation()
     except ValueError:

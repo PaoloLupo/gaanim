@@ -12,14 +12,12 @@ equation = scene.equation(
     "-",
     parts(
         mass_left="m",
-        # aca espaciado incorrecto
         gravity="g sin(theta)",
     ),
     "=",
     parts(
         mass_right="m",
         length="L",
-        # aca espaciado incorrecto
         acceleration="theta''",
     ),
 ).at(0, 45).scaled(1.25)
@@ -28,12 +26,12 @@ caption = scene.text(
     role="caption",
 ).fill(GRAY).at(0, -150)
 
-# equation["gravity"].fill(GOLD)
-equation["acceleration"].fill(GOLD)
-scene.play([title.write(0.7), equation.write(1.8), caption.fade_in(0.7), equation["gravity"].color_to(GOLD, duration=1)])
+scene.play([title.write(0.7), equation.write(1.8), caption.fade_in(0.7)])
+scene.play([equation["gravity"].indicate(0.7)])
+scene.play([equation["acceleration"].color_to(GOLD, duration=0.7)])
 scene.wait(0.5)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.0, 0.7, 1.8, 2.3])
+    scene.snapshots(snapshots, [0.0, 0.7, 1.8, 2.15, 2.85, 3.2])
 else:
     scene.render()
