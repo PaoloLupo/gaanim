@@ -2,13 +2,13 @@
 
 import os
 
-from gaanim import BLACK, GRAY, WHITE, Direction, Scene
+from gaanim import Anchor, BLACK, GRAY, WHITE, Direction, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.text("Solver comparison", role="title").fill(WHITE).at(0, 250)
-subtitle = scene.text("Residual after 200 iterations", role="subtitle").fill(GRAY).at(0, 195)
+title = scene.text("Solver comparison", role="title").fill(WHITE).at(0, 250, anchor=Anchor.CENTER)
+subtitle = scene.text("Residual after 200 iterations", role="subtitle").fill(GRAY).at(0, 195, anchor=Anchor.CENTER)
 results = scene.table(
     ["Method", "Residual", "Elapsed"],
     [

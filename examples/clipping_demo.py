@@ -2,13 +2,13 @@
 
 import os
 
-from gaanim import Brush, Scene
+from gaanim import Anchor, Brush, Scene
 
 
 scene = Scene(1280, 720, margin=52)
 scene.canvas.set_theme("tokyo-night")
-scene.text("Clipping and masks", role="title").at(0, 285)
-scene.text("Any vector drawable can define the visible region", role="subtitle").at(0, 230)
+scene.text("Clipping and masks", role="title").at(0, 285, anchor=Anchor.CENTER)
+scene.text("Any vector drawable can define the visible region", role="subtitle").at(0, 230, anchor=Anchor.CENTER)
 
 # One large gradient is constrained to a circular viewport.
 orb_mask = scene.circle(118).no_fill().no_stroke().at(-330, 5)
@@ -20,7 +20,7 @@ scene.rect(430, 245).fill(
     )
 ).no_stroke().at(-330, 5).clip(orb_mask)
 scene.circle(118).no_fill().stroke("#7DCFFF", 4).at(-330, 5)
-scene.text("Drawable mask").at(-330, -155)
+scene.text("Drawable mask").at(-330, -155, anchor=Anchor.CENTER)
 
 # The same API reaches every visual leaf of a nested group.
 stripes = []
@@ -32,7 +32,7 @@ stripe_group = scene.group(stripes)
 panel_mask = scene.rounded_rect(390, 235, 42).no_fill().no_stroke().at(287, 5)
 stripe_group.clip(panel_mask)
 scene.rounded_rect(390, 235, 42).no_fill().stroke("#A9B1D6", 4).at(287, 5)
-scene.text("Group mask").at(287, -155)
+scene.text("Group mask").at(287, -155, anchor=Anchor.CENTER)
 
 scene.wait(1.0)
 

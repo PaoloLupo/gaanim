@@ -512,6 +512,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub id_counter: u32,
     pub current_time: f64,
     pub states: MobjectStateMap,
+    /// Typographic metrics retained for text-specific baseline positioning.
+    pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     pub default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -542,6 +544,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         fill: Option<Brush>,
         stroke: StrokeBrush,
         child_spans: Vec<HierarchyChild>,
+        metrics: Option<gaanim_text::prelude::TextMetrics>,
     ) -> MobjectRef {
         let parent_path = compose_child_paths(&child_spans);
         let child_ids = child_spans.iter().map(|child| child.id).collect();
@@ -586,6 +589,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             exclude_from_parent_draw: false,
         };
         self.states.insert(parent_id, state);
+        if let Some(metrics) = metrics {
+            self.text_metrics.insert(parent_id, metrics);
+        }
 
         MobjectRef { id: parent_id }
     }
@@ -803,6 +809,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             id_counter: 0,
             current_time: 0.0,
             states: MobjectStateMap::new(),
+            text_metrics: HashMap::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),
@@ -6123,7 +6130,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         let mut child_spans = Vec::new();
-        let (entity, bounds) = compile_typst_to_hierarchy(
+        let (entity, bounds, metrics) = compile_typst_to_hierarchy(
             self.commands,
             self.font_registry,
             source,
@@ -6138,7 +6145,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             next_id_fn,
             &mut child_spans,
         );
-        self.register_textual_hierarchy(parent_id, entity, bounds, fill, stroke, child_spans)
+        self.register_textual_hierarchy(
+            parent_id,
+            entity,
+            bounds,
+            fill,
+            stroke,
+            child_spans,
+            Some(metrics),
+        )
     }
 
     /// Convenience wrapper for `typst` that uses explicit fonts for both text and math.
@@ -6212,6 +6227,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             )),
             gaanim_scene::StrokeBrush::transparent(),
             child_spans,
+            None,
         )
     }
 
@@ -6288,6 +6304,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             Some(gaanim_core::peniko::Brush::Solid(style.fill_color)),
             gaanim_scene::StrokeBrush::transparent(),
             child_spans,
+            None,
         );
         self.mobject_names
             .insert(parent_id, format!("Text('{}')", content));

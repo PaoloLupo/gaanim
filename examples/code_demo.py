@@ -2,13 +2,13 @@
 
 import os
 
-from gaanim import BLACK, GRAY, WHITE, Direction, Scene
+from gaanim import Anchor, BLACK, GRAY, WHITE, Direction, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.text("Integration step", role="title").fill(WHITE).at(0, 255)
-subtitle = scene.text("Explicit Euler update", role="subtitle").fill(GRAY).at(0, 200)
+title = scene.text("Integration step", role="title").fill(WHITE).at(0, 255, anchor=Anchor.CENTER)
+subtitle = scene.text("Explicit Euler update", role="subtitle").fill(GRAY).at(0, 200, anchor=Anchor.CENTER)
 snippet = scene.code(
     "velocity += acceleration * dt\nposition += velocity * dt",
     language="python",

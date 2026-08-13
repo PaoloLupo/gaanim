@@ -1474,7 +1474,7 @@ scene.export("preview.webp", fps=30)
   signature: ".at(x, y, anchor=Anchor.CENTER) .scaled(factor) .rotated(radians) .z_index(int) .with_pivot(x,y)",
   params: ((name: "x / y", type: "float", default: none, desc: [Target scene-space position.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Local point placed at `(x, y)`.]),),
   returns: (type: "Drawable", desc: [Self.]),
-  desc: [Transforms in scene space. `.at(x, y)` retains center-based positioning; pass an `Anchor` to place an edge or corner at the target. `with_pivot`/`pivot` sets rotation/scale origin.],
+  desc: [Transforms in scene space. Generic drawables use center-based `.at(x, y)` positioning; pass an `Anchor` to place an edge or corner at the target. The specialized `Text` subtype additionally accepts `TextAnchor` and defaults single-line placement to its baseline center; see the Text API. `with_pivot`/`pivot` sets rotation/scale origin.],
 )[
 ```python
 # show-code: true

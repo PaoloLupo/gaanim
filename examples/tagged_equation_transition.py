@@ -2,24 +2,24 @@
 
 import os
 
-from gaanim import BLACK, BLUE, GOLD, GRAY, WHITE, Scene, GREEN, part
+from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene, GREEN, part
 
 
 scene = Scene(1280, 720, background=BLACK)
 
-title = scene.text("Una variable, dos ecuaciones", role="title").fill(WHITE).at(0, 230)
+title = scene.text("Una variable, dos ecuaciones", role="title").fill(WHITE).at(0, 230, anchor=Anchor.CENTER)
 
 energy = (
     scene.text("$E = ", part("mass", "m"), " ", part("light_speed", "c^2"), "$")
-    .at(0, 70)
+    .at(0, 70, anchor=Anchor.CENTER)
 )
 
 momentum = (
     scene.text("$p = ", part("mass", "m"), " ", part("velocity", "v"), "$")
-    .at(0, -90)
+    .at(0, -90, anchor=Anchor.CENTER)
 )
 
-caption = scene.text("La etiqueta 'mass' conecta ambos términos.").fill(GRAY).at(0, -240)
+caption = scene.text("La etiqueta 'mass' conecta ambos términos.").fill(GRAY).at(0, -240, anchor=Anchor.CENTER)
 
 # El color también puede aplicarse usando el nombre semántico.
 energy["mass"].fill(GOLD)

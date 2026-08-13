@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLACK, BLUE, GOLD, GRAY, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(640, 360, background=WHITE)
@@ -14,8 +14,8 @@ mass = scene.circle(24).fill(GOLD).stroke(BLACK, 3).at(70, -45)
 mechanism = scene.group([arm, mass]).with_pivot(*hinge)
 
 scene.dot(11).fill(BLUE).at(*hinge)
-scene.text("scene-space pivot").fill(GRAY).at(-35, 95)
-scene.text("hinge").fill(GRAY).at(-100, -88)
+scene.text("scene-space pivot").fill(GRAY).at(-35, 95, anchor=Anchor.CENTER)
+scene.text("hinge").fill(GRAY).at(-100, -88, anchor=Anchor.CENTER)
 
 scene.play([
     arm.create().duration(0.5),

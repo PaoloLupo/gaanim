@@ -6,6 +6,7 @@ use gaanim_core::peniko::{Brush, Color, ImageData};
 use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
+use gaanim_text::prelude::TextAnchor;
 use std::path::PathBuf;
 
 use crate::anim::{
@@ -607,6 +608,11 @@ pub enum LayoutOp {
     MoveAnchorTo {
         target: DVec3,
         anchor: Anchor,
+    },
+    MoveTextAnchorTo {
+        target: DVec3,
+        anchor: TextAnchor,
+        center_multiline: bool,
     },
     NextTo {
         reference: ObjectId,

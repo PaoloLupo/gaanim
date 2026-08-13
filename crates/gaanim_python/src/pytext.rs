@@ -5,14 +5,54 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySlice, PyTuple};
 
 use gaanim_text::prelude::{
-    flatten_content, TextAlign, TextContent, TextDirection, TextFlow, TextOverflow, TextPart,
-    TextRole, TextSpec, TextStyle, TextWrap,
+    flatten_content, TextAlign, TextAnchor, TextContent, TextDirection, TextFlow, TextOverflow,
+    TextPart, TextRole, TextSpec, TextStyle, TextWrap,
 };
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 use crate::pylayout::{PyAnchor, PyDirection};
+
+#[pyclass(name = "TextAnchor", module = "gaanim_core", frozen, from_py_object)]
+#[derive(Clone, Copy, Debug)]
+pub struct PyTextAnchor(pub TextAnchor);
+
+#[pymethods]
+#[allow(non_snake_case)]
+impl PyTextAnchor {
+    #[classattr]
+    fn BASELINE_LEFT() -> Self {
+        Self(TextAnchor::BaselineLeft)
+    }
+
+    #[classattr]
+    fn BASELINE_CENTER() -> Self {
+        Self(TextAnchor::BaselineCenter)
+    }
+
+    #[classattr]
+    fn BASELINE_RIGHT() -> Self {
+        Self(TextAnchor::BaselineRight)
+    }
+}
+
+enum ResolvedTextAnchor {
+    Geometric(gaanim_api::canvas::Anchor),
+    Typographic(TextAnchor),
+}
+
+fn resolve_text_anchor(value: &Bound<'_, PyAny>) -> PyResult<ResolvedTextAnchor> {
+    if let Ok(anchor) = value.extract::<PyRef<'_, PyAnchor>>() {
+        return Ok(ResolvedTextAnchor::Geometric(anchor.0));
+    }
+    if let Ok(anchor) = value.extract::<PyRef<'_, PyTextAnchor>>() {
+        return Ok(ResolvedTextAnchor::Typographic(anchor.0));
+    }
+    Err(PyTypeError::new_err(
+        "anchor must be an Anchor or TextAnchor",
+    ))
+}
 
 fn parse_role(value: Option<&str>) -> PyResult<Option<TextRole>> {
     value
@@ -732,12 +772,20 @@ impl PyText {
         slf: PyRef<'py, Self>,
         x: f64,
         y: f64,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        slf.handle
-            .clone()
-            .at_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default());
+        match anchor.map(resolve_text_anchor).transpose()? {
+            Some(ResolvedTextAnchor::Geometric(anchor)) => {
+                slf.handle.clone().at_anchor(x, y, anchor);
+            }
+            Some(ResolvedTextAnchor::Typographic(anchor)) => {
+                slf.handle.clone().at_text_anchor(x, y, anchor);
+            }
+            None => {
+                slf.handle.clone().at_text_default(x, y);
+            }
+        }
         Ok(slf)
     }
 
@@ -796,10 +844,17 @@ impl PyText {
         slf: PyRef<'py, Self>,
         x: f64,
         y: f64,
-        anchor: &PyAnchor,
+        anchor: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at_anchor")?;
-        slf.handle.clone().at_anchor(x, y, anchor.0);
+        match resolve_text_anchor(anchor)? {
+            ResolvedTextAnchor::Geometric(anchor) => {
+                slf.handle.clone().at_anchor(x, y, anchor);
+            }
+            ResolvedTextAnchor::Typographic(anchor) => {
+                slf.handle.clone().at_text_anchor(x, y, anchor);
+            }
+        }
         Ok(slf)
     }
 

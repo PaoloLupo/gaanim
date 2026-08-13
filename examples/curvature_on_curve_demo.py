@@ -1,7 +1,7 @@
 """A native osculating circle following a sampled parametric curve."""
 import math
 import os
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = scene.polyline([
@@ -10,7 +10,7 @@ curve = scene.polyline([
 ]).no_fill().stroke(BLUE, 4)
 tracker = scene.parameter(0.15)
 circle = scene.curvature_on_curve(curve, tracker).no_fill().stroke(GOLD, 3)
-title = scene.text("osculating circle").fill(BLACK).at(0, 190)
+title = scene.text("osculating circle").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
 scene.play([curve.create().duration(0.7), circle.create().duration(0.3), title.write().duration(0.4)])
 scene.play([tracker.animate_to(0.85).duration(2.0)])
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

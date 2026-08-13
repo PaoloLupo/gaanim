@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLACK, BLUE, GOLD, GREEN, ORANGE, RED, TEAL, Axis, Brush, Scene, math as gm
+from gaanim import Anchor, BLACK, BLUE, GOLD, GREEN, ORANGE, RED, TEAL, Axis, Brush, Scene, math as gm
 
 scene = Scene(1920, 1080)
 scene.canvas.set_theme("paper")
@@ -21,7 +21,7 @@ riemann = plane.riemann_sum(lambda value: math.sin(value), (-2* math.pi,0), rect
 
 
 point = scene.dot(7).fill(RED).at_coordinate(plane.coord(2, 2))
-title = scene.text("CoordinateSpace + Parameter").fill(BLACK).at(0, 500)
+title = scene.text("CoordinateSpace + Parameter").fill(BLACK).at(0, 500, anchor=Anchor.CENTER)
 
 scene.play([plane.write(), title.write().duration(0.6)])
 scene.play([sine.write().duration(0.8), parabola.write().duration(0.8)])

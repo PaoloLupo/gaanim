@@ -10,7 +10,7 @@ Manual smoke test for:
 
 import os
 
-from gaanim import BLACK, BLUE, GREEN, RED, WHITE, Scene, Transition
+from gaanim import Anchor, BLACK, BLUE, GREEN, RED, WHITE, Scene, Transition
 
 c = Scene(1920, 1080, background=BLACK)
 
@@ -18,14 +18,14 @@ c = Scene(1920, 1080, background=BLACK)
 # Segment 1: shape -> shape
 c.segment("shape_to_shape")
 
-title = c.text("Transform Demo", role="title").fill(WHITE).at(0.0, 260.0)
+title = c.text("Transform Demo", role="title").fill(WHITE).at(0.0, 260.0, anchor=Anchor.CENTER)
 subtitle = (
     c.text(
         "shape -> shape, shape -> text, text -> math, math -> math",
         role="subtitle",
     )
     .fill(WHITE)
-    .at(0.0, 200.0)
+    .at(0.0, 200.0, anchor=Anchor.CENTER)
 )
 title.write().duration(1.0).smooth()
 subtitle.write().duration(1.0).smooth()
@@ -45,7 +45,7 @@ c.wait(0.8)
 c.segment("shape_to_text", Transition.cross_fade(0.5))
 c.wait(1.0)
 
-headline = c.text("Morphing into text", role="title").fill(GREEN).at(0.0, 100.0)
+headline = c.text("Morphing into text", role="title").fill(GREEN).at(0.0, 100.0, anchor=Anchor.CENTER)
 circle.replacement_transform(headline).duration(2.1).spring()
 c.wait(0.5)
 headline.indicate().duration(0.9)
@@ -56,26 +56,26 @@ c.wait(0.7)
 # Keep this in the same segment to avoid transition flicker while exercising
 # text/text and text/math conversions.
 
-phrase = c.text("Energy", role="title").fill(WHITE).at(-260.0, 40.0)
+phrase = c.text("Energy", role="title").fill(WHITE).at(-260.0, 40.0, anchor=Anchor.CENTER)
 phrase.write().duration(0.8).smooth()
 c.wait(0.3)
 
-target_text = c.text("Momentum", role="title").fill(BLUE).at(240.0, -20.0).scaled(1.1)
+target_text = c.text("Momentum", role="title").fill(BLUE).at(240.0, -20.0, anchor=Anchor.CENTER).scaled(1.1)
 phrase.transform(target_text).duration(2.2).spring()
 c.wait(0.8)
 
-target_math = c.text("$p = m v$").fill(GREEN).at(0.0, 10.0).scaled(1.2)
+target_math = c.text("$p = m v$").fill(GREEN).at(0.0, 10.0, anchor=Anchor.CENTER).scaled(1.2)
 phrase.transform(target_math).duration(2.2).spring()
 c.wait(0.8)
 
-alt_math = c.text("$E = m c^2$").fill(BLUE).at(0.0, 10.0).scaled(1.2)
+alt_math = c.text("$E = m c^2$").fill(BLUE).at(0.0, 10.0, anchor=Anchor.CENTER).scaled(1.2)
 phrase.replacement_transform(alt_math).duration(2.2).spring()
 c.wait(0.8)
 
 finale = (
     c.text("Transform pipeline with text and math hierarchies", role="subtitle")
     .fill(GREEN)
-    .at(0.0, -240.0)
+    .at(0.0, -240.0, anchor=Anchor.CENTER)
 )
 finale.write().duration(0.9).smooth()
 alt_math.indicate().duration(0.9)

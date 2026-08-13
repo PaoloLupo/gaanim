@@ -6,6 +6,7 @@ pub use ops::{
 };
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
+pub use gaanim_text::prelude::TextAnchor;
 pub use segment::{
     PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
     SegmentStop,

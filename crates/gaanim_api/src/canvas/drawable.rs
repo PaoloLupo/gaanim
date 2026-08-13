@@ -10,6 +10,7 @@ use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
 use gaanim_objects::prelude::GltfAnimationMetadata;
+use gaanim_text::prelude::TextAnchor;
 
 use crate::anim::{AnimationType, DrawAnimationConfig, TextSelectionEffect};
 use crate::canvas::ops::{
@@ -332,6 +333,7 @@ impl DrawableHandle {
                     op,
                     LayoutOp::SetTranslation(_)
                         | LayoutOp::MoveAnchorTo { .. }
+                        | LayoutOp::MoveTextAnchorTo { .. }
                         | LayoutOp::NextTo { .. }
                         | LayoutOp::AlignTo { .. }
                         | LayoutOp::ToEdge { .. }
@@ -567,6 +569,7 @@ impl DrawableHandle {
                 op,
                 LayoutOp::SetTranslation(_)
                     | LayoutOp::MoveAnchorTo { .. }
+                    | LayoutOp::MoveTextAnchorTo { .. }
                     | LayoutOp::NextTo { .. }
                     | LayoutOp::AlignTo { .. }
                     | LayoutOp::ToEdge { .. }
@@ -953,6 +956,25 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::MoveAnchorTo {
             target: DVec3::new(x, y, 0.0),
             anchor,
+        })
+    }
+
+    /// Place a text baseline anchor at `(x, y)`.
+    pub fn at_text_anchor(self, x: f64, y: f64, anchor: TextAnchor) -> Self {
+        self.push_layout(LayoutOp::MoveTextAnchorTo {
+            target: DVec3::new(x, y, 0.0),
+            anchor,
+            center_multiline: false,
+        })
+    }
+
+    /// Default Text positioning: baseline-center for one line and visual
+    /// center for a multiline block.
+    pub fn at_text_default(self, x: f64, y: f64) -> Self {
+        self.push_layout(LayoutOp::MoveTextAnchorTo {
+            target: DVec3::new(x, y, 0.0),
+            anchor: TextAnchor::BaselineCenter,
+            center_multiline: true,
         })
     }
 

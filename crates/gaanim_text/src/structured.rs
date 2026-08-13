@@ -53,6 +53,19 @@ pub enum TextDirection {
     Rtl,
 }
 
+/// Horizontal reference point on a text object's typographic baseline.
+///
+/// Unlike the geometric `Anchor`, these anchors use the measured text
+/// baseline for Y while retaining a visual left/center/right X coordinate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TextAnchor {
+    BaselineLeft,
+    #[default]
+    BaselineCenter,
+    BaselineRight,
+}
+
 /// Visual and metric text properties. All fields are optional so a reusable
 /// style can overlay the active semantic role without copying theme defaults.
 #[derive(Debug, Clone, PartialEq, Default)]

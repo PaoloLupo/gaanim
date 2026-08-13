@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import Axis, BLACK, GOLD, RED, WHITE, Scene
+from gaanim import Anchor, Axis, BLACK, GOLD, RED, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK)
@@ -20,7 +20,7 @@ helix = axes.parametric(
     (0, 8 * math.pi),
     samples=320,
 ).stroke(RED, 3)
-title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().at(0, 310)
+title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
 scene.camera.look_at(eye=(8, 6, 8), target=(0, 0, 0), duration=1.0)

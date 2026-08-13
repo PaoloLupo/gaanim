@@ -2,17 +2,17 @@
 
 import os
 
-from gaanim import BLUE, GOLD, GREEN, Direction, Scene
+from gaanim import Anchor, BLUE, GOLD, GREEN, Direction, Scene
 
 
 def main():
     scene = Scene(1280, 720, margin=72)
     scene.canvas.set_theme("technical")
-    title = scene.text("Technical visual language", role="title").at(0, 220)
-    subtitle = scene.text("A reusable scientific theme", role="subtitle").at(0, 155)
+    title = scene.text("Technical visual language", role="title").at(0, 220, anchor=Anchor.CENTER)
+    subtitle = scene.text("A reusable scientific theme", role="subtitle").at(0, 155, anchor=Anchor.CENTER)
     circle = scene.circle(75).fill(GREEN).at(-250, -10)
     square = scene.rect(150, 150).stroke(GOLD, 6).no_fill().at(250, -10)
-    equation = scene.text("$H psi = E psi$").at(0, -180)
+    equation = scene.text("$H psi = E psi$").at(0, -180, anchor=Anchor.CENTER)
 
     scene.play([
         circle.grow_from_center().duration(1.2).spring(),

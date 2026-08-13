@@ -214,6 +214,12 @@ class Anchor:
     BOTTOM_LEFT: ClassVar[Anchor]
     BOTTOM_RIGHT: ClassVar[Anchor]
 
+class TextAnchor:
+    """Horizontal reference point on a Text object's typographic baseline."""
+    BASELINE_LEFT: ClassVar[TextAnchor]
+    BASELINE_CENTER: ClassVar[TextAnchor]
+    BASELINE_RIGHT: ClassVar[TextAnchor]
+
 class AnchorPoint:
     """Non-rendered endpoint bound to a drawable's local bounds."""
 
@@ -1577,6 +1583,35 @@ class Text(Drawable):
     def lines(self) -> TextQuery: ...
     @property
     def parts(self) -> TextQuery: ...
+    def at(
+        self,
+        x: float,
+        y: float,
+        anchor: Optional[Anchor | TextAnchor] = None,
+    ) -> Self:
+        """Place this Text and preserve its specialized handle.
+
+        A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
+        multiline block defaults to its visual center. Explicit
+        ``TextAnchor`` values align the first line's baseline; geometric
+        ``Anchor`` values retain bounds-based placement. Layout-owned text
+        raises ``LayoutOwnershipError``.
+
+        Example:
+            label.at(0.0, 40.0, TextAnchor.BASELINE_LEFT)
+        """
+        ...
+    def at_anchor(self, x: float, y: float, anchor: Anchor | TextAnchor) -> Self:
+        """Place a geometric or typographic text anchor at ``(x, y)``.
+
+        ``TextAnchor`` uses the first visual line's baseline, including for
+        multiline text. Other values raise ``TypeError``; layout-owned text
+        raises ``LayoutOwnershipError``.
+
+        Example:
+            equation.at_anchor(0.0, 0.0, TextAnchor.BASELINE_CENTER)
+        """
+        ...
     def write(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
         """Write text over an optional positional duration, grouped as requested.
 

@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLUE, CYAN, GOLD, GRAY, WHITE, Scene
+from gaanim import Anchor, BLUE, CYAN, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(960, 540, background=WHITE)
@@ -17,19 +17,19 @@ spring = scene.path(
     [(-210, -10), (-175, 25), (-140, -45), (-105, 25), (-70, -45), (-35, 25), (0, -10)]
 ).no_fill().stroke(CYAN, 5)
 mass = scene.rect(70, 62).fill(GOLD).stroke(GRAY, 4).at(48, -10)
-mass_label = scene.text("m").fill(GRAY).at(48, -10)
+mass_label = scene.text("m").fill(GRAY).at(48, -10, anchor=Anchor.CENTER)
 mechanism = scene.group([rail, spring, mass, mass_label]).at(-35, 40).pivot(-35, 40).rotated(0.48)
 
 # Technical annotations use dedicated primitives instead of hand-built paths.
 angle_arc = scene.arc(-20, 20, 55, 0.48, 0.22).no_fill().stroke(GRAY, 3)
 rotation = scene.curved_arrow(-20, -155, 145, -115, 0.9).fill(GRAY)
-omega = scene.text("$omega$").fill(GRAY).at(115, -135)
+omega = scene.text("$omega$").fill(GRAY).at(115, -135, anchor=Anchor.CENTER)
 extension = scene.dimension(85, 145, 175, 145, 35)
-extension_label = scene.text("e").fill(GRAY).at(130, 195)
+extension_label = scene.text("e").fill(GRAY).at(130, 195, anchor=Anchor.CENTER)
 
-scene.text("x").fill(GRAY).at(385, 2)
-scene.text("y").fill(GRAY).at(-5, 235)
-equation = scene.text("$eta'' + (2k/m - omega^2) eta = 0$").fill(GRAY).at(0, -215)
+scene.text("x").fill(GRAY).at(385, 2, anchor=Anchor.CENTER)
+scene.text("y").fill(GRAY).at(-5, 235, anchor=Anchor.CENTER)
+equation = scene.text("$eta'' + (2k/m - omega^2) eta = 0$").fill(GRAY).at(0, -215, anchor=Anchor.CENTER)
 
 scene.play([
     disk.create().duration(0.7),

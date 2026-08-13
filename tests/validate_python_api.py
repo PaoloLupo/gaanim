@@ -17,7 +17,14 @@ TYPE_CHECKING_ONLY = {
     "ColorLike",
     "Paint",
 }
-TEXT_API_CLASSES = {"TextStyle", "TextFlow", "TextSelection", "TextQuery", "Text"}
+TEXT_API_CLASSES = {
+    "TextAnchor",
+    "TextStyle",
+    "TextFlow",
+    "TextSelection",
+    "TextQuery",
+    "Text",
+}
 REMOVED_TEXT_SCENE_MEMBERS = {
     "title",
     "subtitle",
@@ -311,9 +318,25 @@ def validate_visualization_contract(module: object) -> list[str]:
     )
     if not isinstance(chained_text, module.Text):
         failures.append("Text fluent styling or positioning erased the Text subtype")
+    baseline_text = scene.text("Baseline").at(
+        0.0, 0.0, anchor=module.TextAnchor.BASELINE_LEFT
+    )
+    baseline_equation = scene.equation("x_1 = 2").at_anchor(
+        0.0, 0.0, module.TextAnchor.BASELINE_RIGHT
+    )
+    if not all(isinstance(value, module.Text) for value in (baseline_text, baseline_equation)):
+        failures.append("TextAnchor positioning did not preserve Text/Equation handles")
     anchored_drawable = scene.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
     if not isinstance(anchored_drawable, module.Drawable):
         failures.append("Drawable.at with an anchor did not return Drawable")
+    try:
+        scene.rect(40.0, 20.0).at(
+            0.0, 0.0, anchor=module.TextAnchor.BASELINE_CENTER
+        )
+    except TypeError:
+        pass
+    else:
+        failures.append("Drawable.at accepted a TextAnchor")
     if not isinstance(
         anchored_drawable.move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
         module.Anim,

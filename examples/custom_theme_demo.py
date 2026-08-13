@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Axis, ChartSpec, Scene, Theme
+from gaanim import Anchor, Axis, ChartSpec, Scene, Theme
 
 
 scene = Scene(1280, 720, margin=54)
@@ -30,8 +30,8 @@ research_theme = Theme(
 scene.canvas.set_theme(research_theme)
 assert not scene.canvas.validate_theme()
 
-scene.text("A theme is a visual system", role="title").at(0, 265)
-scene.text("Nord, customized for a research presentation", role="subtitle").at(0, 205)
+scene.text("A theme is a visual system", role="title").at(0, 265, anchor=Anchor.CENTER)
+scene.text("Nord, customized for a research presentation", role="subtitle").at(0, 205, anchor=Anchor.CENTER)
 scene.line(-460, 165, 460, 165).stroke(scene.canvas.color("rule"), 2)
 
 scene.bullets(

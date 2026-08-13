@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Axis, BLACK, ChartSpec, Field, GOLD, Guide, Scale, Scene, Value
+from gaanim import Anchor, Axis, BLACK, ChartSpec, Field, GOLD, Guide, Scale, Scene, Value
 
 scene = Scene(1280, 720, background=BLACK)
 data = {
@@ -31,7 +31,7 @@ base = (
 target = base.encode(z="z").axes(z=Axis.symlog(-3, 3).ticks(1).label("z"))
 
 chart = scene.chart(base).inspect(("id", "group", "x", "y", "z"), format="{id}: {group}")
-title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().at(0, 310)
+title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
 
 scene.play([chart.create(0.9), title.write(0.6)])
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)

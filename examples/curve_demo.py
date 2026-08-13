@@ -1,6 +1,6 @@
 """A Typst-inspired composed curve with relative and automatic controls."""
 import os
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = scene.curve([
@@ -10,7 +10,7 @@ curve = scene.curve([
     ("quad", [(100, 160), (-220, 80)]),
     ("close_smooth", []),
 ]).fill(BLUE).stroke(BLACK, 4)
-title = scene.text("composed curve").fill(BLACK).at(0, 190)
+title = scene.text("composed curve").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
 marker = scene.dot(9).fill(GOLD).at(-220, 80)
 scene.play([curve.create().duration(1.0), title.write().duration(0.4), marker.create().duration(0.3)])
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

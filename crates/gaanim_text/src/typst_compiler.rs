@@ -55,14 +55,26 @@ struct CachedTypstChild {
 #[derive(Clone)]
 struct CachedTypstHierarchy {
     parent_bounds: Bounds3D,
-    baseline: f64,
+    metrics: TextMetrics,
     children: Vec<CachedTypstChild>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BaselineCandidate {
-    font_size: f64,
-    y: f64,
+/// Typographic metrics retained alongside compiled Typst vector geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextMetrics {
+    /// Local Y coordinate of the first visual line's baseline.
+    pub first_baseline: f64,
+    /// Number of visual text lines represented by the compiled frame.
+    pub line_count: usize,
+}
+
+impl Default for TextMetrics {
+    fn default() -> Self {
+        Self {
+            first_baseline: 0.0,
+            line_count: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -370,7 +382,6 @@ fn extract_frame_items(
     world: &dyn World,
     char_index_counter: &mut usize,
     extracted_children: &mut Vec<PendingTypstChild>,
-    baseline: &mut Option<BaselineCandidate>,
 ) {
     for (pos, item) in frame.items() {
         // Typst frames use Y-down coordinate system, and we convert it to Y-up
@@ -391,7 +402,6 @@ fn extract_frame_items(
                     world,
                     char_index_counter,
                     extracted_children,
-                    baseline,
                 );
             }
             FrameItem::Text(text) => {
@@ -400,15 +410,6 @@ fn extract_frame_items(
                 let upem = font.units_per_em();
                 let scale = size.to_pt() / upem;
                 let ttf = font.ttf();
-                let baseline_y = item_transform * kurbo::Point::ORIGIN;
-                let candidate = BaselineCandidate {
-                    font_size: size.to_pt(),
-                    y: baseline_y.y,
-                };
-                if baseline.is_none_or(|current| candidate.font_size > current.font_size) {
-                    *baseline = Some(candidate);
-                }
-
                 // Determine effective fill brush
                 let fill_brush = typst_paint_to_brush(&text.fill, default_fill);
 
@@ -528,6 +529,89 @@ fn extract_frame_items(
     }
 }
 
+/// Collect the baselines of visual lines without mistaking the numerator,
+/// denominator, or scripts inside a math group for separate paragraph lines.
+#[derive(Debug, Clone, Copy)]
+struct LineBaselineSample {
+    y: f64,
+    size: f64,
+}
+
+fn collect_visual_line_baselines(
+    frame: &Frame,
+    current_transform: &kurbo::Affine,
+) -> Vec<LineBaselineSample> {
+    let mut local = Vec::new();
+    let mut deferred_groups = Vec::new();
+
+    for (pos, item) in frame.items() {
+        let item_offset = kurbo::Affine::translate((pos.x.to_pt(), pos.y.to_pt()));
+        let item_transform = *current_transform * item_offset;
+        match item {
+            FrameItem::Text(text) => {
+                local.push(LineBaselineSample {
+                    y: (item_transform * kurbo::Point::ORIGIN).y,
+                    size: text.size.to_pt(),
+                });
+            }
+            FrameItem::Group(group) => {
+                let group_transform = item_transform * typst_transform_to_affine(&group.transform);
+                if group.frame.has_baseline() {
+                    let point =
+                        group_transform * kurbo::Point::new(0.0, group.frame.baseline().to_pt());
+                    local.push(LineBaselineSample {
+                        y: point.y,
+                        size: group.frame.height().to_pt(),
+                    });
+                } else {
+                    deferred_groups.push((&group.frame, group_transform));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !local.is_empty() {
+        return local;
+    }
+
+    deferred_groups
+        .into_iter()
+        .flat_map(|(frame, transform)| collect_visual_line_baselines(frame, &transform))
+        .collect()
+}
+
+fn effective_line_baselines(mut samples: Vec<LineBaselineSample>) -> Vec<f64> {
+    samples.sort_by(|left, right| right.y.total_cmp(&left.y));
+    let mut clusters: Vec<LineBaselineSample> = Vec::new();
+    for sample in samples {
+        if let Some(cluster) = clusters
+            .iter_mut()
+            .find(|cluster| (cluster.y - sample.y).abs() <= 0.5)
+        {
+            cluster.size = cluster.size.max(sample.size);
+        } else {
+            clusters.push(sample);
+        }
+    }
+
+    // Typst emits scripts as independent text runs. A smaller run close to a
+    // larger run belongs to that same mathematical line; a genuine following
+    // line is separated by approximately a full em or more.
+    clusters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            let is_script = clusters.iter().enumerate().any(|(other_index, other)| {
+                other_index != index
+                    && other.size > candidate.size * 1.1
+                    && (other.y - candidate.y).abs() < other.size * 0.75
+            });
+            (!is_script).then_some(candidate.y)
+        })
+        .collect()
+}
+
 fn build_typst_cache_key(
     font_universe: FontUniverseKey,
     source: &str,
@@ -636,9 +720,11 @@ fn compile_typst_source_with_resources(
     let mut total_bounds: Option<Bounds3D> = None;
     let root_transform = kurbo::Affine::scale_non_uniform(1.0, -1.0);
     let mut extracted_children = Vec::new();
-    let mut baseline = None;
+    let mut line_baselines = Vec::new();
 
     if let Some(page) = document.pages().first() {
+        line_baselines =
+            effective_line_baselines(collect_visual_line_baselines(&page.frame, &root_transform));
         let mut char_index_counter = 0;
         extract_frame_items(
             &page.frame,
@@ -649,7 +735,6 @@ fn compile_typst_source_with_resources(
             &world,
             &mut char_index_counter,
             &mut extracted_children,
-            &mut baseline,
         );
     }
 
@@ -677,9 +762,19 @@ fn compile_typst_source_with_resources(
         DVec3::new(half_size.x, half_size.y, 0.0),
     );
 
+    for baseline in &mut line_baselines {
+        *baseline -= text_center.y;
+    }
+    line_baselines.sort_by(|left, right| right.total_cmp(left));
+    line_baselines.dedup_by(|left, right| (*left - *right).abs() <= 0.5);
+    let metrics = TextMetrics {
+        first_baseline: line_baselines.first().copied().unwrap_or(0.0),
+        line_count: line_baselines.len(),
+    };
+
     Ok(CachedTypstHierarchy {
         parent_bounds: total_bounds,
-        baseline: baseline.map_or(0.0, |candidate| candidate.y - text_center.y),
+        metrics,
         children: centered_children,
     })
 }
@@ -771,7 +866,7 @@ fn spawn_cached_typst_hierarchy(
     let parent_entity = commands.spawn(parent_bundle).id();
     commands
         .entity(parent_entity)
-        .insert(TextBaseline(cached.baseline));
+        .insert(TextBaseline(cached.metrics.first_baseline));
 
     for child in &cached.children {
         let child_id = next_id_fn();
@@ -816,7 +911,7 @@ pub fn compile_typst_to_hierarchy(
     parent_id: ObjectId,
     next_id_fn: impl FnMut() -> ObjectId,
     child_spans: &mut Vec<HierarchyChild>,
-) -> (Entity, Bounds3D) {
+) -> (Entity, Bounds3D, TextMetrics) {
     let cached = match cached_typst_hierarchy(
         font_registry,
         source,
@@ -836,18 +931,19 @@ pub fn compile_typst_to_hierarchy(
             let bounds = Bounds3D::default();
             let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
             let entity = commands.spawn(bundle).id();
-            return (entity, bounds);
+            return (entity, bounds, TextMetrics::default());
         }
     };
 
-    spawn_cached_typst_hierarchy(
+    let (entity, bounds) = spawn_cached_typst_hierarchy(
         commands,
         source,
         parent_id,
         next_id_fn,
         child_spans,
         &cached,
-    )
+    );
+    (entity, bounds, cached.metrics)
 }
 
 #[cfg(test)]
@@ -941,12 +1037,42 @@ mod tests {
         )
         .expect("math label should compile");
 
-        assert!(compiled.baseline.is_finite());
-        assert!(compiled.baseline > compiled.parent_bounds.min.y);
-        assert!(compiled.baseline < compiled.parent_bounds.max.y);
+        assert!(compiled.metrics.first_baseline.is_finite());
+        assert!(compiled.metrics.first_baseline > compiled.parent_bounds.min.y);
+        assert!(compiled.metrics.first_baseline < compiled.parent_bounds.max.y);
         assert!(
-            compiled.baseline.abs() > 0.1,
+            compiled.metrics.first_baseline.abs() > 0.1,
             "a subscripted formula baseline must not collapse to its visual center"
         );
+        assert_eq!(compiled.metrics.line_count, 1);
+    }
+
+    #[test]
+    fn typst_metrics_distinguish_visual_lines_from_math_scripts() {
+        let registry = FontRegistry::new();
+        let compile = |source: &str| {
+            compile_typst_source(
+                &registry,
+                source,
+                false,
+                Some("New Computer Modern"),
+                Some("New Computer Modern Math"),
+                Some(32.0),
+                Some(32.0),
+                &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+                &StrokeBrush::transparent(),
+            )
+            .expect("text fixture should compile")
+        };
+
+        let equation =
+            compile("#set page(width: auto, height: auto, margin: 0pt)\n$frac(x_1^2, y_2)$");
+        assert_eq!(equation.metrics.line_count, 1);
+
+        let paragraph = compile(
+            "#set page(width: 180pt, height: auto, margin: 0pt)\n#set text(size: 32pt)\nFirst line\\\nSecond line",
+        );
+        assert_eq!(paragraph.metrics.line_count, 2);
+        assert!(paragraph.metrics.first_baseline > 0.0);
     }
 }

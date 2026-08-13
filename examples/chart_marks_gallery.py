@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLACK, ChartSpec, Scene
+from gaanim import Anchor, BLACK, ChartSpec, Scene
 
 scene = Scene(1600, 900, background=BLACK)
 series = {
@@ -54,7 +54,7 @@ for index, (name, spec) in enumerate(specs):
         chart = scene.chart(spec).scaled(0.2).at_3d(x / 60, y / 60, 0)
     else:
         chart = scene.chart(spec).scaled(0.17).at(x, y)
-    label = scene.text(name).hud().scaled(0.55).at(x, y + 150)
+    label = scene.text(name).hud().scaled(0.55).at(x, y + 150, anchor=Anchor.CENTER)
     charts.extend([chart.drawable(), label])
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)

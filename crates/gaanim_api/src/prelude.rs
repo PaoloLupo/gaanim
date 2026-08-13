@@ -6,7 +6,7 @@ pub use crate::canvas::{
     Canvas, CanvasEndpoint, CanvasRay, CanvasTheme, CanvasUnits, ChartHandle,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, Direction, DrawableHandle,
     ForceVectorHandle, ObjectSpec, Parameter, PointRef, SegmentError, SegmentHandle, SegmentId,
-    SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, SupportHandle, ThemePalette,
+    SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, SupportHandle, TextAnchor, ThemePalette,
 };
 pub use gaanim_expr::{EvalContext, Expr, VectorExpr};
 pub use gaanim_objects::primitives3d::Primitive3DError;

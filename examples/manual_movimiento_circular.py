@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLUE, WHITE, YELLOW, Axis, Color, Scene, math as gm
+from gaanim import Anchor, BLUE, WHITE, YELLOW, Axis, Color, Scene, math as gm
 
 # Paleta semántica.
 BACKGROUND = Color(15, 23, 42)
@@ -20,9 +20,9 @@ line_length = 600.0
 theta = scene.parameter(0.0)
 
 title = scene.text("Movimiento circular y curva seno", role="title")
-title.fill(WHITE).at(0, 265)
+title.fill(WHITE).at(0, 265, anchor=Anchor.CENTER)
 caption = scene.text("Un solo ángulo gobierna ambas representaciones", role="subtitle")
-caption.fill(MUTED).at(0, 220)
+caption.fill(MUTED).at(0, 220, anchor=Anchor.CENTER)
 
 orbit = (
     scene.circle(radius_value)
@@ -70,10 +70,10 @@ projection_line.stroke(ACCENT, 2).no_fill()
 formula = (
     scene.text("$y(theta) = r sin(theta)$", role="subtitle")
     .fill(WHITE)
-    .at(0, -215)
+    .at(0, -215, anchor=Anchor.CENTER)
 )
 explanation = scene.text("La fase y la altura comparten el mismo parámetro", role="body")
-explanation.fill(MUTED).at(0, -265)
+explanation.fill(MUTED).at(0, -265, anchor=Anchor.CENTER)
 
 # Timeline narrativa y determinista.
 scene.play([title.write().duration(0.8), caption.fade_in().duration(0.6)], lag=0.12)

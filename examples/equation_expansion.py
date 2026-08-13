@@ -2,22 +2,22 @@
 
 import os
 
-from gaanim import BLACK, GOLD, WHITE, Scene, part
+from gaanim import Anchor, BLACK, GOLD, WHITE, Scene, part
 
 
 scene = Scene(1280, 720, background=BLACK)
 
-title = scene.text("Descomponer una masa", role="title").fill(WHITE).at(0, 220)
+title = scene.text("Descomponer una masa", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
 
 compact = (
     scene.text("$E = ", part("mass", "m"), " c^2$")
-    .at(0, 20)
+    .at(0, 20, anchor=Anchor.CENTER)
 )
 expanded = (
     scene.text("$E = ", part("mass", "(m_1 + m_2)"), " c^2$")
-    .at(0, 20)
+    .at(0, 20, anchor=Anchor.CENTER)
 )
-caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").at(0, -170)
+caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").at(0, -170, anchor=Anchor.CENTER)
 
 compact["mass"].fill(GOLD)
 expanded["mass"].fill(GOLD)

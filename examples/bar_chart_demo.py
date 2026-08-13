@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Axis, BLACK, BLUE, ChartSpec, GRAY, WHITE, Direction, Scene, Value
+from gaanim import Anchor, Axis, BLACK, BLUE, ChartSpec, GRAY, WHITE, Direction, Scene, Value
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
@@ -19,8 +19,8 @@ spec = (
 )
 chart = scene.chart(spec).at(0, -35)
 
-title = scene.text("Convergence benchmark", role="title").fill(WHITE).at(0, 245)
-subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).at(0, 190)
+title = scene.text("Convergence benchmark", role="title").fill(WHITE).at(0, 245, anchor=Anchor.CENTER)
+subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).at(0, 190, anchor=Anchor.CENTER)
 scene.play([
     title.write().duration(0.55),
     subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),

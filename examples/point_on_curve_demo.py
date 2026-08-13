@@ -2,7 +2,7 @@
 import math
 import os
 
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = (
@@ -15,7 +15,7 @@ curve = (
 )
 tracker = scene.parameter(0.0)
 dot = scene.point_on_curve(curve, tracker).fill(GOLD)
-title = scene.text("point on curve").fill(BLACK).at(0, 190)
+title = scene.text("point on curve").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
 scene.play([curve.create().duration(0.7), dot.create().duration(0.3), title.write().duration(0.4)])
 scene.play([tracker.animate_to(1.0).duration(2.0)])
 

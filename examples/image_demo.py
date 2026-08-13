@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from gaanim import GOLD, WHITE, Scene
+from gaanim import Anchor, GOLD, WHITE, Scene
 
 
 scene = Scene(960, 540)
@@ -16,7 +16,7 @@ source = (
     / "seek_0008_t_12_900000.png"
 )
 
-title = scene.text("ImageMobject", role="title").fill(WHITE).at(0, 220)
+title = scene.text("ImageMobject", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
 # Loading the same path repeatedly reuses the process-local decoded texture cache.
 contain = scene.image(str(source), width=250, height=150, fit="contain").at(-300, 20)
 cover = scene.image(str(source), width=250, height=150, fit="cover").at(0, 20)
@@ -32,7 +32,7 @@ crop = (
     .opacity(0.78)
     .rotated(-0.08)
 )
-caption = scene.text("contain • cover • crop + stretch").fill(GOLD).at(0, -205)
+caption = scene.text("contain • cover • crop + stretch").fill(GOLD).at(0, -205, anchor=Anchor.CENTER)
 
 scene.play([title.write(0.6), contain.fade_in(0.8), cover.fade_in(0.8), crop.fade_in(0.8)])
 scene.play([contain.move(20, 0).duration(0.7), crop.rotate(0.16).duration(0.7)])

@@ -7,7 +7,7 @@ from gaanim import Anchor, BLACK, CYAN, GOLD, GREEN, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=52, theme="technical")
-title = scene.text("Fuerzas dinámicas reactivas", role="title").at(0, 285)
+title = scene.text("Fuerzas dinámicas reactivas", role="title").at(0, 285, anchor=Anchor.CENTER)
 
 body = scene.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).at(-120, -20)
 force_origin = body.anchor_point(Anchor.TOP_RIGHT)
@@ -45,7 +45,7 @@ resultant = scene.force_from_components(
 caption = scene.text(
     "La escala visual no altera la magnitud física",
     role="caption",
-).at(0, -265)
+).at(0, -265, anchor=Anchor.CENTER)
 
 scene.play([
     title.write(),

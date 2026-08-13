@@ -2,12 +2,12 @@
 
 import os
 
-from gaanim import BLACK, BLUE, GRAY, NAVY, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GRAY, NAVY, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.text("Technical primitives", role="title").fill(WHITE).at(0, 260)
+title = scene.text("Technical primitives", role="title").fill(WHITE).at(0, 260, anchor=Anchor.CENTER)
 guide = scene.dashed_line(-420, 130, -100, 130, dash_length=20, gap_length=12).stroke(GRAY, 3)
 measure = scene.double_arrow(-420, 70, -100, 70).fill(BLUE)
 star = scene.star(5, 78, 36).fill(NAVY).at(80, 100)

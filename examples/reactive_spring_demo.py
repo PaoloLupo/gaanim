@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLACK, BLUE, GOLD, GRAY, WHITE, Scene
+from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(800, 420, background=WHITE)
@@ -14,7 +14,7 @@ measurement = scene.dimension_between(anchor, mass, -78).no_fill().stroke(GRAY, 
 mass_label = scene.text("m").fill(BLACK)
 mass_label.follow_to(mass, offset=(0, 54))
 rail = scene.line(-285, -48, 245, -48).stroke(GRAY, 4)
-label = scene.text("reactive helical spring").fill(GRAY).at(0, 120)
+label = scene.text("reactive helical spring").fill(GRAY).at(0, 120, anchor=Anchor.CENTER)
 
 scene.play([
     anchor.fade_in(),

@@ -6475,10 +6475,12 @@ impl Canvas {
         let entity = state.entity;
         let mut transform = original_transform;
         let mut pivot_in_scene = None;
+        let mut pending_text_anchor = None;
 
         for op in &spec.layout_ops {
             match op {
                 LayoutOp::SetTranslation(translation) => {
+                    pending_text_anchor = None;
                     transform.translation = if matches!(spec.kind, SpawnKind::Group(_)) {
                         *translation - bounds.center()
                     } else {
@@ -6506,8 +6508,16 @@ impl Canvas {
                     pivot_in_scene = Some(*pivot);
                 }
                 LayoutOp::MoveAnchorTo { target, anchor } => {
+                    pending_text_anchor = None;
                     transform =
                         gaanim_layout::compute_move_to(bounds, &transform, *target, *anchor);
+                }
+                LayoutOp::MoveTextAnchorTo {
+                    target,
+                    anchor,
+                    center_multiline,
+                } => {
+                    pending_text_anchor = Some((*target, *anchor, *center_multiline));
                 }
                 LayoutOp::NextTo {
                     reference,
@@ -6515,6 +6525,7 @@ impl Canvas {
                     spacing,
                     aligned_edge,
                 } => {
+                    pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
                         bevy::prelude::warn!(
                             "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
@@ -6547,6 +6558,7 @@ impl Canvas {
                     target_anchor,
                     reference_anchor,
                 } => {
+                    pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
                         bevy::prelude::warn!(
                             "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
@@ -6574,6 +6586,7 @@ impl Canvas {
                     transform = transform.shift_3d(shift);
                 }
                 LayoutOp::ToEdge { direction, buff } => {
+                    pending_text_anchor = None;
                     transform = gaanim_layout::compute_to_edge(
                         bounds,
                         &transform,
@@ -6583,6 +6596,7 @@ impl Canvas {
                     );
                 }
                 LayoutOp::ToCorner { corner, buff } => {
+                    pending_text_anchor = None;
                     transform = gaanim_layout::compute_to_corner(
                         bounds,
                         &transform,
@@ -6594,7 +6608,53 @@ impl Canvas {
             }
         }
 
-        if let Some(pivot) = pivot_in_scene {
+        if let Some((target, anchor, center_multiline)) = pending_text_anchor {
+            let point = builder
+                .text_metrics
+                .get(&id)
+                .filter(|metrics| metrics.line_count > 0)
+                .map(|metrics| {
+                    if center_multiline && metrics.line_count > 1 {
+                        bounds.center()
+                    } else {
+                        let x = match anchor {
+                            gaanim_text::prelude::TextAnchor::BaselineLeft => bounds.min.x,
+                            gaanim_text::prelude::TextAnchor::BaselineCenter => bounds.center().x,
+                            gaanim_text::prelude::TextAnchor::BaselineRight => bounds.max.x,
+                        };
+                        DVec3::new(x, metrics.first_baseline, bounds.center().z)
+                    }
+                })
+                .unwrap_or_else(|| bounds.center());
+
+            if let Some(pivot) = pivot_in_scene {
+                // Satisfy both constraints exactly: the public pivot remains
+                // fixed in scene space while the requested text point lands on
+                // its target after the final rotation and scale.
+                let rotated_delta = transform.rotation.inverse() * (target - pivot);
+                let local_delta = DVec3::new(
+                    if transform.scale.x.abs() > f64::EPSILON {
+                        rotated_delta.x / transform.scale.x
+                    } else {
+                        0.0
+                    },
+                    if transform.scale.y.abs() > f64::EPSILON {
+                        rotated_delta.y / transform.scale.y
+                    } else {
+                        0.0
+                    },
+                    if transform.scale.z.abs() > f64::EPSILON {
+                        rotated_delta.z / transform.scale.z
+                    } else {
+                        0.0
+                    },
+                );
+                transform.translation = pivot - point + local_delta;
+                transform.anchor = pivot - transform.translation;
+            } else {
+                transform = gaanim_layout::compute_move_point_to(&transform, target, point);
+            }
+        } else if let Some(pivot) = pivot_in_scene {
             // SpatialTransform stores anchors in local coordinates, while the
             // public API accepts the stable scene-space point users see.
             transform.anchor = pivot - transform.translation;
@@ -6612,11 +6672,169 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::DrawableHandle;
+    use crate::canvas::{Anchor, DrawableHandle, TextAnchor};
     use bevy::ecs::world::CommandQueue;
     use gaanim_core::peniko::Brush;
-    use gaanim_scene::LocalBounds;
+    use gaanim_math::SpatialTransform;
+    use gaanim_scene::{LocalBounds, TextBaseline};
     use gaanim_timeline::snapshot::WorldSnapshot;
+
+    fn compile_canvas_for_layout(canvas: Canvas) -> World {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        world
+    }
+
+    fn only_text_root(
+        world: &mut World,
+    ) -> (gaanim_math::Bounds3D, TextBaseline, SpatialTransform) {
+        let roots = world
+            .query::<(
+                &LocalBounds,
+                &TextBaseline,
+                &SpatialTransform,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(world)
+            .filter_map(|(bounds, baseline, transform, parent)| {
+                parent
+                    .is_none()
+                    .then_some((bounds.0, *baseline, *transform))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(roots.len(), 1, "expected exactly one text root");
+        roots[0]
+    }
+
+    fn assert_point_close(actual: DVec3, expected: DVec3) {
+        assert!(
+            actual.distance(expected) < 1e-6,
+            "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn default_single_line_text_keeps_its_baseline_center_after_transform_layout() {
+        for source in ["HAPPY", "gyp", "$frac(x_1^2, y_2) = 1$"] {
+            let mut canvas = Canvas::new(640, 360);
+            canvas
+                .text(source)
+                .at_text_default(73.0, -41.0)
+                .scaled(1.65)
+                .rotated(0.23)
+                .with_pivot(-120.0, 95.0);
+
+            let mut world = compile_canvas_for_layout(canvas);
+            let (bounds, baseline, transform) = only_text_root(&mut world);
+            let local_anchor = DVec3::new(bounds.center().x, baseline.0, bounds.center().z);
+            assert_point_close(
+                transform.to_mat4().transform_point3(local_anchor),
+                DVec3::new(73.0, -41.0, 0.0),
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_text_baseline_anchors_place_left_center_and_right_edges() {
+        for (anchor, x_selector) in [
+            (
+                TextAnchor::BaselineLeft,
+                fn_x_min as fn(&gaanim_math::Bounds3D) -> f64,
+            ),
+            (TextAnchor::BaselineCenter, fn_x_center),
+            (TextAnchor::BaselineRight, fn_x_max),
+        ] {
+            let mut canvas = Canvas::new(640, 360);
+            canvas.text("gyp").at_text_anchor(17.0, 29.0, anchor);
+
+            let mut world = compile_canvas_for_layout(canvas);
+            let (bounds, baseline, transform) = only_text_root(&mut world);
+            let local_anchor = DVec3::new(x_selector(&bounds), baseline.0, bounds.center().z);
+            assert_point_close(
+                transform.to_mat4().transform_point3(local_anchor),
+                DVec3::new(17.0, 29.0, 0.0),
+            );
+        }
+
+        fn fn_x_min(bounds: &gaanim_math::Bounds3D) -> f64 {
+            bounds.min.x
+        }
+        fn fn_x_center(bounds: &gaanim_math::Bounds3D) -> f64 {
+            bounds.center().x
+        }
+        fn fn_x_max(bounds: &gaanim_math::Bounds3D) -> f64 {
+            bounds.max.x
+        }
+    }
+
+    #[test]
+    fn multiline_default_is_visual_center_but_explicit_anchor_uses_first_baseline() {
+        let mut default_canvas = Canvas::new(640, 360);
+        default_canvas
+            .text("First line\nsecond line")
+            .at_text_default(-35.0, 61.0);
+        let mut default_world = compile_canvas_for_layout(default_canvas);
+        let (bounds, _, transform) = only_text_root(&mut default_world);
+        assert_point_close(
+            transform.to_mat4().transform_point3(bounds.center()),
+            DVec3::new(-35.0, 61.0, 0.0),
+        );
+
+        let mut explicit_canvas = Canvas::new(640, 360);
+        explicit_canvas
+            .text("First line\nsecond line")
+            .at_text_anchor(-35.0, 61.0, TextAnchor::BaselineLeft);
+        let mut explicit_world = compile_canvas_for_layout(explicit_canvas);
+        let (bounds, baseline, transform) = only_text_root(&mut explicit_world);
+        assert_point_close(
+            transform.to_mat4().transform_point3(DVec3::new(
+                bounds.min.x,
+                baseline.0,
+                bounds.center().z,
+            )),
+            DVec3::new(-35.0, 61.0, 0.0),
+        );
+        assert!(
+            (baseline.0 - bounds.center().y).abs() > 1.0,
+            "first baseline must remain distinct from the multiline visual center"
+        );
+    }
+
+    #[test]
+    fn geometric_top_left_places_the_corner_without_promising_a_baseline() {
+        let mut baselines = Vec::new();
+        for source in ["HAPPY", "gyp"] {
+            let mut canvas = Canvas::new(640, 360);
+            canvas.text(source).at_anchor(12.0, 34.0, Anchor::TopLeft);
+            let mut world = compile_canvas_for_layout(canvas);
+            let (bounds, baseline, transform) = only_text_root(&mut world);
+            assert_point_close(
+                transform
+                    .to_mat4()
+                    .transform_point3(Anchor::TopLeft.get_point(&bounds)),
+                DVec3::new(12.0, 34.0, 0.0),
+            );
+            baselines.push(
+                transform
+                    .to_mat4()
+                    .transform_point3(DVec3::new(bounds.min.x, baseline.0, 0.0))
+                    .y,
+            );
+        }
+        assert!(
+            (baselines[0] - baselines[1]).abs() > 0.1,
+            "geometric top-left alignment must not imply equal baselines: {baselines:?}"
+        );
+    }
 
     #[test]
     fn expression_reveal_ends_at_exact_data_coordinate() {

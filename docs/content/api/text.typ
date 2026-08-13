@@ -535,6 +535,29 @@ content, delimiters, metrics, flow, or duration raise `TypeError` or
 copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 ```
 
+== TextAnchor y posicionamiento
+
+#api-entry(
+  name: "Text.at / Text.at_anchor",
+  kind: "method",
+  signature: ".at(x, y, anchor: Anchor | TextAnchor = None) -> Text\n.at_anchor(x, y, anchor: Anchor | TextAnchor) -> Text",
+  params: (
+    (name: "x / y", type: "float", default: none, desc: [Target point in canvas units.]),
+    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor.]),
+  ),
+  returns: (type: "Text", desc: [The same specialized fluent handle.]),
+  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
+)[
+```python
+# show-code: true
+from gaanim import Anchor, Scene, TextAnchor
+scene = Scene(640, 360)
+scene.text("baseline left").at(-220, 60, TextAnchor.BASELINE_LEFT)
+scene.equation("frac(x_1^2, y_2) = 1").at(0, 0)
+scene.text("geometric corner").at(-220, -100, Anchor.TOP_LEFT)
+```
+]
+
 == Capacidades heredadas de Drawable
 
 `Text` remains a `Drawable`. It preserves its specialized subtype through the
@@ -547,6 +570,33 @@ text.align_to(other, anchor).to_edge(direction).to_corner(anchor)
 text.scaled(factor).rotated(radians).with_pivot(x, y)
 text.billboard().hud()
 ```
+
+For single-line text, `text.at(x, y)` places the visual horizontal center on
+`x` and the typographic baseline on `y`. `scene.equation(...)` returns the same
+`Text` type and follows the same rule, so words and equations with different
+ascenders, descenders, fractions, scripts, or authored sizes can share a
+stable baseline:
+
+```python
+from gaanim import Scene, TextAnchor
+
+scene = Scene(960, 540)
+word = scene.text("Typography").at(0, 80)
+equation = scene.equation("frac(x_1^2, y_2) = 1").at(
+    0, -40, TextAnchor.BASELINE_CENTER
+)
+left = scene.text("left aligned").at(
+    -320, -160, TextAnchor.BASELINE_LEFT
+)
+```
+
+`TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER`, and `BASELINE_RIGHT` select the
+horizontal point on the baseline. On multiline text, an explicit `TextAnchor`
+uses the first visual line; omitting the anchor keeps the block's visual center
+behavior. Geometric anchors remain bounds-based: two texts placed with
+`Anchor.TOP_LEFT` share their top-left corner, but do not necessarily share a
+baseline. `Drawable.at` accepts only geometric `Anchor` values; passing a
+`TextAnchor` to a non-text drawable raises `TypeError`.
 
 Free text can also use generic Drawable animations such as move, rotate,
 scale, fade transforms, or replacement transforms. Prefer the structural text

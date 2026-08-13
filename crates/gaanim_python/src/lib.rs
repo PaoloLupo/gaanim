@@ -55,6 +55,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py3d::PyMaterial3D>()?;
     m.add_class::<py3d::PyPrimitive3D>()?;
     m.add_class::<pytext::PyTextStyle>()?;
+    m.add_class::<pytext::PyTextAnchor>()?;
     m.add_class::<pystyle::PyStrokeStyle>()?;
     m.add_class::<pystyle::PyStyle>()?;
     m.add_class::<pystyle::PyAxesStyle>()?;

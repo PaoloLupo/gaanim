@@ -2,12 +2,12 @@
 
 import os
 
-from gaanim import BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
+from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
 
 
 scene = Scene(960, 540, background=BLACK)
 scene.lighting_3d("studio", intensity=1.0, shadows=True)
-scene.text("Reactive camera rig", role="title").fill(WHITE).at(0, 220)
+scene.text("Reactive camera rig", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
 marker = scene.dot(18).fill(GOLD)
 scene.circle(150).no_fill().stroke(BLUE, 3)
 cube = scene.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-1.8, -0.5, 0)

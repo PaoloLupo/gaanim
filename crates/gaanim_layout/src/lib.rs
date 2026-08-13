@@ -14,7 +14,7 @@ pub use engine::{
     solve_constraints,
 };
 pub use positioning::{
-    compute_align_to as compute_align_to_new, compute_move_to,
+    compute_align_to as compute_align_to_new, compute_move_point_to, compute_move_to,
     compute_next_to as compute_next_to_new, compute_to_corner, compute_to_edge, transform_bounds,
 };
 pub use query::{get_anchor_point, get_center, get_corner, get_edge_center, get_height, get_width};
