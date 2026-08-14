@@ -329,6 +329,34 @@ mod tests {
             "the loop baseline must include reactive trail state"
         );
     }
+
+    #[test]
+    fn hot_reload_keeps_later_fade_text_hidden_before_playback_resumes() {
+        let mut world = World::new();
+        world.insert_resource(Timeline::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+
+        let mut canvas = gaanim_api::canvas::Canvas::new(320, 180);
+        let later = canvas.text("Later explanation");
+        canvas.wait(1.0);
+        canvas.play(vec![later.fade_in(0.5)]);
+        canvas.wait(0.5);
+        canvas.play(vec![later.fade_out(0.5)]);
+
+        reload_with(&mut world, canvas);
+
+        let compiled_id = ObjectId::from_raw(later.id.as_raw() - 1);
+        let opacity = world
+            .query::<(&MobjectId, &gaanim_scene::Opacity)>()
+            .iter(&world)
+            .find_map(|(id, opacity)| (id.0 == compiled_id).then_some(opacity.0))
+            .expect("reloaded text root");
+        assert_eq!(
+            opacity, 0.0,
+            "a text whose first entry is later on the timeline must not flash after hot reload"
+        );
+    }
 }
 
 /// How long the reload badge stays fully visible (seconds).

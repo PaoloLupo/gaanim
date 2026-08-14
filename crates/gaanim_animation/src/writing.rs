@@ -14,8 +14,10 @@
 //! Ported and adapted from `crabanim::engine::animation::path_lens`.
 
 use bevy::prelude::{Added, Commands, Component, Entity, Query, Without};
+use gaanim_core::kurbo::BezPath;
 use gaanim_scene::Path2D;
 pub use gaanim_scene::PathSource;
+use std::sync::Arc;
 
 /// Multiplier applied to the fill brush's color alpha by the renderer
 /// during a Write animation. `0.0` = fill fully hidden, `1.0` = fill
@@ -51,6 +53,21 @@ pub struct PathReveal(pub f64);
 impl Default for PathReveal {
     fn default() -> Self {
         Self(1.0)
+    }
+}
+
+/// Return the visible path for a reactive object's current draw progress while
+/// leaving the full source path available for later animation frames.
+///
+/// Every system that regenerates `Path2D` should use this helper before writing
+/// the visible geometry. This keeps Create/Write semantics uniform for current
+/// and future reactive primitives.
+pub(crate) fn path_at_reveal(source: &Arc<BezPath>, reveal: f64) -> Arc<BezPath> {
+    let reveal = reveal.clamp(0.0, 1.0);
+    if (reveal - 1.0).abs() < 1e-9 {
+        source.clone()
+    } else {
+        Arc::new(gaanim_math::get_subpath(source.as_ref(), reveal))
     }
 }
 

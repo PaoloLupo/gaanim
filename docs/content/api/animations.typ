@@ -279,7 +279,7 @@ scene.export("preview.webp", fps=30)
   signature: ".write(duration?) .unwrite(duration?) -> Anim",
   params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
   returns: (type: "Anim", desc: [Glyph-by-glyph write.]),
-  desc: [For text/equation. Respects vector paths, not just opacity. `unwrite` reverses.],
+  desc: [For text/equation. Respects vector paths, not just opacity. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `unwrite` reverses.],
 )[
 ```python
 # show-code: true
@@ -317,7 +317,7 @@ scene.export("preview.webp", fps=30)
   signature: ".create(duration?) .uncreate(duration?) -> Anim",
   params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
   returns: (type: "Anim", desc: [Stroke-drawing.]),
-  desc: [Draws outline progressively. `uncreate` erases. Different from `write` (which follows glyphs).],
+  desc: [Draws outline progressively. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `uncreate` erases. Different from `write` (which follows glyphs).],
 )[
 ```python
 # show-code: true

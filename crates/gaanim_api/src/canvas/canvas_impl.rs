@@ -4344,6 +4344,82 @@ mod tests {
     }
 
     #[test]
+    fn mechanism_create_and_write_start_with_every_reactive_path_hidden() {
+        let mut canvas = Canvas::new(640, 360);
+        let pivot = CanvasEndpoint::Static(DVec3::new(-120.0, 80.0, 0.0));
+        let support = canvas.support_at(pivot.clone(), "fixed", DVec3::NEG_Y, 48.0, 72.0, None);
+        let angle = canvas
+            .angle_between_with_options(
+                pivot.clone(),
+                CanvasRay::Direction(DVec3::NEG_Y),
+                CanvasRay::Direction(DVec3::new(0.7, -0.7, 0.0)),
+                64.0,
+                AngleDimensionOptions {
+                    show_value: true,
+                    ..Default::default()
+                },
+            )
+            .expect("valid angle");
+        let force = canvas
+            .force_at(
+                pivot,
+                Expr::Constant(981.0),
+                Expr::Constant(-std::f64::consts::FRAC_PI_2),
+                0.1,
+                Some("$P$".to_owned()),
+                true,
+                ".0f".to_owned(),
+                Some("N".to_owned()),
+                40.0,
+                None,
+                None,
+            )
+            .expect("valid force");
+        canvas.play(vec![
+            support.drawable.write(1.0),
+            angle.drawable.create(1.0),
+            force.drawable.write(1.0),
+        ]);
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let draw_paths = app
+            .world_mut()
+            .query::<(&gaanim_animation::PathReveal, &gaanim_scene::Path2D)>()
+            .iter(app.world())
+            .filter(|(reveal, _)| reveal.0 == 0.0)
+            .map(|(_, path)| path.0.is_empty())
+            .collect::<Vec<_>>();
+        assert!(draw_paths.len() > 3, "expected composite draw leaves");
+        assert!(
+            draw_paths.iter().all(|empty| *empty),
+            "fixed support, angle, and force paths must not appear before their entry animation"
+        );
+
+        let readout_paths = app
+            .world_mut()
+            .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::Path2D)>()
+            .iter(app.world())
+            .filter(|(tag, _)| tag.0 == "SvgPath#ReactiveReadout")
+            .map(|(_, path)| path.0.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(readout_paths.len(), 2);
+        assert!(
+            readout_paths.iter().all(|empty| *empty),
+            "angle and force values must remain hidden until Create/Write reveals them"
+        );
+    }
+
+    #[test]
     fn angle_color_applies_to_the_reactive_numeric_value() {
         let mut canvas = Canvas::new(640, 360);
         let gold = Color::from_rgb8(255, 200, 0);

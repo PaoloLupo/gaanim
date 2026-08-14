@@ -989,12 +989,18 @@ class Drawable:
     def write(self, duration: Optional[float] = None) -> Anim:
         """Create a write animation for this drawable.
 
+        Reactive and generated descendants stay hidden before the scheduled
+        animation and preserve the current reveal progress while updating.
+
         Example:
             result = drawable.write()
         """
         ...
     def create(self, duration: Optional[float] = None) -> Anim:
         """Create a create animation for this drawable.
+
+        Reactive and generated descendants stay hidden before the scheduled
+        animation and preserve the current reveal progress while updating.
 
         Example:
             result = drawable.create()

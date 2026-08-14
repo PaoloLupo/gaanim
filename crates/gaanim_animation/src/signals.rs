@@ -157,10 +157,15 @@ pub fn reactive_readout_update_system(
         Option<&mut PathSource>,
         &mut LocalBounds,
         &mut TextBaseline,
+        Option<&crate::writing::PathReveal>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    for (mut readout, mut path, path_source, mut bounds, mut baseline) in &mut query {
+    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal) in &mut query {
+        let reveal = reveal
+            .map(|progress| progress.0)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
         let mut context = EvalContext::new();
         for (id, entity) in &readout.parameters {
             if let Ok(signal) = signals.get(*entity) {
@@ -191,7 +196,7 @@ pub fn reactive_readout_update_system(
             if let Some(mut source) = path_source {
                 source.0 = cached_path.clone();
             }
-            path.0 = cached_path;
+            path.0 = crate::writing::path_at_reveal(&cached_path, reveal);
             bounds.0 = readout.last_bounds;
             continue;
         }
@@ -207,10 +212,10 @@ pub fn reactive_readout_update_system(
             if let Some(mut source) = path_source {
                 source.0 = new_path.clone();
             }
-            path.0 = new_path;
+            path.0 = crate::writing::path_at_reveal(&new_path, reveal);
             bounds.0 = new_bounds;
             readout.last_text = text;
-            readout.last_path = path.0.clone();
+            readout.last_path = new_path;
             readout.last_bounds = new_bounds;
         }
     }
@@ -818,6 +823,51 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn reactive_readout_keeps_create_hidden_when_its_value_changes() {
+        let parameter_id = gaanim_core::ObjectId::from_raw(11);
+        let mut app = App::new();
+        app.insert_resource(gaanim_text::font::FontRegistry::new());
+        app.add_systems(Update, reactive_readout_update_system);
+
+        let signal = app.world_mut().spawn(FloatSignal::new(44.2)).id();
+        let empty = Arc::new(BezPath::new());
+        let readout = app
+            .world_mut()
+            .spawn((
+                ReactiveReadout {
+                    expression: Expr::parameter(parameter_id),
+                    parameters: vec![(parameter_id, signal)],
+                    format: ".1f".to_owned(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                    invalid: "—".to_owned(),
+                    font_family: "sans-serif".to_owned(),
+                    font_size: 40.0,
+                    last_text: "—".to_owned(),
+                    last_path: empty.clone(),
+                    last_bounds: Bounds3D::default(),
+                },
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(Bounds3D::default()),
+                TextBaseline::default(),
+                crate::writing::PathReveal(0.0),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(
+            !app.world().get::<PathSource>(readout).unwrap().0.is_empty(),
+            "the full numeric outline must remain available to the Create animation"
+        );
+        assert!(
+            app.world().get::<Path2D>(readout).unwrap().0.is_empty(),
+            "a reactive value update must not reveal the readout before Create starts"
+        );
+    }
+
+    #[test]
     fn reactive_readout_replaces_both_render_paths_when_signal_changes() {
         let parameter_id = gaanim_core::ObjectId::from_raw(7);
         let mut app = App::new();
@@ -1085,16 +1135,13 @@ pub fn always_redraw_regen_system(world: &mut World) {
     }
 
     for (entity, path, bounds, reveal) in updates {
-        let trimmed = if (reveal - 1.0).abs() < 1e-9 {
-            path.clone()
-        } else {
-            gaanim_math::get_subpath(&path, reveal)
-        };
+        let path = Arc::new(path);
+        let visible = crate::writing::path_at_reveal(&path, reveal);
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
-            path_comp.0 = std::sync::Arc::new(trimmed);
+            path_comp.0 = visible;
         }
         if let Some(mut path_source) = world.get_mut::<gaanim_scene::PathSource>(entity) {
-            path_source.0 = std::sync::Arc::new(path);
+            path_source.0 = path;
         }
         if let Some(mut local_bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
             local_bounds.0 = bounds;

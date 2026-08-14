@@ -606,9 +606,7 @@ pub fn traced_path_system(world: &mut World) {
 
     // 3. Aplicamos los nuevos paths
     for (trace_entity, path) in trace_updates {
-        if let Some(mut path_comp) = world.get_mut::<Path2D>(trace_entity) {
-            path_comp.0 = std::sync::Arc::new(path);
-        }
+        write_path(world, trace_entity, path);
     }
 }
 
@@ -1046,32 +1044,7 @@ pub fn tracking_line_system(world: &mut World) {
     }
 
     for (entity, path) in updates {
-        let reveal = world
-            .get::<crate::writing::PathReveal>(entity)
-            .map(|progress| progress.0)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-        let visible = if (reveal - 1.0).abs() < 1e-9 {
-            path.clone()
-        } else {
-            gaanim_math::get_subpath(&path, reveal)
-        };
-        let path = Arc::new(path);
-        if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
-            path_comp.0 = Arc::new(visible);
-        }
-        if let Some(mut source) = world.get_mut::<PathSource>(entity) {
-            source.0 = path.clone();
-        }
-        if let Some(mut bounds) = world.get_mut::<LocalBounds>(entity) {
-            let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
-            bounds.0 = gaanim_math::Bounds3D::new_2d(
-                rect.x0 - 12.0,
-                rect.y0 - 12.0,
-                rect.x1 + 12.0,
-                rect.y1 + 12.0,
-            );
-        }
+        write_path(world, entity, path);
     }
 }
 
@@ -1233,8 +1206,14 @@ fn resolve_angle(
 
 fn write_path(world: &mut World, entity: Entity, path: BezPath) {
     let path = Arc::new(path);
+    let reveal = world
+        .get::<crate::writing::PathReveal>(entity)
+        .map(|progress| progress.0)
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+    let visible = crate::writing::path_at_reveal(&path, reveal);
     if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
-        path_comp.0 = path.clone();
+        path_comp.0 = visible;
     }
     if let Some(mut source) = world.get_mut::<PathSource>(entity) {
         source.0 = path.clone();
@@ -1658,6 +1637,34 @@ pub fn mechanism_binding_system(world: &mut World) {
 mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
+    use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn regenerated_paths_preserve_create_reveal_progress() {
+        let mut world = World::new();
+        let empty = Arc::new(BezPath::new());
+        let entity = world
+            .spawn((
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                crate::writing::PathReveal(0.25),
+            ))
+            .id();
+        let mut full_path = BezPath::new();
+        full_path.move_to((0.0, 0.0));
+        full_path.line_to((100.0, 0.0));
+
+        write_path(&mut world, entity, full_path);
+
+        let source = world.get::<PathSource>(entity).unwrap();
+        let visible = world.get::<Path2D>(entity).unwrap();
+        assert_eq!(source.0.bounding_box().x1, 100.0);
+        assert!(
+            visible.0.bounding_box().x1 < 30.0,
+            "every regenerated path must keep the partial Create trim"
+        );
+    }
 
     fn spawn_accelerating_simulation(world: &mut World, fixed_dt: f64) -> Entity {
         let velocity = Arc::new(Mutex::new(0.0));
