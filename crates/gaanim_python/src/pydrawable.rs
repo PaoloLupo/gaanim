@@ -316,6 +316,34 @@ impl PyCanvasAnim {
 #[derive(Clone)]
 pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
 
+pub(crate) enum PyAtTarget {
+    Coordinates { x: f64, y: f64 },
+    Drawable(gaanim_api::canvas::DrawableHandle),
+}
+
+pub(crate) fn resolve_at_target(
+    x: &Bound<'_, PyAny>,
+    y: Option<f64>,
+    has_anchor: bool,
+) -> PyResult<PyAtTarget> {
+    if let Ok(reference) = x.extract::<PyRef<'_, PyDrawable>>() {
+        if y.is_some() || has_anchor {
+            return Err(PyTypeError::new_err(
+                "at() with a Drawable accepts no y or anchor; use align_to() for explicit anchors",
+            ));
+        }
+        return Ok(PyAtTarget::Drawable(reference.0.clone()));
+    }
+
+    let x = x.extract::<f64>().map_err(|_| {
+        PyTypeError::new_err("at() expects either a Drawable or numeric x and y coordinates")
+    })?;
+    let y = y.ok_or_else(|| {
+        PyTypeError::new_err("at() with numeric coordinates requires both x and y")
+    })?;
+    Ok(PyAtTarget::Coordinates { x, y })
+}
+
 impl PyDrawable {
     fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.0.layout_owner().is_some() {
@@ -544,14 +572,26 @@ impl PyDrawable {
     fn z_index(&self, z: i32) -> Self {
         Self(self.0.clone().z_index(z))
     }
-    #[pyo3(signature = (x, y, anchor=None))]
-    fn at(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<Self> {
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn at(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: Option<f64>,
+        anchor: Option<&PyAnchor>,
+    ) -> PyResult<Self> {
         self.require_free_position("at")?;
-        Ok(Self(self.0.clone().at_anchor(
-            x,
-            y,
-            anchor.map(|anchor| anchor.0).unwrap_or_default(),
-        )))
+        match resolve_at_target(x, y, anchor.is_some())? {
+            PyAtTarget::Coordinates { x, y } => Ok(Self(self.0.clone().at_anchor(
+                x,
+                y,
+                anchor.map(|anchor| anchor.0).unwrap_or_default(),
+            ))),
+            PyAtTarget::Drawable(reference) => Ok(Self(self.0.clone().align_to(
+                &reference,
+                gaanim_api::canvas::Anchor::Center,
+                gaanim_api::canvas::Anchor::Center,
+            ))),
+        }
     }
     fn at_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         self.require_free_position("at_3d")?;

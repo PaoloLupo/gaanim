@@ -1471,17 +1471,18 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Drawable.at / scaled / rotated / z_index",
   kind: "method",
-  signature: ".at(x, y, anchor=Anchor.CENTER) .scaled(factor) .rotated(radians) .z_index(int) .with_pivot(x,y)",
-  params: ((name: "x / y", type: "float", default: none, desc: [Target scene-space position.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Local point placed at `(x, y)`.]),),
+  signature: ".at(x, y, anchor=Anchor.CENTER) | .at(reference) .scaled(factor) .rotated(radians) .z_index(int) .with_pivot(x,y)",
+  params: ((name: "x / y", type: "float", default: none, desc: [Target scene-space position.]), (name: "reference", type: "Drawable", default: none, desc: [Alternative single argument for deferred center-to-center placement.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Local point placed at `(x, y)`; coordinates only.]),),
   returns: (type: "Drawable", desc: [Self.]),
-  desc: [Transforms in scene space. Generic drawables use center-based `.at(x, y)` positioning; pass an `Anchor` to place an edge or corner at the target. The specialized `Text` subtype additionally accepts `TextAnchor` and defaults single-line placement to its baseline center; see the Text API. `with_pivot`/`pivot` sets rotation/scale origin.],
+  desc: [Transforms in scene space. Generic drawables use center-based `.at(x, y)` positioning; pass an `Anchor` to place an edge or corner at the target. `.at(reference)` creates a deferred center-to-center layout relation equivalent to `align_to(reference, Anchor.CENTER)`; it does not follow later animations, so use `follow` or `attach_to` for reactive placement. A reference cannot be combined with `y` or `anchor`. The specialized `Text` subtype additionally accepts `TextAnchor` for coordinates and defaults single-line coordinate placement to its baseline center; see the Text API. `with_pivot`/`pivot` sets rotation/scale origin.],
 )[
 ```python
 # show-code: true
 from gaanim import Anchor, BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import pi
 scene = Scene(480, 270, background="#0f172a")
-arm = scene.rect(90, 18).fill(BLUE).at(-200, 100, Anchor.TOP_LEFT).with_pivot(0, 0)
+hinge = scene.dot(7).fill(GOLD).at(-200, 100)
+arm = scene.rect(90, 18).fill(BLUE).at(hinge).with_pivot(-200, 100)
 scene.play([arm.rotate(pi/2.5).duration(1.0)])
 scene.export("preview.webp", fps=30)
 ```

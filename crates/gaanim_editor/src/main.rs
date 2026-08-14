@@ -53,6 +53,7 @@ fn main() {
                         "Gaanim".to_string()
                     },
                     resolution: (1280, 720).into(),
+                    present_mode: bevy::window::PresentMode::AutoVsync,
                     mode: if launch.present {
                         bevy::window::WindowMode::BorderlessFullscreen(
                             launch

@@ -74,9 +74,20 @@ scene.stop("resultado")
 La exportación ignora los stops. Para exportar un segmento concreto use
 `scene.export("intro.mp4", segment="Introducción")`.
 
-En el editor, el toggle **Continuous** reproduce la escena de principio a fin
-sin detenerse en `stop()`; es una preferencia temporal de la sesión y no cambia
-el script. Presenter Mode siempre respeta los stops. Durante una presentación,
+El editor usa un único playback flotante en lugar de una timeline detallada.
+`Space` alterna play/pausa, las flechas navegan entre segmentos y `L` activa el
+loop del segmento actual, salta a su inicio e ignora sus `stop()` hasta apagar
+el loop. Los tiradores de la barra permiten refinar el rango dentro de ese
+segmento. **Continuous** reproduce la escena completa sin detenerse en
+`stop()`; es una preferencia temporal de la sesión y no cambia el script.
+
+El playback reduce márgenes y controles según el ancho disponible; en ventanas
+estrechas mueve velocidad, Continuous, fullscreen, Present, Export y Pin al
+menú **More**. `F11` alterna fullscreen del editor en el monitor actual sin
+cambiar el playback ni activar Presenter Mode. **Present** sigue siendo un modo
+independiente, pensado para audiencia y con su propio dock seguro.
+
+Presenter Mode siempre respeta los stops. Durante una presentación,
 `Right`, `Space`, `Enter` o un clic en la pantalla de audiencia avanzan;
 `Left`/`Backspace` retroceden, `O` abre el overview y `B`/`W` controlan el
 blanking. Cerrar Presenter View mantiene la audiencia activa y `P` vuelve a

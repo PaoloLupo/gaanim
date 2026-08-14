@@ -11,7 +11,7 @@ use gaanim_text::prelude::{
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
-use crate::pydrawable::{PyCanvasAnim, PyDrawable};
+use crate::pydrawable::{resolve_at_target, PyAtTarget, PyCanvasAnim, PyDrawable};
 use crate::pylayout::{PyAnchor, PyDirection};
 
 #[pyclass(name = "TextAnchor", module = "gaanim_core", frozen, from_py_object)]
@@ -767,23 +767,34 @@ impl PyText {
         slf
     }
 
-    #[pyo3(signature = (x, y, anchor=None))]
+    #[pyo3(signature = (x, y=None, anchor=None))]
     fn at<'py>(
         slf: PyRef<'py, Self>,
-        x: f64,
-        y: f64,
+        x: &Bound<'_, PyAny>,
+        y: Option<f64>,
         anchor: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        match anchor.map(resolve_text_anchor).transpose()? {
-            Some(ResolvedTextAnchor::Geometric(anchor)) => {
-                slf.handle.clone().at_anchor(x, y, anchor);
+        match resolve_at_target(x, y, anchor.is_some())? {
+            PyAtTarget::Coordinates { x, y } => {
+                match anchor.map(resolve_text_anchor).transpose()? {
+                    Some(ResolvedTextAnchor::Geometric(anchor)) => {
+                        slf.handle.clone().at_anchor(x, y, anchor);
+                    }
+                    Some(ResolvedTextAnchor::Typographic(anchor)) => {
+                        slf.handle.clone().at_text_anchor(x, y, anchor);
+                    }
+                    None => {
+                        slf.handle.clone().at_text_default(x, y);
+                    }
+                }
             }
-            Some(ResolvedTextAnchor::Typographic(anchor)) => {
-                slf.handle.clone().at_text_anchor(x, y, anchor);
-            }
-            None => {
-                slf.handle.clone().at_text_default(x, y);
+            PyAtTarget::Drawable(reference) => {
+                slf.handle.clone().align_to(
+                    &reference,
+                    gaanim_api::canvas::Anchor::Center,
+                    gaanim_api::canvas::Anchor::Center,
+                );
             }
         }
         Ok(slf)

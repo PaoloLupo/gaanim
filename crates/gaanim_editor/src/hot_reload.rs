@@ -7,7 +7,7 @@ use gaanim_api::host::ReloadPayload;
 use gaanim_api::runtime;
 use std::time::Instant;
 
-use gaanim_editor::export::StashedReplay;
+use gaanim_editor::{EditorState, export::StashedReplay};
 use gaanim_scene::MobjectId;
 use gaanim_timeline::timeline::Timeline;
 
@@ -141,6 +141,7 @@ pub fn reload_listener_system(world: &mut World) {
     let replay_duration = replay_started_at.elapsed().as_secs_f64();
 
     // Restore playback position after rebuild.
+    let mut reload_target = None;
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let target = reload_target_time(saved_time, &tl);
         tl.seek_request = Some(target);
@@ -149,6 +150,16 @@ pub fn reload_listener_system(world: &mut World) {
         } else {
             tl.cached_duration > 0.0
         };
+        reload_target = Some(target);
+    }
+    if let Some(target) = reload_target
+        && world.contains_resource::<EditorState>()
+    {
+        world.resource_scope(|world, mut editor_state: Mut<EditorState>| {
+            if let Some(mut timeline) = world.get_resource_mut::<Timeline>() {
+                editor_state.reconcile_segment_loop_after_reload(&mut timeline, target);
+            }
+        });
     }
 
     let now = world.resource::<Time>().elapsed_secs_f64();

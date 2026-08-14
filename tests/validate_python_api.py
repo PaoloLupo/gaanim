@@ -329,6 +329,28 @@ def validate_visualization_contract(module: object) -> list[str]:
     anchored_drawable = scene.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
     if not isinstance(anchored_drawable, module.Drawable):
         failures.append("Drawable.at with an anchor did not return Drawable")
+    reference_drawable = scene.dot(6.0).at(-25.0, 15.0)
+    centered_drawable = scene.rect(40.0, 20.0).at(reference_drawable)
+    if not isinstance(centered_drawable, module.Drawable):
+        failures.append("Drawable.at with a reference did not return Drawable")
+    centered_text = scene.text("Centered").at(reference_drawable)
+    if not isinstance(centered_text, module.Text):
+        failures.append("Text.at with a reference erased the Text subtype")
+    centered_primitive = scene.cube().at(reference_drawable)
+    if not isinstance(centered_primitive, module.Primitive3D):
+        failures.append("Primitive3D.at with a reference erased the Primitive3D subtype")
+    try:
+        scene.rect(40.0, 20.0).at(reference_drawable, anchor=module.Anchor.TOP)
+    except TypeError:
+        pass
+    else:
+        failures.append("Drawable.at accepted an anchor with a reference")
+    try:
+        scene.rect(40.0, 20.0).at(10.0)
+    except TypeError:
+        pass
+    else:
+        failures.append("Drawable.at accepted a numeric x without y")
     try:
         scene.rect(40.0, 20.0).at(
             0.0, 0.0, anchor=module.TextAnchor.BASELINE_CENTER

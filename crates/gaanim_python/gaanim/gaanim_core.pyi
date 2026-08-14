@@ -749,15 +749,22 @@ class Drawable:
             result = drawable.z_index(1)
         """
         ...
+    @overload
+    def at(self, reference: Drawable, /) -> Self: ...
+    @overload
     def at(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
-        """Place ``anchor`` at ``(x, y)`` and return this drawable.
+        """Place this drawable at coordinates or at another drawable.
 
         Omitting ``anchor`` uses ``Anchor.CENTER`` and preserves the existing
         center-based behavior. The optional anchor can be passed positionally
-        or by keyword.
+        or by keyword. Passing one ``Drawable`` instead creates a deferred
+        center-to-center layout relation; use ``follow`` or ``attach_to`` when
+        the target must continue following an animated reference. A reference
+        cannot be combined with ``y`` or ``anchor``.
 
         Example:
             result = drawable.at(1.0, 1.0, Anchor.TOP_LEFT)
+            centered = label.at(drawable)
         """
         ...
     def anchor_point(
@@ -1589,6 +1596,9 @@ class Text(Drawable):
     def lines(self) -> TextQuery: ...
     @property
     def parts(self) -> TextQuery: ...
+    @overload
+    def at(self, reference: Drawable, /) -> Self: ...
+    @overload
     def at(
         self,
         x: float,
@@ -1601,10 +1611,13 @@ class Text(Drawable):
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
         ``Anchor`` values retain bounds-based placement. Layout-owned text
-        raises ``LayoutOwnershipError``.
+        raises ``LayoutOwnershipError``. Passing one ``Drawable`` instead
+        aligns the text's visual center to the reference's center without
+        creating a reactive follow relationship.
 
         Example:
             label.at(0.0, 40.0, TextAnchor.BASELINE_LEFT)
+            label.at(marker)
         """
         ...
     def at_anchor(self, x: float, y: float, anchor: Anchor | TextAnchor) -> Self:

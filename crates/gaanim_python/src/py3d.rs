@@ -4,7 +4,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
-use crate::pydrawable::{PyCanvasAnim, PyDrawable};
+use crate::pydrawable::{resolve_at_target, PyAtTarget, PyCanvasAnim, PyDrawable};
 use crate::pylayout::PyAnchor;
 
 #[pyclass(name = "Material3D", module = "gaanim_core", frozen, from_py_object)]
@@ -130,17 +130,30 @@ impl PyPrimitive3D {
         slf
     }
 
-    #[pyo3(signature = (x, y, anchor=None))]
+    #[pyo3(signature = (x, y=None, anchor=None))]
     fn at<'py>(
         slf: PyRef<'py, Self>,
-        x: f64,
-        y: f64,
+        x: &Bound<'_, PyAny>,
+        y: Option<f64>,
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        slf.handle
-            .clone()
-            .at_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default());
+        match resolve_at_target(x, y, anchor.is_some())? {
+            PyAtTarget::Coordinates { x, y } => {
+                slf.handle.clone().at_anchor(
+                    x,
+                    y,
+                    anchor.map(|anchor| anchor.0).unwrap_or_default(),
+                );
+            }
+            PyAtTarget::Drawable(reference) => {
+                slf.handle.clone().align_to(
+                    &reference,
+                    gaanim_api::canvas::Anchor::Center,
+                    gaanim_api::canvas::Anchor::Center,
+                );
+            }
+        }
         Ok(slf)
     }
 

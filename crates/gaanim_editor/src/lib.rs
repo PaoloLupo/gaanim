@@ -1,27 +1,14 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
-use gaanim_core::id::ObjectId;
-use gaanim_core::peniko;
 use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
-use gaanim_scene::{
-    FillBrush, GltfModelRoot, GroupMarker, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
-    RenderOrder, StrokeBrush, WorldBounds,
-};
+use gaanim_scene::{GltfModelRoot, Mesh3DMarker, RenderOrder, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
-use std::collections::{HashMap, HashSet};
-
-use gaanim_animation::signals::FloatSignal;
-use gaanim_animation::updaters::Updater;
-use gaanim_api::DecimalNumber;
 
 pub mod export;
 mod fps_overlay;
 pub mod overlays;
 mod presenter;
 pub mod project_hub;
-mod timeline_widget;
-mod vsync;
 
 fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
@@ -33,7 +20,9 @@ fn sync_editor_input_ignore_system(
     timeline.ignore_input = presentation_mode.active
         || egui_wants.wants_keyboard_input()
         || egui_wants.wants_any_pointer_input();
-    *stop_policy = if presentation_mode.active || !editor_state.continuous_preview {
+    *stop_policy = if presentation_mode.active
+        || (!editor_state.continuous_preview && !editor_state.segment_loop.is_active())
+    {
         PlaybackStopPolicy::Respect
     } else {
         PlaybackStopPolicy::Ignore
@@ -168,7 +157,7 @@ impl Plugin for GaanimEditorPlugin {
         .init_resource::<presenter::AudienceControlsState>()
         .init_resource::<presenter::PresentationTimer>()
         .init_resource::<fps_overlay::FpsOverlay>()
-        .init_resource::<vsync::VsyncState>()
+        .init_resource::<EditorFullscreenState>()
         .init_resource::<PresentationMode>()
         .init_resource::<AudienceBlank>()
         .init_resource::<ViewportInset>()
@@ -190,13 +179,13 @@ impl Plugin for GaanimEditorPlugin {
                 editor_picking_system,
                 overlays::overlays_toggle_keys_system,
                 global_playback_keys_system,
+                editor_fullscreen_keys_system,
                 presenter::presentation_input_system
                     .after(sync_editor_input_ignore_system)
                     .before(gaanim_timeline::timeline_playback_system),
                 presenter::sync_presentation_timer_system,
                 presentation_escape_system,
                 fps_overlay::fps_overlay_system,
-                vsync::vsync_toggle_system,
             ),
         )
         .add_systems(Startup, presenter::spawn_presenter_window_system)
@@ -258,14 +247,65 @@ pub(crate) enum AudienceBlank {
     White,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct SegmentLoopState {
+    segment_bounds: Option<(f64, f64)>,
+    previous_range: Option<(f64, f64)>,
+    previous_was_full_duration: bool,
+}
+
+impl SegmentLoopState {
+    fn is_active(&self) -> bool {
+        self.segment_bounds.is_some()
+    }
+
+    fn deactivate(&mut self, timeline: &mut Timeline) {
+        timeline.loop_range = self.previous_range;
+        self.segment_bounds = None;
+        self.previous_range = None;
+        self.previous_was_full_duration = false;
+    }
+
+    fn clamp_range(&self, start: f64, end: f64) -> Option<(f64, f64)> {
+        let (segment_start, segment_end) = self.segment_bounds?;
+        let start = start.clamp(segment_start, segment_end);
+        let end = end.clamp(segment_start, segment_end);
+        (end - start > 1e-6).then_some((start, end))
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+struct EditorFullscreenState {
+    previous_mode: Option<bevy::window::WindowMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaybackDensity {
+    Wide,
+    Compact,
+    Minimal,
+}
+
+impl PlaybackDensity {
+    fn for_width(width: f32) -> Self {
+        if width >= 900.0 {
+            Self::Wide
+        } else if width >= 560.0 {
+            Self::Compact
+        } else {
+            Self::Minimal
+        }
+    }
+
+    fn overlay_width(self, viewport_width: f32) -> f32 {
+        let margin = if self == Self::Wide { 24.0 } else { 16.0 };
+        (viewport_width - margin).clamp(0.0, 980.0)
+    }
+}
+
 #[derive(Resource)]
 pub struct EditorState {
     pub selected: Option<Entity>,
-    pub timeline_widget: timeline_widget::TimelineWidget,
-    /// Whether the full timeline panel is visible. Defaults to `false` so the
-    /// animation preview occupies the full window; the compact playback overlay
-    /// is shown instead.
-    pub timeline_visible: bool,
     /// Whether the window is pinned always-on-top.
     pub pinned_on_top: bool,
     /// Play through authored presentation stops during editor preview.
@@ -278,62 +318,54 @@ pub struct EditorState {
     bar_hovered: bool,
     /// Interaction target selected when a seek-bar drag starts.
     seek_bar_drag_target: Option<SeekBarDragTarget>,
+    segment_loop: SegmentLoopState,
 }
 
 impl Default for EditorState {
     fn default() -> Self {
         Self {
             selected: None,
-            timeline_widget: timeline_widget::TimelineWidget::new(),
-            timeline_visible: false,
             pinned_on_top: false,
             continuous_preview: false,
             seek_bar_hover: None,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
             seek_bar_drag_target: None,
+            segment_loop: SegmentLoopState::default(),
         }
     }
 }
 
-/// Bundle of read-only queries used by the editor UI, kept separate to avoid
-/// exceeding Bevy's 16-parameter system limit.
-#[derive(SystemParam)]
-struct EditorQueries<'w, 's> {
-    entity: Query<
-        'w,
-        's,
-        (
-            Entity,
-            Option<&'static MobjectId>,
-            Option<&'static ObjectTag>,
-        ),
-    >,
-    children: Query<'w, 's, &'static Children>,
-    group: Query<'w, 's, &'static GroupMarker>,
-    transform: Query<'w, 's, &'static gaanim_math::SpatialTransform>,
-    fill: Query<'w, 's, &'static FillBrush>,
-    stroke: Query<'w, 's, &'static StrokeBrush>,
-    opacity: Query<'w, 's, &'static Opacity>,
-    extra: Query<
-        'w,
-        's,
-        (
-            Entity,
-            Option<&'static MobjectId>,
-            Option<&'static FloatSignal>,
-            Option<&'static Updater>,
-            Option<&'static DecimalNumber>,
-        ),
-    >,
-    presenter_window: Query<'w, 's, (), With<presenter::PresenterWindow>>,
+impl EditorState {
+    /// Re-resolve an active editor segment loop after a script hot reload.
+    /// The timeline engine remains independent from this editor-only state.
+    pub fn reconcile_segment_loop_after_reload(
+        &mut self,
+        timeline: &mut Timeline,
+        target_time: f64,
+    ) {
+        if !self.segment_loop.is_active() {
+            return;
+        }
+        let Some(range) = scene_loop_range_at(timeline, target_time) else {
+            self.segment_loop.deactivate(timeline);
+            return;
+        };
+        self.segment_loop.segment_bounds = Some(range);
+        if self.segment_loop.previous_was_full_duration {
+            self.segment_loop.previous_range = Some((0.0, timeline.cached_duration.max(0.0)));
+        }
+        timeline.loop_range = Some(range);
+    }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
     mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
     mut export_state: ResMut<export::ExportState>,
+    mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
     mut inset: ResMut<ViewportInset>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
@@ -342,7 +374,7 @@ fn editor_ui_system(
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
     hub: Option<Res<project_hub::ProjectHubState>>,
-    q: EditorQueries,
+    presenter_windows: Query<(), With<presenter::PresenterWindow>>,
 ) {
     if hub.is_some_and(|hub| hub.active) {
         inset.bottom = 0.0;
@@ -415,159 +447,9 @@ fn editor_ui_system(
         (0.0, 0, 0)
     };
 
-    let mut property_values: HashMap<ObjectId, timeline_widget::PropertyValues> = HashMap::new();
-    for (entity, mobj_id, _) in &q.entity {
-        let Some(oid) = mobj_id else {
-            continue;
-        };
-
-        let pos = if let Ok(t) = q.transform.get(entity) {
-            t.translation
-        } else {
-            glam::DVec3::ZERO
-        };
-        let scale = if let Ok(t) = q.transform.get(entity) {
-            t.scale
-        } else {
-            glam::DVec3::ONE
-        };
-        let rotation_deg = if let Ok(t) = q.transform.get(entity) {
-            2.0 * f64::atan2(t.rotation.z, t.rotation.w).to_degrees()
-        } else {
-            0.0
-        };
-
-        let fill_label = if let Ok(fb) = q.fill.get(entity) {
-            brush_string(&fb.0)
-        } else {
-            "none".into()
-        };
-
-        let stroke_label = if let Ok(sb) = q.stroke.get(entity) {
-            brush_string(&sb.brush)
-        } else {
-            "none".into()
-        };
-
-        let stroke_width = if let Ok(sb) = q.stroke.get(entity) {
-            sb.style.width
-        } else {
-            0.0
-        };
-
-        let opacity = if let Ok(o) = q.opacity.get(entity) {
-            o.0
-        } else {
-            1.0
-        };
-
-        property_values.insert(
-            oid.0,
-            timeline_widget::PropertyValues {
-                pos_x: pos.x,
-                pos_y: pos.y,
-                pos_z: pos.z,
-                scale_x: scale.x,
-                scale_y: scale.y,
-                scale_z: scale.z,
-                rotation_deg,
-                fill_label,
-                stroke_label,
-                stroke_width,
-                opacity,
-            },
-        );
-    }
-
-    let mobject_to_track: HashMap<gaanim_core::id::ObjectId, gaanim_timeline::clip::TrackId> =
-        timeline
-            .tracks
-            .iter()
-            .filter_map(|(tid, t)| t.object_id.map(|oid| (oid, tid)))
-            .collect();
-    let mut group_children: HashMap<
-        gaanim_timeline::clip::TrackId,
-        Vec<gaanim_timeline::clip::TrackId>,
-    > = HashMap::new();
-    for (entity, mobj_id, _) in &q.entity {
-        if !q.group.contains(entity) {
-            continue;
-        }
-        let Some(group_oid) = mobj_id else { continue };
-        let Some(&group_tid) = mobject_to_track.get(&group_oid.0) else {
-            continue;
-        };
-        if let Ok(children) = q.children.get(entity) {
-            let child_tids: Vec<gaanim_timeline::clip::TrackId> = children
-                .iter()
-                .filter_map(|child| {
-                    q.entity
-                        .get(child)
-                        .ok()
-                        .and_then(|(_, mid, _)| mid)
-                        .and_then(|oid| mobject_to_track.get(&oid.0))
-                        .copied()
-                })
-                .collect();
-            if !child_tids.is_empty() {
-                group_children.insert(group_tid, child_tids);
-            }
-        }
-    }
-
-    // Top bar removed — export button lives in the playback controls now.
-
-    let mut signal_values: HashMap<ObjectId, f64> = HashMap::new();
-    let mut updater_entities: HashSet<ObjectId> = HashSet::new();
-    let mut signal_by_entity: HashMap<Entity, f64> = HashMap::new();
-    let mut decimal_values: HashMap<ObjectId, f64> = HashMap::new();
-    for (entity, mobj_id, signal, updater, decimal) in &q.extra {
-        let Some(mobj_id) = mobj_id else { continue };
-        let oid = mobj_id.0;
-        if let Some(signal) = signal {
-            signal_values.insert(oid, signal.value);
-            signal_by_entity.insert(entity, signal.value);
-        }
-        if updater.is_some() {
-            updater_entities.insert(oid);
-        }
-        if let Some(decimal) = decimal {
-            let val = signal_by_entity
-                .get(&decimal.signal_entity)
-                .copied()
-                .or(decimal.last_value)
-                .unwrap_or(0.0);
-            decimal_values.insert(oid, val);
-        }
-    }
-
     // Temporal snapping is intentionally unavailable while inspecting 3D.
     // Keep the ordinary 2D preference untouched.
     let snapping_allowed = !interactive.detected_3d;
-
-    // ── Full timeline panel (only when explicitly toggled on) ──────────────
-    let timeline_response = if state.timeline_visible {
-        Some(
-            egui::TopBottomPanel::bottom("timeline")
-                .resizable(true)
-                .default_height(200.0)
-                .min_height(100.0)
-                .show(ctx, |ui| {
-                    state.timeline_widget.show(
-                        ui,
-                        &mut timeline,
-                        &property_values,
-                        &group_children,
-                        &signal_values,
-                        &updater_entities,
-                        &decimal_values,
-                        snapping_allowed,
-                    );
-                }),
-        )
-    } else {
-        None
-    };
 
     // ── Compact playback overlay (auto-hide) ──────────────────────────────
     let scene_name: String = timeline
@@ -593,14 +475,8 @@ fn editor_ui_system(
         state.bar_visibility = target_vis;
     }
     let vis = state.bar_visibility;
-    // Solo la timeline docked reserva espacio. El playback es overlay flotante
-    // y no debe modificar viewport_scale/offset para que el preview no "salte"
-    // al aparecer/desaparecer.
-    let panel_h = timeline_response
-        .as_ref()
-        .map(|r| r.response.rect.height())
-        .unwrap_or(0.0);
-    inset.bottom = panel_h;
+    // El playback es un overlay flotante y nunca reduce el viewport.
+    inset.bottom = 0.0;
 
     if vis > 0.01 {
         let slide_offset = (1.0 - vis) * 8.0;
@@ -609,16 +485,19 @@ fn editor_ui_system(
         let area_resp = egui::Area::new("playback_overlay".into())
             .anchor(
                 egui::Align2::CENTER_BOTTOM,
-                egui::vec2(0.0, -panel_h + slide_offset),
+                egui::vec2(0.0, slide_offset),
             )
             .order(egui::Order::Foreground)
             .interactable(true)
             .show(ctx, |ui| {
                 let screen_w = vp.width();
-                // Más ancho para comodidad, sin tapar bordes
-                let bar_w = (screen_w * 0.82).min(980.0).max(640.0);
-                let avail_w = (screen_w - 24.0).max(bar_w);
-                let final_w = bar_w.min(avail_w);
+                let density = PlaybackDensity::for_width(screen_w);
+                let overlay_w = density.overlay_width(screen_w);
+                let (horizontal_margin, vertical_margin) = match density {
+                    PlaybackDensity::Wide => (16, 10),
+                    PlaybackDensity::Compact => (10, 8),
+                    PlaybackDensity::Minimal => (6, 6),
+                };
 
                 let fill_alpha = (245.0 * alpha_mul) as u8;
                 let stroke_alpha = (110.0 * alpha_mul) as u8;
@@ -628,17 +507,19 @@ fn editor_ui_system(
                     ))
                     .corner_radius(12.0)
                     .inner_margin(egui::Margin {
-                        left: 16,
-                        right: 16,
-                        top: 10,
-                        bottom: 8,
+                        left: horizontal_margin,
+                        right: horizontal_margin,
+                        top: vertical_margin,
+                        bottom: vertical_margin,
                     })
                     .stroke(egui::Stroke::new(
                         1.0,
                         egui::Color32::from_rgba_premultiplied(65, 65, 80, stroke_alpha),
                     ))
                     .show(ui, |ui| {
-                        ui.set_width(final_w);
+                        let content_w =
+                            (overlay_w - 2.0 * horizontal_margin as f32).max(0.0);
+                        ui.set_width(content_w);
                         ui.spacing_mut().item_spacing.y = 6.0;
 
                         // Row 1: custom seek bar
@@ -648,9 +529,10 @@ fn editor_ui_system(
                             0.0
                         };
                         let total_f32 = total.max(0.001) as f32;
-                        let loop_frac = timeline
-                            .loop_range
-                            .map(|(s, e)| (s as f32 / total_f32, e as f32 / total_f32));
+                        let loop_frac = state.segment_loop.is_active().then(|| {
+                            let (s, e) = timeline.loop_range.unwrap_or((0.0, 0.0));
+                            (s as f32 / total_f32, e as f32 / total_f32)
+                        });
                         let bp_fracs: Vec<f32> = timeline
                             .segments
                             .iter()
@@ -694,27 +576,17 @@ fn editor_ui_system(
                         if let Some((ls, le)) = seek_resp.loop_drag {
                             let s = (ls as f64 * total).clamp(0.0, total);
                             let e = (le as f64 * total).clamp(0.0, total);
-                            if (e - s).abs() > 0.05 {
-                                timeline.loop_range = Some((s.min(e), s.max(e)));
-                            }
-                        }
-                        if seek_resp.loop_toggle {
-                            if timeline.loop_range.is_some() {
-                                timeline.loop_range = None;
-                            } else {
-                                timeline.loop_range = Some((0.0, timeline.cached_duration.max(0.01)));
+                            if let Some(range) = state.segment_loop.clamp_range(s.min(e), s.max(e))
+                                && range.1 - range.0 > 0.05
+                            {
+                                timeline.loop_range = Some(range);
                             }
                         }
                         state.seek_bar_hover = seek_resp.hover_time;
 
                         // Row 2: controles (escalados)
                         ui.add_space(4.0);
-                        egui::ScrollArea::horizontal()
-                            .auto_shrink([false, true])
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                            )
-                            .show(ui, |ui| {
+                        ui.horizontal(|ui| {
                                 ui.horizontal(|ui| {
                             // ── Grupo A: Transporte (pill)
                             egui::Frame::new()
@@ -725,10 +597,12 @@ fn editor_ui_system(
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
-                                        transport_button(ui, "⏮", || {
-                                            timeline.is_playing = false;
-                                            timeline.seek_request = Some(0.0);
-                                        });
+                                        if density != PlaybackDensity::Minimal {
+                                            transport_button(ui, "⏮", || {
+                                                timeline.is_playing = false;
+                                                timeline.seek_request = Some(0.0);
+                                            });
+                                        }
 
                                         // Play / Pause (más grande)
                                         let play_sym = if timeline.is_playing { "⏸" } else { "▶" };
@@ -748,18 +622,20 @@ fn editor_ui_system(
                                             timeline.is_playing = !timeline.is_playing;
                                         }
 
-                                        transport_button(ui, "⏭", || {
-                                            timeline.is_playing = false;
-                                            timeline.seek_request = Some(total);
-                                        });
+                                        if density != PlaybackDensity::Minimal {
+                                            transport_button(ui, "⏭", || {
+                                                timeline.is_playing = false;
+                                                timeline.seek_request = Some(total);
+                                            });
+                                        }
 
-                                        if !scene_segs.is_empty() {
+                                        if density != PlaybackDensity::Minimal && !scene_segs.is_empty() {
                                             ui.separator();
                                             let cur_scene_idx = scene_segs.iter().position(|s| {
                                                 frac >= s.start_frac && frac < s.end_frac + 0.005
                                             });
-                                            let has_prev = cur_scene_idx.map_or(false, |i| i > 0);
-                                            let has_next = cur_scene_idx.map_or(false, |i| i + 1 < scene_segs.len());
+                                            let has_prev = cur_scene_idx.is_some_and(|i| i > 0);
+                                            let has_next = cur_scene_idx.is_some_and(|i| i + 1 < scene_segs.len());
                                             let before_first = !scene_segs.is_empty() && frac < scene_segs[0].start_frac;
                                             let after_last = !scene_segs.is_empty() && frac >= scene_segs.last().unwrap().end_frac - 0.005;
 
@@ -819,6 +695,7 @@ fn editor_ui_system(
                                         ui.spacing_mut().item_spacing.x = 6.0;
 
                             // Speed control
+                            if density == PlaybackDensity::Wide {
                             let speed = timeline.playback_rate;
                             let speed_label = if speed == 1.0 {
                                 "1x".to_string()
@@ -912,6 +789,7 @@ fn editor_ui_system(
                                 });
 
                             ui.add_space(3.0);
+                            }
 
                             // Time display (más grande) — click copia timecode
                             let time_resp = ui.add(
@@ -934,27 +812,42 @@ fn editor_ui_system(
 
                             ui.add_space(4.0);
 
-                            // Loop toggle — arrastrable en la barra
-                            let loop_on = timeline.loop_range.is_some();
+                            // Loop del segmento actual; los tiradores refinan
+                            // el rango sin salir de sus límites.
+                            let loop_on = state.segment_loop.is_active();
                             let loop_color = if loop_on {
                                 egui::Color32::from_rgb(100, 200, 140)
                             } else {
                                 egui::Color32::from_rgb(100, 100, 110)
                             };
+                            let loop_label = if density == PlaybackDensity::Wide {
+                                "↻ Segment"
+                            } else {
+                                "↻"
+                            };
                             let loop_btn = egui::Button::new(
-                                egui::RichText::new("🔁").size(14.0).color(loop_color),
+                                egui::RichText::new(loop_label).size(13.0).color(loop_color),
                             )
-                            .min_size(egui::vec2(28.0, 24.0))
+                            .min_size(egui::vec2(
+                                if density == PlaybackDensity::Wide { 78.0 } else { 28.0 },
+                                24.0,
+                            ))
                             .corner_radius(4.0)
                             .fill(egui::Color32::TRANSPARENT);
-                            if ui.add(loop_btn).on_hover_text("Loop (L) · Arrastra los tiradores en la barra · Doble-click en barra alterna").clicked() {
-                                if loop_on {
-                                    timeline.loop_range = None;
-                                } else {
-                                    timeline.loop_range = Some((0.0, timeline.cached_duration));
-                                }
+                            if ui
+                                .add_enabled(active_scene_loop_range.is_some(), loop_btn)
+                                .on_hover_text("L: loop del segmento actual · arrastra los tiradores para refinar")
+                                .clicked()
+                                && let Some(range) = active_scene_loop_range
+                            {
+                                toggle_scene_loop_range(
+                                    &mut state.segment_loop,
+                                    &mut timeline,
+                                    range,
+                                );
                             }
 
+                            if density == PlaybackDensity::Wide {
                             let continuous_color = if state.continuous_preview {
                                 egui::Color32::from_rgb(105, 220, 155)
                             } else {
@@ -982,22 +875,12 @@ fn editor_ui_system(
                             ui.add_space(6.0);
                             if let Some(presentation_name) = &presentation_name {
                                 let display = truncate_with_ellipsis(presentation_name, 22);
-                                let response = ui
-                                    .add(
-                                        egui::Label::new(
-                                            egui::RichText::new(display)
-                                                .color(egui::Color32::from_rgb(170, 210, 255))
-                                                .strong()
-                                                .size(13.0),
-                                        )
-                                        .sense(egui::Sense::click()),
-                                    )
-                                    .on_hover_text("Double-click to loop this scene");
-                                if response.double_clicked()
-                                    && let Some(range) = active_scene_loop_range
-                                {
-                                    toggle_scene_loop_range(&mut timeline, range);
-                                }
+                                ui.label(
+                                    egui::RichText::new(display)
+                                        .color(egui::Color32::from_rgb(170, 210, 255))
+                                        .strong()
+                                        .size(13.0),
+                                );
                                 ui.add_space(4.0);
                             } else if !scene_name.is_empty() {
                                 let display = truncate_with_ellipsis(&scene_name, 20);
@@ -1008,22 +891,12 @@ fn editor_ui_system(
                                 } else {
                                     egui::Color32::from_rgb(150, 180, 220)
                                 };
-                                let response = ui
-                                    .add(
-                                        egui::Label::new(
-                                            egui::RichText::new(scene_text)
-                                                .color(scene_color)
-                                                .strong()
-                                                .size(13.0),
-                                        )
-                                        .sense(egui::Sense::click()),
-                                    )
-                                    .on_hover_text("Double-click to loop this scene");
-                                if response.double_clicked()
-                                    && let Some(range) = active_scene_loop_range
-                                {
-                                    toggle_scene_loop_range(&mut timeline, range);
-                                }
+                                ui.label(
+                                    egui::RichText::new(scene_text)
+                                        .color(scene_color)
+                                        .strong()
+                                        .size(13.0),
+                                );
                                 ui.add_space(4.0);
                             } else if !scene_segs.is_empty() {
                                 ui.label(
@@ -1042,9 +915,11 @@ fn editor_ui_system(
                                 );
                                 ui.add_space(2.0);
                             }
+                            }
                                     });
                                 });
 
+                            if density == PlaybackDensity::Wide {
                             ui.add_space(6.0);
 
                             // ── Grupo C: Acciones derecha ──
@@ -1056,28 +931,20 @@ fn editor_ui_system(
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 6.0;
-                            // Right-aligned controls: timeline toggle + export + pin
+                            // Right-aligned window and output controls.
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    // Timeline toggle
-                                    let (lbl, icon) = if state.timeline_visible {
-                                        ("Close", "✕")
-                                    } else {
-                                        ("Timeline", "☰")
-                                    };
-                                    let tl_btn = egui::Button::new(
-                                        egui::RichText::new(format!("{} {}", icon, lbl))
-                                            .size(12.5)
-                                            .color(egui::Color32::from_rgb(150, 150, 165)),
-                                    )
-                                    .min_size(egui::vec2(68.0, 24.0))
-                                    .corner_radius(4.0)
-                                    .fill(egui::Color32::from_rgba_premultiplied(
-                                        30, 30, 45, 140,
-                                    ));
-                                    if ui.add(tl_btn).clicked() {
-                                        state.timeline_visible = !state.timeline_visible;
+                                    if ui
+                                        .button("⛶ Fullscreen")
+                                        .on_hover_text("F11: toggle editor fullscreen")
+                                        .clicked()
+                                        && let Ok(mut window) = windows.single_mut()
+                                    {
+                                        toggle_editor_fullscreen(
+                                            &mut window,
+                                            &mut fullscreen_state,
+                                        );
                                     }
 
                                     let present_btn = egui::Button::new(
@@ -1096,16 +963,16 @@ fn editor_ui_system(
                                             "Start fullscreen audience mode on this monitor",
                                         )
                                         .clicked()
+                                        && let Ok(mut window) = windows.single_mut()
                                     {
-                                        if let Ok(mut window) = windows.single_mut() {
-                                            window.mode =
-                                                bevy::window::WindowMode::BorderlessFullscreen(
-                                                    bevy::window::MonitorSelection::Current,
-                                                );
-                                            presentation_mode.active = true;
-                                            if q.presenter_window.is_empty() {
-                                                presenter::spawn_presenter_window(&mut commands);
-                                            }
+                                        fullscreen_state.previous_mode = None;
+                                        window.mode =
+                                            bevy::window::WindowMode::BorderlessFullscreen(
+                                                bevy::window::MonitorSelection::Current,
+                                            );
+                                        presentation_mode.active = true;
+                                        if presenter_windows.is_empty() {
+                                            presenter::spawn_presenter_window(&mut commands);
                                         }
                                     }
 
@@ -1183,6 +1050,114 @@ fn editor_ui_system(
                                     });
                                 });
                             });
+                            }
+                            if density != PlaybackDensity::Wide {
+                                ui.add_space(4.0);
+                                ui.menu_button("⋯ More", |ui| {
+                                    if density == PlaybackDensity::Minimal {
+                                        if ui.button("Start").clicked() {
+                                            timeline.is_playing = false;
+                                            timeline.seek_request = Some(0.0);
+                                        }
+                                        if ui.button("Previous segment").clicked()
+                                            && let Some(target) = adjacent_scene_time(
+                                                &scene_segs,
+                                                frac,
+                                                total,
+                                                false,
+                                            )
+                                        {
+                                            timeline.seek_request = Some(target);
+                                        }
+                                        if ui.button("Next segment").clicked()
+                                            && let Some(target) = adjacent_scene_time(
+                                                &scene_segs,
+                                                frac,
+                                                total,
+                                                true,
+                                            )
+                                        {
+                                            timeline.seek_request = Some(target);
+                                        }
+                                        if ui.button("End").clicked() {
+                                            timeline.is_playing = false;
+                                            timeline.seek_request = Some(total);
+                                        }
+                                        ui.separator();
+                                    }
+
+                                    ui.menu_button(
+                                        format!("Speed · {:.2}x", timeline.playback_rate),
+                                        |ui| {
+                                            for rate in [0.25, 0.5, 1.0, 1.5, 2.0, 3.0] {
+                                                if ui
+                                                    .selectable_label(
+                                                        (timeline.playback_rate - rate).abs()
+                                                            < f64::EPSILON,
+                                                        format!("{}x", rate),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    timeline.playback_rate = rate;
+                                                }
+                                            }
+                                        },
+                                    );
+                                    ui.checkbox(&mut state.continuous_preview, "Continuous");
+                                    ui.separator();
+
+                                    if ui.button("Fullscreen · F11").clicked()
+                                        && let Ok(mut window) = windows.single_mut()
+                                    {
+                                        toggle_editor_fullscreen(
+                                            &mut window,
+                                            &mut fullscreen_state,
+                                        );
+                                    }
+                                    if ui.button("Present").clicked()
+                                        && let Ok(mut window) = windows.single_mut()
+                                    {
+                                        fullscreen_state.previous_mode = None;
+                                        window.mode =
+                                            bevy::window::WindowMode::BorderlessFullscreen(
+                                                bevy::window::MonitorSelection::Current,
+                                            );
+                                        presentation_mode.active = true;
+                                        if presenter_windows.is_empty() {
+                                            presenter::spawn_presenter_window(&mut commands);
+                                        }
+                                    }
+                                    if ui
+                                        .add_enabled(!is_exporting, egui::Button::new("Export"))
+                                        .clicked()
+                                    {
+                                        export_state.dialog_open = true;
+                                    }
+                                    if is_exporting {
+                                        ui.label(format!(
+                                            "Export {:.0}% · {}/{}",
+                                            export_progress_pct * 100.0,
+                                            export_current,
+                                            export_total,
+                                        ));
+                                    }
+                                    let pin_label = if state.pinned_on_top {
+                                        "Unpin window"
+                                    } else {
+                                        "Pin window on top"
+                                    };
+                                    if ui.button(pin_label).clicked() {
+                                        state.pinned_on_top = !state.pinned_on_top;
+                                        if let Ok(mut window) = windows.single_mut() {
+                                            window.window_level = if state.pinned_on_top {
+                                                bevy::window::WindowLevel::AlwaysOnTop
+                                            } else {
+                                                bevy::window::WindowLevel::Normal
+                                            };
+                                        }
+                                    }
+                                });
+                            }
                             // cerrar grupos
                          });
                      });
@@ -1193,35 +1168,7 @@ fn editor_ui_system(
         state.bar_hovered = hover_pos.is_some_and(|p| area_resp.response.rect.contains(p));
     }
 
-    if let Some(track_id) = state.timeline_widget.selected_track {
-        if let Some(track) = timeline.tracks.get(track_id)
-            && let Some(obj_id) = track.object_id
-        {
-            for (entity, mobj_id, _) in &q.entity {
-                if let Some(mid) = mobj_id
-                    && mid.0 == obj_id
-                {
-                    state.selected = Some(entity);
-                    break;
-                }
-            }
-        }
-        state.timeline_widget.selected_track = None;
-    }
-
     fps_overlay.render(ctx);
-}
-
-fn brush_string(brush: &Option<peniko::Brush>) -> String {
-    match brush {
-        Some(peniko::Brush::Solid(color)) => {
-            let rgba = color.to_rgba8();
-            format!("#{:02X}{:02X}{:02X}{:02X}", rgba.r, rgba.g, rgba.b, rgba.a)
-        }
-        Some(peniko::Brush::Gradient(_)) => "<gradient>".into(),
-        Some(peniko::Brush::Image(_)) => "<image>".into(),
-        None => "none".into(),
-    }
 }
 
 /// Format seconds as `M:SS.ss` for the playback overlay.
@@ -1237,7 +1184,11 @@ fn format_time(seconds: f64) -> String {
 }
 
 fn current_scene_loop_range(timeline: &Timeline) -> Option<(f64, f64)> {
-    if let Some(position) = timeline.segment_position_at(timeline.current_time)
+    scene_loop_range_at(timeline, timeline.current_time)
+}
+
+fn scene_loop_range_at(timeline: &Timeline, time: f64) -> Option<(f64, f64)> {
+    if let Some(position) = timeline.segment_position_at(time)
         && let Some(segment) = timeline
             .segments
             .iter()
@@ -1246,30 +1197,40 @@ fn current_scene_loop_range(timeline: &Timeline) -> Option<(f64, f64)> {
         return Some((segment.start_time, segment.end_time));
     }
     timeline
-        .scene_at(timeline.current_time)
+        .scene_at(time)
         .and_then(|scene| timeline.scene_bounds(scene))
 }
 
-fn toggle_scene_loop_range(timeline: &mut Timeline, range: (f64, f64)) {
+fn toggle_scene_loop_range(
+    state: &mut SegmentLoopState,
+    timeline: &mut Timeline,
+    range: (f64, f64),
+) {
     const EPSILON: f64 = 1e-6;
     let (start, end) = (range.0.min(range.1), range.0.max(range.1));
     if !start.is_finite() || !end.is_finite() || end - start <= EPSILON {
-        timeline.loop_range = None;
-        timeline.seek_request = start.is_finite().then_some(start);
-        timeline.is_playing = false;
         return;
     }
 
-    let same_range = timeline
-        .loop_range
+    let same_range = state
+        .segment_bounds
         .is_some_and(|(active_start, active_end)| {
             (active_start - start).abs() <= EPSILON && (active_end - end).abs() <= EPSILON
         });
     if same_range {
-        timeline.loop_range = None;
+        state.deactivate(timeline);
         return;
     }
 
+    if !state.is_active() {
+        state.previous_range = timeline.loop_range;
+        state.previous_was_full_duration =
+            timeline.loop_range.is_some_and(|(old_start, old_end)| {
+                old_start.abs() <= EPSILON
+                    && (old_end - timeline.cached_duration.max(0.0)).abs() <= EPSILON
+            });
+    }
+    state.segment_bounds = Some((start, end));
     timeline.loop_range = Some((start, end));
     timeline.seek_request = Some(start);
     timeline.is_playing = true;
@@ -1282,6 +1243,36 @@ struct SceneSegment {
     end_frac: f32,
 }
 
+fn adjacent_scene_time(
+    scenes: &[SceneSegment],
+    fraction: f32,
+    total: f64,
+    next: bool,
+) -> Option<f64> {
+    let first = scenes.first()?;
+    let last = scenes.last()?;
+    let current = scenes
+        .iter()
+        .position(|scene| fraction >= scene.start_frac && fraction < scene.end_frac + 0.005);
+    let target = if next {
+        if fraction < first.start_frac {
+            Some(first.start_frac)
+        } else {
+            current
+                .and_then(|index| scenes.get(index + 1))
+                .map(|scene| scene.start_frac)
+        }
+    } else if fraction >= last.end_frac - 0.005 {
+        Some(last.start_frac)
+    } else {
+        current
+            .and_then(|index| index.checked_sub(1))
+            .and_then(|index| scenes.get(index))
+            .map(|scene| scene.start_frac)
+    };
+    target.map(|fraction| fraction as f64 * total)
+}
+
 /// Result from painting the custom seek bar.
 struct SeekBarResponse {
     /// If Some, the user wants to seek to this fraction (0.0..=1.0).
@@ -1290,8 +1281,6 @@ struct SeekBarResponse {
     hover_time: Option<f64>,
     /// If Some, the user dragged a loop handle to a new (start_frac, end_frac).
     loop_drag: Option<(f32, f32)>,
-    /// Double-click on bar toggles loop.
-    loop_toggle: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1402,7 +1391,7 @@ fn paint_seek_bar(
                         .enumerate()
                         .filter(|(_, s)| frac >= s.start_frac)
                         .map(|(i, _)| i)
-                        .last()
+                        .next_back()
                 } else {
                     None
                 }
@@ -1720,22 +1709,20 @@ fn paint_seek_bar(
     );
 
     // Cursor feedback for lane: show hand when hovering a scene chip
-    if has_scenes {
-        if let Some(hover_pos) = response.hover_pos() {
-            let lane_rect = egui::Rect::from_min_max(
-                egui::pos2(rect.min.x, rect.min.y),
-                egui::pos2(rect.max.x, rect.min.y + scene_lane_h),
-            );
-            if lane_rect.contains(hover_pos) {
-                // Check if over any scene chip (seg_w > 1)
-                let over_scene = scenes.iter().any(|seg| {
-                    let sx = rect.min.x + seg.start_frac * rect.width();
-                    let ex = rect.min.x + seg.end_frac * rect.width();
-                    hover_pos.x >= sx && hover_pos.x <= ex
-                });
-                if over_scene {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
+    if has_scenes && let Some(hover_pos) = response.hover_pos() {
+        let lane_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.min.x, rect.min.y),
+            egui::pos2(rect.max.x, rect.min.y + scene_lane_h),
+        );
+        if lane_rect.contains(hover_pos) {
+            // Check if over any scene chip (seg_w > 1)
+            let over_scene = scenes.iter().any(|seg| {
+                let sx = rect.min.x + seg.start_frac * rect.width();
+                let ex = rect.min.x + seg.end_frac * rect.width();
+                hover_pos.x >= sx && hover_pos.x <= ex
+            });
+            if over_scene {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
         }
     }
@@ -1832,12 +1819,6 @@ fn paint_seek_bar(
     // Interaction: lane chip → inicio escena, handle loop → ajusta loop, resto → seek
     let mut seek_to = None;
     let mut loop_drag = None;
-    let mut loop_toggle = false;
-
-    // doble-click en la barra alterna loop
-    if response.double_clicked() {
-        loop_toggle = true;
-    }
 
     if response.clicked() {
         if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
@@ -1936,7 +1917,6 @@ fn paint_seek_bar(
         seek_to,
         hover_time,
         loop_drag,
-        loop_toggle,
     }
 }
 
@@ -1964,15 +1944,56 @@ fn transport_button(ui: &mut egui::Ui, label: &str, on_click: impl FnOnce()) {
     }
 }
 
+fn toggle_editor_fullscreen(window: &mut Window, state: &mut EditorFullscreenState) {
+    if matches!(window.mode, bevy::window::WindowMode::Windowed) {
+        state.previous_mode = Some(window.mode);
+        window.mode =
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current);
+    } else {
+        window.mode = state
+            .previous_mode
+            .take()
+            .unwrap_or(bevy::window::WindowMode::Windowed);
+    }
+}
+
+fn editor_fullscreen_keys_system(
+    egui_wants: Res<EguiWantsInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    presentation_mode: Res<PresentationMode>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut state: ResMut<EditorFullscreenState>,
+) {
+    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input())
+        || !keys.just_pressed(KeyCode::F11)
+    {
+        return;
+    }
+    if let Ok(mut window) = windows.single_mut() {
+        toggle_editor_fullscreen(&mut window, &mut state);
+    }
+}
+
+fn editor_shortcuts_allowed(presentation_active: bool, wants_keyboard_input: bool) -> bool {
+    !presentation_active && !wants_keyboard_input
+}
+
 /// Global playback keybindings that work regardless of timeline panel visibility.
 fn global_playback_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
     presentation_mode: Res<PresentationMode>,
+    mut state: ResMut<EditorState>,
     mut timeline: ResMut<Timeline>,
 ) {
-    if presentation_mode.active || egui_wants.wants_keyboard_input() {
+    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
         return;
+    }
+
+    if keys.just_pressed(KeyCode::KeyL)
+        && let Some(range) = current_scene_loop_range(&timeline)
+    {
+        toggle_scene_loop_range(&mut state.segment_loop, &mut timeline, range);
     }
 
     // Explicit stop navigation is owned by `interactive_stop_input_system`.
@@ -2629,20 +2650,24 @@ mod tests {
     #[test]
     fn scene_loop_replaces_a_previous_range_and_repeated_toggle_disables_it() {
         let mut timeline = Timeline::new();
+        timeline.cached_duration = 8.0;
         timeline.loop_range = Some((0.0, 8.0));
         timeline.playback_rate = 1.75;
+        let mut state = SegmentLoopState::default();
 
-        toggle_scene_loop_range(&mut timeline, (2.0, 4.5));
+        toggle_scene_loop_range(&mut state, &mut timeline, (2.0, 4.5));
         assert_eq!(timeline.loop_range, Some((2.0, 4.5)));
         assert_eq!(timeline.seek_request, Some(2.0));
         assert!(timeline.is_playing);
         assert_eq!(timeline.playback_rate, 1.75);
+        assert!(state.is_active());
 
         timeline.seek_request = None;
-        toggle_scene_loop_range(&mut timeline, (2.0, 4.5));
-        assert_eq!(timeline.loop_range, None);
+        toggle_scene_loop_range(&mut state, &mut timeline, (2.0, 4.5));
+        assert_eq!(timeline.loop_range, Some((0.0, 8.0)));
         assert_eq!(timeline.seek_request, None);
         assert_eq!(timeline.playback_rate, 1.75);
+        assert!(!state.is_active());
     }
 
     #[test]
@@ -2650,12 +2675,212 @@ mod tests {
         let mut timeline = Timeline::new();
         timeline.loop_range = Some((0.0, 2.0));
         timeline.is_playing = true;
+        let mut state = SegmentLoopState::default();
 
-        toggle_scene_loop_range(&mut timeline, (1.0, 1.0));
+        toggle_scene_loop_range(&mut state, &mut timeline, (1.0, 1.0));
 
-        assert_eq!(timeline.loop_range, None);
-        assert_eq!(timeline.seek_request, Some(1.0));
-        assert!(!timeline.is_playing);
+        assert_eq!(timeline.loop_range, Some((0.0, 2.0)));
+        assert_eq!(timeline.seek_request, None);
+        assert!(timeline.is_playing);
+        assert!(!state.is_active());
+    }
+
+    #[test]
+    fn scene_loop_falls_back_to_authored_scene_bounds() {
+        use gaanim_timeline::clip::ClipPayload;
+
+        let mut timeline = Timeline::new();
+        let scene = timeline.add_scene("legacy");
+        timeline.index_scene(scene, 2.0);
+        let track = timeline.add_track("scene", 0);
+        timeline.add_clip(track, 2.0, 0.0, ClipPayload::SceneStart(scene));
+        timeline.add_clip(track, 5.0, 0.0, ClipPayload::SceneEnd(scene));
+
+        assert_eq!(scene_loop_range_at(&timeline, 3.0), Some((2.0, 5.0)));
+    }
+
+    #[test]
+    fn hot_reload_re_resolves_or_disables_the_active_segment_loop() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 4.0;
+        timeline.loop_range = Some((0.0, 4.0));
+        let mut state = EditorState::default();
+        toggle_scene_loop_range(&mut state.segment_loop, &mut timeline, (1.0, 2.0));
+
+        timeline.cached_duration = 5.0;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "changed".into(),
+            notes: None,
+            start_time: 0.75,
+            end_time: 2.5,
+            stops: Vec::new(),
+        }]);
+        state.reconcile_segment_loop_after_reload(&mut timeline, 1.5);
+        assert_eq!(timeline.loop_range, Some((0.75, 2.5)));
+
+        timeline.set_segments(Vec::new());
+        state.reconcile_segment_loop_after_reload(&mut timeline, 1.5);
+        assert!(!state.segment_loop.is_active());
+        assert_eq!(timeline.loop_range, Some((0.0, 5.0)));
+    }
+
+    #[test]
+    fn active_segment_loop_ignores_stops_without_enabling_continuous_preview() {
+        let mut app = App::new();
+        let mut editor_state = EditorState::default();
+        editor_state.segment_loop.segment_bounds = Some((1.0, 2.0));
+        app.init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<Timeline>()
+            .init_resource::<PlaybackStopPolicy>()
+            .insert_resource(editor_state)
+            .insert_resource(PresentationMode::default())
+            .add_systems(Update, sync_editor_input_ignore_system);
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<PlaybackStopPolicy>(),
+            PlaybackStopPolicy::Ignore
+        );
+        assert!(!app.world().resource::<EditorState>().continuous_preview);
+    }
+
+    #[test]
+    fn l_toggles_the_current_segment_even_when_it_contains_stops() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 3.0;
+        timeline.current_time = 1.5;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "loop me".into(),
+            notes: None,
+            start_time: 1.0,
+            end_time: 2.0,
+            stops: vec![gaanim_timeline::timeline::SegmentStop {
+                name: Some("pause".into()),
+                time: 1.5,
+            }],
+        }]);
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<EditorState>()
+            .insert_resource(PresentationMode::default())
+            .insert_resource(timeline)
+            .add_systems(Update, global_playback_keys_system);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyL);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Timeline>().loop_range,
+            Some((1.0, 2.0))
+        );
+        assert!(
+            app.world()
+                .resource::<EditorState>()
+                .segment_loop
+                .is_active()
+        );
+    }
+
+    #[test]
+    fn playback_shortcuts_do_not_change_segment_loop_in_presentation_mode() {
+        let mut timeline = Timeline::new();
+        timeline.current_time = 0.5;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "present".into(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 1.0,
+            stops: Vec::new(),
+        }]);
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<EditorState>()
+            .insert_resource(PresentationMode { active: true })
+            .insert_resource(timeline)
+            .add_systems(Update, global_playback_keys_system);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyL);
+
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<EditorState>()
+                .segment_loop
+                .is_active()
+        );
+    }
+
+    #[test]
+    fn editor_shortcuts_are_blocked_while_egui_captures_the_keyboard() {
+        assert!(editor_shortcuts_allowed(false, false));
+        assert!(!editor_shortcuts_allowed(false, true));
+        assert!(!editor_shortcuts_allowed(true, false));
+    }
+
+    #[test]
+    fn playback_density_and_width_follow_the_responsive_breakpoints() {
+        assert_eq!(PlaybackDensity::for_width(1280.0), PlaybackDensity::Wide);
+        assert_eq!(PlaybackDensity::for_width(900.0), PlaybackDensity::Wide);
+        assert_eq!(PlaybackDensity::for_width(899.0), PlaybackDensity::Compact);
+        assert_eq!(PlaybackDensity::for_width(560.0), PlaybackDensity::Compact);
+        assert_eq!(PlaybackDensity::for_width(559.0), PlaybackDensity::Minimal);
+
+        for width in [1280.0, 800.0, 480.0, 320.0] {
+            let density = PlaybackDensity::for_width(width);
+            assert!(density.overlay_width(width) <= width);
+            assert!(density.overlay_width(width) >= 0.0);
+        }
+    }
+
+    #[test]
+    fn fullscreen_toggle_restores_windowed_mode() {
+        let mut window = Window::default();
+        let mut state = EditorFullscreenState::default();
+
+        toggle_editor_fullscreen(&mut window, &mut state);
+        assert!(matches!(
+            window.mode,
+            bevy::window::WindowMode::BorderlessFullscreen(_)
+        ));
+
+        toggle_editor_fullscreen(&mut window, &mut state);
+        assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
+        assert!(state.previous_mode.is_none());
+    }
+
+    #[test]
+    fn f11_does_not_replace_presentation_mode() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<EditorFullscreenState>()
+            .insert_resource(PresentationMode { active: true })
+            .add_systems(Update, editor_fullscreen_keys_system);
+        app.world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F11);
+
+        app.update();
+
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
+        assert!(app.world().resource::<PresentationMode>().active);
     }
 
     #[test]
