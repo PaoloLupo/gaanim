@@ -34,9 +34,10 @@ pub struct TextConfig {
 impl Default for TextConfig {
     fn default() -> Self {
         let mut roles = HashMap::new();
-        // Body copy and inline/display equations share one scientific scale.
-        // Titles and captions remain distinct semantic roles.
-        let body_size = 32.0;
+        // Defaults target a 1080p canvas that may be shown inside a smaller
+        // player or presentation viewport. Title and subtitle retain their
+        // established scale while supporting copy gets a larger floor.
+        let body_size = 40.0;
 
         // Scientific default text face, bundled through FontRegistry.
         roles.insert(
@@ -62,7 +63,7 @@ impl Default for TextConfig {
             TextRole::Heading,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 40.0,
+                size: 48.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -82,7 +83,7 @@ impl Default for TextConfig {
             TextRole::Caption,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 24.0,
+                size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -91,18 +92,17 @@ impl Default for TextConfig {
             TextRole::Label,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 28.0,
+                size: 36.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
 
-        // Mathematical / Equation role. Match Body so text labels and
-        // equations compose on the same baseline scale by default.
+        // Standalone equations get a little more presence than body copy.
         roles.insert(
             TextRole::Math,
             RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
-                size: body_size,
+                size: 44.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -112,7 +112,7 @@ impl Default for TextConfig {
             TextRole::Code,
             RoleStyle {
                 font_family: "Consolas".to_string(),
-                size: 28.0,
+                size: 36.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );

@@ -30,9 +30,9 @@ mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError,
-    CameraBindingError, CameraConstraintHandle, Canvas, DimensionExtensionStyle, DimensionHandle,
-    DimensionOptions, ForceVectorHandle, ImageLoadError, SceneObjectError, SupportHandle,
-    ThemeError,
+    CameraBindingError, CameraConstraintHandle, Canvas, DEFAULT_REACTIVE_TEXT_SIZE,
+    DimensionExtensionStyle, DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError,
+    SceneObjectError, SupportHandle, ThemeError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

@@ -68,6 +68,15 @@ pub fn clear_scene_entities(world: &mut World) {
             world.despawn(e);
         }
     }
+    // Canvas compilation allocates ObjectIds deterministically from zero on
+    // every replay. Retained Vello fragments are keyed by those IDs, so keeping
+    // the previous revision's cache can attach an old glyph or arrowhead to a
+    // newly compiled (and initially hidden) object with the same ID.
+    if let Some(mut cache) =
+        world.get_resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
+    {
+        cache.fragment_cache.clear();
+    }
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let playback_rate = tl.playback_rate;
         let loop_range = tl.loop_range;
@@ -190,8 +199,12 @@ pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
         revision,
     });
     runtime::replay_canvas_into(world, canvas);
-    // Defer keyframe capture to the next frame so that deferred Commands
-    // (entity spawns, SceneMember inserts, etc.) are flushed first.
+    // `replay_canvas_into` records entity spawns and component inserts in the
+    // World's internal command queue.  Materialize them now: the deferred
+    // keyframe capture runs in the Animation phase of this same update, after
+    // this Input-phase reload system, and must not capture an empty baseline.
+    world.flush();
+    // Capture the fresh t=0 baseline later in this update, before timeline seek.
     world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);
 }
 
@@ -264,6 +277,57 @@ mod tests {
                 "editor-owned entities must survive scene clearing"
             );
         }
+    }
+
+    #[test]
+    fn hot_reload_discards_retained_fragments_before_object_ids_are_reused() {
+        let mut world = World::new();
+        world.insert_resource(Timeline::default());
+        world.insert_resource(gaanim_renderer::pipeline::GaanimRenderCache::default());
+        let reused_id = ObjectId::from_parts(12, 1);
+        world.spawn((MobjectId(reused_id), ObjectTag("old force unit".to_owned())));
+        world
+            .resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
+            .fragment_cache
+            .insert(reused_id, Default::default());
+
+        clear_scene_entities(&mut world);
+
+        assert!(
+            world
+                .resource::<gaanim_renderer::pipeline::GaanimRenderCache>()
+                .fragment_cache
+                .is_empty(),
+            "a new canvas reuses ObjectIds, so no retained geometry from the previous revision may survive"
+        );
+    }
+
+    #[test]
+    fn hot_reload_materializes_the_new_scene_before_keyframe_capture() {
+        let mut world = World::new();
+        world.insert_resource(Timeline::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+
+        let mut canvas = gaanim_api::canvas::Canvas::new(320, 180);
+        let source = canvas.dot(8.0);
+        let _trail = canvas.traced_path(&source);
+        canvas.wait(1.0);
+
+        reload_with(&mut world, canvas);
+
+        assert!(
+            world.query::<&MobjectId>().iter(&world).count() > 0,
+            "the deferred keyframe capture must see the replayed entities in this update"
+        );
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::TracedPath>()
+                .iter(&world)
+                .count(),
+            1,
+            "the loop baseline must include reactive trail state"
+        );
     }
 }
 

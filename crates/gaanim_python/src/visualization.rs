@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use gaanim_api::canvas::{
     Canvas as ApiCanvas, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
     CoordinateSpaceHandle, NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
+    DEFAULT_REACTIVE_TEXT_SIZE,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
@@ -88,33 +89,39 @@ fn build_readout_parts(
     PyDrawable,
     Option<PyDrawable>,
 ) {
+    let font_size = font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
     let mut number =
-        canvas.expression_readout(expression, format, prefix, suffix, invalid, font_size);
+        canvas.expression_readout(expression, format, prefix, suffix, invalid, Some(font_size));
     if let Some(color) = color.clone() {
         number = number.fill(color.0);
     }
     let number_part = PyDrawable(number.clone());
-    let equals_part = label.as_deref().filter(|value| !value.is_empty()).map(|_| {
-        let mut handle = canvas.text("=");
+    let mut text_part = |value: &str| {
+        let mut style = gaanim_text::prelude::TextStyle::default();
+        style.size = Some(font_size);
+        let spec = gaanim_text::prelude::TextSpec::new(
+            vec![value.into()],
+            None,
+            style,
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .expect("reactive readout text is validated by the public binding");
+        let mut handle = canvas.text_spec(spec);
         if let Some(color) = color.clone() {
             handle = handle.fill(color.0);
         }
         PyDrawable(handle)
-    });
-    let label_part = label.filter(|value| !value.is_empty()).map(|value| {
-        let mut handle = canvas.text(&value);
-        if let Some(color) = color.clone() {
-            handle = handle.fill(color.0);
-        }
-        PyDrawable(handle)
-    });
-    let unit_part = unit.filter(|value| !value.is_empty()).map(|value| {
-        let mut handle = canvas.text(&value);
-        if let Some(color) = color.clone() {
-            handle = handle.fill(color.0);
-        }
-        PyDrawable(handle)
-    });
+    };
+    let equals_part = label
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(|_| text_part("="));
+    let label_part = label
+        .filter(|value| !value.is_empty())
+        .map(|value| text_part(&value));
+    let unit_part = unit
+        .filter(|value| !value.is_empty())
+        .map(|value| text_part(&value));
     let group = canvas.reactive_readout_group(
         label_part.as_ref().map(|part| &part.0),
         equals_part.as_ref().map(|part| &part.0),
@@ -2353,5 +2360,58 @@ impl PyScene {
             inner,
             canvas: self.inner.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_scene::prelude::World;
+    use gaanim_timeline::timeline::Timeline;
+
+    #[test]
+    fn readout_parts_share_default_and_explicit_font_sizes() {
+        for expected in [DEFAULT_REACTIVE_TEXT_SIZE, 56.0] {
+            let mut canvas = ApiCanvas::new(1920, 1080);
+            let (_, label, equals, _, unit) = build_readout_parts(
+                &mut canvas,
+                NativeExpr::constant(12.0),
+                Some("$x$".to_owned()),
+                ".1f".to_owned(),
+                String::new(),
+                String::new(),
+                Some("m".to_owned()),
+                (expected != DEFAULT_REACTIVE_TEXT_SIZE).then_some(expected),
+                None,
+                "—".to_owned(),
+            );
+
+            for part in [label.as_ref(), equals.as_ref(), unit.as_ref()] {
+                assert_eq!(
+                    part.expect("readout text part")
+                        .0
+                        .text_spec()
+                        .expect("readout text spec")
+                        .style
+                        .size,
+                    Some(expected)
+                );
+            }
+
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            assert_eq!(
+                world
+                    .query::<&gaanim_animation::ReactiveReadout>()
+                    .single(&world)
+                    .expect("compiled readout")
+                    .font_size,
+                expected
+            );
+        }
     }
 }

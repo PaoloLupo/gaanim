@@ -9074,9 +9074,9 @@ mod tests {
             .map(|(bounds, _)| bounds.0)
             .collect();
         assert!(
-            visible_bounds.iter().any(|bounds| bounds.width() > 240.0
+            visible_bounds.iter().any(|bounds| bounds.width() > 200.0
                 && bounds.width() < 300.0
-                && bounds.height() > 60.0),
+                && bounds.height() > 100.0),
             "expected a wrapped paragraph inside the 284-unit content box, got {visible_bounds:?}"
         );
         assert!(

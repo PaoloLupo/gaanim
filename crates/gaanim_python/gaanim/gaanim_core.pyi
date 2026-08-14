@@ -2471,6 +2471,8 @@ class Scene:
     def readout(self, source: _TracedScalar | Callable[[], _TracedScalar], *, label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
+        The label, equality sign, number, and unit all use ``font_size``;
+        omitting it selects the shared 48-unit reactive annotation size.
         ``color`` applies to the label, reactive value, and unit and remains in
         effect when the number changes or the timeline seeks.
         """
@@ -2478,6 +2480,7 @@ class Scene:
     def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
+        Every visible term uses ``font_size``, or 48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
         """
         ...
@@ -3029,7 +3032,9 @@ class Scene:
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the
         Layout-v2 width offer or the scene safe frame; outer box dimensions
-        remain Layout properties.
+        remain Layout properties. Default theme sizes are 64 for title, 48 for
+        subtitle/heading, 40 for body, 32 for caption, 36 for label/code, and
+        44 for math.
 
         Example:
             formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
@@ -3068,7 +3073,8 @@ class Scene:
         those delimiters are preserved to select Typst block math. Every
         content boundary becomes ordinary Typst whitespace, so ``"="`` does
         not need a written trailing space. Empty content and invalid
-        mathematics raise ``ValueError``.
+        mathematics raise ``ValueError``. With no explicit role or size, a
+        display equation uses the 44-unit math default.
 
         Example:
             equation = scene.equation(
@@ -3598,6 +3604,7 @@ class Scene:
         """Create a same-frame angular dimension from fixed directions or endpoints.
 
         ``color`` applies to the arc, arrows, label, reactive value, and unit.
+        All annotation terms default to the shared 48-unit reactive size.
         Degenerate rays hide the geometry; invalid modes or metrics raise ``ValueError``.
         """
         ...
@@ -3605,7 +3612,8 @@ class Scene:
         """Create a reactive vector with accessible shaft, solid head, and readout parts.
 
         ``color`` applies to the vector and every readout term, including the
-        reactive numeric value after updates and seeks.
+        reactive numeric value after updates and seeks. Labels, values, and
+        units default to 48 scene units.
         """
         ...
     def force_at(self, origin: Endpoint, magnitude: _TracedScalar, *, direction: _TracedScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
@@ -3613,13 +3621,15 @@ class Scene:
 
         ``visual_scale`` converts physical units into scene units and must be
         positive. The optional readout reports the physical magnitude, and
-        ``color`` also applies to that changing number.
+        ``color`` also applies to that changing number. Its complete annotation
+        row defaults to 48 scene units.
         """
         ...
     def force_from_components(self, origin: Endpoint, fx: _TracedScalar, fy: _TracedScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive force from physical X/Y components relative to a moving origin.
 
-        ``color`` applies to the force and the complete reactive readout.
+        ``color`` applies to the force and the complete reactive readout, whose
+        terms default to 48 scene units.
         """
         ...
     def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:

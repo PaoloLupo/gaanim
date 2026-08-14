@@ -52,6 +52,10 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    /// Runtime progress for the transient Write pen-tip illumination.
+    /// Restoring it prevents a partial glyph/head highlight from surviving a rewind.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub write_tip_glow: Option<gaanim_animation::WriteTipGlow>,
     /// Path-reveal progress for draw animations (0.0 = hidden, 1.0 = fully drawn).
     /// Used to keep reactive regenerators (e.g. ExpressionPlot) in sync
     /// with the current trim so they do not overwrite it with the full path.
@@ -161,6 +165,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
     } else {
         entity_mut.remove::<gaanim_animation::FillDrawProgress>();
+    }
+
+    if let Some(tip) = &snap.write_tip_glow {
+        entity_mut.insert(tip.clone());
+    } else {
+        entity_mut.remove::<gaanim_animation::WriteTipGlow>();
     }
 
     if let Some(progress) = snap.path_reveal {
@@ -387,6 +397,7 @@ impl WorldSnapshot {
                     fill_draw_progress: world
                         .get::<gaanim_animation::FillDrawProgress>(entity)
                         .map(|p| p.0),
+                    write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)
                         .map(|p| p.0),
@@ -622,6 +633,37 @@ mod tests {
         schedule.add_systems(gaanim_scene::systems::style_propagation_system);
         schedule.run(&mut world);
         assert_eq!(world.get::<FillBrush>(child), Some(&expected));
+    }
+
+    #[test]
+    fn restoring_a_snapshot_resets_write_tip_progress() {
+        let mut world = World::new();
+        let id = ObjectId::from_parts(3, 1);
+        let entity = world
+            .spawn((
+                MobjectId(id),
+                gaanim_animation::WriteTipGlow {
+                    completion: 0.0,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        world
+            .get_mut::<gaanim_animation::WriteTipGlow>(entity)
+            .unwrap()
+            .completion = 0.5;
+        snapshot.restore(&mut world);
+
+        assert_eq!(
+            world
+                .get::<gaanim_animation::WriteTipGlow>(entity)
+                .unwrap()
+                .completion,
+            0.0,
+            "seeking before a Write clip must not retain its previous partial glow"
+        );
     }
 
     #[test]

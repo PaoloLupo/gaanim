@@ -458,7 +458,7 @@ impl CanvasTheme {
                 text: Some(TextStyle {
                     // Tick numbers must remain readable after a 1080p frame is
                     // scaled down inside a player or presentation viewport.
-                    size: Some(self.text.roles[&TextRole::Caption].size * (4.0 / 3.0)),
+                    size: Some(self.text.roles[&TextRole::Caption].size),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -469,7 +469,7 @@ impl CanvasTheme {
             ThemeStyle {
                 fill: Some(ThemePaint::Named("foreground".into())),
                 text: Some(TextStyle {
-                    size: Some(self.text.roles[&TextRole::Label].size * (9.0 / 7.0)),
+                    size: Some(self.text.roles[&TextRole::Label].size),
                     ..Default::default()
                 }),
                 ..Default::default()

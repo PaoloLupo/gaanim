@@ -33,6 +33,9 @@ use crate::export::{AudioTrack, AudioTrackError};
 /// Default length in scene units for the straight segments at either spring end.
 pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 
+/// Default nominal font size for labels, values, and units in reactive annotations.
+pub const DEFAULT_REACTIVE_TEXT_SIZE: f64 = 48.0;
+
 /// Public pieces of a reactive technical dimension.
 #[derive(Debug, Clone)]
 pub struct DimensionHandle {
@@ -221,7 +224,7 @@ impl Default for DimensionOptions {
             scale: 1.0,
             label_gap: 10.0,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
-            font_size: Some(48.0),
+            font_size: Some(DEFAULT_REACTIVE_TEXT_SIZE),
             color: None,
             line_width: 3.0,
             extension_style: DimensionExtensionStyle::Solid,
@@ -2546,7 +2549,7 @@ impl Canvas {
         color: Option<Color>,
     ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
         let mut style = gaanim_text::prelude::TextStyle::default();
-        style.size = font_size;
+        style.size = Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
         style.color = color;
         gaanim_text::prelude::TextSpec::new(
             vec![text.into()],
@@ -2567,6 +2570,7 @@ impl Canvas {
         options: AngleDimensionOptions,
     ) -> Result<AngleDimensionHandle, gaanim_text::prelude::TextSpecError> {
         let (color, _) = self.mechanism_colors(options.color);
+        let font_size = Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
         let arc = self
             .spawn(SpawnKind::TrackingLine)
             .no_fill()
@@ -2602,7 +2606,7 @@ impl Canvas {
         let label = options
             .label
             .as_deref()
-            .map(|text| self.annotation_text(text, options.font_size, Some(color)))
+            .map(|text| self.annotation_text(text, font_size, Some(color)))
             .transpose()?;
         let mut number = None;
         let mut unit = None;
@@ -2633,15 +2637,15 @@ impl Canvas {
                     "",
                     "",
                     "—",
-                    options.font_size,
+                    font_size,
                 )
                 .fill(color);
             let equals = label
                 .as_ref()
-                .map(|_| self.annotation_text("=", options.font_size, Some(color)))
+                .map(|_| self.annotation_text("=", font_size, Some(color)))
                 .transpose()?;
             let unit_text = if options.unit == "deg" { "°" } else { "rad" };
-            let unit_handle = self.annotation_text(unit_text, options.font_size, Some(color))?;
+            let unit_handle = self.annotation_text(unit_text, font_size, Some(color))?;
             let group = self.reactive_readout_group(
                 label.as_ref(),
                 equals.as_ref(),
@@ -2706,6 +2710,7 @@ impl Canvas {
         requested_color: Option<Color>,
     ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
         let (color, _) = self.mechanism_colors(requested_color);
+        let font_size = Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
         let shaft = self
             .tracking_line(from.clone(), to.clone())
             .no_fill()
@@ -3602,7 +3607,7 @@ impl Canvas {
 
         let text_part = |canvas: &mut Canvas, text: &str| {
             let mut style = gaanim_text::prelude::TextStyle::default();
-            style.size = Some(options.font_size.unwrap_or(48.0));
+            style.size = Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
             style.color = options.color;
             gaanim_text::prelude::TextSpec::new(
                 vec![text.into()],
@@ -3644,7 +3649,7 @@ impl Canvas {
                 "",
                 "",
                 "—",
-                Some(options.font_size.unwrap_or(48.0)),
+                Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE)),
             );
             if let Some(color) = options.color {
                 number_handle = number_handle.fill(color);
@@ -4271,6 +4276,71 @@ mod tests {
         ] {
             assert_eq!(config.roles[&role].fill_color, Color::BLACK);
         }
+    }
+
+    #[test]
+    fn reactive_annotations_share_one_default_text_size() {
+        let mut canvas = Canvas::new(1920, 1080);
+        let origin = CanvasEndpoint::Static(DVec3::ZERO);
+        let tip = CanvasEndpoint::Static(DVec3::new(120.0, 0.0, 0.0));
+        let angle = canvas
+            .angle_between_with_options(
+                origin.clone(),
+                CanvasRay::Direction(DVec3::X),
+                CanvasRay::Direction(DVec3::Y),
+                64.0,
+                AngleDimensionOptions {
+                    label: Some("$theta$".to_owned()),
+                    show_value: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let vector = canvas
+            .vector_between_with_parts(
+                origin,
+                tip,
+                Some("$F$".to_owned()),
+                true,
+                ".1f".to_owned(),
+                Some("N".to_owned()),
+                1.0,
+                14.0,
+                None,
+                None,
+            )
+            .unwrap();
+
+        for part in [
+            angle.label.as_ref(),
+            angle.unit.as_ref(),
+            vector.label.as_ref(),
+            vector.unit.as_ref(),
+        ] {
+            assert_eq!(
+                part.expect("reactive annotation text")
+                    .text_spec()
+                    .expect("reactive annotation text spec")
+                    .style
+                    .size,
+                Some(DEFAULT_REACTIVE_TEXT_SIZE)
+            );
+        }
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let sizes = world
+            .query::<&gaanim_animation::ReactiveReadout>()
+            .iter(&world)
+            .map(|readout| readout.font_size)
+            .collect::<Vec<_>>();
+        assert_eq!(sizes.len(), 2);
+        assert!(sizes.iter().all(|size| *size == DEFAULT_REACTIVE_TEXT_SIZE));
     }
 
     #[test]

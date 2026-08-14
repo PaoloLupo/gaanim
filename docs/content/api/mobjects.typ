@@ -781,7 +781,7 @@ scene.export("preview.webp", fps=30)
   signature: "equation(*content, role=None, style=None, flow=None, **overrides) -> Text",
   params: ((name: "content", type: "str | TextPart | TextParts", default: none, desc: [Equation content without surrounding `$` delimiters.]),),
   returns: (type: "Text", desc: [Standalone display equation with the complete structured-text API.]),
-  desc: [Adds and preserves `$ ... $` internally so Typst composes a block equation. It otherwise shares `Scene.text` styling, flow, selections, and animations; content boundaries use ordinary Typst whitespace.],
+  desc: [Adds and preserves `$ ... $` internally so Typst composes a block equation. It otherwise shares `Scene.text` styling, flow, selections, and animations; content boundaries use ordinary Typst whitespace. Without an explicit role or size it uses the 44-unit math default.],
 )[
 ```python
 # show-code: true
@@ -818,7 +818,7 @@ scene.export("preview.webp", fps=30)
   signature: "TextStyle(font=None, math_font=None, size=None, weight=None, color=None, ...)",
   params: ((name: "font", type: "str | None", default: "None", desc: [Primary text font.]), (name: "math_font", type: "str | None", default: "None", desc: [Math font used by inline equations.]), (name: "size", type: "float | None", default: "None", desc: [Font size in canvas/Typst points.]), (name: "weight", type: "int | None", default: "None", desc: [Font weight from 1 through 1000.]), (name: "color", type: "Color | None", default: "None", desc: [Resolved glyph color.])),
   returns: (type: "TextStyle", desc: [Reusable typography overlay.]),
-  desc: [Roles are title, subtitle, heading, body, caption, label, code, and math. Role theme values are resolved before `TextStyle`, direct keywords, local `part` style, and persistent selection changes.],
+  desc: [Roles are title, subtitle, heading, body, caption, label, code, and math. The 1080p-oriented defaults are respectively 64, 48, 48, 40, 32, 36, 36, and 44 scene units. Role theme values are resolved before `TextStyle`, direct keywords, local `part` style, and persistent selection changes.],
 )[
 ```python
 # show-code: true
@@ -1116,7 +1116,7 @@ scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2
   signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Variable",
   params: ((name: "label", type: "str", default: none, desc: [Visible label placed before the equality sign.]), (name: "format", type: "str", default: "'.2f'", desc: [Numeric format: width, sign, grouping, precision, and `f`, `e`, `g`, or `%`.]), (name: "unit", type: "str | None", default: none, desc: [Optional visible unit.]),),
   returns: (type: "Variable", desc: [A `Drawable` and reactive scalar at the same time.]),
-  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
+  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. All terms use `font_size`, defaulting together to the 48-unit reactive annotation size. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
 ```python
 from gaanim import RED, Scene
@@ -1133,7 +1133,7 @@ scene.play([k.create(), k.animate_to(100, duration=1.5)])
   signature: "readout(source, *, label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Readout",
   params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [A scalar or no-argument lambda traced once.]), (name: "invalid", type: "str", default: "'—'", desc: [Text used when evaluation is invalid or non-finite.]),),
   returns: (type: "Readout", desc: [A reactive `Drawable` group.]),
-  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts with equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[
 ```python
 from gaanim import Scene, math as gm
@@ -1352,7 +1352,7 @@ scene.export("preview.webp", fps=30)
   kind: "factory",
   signature: "angle_between(vertex, from, to, *, radius=64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
   returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
-  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
+  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
 )[
 ```python
 # show-code: true
@@ -1370,7 +1370,7 @@ scene.export("preview.webp", fps=30)
   kind: "factories",
   signature: "vector_between(...) / moment_about(...) / coordinate_frame_at(...) / contact_on_curve(...) ",
   returns: (type: "Drawable", desc: [Composable reactive technical annotations.]),
-  desc: [`vector_between` provides a solid head and optional formatted magnitude; `moment_about` follows a center; `coordinate_frame_at` builds orthogonal labeled axes; `contact_on_curve` groups the existing point, tangent, and normal helpers.],
+  desc: [`vector_between` provides a solid head and optional formatted magnitude; `moment_about` follows a center; `coordinate_frame_at` builds orthogonal labeled axes; `contact_on_curve` groups the existing point, tangent, and normal helpers. Technical annotation text uses a uniform 48-unit default unless `font_size` is supplied.],
 )[
 ```python
 # show-code: true
@@ -1389,7 +1389,7 @@ scene.export("preview.webp", fps=30)
   kind: "factories",
   signature: "offset_point(origin, dx, dy) / force_at(origin, magnitude, direction=0, visual_scale=1, ...) / force_from_components(origin, fx, fy, visual_scale=1, ...) -> ForceVector",
   returns: (type: "PointRef | ForceVector", desc: [Reactive relative geometry or a drawable exposing `shaft`, `head`, `label`, `number`, and `unit`.]),
-  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. `color` paints the force, label, changing numeric value, and unit. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
+  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. Its label, value, and unit share a 48-unit default. `color` paints the force, label, changing numeric value, and unit. All scalar inputs accept floats, Parameters, Variables, and expressions. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
 )[
 ```python
 # show-code: true
