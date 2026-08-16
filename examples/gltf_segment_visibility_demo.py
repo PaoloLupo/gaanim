@@ -26,7 +26,7 @@ scene.play(
     [
         scene.camera.perspective(fov_y=1.0, near=0.1, far=500.0, duration=0.0),
         scene.camera.look_at(
-            eye=(6.6, 2.4, 0.0), target=(0.0, 0.15, 0.0), duration=0.0
+            eye=(10.5, 3.8, 0.0), target=(0.0, 0.15, 0.0), duration=0.0
         ),
         fox.animation("Survey", duration=2.4),
     ]

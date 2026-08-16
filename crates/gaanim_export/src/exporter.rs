@@ -808,6 +808,12 @@ struct HybridCapturePipeline {
     result_sent: bool,
 }
 
+/// Number of complete render frames allowed after an exact seek before the
+/// screenshot request is submitted. Native mesh extraction and GPU pipeline
+/// preparation can take more than two frames on a cold Vulkan renderer.
+const HYBRID_CAPTURE_SETTLE_FRAMES: u8 = 6;
+const HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES: u8 = 6;
+
 fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
     if pipeline.result_sent {
         return;
@@ -822,13 +828,17 @@ fn hybrid_capture_system(
     mut pipeline: ResMut<HybridCapturePipeline>,
     mut timeline: ResMut<Timeline>,
     mut exit: MessageWriter<'_, AppExit>,
-    gltf_models: Query<(), With<gaanim_scene::GltfModelRoot>>,
+    gltf_models: Query<Option<&gaanim_scene::Visible>, With<gaanim_scene::GltfModelRoot>>,
     ready_gltf_models: Query<
         (),
         (
             With<gaanim_scene::GltfModelRoot>,
             With<gaanim_scene::GltfModelReady>,
         ),
+    >,
+    visible_gltf_meshes: Query<
+        &bevy::camera::visibility::ViewVisibility,
+        With<gaanim_scene::GltfMaterialBaseline>,
     >,
 ) {
     if gltf_models.iter().count() != ready_gltf_models.iter().count() {
@@ -844,13 +854,39 @@ fn hybrid_capture_system(
             timeline.seek_request = Some(pipeline.times[pipeline.index]);
             pipeline.phase = 1;
         }
-        1 => {
-            // Let Bevy propagate a changed Camera3d projection through its
-            // frustum and render-world extraction before requesting a GPU
-            // screenshot. The timeline remains at the exact seek timestamp.
-            pipeline.phase = 2;
+        phase if phase <= HYBRID_CAPTURE_SETTLE_FRAMES => {
+            // Propagate the exact seek through camera, hierarchy, material,
+            // and mesh systems, then allow changed assets to reach Bevy's
+            // render world. Several frames are required on a cold renderer
+            // while native mesh pipelines are being prepared asynchronously.
+            pipeline.phase += 1;
         }
-        2 => {
+        phase if phase == HYBRID_CAPTURE_SETTLE_FRAMES + 1 => {
+            let expects_visible_gltf = gltf_models.iter().any(|visible| visible.is_some());
+            let has_visible_gltf_mesh = visible_gltf_meshes.iter().any(|visible| visible.get());
+            if expects_visible_gltf && !has_visible_gltf_mesh {
+                return;
+            }
+            if expects_visible_gltf {
+                // ViewVisibility confirms main-world culling, but render-asset
+                // preparation may still be catching up after a model changes
+                // from hidden to visible. Count a bounded warm-up below.
+                pipeline.phase += 1;
+            } else {
+                pipeline.phase =
+                    HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
+            }
+        }
+        phase
+            if phase
+                <= HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 =>
+        {
+            pipeline.phase += 1;
+        }
+        phase
+            if phase
+                == HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 =>
+        {
             let tx = pipeline.tx.clone();
             let width = pipeline.width;
             let height = pipeline.height;
@@ -889,7 +925,7 @@ fn hybrid_capture_system(
                     let _ = tx.send(data);
                 },
             );
-            pipeline.phase = 3;
+            pipeline.phase += 1;
         }
         _ => {
             let received = pipeline.rx.lock().unwrap().try_recv();

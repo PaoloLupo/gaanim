@@ -11,7 +11,9 @@ use crate::scene::{SceneMember, SceneMetadata};
 use crate::snapshot::WorldSnapshot;
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
-use gaanim_scene::{FillBrush, MobjectId, Opacity, Path2D, StrokeBrush};
+use gaanim_scene::{
+    FillBrush, LineListData, LineListSource, MobjectId, Opacity, Path2D, StrokeBrush,
+};
 
 /// Whether real-time playback pauses at authored presentation stops.
 ///
@@ -659,6 +661,39 @@ impl Timeline {
         let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
         for (entity, mobj_id) in query.iter(world) {
             entity_map.insert(mobj_id.0, entity);
+        }
+
+        // A draw animation that starts later still owns the object's state
+        // before its first clip: it must remain at the lens' `from` value.
+        // Path2D objects are pre-seeded during scene construction, but native
+        // 3D lines have no Path2D to replace. Initialize only the earliest
+        // future PathCompletion per object, then let past/current clips below
+        // replay over it as usual.
+        let mut future_path_initials = HashMap::new();
+        for clip in self.clips_in_range(self.current_time, self.cached_duration) {
+            if clip.start <= self.current_time {
+                continue;
+            }
+            let ClipPayload::Animation(anim) = &clip.payload else {
+                continue;
+            };
+            if !matches!(anim.lens, PropertyLensSpec::PathCompletion { .. }) {
+                continue;
+            }
+            let initial_t = anim.rate_func.evaluate(0.0);
+            future_path_initials
+                .entry(anim.target)
+                .and_modify(|current: &mut (f64, PropertyLensSpec, f64)| {
+                    if clip.start < current.0 {
+                        *current = (clip.start, anim.lens.clone(), initial_t);
+                    }
+                })
+                .or_insert_with(|| (clip.start, anim.lens.clone(), initial_t));
+        }
+        for (target, (_, lens, initial_t)) in future_path_initials {
+            if let Some(&target_entity) = entity_map.get(&target) {
+                apply_lens_spec(world, target_entity, &lens, initial_t, false);
+            }
         }
 
         // 3. Replay and interpolate clip properties up to target_time
@@ -1547,6 +1582,155 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
 }
 
 /// Helper function to evaluate and apply a PropertyLensSpec to an entity.
+fn lerp_line_point(from: [f32; 3], to: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        from[0] + (to[0] - from[0]) * t,
+        from[1] + (to[1] - from[1]) * t,
+        from[2] + (to[2] - from[2]) * t,
+    ]
+}
+
+fn lerp_line_color(from: [f32; 4], to: [f32; 4], t: f32) -> [f32; 4] {
+    [
+        from[0] + (to[0] - from[0]) * t,
+        from[1] + (to[1] - from[1]) * t,
+        from[2] + (to[2] - from[2]) * t,
+        from[3] + (to[3] - from[3]) * t,
+    ]
+}
+
+fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
+    let completion = completion.clamp(0.0, 1.0);
+    if completion <= f64::EPSILON {
+        return LineListData {
+            points: Vec::new(),
+            indices: source.indices.as_ref().map(|_| Vec::new()),
+            strip: source.strip,
+            color: source.color,
+            colors: source.colors.as_ref().map(|_| Vec::new()),
+        };
+    }
+    if completion >= 1.0 {
+        return source.clone();
+    }
+
+    if source.strip && source.indices.is_none() {
+        let segment_count = source.points.len().saturating_sub(1);
+        if segment_count == 0 {
+            return source.clone();
+        }
+        let scaled = completion * segment_count as f64;
+        let completed = scaled.floor() as usize;
+        let fraction = (scaled - completed as f64) as f32;
+        let point_count = (completed + 1).min(source.points.len());
+        let mut points = source.points[..point_count].to_vec();
+        let mut colors = source
+            .colors
+            .as_ref()
+            .map(|colors| colors[..point_count.min(colors.len())].to_vec());
+        if fraction > f32::EPSILON && completed + 1 < source.points.len() {
+            points.push(lerp_line_point(
+                source.points[completed],
+                source.points[completed + 1],
+                fraction,
+            ));
+            if let (Some(source_colors), Some(colors)) = (&source.colors, &mut colors)
+                && completed + 1 < source_colors.len()
+            {
+                colors.push(lerp_line_color(
+                    source_colors[completed],
+                    source_colors[completed + 1],
+                    fraction,
+                ));
+            }
+        }
+        return LineListData {
+            points,
+            indices: None,
+            strip: true,
+            color: source.color,
+            colors,
+        };
+    }
+
+    let pair_count = source
+        .indices
+        .as_ref()
+        .map_or(source.points.len() / 2, |indices| indices.len() / 2);
+    let scaled = completion * pair_count as f64;
+    let completed = (scaled.floor() as usize).min(pair_count);
+    let fraction = (scaled - completed as f64) as f32;
+
+    if let Some(source_indices) = &source.indices {
+        let mut points = source.points.clone();
+        let mut colors = source.colors.clone();
+        let mut indices = source_indices[..completed * 2].to_vec();
+        if fraction > f32::EPSILON && completed < pair_count {
+            let start_index = source_indices[completed * 2] as usize;
+            let end_index = source_indices[completed * 2 + 1] as usize;
+            if let (Some(start), Some(end)) = (
+                source.points.get(start_index).copied(),
+                source.points.get(end_index).copied(),
+            ) {
+                let new_start = points.len() as u32;
+                points.push(start);
+                points.push(lerp_line_point(start, end, fraction));
+                indices.extend_from_slice(&[new_start, new_start + 1]);
+                if let Some(colors) = &mut colors
+                    && let (Some(start), Some(end)) = (
+                        colors.get(start_index).copied(),
+                        colors.get(end_index).copied(),
+                    )
+                {
+                    colors.push(start);
+                    colors.push(lerp_line_color(start, end, fraction));
+                }
+            }
+        }
+        return LineListData {
+            points,
+            indices: Some(indices),
+            strip: source.strip,
+            color: source.color,
+            colors,
+        };
+    }
+
+    let point_count = completed * 2;
+    let mut points = source.points[..point_count].to_vec();
+    let mut colors = source
+        .colors
+        .as_ref()
+        .map(|colors| colors[..point_count.min(colors.len())].to_vec());
+    if fraction > f32::EPSILON && completed < pair_count {
+        let start_index = completed * 2;
+        let end_index = start_index + 1;
+        points.push(source.points[start_index]);
+        points.push(lerp_line_point(
+            source.points[start_index],
+            source.points[end_index],
+            fraction,
+        ));
+        if let (Some(source_colors), Some(colors)) = (&source.colors, &mut colors)
+            && end_index < source_colors.len()
+        {
+            colors.push(source_colors[start_index]);
+            colors.push(lerp_line_color(
+                source_colors[start_index],
+                source_colors[end_index],
+                fraction,
+            ));
+        }
+    }
+    LineListData {
+        points,
+        indices: None,
+        strip: false,
+        color: source.color,
+        colors,
+    }
+}
+
 fn apply_lens_spec(
     world: &mut World,
     target: Entity,
@@ -1632,6 +1816,27 @@ fn apply_lens_spec(
 
             if let Some(mut tip) = world.get_mut::<gaanim_animation::WriteTipGlow>(target) {
                 tip.completion = completion;
+            }
+            if world.get::<LineListSource>(target).is_none() {
+                let line_clone = world.get::<LineListData>(target).cloned();
+                if let Some(line) = line_clone
+                    && let Ok(mut entity) = world.get_entity_mut(target)
+                {
+                    entity.insert(LineListSource(line));
+                }
+            }
+            if let Some(source) = world.get::<LineListSource>(target) {
+                let visible = trim_line_list(&source.0, completion);
+                if let Some(mut line) = world.get_mut::<LineListData>(target) {
+                    *line = visible;
+                }
+                if let Some(mut visibility) = world.get_mut::<bevy::prelude::Visibility>(target) {
+                    *visibility = if completion <= f64::EPSILON {
+                        bevy::prelude::Visibility::Hidden
+                    } else {
+                        bevy::prelude::Visibility::Inherited
+                    };
+                }
             }
             if let Ok(mut em) = world.get_entity_mut(target) {
                 em.insert(gaanim_animation::PathReveal(completion));
@@ -2086,6 +2291,21 @@ mod tests {
                 SpatialTransform::default(),
             ))
             .id();
+        let line_object_id = ObjectId::from_raw(78);
+        let line_entity = world
+            .spawn((
+                MobjectId(line_object_id),
+                LineListData {
+                    points: vec![[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]],
+                    indices: None,
+                    strip: true,
+                    color: gaanim_core::peniko::Color::WHITE,
+                    colors: None,
+                },
+                SpatialTransform::default(),
+                bevy::prelude::Visibility::Inherited,
+            ))
+            .id();
         let snapshot = WorldSnapshot::capture(&mut world);
         let mut timeline = Timeline::default();
         let track = timeline.add_track("Path", 0);
@@ -2102,9 +2322,42 @@ mod tests {
                 label: Some("PathCompletion".into()),
             }),
         );
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: line_object_id,
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("LineListCompletion".into()),
+            }),
+        );
 
         timeline.seek(&mut world, 0.0);
         assert!(world.get::<Path2D>(entity).unwrap().0.elements().is_empty());
+        assert!(
+            world
+                .get::<LineListData>(line_entity)
+                .unwrap()
+                .points
+                .is_empty()
+        );
+        assert_eq!(
+            *world.get::<bevy::prelude::Visibility>(line_entity).unwrap(),
+            bevy::prelude::Visibility::Hidden
+        );
+
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(
+            world.get::<LineListData>(line_entity).unwrap().points.len(),
+            2
+        );
+        assert_eq!(
+            *world.get::<bevy::prelude::Visibility>(line_entity).unwrap(),
+            bevy::prelude::Visibility::Inherited
+        );
     }
 
     #[test]

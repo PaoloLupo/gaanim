@@ -1010,7 +1010,12 @@ impl Canvas {
                 let normalized = axis.normalize(tick.value)?;
                 let coordinate = min[dimension] + normalized * size[dimension];
                 let color = axis.style_value().color;
-                if tick.major && grid {
+                // The three axes already own the edges that start at the
+                // minimum corner. Emitting the minimum tick's grid segments
+                // duplicates those lines at exactly the same depth, causing
+                // nondeterministic z-fighting when another 3D drawable enters
+                // the transparent render phase.
+                if tick.major && grid && normalized > 1e-12 {
                     let lines = match dimension {
                         0 => [
                             ([coordinate, min[1], min[2]], [coordinate, max[1], min[2]]),
@@ -1027,7 +1032,12 @@ impl Canvas {
                     };
                     for (from, to) in lines {
                         grid_points.extend_from_slice(&[as_point(from), as_point(to)]);
-                        let grid_color = Color::from_rgba8(0x80, 0x80, 0x80, 0x60);
+                        // Use the opaque sRGB equivalent of the previous
+                        // 50%-gray/38%-alpha tint over the default black
+                        // background. Transparent line-list intersections
+                        // have undefined fragment ordering on the GPU and
+                        // produced a handful of alternating snapshot pixels.
+                        let grid_color = Color::from_rgb8(0x50, 0x50, 0x50);
                         grid_colors.extend_from_slice(&[grid_color, grid_color]);
                     }
                 }
@@ -2358,6 +2368,54 @@ mod tests {
             .map(|line| line.color)
             .collect();
         assert_eq!(colors, [expected]);
+    }
+
+    #[test]
+    fn three_dimensional_grid_does_not_duplicate_axis_edges() {
+        let mut canvas = Canvas::new(640, 360);
+        let _space = canvas
+            .coordinate_axes_3d(
+                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
+                [4.0, 4.0, 4.0],
+                true,
+            )
+            .unwrap();
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut lines = world.query::<&gaanim_scene::LineListData>();
+        let compiled: Vec<_> = lines.iter(&world).cloned().collect();
+        let axes = compiled
+            .iter()
+            .find(|line| {
+                line.points.len() == 6
+                    && line
+                        .colors
+                        .as_ref()
+                        .is_some_and(|colors| colors.iter().all(|color| color[3] >= 0.999))
+            })
+            .unwrap();
+        let grid = compiled
+            .iter()
+            .max_by_key(|line| line.points.len())
+            .unwrap();
+        assert!(
+            grid.colors
+                .as_ref()
+                .is_some_and(|colors| colors.iter().all(|color| color[3] >= 0.999))
+        );
+
+        for axis in axes.points.chunks_exact(2) {
+            assert!(grid.points.chunks_exact(2).all(|segment| {
+                segment != axis && !(segment[0] == axis[1] && segment[1] == axis[0])
+            }));
+        }
     }
 
     #[test]

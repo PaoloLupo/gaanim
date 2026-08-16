@@ -87,6 +87,14 @@ fn stroke_clip_path<'a>(
         .contains(&kurbo::PathEl::ClosePath)
         .then_some(clip_path)
 }
+
+fn path_reveal_is_empty(tip: Option<&WriteTipGlow>) -> bool {
+    tip.is_some_and(|tip| tip.completion <= f64::EPSILON)
+}
+
+fn opacity_is_empty(opacity: &GlobalOpacity) -> bool {
+    opacity.0 <= f32::EPSILON
+}
 const BLUR_KERNEL: [((f64, f64), f32); 13] = [
     ((0.0, 0.0), 0.20),
     ((0.65, 0.0), 0.10),
@@ -473,6 +481,9 @@ pub fn compile_scene_from_world(
         if *render_layer != RenderLayer::Vello2D {
             continue;
         }
+        if opacity_is_empty(global_opacity) {
+            continue;
+        }
 
         let Ok((
             shadow_opt,
@@ -523,7 +534,11 @@ pub fn compile_scene_from_world(
 
         let mut scene = vello::Scene::new();
         let empty_bez = kurbo::BezPath::new();
-        let elem_path = path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez);
+        let elem_path = if path_reveal_is_empty(tip_glow_opt) {
+            &empty_bez
+        } else {
+            path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez)
+        };
         let source_path = path_source_opt.map(|p| p.0.as_ref());
         let elem_fill = fill_opt.and_then(|f| f.0.as_ref());
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
@@ -935,6 +950,9 @@ pub fn gaanim_render_system(
         if *render_layer != RenderLayer::Vello2D {
             continue;
         }
+        if opacity_is_empty(&global_opacity) {
+            continue;
+        }
 
         // Groups do not draw visual geometry directly, they only act as spatial nodes.
         if is_group_opt.is_some() {
@@ -982,10 +1000,14 @@ pub fn gaanim_render_system(
             let mut scene = vello::Scene::new();
 
             let empty_bez = kurbo::BezPath::new();
-            let elem_path = path_ref
-                .as_ref()
-                .map(|p| p.0.as_ref())
-                .unwrap_or(&empty_bez);
+            let elem_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
+                &empty_bez
+            } else {
+                path_ref
+                    .as_ref()
+                    .map(|p| p.0.as_ref())
+                    .unwrap_or(&empty_bez)
+            };
             let source_path = path_source_ref.as_ref().map(|p| p.0.as_ref());
             let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
             let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
@@ -1334,6 +1356,22 @@ fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Bru
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_path_reveal_is_rendered_as_empty_geometry() {
+        let mut tip = WriteTipGlow::default();
+        tip.completion = 0.0;
+        assert!(path_reveal_is_empty(Some(&tip)));
+        tip.completion = 0.001;
+        assert!(!path_reveal_is_empty(Some(&tip)));
+        assert!(!path_reveal_is_empty(None));
+    }
+
+    #[test]
+    fn zero_global_opacity_is_not_extracted() {
+        assert!(opacity_is_empty(&GlobalOpacity(0.0)));
+        assert!(!opacity_is_empty(&GlobalOpacity(0.001)));
+    }
 
     fn window(width: u32, height: u32) -> Window {
         Window {

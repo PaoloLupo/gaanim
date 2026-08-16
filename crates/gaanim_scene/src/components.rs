@@ -453,6 +453,10 @@ pub struct LineListData {
     pub colors: Option<Vec<[f32; 4]>>,
 }
 
+/// Immutable source geometry retained while `PathCompletion` reveals a 3D line.
+#[derive(Component, Debug, Clone)]
+pub struct LineListSource(pub LineListData);
+
 #[cfg(test)]
 mod material_3d_tests {
     use super::*;

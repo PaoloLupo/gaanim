@@ -354,6 +354,38 @@ pub fn sync_3d_mesh_transform_system(
     }
 }
 
+/// Hide native 3D line meshes while transparent or without a revealed segment.
+///
+/// Replacing a populated GPU mesh with an empty one can retain a few endpoint
+/// coverage pixels for one extraction cycle. Visibility culling at the ECS
+/// boundary guarantees an actually empty `PathCompletion == 0` frame.
+pub fn sync_3d_line_visibility_system(
+    mut query: Query<
+        (
+            &LineListData,
+            Option<&crate::components::Visible>,
+            &GlobalOpacity,
+            &mut Visibility,
+        ),
+        With<crate::components::Mesh3DMarker>,
+    >,
+) {
+    for (line, visible, opacity, mut bevy_visibility) in &mut query {
+        let has_segment = if line.strip {
+            line.points.len() >= 2
+        } else {
+            line.indices
+                .as_ref()
+                .map_or(line.points.len() >= 2, |indices| indices.len() >= 2)
+        };
+        *bevy_visibility = if visible.is_some() && has_segment && opacity.0 > f32::EPSILON {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
 /// Request native Bevy assets for newly compiled glTF model roots.
 pub fn request_gltf_assets_system(
     mut commands: Commands,
@@ -1032,10 +1064,19 @@ pub fn update_3d_line_meshes_system(
         {
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols.clone());
         }
-        let new_handle = meshes.add(mesh);
-        commands
-            .entity(entity)
-            .insert(bevy::prelude::Mesh3d(new_handle));
+        // Preserve the asset identity across timeline seeks. Replacing the
+        // handle on every PathCompletion update leaves native line entities
+        // temporarily pointing at meshes that have not reached the render
+        // world yet, which makes exact-seek snapshots alternate between old
+        // and new geometry. Mutating the existing asset emits the normal
+        // asset-change event without that deferred handle swap.
+        if let Some(existing) = meshes.get_mut(&mesh_handle.0) {
+            *existing = mesh;
+        } else {
+            commands
+                .entity(entity)
+                .insert(bevy::prelude::Mesh3d(meshes.add(mesh)));
+        }
 
         // Update material alpha mode to match vertex-color presence (transparency)
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
@@ -1067,7 +1108,6 @@ pub fn update_3d_line_meshes_system(
                 bounds.0 = gaanim_math::Bounds3D::new(min, max);
             }
         }
-        let _ = mesh_handle; // suppress unused warning if needed
     }
 }
 
@@ -1197,6 +1237,81 @@ mod tests {
             bevy::render::alpha::AlphaMode::Opaque,
             "opaque vertex colors restore their authored opaque mode",
         );
+    }
+
+    #[test]
+    fn three_d_line_visibility_requires_geometry_and_positive_opacity() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                Mesh3DMarker,
+                crate::components::Visible,
+                LineListData {
+                    points: Vec::new(),
+                    indices: None,
+                    strip: true,
+                    color: gaanim_core::peniko::Color::WHITE,
+                    colors: None,
+                },
+                GlobalOpacity(1.0),
+                Visibility::Inherited,
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(sync_3d_line_visibility_system);
+
+        schedule.run(&mut world);
+        assert_eq!(
+            *world.get::<Visibility>(entity).unwrap(),
+            Visibility::Hidden
+        );
+
+        world.get_mut::<LineListData>(entity).unwrap().points =
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        schedule.run(&mut world);
+        assert_eq!(
+            *world.get::<Visibility>(entity).unwrap(),
+            Visibility::Inherited
+        );
+
+        world.entity_mut(entity).insert(GlobalOpacity(0.0));
+        schedule.run(&mut world);
+        assert_eq!(
+            *world.get::<Visibility>(entity).unwrap(),
+            Visibility::Hidden
+        );
+    }
+
+    #[test]
+    fn three_d_line_updates_preserve_the_mesh_handle() {
+        let mut world = World::new();
+        world.insert_resource(Assets::<bevy::mesh::Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        let entity = world
+            .spawn(LineListData {
+                points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                indices: None,
+                strip: true,
+                color: gaanim_core::peniko::Color::WHITE,
+                colors: None,
+            })
+            .id();
+
+        let mut build = Schedule::default();
+        build.add_systems(build_3d_meshes_system);
+        build.run(&mut world);
+        let original = world.get::<bevy::prelude::Mesh3d>(entity).unwrap().0.id();
+
+        world.get_mut::<LineListData>(entity).unwrap().points =
+            vec![[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [1.0, 0.0, 0.0]];
+        let mut update = Schedule::default();
+        update.add_systems(update_3d_line_meshes_system);
+        update.run(&mut world);
+
+        let current = world.get::<bevy::prelude::Mesh3d>(entity).unwrap().0.id();
+        assert_eq!(current, original);
+        let mesh = world.resource::<Assets<bevy::mesh::Mesh>>();
+        assert_eq!(mesh.get(current).unwrap().count_vertices(), 3);
     }
 
     #[test]

@@ -7348,7 +7348,15 @@ mod tests {
             .values()
             .filter(|clip| (clip.duration - 2.0).abs() < 1e-9)
             .collect();
-        assert_eq!(parallel_clips.len(), 3); // fade + orbit position + orbit rotation
+        assert_eq!(parallel_clips.len(), 2); // fade + one atomic orbit pose
+        assert!(parallel_clips.iter().any(|clip| matches!(
+            &clip.payload,
+            gaanim_timeline::clip::ClipPayload::Animation(animation)
+                if matches!(
+                    animation.lens,
+                    gaanim_timeline::clip::PropertyLensSpec::CameraOrbit { .. }
+                )
+        )));
         assert!(parallel_clips.iter().all(|clip| clip.start.abs() < 1e-9));
         assert!((timeline.cached_duration - 2.0).abs() < 1e-9);
     }

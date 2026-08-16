@@ -74,7 +74,8 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::transform_propagation_system
                     .run_if(crate::systems::has_transform_changes),
                 crate::systems::opacity_propagation_system
-                    .run_if(crate::systems::has_opacity_changes),
+                    .run_if(crate::systems::has_opacity_changes)
+                    .after(crate::systems::sync_new_opacities),
                 crate::systems::sync_new_opacities,
                 crate::systems::style_propagation_system,
             )
@@ -101,9 +102,11 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::sync_gltf_wrapper_transform_system,
                 crate::systems::sync_gltf_visibility_system,
                 crate::systems::sync_gltf_material_opacity_system
-                    .run_if(resource_exists::<Assets<StandardMaterial>>),
+                    .run_if(resource_exists::<Assets<StandardMaterial>>)
+                    .after(crate::systems::opacity_propagation_system),
                 crate::systems::sync_material_3d_system
-                    .run_if(resource_exists::<Assets<StandardMaterial>>),
+                    .run_if(resource_exists::<Assets<StandardMaterial>>)
+                    .after(crate::systems::opacity_propagation_system),
             )
                 .in_set(SceneSet::Propagation)
                 .after(crate::systems::transform_propagation_system),
@@ -118,6 +121,12 @@ impl Plugin for GaanimScenePlugin {
             crate::systems::update_3d_line_meshes_system
                 .in_set(SceneSet::Bounds)
                 .after(crate::systems::build_3d_meshes_system),
+        );
+        app.add_systems(
+            Update,
+            crate::systems::sync_3d_line_visibility_system
+                .in_set(SceneSet::Bounds)
+                .after(crate::systems::update_3d_line_meshes_system),
         );
 
         // Register bounds systems in the Bounds SystemSet.
