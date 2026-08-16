@@ -1771,26 +1771,63 @@ fn apply_lens_spec(
                 camera.rotation = rot;
             }
         }
+        PropertyLensSpec::CameraLookAt {
+            from_position,
+            from_target,
+            eye,
+            target,
+            up,
+        } => {
+            let position = from_position.lerp(*eye, t);
+            let target = from_target.lerp(*target, t);
+            if gaanim_math::Camera::validate_look_at(position, target, *up).is_ok()
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera
+                    .look_at(position, target, *up)
+                    .expect("validated look-at pose");
+            }
+        }
+        PropertyLensSpec::CameraOrbit {
+            from_position,
+            target,
+            up,
+            delta_yaw,
+            delta_pitch,
+        } => {
+            let mut orbit = gaanim_math::Camera::ortho_2d(1, 1);
+            orbit
+                .look_at(*from_position, *target, *up)
+                .expect("compiled orbit starts from a valid authored pose");
+            orbit
+                .orbit_around_target(delta_yaw * t, delta_pitch * t)
+                .expect("validated orbit interpolation");
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = orbit.position;
+                camera.target = orbit.target;
+                camera.up = orbit.up;
+                camera.rotation = orbit.rotation;
+            }
+        }
         PropertyLensSpec::CameraLookAtSource {
             from_position,
             from_target,
-            from_rotation,
+            from_rotation: _,
             eye,
             target,
             up,
         } => {
             let resolved = gaanim_animation::resolve_tracking_endpoint(eye, world)
                 .zip(gaanim_animation::resolve_tracking_endpoint(target, world));
-            if let Some((eye, target)) = resolved
-                && gaanim_math::Camera::validate_look_at(eye, target, *up).is_ok()
-            {
-                let view = gaanim_core::glam::DMat4::look_at_rh(eye, target, *up);
-                let rotation = view.inverse().to_scale_rotation_translation().1;
-                if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                    camera.position = from_position.lerp(eye, t);
-                    camera.target = from_target.lerp(target, t);
-                    camera.rotation = from_rotation.slerp(rotation, t);
-                    camera.up = *up;
+            if let Some((eye, target)) = resolved {
+                let position = from_position.lerp(eye, t);
+                let target = from_target.lerp(target, t);
+                if gaanim_math::Camera::validate_look_at(position, target, *up).is_ok()
+                    && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+                {
+                    camera
+                        .look_at(position, target, *up)
+                        .expect("validated tracked look-at pose");
                 }
             }
         }
@@ -2032,6 +2069,42 @@ mod tests {
         assert!((middle.roughness - 0.5).abs() < 1e-6);
         assert!((middle.metallic - 0.5).abs() < 1e-6);
         assert!((middle.emissive_strength - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn zero_path_completion_restores_an_empty_path() {
+        let mut source = BezPath::new();
+        source.move_to((0.0, 0.0));
+        source.line_to((100.0, 0.0));
+        let object_id = ObjectId::from_raw(77);
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                Path2D(Arc::new(source.clone())),
+                PathSource(Arc::new(source)),
+                SpatialTransform::default(),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Path", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("PathCompletion".into()),
+            }),
+        );
+
+        timeline.seek(&mut world, 0.0);
+        assert!(world.get::<Path2D>(entity).unwrap().0.elements().is_empty());
     }
 
     #[test]

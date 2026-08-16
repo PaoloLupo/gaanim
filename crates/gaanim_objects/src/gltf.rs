@@ -440,29 +440,37 @@ mod tests {
 
     #[test]
     fn acceptance_fixture_exposes_nodes_and_actions() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/assets/gltf_animation_fixture.gltf");
-        let document =
-            GltfDocument::load(path, &GltfSceneSelector::Name("Presentation".to_owned())).unwrap();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/assets/Fox.glb");
+        let document = GltfDocument::load(path, &GltfSceneSelector::Default).unwrap();
+        assert_eq!(document.scene_index, 0);
         assert_eq!(
             document
                 .animations
                 .iter()
                 .map(|animation| animation.name.as_str())
                 .collect::<Vec<_>>(),
-            ["Walk", "Wave"]
+            ["Survey", "Walk", "Run"]
         );
         assert!(
             document
                 .animations
                 .iter()
-                .all(|animation| animation.duration == 1.0)
+                .all(|animation| animation.duration.is_finite() && animation.duration > 0.0)
         );
         assert!(
             document
                 .nodes
                 .iter()
-                .any(|node| node.path == "Robot/Rig/Arm")
+                .any(|node| node.name == "fox" && node.has_geometry)
         );
+        assert!(
+            document
+                .nodes
+                .iter()
+                .any(|node| node.path.ends_with("/b_Head_05"))
+        );
+        assert!(document.bounds.min.is_finite());
+        assert!(document.bounds.max.is_finite());
+        assert!(document.bounds.size().length_squared() > 0.0);
     }
 }

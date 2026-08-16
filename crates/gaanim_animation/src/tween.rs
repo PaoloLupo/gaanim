@@ -205,6 +205,20 @@ pub enum PropertyLens {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    CameraLookAt {
+        from_position: gaanim_core::glam::DVec3,
+        from_target: gaanim_core::glam::DVec3,
+        eye: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        up: gaanim_core::glam::DVec3,
+    },
+    CameraOrbit {
+        from_position: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        up: gaanim_core::glam::DVec3,
+        delta_yaw: f64,
+        delta_pitch: f64,
+    },
     CameraLookAtSource {
         from_position: gaanim_core::glam::DVec3,
         from_target: gaanim_core::glam::DVec3,
@@ -293,6 +307,8 @@ impl std::fmt::Debug for PropertyLens {
                 "CameraShake(amplitude {amplitude}, frequency {frequency})"
             ),
             Self::CameraTarget { from, to } => write!(f, "CameraTarget({:?} -> {:?})", from, to),
+            Self::CameraLookAt { .. } => write!(f, "CameraLookAt"),
+            Self::CameraOrbit { .. } => write!(f, "CameraOrbit"),
             Self::CameraLookAtSource { .. } => write!(f, "CameraLookAtSource"),
             Self::CameraPerspective {
                 from_fov, to_fov, ..
@@ -471,6 +487,8 @@ pub fn evaluate_tweens_system(
             PropertyLens::CameraFrameDynamic { .. } => {}
             PropertyLens::CameraShake { .. } => {}
             PropertyLens::CameraTarget { .. } => {}
+            PropertyLens::CameraLookAt { .. } => {}
+            PropertyLens::CameraOrbit { .. } => {}
             PropertyLens::CameraLookAtSource { .. } => {}
             PropertyLens::CameraPerspective { .. } => {}
             PropertyLens::PathMorph { from, to, table: _ } => {

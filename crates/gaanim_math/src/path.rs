@@ -32,9 +32,8 @@ pub fn get_path_length(path: &BezPath) -> f64 {
 /// A trimmed sub-segment of a `BezPath` from the start up to a fractional
 /// arc-length position `alpha` in `[0.0, 1.0]`.
 ///
-/// - `alpha == 0.0` returns either an empty path or, if the original
-///   starts with a `MoveTo`, just that `MoveTo` (so the result is a
-///   valid path with a starting point).
+/// - `alpha == 0.0` returns an empty path so zero-progress strokes cannot
+///   leak a cap or antialiased pixel into deterministic snapshots.
 /// - `alpha == 1.0` returns the full path (cloned).
 /// - Intermediate values trim each sub-path to `alpha` of its **own**
 ///   arc length. This means all sub-paths (e.g. the outer and inner
@@ -49,11 +48,7 @@ pub fn get_subpath(path: &BezPath, alpha: f64) -> BezPath {
         return path.clone();
     }
     if alpha <= 0.0 {
-        let mut result = BezPath::new();
-        if let Some(PathEl::MoveTo(p)) = path.elements().first() {
-            result.move_to(*p);
-        }
-        return result;
+        return BezPath::new();
     }
 
     let mut result = BezPath::new();
@@ -93,11 +88,7 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
         return path.clone();
     }
     if alpha <= 0.0 {
-        let mut result = BezPath::new();
-        if let Some(PathEl::MoveTo(p)) = path.elements().first() {
-            result.move_to(*p);
-        }
-        return result;
+        return BezPath::new();
     }
 
     let total_length = get_path_length(path);

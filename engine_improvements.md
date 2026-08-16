@@ -6,12 +6,16 @@ videos explicativos, contenido educativo, piezas para redes y presentaciones ani
 mediante una API programática en Python, manteniendo un núcleo reutilizable desde Rust.
 
 > [!NOTE]
-> Última actualización basada en el repositorio: **2026-08-08**.
+> Última actualización basada en el repositorio: **2026-08-16**.
 > `Scene` es la fachada pública de Python; `scene.canvas` contiene la configuración del
 > viewport y `Canvas(...)` se mantiene como constructor de compatibilidad deprecado. La
 > API pública ya cubre escenas 2D, una ruta 3D técnica y modelos glTF, pero no toda la
 > capacidad interna de Rust. `Transform`, `ReplacementTransform`, matching de formas/texto,
 > cámara 3D y acciones glTF tienen implementación y ejemplos/documentación asociados.
+> Novedades de este corte: partes de texto/ecuaciones animables (`parts(...)`), coloración
+> de partes en `scene.play`, lentes de cámara atómicos (`CameraLookAt`/`CameraOrbit`),
+> reveal determinista de paths y líneas 3D nativas, `at()` que acepta otros drawables, y
+> un editor simplificado cuyo panel de timeline con tracks/clips fue retirado.
 
 ---
 
@@ -55,7 +59,7 @@ En términos prácticos:
 | Animación vectorial 2D programática | 🟢 | Núcleo funcional con preview y exportación |
 | Visualización 3D programática | 🟡 | Ejes, superficies, líneas, cámara y transforms públicos; faltan cobertura y pulido |
 | Modelos glTF animados | 🟡 | Importación, partes, materiales PBR y acciones; faltan más formatos y E2E |
-| Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst son una fortaleza |
+| Contenido matemático/educativo simple | 🟢 | Texto y ecuaciones Typst con partes animables (`parts`) son la fortaleza diferencial |
 | Videos cortos para redes | 🟡 | Viable si audio, imágenes y montaje se hacen fuera de gaanim |
 | Presentaciones animadas en vivo | 🟢 | Segmentos semánticos, notas, Presenter View y overview verificados |
 | Contenido con código, tablas o datos | 🟡 | `table`, `bar_chart` y `code` existen; faltan charts, highlighting y APIs de datos más ricas |
@@ -67,7 +71,7 @@ En términos prácticos:
 ## Evidencia de la auditoría
 
 - `cargo check --workspace` finaliza correctamente.
-- El workspace contiene 16 crates de gaanim más el crate de documentación (17 miembros).
+- El workspace contiene 18 crates de gaanim más el crate de documentación (19 miembros).
 - El paquete declara versión Python `0.1.0`; varios crates Rust siguen en `0.1.0`.
 - La API pública de Python exporta `Scene`, `Drawable`, `Anim`, `Transition`, `Color`,
   `Brush`, `Camera`, `Theme`, layouts, `ValueTracker` y `Segment`, además de primitivas 3D
@@ -81,6 +85,11 @@ En términos prácticos:
   construcción de la wheel Python.
 - La auditoría heurística del repositorio no reporta hallazgos objetivos en este corte;
   la verificación final debe volver a ejecutarse después de cada cambio de código.
+- El test de aceptación glTF usa un asset real (`Fox.glb` con acciones Survey/Walk/Run)
+  y verifica jerarquía, geometría, bounds finitos y duraciones.
+- Hay tests que fijan determinismo puntual: el seek de orbit publica la misma pose atómica
+  en las cámaras authored/rig/resolved, el reveal de progreso cero produce geometría
+  vacía, y `follow_lag` es bitwise-idéntico entre evaluación incremental y rewind.
 
 ---
 
@@ -171,7 +180,8 @@ La API pública actual permite:
 - colocar objetos en 3D con cámara perspectiva, `billboard` y overlays `hud`;
 - agrupar objetos;
 - configurar fill, stroke, opacidad y z-index;
-- posicionar con `at`, `at_anchor`, `next_to`, `align_to`, `to_edge` y `to_corner`;
+- posicionar con `at` (coordenadas o una referencia a otro drawable), `at_anchor`,
+  `next_to`, `align_to`, `to_edge` y `to_corner`;
 - dividir el contenido en segmentos y enlazarlos con transiciones;
 - ejecutar la escena en la aplicación o exportarla por extensión de archivo.
 
@@ -193,6 +203,11 @@ Desde Python están expuestas animaciones de:
 - `Transform` y `ReplacementTransform`;
 - `TransformMatchingShapes`, `TransformMatchingText` y `TransformMatchingTex`;
 - `move_along_path` y transforms 3D (`move_3d`, `move_to_3d`, `rotate_*_3d`, `scale_to_3d`);
+- animaciones de cámara 3D `look_at` y `orbit` compiladas como un único clip atómico
+  (`CameraLookAt`/`CameraOrbit`): posición, objetivo y rotación dejan de ser tres clips
+  independientes que podían desincronizarse en seek, y el orbit interpola conservando el
+  radio eye-target durante toda la animación;
+- coloración de partes de texto/ecuaciones desde `scene.play` con `Anim.color(...)`;
 - acciones glTF con velocidad, loop, reverse, offset y cross-fade.
 
 `Scene.play()` compone animaciones en paralelo y admite lag; llamadas sucesivas,
@@ -214,6 +229,12 @@ Esta es una de las áreas más fuertes del motor:
 - soporte de fuentes del sistema y registro interno;
 - fórmulas y documentos mediante Typst;
 - cache de jerarquías compiladas de Typst;
+- partes semánticas animables con `parts(...)`: grupos ordenados de contenido donde cada
+  parte nombrada es un drawable independiente y, dentro de matemática `$...$`, las partes
+  adyacentes se separan implícitamente — escribir, colorear o transformar un fragmento de
+  ecuación ya no exige partirla a mano;
+- baseline tipográfico unificado para que los `Transform` entre textos no se reduzcan a
+  un cambio de posición;
 - salida vectorial consistente con el renderer.
 
 Para convertir esta capacidad en una función de producción todavía hacen falta una API
@@ -309,11 +330,22 @@ La ruta 3D nativa usa Bevy para meshes y materiales PBR, mientras Vello conserva
 render vectorial de overlays. Hoy soporta:
 
 - `axes_3d` con tres planos, ticks, números y labels billboard o HUD;
-- `surface` triangulada, `polyline_3d` con colores por vértice y colormaps;
+- `surface` triangulada, `polyline_3d` con colores por vértice y colormaps, ahora con
+  `Create`/`Write` real: la geometría fuente se retiene (`LineListSource`) y el reveal
+  recorta segmentos interpolando vértices y colores en el segmento parcial;
 - cámara perspectiva con `look_at`, `orbit`, `dolly` y transforms 3D de objetos;
 - modelos glTF/GLB con jerarquía seleccionable, skins, morph targets, materiales PBR,
   texturas y acciones muestreadas desde el timeline;
 - overlays `hud` y etiquetas `billboard` que se mantienen legibles sobre la escena.
+
+El render es determinista en los bordes de progreso: un reveal en progreso cero produce
+geometría realmente vacía —el subpath en 0 ya no deja un `MoveTo` suelto, el renderer
+sustituye el path por uno vacío y las líneas 3D sin segmentos se ocultan en el límite
+ECS—, eliminando píxeles de caps/antialias que contaminaban snapshots exactos. El seek
+además pre-siembra el valor `from` de animaciones de dibujo futuras, de modo que un
+objeto cuyo `Create` empieza más tarde permanece en su estado inicial durante seeks
+previos, y la pose de cámara se resuelve como una sola unidad publicada de forma
+idéntica en las cámaras authored, rig y resolved.
 
 Esta ruta es funcional pero reciente: requiere ampliar pruebas visuales y E2E, documentar
 los límites de materiales/extensiones glTF y medir el coste de exportar escenas híbridas.
@@ -346,8 +378,9 @@ La aplicación incluye:
 - ejecución embebida de scripts Python;
 - hot reload al guardar;
 - preview GPU con play/pause y seek;
-- barra de transporte, velocidad y navegación entre escenas;
-- timeline expandible con tracks, clips, zoom, scroll, snap y edición de tiempos;
+- barra de transporte con scrub, timecode copiable, velocidad, navegación entre escenas y
+  loop por segmento (el panel de timeline con tracks/clips, zoom y edición de tiempos fue
+  retirado en la simplificación de UI de 2026-08-14);
 - selección básica de objetos por bounds;
 - pin always-on-top y diálogo de exportación;
 - Inicio de proyectos con `gaanim init`, proyectos recientes y diagnóstico de Python/uv;
@@ -363,8 +396,9 @@ Limitaciones actuales:
   sigue siendo limitada;
 - los errores se reportan principalmente por consola/estado de recarga y faltan paneles
   de diagnóstico más ricos;
-- los cambios hechos en el timeline no constituyen todavía un formato de proyecto
-  persistente y bidireccional con el script;
+- la edición temporal del timeline fue retirada junto con el widget: debe volver como
+  un formato de proyecto persistente y bidireccional con el script, no como un panel
+  acoplado al playback;
 - audio, glTF y exportación 3D necesitan más pruebas automatizadas en el flujo del editor.
 
 ---
@@ -494,6 +528,8 @@ componer cada pieza desde primitivas.
 - [x] gradientes y efectos vectoriales de sombra/blur/glow con caché retained;
 - [x] soporte explícito de aspect ratios y safe areas en `scene.canvas`;
 - [x] perspectiva 3D, `look_at`, `orbit`, `dolly`, HUD y billboards;
+- [x] clips de cámara atómicos (`CameraLookAt`/`CameraOrbit`): una animación = una pose,
+  publicada de forma idéntica en authored/rig/resolved y verificada en seek exacto;
 - [ ] encuadre, picking y composición responsive que combinen 2D y 3D de forma uniforme.
 
 ### P1 — Presentaciones completas
@@ -514,7 +550,8 @@ componer cada pieza desde primitivas.
 - [x] terminar y validar `Transform`/`ReplacementTransform`;
 - [x] `TransformMatchingShapes`, `TransformMatchingText` y `TransformMatchingTex`;
 - [ ] `ApplyWave`, deformaciones y homotopías;
-- [ ] animación de propiedades tipográficas;
+- [~] animación de propiedades tipográficas: baseline unificado y coloración de partes en
+  `scene.play` existen; falta animar familia, tamaño y peso;
 - [ ] callbacks/eventos seguros sin bloquear el renderer;
 - [~] API reactiva para trackers, updaters, señales y `always_redraw`.
 
@@ -525,9 +562,103 @@ deben desplazar la estabilización 2D/3D, los assets, el audio y el flujo de pub
 
 ---
 
+## Aportes diferenciadores hacia el estado del arte
+
+Manim domina en volumen de usuarios, Motion Canvas en la interactividad de curvas y
+Remotion en el ecosistema React. Ninguno combina render vectorial GPU, un timeline con
+seek exacto y un solo núcleo reutilizable desde Rust y Python. Los aportes siguientes
+explotan exactamente esa intersección: cada uno parte de una palanca que ya existe en el
+código y nombra el salto que falta para convertirlo en ventaja competitiva medible.
+
+### 1. Determinismo frame-exact como contrato de producto
+
+**Palanca actual:** el reveal de progreso cero produce geometría vacía en 2D y 3D; el
+seek pre-siembra estados `from` de clips futuros; `follow_lag` es bitwise-idéntico entre
+evaluación incremental y rewind; la pose de cámara se publica atómica e idéntica en
+authored/rig/resolved; `gaanim_diff` ya compara snapshots exactos.
+
+**Salto:** convertir coincidencias puntuales en contrato continuo.
+
+- Un "render oracle" de CI que re-exporte frames arbitrarios y los compare contra
+  fixtures bendecidos en Windows y Linux, para preview y export, 2D y 3D.
+- Un audit/lint que rechace nuevas rutas de render que consulten tiempo de wall-clock o
+  estado fuera del timeline.
+- El contrato documentado: mismo proyecto + mismo seek = mismos píxeles, sin excepciones.
+
+Ningún competidor promete esto hoy, y es la base de regresión visual barata y confiable.
+
+### 2. Seek y export de coste acotado
+
+**Palanca actual:** el timeline replaya clips desde keyframes con índices BTree; el costo
+de seek está marcado como pendiente de optimizar; la exportación ya es seek determinista
+por frames.
+
+**Salto:** snapshots jerárquicos por intervalo (uno cada N segundos) para que el seek
+arbitrario cueste O(clips activos) y no O(historia), con benchmarks reproducibles (hoy
+ausentes en P0). El export paralelo por frames depende directamente de esto: con seeks
+baratos y deterministas, N workers renderizan frames desordenados sin artefactos — algo
+que un motor imperativo como Manim no puede prometer por diseño.
+
+### 3. `parts()` como primitiva universal de semántica animable
+
+**Palanca actual:** `parts(...)` agrupa texto/ecuaciones en partes nombradas con
+separadores implícitos en `$...$`; existen `TransformMatchingShapes/Text/Tex`, jerarquía
+por glifos y partes seleccionables de glTF; los componentes técnicos ya exponen partes
+independientes (`dimension`, `vector`, soportes mecánicos).
+
+**Salto:** generalizar el mismo contrato a SVG (los grupos direccionables ya existen),
+charts (ejes/series/puntos como parts) y grupos nativos, de modo que cualquier mobject
+exponga `parts()` consultable y animable con la misma API. El diferenciador no es
+"tener transforms": es que declarar la parte una vez alcance para escribirla,
+colorearla, transformarla y hacer matching con ella siempre.
+
+### 4. Rig de cámara declarativo uniforme 2D/3D
+
+**Palanca actual:** el pipeline authored→rig→resolved publica una sola pose atómica; la
+cámara semántica 2D (`frame_to`, follow, pan, zoom, shake) y la 3D (`look_at`, `orbit`,
+`dolly`) ya son de alto nivel.
+
+**Salto:** exponer el rig como objeto declarativo combinable —orbit + shake + follow
+superpuestos con pesos— con la misma superficie en 2D y 3D, y un `frame_to` que encuadre
+contenido mixto 2D/3D (hoy pendiente en P1). Una sola mente de cámara para toda la
+escena es un argumento de producto que Manim no tiene.
+
+### 5. Hot reload incremental sobre el modelo diferido
+
+**Palanca actual:** la construcción de escenas es diferida (`Arc<Mutex<MobjectSpec>>`)
+pero se re-ejecuta completa al guardar; el proceso gráfico sobrevive recargas y los
+artefactos visuales de reload fueron corregidos.
+
+**Salto:** diff de specs entre recargas para preservar entidades estables —y la selección
+del editor— cuando solo cambia un parámetro, con presupuesto medido de tiempo de reload
+(indicador ya definido). Es la base sobre la que la edición temporal retirada del editor
+debe volver como edición bidireccional sobre el script.
+
+### 6. Audio de primera clase en el editor
+
+**Palanca actual:** pistas con offsets, volumen y fade ya se mezclan y muxean en export;
+no hay preview.
+
+**Salto:** waveform en la barra de transporte, scrub de audio sincronizado por seek (el
+timeline ya es seekable; falta el reloj de audio) y marcadores de beats como snaps de
+animación. Es el bloque P1 más visible para contenido de redes y cierra la dependencia
+de herramientas externas de montaje.
+
+### 7. Matriz de assets reales como evidencia pública
+
+**Palanca actual:** el test de aceptación glTF usa un asset real (`Fox.glb`) con
+jerarquía, bounds y acciones verificadas.
+
+**Salto:** una matriz versionada de assets representativos (exporters Blender/Maya,
+KhronosSample, glTF Pipeline) con capturas bendecidas por exporter y límites de
+materiales/extensiones documentados; el mismo patrón para fuentes/Typst por plataforma.
+"Compatible con glTF" deja de ser una afirmación y pasa a ser un artefacto verificable.
+
+---
+
 ## Roadmap propuesto por releases
 
-### 0.1.x — Baseline actual (2026-08-08)
+### 0.1.x — Baseline actual (2026-08-16)
 
 Este bloque describe capacidades ya presentes en la versión de trabajo `0.1.0`, no una
 promesa de release separada:
@@ -542,8 +673,12 @@ promesa de release separada:
 - [x] Segmentos semánticos, notas, stops, overview, Presenter View y exportación por segmento.
 - [x] Primera ruta 3D pública: ejes, superficies, polilíneas, cámara perspectiva,
   HUD/billboards y transforms 3D.
-- [~] glTF/GLB: importación, jerarquía, materiales, skins/morphs y acciones; falta
-  endurecer compatibilidad y exportación E2E.
+- [x] Partes semánticas de texto/ecuaciones animables (`parts(...)`) con coloración desde
+  `scene.play` y baseline tipográfico para transforms de texto.
+- [x] Cámara 3D atómica (`CameraLookAt`/`CameraOrbit`) y determinismo de reveal en el
+  borde cero para paths 2D y líneas 3D nativas.
+- [~] glTF/GLB: importación, jerarquía, materiales, skins/morphs y acciones, con test de
+  aceptación sobre un asset real; falta endurecer compatibilidad y exportación E2E.
 - [~] layouts persistentes: reflow anidable disponible; faltan overflow, spans y
   variantes responsive.
 
@@ -560,6 +695,9 @@ promesa de release separada:
   incremental donde el perfil lo justifique.
 - [ ] Completar line/pie charts, syntax highlighting y diff animado de código.
 - [ ] Mejorar picking, panel de propiedades, encuadre 2D/3D y composición responsive.
+- [ ] Render oracle de determinismo frame-exact en CI (re-export de frames arbitrarios
+  comparados contra fixtures) y snapshots jerárquicos para seek de coste acotado, que
+  habilitan export paralelo por frames.
 
 ### 1.0 — Librería estable
 
@@ -601,6 +739,10 @@ release conviene registrar:
 6. Separación entre API, runtime, editor y exportación.
 7. Tipos 3D-ready que permiten ampliar el producto sin perder el foco en composición 2D.
 8. Uso directo de tipos gráficos (`peniko`, `kurbo`, `glam`) sin wrappers innecesarios.
+9. Clips de cámara atómicos y pipeline authored→rig→resolved con publicación determinista
+   de una sola pose.
+10. Reveal frame-exact: progreso cero es geometría vacía en 2D y 3D, y el seek pre-siembra
+    los estados iniciales de clips futuros.
 
 La oportunidad de gaanim no está en copiar todo Manim o Motion Canvas. Está en convertir
 esta base Rust/GPU en un flujo especialmente rápido y confiable para crear, iterar,

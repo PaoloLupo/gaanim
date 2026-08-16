@@ -282,6 +282,22 @@ pub enum PropertyLensSpec {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    /// Interpolate a complete look-at pose and derive rotation atomically.
+    CameraLookAt {
+        from_position: gaanim_core::glam::DVec3,
+        from_target: gaanim_core::glam::DVec3,
+        eye: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        up: gaanim_core::glam::DVec3,
+    },
+    /// Orbit from an authored pose without contracting the eye-target radius.
+    CameraOrbit {
+        from_position: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        up: gaanim_core::glam::DVec3,
+        delta_yaw: f64,
+        delta_pitch: f64,
+    },
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraLookAtSource {
         from_position: gaanim_core::glam::DVec3,
@@ -456,6 +472,32 @@ impl PropertyLensSpec {
             Self::CameraTarget { from, to } => PropertyLens::CameraTarget {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraLookAt {
+                from_position,
+                from_target,
+                eye,
+                target,
+                up,
+            } => PropertyLens::CameraLookAt {
+                from_position: *from_position,
+                from_target: *from_target,
+                eye: *eye,
+                target: *target,
+                up: *up,
+            },
+            Self::CameraOrbit {
+                from_position,
+                target,
+                up,
+                delta_yaw,
+                delta_pitch,
+            } => PropertyLens::CameraOrbit {
+                from_position: *from_position,
+                target: *target,
+                up: *up,
+                delta_yaw: *delta_yaw,
+                delta_pitch: *delta_pitch,
             },
             Self::CameraLookAtSource {
                 from_position,

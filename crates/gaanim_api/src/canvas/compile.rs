@@ -3509,15 +3509,17 @@ impl Canvas {
                     up,
                     duration,
                 } => {
-                    let from_eye = *camera_position;
+                    let from_eye =
+                        if (*camera_position - *camera_target).length_squared() <= f64::EPSILON {
+                            *eye
+                        } else {
+                            *camera_position
+                        };
                     let to_eye = *eye;
                     let from_target = *camera_target;
                     let to_target = *target;
-                    // Compute rotations via look_at
-                    let from_rot = *camera_rotation;
                     let view_to = gaanim_core::glam::DMat4::look_at_rh(to_eye, to_target, *up);
                     let to_rot = view_to.inverse().to_scale_rotation_translation().1;
-                    // Position clip
                     builder.timeline.add_clip(
                         builder.default_track,
                         builder.current_time,
@@ -3525,45 +3527,12 @@ impl Canvas {
                         gaanim_timeline::clip::ClipPayload::Animation(
                             gaanim_timeline::clip::AnimationSpec {
                                 target: gaanim_core::ObjectId::from_parts(0, 1),
-                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
-                                    from: from_eye,
-                                    to: to_eye,
-                                },
-                                rate_func: gaanim_math::RateFunc::Smooth,
-                                delay: 0.0,
-                                label: None,
-                            },
-                        ),
-                    );
-                    // Target clip
-                    builder.timeline.add_clip(
-                        builder.default_track,
-                        builder.current_time,
-                        *duration,
-                        gaanim_timeline::clip::ClipPayload::Animation(
-                            gaanim_timeline::clip::AnimationSpec {
-                                target: gaanim_core::ObjectId::from_parts(0, 1),
-                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraTarget {
-                                    from: from_target,
-                                    to: to_target,
-                                },
-                                rate_func: gaanim_math::RateFunc::Smooth,
-                                delay: 0.0,
-                                label: None,
-                            },
-                        ),
-                    );
-                    // Rotation clip
-                    builder.timeline.add_clip(
-                        builder.default_track,
-                        builder.current_time,
-                        *duration,
-                        gaanim_timeline::clip::ClipPayload::Animation(
-                            gaanim_timeline::clip::AnimationSpec {
-                                target: gaanim_core::ObjectId::from_parts(0, 1),
-                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraRotation {
-                                    from: from_rot,
-                                    to: to_rot,
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraLookAt {
+                                    from_position: from_eye,
+                                    from_target,
+                                    eye: to_eye,
+                                    target: to_target,
+                                    up: *up,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
                                 delay: 0.0,
@@ -3596,8 +3565,6 @@ impl Canvas {
                     } else {
                         gaanim_math::Projection::Orthographic { zoom: *camera_zoom }
                     };
-                    let from_pos = *camera_position;
-                    let from_rot = *camera_rotation;
                     temp_cam
                         .orbit_around_target(*delta_yaw, *delta_pitch)
                         .expect("camera orbit requires a finite, non-degenerate pose");
@@ -3610,26 +3577,12 @@ impl Canvas {
                         gaanim_timeline::clip::ClipPayload::Animation(
                             gaanim_timeline::clip::AnimationSpec {
                                 target: gaanim_core::ObjectId::from_parts(0, 1),
-                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition {
-                                    from: from_pos,
-                                    to: to_pos,
-                                },
-                                rate_func: gaanim_math::RateFunc::Smooth,
-                                delay: 0.0,
-                                label: None,
-                            },
-                        ),
-                    );
-                    builder.timeline.add_clip(
-                        builder.default_track,
-                        builder.current_time,
-                        *duration,
-                        gaanim_timeline::clip::ClipPayload::Animation(
-                            gaanim_timeline::clip::AnimationSpec {
-                                target: gaanim_core::ObjectId::from_parts(0, 1),
-                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraRotation {
-                                    from: from_rot,
-                                    to: to_rot,
+                                lens: gaanim_timeline::clip::PropertyLensSpec::CameraOrbit {
+                                    from_position: *camera_position,
+                                    target: *camera_target,
+                                    up: gaanim_core::glam::DVec3::Y,
+                                    delta_yaw: *delta_yaw,
+                                    delta_pitch: *delta_pitch,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
                                 delay: 0.0,
@@ -4891,57 +4844,69 @@ impl Canvas {
                 },
             ),
             AnimationType::CameraLookAt { eye, target, up } => {
+                let from_position =
+                    if (*camera_position - *camera_target).length_squared() <= f64::EPSILON {
+                        *eye
+                    } else {
+                        *camera_position
+                    };
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraLookAt {
+                        from_position,
+                        from_target: *camera_target,
+                        eye: *eye,
+                        target: *target,
+                        up: *up,
+                    },
+                );
                 let to_rotation = gaanim_core::glam::DMat4::look_at_rh(*eye, *target, *up)
                     .inverse()
                     .to_scale_rotation_translation()
                     .1;
-                Self::add_camera_lens(
-                    builder,
-                    start,
-                    anim,
-                    PropertyLensSpec::CameraPosition {
-                        from: *camera_position,
-                        to: *eye,
-                    },
-                );
-                Self::add_camera_lens(
-                    builder,
-                    start,
-                    anim,
-                    PropertyLensSpec::CameraTarget {
-                        from: *camera_target,
-                        to: *target,
-                    },
-                );
-                Self::add_camera_lens(
-                    builder,
-                    start,
-                    anim,
-                    PropertyLensSpec::CameraRotation {
-                        from: *camera_rotation,
-                        to: to_rotation,
-                    },
-                );
                 *camera_position = *eye;
                 *camera_target = *target;
                 *camera_up = *up;
                 *camera_rotation = to_rotation;
             }
             AnimationType::CameraLookAtSource { eye, target, up } => {
+                let compiled_eye = compile_tracking_endpoint(eye, id_map, &builder.states);
+                let compiled_target = compile_tracking_endpoint(target, id_map, &builder.states);
+                let from_position =
+                    if (*camera_position - *camera_target).length_squared() <= f64::EPSILON {
+                        match &compiled_eye {
+                            gaanim_animation::TrackingEndpoint::Static(eye) => *eye,
+                            _ => *camera_target + DVec3::Z * 10.0,
+                        }
+                    } else {
+                        *camera_position
+                    };
                 Self::add_camera_lens(
                     builder,
                     start,
                     anim,
                     PropertyLensSpec::CameraLookAtSource {
-                        from_position: *camera_position,
+                        from_position,
                         from_target: *camera_target,
                         from_rotation: *camera_rotation,
-                        eye: compile_tracking_endpoint(eye, id_map, &builder.states),
-                        target: compile_tracking_endpoint(target, id_map, &builder.states),
+                        eye: compiled_eye.clone(),
+                        target: compiled_target.clone(),
                         up: *up,
                     },
                 );
                 *camera_up = *up;
+                if let (
+                    gaanim_animation::TrackingEndpoint::Static(eye),
+                    gaanim_animation::TrackingEndpoint::Static(target),
+                ) = (compiled_eye, compiled_target)
+                {
+                    let view = gaanim_core::glam::DMat4::look_at_rh(eye, target, *up);
+                    *camera_position = eye;
+                    *camera_target = target;
+                    *camera_rotation = view.inverse().to_scale_rotation_translation().1;
+                }
             }
             AnimationType::CameraOrbit {
                 delta_yaw,
@@ -4964,18 +4929,12 @@ impl Canvas {
                     builder,
                     start,
                     anim,
-                    PropertyLensSpec::CameraPosition {
-                        from: *camera_position,
-                        to: camera.position,
-                    },
-                );
-                Self::add_camera_lens(
-                    builder,
-                    start,
-                    anim,
-                    PropertyLensSpec::CameraRotation {
-                        from: *camera_rotation,
-                        to: camera.rotation,
+                    PropertyLensSpec::CameraOrbit {
+                        from_position: *camera_position,
+                        target: *camera_target,
+                        up: *camera_up,
+                        delta_yaw: *delta_yaw,
+                        delta_pitch: *delta_pitch,
                     },
                 );
                 *camera_position = camera.position;
@@ -7392,6 +7351,82 @@ mod tests {
         assert_eq!(parallel_clips.len(), 3); // fade + orbit position + orbit rotation
         assert!(parallel_clips.iter().all(|clip| clip.start.abs() < 1e-9));
         assert!((timeline.cached_duration - 2.0).abs() < 1e-9);
+    }
+
+    fn compile_camera_timeline(canvas: Canvas) -> (World, Timeline) {
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        (world, timeline)
+    }
+
+    #[test]
+    fn animated_look_at_starts_from_a_valid_perspective_pose() {
+        let mut canvas = Canvas::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at((8.0, 6.0, 8.0), (0.0, 0.0, 0.0), None, 1.0);
+        canvas.play(vec![look_at]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        timeline.seek(&mut world, 0.0);
+        let start = *world.resource::<gaanim_math::Camera>();
+        assert!(start.validate().is_ok());
+        assert!(matches!(
+            start.projection,
+            gaanim_math::Projection::Perspective { .. }
+        ));
+        assert_eq!(start.position, DVec3::new(8.0, 6.0, 8.0));
+        assert!((start.position - start.target).length() > 1.0);
+        timeline.seek(&mut world, 0.5);
+        let middle = *world.resource::<gaanim_math::Camera>();
+        assert!(middle.validate().is_ok());
+        assert!((middle.position - middle.target).length() > 1.0);
+    }
+
+    #[test]
+    fn camera_orbit_seek_preserves_authored_radius() {
+        let eye = DVec3::new(10.0, 7.0, 13.0);
+        let target = DVec3::new(0.0, -0.5, 0.0);
+        let radius = (eye - target).length();
+        let mut canvas = Canvas::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at_endpoints(
+            CanvasEndpoint::Static(eye),
+            CanvasEndpoint::Static(target),
+            DVec3::Y,
+            0.5,
+        );
+        canvas.play(vec![look_at]);
+        let orbit = canvas.camera_orbit(0.8, 0.2, 1.4);
+        canvas.play(vec![orbit]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        for time in [0.5, 1.2, 1.9] {
+            timeline.seek(&mut world, time);
+            let camera = *world.resource::<gaanim_math::Camera>();
+            assert!(camera.validate().is_ok(), "invalid camera at {time}");
+            assert_eq!(camera.target, target);
+            assert!(
+                ((camera.position - target).length() - radius).abs() < 1e-9,
+                "orbit radius changed at {time}: {:?}",
+                camera.position
+            );
+            let forward = camera.rotation * -DVec3::Z;
+            let expected = (target - camera.position).normalize();
+            assert!(forward.dot(expected) > 1.0 - 1e-9);
+        }
     }
 
     #[test]

@@ -525,6 +525,79 @@ mod tests {
     }
 
     #[test]
+    fn orbit_seek_publishes_the_atomic_pose_to_the_resolved_camera() {
+        let mut app = App::new();
+        app.add_plugins((
+            gaanim_scene::hierarchy::GaanimScenePlugin,
+            GaanimTimelinePlugin,
+        ));
+        app.insert_resource(gaanim_animation::DeltaTime { dt: 0.0 });
+
+        let mut start = gaanim_math::Camera::perspective_3d(1280, 720, std::f64::consts::FRAC_PI_4);
+        start.position = gaanim_core::glam::DVec3::new(0.0, 2.0, 12.0);
+        start.target = gaanim_core::glam::DVec3::new(0.0, 1.0, 0.0);
+        start
+            .look_at(start.position, start.target, gaanim_core::glam::DVec3::Y)
+            .expect("test camera pose is valid");
+        app.insert_resource(start);
+        app.world_mut()
+            .spawn(gaanim_scene::MobjectId(gaanim_core::ObjectId::from_raw(0)));
+
+        let mut timeline = app.world_mut().remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, snapshot::WorldSnapshot::capture(app.world_mut()));
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            2.0,
+            clip::ClipPayload::Animation(clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_raw(0),
+                lens: clip::PropertyLensSpec::CameraOrbit {
+                    from_position: start.position,
+                    target: start.target,
+                    up: start.up,
+                    delta_yaw: std::f64::consts::FRAC_PI_2,
+                    delta_pitch: -std::f64::consts::FRAC_PI_6,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("CameraOrbit".into()),
+            }),
+        );
+        app.insert_resource(timeline);
+
+        // Let startup capture settle, then perform the exact seek that an exporter
+        // or snapshot capture would request before the camera publication phase.
+        app.update();
+        let mut timeline = app.world_mut().remove_resource::<Timeline>().unwrap();
+        timeline.seek(app.world_mut(), 1.0);
+        app.insert_resource(timeline);
+        app.update();
+
+        let mut expected = start;
+        expected
+            .orbit_around_target(std::f64::consts::FRAC_PI_4, -std::f64::consts::PI / 12.0)
+            .expect("test orbit is valid");
+        let authored = *app.world().resource::<gaanim_math::Camera>();
+        let rig = app.world().resource::<gaanim_math::CameraRigCamera>().0;
+        let resolved = app.world().resource::<gaanim_math::ResolvedCamera>();
+        for (label, camera) in [
+            ("authored", authored),
+            ("rig", rig),
+            ("resolved", **resolved),
+        ] {
+            assert!(
+                (camera.position - expected.position).length() < 1e-9,
+                "{label} position {:?}, expected {:?}",
+                camera.position,
+                expected.position
+            );
+            assert!((camera.target - start.target).length() < 1e-9);
+            assert!(camera.rotation.dot(expected.rotation).abs() > 1.0 - 1e-12);
+        }
+    }
+
+    #[test]
     fn follow_lag_is_bitwise_identical_for_direct_incremental_and_rewind_evaluation() {
         let mut world = World::new();
         world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));

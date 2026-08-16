@@ -585,6 +585,25 @@ mod tests {
     }
 
     #[test]
+    fn camera_orbit_preserves_target_radius_and_look_rotation() {
+        let target = DVec3::new(1.0, -0.5, 2.0);
+        let mut cam = Camera::perspective_3d(1280, 720, 0.8);
+        cam.look_at(DVec3::new(10.0, 7.0, 13.0), target, DVec3::Y)
+            .unwrap();
+        let radius = (cam.position - target).length();
+
+        cam.orbit_around_target(0.8, 0.2).unwrap();
+
+        assert!(cam.position.is_finite());
+        assert!(cam.rotation.is_finite());
+        assert_eq!(cam.target, target);
+        assert!(((cam.position - target).length() - radius).abs() < 1e-10);
+        let forward = cam.rotation * -DVec3::Z;
+        let expected = (target - cam.position).normalize();
+        assert!(forward.dot(expected) > 1.0 - 1e-10);
+    }
+
+    #[test]
     fn camera_projection_matrix_ortho() {
         let cam = Camera::ortho_2d(100, 100);
         let proj = cam.projection_matrix();
