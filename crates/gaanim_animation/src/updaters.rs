@@ -979,6 +979,147 @@ pub struct RotationTranslationBinding {
     pub base_angle: Option<f64>,
 }
 
+/// Propiedad de una entidad que un `SampledSeriesDriver` puede controlar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SampledProperty {
+    TranslateX,
+    TranslateY,
+    TranslateZ,
+    RotateZ,
+    UniformScale,
+    Opacity,
+    Signal,
+}
+
+/// Interpolación entre muestras consecutivas de una serie muestreada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SampledInterpolation {
+    /// Mantiene el valor de la última muestra alcanzada.
+    Step,
+    /// Interpola linealmente entre las dos muestras circundantes.
+    Linear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[error("sampled series requires non-empty finite non-decreasing times, matching finite values, and finite scale/offset")]
+pub struct InvalidSampledSeries;
+
+/// Conduce una propiedad de la entidad a lo largo de una serie muestreada
+/// `(times, values)` como función pura del tiempo absoluto de la timeline.
+///
+/// A diferencia de un updater de Python (callback por frame) o de una
+/// simulación de paso fijo, este componente no acumula estado: evaluar en un
+/// instante cualquiera reproduce siempre el mismo resultado, por lo que los
+/// seeks y el scrub en pausa son exactos sin replay.
+///
+/// Para `TranslateX`/`TranslateY`/`TranslateZ`/`RotateZ` la salida es
+/// relativa al valor autorizado, capturado de forma lazy en la primera
+/// evaluación: `base + offset + scale * muestra`. Para `UniformScale`,
+/// `Opacity` y `Signal` la salida es absoluta: `offset + scale * muestra`.
+#[derive(Component, Clone)]
+pub struct SampledSeriesDriver {
+    pub times: Arc<[f64]>,
+    pub values: Arc<[f64]>,
+    pub interpolation: SampledInterpolation,
+    pub property: SampledProperty,
+    pub scale: f64,
+    pub offset: f64,
+    /// Instante absoluto de la timeline a partir del cual corre la serie.
+    pub start_at: f64,
+    /// Tiempo de corte opcional: a partir de aquí el driver queda congelado
+    /// en el valor que tenía a ese instante (semántica de `RemoveUpdater`).
+    pub stop_at: Option<f64>,
+    /// Valor base capturado en la primera evaluación (propiedades relativas).
+    pub base: Option<f64>,
+}
+
+impl std::fmt::Debug for SampledSeriesDriver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SampledSeriesDriver")
+            .field("samples", &self.times.len())
+            .field("interpolation", &self.interpolation)
+            .field("property", &self.property)
+            .field("scale", &self.scale)
+            .field("offset", &self.offset)
+            .field("start_at", &self.start_at)
+            .field("stop_at", &self.stop_at)
+            .field("base", &self.base)
+            .finish()
+    }
+}
+
+impl SampledSeriesDriver {
+    /// Valida y construye el driver. Los tiempos deben ser finitos y no
+    /// decrecientes; los valores, finitos y de la misma longitud que los tiempos.
+    pub fn new(
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        scale: f64,
+        offset: f64,
+    ) -> Result<Self, InvalidSampledSeries> {
+        if times.is_empty()
+            || times.len() != values.len()
+            || !times.iter().all(|time| time.is_finite())
+            || !values.iter().all(|value| value.is_finite())
+            || !times.windows(2).all(|window| window[0] <= window[1])
+            || !scale.is_finite()
+            || !offset.is_finite()
+        {
+            return Err(InvalidSampledSeries);
+        }
+        Ok(Self {
+            times: times.into(),
+            values: values.into(),
+            interpolation,
+            property,
+            scale,
+            offset,
+            start_at: 0.0,
+            stop_at: None,
+            base: None,
+        })
+    }
+
+    /// Desplaza el inicio del driver a un instante absoluto de la timeline.
+    #[doc(hidden)]
+    pub fn starting_at(mut self, start_at: f64) -> Self {
+        self.start_at = if start_at.is_finite() {
+            start_at.max(0.0)
+        } else {
+            0.0
+        };
+        self
+    }
+
+    /// Valor muestreado en `elapsed` segundos desde `start_at`, con clamp a
+    /// los extremos de la serie fuera de rango.
+    fn sample(&self, elapsed: f64) -> f64 {
+        let last = self.times.len() - 1;
+        if elapsed <= self.times[0] {
+            return self.values[0];
+        }
+        if elapsed >= self.times[last] {
+            return self.values[last];
+        }
+        let index = self.times.partition_point(|time| *time <= elapsed) - 1;
+        match self.interpolation {
+            SampledInterpolation::Step => self.values[index],
+            SampledInterpolation::Linear => {
+                let t0 = self.times[index];
+                let t1 = self.times[index + 1];
+                if t1 <= t0 {
+                    self.values[index + 1]
+                } else {
+                    let alpha = (elapsed - t0) / (t1 - t0);
+                    self.values[index] * (1.0 - alpha) + self.values[index + 1] * alpha
+                }
+            }
+        }
+    }
+}
+
 /// Keeps a float signal synchronized with the XY distance between two endpoints.
 #[derive(Component, Debug, Clone)]
 pub struct EndpointDistance {
@@ -1633,6 +1774,121 @@ pub fn mechanism_binding_system(world: &mut World) {
     }
 }
 
+/// Sistema exclusivo que evalúa cada `SampledSeriesDriver` como función pura
+/// del tiempo absoluto de la timeline (`PlaybackState.current_time`).
+///
+/// Debe correr después de `updater_system` y antes de los bindings de posición
+/// para que el resto de la fase Updaters observe el resultado del mismo frame.
+/// No se salta en pausa: el scrub en pausa cambia `current_time` y el driver
+/// debe reflejarlo (la evaluación es idempotente).
+pub fn sampled_series_system(world: &mut World) {
+    let current_time = world
+        .get_resource::<PlaybackState>()
+        .map(|state| state.current_time)
+        .unwrap_or(0.0);
+
+    let mut updates: Vec<(Entity, SampledProperty, f64)> = Vec::new();
+    let mut new_bases: Vec<(Entity, f64)> = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &SampledSeriesDriver)>();
+        for (entity, driver) in query.iter(world) {
+            if driver.times.is_empty() || driver.values.len() != driver.times.len() {
+                continue;
+            }
+            let relative = matches!(
+                driver.property,
+                SampledProperty::TranslateX
+                    | SampledProperty::TranslateY
+                    | SampledProperty::TranslateZ
+                    | SampledProperty::RotateZ
+            );
+            let base = if relative {
+                driver.base.unwrap_or_else(|| {
+                    let captured = match driver.property {
+                        SampledProperty::TranslateX => world
+                            .get::<SpatialTransform>(entity)
+                            .map(|transform| transform.translation.x),
+                        SampledProperty::TranslateY => world
+                            .get::<SpatialTransform>(entity)
+                            .map(|transform| transform.translation.y),
+                        SampledProperty::TranslateZ => world
+                            .get::<SpatialTransform>(entity)
+                            .map(|transform| transform.translation.z),
+                        SampledProperty::RotateZ => world
+                            .get::<SpatialTransform>(entity)
+                            .map(|transform| transform.rotation.to_scaled_axis().z),
+                        _ => None,
+                    };
+                    let value = captured.unwrap_or(0.0);
+                    new_bases.push((entity, value));
+                    value
+                })
+            } else {
+                0.0
+            };
+
+            let effective_time = match driver.stop_at {
+                Some(stop_at) => current_time.min(stop_at),
+                None => current_time,
+            };
+            let elapsed = (effective_time - driver.start_at).max(0.0);
+            let sampled = driver.sample(elapsed);
+            let output = if relative {
+                base + driver.offset + driver.scale * sampled
+            } else {
+                driver.offset + driver.scale * sampled
+            };
+            updates.push((entity, driver.property, output));
+        }
+    }
+
+    for (entity, base) in new_bases {
+        if let Some(mut driver) = world.get_mut::<SampledSeriesDriver>(entity) {
+            driver.base = Some(base);
+        }
+    }
+
+    for (entity, property, output) in updates {
+        match property {
+            SampledProperty::TranslateX => {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x = output;
+                }
+            }
+            SampledProperty::TranslateY => {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.y = output;
+                }
+            }
+            SampledProperty::TranslateZ => {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.z = output;
+                }
+            }
+            SampledProperty::RotateZ => {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.rotation = DQuat::from_rotation_z(output);
+                }
+            }
+            SampledProperty::UniformScale => {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.scale = DVec3::splat(output.max(0.0));
+                }
+            }
+            SampledProperty::Opacity => {
+                if let Some(mut opacity) = world.get_mut::<gaanim_scene::Opacity>(entity) {
+                    opacity.0 = output.clamp(0.0, 1.0) as f32;
+                }
+            }
+            SampledProperty::Signal => {
+                if let Some(mut signal) = world.get_mut::<crate::signals::FloatSignal>(entity) {
+                    signal.value = output;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2216,5 +2472,226 @@ mod tests {
             visible.0.elements().last(),
             Some(gaanim_core::kurbo::PathEl::LineTo(point)) if (point.x - 50.0).abs() < 1e-9
         ));
+    }
+
+    fn sampled_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+        world
+    }
+
+    #[test]
+    fn sampled_series_rejects_invalid_input() {
+        assert!(SampledSeriesDriver::new(
+            vec![],
+            vec![],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            1.0,
+            0.0
+        )
+        .is_err());
+        assert!(SampledSeriesDriver::new(
+            vec![0.0, 1.0],
+            vec![1.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            1.0,
+            0.0
+        )
+        .is_err());
+        assert!(SampledSeriesDriver::new(
+            vec![1.0, 0.0],
+            vec![1.0, 2.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            1.0,
+            0.0
+        )
+        .is_err());
+        assert!(SampledSeriesDriver::new(
+            vec![0.0, f64::NAN],
+            vec![1.0, 2.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            1.0,
+            0.0
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sampled_series_translation_is_relative_to_lazy_base() {
+        let mut world = sampled_world();
+        let entity = world
+            .spawn(SpatialTransform::new_2d(-40.0, 10.0))
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 4.0, -2.0],
+                    SampledProperty::TranslateX,
+                    SampledInterpolation::Linear,
+                    10.0,
+                    0.0,
+                )
+                .unwrap()
+                .starting_at(1.0),
+            )
+            .id();
+
+        // Antes de start_at la serie corre desde elapsed = 0 → muestra values[0].
+        world.resource_mut::<PlaybackState>().current_time = 0.5;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation,
+            DVec3::new(-40.0, 10.0, 0.0)
+        );
+
+        // elapsed = 1.5 interpola entre 4.0 y -2.0 → 1.0.
+        world.resource_mut::<PlaybackState>().current_time = 2.5;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation.x,
+            -40.0 + 10.0
+        );
+
+        // Fuera de rango: clamp al último valor (-2.0) aunque el tiempo siga.
+        world.resource_mut::<PlaybackState>().current_time = 9.0;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation.x,
+            -40.0 - 20.0
+        );
+    }
+
+    #[test]
+    fn sampled_series_step_interpolation_holds_previous_value() {
+        let mut world = sampled_world();
+        let entity = world
+            .spawn(SpatialTransform::default())
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![1.0, 3.0],
+                    SampledProperty::TranslateY,
+                    SampledInterpolation::Step,
+                    1.0,
+                    0.0,
+                )
+                .unwrap(),
+            )
+            .id();
+
+        world.resource_mut::<PlaybackState>().current_time = 0.999;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation.y,
+            1.0
+        );
+
+        world.resource_mut::<PlaybackState>().current_time = 1.0;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation.y,
+            3.0
+        );
+    }
+
+    #[test]
+    fn sampled_series_absolute_properties_and_determinism_across_seeks() {
+        let mut world = sampled_world();
+        let scaled = world
+            .spawn(SpatialTransform::default())
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![1.0, 3.0],
+                    SampledProperty::UniformScale,
+                    SampledInterpolation::Linear,
+                    0.5,
+                    0.0,
+                )
+                .unwrap(),
+            )
+            .id();
+        let signalled = world
+            .spawn(crate::signals::FloatSignal::new(0.0))
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 2.0],
+                    vec![-1.0, 1.0],
+                    SampledProperty::Signal,
+                    SampledInterpolation::Linear,
+                    2.0,
+                    5.0,
+                )
+                .unwrap(),
+            )
+            .id();
+
+        let evaluate = |world: &mut World, time: f64| {
+            world.resource_mut::<PlaybackState>().current_time = time;
+            sampled_series_system(world);
+            (
+                world.get::<SpatialTransform>(scaled).unwrap().scale.x,
+                world
+                    .get::<crate::signals::FloatSignal>(signalled)
+                    .unwrap()
+                    .value,
+            )
+        };
+
+        let forward = evaluate(&mut world, 0.5);
+        assert_eq!(forward, (1.0, 4.0));
+        let later = evaluate(&mut world, 1.0);
+        assert_eq!(later, (1.5, 5.0));
+
+        // Seek hacia atrás y de nuevo hacia adelante: misma salida, sin replay.
+        evaluate(&mut world, 0.0);
+        assert_eq!(evaluate(&mut world, 0.5), forward);
+        assert_eq!(evaluate(&mut world, 1.0), later);
+        assert_eq!(evaluate(&mut world, 9.0), (1.5, 7.0));
+    }
+
+    #[test]
+    fn sampled_series_drives_rotation_and_opacity() {
+        let mut world = sampled_world();
+        let rotated = world
+            .spawn(SpatialTransform::default().with_rotation_2d(0.5))
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![0.0, 1.0],
+                    SampledProperty::RotateZ,
+                    SampledInterpolation::Linear,
+                    1.0,
+                    0.0,
+                )
+                .unwrap(),
+            )
+            .id();
+        let faded = world
+            .spawn(SpatialTransform::default())
+            .insert(gaanim_scene::Opacity(1.0))
+            .insert(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![1.0, -1.0],
+                    SampledProperty::Opacity,
+                    SampledInterpolation::Linear,
+                    1.0,
+                    0.0,
+                )
+                .unwrap(),
+            )
+            .id();
+
+        world.resource_mut::<PlaybackState>().current_time = 1.0;
+        sampled_series_system(&mut world);
+
+        let rotation = world.get::<SpatialTransform>(rotated).unwrap().rotation;
+        assert!((rotation.to_scaled_axis().z - 1.5).abs() < 1e-12);
+        // La opacidad se clampea a [0, 1] aunque la serie la cruce.
+        assert_eq!(world.get::<gaanim_scene::Opacity>(faded).unwrap().0, 0.0);
     }
 }

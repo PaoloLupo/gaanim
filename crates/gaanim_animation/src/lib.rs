@@ -22,15 +22,17 @@ pub use tween::{
 pub use updaters::{
     AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, EndpointAngle, EndpointDistance, EndpointFollow, FollowOffsetSpace,
-    InvalidFixedStep, PlaybackState, RotationBinding, RotationTranslationBinding, TracedPath,
-    TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay,
-    TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by, advance_x_updater,
-    angle_label_placement_system, bob_updater, dimension_label_placement_system,
+    InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
+    RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
+    TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine,
+    TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
+    advance_x_updater, angle_label_placement_system, bob_updater, dimension_label_placement_system,
     endpoint_angle_system, endpoint_distance_system, endpoint_follow_system, follow_updater,
     mechanism_binding_system, orbit_updater, pulse_updater, resolve_entity_bounds,
     resolve_tracking_endpoint, resolve_tracking_endpoint_with_offset, rotate_updater,
-    seek_updaters, traced_path_3d_system, traced_path_system, tracking_angle_system,
-    tracking_line_system, tracking_vector_head_system, tracking_world_to_local, updater_system,
+    sampled_series_system, seek_updaters, traced_path_3d_system, traced_path_system,
+    tracking_angle_system, tracking_line_system, tracking_vector_head_system,
+    tracking_world_to_local, updater_system,
 };
 pub use writing::{
     FillDrawProgress, PathReveal, PathSource, WriteTipGlow, path_source_seed_added_system,
@@ -91,7 +93,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             Update,
             (
                 updater_system,
-                position_binding_system.after(updater_system),
+                sampled_series_system.after(updater_system),
+                position_binding_system.after(sampled_series_system),
                 mechanism_binding_system.after(position_binding_system),
                 endpoint_follow_system.after(mechanism_binding_system),
                 always_redraw_regen_system.after(endpoint_follow_system),

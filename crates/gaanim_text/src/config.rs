@@ -7,6 +7,8 @@ use std::collections::HashMap;
 pub enum TextRole {
     Title,
     Subtitle,
+    /// Small accent line above a title (kicker / eyebrow).
+    Kicker,
     Heading,
     Body,
     Caption,
@@ -55,6 +57,16 @@ impl Default for TextConfig {
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
                 size: 48.0,
+                fill_color: gaanim_core::peniko::Color::WHITE,
+            },
+        );
+
+        // Kicker: compact accent line set above titles (eyebrow/overline).
+        roles.insert(
+            TextRole::Kicker,
+            RoleStyle {
+                font_family: "New Computer Modern".to_string(),
+                size: 32.0,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );

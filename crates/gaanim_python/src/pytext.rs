@@ -54,11 +54,12 @@ fn resolve_text_anchor(value: &Bound<'_, PyAny>) -> PyResult<ResolvedTextAnchor>
     ))
 }
 
-fn parse_role(value: Option<&str>) -> PyResult<Option<TextRole>> {
+pub(crate) fn parse_role(value: Option<&str>) -> PyResult<Option<TextRole>> {
     value
         .map(|value| match value {
             "title" => Ok(TextRole::Title),
             "subtitle" => Ok(TextRole::Subtitle),
+            "kicker" => Ok(TextRole::Kicker),
             "heading" => Ok(TextRole::Heading),
             "body" => Ok(TextRole::Body),
             "caption" => Ok(TextRole::Caption),
@@ -66,7 +67,7 @@ fn parse_role(value: Option<&str>) -> PyResult<Option<TextRole>> {
             "code" => Ok(TextRole::Code),
             "math" => Ok(TextRole::Math),
             _ => Err(PyValueError::new_err(
-                "role must be title, subtitle, heading, body, caption, label, code, or math",
+                "role must be title, subtitle, kicker, heading, body, caption, label, code, or math",
             )),
         })
         .transpose()

@@ -146,6 +146,61 @@ surface = world.surface(lambda x, y: x * y)
 traced scalar functions execute once; sampling and reactive evaluation stay in
 Rust.
 
+== Series de datos muestreadas
+
+`plot_data` and `scatter_data` draw raw `(xs, ys)` series directly in a
+space's data coordinates. The result is parented to the plane, so moving or
+scaling the space carries the series with it; there is no manual
+data-to-pixel mapping to keep in sync.
+
+#api-entry(
+  name: "Cartesian2D.plot_data",
+  kind: "method",
+  signature: "plot_data(xs, ys, *, step=False, baseline=None, policy=\"gap\", color=None, width=None) -> Drawable",
+  params: (
+    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Matching series in data coordinates; `None` marks a missing sample.]),
+    (name: "step", type: "bool", default: "False", desc: [Draw a step chart instead of a continuous line.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Data-space baseline; a value fills the area under the curve.]),
+    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Non-finite sample handling: split the line, skip staying connected, or raise.]),
+    (name: "color, width", type: "Color | None, float | None", default: "None", desc: [Optional restyle of the default series stroke.]),
+  ),
+  returns: (type: "Drawable", desc: [Retained vector curve parented to the space; supports `create`, `write`, styling, and all drawable animations.]),
+  desc: [Validates non-empty series of matching length. This is the static path for measured series; see `Parameter.drive_from_samples` for time-driven data.],
+)[
+```python
+from gaanim import CYAN, Axis, Scene
+
+scene = Scene()
+plane = scene.cartesian_2d(
+  Axis.linear(0, 30).ticks(5).label("tiempo (s)"),
+  Axis.linear(-0.4, 0.4).ticks(0.2).label("aceleración (g)"),
+  width=1460,
+  height=570,
+)
+curve = plane.plot_data(times, accel, color=CYAN, width=4)
+scene.play([plane.create(0.85), curve.create(2.2)])
+```
+]
+
+#api-entry(
+  name: "Cartesian2D.scatter_data",
+  kind: "method",
+  signature: "scatter_data(xs, ys, *, radius=6.0, policy=\"gap\", color=None) -> Drawable",
+  params: (
+    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Matching series in data coordinates.]),
+    (name: "radius", type: "float", default: "6.0", desc: [Dot radius in local canvas units; must be positive.]),
+    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Non-finite sample handling.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Optional dot fill overriding the theme series color.]),
+  ),
+  returns: (type: "Drawable", desc: [Group of dots parented to the space.]),
+  desc: [Use it for highlighted points over a `plot_data` curve; both follow the same plane.],
+)[
+```python
+peaks = plane.scatter_data(peak_times, peak_values, radius=7, color=GOLD)
+scene.play(peaks.fade_in())
+```
+]
+
 == NumberLine reactivo
 
 #api-entry(
@@ -205,7 +260,8 @@ scene.play([theta.animate_to(3 * math.pi, duration=4)])
   [`scene.polar_plane(axis)`], [`scene.polar(axis)`],
   [`scene.complex_plane()`], [`scene.complex()`],
   [`space.plot(f)`], [`space.function(f)`],
-  [`space.scatter/bars/...`], [`ChartSpec(...).mark(...).encode(...)`],
+  [`space.scatter/bars/...`], [`ChartSpec(...).mark(...).encode(...)` o `space.plot_data(xs, ys)`],
+  [`mapeo manual de datos a píxeles`], [`space.plot_data / scatter_data + drawable.at_coordinate(space.coord(x, y))`],
 )
 
 The legacy entry points in this table are not aliases in the primary Python

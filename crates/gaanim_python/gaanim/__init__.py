@@ -94,6 +94,7 @@ from .templates import (
     title_slide,
     vertical_short,
 )
+from .composition import AnimationGroup, LaggedStart, Succession
 
 
 def Canvas(*args, **kwargs):
@@ -111,6 +112,9 @@ __all__ = [
     "Scene",
     "Segment",
     "Canvas",
+    "AnimationGroup",
+    "LaggedStart",
+    "Succession",
     "Drawable",
     "Dimension",
     "AngleDimension",

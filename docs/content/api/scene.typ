@@ -260,6 +260,16 @@ note = scene.callout("Moving mass", mass, offset=(180, 100))
 scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
 ```
 
+`badge(text, x=None, y=None, color=None, background=None, padding=(36, 20), radius=16, font_size=None, min_width=None)` creates a pill whose rounded
+rectangle is measured to fit its label — no guessed widths. Colors default to
+the active theme's panel and foreground, and the result is a regular group, so
+`grow_from_center` and friends work out of the box.
+
+```python
+source = scene.badge("EL CENTRO · 1940 · 180°", -525, -414, color=CYAN)
+scene.play([source.grow_from_center().duration(0.35)])
+```
+
 `caption(text, position="bottom")` adds a readable lower-third card and
 automatically respects the canvas safe area. Use `position="top"` for
 headlines or translation overlays.

@@ -28,6 +28,17 @@ fn value_error(error: impl ToString) -> PyErr {
     PyValueError::new_err(error.to_string())
 }
 
+fn parse_non_finite_policy(value: &str) -> PyResult<NonFinitePolicy> {
+    match value {
+        "gap" => Ok(NonFinitePolicy::Gap),
+        "drop" => Ok(NonFinitePolicy::Drop),
+        "error" => Ok(NonFinitePolicy::Error),
+        _ => Err(value_error(
+            "policy must be 'gap', 'drop', or 'error' for non-finite samples",
+        )),
+    }
+}
+
 fn trace_readout_source(source: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
     if source.is_callable() {
         let result = source.call0().map_err(|_| {
@@ -875,6 +886,42 @@ impl PyParameter {
 
     fn remove_updater(&self) {
         self.inner.drawable().remove_updater();
+    }
+
+    /// Drive this parameter's value along a sampled `(times, values)` series,
+    /// evaluated natively as a pure function of timeline time — no per-frame
+    /// Python callbacks, exact under seeks and paused scrubbing.
+    ///
+    /// The value becomes `offset + scale * sample` (absolute, clamped outside
+    /// the series), so traced expressions, readouts, and reactive plots that
+    /// reference this parameter follow the series for free.
+    #[pyo3(signature = (times, values, *, interpolation = "linear", scale = 1.0, offset = 0.0))]
+    fn drive_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        interpolation: &str,
+        scale: f64,
+        offset: f64,
+    ) -> PyResult<Self> {
+        let interpolation = crate::pydrawable::parse_sampled_interpolation(interpolation)?;
+        self.inner
+            .drawable()
+            .drive_from_samples(
+                times,
+                values,
+                gaanim_animation::SampledProperty::Signal,
+                interpolation,
+                scale,
+                offset,
+            )
+            .map(|_| self.clone())
+            .map_err(|_| {
+                PyValueError::new_err(
+                    "drive_from_samples requires non-empty matching times/values, finite values, \
+                     and non-decreasing times",
+                )
+            })
     }
 
     fn __neg__(&self) -> PyExpr {
@@ -1938,6 +1985,90 @@ impl PyCoordinateSpace {
             )
             .map(PyDrawable)
             .map_err(value_error)
+    }
+
+    #[pyo3(signature = (xs, ys, *, step=false, baseline=None, policy="gap", color=None, width=None))]
+    /// Plot a raw data series in this space's data coordinates.
+    ///
+    /// `xs` and `ys` are matching lists of floats (`None` marks a missing
+    /// sample). The curve is drawn in data coordinates and follows the plane,
+    /// so repositioning the space carries the series with it. `policy`
+    /// controls non-finite samples: `"gap"` splits the line, `"drop"` skips
+    /// the point but stays connected, `"error"` raises. Pass `step=True` for
+    /// a step chart, `baseline` (data units) for a filled area, and
+    /// `color`/`width` to restyle the stroke.
+    ///
+    /// ```python
+    /// plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
+    /// curve = plane.plot_data(times, accel, color=CYAN, width=4)
+    /// ```
+    fn plot_data(
+        &self,
+        xs: Vec<Option<f64>>,
+        ys: Vec<Option<f64>>,
+        step: bool,
+        baseline: Option<f64>,
+        policy: &str,
+        color: Option<PyColor>,
+        width: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        if xs.is_empty() || xs.len() != ys.len() {
+            return Err(value_error(
+                "plot_data requires non-empty xs and ys lists of matching length",
+            ));
+        }
+        let policy = parse_non_finite_policy(policy)?;
+        let handle = self
+            .canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .data_line(&self.inner, &xs, &ys, step, baseline, policy)
+            .map_err(value_error)?;
+        let handle = match color {
+            Some(color) => handle.stroke(color.0, width.unwrap_or(3.0)),
+            None if width.is_some() => handle.stroke(
+                gaanim_core::peniko::Color::from_rgb8(0x19, 0x32, 0x64),
+                width.unwrap_or(3.0),
+            ),
+            None => handle,
+        };
+        Ok(PyDrawable(handle))
+    }
+
+    #[pyo3(signature = (xs, ys, *, radius=6.0, policy="gap", color=None))]
+    /// Plot a data series as scatter dots in this space's data coordinates.
+    ///
+    /// `xs` and `ys` are matching lists of floats (`None` marks a missing
+    /// sample); `policy` handles non-finite samples (`"gap"`, `"drop"`,
+    /// `"error"`). Pass `color` to restyle the dots.
+    fn scatter_data(
+        &self,
+        xs: Vec<Option<f64>>,
+        ys: Vec<Option<f64>>,
+        radius: f64,
+        policy: &str,
+        color: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        if xs.is_empty() || xs.len() != ys.len() {
+            return Err(value_error(
+                "scatter_data requires non-empty xs and ys lists of matching length",
+            ));
+        }
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(value_error("scatter_data requires a positive finite radius"));
+        }
+        let policy = parse_non_finite_policy(policy)?;
+        let handle = self
+            .canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .data_scatter(&self.inner, &xs, &ys, radius, policy)
+            .map_err(value_error)?;
+        let handle = match color {
+            Some(color) => handle.fill(color.0),
+            None => handle,
+        };
+        Ok(PyDrawable(handle))
     }
 
     #[pyo3(signature = (function, domain, *, rectangles=12, method="midpoint", baseline=0.0))]

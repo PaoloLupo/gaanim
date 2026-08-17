@@ -738,6 +738,11 @@ impl Timeline {
                                 updater.elapsed = clip.start;
                             }
                         }
+                        if let Some(mut driver) =
+                            entity_mut.get_mut::<gaanim_animation::SampledSeriesDriver>()
+                        {
+                            driver.stop_at = Some(clip.start);
+                        }
                     }
                 }
                 ClipPayload::SetSceneMember { target, scene } => {

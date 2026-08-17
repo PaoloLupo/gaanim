@@ -482,6 +482,14 @@ class Anim:
             result = animation.duration(1.0)
         """
         ...
+    @property
+    def timing(self) -> tuple[float, float]:
+        """Currently configured ``(duration, delay)`` in seconds.
+
+        Example:
+            duration, delay = animation.timing
+        """
+        ...
     def ease(self, name: str) -> Anim:
         """Configure this animation with ease.
 
@@ -1135,6 +1143,31 @@ class Drawable:
             drawable.remove_updater()
         """
         ...
+    def drive_from_samples(
+        self,
+        times: Sequence[float],
+        values: Sequence[float],
+        property: Literal["x", "y", "z", "rotation", "scale", "opacity", "signal"] = "x",
+        *,
+        interpolation: Literal["linear", "step"] = "linear",
+        scale: float = 1.0,
+        offset: float = 0.0,
+    ) -> Drawable:
+        """Drive a property along a sampled ``(times, values)`` series natively.
+
+        Evaluated as a pure function of timeline time — no per-frame Python
+        callbacks, exact under seeks and paused scrubbing. Translation axes
+        and ``rotation`` are relative to the authored pose
+        (``base + offset + scale * sample``); ``scale``, ``opacity``, and
+        ``signal`` are absolute (``offset + scale * sample``). Samples outside
+        the series clamp to its first/last value. Detach with
+        ``remove_updater()``.
+
+        Example:
+            times = [i * 0.02 for i in range(len(accel))]
+            building.drive_from_samples(times, accel, "x", scale=520.0)
+        """
+        ...
     def bind_y_from(self, source: Drawable) -> None:
         """Bind Y and defer this visual until its entry animation is played.
 
@@ -1227,7 +1260,7 @@ class Drawable:
         """
         ...
 
-TextRole: TypeAlias = Literal["title", "subtitle", "heading", "body", "caption", "label", "code", "math"]
+TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", "caption", "label", "code", "math"]
 TextWrap: TypeAlias = Literal["auto", False] | float
 TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
 TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
@@ -2222,6 +2255,26 @@ class Parameter:
         must return a finite number.
         """
         ...
+    def drive_from_samples(
+        self,
+        times: Sequence[float],
+        values: Sequence[float],
+        *,
+        interpolation: Literal["linear", "step"] = "linear",
+        scale: float = 1.0,
+        offset: float = 0.0,
+    ) -> Parameter:
+        """Drive this parameter's value along a sampled series, natively.
+
+        The value becomes ``offset + scale * sample`` as a pure function of
+        timeline time, so traced expressions, readouts, and reactive plots
+        referencing this parameter follow the series without Python callbacks.
+
+        Example:
+            phase = scene.parameter(0.0)
+            phase.drive_from_samples(times, values, scale=2.0 * math.pi)
+        """
+        ...
     def remove_updater(self) -> None: ...
     def __neg__(self) -> _Expr: ...
     def __add__(self, other: object) -> _Expr: ...
@@ -2386,6 +2439,45 @@ class CoordinateSpace:
     def normal(self, function: Callable[[float], float], x: float, *, length: Optional[float] = None, dx: Optional[float] = None) -> Drawable: ...
     def area_under(self, function: Callable[[float], float], domain: tuple[float, float], *, samples: int = 160, baseline: float = 0.0) -> Drawable: ...
     def riemann_sum(self, function: Callable[[float], float], domain: tuple[float, float], *, rectangles: int = 12, method: Literal["left", "midpoint", "middle", "right"] = "midpoint", baseline: float = 0.0) -> Drawable: ...
+    def plot_data(
+        self,
+        xs: Sequence[Optional[float]],
+        ys: Sequence[Optional[float]],
+        *,
+        step: bool = False,
+        baseline: Optional[float] = None,
+        policy: Literal["gap", "drop", "error"] = "gap",
+        color: Optional[Color] = None,
+        width: Optional[float] = None,
+    ) -> Drawable:
+        """Plot a raw data series in this space's data coordinates.
+
+        The curve follows the plane, so repositioning the space carries the
+        series with it. ``None`` entries mark missing samples; ``policy``
+        controls non-finite ones. Pass ``step=True`` for a step chart and
+        ``baseline`` (data units) for a filled area.
+
+        Example:
+            plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
+            curve = plane.plot_data(times, accel, color=CYAN, width=4)
+            scene.play(curve.create(2.0))
+        """
+        ...
+    def scatter_data(
+        self,
+        xs: Sequence[Optional[float]],
+        ys: Sequence[Optional[float]],
+        *,
+        radius: float = 6.0,
+        policy: Literal["gap", "drop", "error"] = "gap",
+        color: Optional[Color] = None,
+    ) -> Drawable:
+        """Plot a data series as scatter dots in this space's data coordinates.
+
+        Example:
+            dots = plane.scatter_data(periods, spectral_values, radius=7, color=GOLD)
+        """
+        ...
 
 class NumberLine:
     """A one-dimensional typed coordinate space with scale-aware labels and reactive points."""
@@ -3161,6 +3253,52 @@ class Scene:
 
         Example:
             result = scene.group([drawable])
+        """
+        ...
+    def measure_text(
+        self,
+        content: str,
+        *,
+        role: Optional[TextRole] = None,
+        size: Optional[float] = None,
+        font: Optional[str] = None,
+        color: Optional[Color] = None,
+        wrap: Optional[float] = None,
+    ) -> tuple[float, float]:
+        """Measure laid-out text without spawning it.
+
+        Uses the same pipeline that renders ``scene.text`` (role defaults from
+        the active theme and Typst shaping) and returns ``(width, height)`` in
+        scene units. ``wrap`` composes at a fixed line width; ``None``
+        measures a single unwrapped block.
+
+        Example:
+            width, height = scene.measure_text("PGA = 0.35 g", role="label")
+            box = scene.rounded_rect(width + 56, height + 32, 14)
+        """
+        ...
+    def badge(
+        self,
+        text: str,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        *,
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        padding: tuple[float, float] = (36.0, 20.0),
+        radius: float = 16.0,
+        font_size: Optional[float] = None,
+        min_width: Optional[float] = None,
+    ) -> Drawable:
+        """Create a badge (pill) whose rectangle is sized to its label.
+
+        Returns a group of a rounded rectangle and a centered label, placed at
+        ``(x, y)`` when given. Colors default to the active theme's panel and
+        foreground.
+
+        Example:
+            tag = scene.badge("EL CENTRO · 1940 · 180°", -525, -414, color=CYAN)
+            scene.play(tag.grow_from_center())
         """
         ...
     def callout(

@@ -117,15 +117,22 @@ scene.export("equation_factory.webp", fps=30)
 The accepted roles are:
 
 ```text
-"title" | "subtitle" | "heading" | "body" |
+"title" | "subtitle" | "kicker" | "heading" | "body" |
 "caption" | "label" | "code" | "math"
 ```
 
 The default text configuration uses these sizes in Typst/canvas points:
-`title=64`, `subtitle=48`, `heading=40`, `body=32`, `caption=24`,
-`label=28`, `code=28`, and `math=32`. Prose uses New Computer Modern by
-default, code uses Consolas, and math uses New Computer Modern Math. The active
-theme and explicit style may replace the resolved color and typography.
+`title=64`, `subtitle=48`, `kicker=32`, `heading=48`, `body=40`,
+`caption=32`, `label=36`, `code=36`, and `math=44`. Prose uses New Computer
+Modern by default, code uses Consolas, and math uses New Computer Modern Math.
+The active theme and explicit style may replace the resolved color and
+typography. Under a theme, `kicker` resolves to the palette's `accent` color,
+which makes it the natural small line above a title:
+
+```python
+kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").at(0, 452)
+title = scene.text("¿Cuál sufrirá más?", role="title").at(0, 360)
+```
 
 Resolution order is:
 
@@ -133,6 +140,27 @@ Resolution order is:
 role/theme -> TextStyle/TextFlow -> direct scene.text keywords
            -> local part style -> later TextSelection.fill / Text.fill
 ```
+
+== Medición sin spawn
+
+#api-entry(
+  name: "Scene.measure_text",
+  kind: "method",
+  signature: "measure_text(content, *, role=None, size=None, font=None, color=None, wrap=None) -> tuple[float, float]",
+  params: (
+    (name: "content", type: "str", default: none, desc: [Text to measure; must not be empty.]),
+    (name: "role", type: "TextRole | None", default: "None", desc: [Role whose theme defaults resolve size, family, and color (`body` when omitted).]),
+    (name: "size, font, color", type: "float | str | Color | None", default: "None", desc: [Explicit overrides, resolved exactly as on the spawned text object.]),
+    (name: "wrap", type: "float | None", default: "None", desc: [Fixed composition width; `None` measures a single unwrapped block.]),
+  ),
+  returns: (type: "tuple[float, float]", desc: [Laid-out `(width, height)` in scene units.]),
+  desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
+)[
+```python
+width, height = scene.measure_text("PGA = 0.35 g", role="label")
+box = scene.rounded_rect(width + 56, height + 32, 14).at(0, -414)
+```
+]
 
 == Contenido estructurado y matemáticas
 

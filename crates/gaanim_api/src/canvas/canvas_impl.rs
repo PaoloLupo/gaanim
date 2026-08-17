@@ -514,6 +514,94 @@ impl Canvas {
         }
     }
 
+    /// Measure laid-out text without spawning it, through the exact pipeline
+    /// that renders `scene.text`: role defaults from the active theme, Typst
+    /// shaping, and the shared Typst hierarchy cache. Returns
+    /// `(width, height)` in scene units.
+    ///
+    /// `wrap_width` composes the text at a fixed line width (like
+    /// `TextFlow` wrap); `None` measures a single unwrapped block. Explicit
+    /// `size`, `font`, and `color` overrides resolve exactly as they would on
+    /// the spawned text object.
+    pub fn measure_text(
+        &self,
+        content: &str,
+        role: Option<gaanim_text::prelude::TextRole>,
+        size: Option<f64>,
+        font: Option<String>,
+        color: Option<Color>,
+        wrap_width: Option<f64>,
+    ) -> Result<(f64, f64), String> {
+        use gaanim_text::prelude::{TextContent, TextFlow, TextRole, TextSpec, TextStyle, TextWrap};
+
+        let config = self.themed_text_config();
+        let role = role.unwrap_or(TextRole::Body);
+        let role_style = config
+            .roles
+            .get(&role)
+            .ok_or_else(|| format!("no style configured for text role {role:?}"))?;
+        let math_font = config
+            .roles
+            .get(&TextRole::Math)
+            .map(|style| style.font_family.clone())
+            .unwrap_or_else(|| "New Computer Modern Math".to_string());
+
+        let style = TextStyle {
+            size,
+            font,
+            color,
+            ..TextStyle::default()
+        };
+        let flow = TextFlow {
+            wrap: match wrap_width {
+                Some(width) => TextWrap::Width(width.max(1.0)),
+                None => TextWrap::NoWrap,
+            },
+            ..TextFlow::default()
+        };
+        let spec = TextSpec::new(
+            vec![TextContent::Literal(content.to_string())],
+            Some(role),
+            style,
+            flow,
+        )
+        .map_err(|error| error.to_string())?;
+
+        let font_size = spec.style.size.unwrap_or(role_style.size).max(1.0);
+        let font_family = spec
+            .style
+            .font
+            .clone()
+            .unwrap_or_else(|| role_style.font_family.clone());
+        let color = spec.style.color.unwrap_or(role_style.fill_color);
+
+        let source = crate::canvas::compile::structured_text_typst_source(
+            &spec,
+            None,
+            font_size,
+            &font_family,
+            color,
+        );
+
+        let mut registry = gaanim_text::font::FontRegistry::new();
+        self.register_theme_fonts(&mut registry);
+
+        let bounds = gaanim_text::prelude::measure_typst(
+            &registry,
+            &source,
+            false,
+            Some(&font_family),
+            Some(&math_font),
+            Some(font_size),
+            None,
+            Some(Brush::Solid(color)),
+            gaanim_scene::StrokeBrush::transparent(),
+        )
+        .map_err(|errors| errors.join("; "))?;
+
+        Ok((bounds.width().max(0.0), bounds.height().max(0.0)))
+    }
+
     pub fn with_units(mut self, u: CanvasUnits) -> Self {
         self.units = u;
         self

@@ -590,6 +590,65 @@ scene.play([rod.create(0.8), mass.move(120, 0).duration(0.8)])
 scene.play([rod.write(0.8), mass.move(-80, 40).duration(0.8)])
 ```
 
+== Series muestreadas nativas
+
+#api-entry(
+  name: "Drawable.drive_from_samples",
+  kind: "method",
+  signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0) -> Drawable",
+  params: (
+    (name: "times, values", type: "sequence[float]", default: none, desc: [Matching series; times must be finite and non-decreasing.]),
+    (name: "property", type: "\"x\" | \"y\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\"", default: "\"x\"", desc: [Driven channel.]),
+    (name: "interpolation", type: "\"linear\" | \"step\"", default: "\"linear\"", desc: [Interpolation between consecutive samples.]),
+    (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Output transform applied to each sample.]),
+  ),
+  returns: (type: "Drawable", desc: [The same drawable for fluent chaining.]),
+  desc: [Drives the property as a pure function of timeline time, evaluated in Rust — no per-frame Python callbacks. Translation axes and `rotation` are relative to the authored pose (`base + offset + scale * sample`); `scale`, `opacity`, and `signal` are absolute. Samples outside the series clamp to its first/last value. Seeks and paused scrubbing are exact because the driver keeps no accumulated state. Detach with `remove_updater()`.],
+)[
+```python
+from gaanim import CYAN, Scene
+
+scene = Scene()
+times = [i * 0.02 for i in range(len(accel))]
+building = scene.rounded_rect(160, 360, 10).fill(CYAN).at(-200, -120)
+# El edificio oscila con el registro medido; el seek es determinista.
+building.drive_from_samples(times, accel, "x", scale=520.0)
+scene.play(building.grow_from_center())
+scene.wait(4.0)
+```
+
+`Parameter.drive_from_samples(times, values, *, ...)` drives a parameter's
+float signal the same way, so traced expressions, readouts, and reactive plots
+that reference the parameter follow the measured series for free.
+]
+
+== Composición de animaciones
+
+#api-entry(
+  name: "gaanim.Succession",
+  kind: "function",
+  signature: "Succession(*steps) -> list[Anim]",
+  params: (
+    (name: "steps", type: "Anim | list[Anim]", default: none, desc: [Each step is an animation or a group; the next starts when the longest member finishes.]),
+  ),
+  returns: (type: "list[Anim]", desc: [Flat batch accepted directly by `scene.play`.]),
+  desc: [Composition resolves to per-clip delays, so it compiles to ordinary clips without extra timeline machinery. `LaggedStart(*anims, lag=0.1)` staggers starts and `AnimationGroup(*anims)` is an explicit parallel group; both nest inside `Succession`.],
+)[
+```python
+from gaanim import LaggedStart, Scene, Succession
+
+scene.play(
+    Succession(
+        title.write(0.8),
+        LaggedStart(box.create(), label.fade_in(), lag=0.15),
+    )
+)
+```
+
+`Anim.timing` exposes the current `(duration, delay)` in seconds for helpers
+that compute cumulative delays.
+]
+
 == Tiempo y easing
 
 Configure any `Anim` fluently before passing to `play`:

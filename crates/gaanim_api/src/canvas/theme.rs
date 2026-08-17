@@ -509,6 +509,11 @@ impl CanvasTheme {
             .fill_color = self.palette.muted;
         self.text
             .roles
+            .get_mut(&TextRole::Kicker)
+            .unwrap()
+            .fill_color = self.palette.accent;
+        self.text
+            .roles
             .get_mut(&TextRole::Heading)
             .unwrap()
             .fill_color = self.palette.title;
@@ -755,6 +760,7 @@ impl CanvasTheme {
                 "text" => &[
                     TextRole::Title,
                     TextRole::Subtitle,
+                    TextRole::Kicker,
                     TextRole::Heading,
                     TextRole::Body,
                     TextRole::Caption,
@@ -763,6 +769,7 @@ impl CanvasTheme {
                 "all" => &[
                     TextRole::Title,
                     TextRole::Subtitle,
+                    TextRole::Kicker,
                     TextRole::Heading,
                     TextRole::Body,
                     TextRole::Caption,
@@ -772,6 +779,7 @@ impl CanvasTheme {
                 ],
                 "title" => &[TextRole::Title],
                 "subtitle" => &[TextRole::Subtitle],
+                "kicker" => &[TextRole::Kicker],
                 "heading" => &[TextRole::Heading],
                 "body" => &[TextRole::Body],
                 "caption" => &[TextRole::Caption],
@@ -803,6 +811,7 @@ fn text_role(role: &str) -> Result<TextRole, String> {
     match role {
         "title" => Ok(TextRole::Title),
         "subtitle" => Ok(TextRole::Subtitle),
+        "kicker" => Ok(TextRole::Kicker),
         "heading" => Ok(TextRole::Heading),
         "body" => Ok(TextRole::Body),
         "caption" => Ok(TextRole::Caption),

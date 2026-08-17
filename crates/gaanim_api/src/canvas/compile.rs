@@ -697,7 +697,7 @@ pub(crate) fn text_inline_typst_source(text: &str, color: gaanim_core::peniko::C
 /// Compose every structured text role through one Typst vector pipeline. The
 /// optional width is the offer from Layout v2 (or the scene safe frame for a
 /// free text object); it is never stored as an outer text box.
-fn structured_text_typst_source(
+pub(crate) fn structured_text_typst_source(
     spec: &StructuredTextSpec,
     offered_width: Option<f64>,
     font_size: f64,
@@ -4207,6 +4207,15 @@ impl Canvas {
                                 base_angle: None,
                             },
                         );
+                    }
+                }
+
+                Op::AttachSampledSeries { target, driver } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let driver = driver.clone().starting_at(builder.current_time);
+                        builder.commands.entity(target_st.entity).insert(driver);
                     }
                 }
 
@@ -9244,5 +9253,34 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn sampled_series_op_compiles_to_driver_component() {
+        use gaanim_animation::{SampledInterpolation, SampledProperty};
+
+        let mut canvas = Canvas::new(640, 360);
+        let dot = canvas.dot(8.0);
+        canvas.wait(1.5);
+        dot.drive_from_samples(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            10.0,
+            0.0,
+        )
+        .expect("valid sampled series");
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut query = world.query::<&gaanim_animation::SampledSeriesDriver>();
+        let driver = query.single(&world).expect("exactly one compiled driver");
+        assert_eq!(driver.property, SampledProperty::TranslateX);
+        assert_eq!(driver.interpolation, SampledInterpolation::Linear);
+        assert_eq!(driver.times.to_vec(), vec![0.0, 1.0]);
+        assert_eq!(driver.values.to_vec(), vec![1.0, 2.0]);
+        assert_eq!(driver.scale, 10.0);
+        assert_eq!(driver.start_at, 1.5, "driver starts at the authored cursor");
+        assert!(driver.base.is_none());
     }
 }

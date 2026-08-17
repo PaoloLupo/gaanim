@@ -540,6 +540,7 @@ impl PyTheme {
                 let role = match role_name.as_str() {
                     "title" => gaanim_text::prelude::TextRole::Title,
                     "subtitle" => gaanim_text::prelude::TextRole::Subtitle,
+                    "kicker" => gaanim_text::prelude::TextRole::Kicker,
                     "heading" => gaanim_text::prelude::TextRole::Heading,
                     "body" => gaanim_text::prelude::TextRole::Body,
                     "caption" => gaanim_text::prelude::TextRole::Caption,
@@ -3299,6 +3300,114 @@ impl PyScene {
                 .expect("scene canvas poisoned")
                 .group(&refs),
         )
+    }
+
+    /// Measure laid-out text without spawning it, through the same pipeline
+    /// that renders ``scene.text`` (role defaults from the active theme and
+    /// Typst shaping). Returns ``(width, height)`` in scene units.
+    ///
+    /// ```python
+    /// w, h = scene.measure_text("PGA = 0.35 g", role="label")
+    /// box = scene.rounded_rect(w + 56, h + 32, 14)
+    /// ```
+    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None))]
+    #[pyo3(name = "measure_text")]
+    fn measure_text_py(
+        &self,
+        content: &str,
+        role: Option<&str>,
+        size: Option<f64>,
+        font: Option<String>,
+        color: Option<PyColor>,
+        wrap: Option<f64>,
+    ) -> PyResult<(f64, f64)> {
+        if content.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "measure_text content must not be empty",
+            ));
+        }
+        let role = crate::pytext::parse_role(role)?
+            .unwrap_or(gaanim_text::prelude::TextRole::Body);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .measure_text(content, Some(role), size, font, color.map(|color| color.0), wrap)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Create a badge (pill) whose rounded rectangle is sized to its label,
+    /// centered at ``(x, y)`` when given.
+    ///
+    /// ```python
+    /// badge = scene.badge("EL CENTRO · 1940", x=-525, y=-414, color=CYAN)
+    /// scene.play(badge.grow_from_center())
+    /// ```
+    #[pyo3(signature = (text, x=None, y=None, *, color=None, background=None, padding=(36.0, 20.0), radius=16.0, font_size=None, min_width=None))]
+    #[pyo3(name = "badge")]
+    fn badge_py(
+        &self,
+        text: String,
+        x: Option<f64>,
+        y: Option<f64>,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        padding: (f64, f64),
+        radius: f64,
+        font_size: Option<f64>,
+        min_width: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        if text.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "badge text must not be empty",
+            ));
+        }
+        if !(padding.0.is_finite()
+            && padding.1.is_finite()
+            && padding.0 >= 0.0
+            && padding.1 >= 0.0
+            && radius.is_finite()
+            && radius >= 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "badge padding must be non-negative finite values and radius non-negative",
+            ));
+        }
+
+        let palette = {
+            let scene = self.inner.lock().expect("scene canvas poisoned");
+            component_palette(&scene)
+        };
+        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
+        let background = background.map(|color| color.0).unwrap_or(palette.panel);
+
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let (label_width, label_height) = scene
+            .measure_text(
+                &text,
+                Some(gaanim_text::prelude::TextRole::Label),
+                font_size,
+                None,
+                Some(color),
+                None,
+            )
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let width = (label_width + padding.0 * 2.0).max(min_width.unwrap_or(0.0));
+        let height = label_height + padding.1 * 2.0;
+
+        let mut group_members: Vec<gaanim_api::canvas::DrawableHandle> = Vec::with_capacity(2);
+        let card = scene
+            .rounded_rect(width, height, radius)
+            .fill(background)
+            .stroke(color, 2.0);
+        let label = scene.text(&text).fill(color);
+        let (card, label) = match (x, y) {
+            (Some(x), Some(y)) => (card.at(x, y), label.at(x, y)),
+            _ => (card, label),
+        };
+        group_members.push(card);
+        group_members.push(label);
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = group_members.iter().collect();
+        Ok(PyDrawable(scene.group(&refs)))
     }
 
     /// Create a labeled card with a native connector that follows `target`.

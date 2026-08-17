@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use gaanim_animation::{
-    AngleArrowheads, AngleSweep, AxisMask, DimensionLabelOrientation, FollowOffsetSpace, Updater,
+    AngleArrowheads, AngleSweep, AxisMask, DimensionLabelOrientation, FollowOffsetSpace,
+    SampledSeriesDriver, Updater,
 };
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
@@ -475,6 +476,12 @@ pub(crate) enum Op {
         source: ObjectId,
         axis: DVec3,
         scale: f64,
+    },
+    /// Drive a property along a sampled `(times, values)` series as a pure
+    /// function of timeline time (no per-frame callbacks).
+    AttachSampledSeries {
+        target: ObjectId,
+        driver: SampledSeriesDriver,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {

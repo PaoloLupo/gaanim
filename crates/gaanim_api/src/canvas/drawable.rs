@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gaanim_animation::AxisMask;
+use gaanim_animation::{
+    AxisMask, InvalidSampledSeries, SampledInterpolation, SampledProperty, SampledSeriesDriver,
+};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec2, DVec3, EulerRot};
 use gaanim_core::kurbo::BezPath;
@@ -1445,6 +1447,37 @@ impl DrawableHandle {
                 scale,
             });
         self.clone()
+    }
+
+    /// Drive a property of this drawable along a sampled `(times, values)`
+    /// series, evaluated natively as a pure function of timeline time.
+    ///
+    /// Translation axes and Z rotation are relative to the authored pose
+    /// (captured lazily on first evaluation): `base + offset + scale * sample`.
+    /// Uniform scale, opacity, and float signals are absolute:
+    /// `offset + scale * sample`. Seeks and paused scrubbing are exact because
+    /// the driver accumulates no state. Call `remove_updater` to detach it.
+    pub fn drive_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        scale: f64,
+        offset: f64,
+    ) -> Result<Self, InvalidSampledSeries> {
+        let driver =
+            SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachSampledSeries {
+                target: self.id,
+                driver,
+            });
+        Ok(self.clone())
     }
 
     /// Copy the source entity's position on specified axes each frame.

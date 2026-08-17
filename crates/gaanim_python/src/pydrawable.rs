@@ -11,6 +11,31 @@ use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression}
 use crate::pystyle::PyStrokeStyle;
 use crate::updater::PyUpdater;
 
+fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProperty> {
+    match value {
+        "x" => Ok(gaanim_animation::SampledProperty::TranslateX),
+        "y" => Ok(gaanim_animation::SampledProperty::TranslateY),
+        "z" => Ok(gaanim_animation::SampledProperty::TranslateZ),
+        "rotation" => Ok(gaanim_animation::SampledProperty::RotateZ),
+        "scale" => Ok(gaanim_animation::SampledProperty::UniformScale),
+        "opacity" => Ok(gaanim_animation::SampledProperty::Opacity),
+        "signal" => Ok(gaanim_animation::SampledProperty::Signal),
+        _ => Err(PyValueError::new_err(
+            "property must be one of 'x', 'y', 'z', 'rotation', 'scale', 'opacity', 'signal'",
+        )),
+    }
+}
+
+pub(crate) fn parse_sampled_interpolation(value: &str) -> PyResult<gaanim_animation::SampledInterpolation> {
+    match value {
+        "linear" => Ok(gaanim_animation::SampledInterpolation::Linear),
+        "step" => Ok(gaanim_animation::SampledInterpolation::Step),
+        _ => Err(PyValueError::new_err(
+            "interpolation must be 'linear' or 'step'",
+        )),
+    }
+}
+
 #[pyclass(name = "AnchorPoint", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyAnchorPoint(pub gaanim_api::canvas::AnchorPoint);
@@ -241,6 +266,14 @@ impl PyCanvasAnim {
         Self {
             inner: self.inner.clone().duration(d),
         }
+    }
+
+    /// Currently configured `(duration, delay)` in seconds, so helpers like
+    /// `gaanim.Succession` can compute cumulative delays without re-specifying
+    /// durations.
+    #[getter]
+    fn timing(&self) -> (f64, f64) {
+        (self.inner.inner.duration, self.inner.inner.delay)
     }
 
     fn ease(&self, name: &str) -> Self {
@@ -995,6 +1028,45 @@ impl PyDrawable {
     /// Remove any updater attached to this entity.
     fn remove_updater(&self) {
         self.0.remove_updater();
+    }
+
+    /// Drive a property of this drawable along a sampled `(times, values)`
+    /// series, evaluated natively as a pure function of timeline time — no
+    /// per-frame Python callbacks, and exact under seeks and paused scrubbing.
+    ///
+    /// `property` selects the driven channel: `"x"`, `"y"`, `"z"`,
+    /// `"rotation"` (Z radians), `"scale"` (uniform), `"opacity"`, or
+    /// `"signal"` (the entity's float signal, composable with expressions).
+    /// Translation axes and rotation are relative to the authored pose:
+    /// `base + offset + scale * sample`. Scale, opacity, and signal are
+    /// absolute: `offset + scale * sample`. Samples outside the series are
+    /// clamped to its first/last value.
+    ///
+    /// ```python
+    /// times = [i * 0.02 for i in range(len(accel))]
+    /// building.drive_from_samples(times, accel, "x", scale=520.0)
+    /// ```
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
+    fn drive_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: &str,
+        interpolation: &str,
+        scale: f64,
+        offset: f64,
+    ) -> PyResult<Self> {
+        let property = parse_sampled_property(property)?;
+        let interpolation = parse_sampled_interpolation(interpolation)?;
+        self.0
+            .drive_from_samples(times, values, property, interpolation, scale, offset)
+            .map(|_| self.clone())
+            .map_err(|_| {
+                PyValueError::new_err(
+                    "drive_from_samples requires non-empty matching times/values, finite values, \
+                     and non-decreasing times",
+                )
+            })
     }
 
     /// Copy the source entity's Y position each frame.
