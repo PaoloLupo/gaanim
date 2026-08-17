@@ -27,12 +27,72 @@ circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
 label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
 
-You can update the viewport background through `scene.canvas`:
+You can update the background inside the authored scene bounds through
+`scene.canvas`:
 
 ```python
 from gaanim import Color
 
 scene.canvas.background = Color(40, 42, 54)
+```
+
+== Fondos con gradientes y WGSL
+
+`Scene.background` and `scene.canvas.background` accept the same `Brush`
+gradients used by drawables. Gradient coordinates are scene coordinates, so a
+full-width linear gradient on a 1280×720 scene runs from `x=-640` to `x=640`:
+
+```python
+from gaanim import Brush, Scene
+
+sky = Brush.linear(
+    ["#071022", "#164E8A", "#7DD3FC"],
+    start=(-640, 0),
+    end=(640, 0),
+)
+scene = Scene(1280, 720, background=sky)
+```
+
+For procedural or animated art, `Background.shader(source, fallback=...)`
+accepts a WGSL function with this signature:
+
+```wgsl
+fn gaanim_background(
+    uv: vec2<f32>,
+    resolution: vec2<f32>,
+    time: f32,
+) -> vec4<f32> {
+    let pulse = 0.5 + 0.5 * sin(time * 2.0);
+    return vec4<f32>(uv.x, uv.y, pulse, 1.0);
+}
+```
+
+`uv=(0, 0)` is the top-left and `uv=(1, 1)` the bottom-right. `resolution` is
+the effective scene size in pixels. `time` is the absolute timeline position
+in seconds; it follows playback and exact seeks, making snapshots and exports
+deterministic. The shader covers the same authored scene rectangle shown by the
+editor's bounds overlay; letterboxed space outside that rectangle uses
+`fallback`. The function is validated when the `Background` is created and
+cached as a Vello texture for the active resolution and time. Resizing the
+editor re-rasterizes it. Legacy two-argument functions without `time` remain
+accepted as static backgrounds. `fallback` defaults to black and is also used
+for native 3D clearing, automatic text contrast, or a GPU rasterization failure.
+
+```python
+from gaanim import Background, Scene
+
+shader = Background.shader("""
+fn gaanim_background(
+    uv: vec2<f32>,
+    resolution: vec2<f32>,
+    time: f32,
+) -> vec4<f32> {
+    let center = vec2<f32>(0.35 + 0.1 * sin(time), 0.45);
+    let glow = exp(-8.0 * distance(uv, center));
+    return vec4<f32>(0.02, 0.08 + 0.4 * glow, 0.18 + 0.6 * glow, 1.0);
+}
+""", fallback="#071022")
+scene = Scene(1280, 720, background=shader)
 ```
 
 == Temas incluidos

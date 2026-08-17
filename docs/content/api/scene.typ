@@ -20,8 +20,8 @@ animation; `Canvas` is retained only as a deprecated compatibility constructor.
 #api-entry(
   name: "Scene",
   kind: "constructor",
-  signature: "Scene(width: int = 1280, height: int = 720, background: ColorLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
-  params: ((name: "width", type: "int", default: "1280", desc: [Viewport width in pixels.]), (name: "height", type: "int", default: "720", desc: [Viewport height in pixels.]), (name: "background", type: "ColorLike | None", default: "None", desc: [Explicit viewport color; it takes precedence over the theme background.]), (name: "margin", type: "float | None", default: "None", desc: [Uniform safe-frame margin.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Built-in name or reusable centralized theme.]),),
+  signature: "Scene(width: int = 1280, height: int = 720, background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
+  params: ((name: "width", type: "int", default: "1280", desc: [Viewport width in pixels.]), (name: "height", type: "int", default: "720", desc: [Viewport height in pixels.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [ColorLike, Brush, or Background; it takes precedence over the theme background.]), (name: "margin", type: "float | None", default: "None", desc: [Uniform safe-frame margin.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Built-in name or reusable centralized theme.]),),
   returns: (type: "Scene", desc: [A new authoring scene.]),
   desc: [Installs the theme before objects are authored. Unknown names or invalid theme values raise `ValueError` or `TypeError`.],
 )[

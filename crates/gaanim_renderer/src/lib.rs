@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+pub mod background;
 pub mod effects;
 pub mod pipeline;
 pub mod prelude;

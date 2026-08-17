@@ -1,4 +1,5 @@
 pub use crate::GaanimRendererPlugin;
+pub use crate::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
 pub use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
 pub use crate::pipeline::{
     CanvasBackground, GaanimRenderCache, MainVelloScene, gaanim_render_cache_sweep_system,

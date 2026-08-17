@@ -350,6 +350,9 @@ pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub background: Option<Color>,
+    /// Full scene-bounds paint. `background` remains the representative color used
+    /// for theme contrast and native 3D clears.
+    pub background_paint: Option<gaanim_renderer::background::BackgroundPaint>,
     pub(crate) background_overridden: bool,
     pub units: CanvasUnits,
     /// Canonical name of the selected theme.
@@ -375,6 +378,7 @@ impl Canvas {
             width,
             height,
             background: None,
+            background_paint: None,
             background_overridden: false,
             theme: None,
             theme_style: None,
@@ -424,13 +428,44 @@ impl Canvas {
     }
 
     pub fn background(mut self, c: Color) -> Self {
-        self.background = Some(c);
-        self.background_overridden = true;
+        self.set_background(Some(c));
         self
     }
 
     pub fn set_background(&mut self, color: Option<Color>) {
         self.background = color;
+        self.background_paint = color.map(gaanim_renderer::background::BackgroundPaint::solid);
+        self.background_overridden = true;
+    }
+
+    /// Use any native Vello brush as the full scene background.
+    pub fn background_brush(mut self, brush: Brush) -> Self {
+        self.set_background_paint(Some(gaanim_renderer::background::BackgroundPaint::Brush(
+            brush,
+        )));
+        self
+    }
+
+    /// Use a validated timeline-driven WGSL function as the full scene background.
+    pub fn background_shader(
+        mut self,
+        source: impl Into<Arc<str>>,
+        fallback: Color,
+    ) -> Result<Self, gaanim_renderer::background::ShaderBackgroundError> {
+        let shader = gaanim_renderer::background::ShaderBackground::new(source, fallback)?;
+        self.set_background_paint(Some(gaanim_renderer::background::BackgroundPaint::Shader(
+            shader,
+        )));
+        Ok(self)
+    }
+
+    /// Replace the scene paint while retaining a representative fallback color.
+    pub fn set_background_paint(
+        &mut self,
+        paint: Option<gaanim_renderer::background::BackgroundPaint>,
+    ) {
+        self.background = paint.as_ref().map(|paint| paint.fallback_color());
+        self.background_paint = paint;
         self.background_overridden = true;
     }
 
@@ -450,6 +485,9 @@ impl Canvas {
     pub fn apply_theme(&mut self, theme: CanvasTheme) {
         if !self.background_overridden {
             self.background = Some(theme.palette.background);
+            self.background_paint = Some(gaanim_renderer::background::BackgroundPaint::solid(
+                theme.palette.background,
+            ));
         }
         self.theme = Some(theme.name.clone());
         self.theme_style = Some(theme);
@@ -532,7 +570,9 @@ impl Canvas {
         color: Option<Color>,
         wrap_width: Option<f64>,
     ) -> Result<(f64, f64), String> {
-        use gaanim_text::prelude::{TextContent, TextFlow, TextRole, TextSpec, TextStyle, TextWrap};
+        use gaanim_text::prelude::{
+            TextContent, TextFlow, TextRole, TextSpec, TextStyle, TextWrap,
+        };
 
         let config = self.themed_text_config();
         let role = role.unwrap_or(TextRole::Body);
@@ -4682,6 +4722,27 @@ mod tests {
         canvas.set_background(Some(explicit));
         canvas.set_theme("paper").unwrap();
         assert_eq!(canvas.background, Some(explicit));
+    }
+
+    #[test]
+    fn gradient_background_keeps_a_representative_color_for_theme_contrast() {
+        let navy = Color::from_rgb8(0x0B, 0x10, 0x20);
+        let blue = Color::from_rgb8(0x25, 0x63, 0xEB);
+        let gradient = gaanim_core::peniko::Gradient::new_linear((-320.0, 0.0), (320.0, 0.0))
+            .with_stops([(0.0, navy), (1.0, blue)]);
+        let mut canvas =
+            Canvas::new(640, 360).background_brush(gaanim_core::peniko::Brush::Gradient(gradient));
+
+        assert_eq!(canvas.background, Some(navy));
+        assert!(matches!(
+            canvas.background_paint,
+            Some(gaanim_renderer::background::BackgroundPaint::Brush(
+                gaanim_core::peniko::Brush::Gradient(_)
+            ))
+        ));
+
+        canvas.set_theme("paper").unwrap();
+        assert_eq!(canvas.background, Some(navy));
     }
 
     #[test]

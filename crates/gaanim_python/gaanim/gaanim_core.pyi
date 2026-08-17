@@ -101,6 +101,31 @@ class Brush:
 
 Paint: TypeAlias = ColorLike | Brush
 
+class Background:
+    def __init__(self, paint: Paint) -> None:
+        """Wrap a solid or gradient Brush for use inside the full scene bounds."""
+        ...
+    @staticmethod
+    def shader(source: str, *, fallback: Optional[ColorLike] = None) -> Background:
+        """Create a timeline-driven WGSL scene background.
+
+        ``source`` must define ``gaanim_background(uv, resolution, time)``
+        returning ``vec4<f32>``. ``time`` is the absolute timeline position in
+        seconds, so preview, seeks, snapshots, and exports are deterministic.
+        UV coordinates are normalized from the top-left and the shader covers
+        the authored scene bounds at their effective viewport resolution.
+        Legacy two-argument shaders remain accepted as static backgrounds.
+        Invalid WGSL raises ``ValueError``; ``fallback`` is used outside the
+        scene bounds, by native 3D clears, and if rasterization is unavailable.
+        """
+        ...
+    @property
+    def fallback(self) -> Color:
+        """Return the representative clear and contrast color."""
+        ...
+
+BackgroundLike: TypeAlias = Paint | Background
+
 class StrokeStyle:
     def __init__(
         self,
@@ -1833,7 +1858,7 @@ class Canvas:
     """Visual viewport configuration owned by a Scene."""
     width: int
     height: int
-    background: Optional[Color]
+    background: Optional[BackgroundLike]
     theme: Optional[str]
     def set_theme(self, theme: str | Theme) -> None:
         """Apply a built-in color scheme or a custom Theme."""
@@ -2553,14 +2578,14 @@ class Scene:
         self,
         width: int = 1280,
         height: int = 720,
-        background: Optional[Color] = None,
+        background: Optional[BackgroundLike] = None,
         margin: Optional[float] = None,
         theme: Optional[str | Theme] = None,
     ) -> None:
         """Create a scene and optionally install its centralized theme.
 
-        An explicit background wins over the theme background. Unknown theme
-        names and invalid values raise ``ValueError``.
+        An explicit color, Brush, or Background wins over the theme background.
+        Invalid WGSL and unknown theme names raise ``ValueError``.
         """
         ...
     def parameter(self, initial: float) -> Parameter: ...

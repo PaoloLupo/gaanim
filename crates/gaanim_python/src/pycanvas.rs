@@ -684,20 +684,27 @@ impl PyCanvas {
     }
 
     #[getter]
-    fn background(&self) -> Option<PyColor> {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .background
-            .map(PyColor)
+    fn background(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let Some(paint) = canvas.background_paint.clone() else {
+            return Ok(None);
+        };
+        match paint {
+            gaanim_api::canvas::BackgroundPaint::Brush(gaanim_core::peniko::Brush::Solid(
+                color,
+            )) => Ok(Some(Py::new(py, PyColor(color))?.into_any())),
+            paint => Ok(Some(
+                Py::new(py, crate::brush::PyBackground(paint))?.into_any(),
+            )),
+        }
     }
 
     #[setter]
-    fn set_background(&self, background: Option<PyColor>) {
+    fn set_background(&self, background: Option<crate::brush::PyBackgroundInput>) {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .set_background(background.map(|c| c.0));
+            .set_background_paint(background.map(|background| background.0));
     }
 
     /// Name of the selected built-in or custom visual theme, if any.
@@ -1326,7 +1333,7 @@ impl PyScene {
     fn new(
         width: u32,
         height: u32,
-        background: Option<PyColor>,
+        background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
         theme: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
@@ -1345,7 +1352,7 @@ impl PyScene {
             }
         }
         if let Some(background) = background {
-            canvas.set_background(Some(background.0));
+            canvas.set_background_paint(Some(background.0));
         }
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
@@ -3326,12 +3333,18 @@ impl PyScene {
                 "measure_text content must not be empty",
             ));
         }
-        let role = crate::pytext::parse_role(role)?
-            .unwrap_or(gaanim_text::prelude::TextRole::Body);
+        let role = crate::pytext::parse_role(role)?.unwrap_or(gaanim_text::prelude::TextRole::Body);
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .measure_text(content, Some(role), size, font, color.map(|color| color.0), wrap)
+            .measure_text(
+                content,
+                Some(role),
+                size,
+                font,
+                color.map(|color| color.0),
+                wrap,
+            )
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 

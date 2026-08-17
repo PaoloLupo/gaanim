@@ -1756,6 +1756,10 @@ impl Canvas {
             raw_bounds.max.y - m.top,
         );
         let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
+        let bg_paint = self
+            .background_paint
+            .clone()
+            .unwrap_or_else(|| gaanim_renderer::background::BackgroundPaint::solid(bg_color));
 
         for seg in &segments {
             let previous_scene = seg
@@ -1813,7 +1817,8 @@ impl Canvas {
         builder
             .commands
             .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
-                color: bg_color,
+                paint: bg_paint,
+                pixel_size: (self.width, self.height),
                 bounds: raw_bounds,
             });
 

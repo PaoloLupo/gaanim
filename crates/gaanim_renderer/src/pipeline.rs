@@ -1,3 +1,4 @@
+use crate::background::BackgroundPaint;
 use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
 use bevy::prelude::*;
 use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
@@ -14,17 +15,65 @@ use std::sync::Arc;
 // Explicit imports from bevy_vello instead of glob for clarity
 use bevy_vello::integrations::scene::VelloScene2d;
 
-/// Resource: stores the canvas background color and logical frame bounds.
+/// Resource: stores the canvas background paint and logical frame bounds.
 ///
 /// Inserted by `Canvas::compile_into` and consumed by the render systems to
 /// draw a visible canvas boundary that distinguishes the canvas area from
 /// the surrounding window background.
 #[derive(Resource, Clone, Debug)]
 pub struct CanvasBackground {
-    /// Background color of the canvas.
-    pub color: peniko::Color,
+    /// Background paint of the canvas.
+    pub paint: BackgroundPaint,
+    /// Pixel dimensions used to rasterize shader backgrounds.
+    pub pixel_size: (u32, u32),
     /// Frame bounds in world coordinates (Y-up, center-origin).
     pub bounds: gaanim_math::Bounds3D,
+}
+
+fn resolve_canvas_background_brush(
+    background: &CanvasBackground,
+    rect: kurbo::Rect,
+    pixel_size: (u32, u32),
+    time_seconds: f64,
+) -> (peniko::Brush, Option<kurbo::Affine>) {
+    match background
+        .paint
+        .resolve_brush(pixel_size.0, pixel_size.1, time_seconds)
+    {
+        Ok(brush) => {
+            let brush_transform = background.paint.is_shader().then(|| {
+                kurbo::Affine::translate((rect.x0, rect.y0))
+                    * kurbo::Affine::scale_non_uniform(
+                        rect.width() / f64::from(pixel_size.0),
+                        rect.height() / f64::from(pixel_size.1),
+                    )
+            });
+            (brush, brush_transform)
+        }
+        Err(_) => (
+            peniko::Brush::Solid(background.paint.fallback_color()),
+            None,
+        ),
+    }
+}
+
+fn interactive_background_pixel_size(
+    background: &CanvasBackground,
+    camera: Option<&gaanim_math::ResolvedCamera>,
+) -> (u32, u32) {
+    let scale = camera
+        .map(|camera| camera.viewport.scale)
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0);
+    let scaled = |dimension: u32| {
+        (f64::from(dimension) * scale)
+            .round()
+            .clamp(1.0, f64::from(u32::MAX)) as u32
+    };
+    (
+        scaled(background.pixel_size.0),
+        scaled(background.pixel_size.1),
+    )
 }
 
 /// Marker component identifying the single global Vello compositing entity.
@@ -49,32 +98,12 @@ pub struct ExtractedElement {
     clip_mask: Option<ClipMask>,
 }
 
-fn canvas_background_geometry(
-    background: &CanvasBackground,
-    camera: Option<&gaanim_math::Camera>,
-    viewport_scale: f64,
-) -> (kurbo::Rect, kurbo::Affine) {
-    let Some(camera) = camera else {
-        let b = &background.bounds;
-        return (
-            kurbo::Rect::new(b.min.x, b.min.y, b.max.x, b.max.y),
-            kurbo::Affine::IDENTITY,
-        );
-    };
-    let zoom = match camera.projection {
-        gaanim_math::Projection::Orthographic { zoom } => zoom * viewport_scale,
-        _ => 1.0,
-    }
-    .max(0.01);
-    let half_width = camera.viewport_width as f64 / (2.0 * zoom);
-    let half_height = camera.viewport_height as f64 / (2.0 * zoom);
-    // A rotated viewport exposes the corners outside its unrotated rectangle.
-    // Cover its circumscribed square so the background remains edge-to-edge.
-    let half_extent = half_width.hypot(half_height);
-    let local = kurbo::Rect::new(-half_extent, -half_extent, half_extent, half_extent);
-    let transform = kurbo::Affine::translate((camera.position.x, camera.position.y))
-        * kurbo::Affine::rotate(camera.z_angle());
-    (local, transform)
+fn canvas_background_geometry(background: &CanvasBackground) -> (kurbo::Rect, kurbo::Affine) {
+    let bounds = &background.bounds;
+    (
+        kurbo::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y),
+        kurbo::Affine::IDENTITY,
+    )
 }
 
 fn stroke_clip_path<'a>(
@@ -415,6 +444,9 @@ pub fn compile_scene_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
 ) -> vello::Scene {
+    let background_time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
     let mut extracted = Vec::new();
     let mut culled_entities = std::collections::HashSet::new();
 
@@ -755,12 +787,18 @@ pub fn compile_scene_from_world(
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-            let (rect, transform) = canvas_background_geometry(canvas_bg, camera, 1.0);
+            let (rect, transform) = canvas_background_geometry(canvas_bg);
+            let (brush, brush_transform) = resolve_canvas_background_brush(
+                canvas_bg,
+                rect,
+                canvas_bg.pixel_size,
+                background_time,
+            );
             main_scene.fill(
                 peniko::Fill::NonZero,
                 transform,
-                &canvas_bg.color,
-                None,
+                &brush,
+                brush_transform,
                 &rect,
             );
         }
@@ -829,6 +867,7 @@ pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     child_query: Query<&ChildOf>,
     query_mobjects: Query<
@@ -1242,18 +1281,18 @@ pub fn gaanim_render_system(
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(ref canvas_bg) = canvas_bg {
-            let (rect, transform) = canvas_background_geometry(
-                canvas_bg,
-                gaanim_camera.as_deref().map(|camera| &**camera),
-                gaanim_camera
-                    .as_ref()
-                    .map_or(1.0, |camera| camera.viewport.scale),
-            );
+            let (rect, transform) = canvas_background_geometry(canvas_bg);
+            let pixel_size = interactive_background_pixel_size(canvas_bg, gaanim_camera.as_deref());
+            let time_seconds = playback_state
+                .as_ref()
+                .map_or(0.0, |state| state.current_time);
+            let (brush, brush_transform) =
+                resolve_canvas_background_brush(canvas_bg, rect, pixel_size, time_seconds);
             main_scene.fill(
                 peniko::Fill::NonZero,
                 transform,
-                &canvas_bg.color,
-                None,
+                &brush,
+                brush_transform,
                 &rect,
             );
         }
@@ -1371,6 +1410,40 @@ mod tests {
     fn zero_global_opacity_is_not_extracted() {
         assert!(opacity_is_empty(&GlobalOpacity(0.0)));
         assert!(!opacity_is_empty(&GlobalOpacity(0.001)));
+    }
+
+    #[test]
+    fn shader_background_raster_size_tracks_the_interactive_viewport_scale() {
+        let background = CanvasBackground {
+            paint: BackgroundPaint::solid(peniko::Color::BLACK),
+            pixel_size: (1280, 720),
+            bounds: gaanim_math::Bounds3D::new_2d(-640.0, -360.0, 640.0, 360.0),
+        };
+        let camera = gaanim_math::ResolvedCamera::new(
+            gaanim_math::Camera::ortho_2d(1280, 720),
+            gaanim_math::CameraViewport {
+                scale: 0.5,
+                offset_y: 0.0,
+            },
+        );
+
+        assert_eq!(
+            interactive_background_pixel_size(&background, Some(&camera)),
+            (640, 360)
+        );
+    }
+
+    #[test]
+    fn canvas_background_geometry_matches_the_authored_scene_bounds() {
+        let background = CanvasBackground {
+            paint: BackgroundPaint::solid(peniko::Color::BLACK),
+            pixel_size: (960, 540),
+            bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+        };
+        let (rect, transform) = canvas_background_geometry(&background);
+
+        assert_eq!(rect, kurbo::Rect::new(-480.0, -270.0, 480.0, 270.0));
+        assert_eq!(transform, kurbo::Affine::IDENTITY);
     }
 
     fn window(width: u32, height: u32) -> Window {

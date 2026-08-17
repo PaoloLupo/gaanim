@@ -4,7 +4,58 @@ use pyo3::prelude::*;
 
 use crate::color::PyColor;
 
-/// A reusable solid or gradient paint accepted by `Drawable.fill` and `stroke`.
+/// Full scene-bounds paint, including timeline-driven custom WGSL shaders.
+#[pyclass(name = "Background", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyBackground(pub gaanim_api::canvas::BackgroundPaint);
+
+/// Accept a Background, Brush, or any value accepted by Color.
+#[derive(Clone, Debug)]
+pub struct PyBackgroundInput(pub gaanim_api::canvas::BackgroundPaint);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyBackgroundInput {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(background) = obj.cast::<PyBackground>() {
+            return Ok(Self(background.borrow().0.clone()));
+        }
+        PyPaint::extract(obj).map(|paint| Self(gaanim_api::canvas::BackgroundPaint::Brush(paint.0)))
+    }
+}
+
+#[pymethods]
+impl PyBackground {
+    #[new]
+    fn new(paint: PyPaint) -> Self {
+        Self(gaanim_api::canvas::BackgroundPaint::Brush(paint.0))
+    }
+
+    /// Build a WGSL background evaluated with exact timeline time.
+    #[staticmethod]
+    #[pyo3(signature = (source, *, fallback=None))]
+    fn shader(source: String, fallback: Option<PyColor>) -> PyResult<Self> {
+        let fallback = fallback.map_or(peniko::Color::BLACK, |color| color.0);
+        gaanim_api::canvas::ShaderBackground::new(source, fallback)
+            .map(gaanim_api::canvas::BackgroundPaint::Shader)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    #[getter]
+    fn fallback(&self) -> PyColor {
+        PyColor(self.0.fallback_color())
+    }
+
+    fn __repr__(&self) -> &'static str {
+        match &self.0 {
+            gaanim_api::canvas::BackgroundPaint::Brush(_) => "Background(...)",
+            gaanim_api::canvas::BackgroundPaint::Shader(_) => "Background.shader(...)",
+        }
+    }
+}
+
+/// A reusable solid or gradient paint accepted by drawables and scene backgrounds.
 #[pyclass(name = "Brush", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyBrush(pub Brush);

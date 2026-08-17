@@ -1,6 +1,7 @@
 pub mod ops;
 mod segment;
 pub use gaanim_animation::AxisMask;
+pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
 pub use ops::{
     AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
 };
