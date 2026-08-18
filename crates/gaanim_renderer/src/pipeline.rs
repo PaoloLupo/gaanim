@@ -93,9 +93,118 @@ pub struct GaanimRenderCache {
 pub struct ExtractedElement {
     transform: kurbo::Affine,
     opacity: f32,
+    opacity_bounds: kurbo::Rect,
+    opacity_group: Entity,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
+}
+
+fn opacity_layer_bounds(
+    world_bounds: Option<&WorldBounds>,
+    fallback: kurbo::Rect,
+    shadow: Option<&DropShadow>,
+    glow: Option<&Glow>,
+    blur: Option<&GaussianBlur>,
+) -> kurbo::Rect {
+    let mut rect = world_bounds
+        .map(|bounds| {
+            kurbo::Rect::new(
+                bounds.0.min.x,
+                bounds.0.min.y,
+                bounds.0.max.x,
+                bounds.0.max.y,
+            )
+        })
+        .filter(|rect| rect.width().is_finite() && rect.height().is_finite())
+        .unwrap_or(fallback);
+
+    let blur_padding = blur.map_or(0.0, |blur| blur.sigma.max(0.0) * 3.0);
+    let glow_padding = glow.map_or(0.0, |glow| glow.radius.max(0.0));
+    let shadow_padding = shadow.map_or(0.0, |shadow| {
+        shadow.blur_radius.max(0.0) * 3.0 + shadow.offset.abs().max_element()
+    });
+    let padding = blur_padding.max(glow_padding).max(shadow_padding) + 1.0;
+    rect = rect.inflate(padding, padding);
+    rect
+}
+
+fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
+    let opacity = elements[start].opacity.to_bits();
+    let mut end = start + 1;
+    while let Some(element) = elements.get(end) {
+        if element.clip_mask.is_some()
+            || element.opacity_group != elements[start].opacity_group
+            || !element.opacity.is_finite()
+            || element.opacity <= 0.0
+            || element.opacity >= 1.0
+            || element.opacity.to_bits() != opacity
+        {
+            break;
+        }
+        end += 1;
+    }
+    end
+}
+
+fn append_extracted_elements(
+    main_scene: &mut vello::Scene,
+    elements: &[ExtractedElement],
+    composition_bounds: kurbo::Rect,
+) {
+    let mut index = 0;
+    while let Some(elem) = elements.get(index) {
+        if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
+            index += 1;
+            continue;
+        }
+
+        if elem.clip_mask.is_none() && elem.opacity < 1.0 {
+            let end = opacity_run_end(elements, index);
+            let mut opacity_scene = vello::Scene::new();
+            for grouped in &elements[index..end] {
+                opacity_scene.append(&grouped.scene, Some(grouped.transform));
+            }
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::default(),
+                elem.opacity.clamp(0.0, 1.0),
+                kurbo::Affine::IDENTITY,
+                &composition_bounds,
+            );
+            main_scene.append(&opacity_scene, None);
+            main_scene.pop_layer();
+            index = end;
+            continue;
+        }
+
+        let mut layers_to_pop = 0;
+        if let Some(clip) = &elem.clip_mask {
+            main_scene.push_layer(
+                clip.rule,
+                peniko::BlendMode::default(),
+                1.0,
+                elem.transform,
+                &clip.path,
+            );
+            layers_to_pop += 1;
+        }
+        if elem.opacity < 1.0 {
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::default(),
+                elem.opacity.clamp(0.0, 1.0),
+                kurbo::Affine::IDENTITY,
+                &elem.opacity_bounds,
+            );
+            layers_to_pop += 1;
+        }
+        main_scene.append(&elem.scene, Some(elem.transform));
+        for _ in 0..layers_to_pop {
+            main_scene.pop_layer();
+        }
+        index += 1;
+    }
 }
 
 fn canvas_background_geometry(background: &CanvasBackground) -> (kurbo::Rect, kurbo::Affine) {
@@ -449,6 +558,17 @@ pub fn compile_scene_from_world(
         .map_or(0.0, |state| state.current_time);
     let mut extracted = Vec::new();
     let mut culled_entities = std::collections::HashSet::new();
+    let opacity_fallback = world
+        .get_resource::<CanvasBackground>()
+        .map(|background| {
+            kurbo::Rect::new(
+                background.bounds.min.x,
+                background.bounds.min.y,
+                background.bounds.max.x,
+                background.bounds.max.y,
+            )
+        })
+        .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
 
     let cam_bounds = camera.and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
@@ -756,9 +876,21 @@ pub fn compile_scene_from_world(
             }
         }
 
+        let mut opacity_group = entity;
+        while let Ok(child_of) = child_query.get(world, opacity_group) {
+            opacity_group = child_of.parent();
+        }
         extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
+            opacity_bounds: opacity_layer_bounds(
+                world_bounds_opt,
+                opacity_fallback,
+                shadow_opt,
+                glow_opt,
+                blur_opt,
+            ),
+            opacity_group,
             render_order: *render_order,
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
@@ -804,46 +936,12 @@ pub fn compile_scene_from_world(
         }
     }
 
-    for elem in extracted {
-        // Do not emit transparent retained fragments. Semantic presentations
-        // keep the contents of future segments in the World at opacity zero so
-        // exact timeline seeks remain possible. Wrapping every hidden glyph in
-        // an enormous Vello opacity layer can exhaust/overflow the compositor
-        // and make the entire frame render black.
-        if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
-            continue;
-        }
-
-        let mut layers_to_pop = 0;
-
-        if let Some(clip) = &elem.clip_mask {
-            main_scene.push_layer(
-                clip.rule,
-                peniko::BlendMode::default(),
-                1.0,
-                elem.transform,
-                &clip.path,
-            );
-            layers_to_pop += 1;
-        }
-
-        if elem.opacity < 1.0 {
-            main_scene.push_layer(
-                peniko::Fill::NonZero,
-                peniko::BlendMode::default(),
-                elem.opacity.clamp(0.0, 1.0),
-                kurbo::Affine::IDENTITY,
-                &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
-            );
-            layers_to_pop += 1;
-        }
-
-        main_scene.append(&elem.scene, Some(elem.transform));
-
-        for _ in 0..layers_to_pop {
-            main_scene.pop_layer();
-        }
-    }
+    let composition_bounds = extracted
+        .iter()
+        .fold(opacity_fallback, |bounds, elem| {
+            bounds.union(elem.opacity_bounds)
+        });
+    append_extracted_elements(&mut main_scene, &extracted, composition_bounds);
 
     main_scene
 }
@@ -926,6 +1024,17 @@ pub fn gaanim_render_system(
             None
         }
     });
+    let opacity_fallback = canvas_bg
+        .as_ref()
+        .map(|background| {
+            kurbo::Rect::new(
+                background.bounds.min.x,
+                background.bounds.min.y,
+                background.bounds.max.x,
+                background.bounds.max.y,
+            )
+        })
+        .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
 
     for (
         entity,
@@ -1233,9 +1342,21 @@ pub fn gaanim_render_system(
             Arc::new(scene)
         });
 
+        let mut opacity_group = entity;
+        while let Ok(child_of) = child_query.get(opacity_group) {
+            opacity_group = child_of.parent();
+        }
         local_extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
+            opacity_bounds: opacity_layer_bounds(
+                world_bounds_opt,
+                opacity_fallback,
+                shadow_ref.as_deref(),
+                glow_ref.as_deref(),
+                blur_ref.as_deref(),
+            ),
+            opacity_group,
             render_order: *render_order,
             scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (*c).clone()),
@@ -1298,45 +1419,17 @@ pub fn gaanim_render_system(
         }
     }
 
-    for elem in local_extracted.drain(..) {
-        // Objects from inactive segments intentionally remain spawned
-        // with zero global opacity. Skipping them is both cheaper and avoids
-        // feeding Vello thousands of transparent full-scene layers.
-        if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
-            continue;
-        }
-
-        let mut layers_to_pop = 0;
-
-        if let Some(clip) = &elem.clip_mask {
-            main_scene.push_layer(
-                clip.rule,
-                peniko::BlendMode::default(),
-                1.0,
-                elem.transform,
-                &clip.path,
-            );
-            layers_to_pop += 1;
-        }
-
-        if elem.opacity < 1.0 {
-            // Apply opacity layer with composite transform
-            main_scene.push_layer(
-                peniko::Fill::NonZero,
-                peniko::BlendMode::default(),
-                elem.opacity.clamp(0.0, 1.0),
-                kurbo::Affine::IDENTITY,
-                &kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9),
-            );
-            layers_to_pop += 1;
-        }
-
-        main_scene.append(&elem.scene, Some(elem.transform));
-
-        for _ in 0..layers_to_pop {
-            main_scene.pop_layer();
-        }
-    }
+    let composition_bounds = local_extracted
+        .iter()
+        .fold(opacity_fallback, |bounds, elem| {
+            bounds.union(elem.opacity_bounds)
+        });
+    append_extracted_elements(
+        &mut main_scene,
+        local_extracted.as_slice(),
+        composition_bounds,
+    );
+    local_extracted.clear();
 
     // Compute a sensible AABB for the VelloScene2d entity.
     // If the scene is empty, use a default viewport-sized bounds to avoid zero-size culling.
@@ -1410,6 +1503,35 @@ mod tests {
     fn zero_global_opacity_is_not_extracted() {
         assert!(opacity_is_empty(&GlobalOpacity(0.0)));
         assert!(!opacity_is_empty(&GlobalOpacity(0.001)));
+    }
+
+    #[test]
+    fn opacity_layers_use_local_finite_bounds_instead_of_a_full_scene_sentinel() {
+        let bounds = WorldBounds(gaanim_math::Bounds3D::new_2d(-12.0, -8.0, 18.0, 14.0));
+        let fallback = kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0);
+        let rect = opacity_layer_bounds(Some(&bounds), fallback, None, None, None);
+
+        assert!(rect.x0 <= -12.0 && rect.y0 <= -8.0);
+        assert!(rect.x1 >= 18.0 && rect.y1 >= 14.0);
+        assert!(rect.width() < 64.0);
+        assert!(rect.height() < 64.0);
+    }
+
+    #[test]
+    fn consecutive_glyphs_with_the_same_opacity_share_one_compositor_run() {
+        let element = |opacity| ExtractedElement {
+            transform: kurbo::Affine::IDENTITY,
+            opacity,
+            opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_group: Entity::PLACEHOLDER,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(vello::Scene::new()),
+            clip_mask: None,
+        };
+        let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
+
+        assert_eq!(opacity_run_end(&elements, 0), 3);
+        assert_eq!(opacity_run_end(&elements, 3), 4);
     }
 
     #[test]
