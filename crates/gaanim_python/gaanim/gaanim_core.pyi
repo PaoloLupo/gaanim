@@ -3309,25 +3309,209 @@ class Scene:
     def badge(
         self,
         text: str,
-        x: Optional[float] = None,
-        y: Optional[float] = None,
         *,
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        padding: tuple[float, float] = (36.0, 20.0),
-        radius: float = 16.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        padding: tuple[float, float] = (18.0, 10.0),
+        radius: Optional[float] = None,
         font_size: Optional[float] = None,
         min_width: Optional[float] = None,
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
     ) -> Drawable:
-        """Create a badge (pill) whose rectangle is sized to its label.
+        """Create an auto-sized editorial badge at the scene origin.
 
-        Returns a group of a rounded rectangle and a centered label, placed at
-        ``(x, y)`` when given. Colors default to the active theme's panel and
-        foreground.
+        ``radius=None`` produces a pill. Semantic variants inherit Theme color
+        tokens; explicit colors override them. Empty text or invalid finite
+        geometry raises ``ValueError``. Position the returned group with
+        ``.at(...)`` and animate it like any other ``Drawable``.
 
         Example:
-            tag = scene.badge("EL CENTRO · 1940 · 180°", -525, -414, color=CYAN)
+            tag = scene.badge("READY", variant="success").at(-300, 180)
             scene.play(tag.grow_from_center())
+        """
+        ...
+    def chip(
+        self,
+        text: str,
+        *,
+        dot: bool = True,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        padding: tuple[float, float] = (14.0, 8.0),
+        radius: Optional[float] = None,
+        font_size: Optional[float] = None,
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create a compact auto-sized chip with an optional semantic dot.
+
+        The result starts at the origin and is a normal animatable group.
+        Unknown variants/appearances, empty text, or invalid geometry raise
+        ``ValueError``.
+
+        Example:
+            chip = scene.chip("Live", variant="danger", appearance="solid")
+        """
+        ...
+    def card(
+        self,
+        title: str,
+        body: Optional[str] = None,
+        footer: Optional[str] = None,
+        *,
+        width: float = 420.0,
+        min_height: float = 180.0,
+        padding: tuple[float, float] = (28.0, 24.0),
+        gap: float = 14.0,
+        radius: float = 18.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create an auto-height card with title, body, and footer text slots.
+
+        Text wraps inside ``width`` using semantic Theme roles. Empty supplied
+        slots or invalid dimensions raise ``ValueError``.
+
+        Example:
+            card = scene.card("Result", "The solver converged.", "12 ms")
+        """
+        ...
+    def banner(
+        self,
+        title: str,
+        subtitle: Optional[str] = None,
+        *,
+        position: Literal["top", "bottom"] = "top",
+        width: Optional[float] = None,
+        margin: float = 32.0,
+        padding: tuple[float, float] = (28.0, 18.0),
+        gap: float = 8.0,
+        radius: float = 14.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create an auto-height banner anchored to a safe top or bottom edge.
+
+        ``width=None`` fills the safe frame minus ``margin``. Empty text,
+        invalid placement strings, and invalid dimensions raise ``ValueError``.
+
+        Example:
+            notice = scene.banner("Simulation complete", position="bottom")
+        """
+        ...
+    def lower_third(
+        self,
+        title: str,
+        subtitle: Optional[str] = None,
+        *,
+        kicker: Optional[str] = None,
+        side: Literal["left", "right"] = "left",
+        width: float = 520.0,
+        margin: float = 32.0,
+        padding: tuple[float, float] = (28.0, 20.0),
+        gap: float = 8.0,
+        radius: float = 16.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create a lower-third anchored to a safe bottom corner.
+
+        Kicker, title, and subtitle use Theme text roles. Invalid side names,
+        empty supplied slots, or invalid dimensions raise ``ValueError``.
+
+        Example:
+            speaker = scene.lower_third("Ada Lovelace", "Mathematician")
+        """
+        ...
+    def stat_card(
+        self,
+        value: str,
+        label: str,
+        *,
+        delta: Optional[str] = None,
+        width: float = 280.0,
+        min_height: float = 170.0,
+        padding: tuple[float, float] = (24.0, 20.0),
+        gap: float = 8.0,
+        radius: float = 18.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create an auto-height metric card with value, label, and delta.
+
+        The value and delta use the semantic variant tone. Empty fields or
+        invalid dimensions raise ``ValueError``.
+
+        Example:
+            metric = scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
+        """
+        ...
+    def quote_card(
+        self,
+        quote: str,
+        attribution: Optional[str] = None,
+        *,
+        width: float = 620.0,
+        padding: tuple[float, float] = (32.0, 28.0),
+        gap: float = 16.0,
+        radius: float = 18.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create a wrapped quotation card with optional attribution.
+
+        Empty supplied text or invalid dimensions raise ``ValueError``; the
+        returned group supports all normal ``Drawable`` animations.
+
+        Example:
+            quote = scene.quote_card("Simplicity is prerequisite for reliability.", "E. Dijkstra")
+        """
+        ...
+    def section_header(
+        self,
+        title: str,
+        *,
+        kicker: Optional[str] = None,
+        subtitle: Optional[str] = None,
+        width: float = 720.0,
+        align: Literal["left", "center", "right"] = "left",
+        rule: bool = False,
+        padding: tuple[float, float] = (24.0, 18.0),
+        gap: float = 10.0,
+        radius: float = 12.0,
+        variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
+        appearance: Literal["soft", "solid", "outline"] = "soft",
+        color: Optional[Color] = None,
+        background: Optional[Color] = None,
+        border: Optional[Color] = None,
+    ) -> Drawable:
+        """Create a section heading with optional kicker and subtitle.
+
+        ``align`` controls all text slots. The horizontal accent rule is hidden
+        by default and can be enabled with ``rule=True``. Unknown
+        alignment/style strings, empty supplied slots, or invalid dimensions
+        raise ``ValueError``.
+
+        Example:
+            heading = scene.section_header("Method", kicker="02", align="left")
         """
         ...
     def callout(
@@ -3345,23 +3529,6 @@ class Scene:
 
         Example:
             result = scene.callout("example", target)
-        """
-        ...
-    def caption(
-        self,
-        text: str,
-        *,
-        position: Literal["top", "bottom"] = "bottom",
-        width: float = 720.0,
-        height: float = 92.0,
-        margin: float = 32.0,
-        background: Optional[Color] = None,
-        color: Optional[Color] = None,
-    ) -> Drawable:
-        """Create a caption drawable in the scene.
-
-        Example:
-            result = scene.caption("example")
         """
         ...
     def title_card(

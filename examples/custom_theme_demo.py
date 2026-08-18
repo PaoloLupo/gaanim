@@ -56,11 +56,11 @@ chart_spec = (
 chart = scene.chart(chart_spec).scaled(0.64).at(330, -35)
 chart.layer("marks").fill(scene.canvas.color("accent"))
 
-scene.caption(
-    "Use Theme(...) to start from scratch, or derive any built-in scheme.",
-    width=920,
-    height=70,
-    margin=28,
+scene.banner(
+    "Theme(...) derives any built-in scheme.",
+    width=1080,
+    margin=20,
+    position="bottom",
 )
 scene.wait(1.0)
 

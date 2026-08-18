@@ -260,27 +260,11 @@ note = scene.callout("Moving mass", mass, offset=(180, 100))
 scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
 ```
 
-`badge(text, x=None, y=None, color=None, background=None, padding=(36, 20), radius=16, font_size=None, min_width=None)` creates a pill whose rounded
-rectangle is measured to fit its label — no guessed widths. Colors default to
-the active theme's panel and foreground, and the result is a regular group, so
-`grow_from_center` and friends work out of the box.
-
-```python
-source = scene.badge("EL CENTRO · 1940 · 180°", -525, -414, color=CYAN)
-scene.play([source.grow_from_center().duration(0.35)])
-```
-
-`caption(text, position="bottom")` adds a readable lower-third card and
-automatically respects the canvas safe area. Use `position="top"` for
-headlines or translation overlays.
-
-```python
-caption = scene.caption(
-    "The callout follows the mass without a Python callback.",
-    position="bottom",
-)
-scene.play([caption.fade_in().duration(0.3)])
-```
+The themed factories `badge`, `chip`, `card`, `banner`, `lower_third`,
+`stat_card`, `quote_card`, and `section_header` are documented together under
+#link("/api/mobjects/", [Mobjects — Composición editorial]). `banner` replaces
+the removed `caption` helper, while `badge` is positioned through the regular
+Drawable API (`scene.badge("READY").at(x, y)`).
 
 `title_card(title, subtitle=None)` returns a restrained, centered opening with
 title, optional subtitle, and an accent rule. Its elements remain a single

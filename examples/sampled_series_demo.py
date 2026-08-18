@@ -41,8 +41,8 @@ SWAY = damped_response(1.4)
 scene.segment("Novedades", notes="Rol kicker, badges y measure_text.")
 kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").at(0, 430)
 title = scene.text("Una serie medida conduce la escena", role="title").at(0, 340)
-tag_source = scene.badge("serie muestreada nativa", -330, 180, color=CYAN)
-tag_sway = scene.badge("drive_from_samples", 330, 180, color=GOLD)
+tag_source = scene.badge("serie muestreada nativa", color=CYAN).at(-330, 180)
+tag_sway = scene.badge("drive_from_samples", color=GOLD).at(330, 180)
 
 scene.play(
     Succession(kicker.fade_in(0.4), title.write(0.8))

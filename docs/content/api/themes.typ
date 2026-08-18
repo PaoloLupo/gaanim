@@ -103,8 +103,8 @@ background, warm gold titles, bright body text and cooler secondary labels.
 `paper` uses a literal white canvas with restrained dark ink. An explicit
 `.fill(...)` always takes precedence.
 
-Component defaults also follow the selected theme. Title cards, bullets,
-captions, callouts, bar charts, tables and code panels inherit compatible
+Component defaults also follow the selected theme. Editorial cards, badges,
+banners, callouts, bar charts, tables and code panels inherit compatible
 foreground, accent, panel and rule colors. Bar charts include value labels and
 reserve enough vertical space to keep them inside their bounds.
 
@@ -262,7 +262,9 @@ print_theme = Theme(
 ```
 
 Built-in color roles are `background`, `foreground`, `muted`, `title`, `accent`,
-`chart`, `panel`, `header`, and `rule`. Font roles are `text`, `all`, `title`,
+`chart`, `panel`, `header`, `rule`, `success`, `warning`, and `danger`. The last
+three drive editorial variants and can be overridden through `Theme(colors=...)`.
+Font roles are `text`, `all`, `title`,
 `subtitle`, `heading`, `body`, `caption`, `label`, `math`, and `code`. The
 `colors` dictionary may also define arbitrary non-empty tokens for selector
 rules.

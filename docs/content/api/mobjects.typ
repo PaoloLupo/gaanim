@@ -989,21 +989,107 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
-  name: "Scene.caption",
+  name: "Scene.badge",
   kind: "factory",
-  signature: "caption(text, *, position=\"bottom\", width, height, margin) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Caption text.]), (name: "position", type: "str", default: "\"bottom\"", desc: ["bottom|top"]),),
-  returns: (type: "Drawable", desc: [Lower-third card respecting safe area.]),
-  desc: [Readable overlay for narration.],
+  signature: "badge(text, *, variant=\"neutral\", appearance=\"soft\", padding=(18,10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "variant", type: "str", default: "\"neutral\"", desc: [neutral, accent, success, warning, or danger.]), (name: "appearance", type: "str", default: "\"soft\"", desc: [soft, solid, or outline.])),
+  returns: (type: "Drawable", desc: [Auto-sized pill group at the origin.]),
+  desc: [`radius=None` derives a pill radius from measured height. Invalid text or finite geometry raises `ValueError`; position with `.at(...)`.],
 )[
 ```python
-# show-code: true
-from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
-dot = scene.dot(10).fill(GOLD).at(0, 30)
-cap = scene.caption("The caption respects the safe area.", position="bottom")
-scene.play([dot.fade_in().duration(0.4), cap.fade_in().duration(0.4)])
-scene.export("preview.webp", fps=30)
+tag = scene.badge("READY", variant="success", appearance="solid").at(-240, 120)
+scene.play([tag.grow_from_center()])
+```
+]
+
+#api-entry(
+  name: "Scene.chip",
+  kind: "factory",
+  signature: "chip(text, *, dot=True, variant=\"neutral\", appearance=\"soft\", padding=(14,8), radius=None, font_size=None, color=None, background=None, border=None) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "dot", type: "bool", default: "True", desc: [Show the semantic tone dot.])),
+  returns: (type: "Drawable", desc: [Compact auto-sized group.]),
+  desc: [A smaller badge for filters, states, and metadata. Theme and validation behavior matches `badge`.],
+)[
+```python
+live = scene.chip("Live", variant="danger", appearance="outline")
+```
+]
+
+#api-entry(
+  name: "Scene.card",
+  kind: "factory",
+  signature: "card(title, body=None, footer=None, *, width=420, min_height=180, padding=(28,24), gap=14, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "title", type: "str", default: none, desc: [Heading slot.]), (name: "body", type: "str | None", default: "None", desc: [Wrapped body slot.]), (name: "footer", type: "str | None", default: "None", desc: [Caption slot.])),
+  returns: (type: "Drawable", desc: [Auto-height panel group.]),
+  desc: [Semantic text roles are measured at construction. Empty supplied slots or invalid dimensions raise `ValueError`.],
+)[
+```python
+result = scene.card("Result", "The solver converged.", "12 ms", variant="accent")
+```
+]
+
+#api-entry(
+  name: "Scene.banner",
+  kind: "factory",
+  signature: "banner(title, subtitle=None, *, position=\"top\", width=None, margin=32, padding=(28,18), gap=8, radius=14, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "title", type: "str", default: none, desc: [Heading slot.]), (name: "position", type: "str", default: "\"top\"", desc: [top or bottom.]), (name: "width", type: "float | None", default: "None", desc: [None fills the safe width minus margin.])),
+  returns: (type: "Drawable", desc: [Safe-edge anchored group.]),
+  desc: [Replacement for the removed `caption` helper. Height follows measured title and subtitle content.],
+)[
+```python
+notice = scene.banner("Simulation complete", position="bottom", variant="success")
+```
+]
+
+#api-entry(
+  name: "Scene.lower_third",
+  kind: "factory",
+  signature: "lower_third(title, subtitle=None, *, kicker=None, side=\"left\", width=520, margin=32, padding=(28,20), gap=8, radius=16, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "title", type: "str", default: none, desc: [Primary label.]), (name: "subtitle", type: "str | None", default: "None", desc: [Secondary label.]), (name: "side", type: "str", default: "\"left\"", desc: [left or right safe corner.])),
+  returns: (type: "Drawable", desc: [Safe-corner anchored group.]),
+  desc: [Kicker, title, and subtitle use Theme roles and wrap within the authored width.],
+)[
+```python
+speaker = scene.lower_third("Ada Lovelace", "Mathematician", kicker="SPEAKER")
+```
+]
+
+#api-entry(
+  name: "Scene.stat_card",
+  kind: "factory",
+  signature: "stat_card(value, label, *, delta=None, width=280, min_height=170, padding=(24,20), gap=8, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "value", type: "str", default: none, desc: [Formatted primary value.]), (name: "label", type: "str", default: none, desc: [Metric label.]), (name: "delta", type: "str | None", default: "None", desc: [Optional comparison text.])),
+  returns: (type: "Drawable", desc: [Auto-height metric panel.]),
+  desc: [Value and delta use the semantic tone; no numeric sign or formatting is inferred.],
+)[
+```python
+metric = scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
+```
+]
+
+#api-entry(
+  name: "Scene.quote_card",
+  kind: "factory",
+  signature: "quote_card(quote, attribution=None, *, width=620, padding=(32,28), gap=16, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "quote", type: "str", default: none, desc: [Wrapped quotation.]), (name: "attribution", type: "str | None", default: "None", desc: [Optional right-aligned credit.])),
+  returns: (type: "Drawable", desc: [Auto-height quotation panel.]),
+  desc: [Adds typographic quotation marks and a semantic attribution treatment.],
+)[
+```python
+quote = scene.quote_card("Clarity matters.", "Gaanim", appearance="outline")
+```
+]
+
+#api-entry(
+  name: "Scene.section_header",
+  kind: "factory",
+  signature: "section_header(title, *, kicker=None, subtitle=None, width=720, align=\"left\", rule=False, padding=(24,18), gap=10, radius=12, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  params: ((name: "title", type: "str", default: none, desc: [Section heading.]), (name: "align", type: "str", default: "\"left\"", desc: [left, center, or right.]), (name: "rule", type: "bool", default: "False", desc: [Opt in to the horizontal semantic accent rule.])),
+  returns: (type: "Drawable", desc: [Measured section heading group.]),
+  desc: [Kicker, title, and subtitle share alignment and Theme roles.],
+)[
+```python
+heading = scene.section_header("Method", kicker="02", align="center")
 ```
 ]
 

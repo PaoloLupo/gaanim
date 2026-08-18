@@ -494,6 +494,15 @@ impl CanvasTheme {
         self.colors.insert("header".into(), self.palette.header);
         self.colors.insert("rule".into(), self.palette.rule);
         self.colors.insert("border".into(), self.palette.rule);
+        self.colors
+            .entry("success".into())
+            .or_insert_with(|| Color::from_rgb8(0x22, 0xC5, 0x5E));
+        self.colors
+            .entry("warning".into())
+            .or_insert_with(|| Color::from_rgb8(0xF5, 0x9E, 0x0B));
+        self.colors
+            .entry("danger".into())
+            .or_insert_with(|| Color::from_rgb8(0xEF, 0x44, 0x44));
     }
 
     pub fn sync_text_colors(&mut self) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import inspect
 from pathlib import Path
 import sys
 
@@ -24,6 +25,16 @@ TEXT_API_CLASSES = {
     "TextSelection",
     "TextQuery",
     "Text",
+}
+EDITORIAL_SCENE_MEMBERS = {
+    "badge",
+    "chip",
+    "card",
+    "banner",
+    "lower_third",
+    "stat_card",
+    "quote_card",
+    "section_header",
 }
 REMOVED_TEXT_SCENE_MEMBERS = {
     "title",
@@ -111,6 +122,87 @@ def documented_text_api_failures(tree: ast.Module) -> list[str]:
                 failures.append(f"{name} is missing a docstring")
             elif "Example:" not in doc:
                 failures.append(f"{name} is missing an Example: block")
+    return failures
+
+
+def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
+    """Require user-facing stub docs and examples for every editorial factory."""
+    failures: list[str] = []
+    scene = next(
+        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Scene"),
+        None,
+    )
+    if scene is None:
+        return ["Scene is missing from the Python stub"]
+    methods = {
+        child.name: child
+        for child in scene.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for name in EDITORIAL_SCENE_MEMBERS:
+        method = methods.get(name)
+        if method is None:
+            failures.append(f"Scene.{name} is missing from the stub")
+            continue
+        doc = ast.get_docstring(method, clean=False)
+        if not doc:
+            failures.append(f"Scene.{name} is missing a docstring")
+        elif "Example:" not in doc:
+            failures.append(f"Scene.{name} is missing an Example: block")
+    return failures
+
+
+def validate_editorial_contract(module: object) -> list[str]:
+    """Exercise the editorial kit without starting the renderer."""
+    failures: list[str] = []
+    scene = module.Scene(1280, 720, margin=48)
+    signature = inspect.signature(module.Scene.section_header)
+    if signature.parameters["rule"].default is not False:
+        failures.append("Scene.section_header must hide its rule by default")
+    components = (
+        scene.badge("Ready", variant="success"),
+        scene.chip("Live", variant="danger", appearance="solid"),
+        scene.card("Result", "The solver converged.", "12 ms"),
+        scene.banner("Simulation complete", position="bottom"),
+        scene.lower_third("Ada Lovelace", "Mathematician", kicker="Speaker"),
+        scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success"),
+        scene.quote_card("Clarity matters.", "Gaanim"),
+        scene.section_header("Method", kicker="02", align="center"),
+    )
+    if not all(isinstance(component, module.Drawable) for component in components):
+        failures.append("one or more editorial factories did not return Drawable")
+    animations = [component.fade_in(duration=0.1) for component in components]
+    if not all(isinstance(animation, module.Anim) for animation in animations):
+        failures.append("one or more editorial groups did not preserve Drawable animations")
+    else:
+        scene.play(animations)
+
+    invalid_calls = (
+        lambda: scene.badge(""),
+        lambda: scene.badge("x", variant="unknown"),
+        lambda: scene.chip("x", appearance="glass"),
+        lambda: scene.card("x", width=20.0, padding=(12.0, 4.0)),
+        lambda: scene.banner("x", position="center"),
+        lambda: scene.lower_third("x", side="center"),
+        lambda: scene.stat_card("", "label"),
+        lambda: scene.quote_card("x", width=float("nan")),
+        lambda: scene.section_header("x", align="justify"),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("an editorial factory accepted invalid authored input")
+    if hasattr(module.Scene, "caption"):
+        failures.append("removed Scene.caption remains public")
+    try:
+        scene.badge("legacy", 0.0, 0.0)
+    except TypeError:
+        pass
+    else:
+        failures.append("Scene.badge still accepts legacy positional coordinates")
     return failures
 
 
@@ -597,7 +689,9 @@ def main() -> int:
     missing.extend(validate_layout_detach_contract(module))
     missing.extend(validate_reactive_connector_contract(module))
     missing.extend(validate_camera_rig_contract(module))
+    missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))
+    missing.extend(documented_editorial_api_failures(tree))
 
     if missing:
         print("Stub declarations missing from gaanim.gaanim_core:", file=sys.stderr)

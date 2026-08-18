@@ -22,6 +22,12 @@ pub use drawable::{
     DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
+mod editorial;
+pub use editorial::{
+    BadgeSpec, BannerPosition, BannerSpec, CardSpec, ChipSpec, EditorialAlign, EditorialAppearance,
+    EditorialError, EditorialStyle, EditorialVariant, LowerThirdSide, LowerThirdSpec,
+    QuoteCardSpec, SectionHeaderSpec, StatCardSpec,
+};
 mod visualization;
 pub use visualization::{
     ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle,

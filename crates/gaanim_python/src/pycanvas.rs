@@ -8,10 +8,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
-    AngleDimensionOptions, Axes3DConfig, AxesConfig, CameraConstraintHandle, Canvas as ApiCanvas,
-    CanvasEndpoint, CanvasRay, CanvasTheme, CurveControl, CurveElement, DimensionExtensionStyle,
-    DimensionOptions, ImageCrop, ImageFit, ImageOptions, LabelMode, PresentationBrand,
-    SegmentHandle, ThemeFont,
+    AngleDimensionOptions, Axes3DConfig, AxesConfig, BadgeSpec, BannerPosition, BannerSpec,
+    CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay, CanvasTheme, CardSpec,
+    ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle, DimensionOptions,
+    EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant, ImageCrop, ImageFit,
+    ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PresentationBrand, QuoteCardSpec,
+    SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -465,6 +467,48 @@ fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
             rule: Color::from_rgb8(0x5B, 0x70, 0x88),
         }
     }
+}
+
+fn editorial_style(
+    variant: &str,
+    appearance: &str,
+    color: Option<PyColor>,
+    background: Option<PyColor>,
+    border: Option<PyColor>,
+) -> PyResult<EditorialStyle> {
+    let variant = match variant.to_ascii_lowercase().as_str() {
+        "neutral" => EditorialVariant::Neutral,
+        "accent" => EditorialVariant::Accent,
+        "success" => EditorialVariant::Success,
+        "warning" => EditorialVariant::Warning,
+        "danger" => EditorialVariant::Danger,
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "variant must be 'neutral', 'accent', 'success', 'warning', or 'danger'",
+            ));
+        }
+    };
+    let appearance = match appearance.to_ascii_lowercase().as_str() {
+        "soft" => EditorialAppearance::Soft,
+        "solid" => EditorialAppearance::Solid,
+        "outline" => EditorialAppearance::Outline,
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "appearance must be 'soft', 'solid', or 'outline'",
+            ));
+        }
+    };
+    Ok(EditorialStyle {
+        variant,
+        appearance,
+        color: color.map(|color| color.0),
+        background: background.map(|color| color.0),
+        border: border.map(|color| color.0),
+    })
+}
+
+fn editorial_error(error: gaanim_api::canvas::EditorialError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(error.to_string())
 }
 
 /// Reusable colors, typography, and embedded font files for a scene.
@@ -3367,79 +3411,304 @@ impl PyScene {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
-    /// Create a badge (pill) whose rounded rectangle is sized to its label,
-    /// centered at ``(x, y)`` when given.
-    ///
-    /// ```python
-    /// badge = scene.badge("EL CENTRO · 1940", x=-525, y=-414, color=CYAN)
-    /// scene.play(badge.grow_from_center())
-    /// ```
-    #[pyo3(signature = (text, x=None, y=None, *, color=None, background=None, padding=(36.0, 20.0), radius=16.0, font_size=None, min_width=None))]
+    /// Create an auto-sized editorial badge.
+    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(18.0, 10.0), radius=None, font_size=None, min_width=None, color=None, background=None, border=None))]
     #[pyo3(name = "badge")]
+    #[allow(clippy::too_many_arguments)]
     fn badge_py(
         &self,
         text: String,
-        x: Option<f64>,
-        y: Option<f64>,
-        color: Option<PyColor>,
-        background: Option<PyColor>,
+        variant: &str,
+        appearance: &str,
         padding: (f64, f64),
-        radius: f64,
+        radius: Option<f64>,
         font_size: Option<f64>,
         min_width: Option<f64>,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
-        if text.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "badge text must not be empty",
-            ));
-        }
-        if !(padding.0.is_finite()
-            && padding.1.is_finite()
-            && padding.0 >= 0.0
-            && padding.1 >= 0.0
-            && radius.is_finite()
-            && radius >= 0.0)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "badge padding must be non-negative finite values and radius non-negative",
-            ));
-        }
-
-        let palette = {
-            let scene = self.inner.lock().expect("scene canvas poisoned");
-            component_palette(&scene)
-        };
-        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
-        let background = background.map(|color| color.0).unwrap_or(palette.panel);
-
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = BadgeSpec::new(text).style(style);
+        spec.padding = padding;
+        spec.radius = radius;
+        spec.font_size = font_size;
+        spec.min_width = min_width;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let (label_width, label_height) = scene
-            .measure_text(
-                &text,
-                Some(gaanim_text::prelude::TextRole::Label),
-                font_size,
-                None,
-                Some(color),
-                None,
-            )
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
-        let width = (label_width + padding.0 * 2.0).max(min_width.unwrap_or(0.0));
-        let height = label_height + padding.1 * 2.0;
+        scene.badge(spec).map(PyDrawable).map_err(editorial_error)
+    }
 
-        let mut group_members: Vec<gaanim_api::canvas::DrawableHandle> = Vec::with_capacity(2);
-        let card = scene
-            .rounded_rect(width, height, radius)
-            .fill(background)
-            .stroke(color, 2.0);
-        let label = scene.text(&text).fill(color);
-        let (card, label) = match (x, y) {
-            (Some(x), Some(y)) => (card.at(x, y), label.at(x, y)),
-            _ => (card, label),
+    /// Create a compact chip with an optional semantic dot.
+    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(14.0, 8.0), radius=None, font_size=None, color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn chip(
+        &self,
+        text: String,
+        dot: bool,
+        variant: &str,
+        appearance: &str,
+        padding: (f64, f64),
+        radius: Option<f64>,
+        font_size: Option<f64>,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = ChipSpec::new(text).style(style);
+        spec.dot = dot;
+        spec.padding = padding;
+        spec.radius = radius;
+        spec.font_size = font_size;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .chip(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create an auto-height card with title, body, and footer slots.
+    #[pyo3(signature = (title, body=None, footer=None, *, width=420.0, min_height=180.0, padding=(28.0, 24.0), gap=14.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn card(
+        &self,
+        title: String,
+        body: Option<String>,
+        footer: Option<String>,
+        width: f64,
+        min_height: f64,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = CardSpec::new(title).style(style);
+        spec.body = body;
+        spec.footer = footer;
+        spec.width = width;
+        spec.min_height = min_height;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .card(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create a safe-area-aware banner at the top or bottom edge.
+    #[pyo3(signature = (title, subtitle=None, *, position="top", width=None, margin=32.0, padding=(28.0, 18.0), gap=8.0, radius=14.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn banner(
+        &self,
+        title: String,
+        subtitle: Option<String>,
+        position: &str,
+        width: Option<f64>,
+        margin: f64,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let position = match position.to_ascii_lowercase().as_str() {
+            "top" => BannerPosition::Top,
+            "bottom" => BannerPosition::Bottom,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "position must be 'top' or 'bottom'",
+                ));
+            }
         };
-        group_members.push(card);
-        group_members.push(label);
-        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = group_members.iter().collect();
-        Ok(PyDrawable(scene.group(&refs)))
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = BannerSpec::new(title).style(style);
+        spec.subtitle = subtitle;
+        spec.position = position;
+        spec.width = width;
+        spec.margin = margin;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .banner(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create a lower-third card in a safe bottom corner.
+    #[pyo3(signature = (title, subtitle=None, *, kicker=None, side="left", width=520.0, margin=32.0, padding=(28.0, 20.0), gap=8.0, radius=16.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn lower_third(
+        &self,
+        title: String,
+        subtitle: Option<String>,
+        kicker: Option<String>,
+        side: &str,
+        width: f64,
+        margin: f64,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let side = match side.to_ascii_lowercase().as_str() {
+            "left" => LowerThirdSide::Left,
+            "right" => LowerThirdSide::Right,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "side must be 'left' or 'right'",
+                ));
+            }
+        };
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = LowerThirdSpec::new(title).style(style);
+        spec.subtitle = subtitle;
+        spec.kicker = kicker;
+        spec.side = side;
+        spec.width = width;
+        spec.margin = margin;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .lower_third(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create a metric card with value, label, and optional delta.
+    #[pyo3(signature = (value, label, *, delta=None, width=280.0, min_height=170.0, padding=(24.0, 20.0), gap=8.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn stat_card(
+        &self,
+        value: String,
+        label: String,
+        delta: Option<String>,
+        width: f64,
+        min_height: f64,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = StatCardSpec::new(value, label).style(style);
+        spec.delta = delta;
+        spec.width = width;
+        spec.min_height = min_height;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .stat_card(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create a wrapped quotation card with optional attribution.
+    #[pyo3(signature = (quote, attribution=None, *, width=620.0, padding=(32.0, 28.0), gap=16.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn quote_card(
+        &self,
+        quote: String,
+        attribution: Option<String>,
+        width: f64,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = QuoteCardSpec::new(quote).style(style);
+        spec.attribution = attribution;
+        spec.width = width;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .quote_card(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
+    }
+
+    /// Create a section heading with optional kicker, subtitle, and opt-in rule.
+    #[pyo3(signature = (title, *, kicker=None, subtitle=None, width=720.0, align="left", rule=false, padding=(24.0, 18.0), gap=10.0, radius=12.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn section_header(
+        &self,
+        title: String,
+        kicker: Option<String>,
+        subtitle: Option<String>,
+        width: f64,
+        align: &str,
+        rule: bool,
+        padding: (f64, f64),
+        gap: f64,
+        radius: f64,
+        variant: &str,
+        appearance: &str,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        border: Option<PyColor>,
+    ) -> PyResult<PyDrawable> {
+        let align = match align.to_ascii_lowercase().as_str() {
+            "left" => EditorialAlign::Left,
+            "center" => EditorialAlign::Center,
+            "right" => EditorialAlign::Right,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "align must be 'left', 'center', or 'right'",
+                ));
+            }
+        };
+        let style = editorial_style(variant, appearance, color, background, border)?;
+        let mut spec = SectionHeaderSpec::new(title).style(style);
+        spec.kicker = kicker;
+        spec.subtitle = subtitle;
+        spec.width = width;
+        spec.align = align;
+        spec.rule = rule;
+        spec.padding = padding;
+        spec.gap = gap;
+        spec.radius = radius;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .section_header(spec)
+            .map(PyDrawable)
+            .map_err(editorial_error)
     }
 
     /// Create a labeled card with a native connector that follows `target`.
@@ -3503,80 +3772,6 @@ impl PyScene {
             .stroke(color, 2.0)
             .z_index(-1);
         Ok(PyDrawable(scene.group(&[&connector, &card, &label])))
-    }
-
-    /// Create a caption card positioned at the top or bottom safe edge.
-    #[pyo3(signature = (
-        text,
-        *,
-        position="bottom",
-        width=720.0,
-        height=92.0,
-        margin=32.0,
-        background=None,
-        color=None,
-    ))]
-    fn caption(
-        &self,
-        text: String,
-        position: &str,
-        width: f64,
-        height: f64,
-        margin: f64,
-        background: Option<PyColor>,
-        color: Option<PyColor>,
-    ) -> PyResult<PyDrawable> {
-        if text.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "caption text must not be empty",
-            ));
-        }
-        if !width.is_finite()
-            || !height.is_finite()
-            || !margin.is_finite()
-            || width <= 0.0
-            || height <= 0.0
-            || margin < 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "width and height must be finite positive numbers and margin must be non-negative",
-            ));
-        }
-        let direction = match position.to_ascii_lowercase().as_str() {
-            "bottom" => gaanim_api::canvas::Direction::Down,
-            "top" => gaanim_api::canvas::Direction::Up,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "position must be 'top' or 'bottom'",
-                ));
-            }
-        };
-        let palette = {
-            let scene = self.inner.lock().expect("scene canvas poisoned");
-            component_palette(&scene)
-        };
-        let background = background.map(|color| color.0).unwrap_or(palette.panel);
-        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
-        let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let card = scene
-            .rounded_rect(width, height, 14.0)
-            .fill(background)
-            .no_stroke();
-        let label_spec = gaanim_text::prelude::TextSpec::new(
-            vec![text.into()],
-            Some(gaanim_text::prelude::TextRole::Caption),
-            gaanim_text::prelude::TextStyle::default(),
-            gaanim_text::prelude::TextFlow {
-                wrap: gaanim_text::prelude::TextWrap::Width(width - 48.0),
-                align: gaanim_text::prelude::TextAlign::Center,
-                max_lines: Some(2),
-                ..Default::default()
-            },
-        )
-        .expect("caption card text is validated by its public arguments");
-        let label = scene.text_spec(label_spec).fill(color);
-        let caption = scene.group(&[&card, &label]).to_edge(direction, margin);
-        Ok(PyDrawable(caption))
     }
 
     /// Create a centered title card with an optional subtitle and accent rule.
