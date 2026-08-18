@@ -426,7 +426,7 @@ scene.link(intro, details, Transition.cross_fade(0.4))
   signature: "stop(name=None) -> None",
   params: ((name: "name", type: "str | None", default: "None", desc: [Optional Presenter View label.]),),
   returns: (type: "None", desc: [Adds no duration and creates no visual change.]),
-  desc: [Pauses real-time playback when the playhead reaches this exact position. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
+  desc: [Pauses real-time playback when the playhead reaches this exact position. At a segment boundary, the completed outgoing segment remains visible until playback advances, so no trailing `wait()` is required. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
 )[
 ```python
 scene.play([result.write().duration(0.6)])

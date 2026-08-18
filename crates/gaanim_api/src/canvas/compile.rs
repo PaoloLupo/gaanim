@@ -7611,6 +7611,56 @@ mod tests {
     }
 
     #[test]
+    fn terminal_stop_holds_the_completed_segment_at_a_shared_boundary() {
+        let red = PenikoColor::from_rgb8(255, 0, 0);
+        let blue = PenikoColor::from_rgb8(0, 0, 255);
+        let mut canvas = Canvas::new(640, 360);
+        canvas.segment("first", None).unwrap();
+        canvas.text("First segment").fill(red);
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("second", None).unwrap();
+        canvas.text("Second segment").fill(blue);
+        canvas.wait(1.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let visible_for = |world: &mut World, color| {
+            world
+                .query::<(&FillBrush, Option<&gaanim_scene::Visible>)>()
+                .iter(world)
+                .find_map(|(fill, visible)| {
+                    matches!(&fill.0, Some(Brush::Solid(found)) if *found == color)
+                        .then_some(visible.is_some())
+                })
+                .expect("colored segment object should exist")
+        };
+
+        timeline.seek(&mut world, 1.0);
+        assert!(visible_for(&mut world, red));
+        assert!(!visible_for(&mut world, blue));
+        assert_eq!(
+            timeline.segment_label().as_deref(),
+            Some("1 / 2 · first · stop 1")
+        );
+
+        timeline.seek(&mut world, 1.000_001);
+        assert!(!visible_for(&mut world, red));
+        assert!(visible_for(&mut world, blue));
+    }
+
+    #[test]
     fn justified_paragraph_compiles_to_vector_glyphs() {
         let mut canvas = Canvas::new(640, 360);
         canvas.configured_text(

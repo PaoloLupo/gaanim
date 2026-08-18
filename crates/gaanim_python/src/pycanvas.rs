@@ -4088,6 +4088,8 @@ impl PyScene {
     }
 
     /// Insert an explicit zero-duration interactive stop.
+    ///
+    /// A terminal stop holds the completed segment until playback advances.
     #[pyo3(signature = (name=None))]
     fn stop(&self, name: Option<String>) -> PyResult<()> {
         self.inner

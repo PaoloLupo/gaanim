@@ -2188,6 +2188,9 @@ impl Canvas {
     }
 
     /// Insert a named or anonymous interactive stop in the active segment.
+    ///
+    /// A stop at the segment's end keeps that completed segment active at the
+    /// shared boundary until playback advances into the next segment.
     pub fn stop(&mut self, name: Option<String>) -> Result<(), SegmentError> {
         let name = match name {
             Some(name) => {

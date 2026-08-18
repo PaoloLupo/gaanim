@@ -3513,6 +3513,8 @@ class Scene:
     def stop(self, name: Optional[str] = None) -> None:
         """Pause interactive playback at the current timeline position.
 
+        At a segment boundary, the completed outgoing segment remains visible
+        until playback advances; no trailing ``wait`` is required.
         Export ignores stops and renders the timeline continuously.
         """
         ...

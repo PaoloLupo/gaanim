@@ -214,8 +214,10 @@ impl Timeline {
     /// Find the semantic segment and most recent stop at `time`.
     pub fn segment_position_at(&self, time: f64) -> Option<SegmentPosition> {
         const EPSILON: f64 = 1e-5;
-        let segment = self.segments.iter().rev().find(|segment| {
-            segment.start_time <= time + EPSILON && time <= segment.end_time + EPSILON
+        let segment = self.terminal_stop_segment_at(time).or_else(|| {
+            self.segments.iter().rev().find(|segment| {
+                segment.start_time <= time + EPSILON && time <= segment.end_time + EPSILON
+            })
         })?;
         let stop_index = segment
             .stops
@@ -359,6 +361,17 @@ impl Timeline {
         stops
     }
 
+    fn terminal_stop_segment_at(&self, time: f64) -> Option<&SegmentMetadata> {
+        const EPSILON: f64 = 1e-9;
+        self.segments.iter().find(|segment| {
+            (segment.end_time - time).abs() <= EPSILON
+                && segment
+                    .stops
+                    .iter()
+                    .any(|stop| (stop.time - time).abs() <= EPSILON)
+        })
+    }
+
     /// Adds a new track to the timeline.
     pub fn add_track(&mut self, name: impl Into<String>, order: i32) -> TrackId {
         self.tracks.insert_with_key(|id| Track {
@@ -385,8 +398,15 @@ impl Timeline {
     /// Returns the scene active at the given timestamp, if any.
     ///
     /// Uses the `scene_index` BTreeMap (populated by `begin_scene`) for O(log n)
-    /// lookup. Returns the scene whose start time is latest but ≤ `time`.
+    /// lookup. A terminal presentation stop keeps its owning scene active at a
+    /// shared boundary; otherwise this returns the scene whose start time is
+    /// latest but ≤ `time`.
     pub fn scene_at(&self, time: f64) -> Option<SceneId> {
+        if let Some(segment) = self.terminal_stop_segment_at(time)
+            && let Some(&scene_id) = self.scene_index.get(&OrderedFloat(segment.start_time))
+        {
+            return Some(scene_id);
+        }
         let time_key = OrderedFloat(time);
         self.scene_index
             .range(..=time_key)
