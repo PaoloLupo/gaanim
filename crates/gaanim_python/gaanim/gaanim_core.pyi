@@ -2723,8 +2723,12 @@ class Scene:
             scene.preload(["assets/example.svg"])
         """
         ...
-    def load_project(self, path: str = "gaanim.toml") -> None:
-        """Use load project on this Scene or create the requested value.
+    def load_project(self, path: str | None = None) -> None:
+        """Load a project manifest and set its asset directory.
+
+        With no path, reads ``gaanim.toml`` beside the calling Python script.
+        An explicit path is used as provided; assets are resolved relative to
+        the selected manifest. Raises RuntimeError if it cannot be read.
 
         Example:
             scene.load_project()

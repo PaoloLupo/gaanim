@@ -31,6 +31,19 @@ use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
 use crate::visualization::{extract_expr, PyParameter, PyVariable};
 
+fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
+    let frame = py.import("inspect")?.call_method0("currentframe")?;
+    let filename = frame
+        .getattr("f_code")?
+        .getattr("co_filename")?
+        .extract::<String>()?;
+    let script = PathBuf::from(filename);
+    Ok(script
+        .parent()
+        .map(|directory| directory.join("gaanim.toml"))
+        .unwrap_or_else(|| PathBuf::from("gaanim.toml")))
+}
+
 #[pyclass(name = "PointRef", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyPointRef(pub gaanim_api::canvas::PointRef);
@@ -1666,14 +1679,20 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// Load the minimal project manifest. It currently accepts one setting:
-    /// `assets_dir = "assets"`, resolved relative to the manifest file.
-    #[pyo3(signature = (path="gaanim.toml"))]
-    fn load_project(&self, path: &str) -> PyResult<()> {
-        let manifest = std::path::PathBuf::from(path);
+    /// Load the minimal project manifest. Without an explicit path, it reads
+    /// `gaanim.toml` beside the Python script that called this method. It
+    /// currently accepts one setting: `assets_dir = "assets"`, resolved
+    /// relative to the manifest file.
+    #[pyo3(signature = (path=None))]
+    fn load_project(&self, py: Python<'_>, path: Option<&str>) -> PyResult<()> {
+        let manifest = match path {
+            Some(path) => PathBuf::from(path),
+            None => default_project_manifest(py)?,
+        };
         let source = std::fs::read_to_string(&manifest).map_err(|error| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
-                "could not read project manifest {path:?}: {error}"
+                "could not read project manifest {}: {error}",
+                manifest.display()
             ))
         })?;
         let assets_dir = source
@@ -5249,5 +5268,41 @@ fn resolve_ray(obj: &Bound<'_, PyAny>) -> PyResult<CanvasRay> {
         Ok(CanvasRay::Direction(vector))
     } else {
         resolve_endpoint(obj).map(CanvasRay::Endpoint)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[pyfunction]
+    fn caller_default_manifest(py: Python<'_>) -> PyResult<String> {
+        Ok(default_project_manifest(py)?.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn default_manifest_is_next_to_the_calling_script() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "manifest_path_test")?;
+            module.add_function(pyo3::wrap_pyfunction!(caller_default_manifest, &module)?)?;
+            py.import("sys")?
+                .getattr("modules")?
+                .set_item("manifest_path_test", &module)?;
+
+            let source = std::ffi::CString::new(
+                "from manifest_path_test import caller_default_manifest\nresult = caller_default_manifest()\n",
+            )?;
+            let filename = std::ffi::CString::new("project/main.py")?;
+            let module_name = std::ffi::CString::new("project_main")?;
+            let script = PyModule::from_code(py, &source, &filename, &module_name)?;
+
+            assert_eq!(
+                script.getattr("result")?.extract::<String>()?,
+                PathBuf::from("project").join("gaanim.toml").to_string_lossy()
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 }

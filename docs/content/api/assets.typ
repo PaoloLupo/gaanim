@@ -50,13 +50,14 @@ Then load it before creating drawables:
 
 ```python
 scene = Scene()
-scene.load_project()  # reads ./gaanim.toml
+scene.load_project()  # reads gaanim.toml beside this Python script
 ```
 
 The CLI accepts either the entry script or its project directory (`gaanim my-deck`,
 `gaanim check my-deck`). The asset directory is resolved relative to the manifest,
-not the process working directory. `load_project("path/to/gaanim.toml")` accepts
-an explicit manifest path.
+not the process working directory. With no argument, `load_project()` finds the
+manifest next to the calling script even when Gaanim was started elsewhere.
+`load_project("path/to/gaanim.toml")` accepts an explicit manifest path.
 
 == Precarga
 
