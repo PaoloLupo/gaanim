@@ -240,18 +240,23 @@ scene.export("preview.webp", fps=30)
 
 #api-entry(
   name: "Scene.line",
-  kind: "factory",
-  signature: "line(x1, y1, x2, y2) -> Drawable",
-  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]),),
-  returns: (type: "Drawable", desc: [Line segment.]),
-  desc: [Axes, dividers, connectors.],
+  kind: "reactive factory",
+  signature: "line(p1: Endpoint, p2: Endpoint) -> Drawable",
+  params: ((name: "p1", type: "Endpoint", default: none, desc: [Fixed tuple, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "p2", type: "Endpoint", default: none, desc: [Second fixed or same-frame endpoint.])),
+  returns: (type: "Drawable", desc: [Visible line segment that follows reference endpoints.]),
+  desc: [Creates axes, dividers, or connectors. The compatibility form `line(x1, y1, x2, y2)` remains accepted. Invalid endpoints and mixed arities raise `TypeError`.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
+from gaanim import Anchor, GOLD, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-axis = scene.line(-140, 0, 140, 0).stroke(WHITE, 3)
-scene.play([axis.create().duration(0.7)])
+left = scene.dot(9).fill(GOLD).at(-120, -30)
+card = scene.rect(120, 70).at(90, 35)
+connector = scene.line(
+    left.anchor_point(Anchor.RIGHT),
+    card.anchor_point(Anchor.LEFT),
+).stroke(WHITE, 3)
+scene.play([left.move(30, 60).duration(0.7)])
 scene.export("preview.webp", fps=30)
 ```
 ]

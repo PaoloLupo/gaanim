@@ -2834,11 +2834,20 @@ class Scene:
             result = scene.ellipse(1.0, 1.0)
         """
         ...
+    @overload
+    def line(self, p1: Endpoint, p2: Endpoint) -> Drawable: ...
+    @overload
     def line(self, x1: float, y1: float, x2: float, y2: float) -> Drawable:
-        """Create a line drawable in the scene.
+        """Create a line between fixed or reactive endpoints.
+
+        The preferred two-argument form accepts 2D/3D tuples, drawables,
+        ``PointRef`` values, and ``AnchorPoint`` values. Reference endpoints
+        are resolved every frame, so the line follows moving objects. The
+        four-coordinate form remains available for compatibility. Invalid
+        endpoint shapes or mixed arities raise ``TypeError``.
 
         Example:
-            result = scene.line(1.0, 1.0, 1.0, 1.0)
+            result = scene.line((-100.0, 0.0), card.anchor_point(Anchor.LEFT))
         """
         ...
     def arrow(self, x1: float, y1: float, x2: float, y2: float) -> Drawable:

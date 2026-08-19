@@ -951,6 +951,11 @@ impl Canvas {
     pub fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Line(x1, y1, x2, y2))
     }
+
+    /// Spawn a visible line between static or reactive endpoints.
+    pub fn line_between(&mut self, from: CanvasEndpoint, to: CanvasEndpoint) -> DrawableHandle {
+        self.endpoint_line(from, to, false)
+    }
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
     }
@@ -3665,8 +3670,19 @@ impl Canvas {
     /// Endpoints can be `DrawableHandle` references (their `.id` is used) or
     /// static `(f64, f64)` positions passed as tuples.
     pub fn tracking_line(&mut self, from: CanvasEndpoint, to: CanvasEndpoint) -> DrawableHandle {
+        self.endpoint_line(from, to, true)
+    }
+
+    fn endpoint_line(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        defer_visibility: bool,
+    ) -> DrawableHandle {
         let handle = self.spawn(SpawnKind::TrackingLine);
-        handle.defer_visibility_until_play();
+        if defer_visibility {
+            handle.defer_visibility_until_play();
+        }
         let id = handle.id;
         self.state
             .lock()
@@ -4269,6 +4285,41 @@ mod tests {
         assert!(spring_opacity > 0.0);
         assert!(dimension_opacity > 0.0);
         assert!(label_opacity > 0.0);
+    }
+
+    #[test]
+    fn line_between_accepts_static_and_anchor_endpoints() {
+        let mut canvas = Canvas::new(320, 180);
+        let reference = canvas.rect(100.0, 40.0).at(30.0, 40.0);
+        let anchor = reference.anchor_point(Anchor::TopRight, DVec3::ZERO);
+        canvas.line_between(
+            CanvasEndpoint::Static(DVec3::new(-10.0, -20.0, 0.0)),
+            anchor.into(),
+        );
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        gaanim_animation::tracking_line_system(&mut world);
+
+        let path = world
+            .query_filtered::<&gaanim_scene::PathSource, With<gaanim_animation::TrackingLine>>()
+            .single(&world)
+            .expect("one endpoint line");
+        let elements = path.0.elements();
+        assert!(matches!(
+            elements.first(),
+            Some(gaanim_core::kurbo::PathEl::MoveTo(point))
+                if (point.x + 10.0).abs() < 1e-9 && (point.y + 20.0).abs() < 1e-9
+        ));
+        assert!(matches!(
+            elements.last(),
+            Some(gaanim_core::kurbo::PathEl::LineTo(point))
+                if (point.x - 80.0).abs() < 1e-9 && (point.y - 60.0).abs() < 1e-9
+        ));
     }
 
     #[test]

@@ -1832,13 +1832,37 @@ impl PyScene {
                 .ellipse(rx, ry),
         )
     }
-    fn line(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .line(x1, y1, x2, y2),
-        )
+    #[pyo3(signature = (p1, p2, x2=None, y2=None))]
+    fn line(
+        &self,
+        p1: Bound<'_, PyAny>,
+        p2: Bound<'_, PyAny>,
+        x2: Option<f64>,
+        y2: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        match (x2, y2) {
+            (None, None) => Ok(PyDrawable(canvas.line_between(
+                resolve_endpoint(&p1)?,
+                resolve_endpoint(&p2)?,
+            ))),
+            (Some(x2), Some(y2)) => {
+                let x1 = p1.extract::<f64>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "legacy line(x1, y1, x2, y2) requires four numeric coordinates",
+                    )
+                })?;
+                let y1 = p2.extract::<f64>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "legacy line(x1, y1, x2, y2) requires four numeric coordinates",
+                    )
+                })?;
+                Ok(PyDrawable(canvas.line(x1, y1, x2, y2)))
+            }
+            _ => Err(pyo3::exceptions::PyTypeError::new_err(
+                "line() expects two endpoints or four numeric coordinates",
+            )),
+        }
     }
     fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
         PyDrawable(
