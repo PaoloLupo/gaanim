@@ -172,6 +172,10 @@ pub enum AnimationType {
         to: DVec3,
         anchor: Anchor,
     },
+    /// Translate the center to an anchor point on another drawable.
+    TranslateToAnchorPoint {
+        point: crate::canvas::AnchorPoint,
+    },
     TranslateBy {
         delta: DVec3,
     },

@@ -72,6 +72,34 @@ producen `ValueError`. El texto adaptable se compone con el ancho ofrecido por
 su fila, columna, track o caja final. Los límites visuales más estrechos de los
 glifos no se convierten después en un nuevo límite de ajuste.
 
+== Posicionamiento mediante anchors
+
+Fuera de un árbol `Layout`, `at()` también acepta el `AnchorPoint` de otro
+objeto. El centro del objeto receptor se coloca sobre el anchor después de
+aplicar la traslación, rotación y escala iniciales de la referencia. El offset
+opcional pertenece al espacio local de la referencia.
+
+```python
+from gaanim import Anchor
+
+card = scene.rect(240, 120).at(80, 20).rotated(0.15)
+label = scene.text("Detalle").at(
+    card.anchor_point(Anchor.TOP_RIGHT, offset=(-12, -12))
+)
+```
+
+La firma relevante es
+`drawable.at(reference.anchor_point(anchor, offset=(dx, dy))) -> Drawable`.
+No se puede combinar un `AnchorPoint` con los argumentos `y` o `anchor` de la
+variante numérica. La relación se resuelve durante el layout inicial; para
+seguir una referencia mientras se anima, usa `follow` o `attach_to`.
+
+`move_to()` admite las mismas referencias y devuelve un `Anim`: `obj.move_to(card)`
+mueve centro con centro, mientras
+`obj.move_to(card.anchor_point(Anchor.BOTTOM_LEFT))` anima el centro de `obj`
+hasta ese anchor. El destino se calcula con el estado de layout que tiene la
+referencia al programar la animación.
+
 == Atlas de posibilidades de layout
 
 Esta sección resume el espacio de diseño de Layout v2. Las capacidades son

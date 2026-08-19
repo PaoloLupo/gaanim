@@ -5090,6 +5090,11 @@ impl Canvas {
                 path: path.clone(),
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
             },
+            AnimationType::TranslateToAnchorPoint { point } => {
+                let mut point = *point;
+                point.object = *id_map.get(&point.object)?;
+                AnimationType::TranslateToAnchorPoint { point }
+            }
             other => other.clone(),
         };
         Some(AnimationBuilder {
@@ -6485,6 +6490,35 @@ impl Canvas {
                     transform =
                         gaanim_layout::compute_move_to(bounds, &transform, *target, *anchor);
                 }
+                LayoutOp::MoveToAnchorPoint { point } => {
+                    pending_text_anchor = None;
+                    let Some(reference_id) = id_map.get(&point.object).copied() else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: anchor point object {:?} was not spawned before {:?}",
+                            point.object,
+                            spec.id
+                        );
+                        continue;
+                    };
+                    let Some(reference_state) = builder.states.get(reference_id) else {
+                        bevy::prelude::warn!(
+                            "Canvas layout skipped: missing state for anchor point object {:?}",
+                            reference_id
+                        );
+                        continue;
+                    };
+                    let reference_transform = builder.get_world_transform(reference_id);
+                    let local = reference_state.bounds.center()
+                        + reference_state.bounds.size() * 0.5 * point.normalized
+                        + point.offset;
+                    let target = reference_transform.to_mat4().transform_point3(local);
+                    transform = gaanim_layout::compute_move_to(
+                        bounds,
+                        &transform,
+                        target,
+                        gaanim_layout::Anchor::Center,
+                    );
+                }
                 LayoutOp::MoveTextAnchorTo {
                     target,
                     anchor,
@@ -6692,6 +6726,46 @@ mod tests {
         assert!(
             actual.distance(expected) < 1e-6,
             "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn at_anchor_point_places_center_on_transformed_reference_anchor() {
+        let mut canvas = Canvas::new(640, 360);
+        let reference = canvas
+            .rect(100.0, 40.0)
+            .at(30.0, -10.0)
+            .scaled(1.5)
+            .rotated(std::f64::consts::FRAC_PI_2);
+        let point = reference.anchor_point(Anchor::TopRight, DVec3::new(5.0, -3.0, 0.0));
+        canvas.rect(10.0, 6.0).at_anchor_point(point);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut roots = world
+            .query::<(
+                &LocalBounds,
+                &SpatialTransform,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .filter_map(|(bounds, transform, parent)| {
+                parent.is_none().then_some((bounds.0, *transform))
+            })
+            .collect::<Vec<_>>();
+        roots.sort_by(|(left, _), (right, _)| left.width().total_cmp(&right.width()));
+        assert_eq!(roots.len(), 2);
+
+        let (target_bounds, target_transform) = roots[0];
+        let (reference_bounds, reference_transform) = roots[1];
+        let reference_local =
+            Anchor::TopRight.get_point(&reference_bounds) + DVec3::new(5.0, -3.0, 0.0);
+        assert_point_close(
+            target_transform
+                .to_mat4()
+                .transform_point3(target_bounds.center()),
+            reference_transform
+                .to_mat4()
+                .transform_point3(reference_local),
         );
     }
 

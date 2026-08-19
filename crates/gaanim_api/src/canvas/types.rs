@@ -609,6 +609,9 @@ pub enum LayoutOp {
         target: DVec3,
         anchor: Anchor,
     },
+    MoveToAnchorPoint {
+        point: super::AnchorPoint,
+    },
     MoveTextAnchorTo {
         target: DVec3,
         anchor: TextAnchor,

@@ -785,19 +785,24 @@ class Drawable:
     @overload
     def at(self, reference: Drawable, /) -> Self: ...
     @overload
+    def at(self, point: AnchorPoint, /) -> Self: ...
+    @overload
     def at(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
-        """Place this drawable at coordinates or at another drawable.
+        """Place this drawable at coordinates, another drawable, or an anchor point.
 
         Omitting ``anchor`` uses ``Anchor.CENTER`` and preserves the existing
         center-based behavior. The optional anchor can be passed positionally
         or by keyword. Passing one ``Drawable`` instead creates a deferred
         center-to-center layout relation; use ``follow`` or ``attach_to`` when
-        the target must continue following an animated reference. A reference
-        cannot be combined with ``y`` or ``anchor``.
+        the target must continue following an animated reference. Passing an
+        ``AnchorPoint`` places this drawable's center on that transformed local
+        anchor during initial layout. References and anchor points cannot be
+        combined with ``y`` or ``anchor``.
 
         Example:
             result = drawable.at(1.0, 1.0, Anchor.TOP_LEFT)
             centered = label.at(drawable)
+            corner_label = label.at(drawable.anchor_point(Anchor.TOP_RIGHT))
         """
         ...
     def anchor_point(
@@ -954,14 +959,22 @@ class Drawable:
             result = drawable.move(1.0, 1.0)
         """
         ...
+    @overload
+    def move_to(self, reference: Drawable, /) -> Anim: ...
+    @overload
+    def move_to(self, point: AnchorPoint, /) -> Anim: ...
+    @overload
     def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
-        """Create a move to animation for this drawable.
+        """Animate toward coordinates, another drawable, or an anchor point.
 
         The selected ``anchor`` arrives at ``(x, y)``; omitting it uses
-        ``Anchor.CENTER``.
+        ``Anchor.CENTER``. A ``Drawable`` targets its center, while an
+        ``AnchorPoint`` targets that transformed local point. These reference
+        forms cannot be combined with ``y`` or ``anchor``.
 
         Example:
             result = drawable.move_to(1.0, 1.0)
+            result = drawable.move_to(card.anchor_point(Anchor.TOP_RIGHT))
         """
         ...
     def move_3d(self, dx: float, dy: float, dz: float) -> Anim: ...
@@ -1657,6 +1670,8 @@ class Text(Drawable):
     @overload
     def at(self, reference: Drawable, /) -> Self: ...
     @overload
+    def at(self, point: AnchorPoint, /) -> Self: ...
+    @overload
     def at(
         self,
         x: float,
@@ -1669,13 +1684,15 @@ class Text(Drawable):
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
         ``Anchor`` values retain bounds-based placement. Layout-owned text
-        raises ``LayoutOwnershipError``. Passing one ``Drawable`` instead
-        aligns the text's visual center to the reference's center without
-        creating a reactive follow relationship.
+        raises ``LayoutOwnershipError``. Passing one ``Drawable`` aligns the
+        text's visual center to the reference's center. Passing an
+        ``AnchorPoint`` aligns the visual center to that transformed anchor;
+        neither form creates a reactive follow relationship.
 
         Example:
             label.at(0.0, 40.0, TextAnchor.BASELINE_LEFT)
             label.at(marker)
+            label.at(marker.anchor_point(Anchor.TOP))
         """
         ...
     def at_anchor(self, x: float, y: float, anchor: Anchor | TextAnchor) -> Self:

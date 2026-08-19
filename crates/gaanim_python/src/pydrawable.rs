@@ -352,27 +352,42 @@ pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
 pub(crate) enum PyAtTarget {
     Coordinates { x: f64, y: f64 },
     Drawable(gaanim_api::canvas::DrawableHandle),
+    AnchorPoint(gaanim_api::canvas::AnchorPoint),
 }
 
 pub(crate) fn resolve_at_target(
+    operation: &str,
     x: &Bound<'_, PyAny>,
     y: Option<f64>,
     has_anchor: bool,
 ) -> PyResult<PyAtTarget> {
+    if let Ok(point) = x.extract::<PyRef<'_, PyAnchorPoint>>() {
+        if y.is_some() || has_anchor {
+            return Err(PyTypeError::new_err(format!(
+                "{operation}() with an AnchorPoint accepts no y or anchor"
+            )));
+        }
+        return Ok(PyAtTarget::AnchorPoint(point.0));
+    }
+
     if let Ok(reference) = x.extract::<PyRef<'_, PyDrawable>>() {
         if y.is_some() || has_anchor {
-            return Err(PyTypeError::new_err(
-                "at() with a Drawable accepts no y or anchor; use align_to() for explicit anchors",
-            ));
+            return Err(PyTypeError::new_err(format!(
+                "{operation}() with a Drawable accepts no y or anchor"
+            )));
         }
         return Ok(PyAtTarget::Drawable(reference.0.clone()));
     }
 
     let x = x.extract::<f64>().map_err(|_| {
-        PyTypeError::new_err("at() expects either a Drawable or numeric x and y coordinates")
+        PyTypeError::new_err(format!(
+            "{operation}() expects a Drawable, AnchorPoint, or numeric x and y coordinates"
+        ))
     })?;
     let y = y.ok_or_else(|| {
-        PyTypeError::new_err("at() with numeric coordinates requires both x and y")
+        PyTypeError::new_err(format!(
+            "{operation}() with numeric coordinates requires both x and y"
+        ))
     })?;
     Ok(PyAtTarget::Coordinates { x, y })
 }
@@ -613,7 +628,7 @@ impl PyDrawable {
         anchor: Option<&PyAnchor>,
     ) -> PyResult<Self> {
         self.require_free_position("at")?;
-        match resolve_at_target(x, y, anchor.is_some())? {
+        match resolve_at_target("at", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => Ok(Self(self.0.clone().at_anchor(
                 x,
                 y,
@@ -624,6 +639,7 @@ impl PyDrawable {
                 gaanim_api::canvas::Anchor::Center,
                 gaanim_api::canvas::Anchor::Center,
             ))),
+            PyAtTarget::AnchorPoint(point) => Ok(Self(self.0.clone().at_anchor_point(point))),
         }
     }
     fn at_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
@@ -713,14 +729,26 @@ impl PyDrawable {
             inner: self.0.r#move(dx, dy),
         })
     }
-    #[pyo3(signature = (x, y, anchor=None))]
-    fn move_to(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<PyCanvasAnim> {
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: Option<f64>,
+        anchor: Option<&PyAnchor>,
+    ) -> PyResult<PyCanvasAnim> {
         self.require_free_position("move_to")?;
-        Ok(PyCanvasAnim {
-            inner: self
-                .0
-                .move_to_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default()),
-        })
+        let inner = match resolve_at_target("move_to", x, y, anchor.is_some())? {
+            PyAtTarget::Coordinates { x, y } => {
+                self.0
+                    .move_to_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default())
+            }
+            PyAtTarget::Drawable(reference) => self.0.move_to_anchor_point(reference.anchor_point(
+                gaanim_api::canvas::Anchor::Center,
+                gaanim_core::glam::DVec3::ZERO,
+            )),
+            PyAtTarget::AnchorPoint(point) => self.0.move_to_anchor_point(point),
+        };
+        Ok(PyCanvasAnim { inner })
     }
     fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyCanvasAnim {
         PyCanvasAnim {

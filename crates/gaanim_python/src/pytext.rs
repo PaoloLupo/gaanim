@@ -776,7 +776,7 @@ impl PyText {
         anchor: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        match resolve_at_target(x, y, anchor.is_some())? {
+        match resolve_at_target("at", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => {
                 match anchor.map(resolve_text_anchor).transpose()? {
                     Some(ResolvedTextAnchor::Geometric(anchor)) => {
@@ -796,6 +796,9 @@ impl PyText {
                     gaanim_api::canvas::Anchor::Center,
                     gaanim_api::canvas::Anchor::Center,
                 );
+            }
+            PyAtTarget::AnchorPoint(point) => {
+                slf.handle.clone().at_anchor_point(point);
             }
         }
         Ok(slf)

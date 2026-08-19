@@ -138,7 +138,7 @@ impl PyPrimitive3D {
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         slf.require_free_position("at")?;
-        match resolve_at_target(x, y, anchor.is_some())? {
+        match resolve_at_target("at", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => {
                 slf.handle.clone().at_anchor(
                     x,
@@ -152,6 +152,9 @@ impl PyPrimitive3D {
                     gaanim_api::canvas::Anchor::Center,
                     gaanim_api::canvas::Anchor::Center,
                 );
+            }
+            PyAtTarget::AnchorPoint(point) => {
+                slf.handle.clone().at_anchor_point(point);
             }
         }
         Ok(slf)

@@ -4983,6 +4983,54 @@ mod tests {
     }
 
     #[test]
+    fn move_to_anchor_point_animates_center_to_reference_anchor() {
+        let mut canvas = Canvas::new(640, 360);
+        let reference = canvas.rect(100.0, 40.0).at(50.0, 20.0);
+        let moving = canvas.rect(10.0, 6.0).at(-100.0, -80.0);
+        let point = reference.anchor_point(
+            Anchor::TopRight,
+            gaanim_core::glam::DVec3::new(-5.0, -3.0, 0.0),
+        );
+        canvas.play(vec![moving.move_to_anchor_point(point).duration(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.0);
+
+        let mut roots = world
+            .query::<(
+                &gaanim_scene::LocalBounds,
+                &SpatialTransform,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .filter_map(|(bounds, transform, parent)| {
+                parent.is_none().then_some((bounds.0, *transform))
+            })
+            .collect::<Vec<_>>();
+        roots.sort_by(|(left, _), (right, _)| left.width().total_cmp(&right.width()));
+        let (moving_bounds, moving_transform) = roots[0];
+        let (reference_bounds, reference_transform) = roots[1];
+        let expected = reference_transform.to_mat4().transform_point3(
+            Anchor::TopRight.get_point(&reference_bounds)
+                + gaanim_core::glam::DVec3::new(-5.0, -3.0, 0.0),
+        );
+        let actual = moving_transform
+            .to_mat4()
+            .transform_point3(moving_bounds.center());
+        assert!(
+            actual.distance(expected) < 1e-6,
+            "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
     fn primitive_3d_color_property_preserves_other_material_channels() {
         let mut canvas = Canvas::new(640, 360);
         let original = gaanim_scene::Material3D::metal(Color::WHITE);

@@ -335,6 +335,7 @@ impl DrawableHandle {
                     op,
                     LayoutOp::SetTranslation(_)
                         | LayoutOp::MoveAnchorTo { .. }
+                        | LayoutOp::MoveToAnchorPoint { .. }
                         | LayoutOp::MoveTextAnchorTo { .. }
                         | LayoutOp::NextTo { .. }
                         | LayoutOp::AlignTo { .. }
@@ -571,6 +572,7 @@ impl DrawableHandle {
                 op,
                 LayoutOp::SetTranslation(_)
                     | LayoutOp::MoveAnchorTo { .. }
+                    | LayoutOp::MoveToAnchorPoint { .. }
                     | LayoutOp::MoveTextAnchorTo { .. }
                     | LayoutOp::NextTo { .. }
                     | LayoutOp::AlignTo { .. }
@@ -961,6 +963,11 @@ impl DrawableHandle {
         })
     }
 
+    /// Place this drawable's center at an anchor point derived from another drawable.
+    pub fn at_anchor_point(self, point: AnchorPoint) -> Self {
+        self.push_layout(LayoutOp::MoveToAnchorPoint { point })
+    }
+
     /// Place a text baseline anchor at `(x, y)`.
     pub fn at_text_anchor(self, x: f64, y: f64, anchor: TextAnchor) -> Self {
         self.push_layout(LayoutOp::MoveTextAnchorTo {
@@ -1028,6 +1035,7 @@ impl DrawableHandle {
             AnimationType::TranslateBy { .. }
                 | AnimationType::TranslateTo { .. }
                 | AnimationType::TranslateAnchorTo { .. }
+                | AnimationType::TranslateToAnchorPoint { .. }
         ) {
             let mut spec = self.spec.lock().expect("object spec poisoned");
             assert!(
@@ -1080,6 +1088,11 @@ impl DrawableHandle {
             to: DVec3::new(x, y, 0.0),
             anchor,
         })
+    }
+
+    /// Animate this drawable's center to an anchor point on another drawable.
+    pub fn move_to_anchor_point(&self, point: AnchorPoint) -> Anim {
+        self.anim(AnimationType::TranslateToAnchorPoint { point })
     }
 
     pub fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> Anim {

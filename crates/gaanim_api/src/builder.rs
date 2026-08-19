@@ -992,6 +992,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Uncreate { .. } => "Uncreate",
             AnimationType::TranslateTo { .. }
             | AnimationType::TranslateAnchorTo { .. }
+            | AnimationType::TranslateToAnchorPoint { .. }
             | AnimationType::TranslateBy { .. } => "Move",
             AnimationType::RotateTo { .. }
             | AnimationType::RotateBy { .. }
@@ -2318,6 +2319,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
+        let anchor_point_target = match anim.anim_type {
+            AnimationType::TranslateToAnchorPoint { point } => {
+                let Some(reference_state) = self.states.get(point.object) else {
+                    bevy::prelude::warn!(
+                        "Anchor-point animation skipped: missing reference object {:?}",
+                        point.object
+                    );
+                    return;
+                };
+                let reference_transform = self.get_world_transform(point.object);
+                let local = reference_state.bounds.center()
+                    + reference_state.bounds.size() * 0.5 * point.normalized
+                    + point.offset;
+                Some(reference_transform.to_mat4().transform_point3(local))
+            }
+            _ => None,
+        };
+
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
@@ -2340,6 +2359,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let from = state.transform.translation;
                 let to = gaanim_layout::compute_move_to(state.bounds, &state.transform, to, anchor)
                     .translation;
+                state.transform.translation = to;
+                PropertyLensSpec::Translation { from, to }
+            }
+            AnimationType::TranslateToAnchorPoint { .. } => {
+                let from = state.transform.translation;
+                let target = anchor_point_target
+                    .expect("anchor-point target is precomputed for this animation variant");
+                let to = gaanim_layout::compute_move_to(
+                    state.bounds,
+                    &state.transform,
+                    target,
+                    Anchor::Center,
+                )
+                .translation;
                 state.transform.translation = to;
                 PropertyLensSpec::Translation { from, to }
             }
