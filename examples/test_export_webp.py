@@ -5,7 +5,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 def main():
     scene = Scene(960, 540, background=BLACK)
-    equation = scene.text("$E = m c^2$").fill(WHITE).at(0, 90)
+    equation = scene.equation("E = m c^2").fill(WHITE).at(0, 90)
     circle = scene.circle(80).stroke(GOLD, 5).no_fill().at(-130, -60)
     rect = scene.rect(150, 90).fill(BLUE).at(150, -60)
 

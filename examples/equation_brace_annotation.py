@@ -8,8 +8,8 @@ from gaanim import Anchor, BLACK, CORAL, GOLD, GRAY, WHITE, Scene, part
 scene = Scene(1280, 720, background=BLACK)
 
 title = scene.text("Explicar los términos de una ecuación", role="title").fill(WHITE).at(0, 250, anchor=Anchor.CENTER)
-formula = scene.text(
-    "$", part("energy", "E"), " = ", part("mass", "m"), " ", part("light_speed", "c^2"), "$"
+formula = scene.equation(
+    part("energy", "E"), "=", part("mass", "m"), part("light_speed", "c^2")
 ).at(0, 60, anchor=Anchor.CENTER)
 formula["mass"].fill(GOLD)
 formula["light_speed"].fill(CORAL)

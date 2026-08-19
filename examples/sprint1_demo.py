@@ -10,7 +10,7 @@ def main():
     y_axis = scene.arrow(0, -220, 0, 220).stroke(WHITE, 3)
     vector = scene.arrow(0, 0, 180, 140).stroke(CORAL, 4)
     vector_label = scene.text("vector").fill(CORAL).at(220, 165)
-    formula = scene.text("$r = sqrt(x^2 + y^2)$").fill(GOLD).at(-170, -170)
+    formula = scene.equation("r = sqrt(x^2 + y^2)").fill(GOLD).at(-170, -170)
     callout = scene.rounded_rect(240, 80, 12).stroke(BLUE, 3).no_fill().at(260, -170)
     callout_text = scene.text("distance from origin").fill(YELLOW).at(260, -170)
     point = scene.dot(12).fill(RED).at(180, 140)

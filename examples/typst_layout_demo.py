@@ -28,7 +28,7 @@ table = scene.typst('''
       (fn: x => calc.cos(x), stroke: red + 1.2pt, samples: 200, label: $cos(x)$, label-pos: 1.0, label-side: "above-left"),
     )
 ''').scaled(2).at(-220, -35)
-matrix = scene.text("$sum_(k=1)^n k = (n(n+1)) / 2$").fill(BLACK).at(285, -35, anchor=Anchor.CENTER)
+matrix = scene.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).at(285, -35, anchor=Anchor.CENTER)
 
 scene.play([
     title.write().duration(0.55),

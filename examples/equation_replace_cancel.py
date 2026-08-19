@@ -8,13 +8,13 @@ from gaanim import Anchor, BLACK, GOLD, GRAY, WHITE, Scene, part
 scene = Scene(1280, 720, background=BLACK)
 title = scene.text("Resolver una ecuación por términos", role="title").fill(WHITE).at(0, 230, anchor=Anchor.CENTER)
 
-before = scene.text(
-    "$", part("variable", "x"), " + ", part("constant", "3"), " = ", part("result", "7"), "$"
+before = scene.equation(
+    part("variable", "x"), "+", part("constant", "3"), "=", part("result", "7")
 ).at(0, 40, anchor=Anchor.CENTER)
 before["variable"].fill(GOLD)
 
-after = scene.text(
-    "$", part("variable", "x"), " = ", part("result", "4"), "$"
+after = scene.equation(
+    part("variable", "x"), "=", part("result", "4")
 ).at(0, 40, anchor=Anchor.CENTER)
 after["variable"].fill(GOLD)
 

@@ -10,12 +10,12 @@ scene = Scene(1280, 720, background=BLACK)
 title = scene.text("Una variable, dos ecuaciones", role="title").fill(WHITE).at(0, 230, anchor=Anchor.CENTER)
 
 energy = (
-    scene.text("$E = ", part("mass", "m"), " ", part("light_speed", "c^2"), "$")
+    scene.equation("E =", part("mass", "m"), part("light_speed", "c^2"))
     .at(0, 70, anchor=Anchor.CENTER)
 )
 
 momentum = (
-    scene.text("$p = ", part("mass", "m"), " ", part("velocity", "v"), "$")
+    scene.equation("p =", part("mass", "m"), part("velocity", "v"))
     .at(0, -90, anchor=Anchor.CENTER)
 )
 

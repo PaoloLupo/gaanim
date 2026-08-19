@@ -68,7 +68,7 @@ projection_line = scene.tracking_line(circle_ref, wave_ref)
 projection_line.stroke(ACCENT, 2).no_fill()
 
 formula = (
-    scene.text("$y(theta) = r sin(theta)$", role="subtitle")
+    scene.equation("y(theta) = r sin(theta)", role="subtitle")
     .fill(WHITE)
     .at(0, -215, anchor=Anchor.CENTER)
 )

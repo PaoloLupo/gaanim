@@ -8,7 +8,7 @@ def main():
     square = scene.rect(150, 150).stroke(PURPLE, 6).no_fill().at(300, -20)
     circle = scene.circle(75).fill(CYAN).at(-300, -20)
     title = scene.text("Advanced Animations", role="title").fill(WHITE).at(0, 180)
-    equation = scene.text("$f(x) = x^2 - 2x + 1$").fill(GOLD).at(0, -20)
+    equation = scene.equation("f(x) = x^2 - 2x + 1").fill(GOLD).at(0, -20)
 
     scene.play([
         square.create().duration(2.0).smooth(),

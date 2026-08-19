@@ -23,13 +23,13 @@ mechanism = scene.group([rail, spring, mass, mass_label]).at(-35, 40).pivot(-35,
 # Technical annotations use dedicated primitives instead of hand-built paths.
 angle_arc = scene.arc(-20, 20, 55, 0.48, 0.22).no_fill().stroke(GRAY, 3)
 rotation = scene.curved_arrow(-20, -155, 145, -115, 0.9).fill(GRAY)
-omega = scene.text("$omega$").fill(GRAY).at(115, -135, anchor=Anchor.CENTER)
+omega = scene.equation("omega").fill(GRAY).at(115, -135, anchor=Anchor.CENTER)
 extension = scene.dimension(85, 145, 175, 145, 35)
 extension_label = scene.text("e").fill(GRAY).at(130, 195, anchor=Anchor.CENTER)
 
 scene.text("x").fill(GRAY).at(385, 2, anchor=Anchor.CENTER)
 scene.text("y").fill(GRAY).at(-5, 235, anchor=Anchor.CENTER)
-equation = scene.text("$eta'' + (2k/m - omega^2) eta = 0$").fill(GRAY).at(0, -215, anchor=Anchor.CENTER)
+equation = scene.equation("eta'' + (2k/m - omega^2) eta = 0").fill(GRAY).at(0, -215, anchor=Anchor.CENTER)
 
 scene.play([
     disk.create().duration(0.7),

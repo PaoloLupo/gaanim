@@ -62,11 +62,11 @@ scene.wait(0.2)
 eq_title = scene.text("Ecuaciones: mantiene 'm' y reordena, sobrantes Fade").fill(WHITE).at(0, 380).scaled(0.6)
 eq_title.fade_in().duration(0.5).smooth()
 
-e1 = scene.text("$E = m c$").fill(WHITE).at(0, 80).scaled(1.3)
+e1 = scene.equation("E = m c").fill(WHITE).at(0, 80).scaled(1.3)
 e1.write().duration(0.7).smooth()
 scene.wait(0.3)
 
-e2 = scene.text("$p = m v^2$").fill(GOLD).at(0, 80).scaled(1.3)
+e2 = scene.equation("p = m v^2").fill(GOLD).at(0, 80).scaled(1.3)
 # Tex matching on equations: 'm' matches by key, other glyphs fade (mismo y, no debajo)
 scene.play([e1.morph_to(e2, duration=1.6)])
 scene.wait(1.0)
