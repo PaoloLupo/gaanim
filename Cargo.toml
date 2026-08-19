@@ -36,6 +36,7 @@ strip = true
 [workspace.dependencies]
 bevy = {version = "0.18", default-features = false, features = [
   "bevy_winit",       # windowing (not included by bevy_vello)
+  "wayland",          # native windowing on Hyprland/Omarchy
   "multi_threaded",   # parallel execution
   "keyboard",         # KeyCode input
   "mouse",            # MouseButton input

@@ -62,6 +62,12 @@ build-release-install: build-release wheel
     Copy-Item -Path "./target/release/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
+[unix]
+build-release-install: build-release wheel
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/share/gaanim"
+    install -m 755 ./target/release/gaanim ./target/release/gaanim-core "$HOME/.local/bin/"
+    install -m 644 ./target/wheels/gaanim-*.whl "$HOME/.local/share/gaanim/"
+
 # Install the Python extension in the local virtual environment.
 python-develop:
     {{ python }} -m maturin develop --manifest-path crates/gaanim_python/Cargo.toml
