@@ -13,6 +13,7 @@ mod py3d;
 mod pycanvas;
 mod pydrawable;
 mod pylayout;
+mod pymatrix;
 mod pystyle;
 mod pytext;
 mod transition;
@@ -70,6 +71,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
     m.add_class::<pylayout::PyLayoutItem>()?;
     m.add_class::<pylayout::PyLayout>()?;
+    m.add_class::<pymatrix::PyMatrixOrder>()?;
     m.add_class::<updater::PyUpdater>()?;
     m.add_class::<visualization::PyAxis>()?;
     m.add_class::<visualization::PyScale>()?;

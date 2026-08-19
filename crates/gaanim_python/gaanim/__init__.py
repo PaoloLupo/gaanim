@@ -96,6 +96,15 @@ from .templates import (
     vertical_short,
 )
 from .composition import AnimationGroup, LaggedStart, Succession
+from .matrix import (
+    Matrix,
+    MatrixAlgebraError,
+    MatrixDerivation,
+    MatrixEntry,
+    MatrixSelection,
+    MatrixSelectionAnimation,
+    MatrixStep,
+)
 
 
 def Canvas(*args, **kwargs):
@@ -116,6 +125,13 @@ __all__ = [
     "AnimationGroup",
     "LaggedStart",
     "Succession",
+    "Matrix",
+    "MatrixEntry",
+    "MatrixSelection",
+    "MatrixSelectionAnimation",
+    "MatrixStep",
+    "MatrixDerivation",
+    "MatrixAlgebraError",
     "Drawable",
     "Dimension",
     "AngleDimension",

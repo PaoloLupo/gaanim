@@ -656,6 +656,62 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_matrix_contract(module: object) -> list[str]:
+    """Exercise matrix construction, selectors, ordering, and mutations."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    matrix = scene.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
+    if matrix.shape != (2, 3):
+        failures.append("Scene.matrix returned the wrong shape")
+    if not isinstance(matrix[0, 0], module.Drawable):
+        failures.append("a matrix cell is not a Drawable")
+    if matrix[1, :].coordinates != ((1, 0), (1, 1), (1, 2)):
+        failures.append("matrix row selection returned wrong coordinates")
+    if matrix.diagonal().coordinates != ((0, 0), (1, 1)):
+        failures.append("matrix diagonal selection returned wrong coordinates")
+    ordered = matrix.entries.write(0.1, order="spiral_in", stagger=0.01)
+    if len(ordered) != 6 or not all(isinstance(animation, module.Anim) for animation in ordered):
+        failures.append("matrix ordered animation did not return one Anim per cell")
+    random_a = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
+    random_b = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
+    if random_a != random_b:
+        failures.append("matrix random order is not reproducible")
+    replacement = matrix.set(0, 1, "x", animate=0.1)
+    if not isinstance(replacement, module.Drawable):
+        failures.append("Matrix.set did not return the replacement Drawable")
+    try:
+        scene.matrix([[1, 2], [3]])
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.matrix accepted ragged data")
+    return failures
+
+
+def validate_matrix_stub_typing() -> list[str]:
+    """Keep the matrix facade drawable-compatible and derivations specialized."""
+    matrix_stub = STUB.with_name("matrix.pyi")
+    tree = ast.parse(matrix_stub.read_text(encoding="utf-8"), filename=str(matrix_stub))
+    matrix_class = next(
+        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Matrix"),
+        None,
+    )
+    if matrix_class is None:
+        return ["matrix.pyi does not declare Matrix"]
+    failures: list[str] = []
+    if not any(isinstance(base, ast.Name) and base.id == "Drawable" for base in matrix_class.bases):
+        failures.append("Matrix stub does not expose delegated Drawable methods")
+    algebra_methods = {
+        "add", "subtract", "matmul", "hadamard", "scale_by", "transpose",
+        "determinant", "inverse", "rank", "trace", "rref", "lu", "qr", "eigen",
+    }
+    for member in matrix_class.body:
+        if isinstance(member, ast.FunctionDef) and member.name in algebra_methods:
+            if not isinstance(member.returns, ast.Subscript):
+                failures.append(f"Matrix.{member.name} returns an unspecialized MatrixDerivation")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -689,6 +745,8 @@ def main() -> int:
     missing.extend(validate_layout_detach_contract(module))
     missing.extend(validate_reactive_connector_contract(module))
     missing.extend(validate_camera_rig_contract(module))
+    missing.extend(validate_matrix_contract(module))
+    missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

@@ -41,5 +41,6 @@
 #include "api/assets.typ"
 #include "api/audio.typ"
 #include "api/mobjects.typ"
+#include "api/matrices.typ"
 #include "api/animations.typ"
 #include "api/themes.typ"
