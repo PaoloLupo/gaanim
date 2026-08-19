@@ -10,10 +10,10 @@ use gaanim_api::canvas::{
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
-    Axis as NativeAxis, AxisStyle, Channel, ChartSpec as NativeChartSpec, Column, ConstantValue,
-    Crossing, DataMarkKind, DataSource as NativeDataSource, DataTable as NativeDataTable, Encoding,
-    GuideSpec, MarkKind, MatchPolicy, NonFinitePolicy, NumberFormat, Sampling,
-    ScaleSpec as NativeScaleSpec, SpaceLayer, TransitionFallback,
+    Axis as NativeAxis, AxisStylePatch, Channel, ChartSpec as NativeChartSpec, Column,
+    ConstantValue, Crossing, DataMarkKind, DataSource as NativeDataSource,
+    DataTable as NativeDataTable, Encoding, GuideSpec, MarkKind, MatchPolicy, NonFinitePolicy,
+    NumberFormat, Sampling, ScaleSpec as NativeScaleSpec, SpaceLayer, TransitionFallback,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -272,45 +272,42 @@ impl PyAxis {
         Ok(Self(self.0.clone().crossing(crossing)))
     }
 
-    #[pyo3(signature = (*, color=None, width=None, tick_length=None, tick_width=None, number_color=None, label_color=None))]
+    #[pyo3(signature = (*, color=None, width=None, tick_length=None, tick_width=None, tick_color=None, number_color=None, label_color=None))]
     fn style(
         &self,
         color: Option<PyColor>,
         width: Option<f64>,
         tick_length: Option<f64>,
         tick_width: Option<f64>,
+        tick_color: Option<PyColor>,
         number_color: Option<PyColor>,
         label_color: Option<PyColor>,
     ) -> PyResult<Self> {
-        let mut style: AxisStyle = self.0.style_value();
-        if let Some(color) = color {
-            style.color = color.0;
-        }
+        let color = color.map(|value| value.0);
         if let Some(value) = width {
             if !value.is_finite() || value < 0.0 {
                 return Err(value_error("width must be finite and non-negative"));
             }
-            style.width = value;
         }
         if let Some(value) = tick_length {
             if !value.is_finite() || value < 0.0 {
                 return Err(value_error("tick_length must be finite and non-negative"));
             }
-            style.tick_length = value;
         }
         if let Some(value) = tick_width {
             if !value.is_finite() || value < 0.0 {
                 return Err(value_error("tick_width must be finite and non-negative"));
             }
-            style.tick_width = value;
         }
-        if let Some(color) = number_color {
-            style.number_color = color.0;
-        }
-        if let Some(color) = label_color {
-            style.label_color = color.0;
-        }
-        Ok(Self(self.0.clone().style(style)))
+        Ok(Self(self.0.clone().style_patch(AxisStylePatch {
+            color,
+            tick_color: tick_color.map(|value| value.0).or(color),
+            width,
+            tick_length,
+            tick_width,
+            number_color: number_color.map(|value| value.0),
+            label_color: label_color.map(|value| value.0),
+        })))
     }
 
     #[getter]

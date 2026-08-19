@@ -924,6 +924,72 @@ impl Canvas {
         handle
     }
 
+    fn themed_axis_path(
+        &mut self,
+        path: BezPath,
+        bounds: gaanim_math::Bounds3D,
+        color: Color,
+        width: f64,
+        name: &str,
+    ) -> DrawableHandle {
+        let handle = self.visualization_path(path, bounds, color, width, name);
+        handle
+            .spec
+            .lock()
+            .expect("axis path spec poisoned")
+            .theme_selector = None;
+        handle
+    }
+
+    fn themed_axis(&self, axis: Axis) -> Axis {
+        let Some(theme) = self.theme_style.as_ref() else {
+            return axis;
+        };
+        let mut style = gaanim_visualization::AxisStyle {
+            color: theme.palette.foreground,
+            tick_color: theme.palette.foreground,
+            number_color: theme.palette.foreground,
+            label_color: theme.palette.foreground,
+            ..Default::default()
+        };
+        if let Some(stroke) = theme
+            .styles
+            .get("axes/axis")
+            .and_then(|rule| rule.stroke.as_ref())
+        {
+            if let Ok(gaanim_core::peniko::Brush::Solid(color)) = theme.resolve_paint(&stroke.paint)
+            {
+                style.color = color;
+            }
+            style.width = stroke.style.width;
+        }
+        if let Some(stroke) = theme
+            .styles
+            .get("axes/ticks")
+            .and_then(|rule| rule.stroke.as_ref())
+        {
+            if let Ok(gaanim_core::peniko::Brush::Solid(color)) = theme.resolve_paint(&stroke.paint)
+            {
+                style.tick_color = color;
+            }
+            style.tick_width = stroke.style.width;
+        }
+        for (selector, target) in [
+            ("axes/numbers", &mut style.number_color),
+            ("axes/labels", &mut style.label_color),
+        ] {
+            if let Some(fill) = theme
+                .styles
+                .get(selector)
+                .and_then(|rule| rule.fill.as_ref())
+                && let Ok(gaanim_core::peniko::Brush::Solid(color)) = theme.resolve_paint(fill)
+            {
+                *target = color;
+            }
+        }
+        axis.with_theme_style(style)
+    }
+
     fn attach_to_space(&mut self, space: &CoordinateSpaceHandle, child: &DrawableHandle) {
         child
             .spec
@@ -984,6 +1050,9 @@ impl Canvas {
         size: [f64; 3],
         grid: bool,
     ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
+        let x = self.themed_axis(x);
+        let y = self.themed_axis(y);
+        let z = self.themed_axis(z);
         let map = CoordinateMap3D::new(x.clone(), y.clone(), z.clone(), size)?;
         let min = [-size[0] * 0.5, -size[1] * 0.5, -size[2] * 0.5];
         let max = [size[0] * 0.5, size[1] * 0.5, size[2] * 0.5];
@@ -1003,13 +1072,28 @@ impl Canvas {
         let mut grid_colors = Vec::new();
         let mut tick_points = Vec::new();
         let mut tick_colors = Vec::new();
+        let grid_color = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| {
+                theme
+                    .styles
+                    .get("axes/grid")
+                    .and_then(|rule| rule.stroke.as_ref())
+                    .and_then(|stroke| theme.resolve_paint(&stroke.paint).ok())
+            })
+            .and_then(|brush| match brush {
+                gaanim_core::peniko::Brush::Solid(color) => Some(color),
+                _ => None,
+            })
+            .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
         let mut numbers = Vec::new();
         for (dimension, axis) in [x.clone(), y.clone(), z.clone()].into_iter().enumerate() {
             for tick in axis.ticks_values(7)? {
                 let normalized = axis.normalize(tick.value)?;
                 let coordinate = min[dimension] + normalized * size[dimension];
-                let color = axis.style_value().color;
+                let tick_color = axis.style_value().tick_color;
                 // The three axes already own the edges that start at the
                 // minimum corner. Emitting the minimum tick's grid segments
                 // duplicates those lines at exactly the same depth, causing
@@ -1037,7 +1121,6 @@ impl Canvas {
                         // background. Transparent line-list intersections
                         // have undefined fragment ordering on the GPU and
                         // produced a handful of alternating snapshot pixels.
-                        let grid_color = Color::from_rgb8(0x50, 0x50, 0x50);
                         grid_colors.extend_from_slice(&[grid_color, grid_color]);
                     }
                 }
@@ -1059,7 +1142,7 @@ impl Canvas {
                     ),
                 };
                 tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
-                tick_colors.extend_from_slice(&[color, color]);
+                tick_colors.extend_from_slice(&[tick_color, tick_color]);
                 if tick.major && !tick.label.is_empty() {
                     numbers.push(
                         self.text(&tick.label)
@@ -1277,33 +1360,15 @@ impl Canvas {
     /// Build Cartesian axes with typed reusable axis specs.
     pub fn coordinate_axes(
         &mut self,
-        mut x: Axis,
-        mut y: Axis,
+        x: Axis,
+        y: Axis,
         width: Option<f64>,
         height: Option<f64>,
         grid: bool,
     ) -> Result<CoordinateSpaceHandle, VisualizationError> {
-        let x_uses_default_style = x.style_value() == gaanim_visualization::AxisStyle::default();
-        let y_uses_default_style = y.style_value() == gaanim_visualization::AxisStyle::default();
-        let themed = self.theme_style.as_ref().map(|theme| {
-            let mut axis_style = gaanim_visualization::AxisStyle {
-                color: theme.palette.foreground,
-                number_color: theme.palette.foreground,
-                label_color: theme.palette.foreground,
-                ..Default::default()
-            };
-            if let Some(stroke) = theme
-                .styles
-                .get("axes/axis")
-                .and_then(|style| style.stroke.as_ref())
-            {
-                if let Ok(gaanim_core::peniko::Brush::Solid(color)) =
-                    theme.resolve_paint(&stroke.paint)
-                {
-                    axis_style.color = color;
-                }
-                axis_style.width = stroke.style.width;
-            }
+        let x = self.themed_axis(x);
+        let y = self.themed_axis(y);
+        let themed_grid_color = self.theme_style.as_ref().map(|theme| {
             let grid_color = theme
                 .styles
                 .get("axes/grid")
@@ -1314,35 +1379,8 @@ impl Canvas {
                     _ => None,
                 })
                 .unwrap_or(theme.palette.rule);
-            let number_style = theme
-                .styles
-                .get("axes/numbers")
-                .and_then(|style| style.text.as_ref());
-            let label_style = theme
-                .styles
-                .get("axes/labels")
-                .and_then(|style| style.text.as_ref());
-            if let Some(color) = number_style.and_then(|style| style.color) {
-                axis_style.number_color = color;
-            }
-            if let Some(color) = label_style.and_then(|style| style.color) {
-                axis_style.label_color = color;
-            }
-            (
-                axis_style,
-                grid_color,
-                number_style.and_then(|style| style.size),
-                label_style.and_then(|style| style.size),
-            )
+            grid_color
         });
-        if let Some((style, _, _, _)) = &themed {
-            if x.style_value() == gaanim_visualization::AxisStyle::default() {
-                x = x.style(*style);
-            }
-            if y.style_value() == gaanim_visualization::AxisStyle::default() {
-                y = y.style(*style);
-            }
-        }
         let safe = self.safe_frame();
         let frame = PlotFrame::new(
             width.unwrap_or_else(|| safe.width()),
@@ -1353,7 +1391,7 @@ impl Canvas {
         } else {
             CartesianSpace::axes(x, y, frame)
         };
-        if let Some((_, grid_color, _, _)) = themed {
+        if let Some(grid_color) = themed_grid_color {
             space.grid_color = grid_color;
             let rgba = grid_color.to_rgba8();
             space.minor_grid_color = Color::from_rgba8(rgba.r, rgba.g, rgba.b, rgba.a / 2);
@@ -1387,31 +1425,21 @@ impl Canvas {
             .theme_selector = Some("axes/minor_grid".into());
         layers.insert(SpaceLayer::MinorGrid, grid_minor.clone());
         let axis_color = space.map.x.style_value().color;
-        let axes = self.visualization_path(
+        let axes = self.themed_axis_path(
             geometry.axes,
             geometry.bounds,
             axis_color,
             space.map.x.style_value().width,
             "CoordinateAxes",
         );
-        if x_uses_default_style && y_uses_default_style {
-            axes.spec.lock().expect("axes spec poisoned").theme_selector = Some("axes/axis".into());
-        }
         layers.insert(SpaceLayer::Axes, axes.clone());
-        let ticks = self.visualization_path(
+        let ticks = self.themed_axis_path(
             geometry.ticks,
             geometry.bounds,
-            space.map.x.style_value().color,
+            space.map.x.style_value().tick_color,
             space.map.x.style_value().tick_width,
             "CoordinateTicks",
         );
-        if x_uses_default_style && y_uses_default_style {
-            ticks
-                .spec
-                .lock()
-                .expect("ticks spec poisoned")
-                .theme_selector = Some("axes/ticks".into());
-        }
         layers.insert(SpaceLayer::Ticks, ticks.clone());
 
         let number_scale = self
@@ -1445,13 +1473,6 @@ impl Canvas {
             })
             .collect();
         let number_refs: Vec<&DrawableHandle> = number_handles.iter().collect();
-        if x_uses_default_style && y_uses_default_style {
-            for number in &number_handles {
-                let mut spec = number.spec.lock().expect("number spec poisoned");
-                spec.theme_selector = Some("axes/numbers".into());
-                spec.fill_overridden = false;
-            }
-        }
         let numbers = self.group(&number_refs);
         layers.insert(SpaceLayer::Numbers, numbers.clone());
 
@@ -1466,13 +1487,6 @@ impl Canvas {
             })
             .collect();
         let label_refs: Vec<&DrawableHandle> = label_handles.iter().collect();
-        if x_uses_default_style && y_uses_default_style {
-            for label in &label_handles {
-                let mut spec = label.spec.lock().expect("label spec poisoned");
-                spec.theme_selector = Some("axes/labels".into());
-                spec.fill_overridden = false;
-            }
-        }
         let labels = self.group(&label_refs);
         layers.insert(SpaceLayer::Labels, labels.clone());
 
@@ -1492,6 +1506,7 @@ impl Canvas {
         axis: Axis,
         length: Option<f64>,
     ) -> Result<NumberLineHandle, VisualizationError> {
+        let axis = self.themed_axis(axis);
         let length = length.unwrap_or_else(|| self.safe_frame().width());
         let line = NumberLine::new(axis.clone(), length)?;
         let style = axis.style_value();
@@ -1521,10 +1536,10 @@ impl Canvas {
             length * 0.5,
             style.tick_length + 32.0,
         );
-        let axis_handle = self.visualization_path(
+        let axis_handle = self.themed_axis_path(
             axis_path,
             bounds,
-            style.color,
+            style.tick_color,
             style.width,
             "NumberLineAxis",
         );
@@ -1544,7 +1559,7 @@ impl Canvas {
                 );
             }
         }
-        let ticks = self.visualization_path(
+        let ticks = self.themed_axis_path(
             tick_path,
             bounds,
             style.color,
@@ -1584,6 +1599,7 @@ impl Canvas {
         if angle_divisions < 3 {
             return Err(VisualizationError::InvalidSize);
         }
+        let radial = self.themed_axis(radial);
         let space = PolarSpace::new(radial.clone(), radius)?;
         let style = radial.style_value();
         let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
@@ -1617,20 +1633,28 @@ impl Canvas {
             grid_path.move_to(Point::ORIGIN);
             grid_path.line_to(Point::new(radius * angle.cos(), radius * angle.sin()));
         }
-        let grid = self.visualization_path(
-            grid_path,
-            bounds,
-            Color::from_rgb8(0xC0, 0xC0, 0xC0),
-            1.0,
-            "PolarGrid",
-        );
+        let grid_color = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| {
+                theme
+                    .styles
+                    .get("axes/grid")
+                    .and_then(|rule| rule.stroke.as_ref())
+                    .and_then(|stroke| theme.resolve_paint(&stroke.paint).ok())
+            })
+            .and_then(|brush| match brush {
+                gaanim_core::peniko::Brush::Solid(color) => Some(color),
+                _ => None,
+            })
+            .unwrap_or(Color::from_rgb8(0xC0, 0xC0, 0xC0));
+        let grid = self.themed_axis_path(grid_path, bounds, grid_color, 1.0, "PolarGrid");
         let mut axes_path = BezPath::new();
         axes_path.move_to(Point::new(-radius, 0.0));
         axes_path.line_to(Point::new(radius, 0.0));
         axes_path.move_to(Point::new(0.0, -radius));
         axes_path.line_to(Point::new(0.0, radius));
-        let axes =
-            self.visualization_path(axes_path, bounds, style.color, style.width, "PolarAxes");
+        let axes = self.themed_axis_path(axes_path, bounds, style.color, style.width, "PolarAxes");
         let number_refs: Vec<&DrawableHandle> = numbers_handles.iter().collect();
         let numbers = self.group(&number_refs);
         let root = self.group(&[&grid, &axes, &numbers]);
@@ -2223,6 +2247,73 @@ impl Canvas {
 mod tests {
     use super::*;
 
+    fn svg_stroke_color(handle: &DrawableHandle) -> Color {
+        let spec = handle.spec.lock().expect("object spec poisoned");
+        let SpawnKind::SvgPath(path) = &spec.kind else {
+            panic!("expected an SVG path")
+        };
+        let Some(gaanim_core::peniko::Brush::Solid(color)) = &path.stroke.brush else {
+            panic!("expected a solid stroke")
+        };
+        *color
+    }
+
+    #[test]
+    fn paper_theme_colors_number_line_parts_unless_authored() {
+        let mut canvas = Canvas::new(640, 360);
+        canvas.set_theme("paper").unwrap();
+        let themed = canvas
+            .coordinate_number_line(Axis::linear(0.0, 4.0).unwrap(), Some(400.0))
+            .unwrap();
+        assert_eq!(
+            svg_stroke_color(themed.layer(SpaceLayer::Axes).unwrap()),
+            Color::BLACK
+        );
+        assert_eq!(
+            svg_stroke_color(themed.layer(SpaceLayer::Ticks).unwrap()),
+            Color::BLACK
+        );
+
+        let width_only = canvas
+            .coordinate_number_line(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .style_patch(gaanim_visualization::AxisStylePatch {
+                        width: Some(7.0),
+                        ..Default::default()
+                    }),
+                Some(400.0),
+            )
+            .unwrap();
+        assert_eq!(
+            svg_stroke_color(width_only.layer(SpaceLayer::Axes).unwrap()),
+            Color::BLACK,
+            "a non-color override must not disconnect the axis from its theme color"
+        );
+
+        let authored = Color::from_rgb8(0xA1, 0x23, 0x45);
+        let overridden = canvas
+            .coordinate_number_line(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .style_patch(gaanim_visualization::AxisStylePatch {
+                        color: Some(authored),
+                        tick_color: Some(authored),
+                        ..Default::default()
+                    }),
+                Some(400.0),
+            )
+            .unwrap();
+        assert_eq!(
+            svg_stroke_color(overridden.layer(SpaceLayer::Axes).unwrap()),
+            authored
+        );
+        assert_eq!(
+            svg_stroke_color(overridden.layer(SpaceLayer::Ticks).unwrap()),
+            authored
+        );
+    }
+
     #[test]
     fn number_line_point_ref_uses_reactive_local_coordinates() {
         let mut canvas = Canvas::new(640, 360);
@@ -2244,6 +2335,38 @@ mod tests {
         assert!(x.eval(&context).unwrap().abs() < 1e-10);
         assert!((y.eval(&context).unwrap() - 42.0).abs() < 1e-10);
         assert!(z.eval(&context).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn number_line_default_placement_keeps_its_authored_axis_origin() {
+        let mut canvas = Canvas::new(640, 360);
+        let line = canvas
+            .coordinate_number_line(
+                Axis::linear(0.0, std::f64::consts::TAU)
+                    .unwrap()
+                    .ticks(std::f64::consts::PI)
+                    .unwrap(),
+                Some(600.0),
+            )
+            .unwrap();
+        line.drawable().clone().at_default(-250.0, 0.0);
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let transform = world
+            .query::<(
+                &gaanim_math::SpatialTransform,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .find_map(|(transform, parent)| parent.is_none().then_some(transform))
+            .expect("number-line root must be compiled");
+        assert_eq!(transform.translation, DVec3::new(-250.0, 0.0, 0.0));
     }
 
     #[test]

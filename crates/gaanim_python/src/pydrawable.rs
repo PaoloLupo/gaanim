@@ -629,11 +629,11 @@ impl PyDrawable {
     ) -> PyResult<Self> {
         self.require_free_position("at")?;
         match resolve_at_target("at", x, y, anchor.is_some())? {
-            PyAtTarget::Coordinates { x, y } => Ok(Self(self.0.clone().at_anchor(
-                x,
-                y,
-                anchor.map(|anchor| anchor.0).unwrap_or_default(),
-            ))),
+            PyAtTarget::Coordinates { x, y } => Ok(Self(if let Some(anchor) = anchor {
+                self.0.clone().at_anchor(x, y, anchor.0)
+            } else {
+                self.0.clone().at_default(x, y)
+            })),
             PyAtTarget::Drawable(reference) => Ok(Self(self.0.clone().align_to(
                 &reference,
                 gaanim_api::canvas::Anchor::Center,

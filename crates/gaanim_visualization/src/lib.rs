@@ -7,7 +7,7 @@ pub mod sampling;
 pub mod space;
 pub mod statistics;
 
-pub use axis::{Axis, AxisError, AxisStyle, Crossing, NumberFormat, Scale, Tick};
+pub use axis::{Axis, AxisError, AxisStyle, AxisStylePatch, Crossing, NumberFormat, Scale, Tick};
 pub use chart::{
     BatchDatum, Channel, ChartError, ChartSpec, ConstantValue, DatumKey, DatumMatch, Encoding,
     GuideSpec, MarkBatch, MarkKind, MarkSpec, MarkTransition, MatchPolicy, ScaleKind, ScaleSpec,

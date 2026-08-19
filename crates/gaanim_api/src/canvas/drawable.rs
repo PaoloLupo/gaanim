@@ -904,6 +904,24 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
     }
 
+    /// Apply the default 2D placement semantics used by the Python API.
+    ///
+    /// Ordinary drawables place their visual center at the target. Identity
+    /// groups preserve an authored local coordinate frame, so their local
+    /// origin is placed at the target instead. Coordinate systems use identity
+    /// groups specifically so labels cannot displace their mathematical origin.
+    pub fn at_default(self, x: f64, y: f64) -> Self {
+        let preserves_authored_origin = matches!(
+            self.spec.lock().expect("object spec poisoned").kind,
+            SpawnKind::GroupNoCenter(_)
+        );
+        if preserves_authored_origin {
+            self.at(x, y)
+        } else {
+            self.at_anchor(x, y, Anchor::Center)
+        }
+    }
+
     /// 3D position in world space (perspective-aware).
     pub fn at_3d(self, x: f64, y: f64, z: f64) -> Self {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, z)))

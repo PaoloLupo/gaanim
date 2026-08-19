@@ -793,9 +793,10 @@ class Drawable:
     def at(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
         """Place this drawable at coordinates, another drawable, or an anchor point.
 
-        Omitting ``anchor`` uses ``Anchor.CENTER`` and preserves the existing
-        center-based behavior. The optional anchor can be passed positionally
-        or by keyword. Passing one ``Drawable`` instead creates a deferred
+        Omitting ``anchor`` places ordinary drawables by their visual center.
+        Coordinate-system roots instead place their authored local origin, so
+        labels cannot displace the mathematical axes. The optional anchor can
+        be passed positionally or by keyword. Passing one ``Drawable`` creates a deferred
         center-to-center layout relation; use ``follow`` or ``attach_to`` when
         the target must continue following an animated reference. Passing an
         ``AnchorPoint`` places this drawable's center on that transformed local
@@ -2154,9 +2155,12 @@ class Axis:
         width: Optional[float] = None,
         tick_length: Optional[float] = None,
         tick_width: Optional[float] = None,
+        tick_color: Optional[ColorLike] = None,
         number_color: Optional[ColorLike] = None,
         label_color: Optional[ColorLike] = None,
-    ) -> Axis: ...
+    ) -> Axis:
+        """Override selected properties; omitted values inherit from the active theme."""
+        ...
     @property
     def domain(self) -> tuple[float, float]: ...
 

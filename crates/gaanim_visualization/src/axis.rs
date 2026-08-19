@@ -56,6 +56,7 @@ pub enum NumberFormat {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AxisStyle {
     pub color: Color,
+    pub tick_color: Color,
     pub width: f64,
     pub tick_length: f64,
     pub tick_width: f64,
@@ -63,10 +64,23 @@ pub struct AxisStyle {
     pub label_color: Color,
 }
 
+/// Optional authored overrides layered over theme-provided axis defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AxisStylePatch {
+    pub color: Option<Color>,
+    pub tick_color: Option<Color>,
+    pub width: Option<f64>,
+    pub tick_length: Option<f64>,
+    pub tick_width: Option<f64>,
+    pub number_color: Option<Color>,
+    pub label_color: Option<Color>,
+}
+
 impl Default for AxisStyle {
     fn default() -> Self {
         Self {
             color: Color::from_rgb8(0x20, 0x20, 0x20),
+            tick_color: Color::from_rgb8(0x20, 0x20, 0x20),
             width: 3.0,
             tick_length: 8.0,
             tick_width: 2.0,
@@ -96,6 +110,7 @@ pub struct Axis {
     label: Option<String>,
     crossing: Crossing,
     style: AxisStyle,
+    style_patch: AxisStylePatch,
 }
 
 impl Axis {
@@ -155,6 +170,7 @@ impl Axis {
             label: None,
             crossing: Crossing::Auto,
             style: AxisStyle::default(),
+            style_patch: AxisStylePatch::default(),
         })
     }
 
@@ -172,6 +188,7 @@ impl Axis {
             label: None,
             crossing: Crossing::Auto,
             style: AxisStyle::default(),
+            style_patch: AxisStylePatch::default(),
         })
     }
 
@@ -210,7 +227,78 @@ impl Axis {
 
     pub fn style(mut self, style: AxisStyle) -> Self {
         self.style = style;
+        self.style_patch = AxisStylePatch {
+            color: Some(style.color),
+            tick_color: Some(style.tick_color),
+            width: Some(style.width),
+            tick_length: Some(style.tick_length),
+            tick_width: Some(style.tick_width),
+            number_color: Some(style.number_color),
+            label_color: Some(style.label_color),
+        };
         self
+    }
+
+    pub fn style_patch(mut self, patch: AxisStylePatch) -> Self {
+        if let Some(value) = patch.color {
+            self.style.color = value;
+            self.style_patch.color = Some(value);
+        }
+        if let Some(value) = patch.tick_color {
+            self.style.tick_color = value;
+            self.style_patch.tick_color = Some(value);
+        }
+        if let Some(value) = patch.width {
+            self.style.width = value;
+            self.style_patch.width = Some(value);
+        }
+        if let Some(value) = patch.tick_length {
+            self.style.tick_length = value;
+            self.style_patch.tick_length = Some(value);
+        }
+        if let Some(value) = patch.tick_width {
+            self.style.tick_width = value;
+            self.style_patch.tick_width = Some(value);
+        }
+        if let Some(value) = patch.number_color {
+            self.style.number_color = value;
+            self.style_patch.number_color = Some(value);
+        }
+        if let Some(value) = patch.label_color {
+            self.style.label_color = value;
+            self.style_patch.label_color = Some(value);
+        }
+        self
+    }
+
+    /// Fill non-authored style properties from a resolved theme style.
+    pub fn with_theme_style(mut self, theme: AxisStyle) -> Self {
+        if self.style_patch.color.is_none() {
+            self.style.color = theme.color;
+        }
+        if self.style_patch.tick_color.is_none() {
+            self.style.tick_color = theme.tick_color;
+        }
+        if self.style_patch.width.is_none() {
+            self.style.width = theme.width;
+        }
+        if self.style_patch.tick_length.is_none() {
+            self.style.tick_length = theme.tick_length;
+        }
+        if self.style_patch.tick_width.is_none() {
+            self.style.tick_width = theme.tick_width;
+        }
+        if self.style_patch.number_color.is_none() {
+            self.style.number_color = theme.number_color;
+        }
+        if self.style_patch.label_color.is_none() {
+            self.style.label_color = theme.label_color;
+        }
+        self
+    }
+
+    pub fn style_overrides(&self) -> AxisStylePatch {
+        self.style_patch
     }
 
     pub fn scale(&self) -> &Scale {

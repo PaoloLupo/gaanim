@@ -174,6 +174,13 @@ surface = world.surface(lambda x, y: x * y)
 separado. `scene.polar(...)`, `scene.complex(...)` y
 `scene.number_line(...)` cubren los demás espacios tipados.
 
+Todos esos espacios heredan por defecto los colores semánticos
+`axes/axis`, `axes/ticks`, `axes/grid`, `axes/numbers` y `axes/labels` del tema
+activo. `Axis.style(...)` solo sustituye las propiedades proporcionadas; las
+omitidas continúan heredándose del tema. Así, cambiar únicamente `width` no
+pierde el negro de los ejes en `paper`. Usa `color`, `tick_color`,
+`number_color` o `label_color` para sustituir explícitamente cada color.
+
 `Expr` y `Parameter` forman la ruta reactiva por fotograma. Las lambdas de
 Python para funciones escalares trazadas se ejecutan una sola vez; el muestreo
 y la evaluación reactiva permanecen en Rust.
