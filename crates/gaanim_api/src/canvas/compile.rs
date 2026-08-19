@@ -3009,11 +3009,19 @@ impl Canvas {
                     );
                     if let Some(state) = builder.states.get_mut(container) {
                         state.bounds = local_root_bounds;
+                        state.transform = SpatialTransform::identity();
                         state.transform.translation = root_center;
                         builder
                             .commands
                             .entity(state.entity)
                             .insert((LocalBounds(local_root_bounds), state.transform));
+                    }
+                    if let Some(root_spec) = object_specs.get(&root_source) {
+                        // The responsive solve changes the root's bounds, so
+                        // replay its authored Drawable transform against the
+                        // final box. Otherwise the solve overwrites `at()` and
+                        // anchor/edge positioning, or retains a stale pivot.
+                        Self::apply_layout(builder, container, root_spec, id_map, frame_bounds);
                     }
 
                     let mut targets = Vec::new();
@@ -9281,6 +9289,107 @@ mod tests {
                 .iter()
                 .all(|bounds| bounds.width() <= 340.0 + 1.0e-6),
             "safe-frame paragraph leaked into the nested layout: {visible_bounds:?}"
+        );
+    }
+
+    #[test]
+    fn root_layout_preserves_authored_at_translation() {
+        let mut canvas = Canvas::new(1280, 720);
+        let first = canvas.rect(160.0, 60.0);
+        let second = canvas.rect(120.0, 40.0);
+        let root = canvas.group(&[&first, &second]);
+        first.claim_layout(&root).unwrap();
+        second.claim_layout(&root).unwrap();
+        canvas.reflow_layout(
+            &root,
+            vec![
+                crate::canvas::LayoutMemberSpec {
+                    id: first.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                },
+                crate::canvas::LayoutMemberSpec {
+                    id: second.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                },
+            ],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(24.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        root.at(400.0, 200.0);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let transform = world
+            .query_filtered::<&SpatialTransform, (
+                bevy::prelude::With<gaanim_scene::GroupMarker>,
+                bevy::prelude::Without<bevy::prelude::ChildOf>,
+            )>()
+            .single(&world)
+            .expect("one root layout group");
+        assert_point_close(transform.translation, DVec3::new(400.0, 200.0, 0.0));
+    }
+
+    #[test]
+    fn root_layout_replays_anchor_scale_and_rotation_against_resolved_bounds() {
+        let mut canvas = Canvas::new(1280, 720);
+        let first = canvas.rect(160.0, 60.0);
+        let second = canvas.rect(120.0, 40.0);
+        let root = canvas.group(&[&first, &second]);
+        first.claim_layout(&root).unwrap();
+        second.claim_layout(&root).unwrap();
+        canvas.reflow_layout(
+            &root,
+            vec![
+                crate::canvas::LayoutMemberSpec {
+                    id: first.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                },
+                crate::canvas::LayoutMemberSpec {
+                    id: second.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                },
+            ],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(24.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        root.scaled(1.5)
+            .rotated(0.25)
+            .at_anchor(300.0, 140.0, Anchor::TopRight);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let (bounds, transform) = world
+            .query_filtered::<(&LocalBounds, &SpatialTransform), (
+                bevy::prelude::With<gaanim_scene::GroupMarker>,
+                bevy::prelude::Without<bevy::prelude::ChildOf>,
+            )>()
+            .single(&world)
+            .map(|(bounds, transform)| (bounds.0, *transform))
+            .expect("one root layout group");
+        assert_point_close(transform.scale, DVec3::splat(1.5));
+        assert_point_close(
+            transform
+                .to_mat4()
+                .transform_point3(Anchor::TopRight.get_point(&bounds)),
+            DVec3::new(300.0, 140.0, 0.0),
         );
     }
 

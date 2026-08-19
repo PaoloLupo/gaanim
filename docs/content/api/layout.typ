@@ -378,6 +378,17 @@ Después de adjuntar un objeto, las llamadas posicionales como `at`, `next_to`,
 `LayoutOwnershipError`. La rotación y la escala siguen siendo válidas. Expresa
 un desplazamiento intencional mediante `offset`.
 
+El contenedor raíz sí es un `Drawable` posicionable. Operaciones como
+`page.at(400, 200)`, `at_anchor`, `next_to`, `align_to`, `to_edge`, `to_corner`,
+rotación y escala se reaplican sobre la caja final después de cada reflow y
+transforman el árbol completo. La restricción anterior corresponde únicamente
+a los hijos cuya traslación pertenece al contenedor.
+
+```python
+panel = scene.column([formula, explanation], gap=50, align="center")
+panel.at(400, 200)
+```
+
 Este error no es una limitación accidental: protege la búsqueda temporal. Si
 Layout y una animación escribieran la misma posición, recorrer la línea de
 tiempo podría resolver resultados diferentes según el orden de evaluación.

@@ -315,8 +315,11 @@ class LayoutItem:
 class Layout(Drawable):
     """Persistent row, column, grid, or stack that owns child translation.
 
-    Layout is itself a ``Drawable``. Positional fluent methods on managed
-    children raise ``LayoutOwnershipError``; use ``configure_item`` offsets.
+    Layout is itself a ``Drawable``: positioning, anchor, scale, rotation, and
+    edge-placement methods transform the complete resolved container and all
+    descendants. Reflow preserves those root transforms. Positional fluent
+    methods on managed children raise ``LayoutOwnershipError``; use
+    ``configure_item`` offsets.
     """
     count: int
     def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None, animate: Optional[float] = None) -> Drawable:
