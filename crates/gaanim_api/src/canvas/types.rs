@@ -298,6 +298,35 @@ pub struct ImageOptions {
     pub crop: Option<ImageCrop>,
 }
 
+/// Playback, sizing, and embedded-audio options for `Canvas::video_with_options`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VideoOptions {
+    pub image: ImageOptions,
+    pub start: Option<f64>,
+    pub offset: f64,
+    /// Length of the selected source interval, in source seconds.
+    pub duration: Option<f64>,
+    pub looping: bool,
+    pub speed: f64,
+    pub audio: bool,
+    pub volume: f64,
+}
+
+impl Default for VideoOptions {
+    fn default() -> Self {
+        Self {
+            image: ImageOptions::default(),
+            start: None,
+            offset: 0.0,
+            duration: None,
+            looping: false,
+            speed: 1.0,
+            audio: true,
+            volume: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImageOptionsError {
     #[error("image width and height must be finite positive values")]
@@ -545,6 +574,12 @@ pub enum SpawnKind {
     Image {
         image: ImageData,
         view: ImageView,
+    },
+    /// Timeline-sampled MP4 frame rendered through the native raster path.
+    Video {
+        poster: ImageData,
+        view: ImageView,
+        playback: gaanim_media::VideoPlayback,
     },
     /// One resolved vector path imported from an SVG document.
     SvgPath(Box<SvgPath>),

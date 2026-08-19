@@ -47,3 +47,9 @@ Por ahora, el audio solo está disponible durante la exportación: la vista
 previa interactiva todavía no lo reproduce ni permite recorrerlo. MP4 usa AAC
 y WebM usa Opus. Las secuencias de imágenes, GIF y WebP animado rechazan las
 pistas porque esos formatos no transportan audio.
+
+El audio embebido de `scene.video(...)` sí se reproduce en la vista previa:
+se pausa, recorre y repite junto con el timeline. `audio=false` silencia ese
+video y `volume` configura su ganancia. Esta reproducción interactiva no cambia
+todavía el comportamiento de las pistas independientes declaradas con
+`scene.audio(...)`.

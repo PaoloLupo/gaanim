@@ -13,7 +13,7 @@ use gaanim_api::canvas::{
     ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle, DimensionOptions,
     EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant, ImageCrop, ImageFit,
     ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PresentationBrand, QuoteCardSpec,
-    SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont,
+    SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont, VideoOptions,
 };
 use gaanim_api::export::{
     detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
@@ -3324,6 +3324,83 @@ impl PyScene {
                     pyo3::exceptions::PyValueError::new_err(error.to_string())
                 }
                 error => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+            })
+    }
+
+    /// Load an MP4 as a timeline-synchronized drawable with embedded audio.
+    #[pyo3(signature = (
+        path,
+        *,
+        width=None,
+        height=None,
+        fit="contain",
+        crop=None,
+        start=None,
+        offset=0.0,
+        duration=None,
+        r#loop=false,
+        speed=1.0,
+        audio=true,
+        volume=1.0,
+    ))]
+    fn video(
+        &self,
+        path: &str,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        crop: Option<(f64, f64, f64, f64)>,
+        start: Option<f64>,
+        offset: f64,
+        duration: Option<f64>,
+        r#loop: bool,
+        speed: f64,
+        audio: bool,
+        volume: f64,
+    ) -> PyResult<PyDrawable> {
+        let fit = match fit {
+            "contain" => ImageFit::Contain,
+            "cover" => ImageFit::Cover,
+            "stretch" => ImageFit::Stretch,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "fit must be 'contain', 'cover', or 'stretch'",
+                ));
+            }
+        };
+        let options = VideoOptions {
+            image: ImageOptions {
+                width,
+                height,
+                fit,
+                crop: crop.map(|(x, y, width, height)| ImageCrop {
+                    x,
+                    y,
+                    width,
+                    height,
+                }),
+            },
+            start,
+            offset,
+            duration,
+            looping: r#loop,
+            speed,
+            audio,
+            volume,
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .video_with_options(path, options)
+            .map(PyDrawable)
+            .map_err(|error| match error {
+                gaanim_api::canvas::VideoLoadError::Options(_)
+                | gaanim_api::canvas::VideoLoadError::InvalidNumber { .. }
+                | gaanim_api::canvas::VideoLoadError::OffsetOutOfRange
+                | gaanim_api::canvas::VideoLoadError::DurationOutOfRange => {
+                    pyo3::exceptions::PyValueError::new_err(error.to_string())
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
             })
     }
 

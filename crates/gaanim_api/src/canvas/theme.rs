@@ -965,6 +965,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Text(_) => "text",
         SpawnKind::Typst { .. } => "typst",
         SpawnKind::Image { .. } => "image",
+        SpawnKind::Video { .. } => "video",
         SpawnKind::SvgPath(_) => "svg_path",
         SpawnKind::Group(_) | SpawnKind::GroupNoCenter(_) => "group",
         SpawnKind::ValueTracker(_) => "value_tracker",

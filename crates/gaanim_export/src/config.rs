@@ -13,10 +13,15 @@ use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 pub struct AudioTrack {
     pub path: PathBuf,
     pub start_time: f64,
+    /// Optional output-timeline duration after playback-rate conversion.
     pub duration: Option<f64>,
     pub volume: f64,
     pub fade_in: f64,
     pub fade_out: f64,
+    pub source_offset: f64,
+    pub source_duration: Option<f64>,
+    pub speed: f64,
+    pub looping: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -71,7 +76,40 @@ impl AudioTrack {
             volume,
             fade_in,
             fade_out,
+            source_offset: 0.0,
+            source_duration: duration,
+            speed: 1.0,
+            looping: false,
         })
+    }
+
+    /// Build a track sourced from an embedded media stream.
+    pub fn from_media(
+        path: impl Into<PathBuf>,
+        start_time: f64,
+        source_offset: f64,
+        source_duration: f64,
+        speed: f64,
+        looping: bool,
+        volume: f64,
+    ) -> Result<Self, AudioTrackError> {
+        if !source_offset.is_finite() || source_offset < 0.0 {
+            return Err(AudioTrackError::InvalidNumber {
+                name: "source_offset",
+            });
+        }
+        for (name, value) in [("source_duration", source_duration), ("speed", speed)] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name });
+            }
+        }
+        let output_duration = (!looping).then_some(source_duration / speed);
+        let mut track = Self::new(path, start_time, output_duration, volume, 0.0, 0.0)?;
+        track.source_offset = source_offset;
+        track.source_duration = Some(source_duration);
+        track.speed = speed;
+        track.looping = looping;
+        Ok(track)
     }
 }
 
@@ -338,7 +376,7 @@ impl ExportConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::ExportTelemetry;
+    use super::{AudioTrack, ExportTelemetry};
 
     #[test]
     fn telemetry_clones_share_progress_and_logs() {
@@ -353,5 +391,21 @@ mod tests {
         assert_eq!(telemetry.progress(), (7, 12));
         assert_eq!(telemetry.encoder().as_deref(), Some("NVIDIA (NVENC)"));
         assert_eq!(telemetry.logs(), vec!["frame progress"]);
+    }
+
+    #[test]
+    fn media_audio_track_maps_source_time_to_scene_time() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-audio-track-test-{}", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+        let track = AudioTrack::from_media(&path, 3.0, 2.0, 4.0, 2.0, false, 0.75)
+            .expect("valid media track");
+        assert_eq!(track.start_time, 3.0);
+        assert_eq!(track.duration, Some(2.0));
+        assert_eq!(track.source_offset, 2.0);
+        assert_eq!(track.source_duration, Some(4.0));
+        assert_eq!(track.speed, 2.0);
+        assert!(!track.looping);
+        let _ = std::fs::remove_file(path);
     }
 }

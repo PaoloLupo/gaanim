@@ -913,6 +913,26 @@ scene.export("preview.webp", fps=30)
 ]
 
 #api-entry(
+  name: "Scene.video",
+  kind: "factory",
+  signature: "video(path: str, *, width?, height?, fit=\"contain\", crop?, start?, offset=0.0, duration?, loop=false, speed=1.0, audio=true, volume=1.0) -> Drawable",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo MP4 local.]), (name: "start", type: "float", default: "cursor actual", desc: [Instante de inicio en la escena.]), (name: "offset", type: "float", default: "0.0", desc: [Inicio dentro de la fuente, en segundos.]), (name: "duration", type: "float", default: "hasta el final", desc: [Duración seleccionada de la fuente.]), (name: "loop", type: "bool", default: "false", desc: [Repite el intervalo seleccionado.]), (name: "speed", type: "float", default: "1.0", desc: [Velocidad positiva; conserva el tono del audio.]), (name: "audio", type: "bool", default: "true", desc: [Reproduce y exporta la primera pista de audio.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia no negativa.]),),
+  returns: (type: "Drawable", desc: [Video transformable y sincronizado con el timeline.]),
+  desc: [Usa FFmpeg/ffprobe. No avanza el cursor; muestra el primer frame antes de `start` y congela el último al terminar sin loop. `width`, `height`, `fit` y `crop` tienen la misma semántica que `Scene.image`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(960, 540)
+# Con un MP4 local: clip = scene.video("assets/clip.mp4", width=720, duration=4, loop=True, volume=0.8)
+clip = scene.rect(720, 405) # placeholder ejecutable para la documentación
+scene.play([clip.fade_in(0.4)])
+scene.wait(7.6)
+scene.export("preview.webp", fps=30)
+```
+]
+
+#api-entry(
   name: "Scene.svg",
   kind: "factory",
   signature: "svg(path: str) -> Drawable",

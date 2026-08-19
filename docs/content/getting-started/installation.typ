@@ -17,7 +17,7 @@ Gaanim `0.1.0` se distribuye como un zip de GitHub Releases. No necesitas `just`
 - *Windows 10/11 x64*
 - *Python >=3.12* — 3.12 es el mínimo, 3.13 y 3.14 también funcionan. Instala desde #link("https://www.python.org/downloads/")[python.org] o `winget install Python.Python.3.12` / `winget install Python.Python.3.14`.
 - *uv recomendado* — #link("https://docs.astral.sh/uv/")[docs.astral.sh/uv] para crear entornos. También funciona `python -m venv`.
-- *FFmpeg opcional* — solo para exportar `mp4`/`webm`. Si no está, exporta `png` primero.
+- *FFmpeg opcional* — necesario para exportar `mp4`/`webm` y para usar `scene.video()`. Si no está, exporta `png` y evita videos embebidos.
 
 El binario es `gaanim.exe` (launcher, 300KB) + `gaanim-core.exe` (motor, ~140MB). El launcher no depende de `python3.dll`, por eso puede arrancar sin tener Python en `PATH` antes de ejecutarlo: detecta el venv, añade su directorio al `PATH` y luego lanza el core.
 

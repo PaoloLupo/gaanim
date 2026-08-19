@@ -73,10 +73,13 @@ fn main() {
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
     .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+    .add_plugins(gaanim_media::GaanimMediaPlugin)
     .add_plugins(gaanim_text::GaanimTextPlugin)
     .add_plugins(gaanim_api::GaanimApiPlugin)
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
     .add_plugins(gaanim_editor::GaanimEditorPlugin)
+    .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
+    .insert_resource(gaanim_media::VideoPreviewAudioEnabled(true))
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })

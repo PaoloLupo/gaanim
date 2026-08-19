@@ -301,13 +301,41 @@ impl ParallelEncoder {
 
     fn audio_filter(track: &AudioTrack, input_index: usize, render_start: f64) -> String {
         let relative_start = track.start_time - render_start;
-        let source_trim = (-relative_start).max(0.0);
+        let output_trim = (-relative_start).max(0.0);
         let mut filter = format!("[{input_index}:a]aresample=48000");
-        if source_trim > 0.0 || track.duration.is_some() {
-            filter.push_str(&format!(",atrim=start={source_trim:.6}"));
-            if let Some(duration) = track.duration {
+        if track.source_offset > 0.0 || track.source_duration.is_some() {
+            filter.push_str(&format!(",atrim=start={:.6}", track.source_offset));
+            if let Some(duration) = track.source_duration {
                 filter.push_str(&format!(":duration={duration:.6}"));
             }
+            filter.push_str(",asetpts=PTS-STARTPTS");
+        }
+        if track.looping {
+            let samples = track
+                .source_duration
+                .map(|duration| (duration * 48_000.0).round().max(1.0) as u64)
+                .unwrap_or(2_147_483_647);
+            filter.push_str(&format!(",aloop=loop=-1:size={samples}"));
+        }
+        let mut tempo = track.speed;
+        while tempo < 0.5 {
+            filter.push_str(",atempo=0.5");
+            tempo /= 0.5;
+        }
+        while tempo > 2.0 {
+            filter.push_str(",atempo=2.0");
+            tempo /= 2.0;
+        }
+        if (tempo - 1.0).abs() > 1e-9 {
+            filter.push_str(&format!(",atempo={tempo:.9}"));
+        }
+        if output_trim > 0.0 || track.duration.is_some() {
+            filter.push_str(&format!(",atrim=start={output_trim:.6}"));
+            if let Some(duration) = track.duration {
+                let remaining = (duration - output_trim).max(0.0);
+                filter.push_str(&format!(":duration={remaining:.6}"));
+            }
+            filter.push_str(",asetpts=PTS-STARTPTS");
         }
         filter.push_str(&format!(",volume={:.6}", track.volume));
         if track.fade_in > 0.0 {

@@ -1,0 +1,16 @@
+[package]
+name = "gaanim_media"
+version = "0.1.0"
+edition = "2024"
+description = "Timeline-synchronized video and embedded-audio playback for gaanim"
+
+[dependencies]
+gaanim_core = { path = "../gaanim_core" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+bevy = { workspace = true }
+crossbeam-channel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+

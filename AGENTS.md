@@ -4,7 +4,7 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 19 workspace members: 18 crates under
+- **Workspace root:** `Cargo.toml` defines 20 workspace members: 19 crates under
   `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
@@ -13,6 +13,7 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
   - `gaanim_scene` — ECS components, `SceneSet` system ordering, hierarchy propagation.
   - `gaanim_animation` — tween entities, signals, writing system.
   - `gaanim_timeline` — BTree-indexed clips, snapshot seek.
+  - `gaanim_media` — FFmpeg-backed video frames and timeline-synchronized preview audio.
   - `gaanim_renderer` — Vello 0.7 backend, `bevy_vello` 0.13.1, fragment retain caching.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.

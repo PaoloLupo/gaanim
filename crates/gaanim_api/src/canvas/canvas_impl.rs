@@ -22,7 +22,7 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{
     Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
-    LayoutTreeSnapshot, Margin, ReactiveReadoutLayoutSpec, SpawnKind,
+    LayoutTreeSnapshot, Margin, ReactiveReadoutLayoutSpec, SpawnKind, VideoOptions,
 };
 use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
@@ -252,6 +252,26 @@ pub enum ImageLoadError {
     },
     #[error(transparent)]
     Options(#[from] ImageOptionsError),
+}
+
+/// Failures while validating or opening a video requested by `Canvas::video`.
+#[derive(Debug, thiserror::Error)]
+pub enum VideoLoadError {
+    #[error(transparent)]
+    Media(#[from] gaanim_media::VideoError),
+    #[error(transparent)]
+    Options(#[from] ImageOptionsError),
+    #[error(transparent)]
+    Audio(#[from] AudioTrackError),
+    #[error("{name} must be a finite {requirement} number")]
+    InvalidNumber {
+        name: &'static str,
+        requirement: &'static str,
+    },
+    #[error("video offset must be before the end of the source")]
+    OffsetOutOfRange,
+    #[error("video duration extends beyond the end of the source")]
+    DurationOutOfRange,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1442,6 +1462,95 @@ impl Canvas {
         let image = load_image(self.resolve_asset_path(path))?;
         let view = options.resolve(image.width, image.height)?;
         Ok(self.spawn(SpawnKind::Image { image, view }))
+    }
+
+    /// Load a timeline-synchronized MP4 as an animatable raster drawable.
+    pub fn video(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, VideoLoadError> {
+        self.video_with_options(path, VideoOptions::default())
+    }
+
+    /// Load a video with temporal, sizing, loop, and embedded-audio options.
+    ///
+    /// Constructing the drawable does not advance the scene cursor. Before its
+    /// start it shows the first selected frame; a non-looping video freezes on
+    /// the last selected frame.
+    pub fn video_with_options(
+        &mut self,
+        path: impl AsRef<Path>,
+        options: VideoOptions,
+    ) -> Result<DrawableHandle, VideoLoadError> {
+        for (name, value, positive) in [
+            ("offset", options.offset, false),
+            ("speed", options.speed, true),
+            ("volume", options.volume, false),
+        ] {
+            if !value.is_finite() || if positive { value <= 0.0 } else { value < 0.0 } {
+                return Err(VideoLoadError::InvalidNumber {
+                    name,
+                    requirement: if positive { "positive" } else { "non-negative" },
+                });
+            }
+        }
+        if let Some(start) = options.start
+            && (!start.is_finite() || start < 0.0)
+        {
+            return Err(VideoLoadError::InvalidNumber {
+                name: "start",
+                requirement: "non-negative",
+            });
+        }
+        if let Some(duration) = options.duration
+            && (!duration.is_finite() || duration <= 0.0)
+        {
+            return Err(VideoLoadError::InvalidNumber {
+                name: "duration",
+                requirement: "positive",
+            });
+        }
+
+        let path = self.resolve_asset_path(path);
+        let metadata = gaanim_media::probe_video(&path)?;
+        if options.offset >= metadata.duration {
+            return Err(VideoLoadError::OffsetOutOfRange);
+        }
+        let source_duration = options
+            .duration
+            .unwrap_or(metadata.duration - options.offset);
+        if options.offset + source_duration > metadata.duration + 1e-6 {
+            return Err(VideoLoadError::DurationOutOfRange);
+        }
+        let view = options.image.resolve(metadata.width, metadata.height)?;
+        let poster = gaanim_media::decode_video_frame(&path, &metadata, options.offset)?;
+        let has_audio = metadata.has_audio;
+        let playback = gaanim_media::VideoPlayback {
+            path: path.canonicalize().unwrap_or(path),
+            metadata,
+            scene_start: options.start.unwrap_or_else(|| self.current_time()),
+            source_offset: options.offset,
+            source_duration,
+            looping: options.looping,
+            speed: options.speed,
+            audio: options.audio,
+            volume: options.volume,
+            last_frame: None,
+        };
+        if options.audio && has_audio {
+            let track = AudioTrack::from_media(
+                playback.path.clone(),
+                playback.scene_start,
+                playback.source_offset,
+                playback.source_duration,
+                playback.speed,
+                playback.looping,
+                playback.volume,
+            )?;
+            self.audio_tracks.push(track);
+        }
+        Ok(self.spawn(SpawnKind::Video {
+            poster,
+            view,
+            playback,
+        }))
     }
 
     /// Load an SVG as an animatable group of resolved vector paths.

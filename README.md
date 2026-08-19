@@ -150,6 +150,16 @@ Se admiten MP4, WebM, WebP animado, GIF y secuencias PNG. La exportación de
 video requiere FFmpeg disponible en `PATH`; si no está instalado, use primero
 una secuencia PNG o instale FFmpeg según su plataforma.
 
+También puede colocar un MP4 dentro de la escena. El clip es un `Drawable`,
+responde al seek del editor y permite trim, loop, velocidad y audio embebido:
+
+```python
+clip = scene.video("assets/clip.mp4", width=720, loop=True, volume=0.8)
+scene.wait(8)
+```
+
+Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
+
 ## Comandos de desarrollo
 
 | Objetivo | Comando |

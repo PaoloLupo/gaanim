@@ -6099,6 +6099,22 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Video {
+                poster,
+                view,
+                playback,
+            } => {
+                let b = builder.image(poster.clone(), *view);
+                let mr = Self::finish_spawn_builder(b, spec);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(playback.clone());
+                }
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::SvgPath(path) => {
                 let b = builder.svg_path(path);
                 let mr = Self::finish_spawn_builder(b, spec);

@@ -19,6 +19,7 @@ gaanim_scene = { path = "../gaanim_scene" }
 gaanim_api = { path = "../gaanim_api" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_media = { path = "../gaanim_media" }
 gaanim_export = { path = "../gaanim_export" }
 gaanim_diff = { path = "../gaanim_diff", features = ["gui"] }
 gaanim_renderer = { path = "../gaanim_renderer" }

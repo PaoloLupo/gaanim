@@ -3278,6 +3278,31 @@ class Scene:
             result = scene.image("assets/example.svg")
         """
         ...
+    def video(
+        self,
+        path: str,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Literal["contain", "cover", "stretch"] = "contain",
+        crop: Optional[tuple[float, float, float, float]] = None,
+        start: Optional[float] = None,
+        offset: float = 0.0,
+        duration: Optional[float] = None,
+        loop: bool = False,
+        speed: float = 1.0,
+        audio: bool = True,
+        volume: float = 1.0,
+    ) -> Drawable:
+        """Create a timeline-synchronized MP4 drawable without advancing the cursor.
+
+        ``start`` defaults to the current cursor. ``offset`` and ``duration``
+        select source seconds, ``loop`` repeats that interval, and ``speed``
+        preserves audio pitch. The first/last frame remains visible outside
+        non-looping playback. Requires ``ffmpeg`` and ``ffprobe`` in PATH and
+        raises ValueError for invalid ranges or RuntimeError for media failures.
+        """
+        ...
     def svg(self, path: str) -> Drawable:
         """Create a svg drawable in the scene.
 
