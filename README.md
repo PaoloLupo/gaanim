@@ -72,7 +72,7 @@ scene.stop("resultado")
 ```
 
 La exportación ignora los stops. Para exportar un segmento concreto use
-`scene.export("intro.mp4", segment="Introducción")`.
+`gaanim export . --output intro.mp4`.
 
 El editor usa un único playback flotante en lugar de una timeline detallada.
 `Space` alterna play/pausa, las flechas navegan entre segmentos y `L` activa el
@@ -121,29 +121,30 @@ El snapping temporal del editor permanece desactivado mientras haya contenido
 
 ## Paquete Python local
 
-El binding también puede instalarse en el entorno virtual del repositorio:
+El wheel instala helpers y stubs para autocompletado; el binding nativo vive
+exclusivamente dentro del ejecutable:
 
 ```powershell
 just bootstrap
 just python-develop
-.\.venv\Scripts\python -c "from gaanim import Scene; print(Scene)"
 ```
 
 Para construir una wheel distribuible use `just wheel`; el resultado se escribe
-en `target/wheels/`. El modo de paquete no incluye el visor interactivo:
-`Scene.render()` sigue requiriendo ejecutar el script con la aplicación
-`gaanim`.
+en `target/wheels/`. Es un wheel universal `py3-none-any` sin renderer ni
+extensión nativa. Ejecutar o importar escenas con Python plano produce un error
+que dirige al usuario a la aplicación `gaanim`.
 
 Después de `just python-develop`, ejecute `just validate-python-api` para
-comprobar que el stub tipado público sigue coincidiendo con la extensión nativa.
+comprobar que el stub tipado público sigue coincidiendo con el módulo PyO3
+embebido por el ejecutable.
 
 ## Exportar
 
-Reemplace `scene.render()` por una exportación cuyo formato se infiere de la
-extensión:
+Mantenga `scene.render()` al final del script y solicite la exportación al
+ejecutable:
 
-```python
-scene.export("output.mp4", fps=30)
+```powershell
+gaanim export . --output output.mp4 --quality standard
 ```
 
 Se admiten MP4, WebM, WebP animado, GIF y secuencias PNG. La exportación de

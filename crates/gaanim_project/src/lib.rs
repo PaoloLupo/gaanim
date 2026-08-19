@@ -241,7 +241,7 @@ fn project_readme(name: &str, kind: ProjectKind) -> String {
     let extra = if kind.is_slides() {
         "\n## Presentar\n\n```powershell\ngaanim --present --monitor 1 .\n```\n"
     } else {
-        "\n## Exportar\n\n```powershell\n$env:GAANIM_EXPORT = \"exports/video.mp4\"\ngaanim .\nRemove-Item Env:GAANIM_EXPORT\n```\n"
+        "\n## Exportar\n\n```powershell\ngaanim export . --output exports/video.mp4 --quality production\n```\n"
     };
     format!(
         "# {name}\n\nProyecto `{}` generado por Gaanim.\n\n## Editar y previsualizar\n\n\
@@ -571,6 +571,90 @@ pub fn activate_environment(probe: &EnvironmentProbe) -> Result<Option<PathBuf>,
     Ok(python.venv_root.clone())
 }
 
+/// Create a project virtual environment with uv and install the bundled
+/// authoring-only Gaanim wheel when it is missing or out of date.
+pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, String> {
+    let wheel = bundled_authoring_wheel().ok_or_else(|| {
+        format!(
+            "bundled gaanim {} authoring wheel was not found next to the application",
+            env!("CARGO_PKG_VERSION")
+        )
+    })?;
+    let venv = project_root.join(".venv");
+    if venv_python(&venv).is_none() {
+        let status = Command::new("uv")
+            .current_dir(project_root)
+            .args(["venv", "--python", "3.12", ".venv"])
+            .status()
+            .map_err(|error| format!("could not start uv: {error}"))?;
+        if !status.success() {
+            return Err(format!("uv could not create {}", venv.display()));
+        }
+    }
+    let python = venv_python(&venv).ok_or_else(|| {
+        format!(
+            "uv did not create a usable environment at {}",
+            venv.display()
+        )
+    })?;
+    let installed = Command::new(&python)
+        .args([
+            "-c",
+            "import importlib.metadata as m; print(m.version('gaanim'))",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+    if installed.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+        let status = Command::new("uv")
+            .args([
+                OsStr::new("pip"),
+                OsStr::new("install"),
+                OsStr::new("--python"),
+            ])
+            .arg(&python)
+            .arg("--reinstall")
+            .arg("--no-deps")
+            .arg(&wheel)
+            .status()
+            .map_err(|error| format!("could not start uv: {error}"))?;
+        if !status.success() {
+            return Err(format!(
+                "uv could not install the Gaanim authoring package into {}",
+                venv.display()
+            ));
+        }
+    }
+    Ok(venv)
+}
+
+fn bundled_authoring_wheel() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GAANIM_AUTHORING_WHEEL").map(PathBuf::from)
+        && path.is_file()
+    {
+        return Some(path);
+    }
+    let filename = format!("gaanim-{}-py3-none-any.whl", env!("CARGO_PKG_VERSION"));
+    let mut directories = vec![
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("target/wheels"),
+    ];
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(bin_dir) = executable.parent()
+    {
+        directories.push(bin_dir.to_path_buf());
+        if let Some(prefix) = bin_dir.parent() {
+            directories.push(prefix.join("share/gaanim"));
+        }
+    }
+    directories
+        .into_iter()
+        .map(|directory| directory.join(&filename))
+        .find(|path| path.is_file())
+}
+
 #[cfg(windows)]
 fn prepend_to_path(path: impl AsRef<Path>) {
     let path = path.as_ref();
@@ -618,6 +702,13 @@ mod tests {
             assert_eq!(project.manifest.kind, kind);
             assert!(directory.join("main.py").is_file());
             assert!(project.entry.is_file());
+            let source = std::fs::read_to_string(&project.entry).unwrap();
+            assert!(source.contains("scene.render()"));
+            assert!(!source.contains("scene.export("));
+            let readme = std::fs::read_to_string(directory.join("README.md")).unwrap();
+            if kind == ProjectKind::Video {
+                assert!(readme.contains("gaanim export"));
+            }
         }
     }
 

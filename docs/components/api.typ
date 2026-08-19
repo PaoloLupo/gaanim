@@ -1,7 +1,7 @@
 #import "section.typ": docs-chapter, code-cell
 
 // API entry card — params, return, kind badge + live rendered example
-// Body python blocks with `# show-code: true` (and optional `# output:` + `scene.export`) compile to code + WebP preview.
+// Body Python blocks with `# show-code: true`, `# output:`, and `scene.render()` compile through the Gaanim executable.
 // Plain fragment blocks without magic comments render as static code (no execution).
 
 #let badge-color(kind) = {

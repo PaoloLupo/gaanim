@@ -443,7 +443,8 @@ scene.persist(title)
 scene.segment("closing", Transition.slide(0.35, "left"))
 scene.release(title)
 scene.wait(0.5)
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -622,46 +623,28 @@ holes, and `drawable.no_clip()` removes a previously assigned mask.
 == Salida
 
 ```python
-scene.render()                         # Interactive Gaanim viewer
-scene.export("output.webp", fps=30)   # Format follows the file extension
-scene.snapshots("snapshots", [0.0, 1.0])
+scene.render()  # Submit the authored timeline to the Gaanim host
 ```
 
-All export controls are available from Python. `quality` accepts `"draft"`,
-`"standard"`, or `"production"`; combine it with `aspect_ratio="youtube"`,
-`"tiktok"`, or `"instagram"` to use an output preset. Explicit `width`,
-`height`, and `fps` take precedence over a preset. Use `start_time` and
-`end_time` to export an interval, `transparent=True` for alpha-capable formats,
-and `encoder="auto"` (or `"libx264"`, `"nvenc"`, `"amf"`, `"qsv"`, or
-`"vaapi"`) to select encoding. `crf` ranges from 0 to 51 and `speed` accepts
-`"fast"`, `"balanced"`, or `"best"`.
+Preview, export and visual capture are host responsibilities. Export a script
+without changing it:
 
-Use `segment="Name"` to export only one named segment. Use `segment="*"` to
-export every segment; the path must contain `{segment}` or `{index}`
-so files cannot overwrite each other. Parent directories are created
-automatically. `segment` is intentionally exclusive with `start_time` and
-`end_time`.
-
-```python
-scene.export(
-    "vertical.webm",
-    quality="standard",
-    aspect_ratio="tiktok",
-    transparent=True,
-    start_time=2.0,
-    end_time=12.0,
-)
-
-scene.export("defense/results.mp4", segment="Resultados", quality="production")
-scene.export(
-    "defense/segments/{index}-{segment}.mp4",
-    segment="*",
-    quality="production",
-)
+```bash
+gaanim export my_animation.py --output output.webp --quality standard
 ```
 
 Run a script through the Gaanim application:
 
 ```bash
 gaanim my_animation.py
+```
+
+For visual regression, the executable injects the authoritative directory.
+The script only declares exact timeline times:
+
+```python
+import os
+
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshots, [0.0, 1.0])
 ```

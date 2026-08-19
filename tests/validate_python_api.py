@@ -1,4 +1,4 @@
-"""Check that the shipped Python stub matches the native extension surface."""
+"""Check that the shipped Python stub matches the embedded PyO3 surface."""
 
 from __future__ import annotations
 
@@ -756,7 +756,7 @@ def main() -> int:
         print("\n".join(f"- {name}" for name in missing), file=sys.stderr)
         return 1
 
-    print("Python stub matches the native extension surface.")
+    print("Python stub matches the embedded PyO3 surface.")
     return 0
 
 

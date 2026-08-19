@@ -62,7 +62,8 @@ Cada entrada muestra:
 - *Firma* — tipos y retorno con tipografía monoespaciada.
 - *Parámetros* — Nombre | Tipo | Valor predeterminado | Descripción.
 - *Retorno* — tipo y qué representa.
-- *Ejemplo* — bloque `python` con `# show-code: true` y `scene.export("preview.webp", fps=30)`. El archivo exportado se detecta automáticamente: ya no hace falta `# output: preview.webp`. La vista previa aparece debajo del código a ancho completo; haz clic para ampliarla al 94 % del viewport.
+- *Ejemplo* — bloque `python` con `# show-code: true`, `# output: preview.webp`
+  y `scene.render()`. El ejecutable genera la vista previa debajo del código.
 
 Los ejemplos con preview son escenas mínimas y autocontenidas:
 
@@ -72,7 +73,8 @@ from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 node = scene.circle(60).fill(BLUE).at(0, 0)
 scene.play([node.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 
 Copiar, pegar, `gaanim archivo.py`.

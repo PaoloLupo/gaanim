@@ -73,7 +73,7 @@ def _profile_commands(
         commands = _fast_commands(repo, change)
         for command in (
             ["just", "clippy"],
-            ["just", "python-develop"],
+            ["just", "wheel"],
             ["just", "validate-python-api"],
             ["just", "docs"],
             [sys.executable, "plugins/gaanim-dev/scripts/audit.py"],
@@ -85,7 +85,7 @@ def _profile_commands(
             ["cargo", "fmt", "--all", "--", "--check"],
             ["cargo", "test", "--workspace"],
             ["cargo", "clippy", "--workspace", "--all-targets"],
-            ["just", "python-develop"],
+            ["just", "wheel"],
             ["just", "validate-python-api"],
             ["just", "docs"],
             [sys.executable, "-m", "unittest", "discover", "-s", "plugins/gaanim-dev/tests"],

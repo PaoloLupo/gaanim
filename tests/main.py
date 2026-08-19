@@ -604,10 +604,4 @@ scene.wait(2.0)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.5, 2.5, 6.0, 11.0, 15.0, 20.0, 24.0, 26.0])
-elif output := os.environ.get("GAANIM_EXPORT"):
-    destination = Path(output)
-    if not destination.is_absolute():
-        destination = ROOT / destination
-    scene.export(str(destination), fps=60, quality="production")
-else:
-    scene.render()
+scene.render()

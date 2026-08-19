@@ -56,9 +56,10 @@ exportaciones o navegación en vivo.
 
 == Salida
 
-Una escena debe terminar con una intención clara: `render()` para el editor,
-`export(...)` para un archivo o `snapshots(...)` para regresión visual. Evita
-combinar salidas incompatibles sin una condición explícita.
+Una escena termina con `render()`, que entrega la descripción al ejecutable.
+El editor/CLI decide si previsualiza, exporta o captura snapshots; el script
+solo declara tiempos mediante `snapshots(...)` cuando el host inyecta
+`GAANIM_SNAPSHOTS`.
 
 == Cámara y clipping
 

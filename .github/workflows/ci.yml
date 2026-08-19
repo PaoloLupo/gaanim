@@ -116,11 +116,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build and install the extension wheel
+      - name: Build and install the authoring wheel
         run: |
-          python -m pip install maturin
-          python -m maturin build --manifest-path crates/gaanim_python/Cargo.toml --out dist
+          python -m pip install build hatchling
+          python -m build --wheel --no-isolation --outdir dist crates/gaanim_python
+          python tests/validate_authoring_wheel.py dist
           python -m pip install dist/*.whl
 
-      - name: Validate the Python API stub
-        run: python tests/validate_python_api.py
+      - name: Validate the embedded Python API stub
+        run: cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py

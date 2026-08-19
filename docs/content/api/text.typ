@@ -78,7 +78,8 @@ copy = scene.text(
     flow=TextFlow(wrap=400, align="center", line_spacing=1.2),
 ).at(0, 0)
 scene.play([copy.write(1.0, by="part")])
-scene.export("text_factory.webp", fps=30)
+# output: text_factory.webp
+scene.render()
 ```
 ]
 
@@ -106,7 +107,8 @@ equation = scene.equation(
 ).at(0, 0)
 equation["acceleration"].fill(GOLD)
 scene.play([equation.write(1.0, by="part")])
-scene.export("equation_factory.webp", fps=30)
+# output: equation_factory.webp
+scene.render()
 ```
 ]
 
@@ -186,7 +188,8 @@ copy = scene.text(
 ).at(0, 0)
 scene.play([copy.write(1.2, by="word", stagger=0.05)])
 scene.play([copy.words[3].indicate(0.6, color=GOLD)])
-scene.export("text_inline_markup.webp", fps=30)
+# output: text_inline_markup.webp
+scene.render()
 ```
 
 - `\\*` and `\\_` produce literal delimiters.
@@ -223,7 +226,8 @@ equation = scene.equation(
 scene.play([equation.write(1.2, by="part")])
 scene.play([equation["gravity"].indicate(0.6)])
 scene.play([equation["acceleration"].color_to(GOLD, duration=0.6)])
-scene.export("compact_text_parts.webp", fps=30)
+# output: compact_text_parts.webp
+scene.render()
 ```
 ]
 
@@ -254,7 +258,8 @@ formula = part(
 )
 text = scene.text("Resultado: ", formula).at(0, 0)
 scene.play([text.write(1.1, by="part", stagger=0.05)])
-scene.export("text_parts.webp", fps=30)
+# output: text_parts.webp
+scene.render()
 ```
 ]
 
@@ -358,7 +363,8 @@ page = scene.column(
     within="safe", width="fill", height="fill", padding=28, gap=18,
 )
 scene.play([page.fade_in().duration(0.7)])
-scene.export("text_flow.webp", fps=30)
+# output: text_flow.webp
+scene.render()
 ```
 ]
 
@@ -409,7 +415,8 @@ copy["concept"].fill(GOLD)
 copy["formula"]["mass"].fill(BLUE)
 scene.play([copy.write(1.0, by="word")])
 scene.play([copy.words[1].pulse(0.6), copy["formula"]["mass"].focus(0.6)])
-scene.export("text_selection.webp", fps=30)
+# output: text_selection.webp
+scene.render()
 ```
 ]
 
@@ -526,7 +533,8 @@ after = scene.text("$x = ", part("result", "4", color=GOLD), "$").at(0, 0)
 scene.play([before.write(0.8)])
 scene.play([before["obsolete"].cancel(0.5)])
 scene.play([before.step_to(after, duration=0.8)])
-scene.export("text_transition.webp", fps=30)
+# output: text_transition.webp
+scene.render()
 ```
 ]
 

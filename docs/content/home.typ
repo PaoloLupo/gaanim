@@ -43,7 +43,8 @@ scene.play([
     rect.grow_from_center().duration(1.0),
 ])
 scene.play([circle.move(200, 0).duration(0.8).smooth()])
-scene.export("demo.mp4", fps=30)
+# output: demo.mp4
+scene.render()
 ```
 
 #html.div(style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 28px 0;", [

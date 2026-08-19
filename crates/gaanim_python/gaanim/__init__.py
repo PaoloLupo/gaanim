@@ -1,6 +1,13 @@
 """Gaanim — GPU-accelerated vector animation engine."""
 
+import sys
 import warnings
+
+if f"{__name__}.gaanim_core" not in sys.modules:
+    raise RuntimeError(
+        "The `gaanim` wheel only provides authoring helpers and type information. "
+        "Run animation scripts with `gaanim <script.py>` or open them in the Gaanim editor."
+    )
 
 from . import colors
 from .gaanim_core import (

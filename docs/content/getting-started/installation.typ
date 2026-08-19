@@ -102,7 +102,7 @@ scene.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proye
 circle = scene.circle(80).fill(BLUE)
 scene.play([circle.create().duration(1).spring()])
 scene.render()  # para preview
-# scene.export("exports/demo.mp4", fps=30)  # para video
+# luego: gaanim export . --output exports/demo.mp4
 ```
 
 == Cómo detecta Python sin variables
@@ -178,7 +178,7 @@ Para contribuir o compilar desde fuente:
 ```powershell
 git clone https://github.com/<tu-org>/gaanim
 cd gaanim
-just bootstrap        # crea .venv con Python 3.14 del sistema y instala maturin
+just bootstrap        # crea .venv e instala build + hatchling
 just build            # debug: gaanim_launcher + gaanim_editor
 just doctor           # check + compila y prueba gaanim --help via launcher
 ```
@@ -190,9 +190,9 @@ just check            # cargo check --workspace
 just clippy           # clippy
 cargo test --workspace
 just run quickstart   # via launcher en Windows, directo en Unix
-just python-develop   # maturin develop en .venv
-just wheel            # wheel en target/wheels/
-just validate-python-api  # compara stub .pyi con la extensión
+just python-develop   # instala el paquete de autoría editable
+just wheel            # wheel universal en target/wheels/
+just validate-python-api  # compara el stub con el módulo embebido
 just docs             # compila el site Typst
 ```
 
@@ -201,10 +201,10 @@ Estructura relevante:
 ```text
 crates/gaanim_launcher  # exe sin pyo3: detecta Python y lanza gaanim-core
 crates/gaanim_editor    # lib + bin gaanim / gaanim-core (Bevy + PyO3 abi3-py312)
-crates/gaanim_python    # cdylib gaanim.gaanim_core
+crates/gaanim_python    # módulo PyO3 embebido + paquete de autoría
 target/debug/gaanim.exe       # launcher (Windows)
 target/debug/gaanim-core.exe  # motor
-target/wheels/gaanim-0.1.0-*.whl
+target/wheels/gaanim-0.1.0-py3-none-any.whl
 ```
 
 En dev, `cargo run -p gaanim_editor -- examples/quickstart.py` requiere `PATH` con Python. Por eso `just run` en Windows usa el launcher (`cargo run -p gaanim_launcher`). Para debug directo del core, el `just` anterior ya no inyecta `$env:PATH`.

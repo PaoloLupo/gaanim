@@ -92,6 +92,10 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         project.root.display()
     );
     println!("Edit: {}", project.entry.display());
+    match gaanim_project::provision_authoring_package(&project.root) {
+        Ok(venv) => println!("Python authoring environment: {}", venv.display()),
+        Err(error) => eprintln!("gaanim init: authoring environment not ready: {error}"),
+    }
     println!("Preview: gaanim {}", project.root.display());
     println!("Check: gaanim check {}", project.root.display());
     if parsed.kind.is_slides() {
@@ -100,7 +104,10 @@ fn handle_no_python_commands(args: &[String]) -> bool {
             project.root.display()
         );
     } else {
-        println!("Export: set GAANIM_EXPORT=exports/video.mp4, then run the project");
+        println!(
+            "Export: gaanim export {} --output exports/video.mp4 --quality production",
+            project.root.display()
+        );
     }
     true
 }
@@ -128,6 +135,9 @@ fn parse_init_args(args: &[String]) -> Result<CreateProjectOptions, String> {
 }
 
 fn find_script_hint(args: &[String]) -> Option<PathBuf> {
+    if matches!(args.get(1).map(String::as_str), Some("check" | "export")) {
+        return args.get(2).map(PathBuf::from);
+    }
     args.iter().rev().find_map(|arg| {
         if arg.starts_with('-') || matches!(arg.as_str(), "check" | "init") {
             return None;
@@ -153,6 +163,7 @@ fn print_general_help() {
     println!("  gaanim");
     println!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
     println!("  gaanim init <video|slides> [DIRECTORY] [--force]");
+    println!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality <PRESET>]");
     println!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
     println!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
 }
@@ -237,6 +248,20 @@ mod tests {
     #[test]
     fn script_hint_ignores_command_words() {
         let args = ["gaanim".into(), "check".into(), "demo.py".into()];
+        assert_eq!(find_script_hint(&args), Some(PathBuf::from("demo.py")));
+    }
+
+    #[test]
+    fn export_uses_the_script_instead_of_option_values_as_hint() {
+        let args = [
+            "gaanim".into(),
+            "export".into(),
+            "demo.py".into(),
+            "--output".into(),
+            "video.mp4".into(),
+            "--quality".into(),
+            "standard".into(),
+        ];
         assert_eq!(find_script_hint(&args), Some(PathBuf::from("demo.py")));
     }
 }

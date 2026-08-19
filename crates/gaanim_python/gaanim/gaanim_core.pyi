@@ -3811,34 +3811,12 @@ class Scene:
             scene.render()
         """
         ...
-    def export(
-        self,
-        path: str,
-        fps: Optional[int] = None,
-        *,
-        transparent: Optional[bool] = None,
-        quality: Optional[Literal["draft", "standard", "production"]] = None,
-        aspect_ratio: Optional[Literal["youtube", "tiktok", "instagram", "custom"]] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        start_time: Optional[float] = None,
-        end_time: Optional[float] = None,
-        segment: Optional[str] = None,
-        crf: Optional[int] = None,
-        encoder: Literal["auto", "libx264", "nvenc", "amf", "qsv", "vaapi"] = "auto",
-        speed: Optional[Literal["fast", "balanced", "best"]] = None,
-    ) -> None:
-        """Export the scene output.
-
-        Example:
-            scene.export("output.webp")
-        """
-        ...
     def snapshots(self, directory: str, times: Sequence[float]) -> int:
-        """Snapshots the scene output.
+        """Ask the attached Gaanim diff host to capture exact timeline seeks.
 
-        Example:
-            result = scene.snapshots("example", [0.0, 1.0])
+        ``directory`` must be the path supplied in ``GAANIM_SNAPSHOTS`` by
+        ``gaanim --diff``. Returns the number of captured frames and raises
+        ``RuntimeError`` when no snapshot host is attached or the path differs.
         """
         ...
     # Reactive geometry helpers

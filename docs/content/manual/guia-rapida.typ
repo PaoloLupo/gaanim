@@ -59,11 +59,11 @@ Durante el trabajo usa:
 scene.render()
 ```
 
-Ejecuta `gaanim .` desde la carpeta del proyecto. Para producir un video,
-sustituye la última línea por:
+Ejecuta `gaanim .` desde la carpeta del proyecto. Para producir un video no
+cambies el script; usa el ejecutable:
 
-```python
-scene.export("exports/movimiento-circular.mp4", fps=30)
+```powershell
+gaanim export . --output exports/movimiento-circular.mp4 --quality standard
 ```
 
 La exportación MP4 necesita FFmpeg. WebP animado es una alternativa útil para

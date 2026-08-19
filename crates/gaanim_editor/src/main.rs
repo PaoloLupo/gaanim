@@ -28,7 +28,13 @@ use hot_reload::{
 };
 
 fn main() {
+    if dispatch_python_api_validation_mode() {
+        return;
+    }
     if dispatch_export_worker_mode() {
+        return;
+    }
+    if dispatch_export_mode() {
         return;
     }
     if dispatch_init_mode() {
@@ -117,6 +123,90 @@ fn main() {
     }
 
     app.run();
+}
+
+fn dispatch_export_mode() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) != Some("export") {
+        return false;
+    }
+    let mut script = None;
+    let mut output = None;
+    let mut quality = "standard".to_string();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" | "-o" => {
+                index += 1;
+                output = args.get(index).cloned();
+            }
+            "--quality" => {
+                index += 1;
+                quality = args.get(index).cloned().unwrap_or_default();
+            }
+            value if value.starts_with('-') => {
+                eprintln!("gaanim export: unknown option `{value}`");
+                std::process::exit(2);
+            }
+            value if script.is_none() => script = Some(PathBuf::from(value)),
+            value => {
+                eprintln!("gaanim export: unexpected argument `{value}`");
+                std::process::exit(2);
+            }
+        }
+        index += 1;
+    }
+    let script = script
+        .and_then(|path| gaanim_project::resolve_entry(&path).ok())
+        .unwrap_or_else(|| {
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production]");
+            std::process::exit(2);
+        });
+    let output = output.unwrap_or_else(|| {
+        eprintln!("gaanim export: --output is required");
+        std::process::exit(2);
+    });
+    if !matches!(quality.as_str(), "draft" | "standard" | "production") {
+        eprintln!("gaanim export: quality must be draft, standard, or production");
+        std::process::exit(2);
+    }
+    let format = Path::new(&output)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|format| matches!(format.as_str(), "mp4" | "webm" | "webp" | "gif" | "png"))
+        .unwrap_or_else(|| {
+            eprintln!("gaanim export: output extension must be mp4, webm, webp, gif, or png");
+            std::process::exit(2);
+        });
+    if let Err(error) = run_export_worker(ExportWorkerArgs {
+        script,
+        output,
+        quality,
+        format,
+    }) {
+        eprintln!("gaanim export: {error}");
+        std::process::exit(1);
+    }
+    true
+}
+
+fn dispatch_python_api_validation_mode() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) != Some("--validate-python-api") {
+        return false;
+    }
+    if args.len() != 2 {
+        eprintln!("usage: gaanim-core --validate-python-api <validator.py>");
+        std::process::exit(2);
+    }
+    gaanim_python::register_inittab();
+    Python::initialize();
+    if let Err(error) = script_runner::validate_python_api(Path::new(&args[1])) {
+        eprintln!("gaanim Python API validation failed: {error}");
+        std::process::exit(1);
+    }
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,6 +307,11 @@ fn start_script_session(
     script_path: PathBuf,
     project: Option<gaanim_project::ResolvedProject>,
 ) -> Result<(), String> {
+    if let Some(project) = &project
+        && let Err(error) = gaanim_project::provision_authoring_package(&project.root)
+    {
+        eprintln!("gaanim: authoring environment not ready: {error}");
+    }
     let hint = project
         .as_ref()
         .map(|project| project.root.as_path())
@@ -310,6 +405,11 @@ fn dispatch_init_mode() -> bool {
         std::process::exit(2);
     });
 
+    match gaanim_project::provision_authoring_package(&project.root) {
+        Ok(venv) => println!("Python authoring environment: {}", venv.display()),
+        Err(error) => eprintln!("gaanim init: authoring environment not ready: {error}"),
+    }
+
     println!(
         "Created {} project: {}",
         parsed.kind.name(),
@@ -324,7 +424,10 @@ fn dispatch_init_mode() -> bool {
             project.root.display()
         );
     } else {
-        println!("Export: set GAANIM_EXPORT=exports/video.mp4, then run the project");
+        println!(
+            "Export: gaanim export {} --output exports/video.mp4 --quality production",
+            project.root.display()
+        );
     }
     true
 }
@@ -910,6 +1013,7 @@ fn parse_args() -> LaunchArgs {
         eprintln!("  gaanim");
         eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
         eprintln!("  gaanim init <video|slides> [DIRECTORY] [--force]");
+        eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE>");
         eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
         std::process::exit(0);

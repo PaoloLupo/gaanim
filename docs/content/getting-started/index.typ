@@ -23,7 +23,7 @@ Para la guía completa (usuario final con zip + `uv`, y desarrollo local desde f
 ```bash
 git clone https://github.com/user/gaanim
 cd gaanim
-just bootstrap        # .venv + maturin
+just bootstrap        # .venv + build/hatchling
 just build            # debug: gaanim_launcher + gaanim-core
 just doctor           # verifica build y gaanim --help via launcher
 ```
@@ -77,16 +77,16 @@ Para exportar en lugar de abrir la previsualización:
 
 ```python
 <<< # MP4
-<<< scene.export("output.mp4", fps=60)
+<<< scene.render()  # luego: gaanim export . --output output.mp4
 <<<
 <<< # WebM
-<<< scene.export("overlay.webm", fps=30)
+<<< scene.render()  # luego: gaanim export . --output overlay.webm
 <<<
 <<< # Animated WebP
-<<< scene.export("preview.webp", fps=30)
+<<< scene.render()  # luego: gaanim export . --output preview.webp
 <<<
 <<< # Any supported video extension
-<<< scene.export("tiktok.mp4", fps=30)
+<<< scene.render()  # luego: gaanim export . --output tiktok.mp4
 ```
 
 = Siguientes pasos

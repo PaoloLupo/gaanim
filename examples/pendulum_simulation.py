@@ -239,8 +239,4 @@ snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
     scene.snapshots(snapshot_dir, [0.0, 1.0, 1.5, 3.0, 6.0, 9.0, 12.0, 16.0])
 
-export_path = os.environ.get("GAANIM_EXPORT")
-if export_path:
-    scene.export(export_path, fps=30)
-else:
-    scene.render()
+scene.render()

@@ -19,10 +19,11 @@ When exposing a user-facing feature, inspect every applicable layer:
 7. Add a focused Rust or Python regression test and an example when the visual
    or fluent behavior is best demonstrated end-to-end.
 
-Use `just python-develop` before `just validate-python-api`; the latter imports
-the installed native extension. The existing validator proves that stub
-declarations exist at runtime. It does not prove that every runtime member is
-documented in the stub, so inspect new registrations and exports explicitly.
+Use `just python-develop` to install the lightweight authoring package when an
+IDE needs it. `just validate-python-api` starts the Gaanim executable and
+compares the stub against its builtin PyO3 module; the public wheel contains no
+native extension. The validator proves that declarations exist at runtime, but
+not that every runtime member is documented.
 
 Keep compatibility aliases intentional and documented. Omit stub docstrings
 only for private names, protocol/dunder members, or aliases with no independent

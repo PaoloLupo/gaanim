@@ -4,7 +4,7 @@
 //! [`Canvas`](crate::canvas::Canvas)) and submit them here. The editor/hot-reload
 //! host listens for these payloads and replays them into Bevy.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
@@ -21,6 +21,8 @@ pub struct ReloadPayload {
 
 static HOST_TX: OnceLock<Mutex<Option<Sender<ReloadPayload>>>> = OnceLock::new();
 static HOST_COMPILE_STARTED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+type SnapshotHandler = dyn Fn(Canvas, &str, &[f64]) -> Result<usize, String> + Send + Sync;
+static SNAPSHOT_HANDLER: OnceLock<Mutex<Option<Arc<SnapshotHandler>>>> = OnceLock::new();
 
 fn tx_slot() -> &'static Mutex<Option<Sender<ReloadPayload>>> {
     HOST_TX.get_or_init(|| Mutex::new(None))
@@ -30,9 +32,35 @@ fn compile_started_at_slot() -> &'static Mutex<Option<Instant>> {
     HOST_COMPILE_STARTED_AT.get_or_init(|| Mutex::new(None))
 }
 
+fn snapshot_handler_slot() -> &'static Mutex<Option<Arc<SnapshotHandler>>> {
+    SNAPSHOT_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
 /// Install or clear the process-local host channel.
 pub fn set_host_sender(tx: Option<Sender<ReloadPayload>>) {
     *tx_slot().lock().expect("host tx poisoned") = tx;
+}
+
+/// Install or clear the process-local snapshot service owned by the host.
+pub fn set_snapshot_handler(handler: Option<Arc<SnapshotHandler>>) {
+    *snapshot_handler_slot()
+        .lock()
+        .expect("snapshot handler poisoned") = handler;
+}
+
+/// Ask the attached host to capture exact timeline snapshots.
+///
+/// Script frontends only declare the requested times. The host remains
+/// responsible for validating the destination and producing image files.
+pub fn request_snapshots(canvas: Canvas, directory: &str, times: &[f64]) -> Result<usize, String> {
+    let handler = snapshot_handler_slot()
+        .lock()
+        .expect("snapshot handler poisoned")
+        .clone()
+        .ok_or_else(|| {
+            "snapshots can only be captured by `gaanim --diff --example <script>`".to_string()
+        })?;
+    handler(canvas, directory, times)
 }
 
 /// Mark the start of an embedded Python execution so the next scene payload
@@ -60,5 +88,24 @@ pub fn send_to_host(canvas: Canvas) -> bool {
             })
             .is_ok(),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_requests_are_delegated_to_the_host() {
+        set_snapshot_handler(Some(Arc::new(|canvas, directory, times| {
+            assert_eq!(canvas.width, 320);
+            assert_eq!(directory, "owned-by-host");
+            assert_eq!(times, [0.0, 1.5]);
+            Ok(times.len())
+        })));
+        let result = request_snapshots(Canvas::new(320, 180), "owned-by-host", &[0.0, 1.5]);
+        set_snapshot_handler(None);
+        assert_eq!(result, Ok(2));
+        assert!(request_snapshots(Canvas::new(1, 1), "x", &[]).is_err());
     }
 }

@@ -24,6 +24,14 @@ pub struct ScriptRunner {
     _exited: Arc<AtomicBool>,
 }
 
+struct SnapshotHandlerGuard;
+
+impl Drop for SnapshotHandlerGuard {
+    fn drop(&mut self) {
+        host::set_snapshot_handler(None);
+    }
+}
+
 impl ScriptRunner {
     /// Spawn the script-runner thread.
     ///
@@ -154,9 +162,8 @@ const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py")
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
-/// Loading the installed wheel here would create a second native extension and
-/// therefore a second host-channel static. Instead, the package initializer and
-/// pure-Python helpers are compiled into the editor and executed with
+/// The installed wheel only carries authoring helpers and stubs. The package
+/// initializer and pure-Python helpers are compiled into the editor and executed with
 /// `gaanim.gaanim_core` explicitly aliased to the builtin module.
 fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let sys = py.import("sys")?;
@@ -193,8 +200,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let composition_source = std::ffi::CString::new(GAANIM_COMPOSITION).unwrap();
     let composition_file = std::ffi::CString::new("gaanim/composition.py").unwrap();
     let composition_name = std::ffi::CString::new("gaanim.composition").unwrap();
-    let composition =
-        PyModule::from_code(py, &composition_source, &composition_file, &composition_name)?;
+    let composition = PyModule::from_code(
+        py,
+        &composition_source,
+        &composition_file,
+        &composition_name,
+    )?;
     modules.set_item("gaanim.composition", &composition)?;
 
     let matrix_source = std::ffi::CString::new(GAANIM_MATRIX).unwrap();
@@ -217,6 +228,20 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
         .ok_or_else(|| "snapshot directory is not UTF-8".to_string())?;
     let (sender, _receiver) = crossbeam_channel::unbounded::<ReloadPayload>();
     host::set_host_sender(Some(sender));
+
+    let handler_dir = PathBuf::from(snapshot_dir);
+    host::set_snapshot_handler(Some(Arc::new(move |canvas, requested, times| {
+        if Path::new(requested) != handler_dir {
+            return Err(format!(
+                "snapshot directory must match the path supplied by the Gaanim host: {}",
+                handler_dir.display()
+            ));
+        }
+        gaanim_diff::capture_canvas(canvas, &handler_dir, times)
+            .map(|manifest| manifest.snapshots.len())
+            .map_err(|error| error.to_string())
+    })));
+    let _snapshot_handler = SnapshotHandlerGuard;
 
     let result = Python::attach(|py| -> PyResult<()> {
         bootstrap_gaanim_package(py)?;
@@ -253,6 +278,19 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Canv
         .recv_timeout(std::time::Duration::from_secs(2))
         .map(|payload| payload.canvas)
         .map_err(|_| "script did not submit a scene; finish it with `scene.render()`".to_string())
+}
+
+/// Run a Python API-contract validator against the builtin PyO3 module.
+pub fn validate_python_api(script_path: &Path) -> Result<(), String> {
+    Python::attach(|py| {
+        bootstrap_gaanim_package(py)?;
+        let path = script_path.to_string_lossy();
+        let code = format!(
+            "import runpy\ntry:\n    runpy.run_path(r'{path}', run_name='__main__')\nexcept SystemExit as exc:\n    if exc.code not in (None, 0):\n        raise\n"
+        );
+        py.run(&std::ffi::CString::new(code).unwrap(), None, None)
+    })
+    .map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))
 }
 
 /// Execute a Python file by path inside the given interpreter, in a fresh

@@ -31,7 +31,8 @@ theme = Theme("paper", styles={".warning": Style(fill="#e11d48")})
 scene = Scene(480, 270, theme=theme)
 warning = scene.square(90).style_class("warning")
 scene.wait(0.1)
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -51,7 +52,8 @@ tip = scene.dot(9).fill(GOLD).at(100, 30)
 rod = scene.tracking_line((-100, -30), tip).no_fill().stroke(WHITE, 4)
 scene.play([rod.create(0.8), tip.move(-40, 80).duration(0.8)])
 scene.play([rod.write(0.8), tip.move(80, -50).duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -71,7 +73,8 @@ guide = scene.line(-160, 0, 160, 0).stroke_style(
     StrokeStyle("#2563eb", 5, cap="round", dashes=[18, 10])
 )
 scene.wait(0.1)
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -141,7 +144,8 @@ from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 node = scene.circle(50).fill(BLUE).at(0, 0)
 scene.play([node.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -159,7 +163,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 card = scene.rect(160, 90).fill(BLUE).stroke(WHITE, 2).at(0, 0)
 scene.play([card.grow_from_center().duration(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -178,7 +183,8 @@ scene = Scene(480, 270, background="#0f172a")
 btn = scene.rounded_rect(160, 50, 12).fill(GOLD).at(0, 0)
 label = scene.text("CLICK").at(0, 0)
 scene.play([scene.group([btn, label]).fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -196,7 +202,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 cell = scene.square(80).fill(BLUE).at(0, 0)
 scene.play([cell.grow_from_center().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -214,7 +221,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 dot = scene.dot(8).fill(RED).at(0, 0)
 scene.play([dot.grow_from_center().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -232,7 +240,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 orbit = scene.ellipse(90, 50).no_fill().stroke(GOLD, 2).at(0, 0)
 scene.play([orbit.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -257,7 +266,8 @@ connector = scene.line(
     card.anchor_point(Anchor.LEFT),
 ).stroke(WHITE, 3)
 scene.play([left.move(30, 60).duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -275,7 +285,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 arrow = scene.arrow(-100, 0, 100, 0).stroke(GOLD, 4)
 scene.play([arrow.create().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -293,7 +304,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 guide = scene.dashed_line(-140, 0, 140, 0, dash_length=12, gap_length=8).stroke(WHITE, 2)
 scene.play([guide.create().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -311,7 +323,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 span = scene.double_arrow(-100, 0, 100, 0).stroke(WHITE, 3)
 scene.play([span.create().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -329,7 +342,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 arc = scene.arc(0, 0, 60, 0.0, 2.0).no_fill().stroke(GOLD, 4)
 scene.play([arc.create().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -347,7 +361,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 loop = scene.curved_arrow(-80, 0, 80, 0, 0.9).fill(WHITE)
 scene.play([loop.create().duration(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -365,7 +380,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 arr = scene.curved_arrow_arc(0, 0, 70, 0.2, 1.8).fill(GOLD)
 scene.play([arr.create().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -383,7 +399,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 dim = scene.dimension(-80, 0, 80, 0, 24).stroke(WHITE, 2)
 scene.play([dim.create().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -403,7 +420,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 tri = scene.polygon([(0, 70), (-65, -50), (65, -50)]).fill(BLUE).stroke(WHITE, 2)
 scene.play([tri.grow_from_center().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -421,7 +439,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 star = scene.star(5, 70, 32).fill(GOLD).at(0, 0)
 scene.play([star.spin_in_from_nothing().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -439,7 +458,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 hexa = scene.regular_polygon(6, 60).fill(BLUE).stroke(WHITE, 2)
 scene.play([hexa.spin_in_from_nothing().duration(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -457,7 +477,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 slice_ = scene.sector(0, 0, 70, 0.0, 2.0).fill(GOLD)
 scene.play([slice_.grow_from_center().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -475,7 +496,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 ring = scene.annulus(60, 34).fill(BLUE).stroke(WHITE, 2)
 scene.play([ring.grow_from_center().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -494,7 +516,8 @@ scene = Scene(480, 270, background="#0f172a")
 brace = scene.brace(-80, -20, 80, -20, 24).stroke(WHITE, 3).no_fill()
 label = scene.text("interval").at(0, -55)
 scene.play([brace.create().duration(0.7), label.fade_in().duration(0.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -512,7 +535,8 @@ from gaanim import GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 ok = scene.checkmark(34).fill(GREEN).at(0, 0)
 scene.play([ok.grow_from_center().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -530,7 +554,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 no = scene.cross(34).stroke(WHITE, 4).at(0, 0)
 scene.play([no.create().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -549,7 +574,8 @@ scene = Scene(480, 270, background="#0f172a")
 corner = scene.right_angle(24).stroke(WHITE, 3).at(0, 0)
 axis = scene.line(-80, 0, 80, 0).stroke(WHITE, 2)
 scene.play([scene.group([axis, corner]).create().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -569,7 +595,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 rail = scene.path([(-140, 0), (0, 60), (140, 0)]).no_fill().stroke(WHITE, 4)
 scene.play([rail.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -587,7 +614,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 zig = scene.polyline([(-100, -30), (0, 30), (100, -30)]).no_fill().stroke(GOLD, 3)
 scene.play([zig.create().duration(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -605,7 +633,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 curve = scene.bezier((-140, 0), [(-50, 90), (50, -90)], (140, 0)).no_fill().stroke(WHITE, 3)
 scene.play([curve.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -623,7 +652,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 shape = scene.curve([("move", [(0, 0)]), ("cubic", [(50, 60), (110, -60), (160, 0)]), ("close", [])]).no_fill().stroke(WHITE, 3).at(-80, 0)
 scene.play([shape.create().duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -661,7 +691,8 @@ scene.play([
 scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=0.8)
 scene.camera.dolly(factor=0.85, duration=0.5)
 scene.wait(0.5)
-scene.export("3d-quickstart.webp", fps=30)
+# output: 3d-quickstart.webp
+scene.render()
 ```
 
 #api-entry(
@@ -779,7 +810,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).at(0, 0)
 scene.play([label.write(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -798,7 +830,8 @@ scene = Scene(480, 270, background="#0f172a")
 eq = scene.equation(part("force", "sum F_t"), "=", parts(mass="m", acceleration="a_t"))
 eq["acceleration"].fill(GOLD)
 scene.play([eq.write(1.0, by="part")])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -816,7 +849,8 @@ from gaanim import Scene, TextFlow
 scene = Scene(480, 270, background="#0f172a")
 body = scene.text("Una explicación larga que se ajusta al ancho.", flow=TextFlow(wrap=320, align="left", line_spacing=1.25)).at(0, 0)
 scene.play([body.fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -835,7 +869,8 @@ scene = Scene(480, 270, background="#0f172a")
 t = scene.text("Fourier Transform", role="title").at(0, 30)
 s = scene.text("A visual proof", role="subtitle").at(0, -20)
 scene.play([t.write(0.7), s.fade_in().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -855,7 +890,8 @@ scene = Scene(480, 270, background="#0f172a")
 eq = scene.equation(parts(variable="x", operator="dot 5 =", result="25")).at(0, 0)
 eq["result"].fill(GOLD)
 scene.play([eq.write(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -873,7 +909,8 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 tbl = scene.typst('#table(columns: 2, [*Method*], [*Error*], [Baseline], [0.18], [GPU], [0.04])')
 scene.play([tbl.fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -891,7 +928,8 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 snippet = scene.code("result = mass * acceleration", language="python").at(0, 0)
 scene.play([snippet.fade_in().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -913,7 +951,8 @@ scene = Scene(480, 270, background="#0f172a")
 logo = scene.rect(120, 70).fill(WHITE).at(0, 0) # placeholder de imagen
 caption = scene.text("scene.image(\"assets/logo.webp\")").at(0, -70)
 scene.play([scene.group([logo, caption]).fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -933,7 +972,8 @@ scene = Scene(960, 540)
 clip = scene.rect(720, 405) # placeholder ejecutable para la documentación
 scene.play([clip.fade_in(0.4)])
 scene.wait(7.6)
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -953,7 +993,8 @@ scene = Scene(480, 270, background="#0f172a")
 placeholder = scene.regular_polygon(6, 50).fill(BLUE).at(0, 0)
 label = scene.text("scene.svg(\"assets/robot.svg\")").at(0, -80)
 scene.play([scene.group([placeholder, label]).fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -972,7 +1013,8 @@ scene = Scene(480, 270, background="#0f172a")
 robot = scene.regular_polygon(5, 60).fill(BLUE).at(0, 0)
 arm = robot # en SVG real: robot.part("arm")
 scene.play([arm.rotate(0.4).duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -991,7 +1033,8 @@ from gaanim import Direction
 scene = Scene(480, 270, background="#0f172a")
 row = scene.group([scene.dot(10).fill(BLUE), scene.text("Label").at(20, 0)]).at(0, 0)
 scene.play([row.fade_in_from(Direction.DOWN, distance=24).duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1012,7 +1055,8 @@ scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(12).fill(GOLD).at(-40, 0)
 note = scene.callout("Moving mass", mass, offset=(130, 70))
 scene.play([mass.move(80, 0).duration(1.0), note.fade_in().duration(0.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1135,7 +1179,8 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 opening = scene.title_card("Vector Motion", "A technical explanation", panel=True)
 scene.play([opening.fade_in().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1153,7 +1198,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 agenda = scene.bullets(["Setup", "Motion", "Export"], gap=48, bullet_color=GOLD).at(0, 40)
 scene.play([agenda.fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1188,7 +1234,8 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 tbl = scene.table(["Method","Error","Time"], [["Baseline","0.18","48 ms"],["GPU","0.04","15 ms"]]).at(0, 0)
 scene.play([tbl.fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1315,7 +1362,8 @@ scene = Scene(480, 270, background="#0f172a")
 theta = scene.parameter(0.2)
 arc = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([arc.fade_in().duration(0.3), theta.animate_to(4.5).duration(1.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1336,7 +1384,8 @@ t = scene.parameter(0.0)
 curve = scene.polyline([(110*cos(u), 60*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 dot = scene.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(1.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1357,7 +1406,8 @@ t = scene.parameter(0.35)
 curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 tangent = scene.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
 scene.play([tangent.fade_in().duration(0.3), t.animate_to(0.9).duration(1.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1378,7 +1428,8 @@ t = scene.parameter(0.25)
 curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 circle = scene.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
 scene.play([circle.fade_in().duration(0.3), t.animate_to(0.7).duration(1.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1397,7 +1448,8 @@ scene = Scene(480, 270, background="#0f172a")
 theta = scene.parameter(0.3)
 rot = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([rot.fade_in().duration(0.3), theta.animate_to(5.0).duration(1.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1416,7 +1468,8 @@ scene = Scene(480, 270)
 body = scene.rect(150, 70).at(40, -20)
 bar = scene.bar_between((-150, 100), body.anchor_point(Anchor.TOP_LEFT), width=9).stroke(BLACK, 9)
 scene.play([bar.fade_in(), body.move(80, 0).duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1435,7 +1488,8 @@ scene = Scene(480, 270, background="#0f172a")
 mass = scene.dot(10).fill(GOLD).at(70, 0)
 spring = scene.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0, start_straight=18, end_straight=18).no_fill().stroke(WHITE, 3)
 scene.play([spring.fade_in().duration(0.3), mass.move(40, 0).duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1460,7 +1514,8 @@ dim = scene.dimension_between(
   extension_style="dashed", line_width=3, dash_length=12, gap_length=8,
 )
 scene.play([dim.fade_in().duration(0.3), physical_width.animate_to(4.0, duration=0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1480,7 +1535,8 @@ tip = scene.polar_point((0, 0), 85, theta)
 bar = scene.bar_between((0, 0), tip).stroke(BLACK, 7)
 label = scene.text("tip").fill(GOLD).follow(tip, offset=(0, 18))
 scene.play([bar.fade_in(), label.write(), theta.animate_to(2.2).duration(1.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1498,7 +1554,8 @@ scene = Scene(480, 270)
 bob = scene.dot(10).at(80, -90)
 theta = scene.angle_between((0,0), Direction.DOWN, bob, label="$theta$", show_value=True, color=GOLD)
 scene.play([theta.fade_in(), bob.move(90, 35).duration(1.2)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1517,7 +1574,8 @@ force = scene.vector_between((-100, 0), (70, 45), label="$F$", color=GOLD)
 moment = scene.moment_about((120, -40), radius=42, label="$M$")
 frame = scene.coordinate_frame_at((0, -80), Direction.RIGHT, labels=("$e_1$", "$e_2$"))
 scene.play([force.fade_in(), moment.fade_in(), frame.fade_in()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1539,7 +1597,8 @@ force = scene.force_at(
   label="$F$", show_value=True, unit="N", color=GREEN,
 )
 scene.play([body.fade_in(), force.fade_in(), magnitude.animate_to(80, duration=1.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1557,7 +1616,8 @@ scene = Scene(480, 270)
 pin = scene.pin_support((-100, 0), direction=Direction.UP)
 roller = scene.roller_support((100, 0), direction=Direction.UP)
 scene.play([pin.fade_in(), roller.fade_in()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1578,7 +1638,8 @@ rack = scene.rack(220, 18).at(0, -65).bind_translation_from_rotation(
   driver, axis=Direction.RIGHT, scale=55,
 )
 scene.play([driver.fade_in(), driven.fade_in(), rack.fade_in(), driver.rotate(2.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1601,7 +1662,8 @@ scene = Scene(480, 270, background="#0f172a")
 obj = scene.circle(45).fill(BLUE).stroke(GOLD, 3).at(0, 0)
 obj.glow(GOLD, radius=18)
 scene.play([obj.grow_from_center().duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1621,7 +1683,8 @@ scene = Scene(480, 270, background="#0f172a")
 hinge = scene.dot(7).fill(GOLD).at(-200, 100)
 arm = scene.rect(90, 18).fill(BLUE).at(hinge).with_pivot(-200, 100)
 scene.play([arm.rotate(pi/2.5).duration(1.0)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1643,7 +1706,8 @@ b = scene.circle(18).fill(WHITE)
 c = scene.circle(18).fill(BLUE)
 row = scene.row([a, b, c], gap=18, within="safe")
 scene.play([row.fade_in().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1663,7 +1727,8 @@ mass = scene.dot(12).fill(GOLD).at(-60, 0)
 label = scene.text("follower").at(0, 45)
 label.attach_to(mass)
 scene.play([label.fade_in().duration(0.3), mass.move(120, 0).duration(1.2)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1687,6 +1752,7 @@ scene.play([
     eq.write(0.8),
     eq["mass"].animate().fill(RED).opacity(0.7).duration(0.8),
 ])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]

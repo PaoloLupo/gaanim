@@ -25,7 +25,8 @@ scene.audio("music.ogg", volume=0.35)
 scene.wait(1.5)
 scene.audio("pop.wav", duration=0.4, volume=0.8, fade_in=0.02)
 
-scene.export("lesson.mp4")
+# output: lesson.mp4
+scene.render()
 ```
 
 `start` es opcional. Si se omite, la fuente comienza en el cursor actual de la

@@ -15,11 +15,6 @@ use gaanim_api::canvas::{
     ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PresentationBrand, QuoteCardSpec,
     SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont, VideoOptions,
 };
-use gaanim_api::export::{
-    detect_best_encoder, export_canvas, export_canvas_segment, export_canvas_segments,
-    AspectRatioPreset, EncodingSpeed, ExportConfig, QualityPreset, SegmentExportError,
-    VideoEncoder,
-};
 
 use crate::color::PyColor;
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
@@ -268,15 +263,6 @@ impl PyDimension {
     }
 }
 
-fn segment_export_error(error: SegmentExportError) -> PyErr {
-    match &error {
-        SegmentExportError::Export(_) | SegmentExportError::Io(_) => {
-            pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-        }
-        _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
-    }
-}
-
 fn drawable_args(
     first: &PyDrawable,
     others: &Bound<'_, PyTuple>,
@@ -299,54 +285,6 @@ fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::
         .try_iter()?
         .map(|child| PyLayout::member_from_python(&child?))
         .collect()
-}
-
-fn parse_quality(value: &str) -> PyResult<QualityPreset> {
-    match value.to_ascii_lowercase().as_str() {
-        "draft" => Ok(QualityPreset::Draft),
-        "standard" => Ok(QualityPreset::Standard),
-        "production" => Ok(QualityPreset::Production),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(
-            "quality must be 'draft', 'standard', or 'production'",
-        )),
-    }
-}
-
-fn parse_aspect_ratio(value: &str) -> PyResult<AspectRatioPreset> {
-    match value.to_ascii_lowercase().as_str() {
-        "youtube" | "16:9" => Ok(AspectRatioPreset::Youtube),
-        "tiktok" | "9:16" => Ok(AspectRatioPreset::TikTok),
-        "instagram" | "1:1" | "square" => Ok(AspectRatioPreset::Instagram),
-        "custom" => Ok(AspectRatioPreset::Custom),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(
-            "aspect_ratio must be 'youtube', 'tiktok', 'instagram', or 'custom'",
-        )),
-    }
-}
-
-fn parse_encoder(value: &str) -> PyResult<VideoEncoder> {
-    match value.to_ascii_lowercase().as_str() {
-        "auto" => Ok(detect_best_encoder()),
-        "libx264" | "cpu" => Ok(VideoEncoder::Libx264),
-        "h264_nvenc" | "nvenc" => Ok(VideoEncoder::H264Nvenc),
-        "h264_amf" | "amf" => Ok(VideoEncoder::H264Amf),
-        "h264_qsv" | "qsv" => Ok(VideoEncoder::H264Qsv),
-        "h264_vaapi" | "vaapi" => Ok(VideoEncoder::H264Vaapi),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(
-            "encoder must be 'auto', 'libx264', 'nvenc', 'amf', 'qsv', or 'vaapi'",
-        )),
-    }
-}
-
-fn parse_encoding_speed(value: &str) -> PyResult<EncodingSpeed> {
-    match value.to_ascii_lowercase().as_str() {
-        "fast" => Ok(EncodingSpeed::Fast),
-        "balanced" | "medium" => Ok(EncodingSpeed::Balanced),
-        "best" | "slow" => Ok(EncodingSpeed::Best),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(
-            "speed must be 'fast', 'balanced', or 'best'",
-        )),
-    }
 }
 
 fn parse_curve_elements(commands: &Bound<'_, PyAny>) -> PyResult<Vec<CurveElement>> {
@@ -4461,143 +4399,10 @@ impl PyScene {
             ))
         }
     }
-    #[pyo3(signature = (
-        path,
-        fps=None,
-        *,
-        transparent=None,
-        quality=None,
-        aspect_ratio=None,
-        width=None,
-        height=None,
-        start_time=None,
-        end_time=None,
-        segment=None,
-        crf=None,
-        encoder="auto",
-        speed=None,
-    ))]
-    fn export(
-        &self,
-        path: &str,
-        fps: Option<u32>,
-        transparent: Option<bool>,
-        quality: Option<&str>,
-        aspect_ratio: Option<&str>,
-        width: Option<u32>,
-        height: Option<u32>,
-        start_time: Option<f64>,
-        end_time: Option<f64>,
-        segment: Option<&str>,
-        crf: Option<u32>,
-        encoder: &str,
-        speed: Option<&str>,
-    ) -> PyResult<()> {
-        let canvas = self.inner.lock().expect("scene canvas poisoned").clone();
-        let mut config = ExportConfig::new(path);
-        config.width = canvas.width;
-        config.height = canvas.height;
-        config.aspect_ratio = AspectRatioPreset::Custom;
-        config.headless = true;
-
-        if let Some(quality) = quality {
-            config.quality = parse_quality(quality)?;
-        }
-        if let Some(aspect_ratio) = aspect_ratio {
-            config.aspect_ratio = parse_aspect_ratio(aspect_ratio)?;
-        }
-        if quality.is_some() || aspect_ratio.is_some() {
-            config = config.apply_presets();
-        }
-
-        if let Some(fps) = fps {
-            if fps == 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "fps must be greater than zero",
-                ));
-            }
-            config.fps = fps;
-        }
-        if let Some(width) = width {
-            if width == 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "width must be greater than zero",
-                ));
-            }
-            config.width = width;
-            config.aspect_ratio = AspectRatioPreset::Custom;
-        }
-        if let Some(height) = height {
-            if height == 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "height must be greater than zero",
-                ));
-            }
-            config.height = height;
-            config.aspect_ratio = AspectRatioPreset::Custom;
-        }
-        if let Some(transparent) = transparent {
-            config.transparent = transparent;
-        }
-        if let Some(crf) = crf {
-            if crf > 51 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "crf must be between 0 and 51",
-                ));
-            }
-            config.crf = crf;
-        }
-        if let Some(start_time) = start_time {
-            if !start_time.is_finite() || start_time < 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "start_time must be a finite non-negative number",
-                ));
-            }
-            config.start_time = Some(start_time);
-        }
-        if let Some(end_time) = end_time {
-            if !end_time.is_finite() || end_time <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "end_time must be a finite positive number",
-                ));
-            }
-            config.end_time = Some(end_time);
-        }
-        if let (Some(start_time), Some(end_time)) = (config.start_time, config.end_time) {
-            if end_time <= start_time {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "end_time must be greater than start_time",
-                ));
-            }
-        }
-        if segment.is_some() && (start_time.is_some() || end_time.is_some()) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "segment cannot be combined with start_time or end_time",
-            ));
-        }
-
-        config.video_encoder = parse_encoder(encoder)?;
-        if let Some(speed) = speed {
-            config.encoding_speed = parse_encoding_speed(speed)?;
-        }
-
-        match segment {
-            Some("*") => export_canvas_segments(canvas, path, config)
-                .map(|_| ())
-                .map_err(segment_export_error),
-            Some(segment_name) => {
-                export_canvas_segment(canvas, segment_name, config).map_err(segment_export_error)
-            }
-            None => export_canvas(canvas, config)
-                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),
-        }
-    }
-
-    /// Render exact timeline seeks into PNG snapshots and a comparison manifest.
+    /// Ask the Gaanim host to render exact timeline seeks into PNG snapshots.
     fn snapshots(&self, directory: &str, times: Vec<f64>) -> PyResult<usize> {
         let scene = self.inner.lock().expect("scene canvas poisoned").clone();
-        gaanim_diff::capture_canvas(scene, directory, &times)
-            .map(|manifest| manifest.snapshots.len())
+        gaanim_api::host::request_snapshots(scene, directory, &times)
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 

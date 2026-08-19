@@ -20,7 +20,7 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
   - `gaanim_text` — cosmic-text/HarfBuzz shaping, Typst math compilation.
   - `gaanim_api` — fluent Rust builder API; depends on most core crates.
-  - `gaanim_python` — PyO3 0.28 extension (`cdylib`), thin wrapper over `gaanim_api`.
+  - `gaanim_python` — PyO3 0.28 module embedded by the editor plus the pure-Python authoring wheel.
   - `gaanim_project` — shared project scaffolding, manifests, recent-project state,
     and side-effect-free Python/uv environment discovery.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
@@ -43,7 +43,7 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Validate installed Python API | `just validate-python-api` |
 | Build documentation | `just docs` |
 | Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
-| Bootstrap venv | `just bootstrap` — creates `.venv` and installs `maturin` |
+| Bootstrap venv | `just bootstrap` — creates `.venv` and installs `build`/`hatchling` |
 | Full clean | `just clean` — deletes `.venv` and `cargo clean` |
 
 **Python bridge order:** `just bootstrap` (once) → `just python-develop` before
@@ -61,7 +61,7 @@ builds and launches an example through the application host.
 
 - **Bevy 0.18** is the current ECS target; abstractions are designed with 0.19 migration in mind. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
 - **Vello 0.7**, **bevy_vello 0.13.1**, **PyO3 0.28**.
-- Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021** (required by PyO3 cdylib constraints).
+- Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.
 

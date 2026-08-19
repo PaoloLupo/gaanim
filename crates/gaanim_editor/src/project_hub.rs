@@ -278,7 +278,7 @@ fn review_page(
     ui.add_space(12.0);
     let command = uv_command_for(&project.root, probe);
     ui.label(if probe.uv.is_some() {
-        "Para aislar dependencias, ejecuta fuera de Gaanim:"
+        "Gaanim puede crear .venv e instalar su paquete de autocompletado:"
     } else {
         "Instala uv y luego crea el entorno fuera de Gaanim:"
     });
@@ -299,18 +299,18 @@ fn review_page(
         }
         if ui
             .add_enabled(
-                probe.has_supported_python(),
-                egui::Button::new("Abrir de todos modos"),
+                probe.has_supported_python() || probe.uv.is_some(),
+                egui::Button::new("Preparar y abrir"),
             )
             .clicked()
         {
             pending.0 = Some(project.clone());
         }
     });
-    if !probe.has_supported_python() {
+    if !probe.has_supported_python() && probe.uv.is_none() {
         ui.colored_label(
             egui::Color32::from_rgb(255, 170, 90),
-            "Se necesita Python 3.12 o posterior antes de abrir.",
+            "Instala uv para que Gaanim prepare Python 3.12 y el autocompletado.",
         );
     }
     stay
@@ -362,7 +362,9 @@ fn uv_command_for(root: &Path, probe: &EnvironmentProbe) -> String {
         } else {
             "winget install --id=astral-sh.uv -e\n".to_string()
         };
-        format!("{setup}Set-Location -LiteralPath '{escaped}'\nuv venv --python 3.12")
+        format!(
+            "{setup}Set-Location -LiteralPath '{escaped}'\n# Gaanim creará .venv e instalará el wheel al abrir"
+        )
     } else {
         let escaped = root.display().to_string().replace('\'', "'\\''");
         let setup = if probe.uv.is_some() {
@@ -370,7 +372,7 @@ fn uv_command_for(root: &Path, probe: &EnvironmentProbe) -> String {
         } else {
             "curl -LsSf https://astral.sh/uv/install.sh | sh\n".to_string()
         };
-        format!("{setup}cd '{escaped}'\nuv venv --python 3.12")
+        format!("{setup}cd '{escaped}'\n# Gaanim creará .venv e instalará el wheel al abrir")
     }
 }
 
@@ -387,9 +389,9 @@ mod tests {
     }
 
     #[test]
-    fn uv_instructions_never_install_gaanim() {
+    fn uv_instructions_explain_automatic_environment_setup() {
         let command = uv_command_for(Path::new("demo"), &EnvironmentProbe::default());
-        assert!(command.contains("uv venv --python 3.12"));
-        assert!(!command.contains("pip install gaanim"));
+        assert!(command.contains("Gaanim creará .venv"));
+        assert!(!command.contains("pip install"));
     }
 }

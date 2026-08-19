@@ -42,11 +42,8 @@ scene.render()
 Para un video final:
 
 ```python
-scene.export(
-    "exports/movimiento-circular.mp4",
-    fps=30,
-    quality="production",
-)
+# output: exports/movimiento-circular.mp4
+scene.render()
 ```
 
 MP4 y WebM necesitan FFmpeg. Para revisar rápidamente una animación en una web

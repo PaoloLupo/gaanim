@@ -282,7 +282,7 @@ pub fn compile_code_cell(
         code_to_display.push('\n');
     }
 
-    // Auto-infer output: si el codigo hace scene.export("algo") y no hay # output:, usar ese archivo automaticamente
+    // Legacy cache compatibility: infer output from old scene.export snippets.
     if expected_webp.is_none() && code_to_execute.contains(".export(") {
         // extrae primer argumento entre comillas de .export("...") o .export('...')
         let mut inferred: Option<String> = None;
@@ -484,10 +484,36 @@ pub fn compile_code_cell(
 
         let prelude_lines = PYTHON_PRELUDE.lines().count();
 
-        let mut command = Command::new(&cmd);
+        let uses_gaanim_host = code_to_execute.contains(".render(");
+        let core_binary = std::env::current_exe()
+            .ok()
+            .and_then(|executable| executable.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| project_root.join("target/debug"))
+            .join(if cfg!(windows) {
+                "gaanim-core.exe"
+            } else {
+                "gaanim-core"
+            });
+        let mut command = if uses_gaanim_host {
+            let mut command = Command::new(&core_binary);
+            if let Some(output) = &expected_webp {
+                command
+                    .arg("export")
+                    .arg(&temp_file)
+                    .arg("--output")
+                    .arg(output)
+                    .arg("--quality")
+                    .arg("standard");
+            } else {
+                command.arg("check").arg(&temp_file);
+            }
+            command
+        } else {
+            let mut command = Command::new(&cmd);
+            command.arg(&temp_file).arg(&cell_id);
+            command
+        };
         command
-            .arg(&temp_file)
-            .arg(&cell_id)
             .current_dir(&cell_work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

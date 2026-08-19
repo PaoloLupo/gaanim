@@ -25,7 +25,7 @@ Una animación se construye con cuatro piezas:
 2. Los métodos de la escena crean objetos como círculos, textos y flechas.
 3. Los métodos fluidos configuran posición y apariencia.
 4. `scene.play(...)` coloca animaciones en el tiempo; `scene.render()` o
-   `scene.export(...)` produce el resultado.
+   `gaanim export ...` produce el resultado desde el ejecutable.
 
 ```python
 from gaanim import BLUE, Scene

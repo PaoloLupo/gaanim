@@ -30,6 +30,12 @@ jobs:
           cargo build -p gaanim_launcher --release --bin gaanim
           cargo build -p gaanim_editor --release --bin gaanim-core
 
+      - name: Build authoring wheel
+        run: |
+          python -m pip install build hatchling
+          python -m build --wheel --no-isolation --outdir target/wheels crates/gaanim_python
+          python tests/validate_authoring_wheel.py target/wheels
+
       - name: Verify version matches tag (if tag push)
         shell: pwsh
         run: |
@@ -54,6 +60,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item target/release/gaanim.exe "$stage/gaanim.exe"
           Copy-Item target/release/gaanim-core.exe "$stage/gaanim-core.exe"
+          Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
           if (Test-Path README.md) { Copy-Item README.md "$stage/" }
           @"
           Gaanim $ver — Windows x64
@@ -64,11 +71,11 @@ jobs:
             2. Añade esa carpeta a PATH (Panel > Sistema > Variables de entorno).
             3. Verifica: gaanim --help  (launcher detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
           
-          Contenido: gaanim.exe (launcher sin dependencia Python) + gaanim-core.exe (motor)
+          Contenido: gaanim.exe + gaanim-core.exe + wheel ligero para autocompletado
           Uso con uv (recomendado, creas proyectos manualmente):
             uv venv --python 3.12
             .\.venv\Scripts\Activate.ps1
-            # No instales gaanim con pip: el launcher usa el paquete embebido.
+            # Gaanim crea .venv e instala automáticamente el wheel de autocompletado.
             gaanim                    # Inicio: crear, abrir y ver recientes
             gaanim init video my_proj
             gaanim init slides my_deck

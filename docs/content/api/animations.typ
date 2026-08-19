@@ -118,7 +118,8 @@ from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 circle = scene.circle(40).fill(BLUE).at(-80, 0)
 scene.play([circle.move(160, 0).duration(1.0).spring()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -136,7 +137,8 @@ from gaanim import Anchor, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 rect = scene.rect(100, 60).fill(BLUE).stroke(WHITE, 2).at(-120, 0)
 scene.play([rect.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).smooth()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -154,7 +156,8 @@ from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 label = scene.text("Glide").at(-100, 0)
 scene.play([label.glide_to(80, 0).duration(1.1)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -172,7 +175,8 @@ from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 icon = scene.circle(36).fill(BLUE).stroke(WHITE, 2).at(0, 0)
 scene.play([icon.scale(1.8).duration(0.7).spring()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -191,7 +195,8 @@ from math import pi
 scene = Scene(480, 270, background="#0f172a")
 arm = scene.rect(80, 14).fill(BLUE).at(40, 0).with_pivot(0, 0)
 scene.play([arm.rotate(pi/2).duration(0.9)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -210,7 +215,8 @@ scene = Scene(480, 270, background=BLACK)
 circle = scene.circle(60).stroke(BLUE, 3).no_fill().at(0, 0)
 dot = scene.dot(8).fill(WHITE).at(60, 0)
 scene.play([dot.move_along_path(circle).duration(2.0).linear()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -228,7 +234,8 @@ from gaanim import BLACK, WHITE, Scene
 scene = Scene(480, 270, background=BLACK)
 dot = scene.dot(10).fill(WHITE).at(60, 0)
 scene.play([dot.pivot(0, 0).rotate(math.tau).duration(1.5).linear()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -251,7 +258,8 @@ box = scene.rect(120, 50).fill(BLUE).at(0, -40)
 scene.play([title.fade_in().duration(0.5)])
 scene.play([box.fade_to(0.35).duration(0.6)])
 scene.play([title.fade_out().duration(0.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -269,7 +277,8 @@ from gaanim import Direction, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 caption = scene.text("Enters from below").fill(WHITE).at(0, 0)
 scene.play([caption.fade_in_from(Direction.DOWN, distance=48).duration(0.8)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -290,7 +299,8 @@ scene = Scene(480, 270, background="#0f172a")
 formula = scene.text("$E = m c^2$").fill(GOLD).at(0, 0)
 scene.play([formula.write().duration(1.0)])
 scene.play([formula.unwrite().duration(0.7)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -309,7 +319,8 @@ scene = Scene(480, 270, background="#0f172a")
 # Grouping is resolved by the specialized Text API.
 eq = scene.text("$", part("energy", "E"), " = ", part("mass", "m"), " ", part("speed", "c^2"), "$").at(0, 0)
 scene.play([eq.write(1.4, by="part", stagger=0.08)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -328,7 +339,8 @@ scene = Scene(480, 270, background="#0f172a")
 circle = scene.circle(50).no_fill().stroke(BLUE, 4).at(0, 0)
 scene.play([circle.create().duration(1.0).smooth()])
 scene.play([circle.uncreate().duration(0.6)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -353,7 +365,8 @@ spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
 chart = scene.chart(spec)
 scene.play([chart.layer("marks").grow_from_center().duration(0.7).spring()])
 scene.play([chart.layer("marks").shrink_to_center().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -371,7 +384,8 @@ from gaanim import GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
 star = scene.star(5, 55, 26).fill(GOLD).at(0, 0)
 scene.play([star.spin_in_from_nothing().duration(0.9).spring()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -389,7 +403,8 @@ from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 rect = scene.rect(140, 80).fill(BLUE).stroke(WHITE, 3).at(0, 0)
 scene.play([rect.draw_border_then_fill().duration(1.3)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -409,7 +424,8 @@ key = scene.circle(32).fill(BLUE).stroke(WHITE, 2).at(-50, 0)
 wrong = scene.cross(28).stroke(WHITE, 3).at(60, 0)
 scene.play([key.indicate().duration(0.7)])
 scene.play([wrong.wiggle().duration(0.5)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -444,7 +460,8 @@ after["result"].fill(GOLD)
 scene.play([before.write().duration(0.7)])
 scene.play([before.step_to(after, duration=0.9)])
 scene.play([after["result"].indicate(duration=0.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -514,7 +531,8 @@ circle = scene.circle(42).fill(BLUE).at(-90, 0)
 target = scene.rect(90, 60).fill(GOLD).at(80, 0)
 scene.play([circle.create().duration(0.6)])
 scene.play([circle.transform(target).duration(1.0).spring()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -575,7 +593,8 @@ def step(pos, dt, elapsed):
 
 ball.add_updater_fn(step, reset=reset, fixed_dt=1 / 240)
 scene.wait(3.0)
-scene.export("simulation.webp", fps=30)
+# output: simulation.webp
+scene.render()
 ```
 ]
 
@@ -683,7 +702,8 @@ from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 g = scene.group([scene.circle(18).fill(BLUE).at(-50,0), scene.circle(18).fill(BLUE).at(0,0), scene.circle(18).fill(BLUE).at(50,0)])
 scene.play([g.create().duration(1.0).lag_ratio(0.25)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -702,7 +722,8 @@ scene = Scene(480, 270, background="#0f172a")
 dot = scene.dot(10).fill(BLUE).at(-110, 0)
 scene.play([dot.move(220, 0).duration(0.9).spring()])
 scene.play([dot.move(-220, 0).duration(0.9).smooth()])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -720,6 +741,7 @@ from gaanim import WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 path = scene.path([(-120, 0), (0, 40), (120, 0)]).no_fill().stroke(WHITE, 3)
 scene.play([path.write().with_pen_tip().duration(1.4)])
-scene.export("preview.webp", fps=30)
+# output: preview.webp
+scene.render()
 ```
 ]

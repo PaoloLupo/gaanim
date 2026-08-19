@@ -11,12 +11,12 @@ default:
 [windows]
 bootstrap:
     if (-not (Test-Path .venv)) { {{ system_python }} -m venv .venv }
-    {{ python }} -m pip install --upgrade pip maturin
+    {{ python }} -m pip install --upgrade pip build hatchling
 
 [unix]
 bootstrap:
     if test ! -e .venv; then {{ system_python }} -m venv .venv; fi
-    {{ python }} -m pip install --upgrade pip maturin
+    {{ python }} -m pip install --upgrade pip build hatchling
 
 # Wipe the local .venv (forces a fresh `just bootstrap`).
 [windows]
@@ -30,10 +30,6 @@ clean-venv:
 # Wipe cargo build artifacts and the .venv.
 clean: clean-venv
     cargo clean
-
-[working-directory("crates/gaanim_python")]
-maturin:
-    maturin develop
 
 # ---- Build ------------------------------------------------------------------
 
@@ -60,25 +56,26 @@ build-release-install: build-release wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
     Copy-Item -Path "./target/release/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path "./target/release/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
-    Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
 [unix]
 build-release-install: build-release wheel
     mkdir -p "$HOME/.local/bin" "$HOME/.local/share/gaanim"
     install -m 755 ./target/release/gaanim ./target/release/gaanim-core "$HOME/.local/bin/"
-    install -m 644 ./target/wheels/gaanim-*.whl "$HOME/.local/share/gaanim/"
+    install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/share/gaanim/"
 
-# Install the Python extension in the local virtual environment.
+# Install the lightweight authoring package in the local virtual environment.
 python-develop:
-    {{ python }} -m maturin develop --manifest-path crates/gaanim_python/Cargo.toml
+    {{ python }} -m pip install --editable crates/gaanim_python
 
-# Build a distributable Python wheel in target/wheels/.
+# Build the universal authoring wheel in target/wheels/.
 wheel:
-    {{ python }} -m maturin build --release --manifest-path crates/gaanim_python/Cargo.toml
+    {{ python }} -m build --wheel --no-isolation --outdir target/wheels crates/gaanim_python
+    {{ python }} tests/validate_authoring_wheel.py target/wheels
 
-# Check that the installed extension exports every public stub declaration.
+# Check that the embedded extension exports every public stub declaration.
 validate-python-api:
-    {{ python }} tests/validate_python_api.py
+    cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
 
 # ---- Run --------------------------------------------------------------------
 
@@ -93,6 +90,7 @@ run EX:
 
 # Build documentation site and PDF (one-shot).
 docs:
+    cargo build -p gaanim_editor --bin gaanim-core
     cargo run -p docs -- compile
 
 # Build documentation PDF explicitly to custom output path.
