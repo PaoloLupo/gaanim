@@ -1842,10 +1842,9 @@ impl PyScene {
     ) -> PyResult<PyDrawable> {
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         match (x2, y2) {
-            (None, None) => Ok(PyDrawable(canvas.line_between(
-                resolve_endpoint(&p1)?,
-                resolve_endpoint(&p2)?,
-            ))),
+            (None, None) => Ok(PyDrawable(
+                canvas.line_between(resolve_endpoint(&p1)?, resolve_endpoint(&p2)?),
+            )),
             (Some(x2), Some(y2)) => {
                 let x1 = p1.extract::<f64>().map_err(|_| {
                     pyo3::exceptions::PyTypeError::new_err(
@@ -2881,6 +2880,21 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .text_spec(spec.clone());
         Py::new(py, PyText::initializer(handle, spec))
+    }
+
+    /// Create a selectable matrix composed from individual drawables.
+    #[pyo3(signature = (data, **options))]
+    fn matrix<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        data: &Bound<'py, PyAny>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        let module = py.import("gaanim.matrix")?;
+        Ok(module
+            .getattr("_build_matrix")?
+            .call((slf, data), options)?
+            .unbind())
     }
 
     #[pyo3(signature = (size=2.0, *, material=None))]

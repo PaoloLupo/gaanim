@@ -7,6 +7,7 @@ script. All camera durations are in seconds; 3D angles are in radians.
 from __future__ import annotations
 
 from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
+from .matrix import Matrix
 
 CurvePoint: TypeAlias = tuple[float, float]
 """A coordinate pair used by :meth:`Scene.path` and :meth:`Scene.curve`."""
@@ -244,6 +245,13 @@ class TextAnchor:
     BASELINE_LEFT: ClassVar[TextAnchor]
     BASELINE_CENTER: ClassVar[TextAnchor]
     BASELINE_RIGHT: ClassVar[TextAnchor]
+
+class MatrixOrder:
+    """Native deterministic ordering used by high-level matrix selections."""
+    @staticmethod
+    def order(rows: int, columns: int, coordinates: Sequence[tuple[int, int]], order: str, seed: int = 0) -> list[tuple[int, int]]:
+        """Return selected zero-based coordinates in the requested seeded order."""
+        ...
 
 class AnchorPoint:
     """Non-rendered endpoint bound to a drawable's local bounds."""
@@ -3256,6 +3264,38 @@ class Scene:
                 parts(mass="m", acceleration="a_t"),
             )
             scene.play([equation.write(1.0, by="part")])
+        """
+        ...
+    def matrix(
+        self,
+        data: Any,
+        *,
+        row_gap: float = 24.0,
+        column_gap: float = 24.0,
+        delimiter_gap: float = 12.0,
+        delimiters: Literal["brackets", "parentheses", "braces", "bars", "double_bars", "none"] = "brackets",
+        delimiter_size: float | None = None,
+        delimiter_weight: int = 300,
+        row_labels: Sequence[Any] | None = None,
+        column_labels: Sequence[Any] | None = None,
+        label_mode: Literal["math", "text"] = "math",
+        cell_mode: Literal["math", "text"] = "math",
+        entry_style: Any | None = None,
+        label_style: Any | None = None,
+        cell_factory: Callable[[Any, int, int], Drawable] | None = None,
+        numeric_format: str = "g",
+    ) -> Matrix:
+        """Create a selectable Layout-backed matrix.
+
+        ``data`` must be a non-empty rectangular sequence or a SymPy matrix.
+        Entries remain individual drawables; rows, columns, blocks and
+        diagonals can therefore be animated independently. Invalid dimensions,
+        ``row_gap`` and ``column_gap`` control automatic tracks. Delimiters
+        accept a size and CSS-like weight from 100 through 900. Labels default
+        to Typst math; ``cell_mode``/``label_mode`` may select plain text.
+        ``cell_factory(value, row, column)`` can return a custom Drawable.
+        Invalid dimensions, labels, modes, weights, delimiters, or factories
+        raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
         """
         ...
     def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:

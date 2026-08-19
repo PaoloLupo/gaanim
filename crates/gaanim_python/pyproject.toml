@@ -9,6 +9,9 @@ description = "High-performance GPU-accelerated mathematical vector animation en
 requires-python = ">=3.12"
 dependencies = []
 
+[project.optional-dependencies]
+algebra = ["sympy>=1.14,<2"]
+
 [tool.maturin]
 python-source = "."
 module-name = "gaanim.gaanim_core"

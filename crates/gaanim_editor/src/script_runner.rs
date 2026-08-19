@@ -150,6 +150,7 @@ const GAANIM_COLORS: &str = include_str!("../../gaanim_python/gaanim/colors.py")
 const GAANIM_MATH: &str = include_str!("../../gaanim_python/gaanim/math.py");
 const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
 const GAANIM_COMPOSITION: &str = include_str!("../../gaanim_python/gaanim/composition.py");
+const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
@@ -195,6 +196,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let composition =
         PyModule::from_code(py, &composition_source, &composition_file, &composition_name)?;
     modules.set_item("gaanim.composition", &composition)?;
+
+    let matrix_source = std::ffi::CString::new(GAANIM_MATRIX).unwrap();
+    let matrix_file = std::ffi::CString::new("gaanim/matrix.py").unwrap();
+    let matrix_name = std::ffi::CString::new("gaanim.matrix").unwrap();
+    let matrix = PyModule::from_code(py, &matrix_source, &matrix_file, &matrix_name)?;
+    modules.set_item("gaanim.matrix", &matrix)?;
 
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)

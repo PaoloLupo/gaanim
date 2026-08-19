@@ -3,6 +3,7 @@ pub mod builder;
 pub mod canvas;
 pub mod export;
 pub mod host;
+pub mod matrix;
 pub mod prelude;
 pub mod runtime;
 

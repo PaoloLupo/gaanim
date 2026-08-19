@@ -41,6 +41,11 @@ en inglés porque forman parte de la API ejecutable.
     #html.div(style: "font-size: 0.84rem; color: var(--text-muted); margin-top: 6px;", [move, fade, write, create, grow, spin, wiggle, transform y easing. Todo sobre Drawable.])
     #html.div(style: "margin-top: 12px; font-family: var(--font-code); font-size: 0.62rem; font-weight: 800; color: var(--accent-cyan); border: 1.5px solid var(--code-border); display: inline-block; padding: 3px 8px; background: #ecfeff;", [ANIMATIONS →])
   ])
+  #html.a(href: "matrices/", style: "display: block; background: var(--bg-card); border: 1.5px solid var(--code-border); padding: 18px; text-decoration: none !important;", [
+    #html.div(style: "font-family: var(--font-code); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-cyan); margin-bottom: 6px;", [MATH — MATRIX])
+    #html.div(style: "font-weight: 800; font-size: 1.05rem; color: var(--text-main);", [Matrices])
+    #html.div(style: "font-size: 0.84rem; color: var(--text-muted); margin-top: 6px;", [Selecciones 2D, cambios estructurales, morph y álgebra SymPy animable.])
+  ])
   #html.a(href: "themes/", style: "display: block; background: var(--bg-card); border: 1.5px solid var(--code-border); padding: 18px; text-decoration: none !important;", [
     #html.div(style: "font-family: var(--font-code); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-emerald); margin-bottom: 6px; border-bottom: 2px solid var(--accent-emerald); display: inline-block; padding-bottom: 2px;", [04 — SISTEMA])
     #html.div(style: "font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; color: var(--text-main);", [Colores y temas])
@@ -78,6 +83,7 @@ Copiar, pegar, `gaanim archivo.py`.
 - #link("/api/text/", "Text — prosa, matemática, estilo, flujo, selecciones y transiciones")
 - #link("/api/visualization/", "Visualización — ejes, funciones, datos, estadística y cálculo")
 - #link("/api/mobjects/", "Objetos — más de 40 fábricas por categoría")
+- #link("/api/matrices/", "Matrices — selección, mutación, morph y álgebra")
 - #link("/api/animations/", "Animaciones — 22 animaciones, tiempo y curvas de ritmo")
 - #link("/api/themes/", "Temas — colores y pinceles")
 - #link("/api/layout/", "Layout v2 — filas, columnas, grids, capas y restricciones") · #link("/api/assets/", "Recursos — imágenes y SVG") · #link("/api/audio/", "Audio")
