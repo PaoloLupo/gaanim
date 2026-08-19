@@ -10,10 +10,10 @@
 
 = Audio
 
-Declare audio on the scene. Relative paths use `scene.assets_dir(...)`, just
-like images and SVG files. On MP4 and WebM export, gaanim sends the tracks to
-FFmpeg, aligns them to the scene timeline, mixes them, and muxes the result
-with the rendered video.
+Declara el audio directamente en la escena. Las rutas relativas usan
+`scene.assets_dir(...)`, igual que las imágenes y los archivos SVG. Al exportar
+MP4 o WebM, Gaanim envía las pistas a FFmpeg, las alinea con la línea de tiempo,
+las mezcla y combina el resultado con el video renderizado.
 
 ```python
 from gaanim import Scene
@@ -28,9 +28,9 @@ scene.audio("pop.wav", duration=0.4, volume=0.8, fade_in=0.02)
 scene.export("lesson.mp4")
 ```
 
-`start` is optional. When omitted, the source starts at the current timeline
-cursor; use `start=...` to place it at an absolute scene time. `duration`
-trims a source, which also makes a fade-out deterministic.
+`start` es opcional. Si se omite, la fuente comienza en el cursor actual de la
+línea de tiempo; usa `start=...` para situarla en un instante absoluto de la
+escena. `duration` recorta la fuente y hace determinista el fundido de salida.
 
 ```python
 scene.audio(
@@ -43,6 +43,7 @@ scene.audio(
 )
 ```
 
-Audio is currently export-only: the interactive preview does not yet play or
-scrub audio. MP4 uses AAC; WebM uses Opus. Image sequences, GIF, and animated
-WebP reject audio tracks because those formats do not carry an audio stream.
+Por ahora, el audio solo está disponible durante la exportación: la vista
+previa interactiva todavía no lo reproduce ni permite recorrerlo. MP4 usa AAC
+y WebM usa Opus. Las secuencias de imágenes, GIF y WebP animado rechazan las
+pistas porque esos formatos no transportan audio.

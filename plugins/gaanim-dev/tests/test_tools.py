@@ -205,6 +205,23 @@ class VerifySafetyTests(unittest.TestCase):
 
 
 class AuditTests(unittest.TestCase):
+    def test_native_contract_ignores_typed_pure_python_imports(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = Path(temp) / "__init__.py"
+            package.write_text(
+                "from .gaanim_core import Scene, Anim\n"
+                "from .composition import AnimationGroup, LaggedStart, Succession\n",
+                encoding="utf-8",
+            )
+
+            imports = audit._relative_imports(package)
+
+        self.assertEqual({"Scene", "Anim"}, imports["gaanim_core"])
+        self.assertEqual(
+            {"AnimationGroup", "LaggedStart", "Succession"},
+            imports["composition"],
+        )
+
     def test_detects_stale_agent_guidance(self):
         findings = audit.agent_guidance_drift(
             "Cargo.toml defines 12 crates. No README exists. "

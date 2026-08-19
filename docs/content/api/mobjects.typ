@@ -11,7 +11,8 @@
 
 = Objetos
 
-Every factory on `Scene` returns a `Drawable`. Chain style, layout and animation fluently.
+Cada fábrica de `Scene` devuelve un `Drawable`. Encadena estilo, layout y
+animación con la API fluida.
 
 == Clases de tema y trazos completos
 
@@ -29,6 +30,7 @@ from gaanim import Scene, Style, Theme
 theme = Theme("paper", styles={".warning": Style(fill="#e11d48")})
 scene = Scene(480, 270, theme=theme)
 warning = scene.square(90).style_class("warning")
+scene.wait(0.1)
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -39,7 +41,7 @@ scene.export("preview.webp", fps=30)
   signature: "tracking_line(from, to) -> Drawable",
   params: ((name: "from", type: "Endpoint", default: none, desc: [Fixed point, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "to", type: "Endpoint", default: none, desc: [Second same-frame endpoint.])),
   returns: (type: "Drawable", desc: [Hidden reactive line; reveal it with `create`, `write`, or another entry animation.]),
-  desc: [Regenerates its full path whenever either endpoint moves while preserving active path-reveal progress. The public name is `tracking_line`; there is no `tracked_line` alias.],
+  desc: [Regenerates its full path whenever either endpoint moves while preserving active path-reveal progress.],
 )[
 ```python
 # show-code: true
@@ -68,6 +70,7 @@ scene = Scene(480, 270)
 guide = scene.line(-160, 0, 160, 0).stroke_style(
     StrokeStyle("#2563eb", 5, cap="round", dashes=[18, 10])
 )
+scene.wait(0.1)
 scene.export("preview.webp", fps=30)
 ```
 ]
@@ -1166,24 +1169,37 @@ scene.export("preview.webp", fps=30)
 
 == Reactividad nativa
 
-Reactive values are traced once when a scene is built. Use `Parameter` as an
-invisible scalar, `Variable` when the scalar must also be visible, and
-`Readout` to display a derived quantity. During playback Gaanim evaluates the
-native expression tree in Rust: it does not re-enter Python or acquire the
-GIL per frame.
+Los valores reactivos se trazan una sola vez al construir la escena. Durante la
+reproducción, Gaanim evalúa el árbol de expresiones nativo en Rust: no vuelve a
+entrar en Python ni adquiere el GIL en cada fotograma.
 
-Use functions from `gaanim.math` inside traced lambdas. Standard-library
-`math` functions and Python control flow cannot consume symbolic values. A
-plot lambda accepts its symbolic input once; a readout lambda takes no
-arguments. The result must be a number or a traced scalar expression.
+Elige el tipo según la responsabilidad:
+
+- `Parameter` es una magnitud invisible que conduce otras propiedades.
+- `Variable` es una magnitud que también debe aparecer como anotación numérica.
+- `Readout` muestra una cantidad derivada sin convertirse en su fuente.
+- `PointRef` y `AnchorPoint` expresan posiciones dependientes sin crear marcas
+  visibles adicionales.
+- Los bindings conectan propiedades existentes; los updaters quedan para
+  comportamiento temporal que no puede expresarse como una relación pura.
+
+Usa funciones de `gaanim.math` dentro de lambdas trazadas. Las funciones del
+módulo estándar `math` y el control de flujo de Python no pueden consumir
+valores simbólicos. La lambda de un gráfico recibe una vez su entrada simbólica;
+la de un readout no recibe argumentos. El resultado debe ser un número o una
+expresión escalar trazada.
+
+La ventaja principal aparece al hacer seek: una relación pura se evalúa para el
+instante solicitado y no depende de haber reproducido todos los fotogramas
+anteriores.
 
 #api-entry(
   name: "Scene.parameter",
   kind: "factory",
   signature: "parameter(initial: float) -> Parameter",
-  params: ((name: "initial", type: "float", default: none, desc: [Finite starting scalar value.]),),
-  returns: (type: "Parameter", desc: [An invisible scalar usable directly in `gaanim.math` expressions.]),
-  desc: [`current` reads its construction value, `set(value)` changes it before compilation, and `animate_to(value, duration=None)` returns an `Anim`. Parameters support arithmetic, power, negation, and `abs`. Non-finite values raise `ValueError`.],
+  params: ((name: "initial", type: "float", default: none, desc: [Valor escalar inicial y finito.]),),
+  returns: (type: "Parameter", desc: [Escalar invisible utilizable directamente en expresiones de `gaanim.math`.]),
+  desc: [`current` lee su valor de construcción, `set(value)` lo modifica antes de compilar y `animate_to(value, duration=None)` devuelve un `Anim`. Admite aritmética, potencias, negación y `abs`. Los valores no finitos producen `ValueError`.],
 )[
 ```python
 from gaanim import Axis, Scene, math as gm
@@ -1200,8 +1216,8 @@ scene.play([axes.create(), curve.write(), amplitude.animate_to(2.0, duration=1.2
   name: "Scene.variable",
   kind: "factory",
   signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Variable",
-  params: ((name: "label", type: "str", default: none, desc: [Visible label placed before the equality sign.]), (name: "format", type: "str", default: "'.2f'", desc: [Numeric format: width, sign, grouping, precision, and `f`, `e`, `g`, or `%`.]), (name: "unit", type: "str | None", default: none, desc: [Optional visible unit.]),),
-  returns: (type: "Variable", desc: [A `Drawable` and reactive scalar at the same time.]),
+  params: ((name: "label", type: "str", default: none, desc: [Etiqueta visible colocada antes del signo igual.]), (name: "format", type: "str", default: "'.2f'", desc: [Formato numérico: ancho, signo, agrupación, precisión y `f`, `e`, `g` o `%`.]), (name: "unit", type: "str | None", default: none, desc: [Unidad visible opcional.]),),
+  returns: (type: "Variable", desc: [Objeto dibujable y escalar reactivo al mismo tiempo.]),
   desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. All terms use `font_size`, defaulting together to the 48-unit reactive annotation size. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
 ```python
@@ -1217,8 +1233,8 @@ scene.play([k.create(), k.animate_to(100, duration=1.5)])
   name: "Scene.readout",
   kind: "factory",
   signature: "readout(source, *, label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='—') -> Readout",
-  params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [A scalar or no-argument lambda traced once.]), (name: "invalid", type: "str", default: "'—'", desc: [Text used when evaluation is invalid or non-finite.]),),
-  returns: (type: "Readout", desc: [A reactive `Drawable` group.]),
+  params: ((name: "source", type: "number | Parameter | Variable | callable", default: none, desc: [Escalar o lambda sin argumentos trazada una sola vez.]), (name: "invalid", type: "str", default: "'—'", desc: [Texto usado cuando la evaluación es inválida o no finita.]),),
+  returns: (type: "Readout", desc: [Grupo dibujable reactivo.]),
   desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[
 ```python
@@ -1233,13 +1249,23 @@ scene.play([area.create(), radius.animate_to(3.0, duration=1.5)])
 
 == Geometría reactiva
 
+La geometría reactiva conecta extremos, magnitudes y referencias espaciales en
+el mismo fotograma. En lugar de recalcular una línea desde Python, construyes una
+relación: «este extremo es la esquina del rectángulo» o «este punto está al 35 %
+de la curva». El motor regenera solo la geometría afectada después de aplicar
+las transformaciones de sus fuentes.
+
+Un objeto reactivo suele empezar oculto igual que cualquier objeto recién
+creado. Anima su entrada (`fade_in`, `create` o `write`) junto con el parámetro o
+el objeto que lo conduce.
+
 #api-entry(
   name: "Drawable.anchor_point",
   kind: "method",
   signature: "anchor_point(anchor=Anchor.CENTER, *, offset=(0, 0)) -> AnchorPoint",
   params: ((name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [One of the nine local-bounds anchors.]), (name: "offset", type: "vec2", default: "(0, 0)", desc: [Additional local-space displacement.]),),
   returns: (type: "AnchorPoint", desc: [Non-rendered endpoint that follows the full transformed hierarchy.]),
-  desc: [Use anchored points with tracking lines, bars, springs, and dimensions. The local offset rotates and scales with the drawable; non-finite values raise `ValueError`. Passing a Drawable directly retains origin-tracking compatibility.],
+  desc: [Use anchored points with tracking lines, bars, springs, and dimensions. The local offset rotates and scales with the drawable; non-finite values raise `ValueError`.],
 )[
 ```python
 from gaanim import Anchor, Scene
@@ -1250,18 +1276,18 @@ corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
 ]
 
 #api-entry(
-  name: "Scene.value_tracker",
+  name: "Scene.parameter",
   kind: "factory",
-  signature: "value_tracker(initial: float) -> ValueTracker",
+  signature: "parameter(initial: float) -> Parameter",
   params: ((name: "initial", type: "float", default: none, desc: [Starting value.]),),
-  returns: (type: "ValueTracker", desc: [Scalar animated independently.]),
+  returns: (type: "Parameter", desc: [Scalar animated independently.]),
   desc: [Drive `always_redraw_arc`, `point_on_curve`, etc. Use `tracker.animate_to(v).duration(t)`. Reactive visuals need their own entry animation in `scene.play(...)`.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
-theta = scene.value_tracker(0.2)
+theta = scene.parameter(0.2)
 arc = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([arc.fade_in().duration(0.3), theta.animate_to(4.5).duration(1.6)])
 scene.export("preview.webp", fps=30)
@@ -1271,8 +1297,8 @@ scene.export("preview.webp", fps=30)
 #api-entry(
   name: "Scene.point_on_curve",
   kind: "factory",
-  signature: "point_on_curve(curve: Drawable, tracker: ValueTracker) -> Drawable",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Sampled polyline/bezier.]), (name: "tracker", type: "ValueTracker", default: none, desc: [0..1 clamped, arc-length.] ),),
+  signature: "point_on_curve(curve: Drawable, tracker: Parameter) -> Drawable",
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Sampled polyline/bezier.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1 clamped, arc-length.] ),),
   returns: (type: "Drawable", desc: [Dot following curve.]),
   desc: [Position by arc length, no Python callback during playback.],
 )[
@@ -1281,7 +1307,7 @@ scene.export("preview.webp", fps=30)
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
-t = scene.value_tracker(0.0)
+t = scene.parameter(0.0)
 curve = scene.polyline([(110*cos(u), 60*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 dot = scene.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(1.6)])
@@ -1293,7 +1319,7 @@ scene.export("preview.webp", fps=30)
   name: "Scene.tangent_on_curve / normal_on_curve",
   kind: "factory",
   signature: "tangent_on_curve(curve, tracker, length=80) / normal_on_curve(...) -> Drawable",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "ValueTracker", default: none, desc: [0..1.] ), (name: "length", type: "float", default: "80", desc: [Line length.]),),
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1.] ), (name: "length", type: "float", default: "80", desc: [Line length.]),),
   returns: (type: "Drawable", desc: [Line centered on curve point, rotated to tangent/normal.]),
   desc: [Normal is 90° CCW from tangent. Same arc-length sampling.],
 )[
@@ -1302,7 +1328,7 @@ scene.export("preview.webp", fps=30)
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
-t = scene.value_tracker(0.35)
+t = scene.parameter(0.35)
 curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 tangent = scene.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
 scene.play([tangent.fade_in().duration(0.3), t.animate_to(0.9).duration(1.4)])
@@ -1314,7 +1340,7 @@ scene.export("preview.webp", fps=30)
   name: "Scene.curvature_on_curve",
   kind: "factory",
   signature: "curvature_on_curve(curve, tracker, window=0.02) -> Drawable",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "ValueTracker", default: none, desc: [0..1.]),),
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1.]),),
   returns: (type: "Drawable", desc: [Osculating circle.]),
   desc: [Estimated from neighboring arc-length samples. Style with `no_fill().stroke()`.],
 )[
@@ -1323,7 +1349,7 @@ scene.export("preview.webp", fps=30)
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(480, 270, background="#0f172a")
-t = scene.value_tracker(0.25)
+t = scene.parameter(0.25)
 curve = scene.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 circle = scene.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
 scene.play([circle.fade_in().duration(0.3), t.animate_to(0.7).duration(1.4)])
@@ -1335,15 +1361,15 @@ scene.export("preview.webp", fps=30)
   name: "Scene.always_redraw_arc",
   kind: "factory",
   signature: "always_redraw_arc(tracker, cx, cy, radius, start_angle) -> Drawable",
-  params: ((name: "tracker", type: "ValueTracker", default: none, desc: [Drives sweep angle.]),),
+  params: ((name: "tracker", type: "Parameter", default: none, desc: [Drives sweep angle.]),),
   returns: (type: "Drawable", desc: [Regenerated arc each frame.]),
-  desc: [For `ValueTracker`-driven rotations without Python callback.],
+  desc: [For `Parameter`-driven rotations without Python callback.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
-theta = scene.value_tracker(0.3)
+theta = scene.parameter(0.3)
 rot = scene.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([rot.fade_in().duration(0.3), theta.animate_to(5.0).duration(1.6)])
 scene.export("preview.webp", fps=30)
@@ -1418,7 +1444,7 @@ scene.export("preview.webp", fps=30)
   kind: "reactive geometry",
   signature: "point_ref(x,y) · point_between(from,to,alpha=.5,offset=(0,0)) · polar_point(origin,radius,angle) · drawable.follow(endpoint,offset=(0,0),offset_space=\"world\")",
   returns: (type: "PointRef | Drawable", desc: [Non-rendered points and a fluent same-frame follower.]),
-  desc: [`PointRef` is accepted anywhere an `Endpoint` is accepted. Scalars can be `float`, `Parameter`, `Variable`, or traced expressions. `offset_space="local"` rotates and scales offsets with drawable and anchor sources; invalid values raise `ValueError`. `follow_to` remains available for compatibility.],
+  desc: [`PointRef` is accepted anywhere an `Endpoint` is accepted. Scalars can be `float`, `Parameter`, `Variable`, or traced expressions. `offset_space="local"` rotates and scales offsets with drawable and anchor sources; invalid values raise `ValueError`.],
 )[
 ```python
 # show-code: true

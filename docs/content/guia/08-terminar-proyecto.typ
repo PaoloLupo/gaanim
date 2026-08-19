@@ -120,6 +120,7 @@ proyecto. Conserva una copia antes de experimentar con extensiones.
 
 == Después de la guía
 
-Los capítulos siguientes cubren proyectos, presentaciones y regresión visual.
-La tercera parte es la referencia técnica de la API pública.
+La parte siguiente abre un taller de escenas con recetas de texto estructurado,
+datos, Layout, reactividad, 3D, proyectos, presentaciones y regresión visual.
+La referencia técnica de la API queda reservada para el apéndice final.
 ]

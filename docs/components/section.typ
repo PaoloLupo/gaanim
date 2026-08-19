@@ -106,7 +106,16 @@
 
         let site-map = (
           "Inicio": "",
-          "Guía de usuario": (
+          "Fundamentos": (
+            "Introducción": "manual/introduccion/",
+            "Instalación rápida": "getting-started/",
+            "Instalación detallada": "getting-started/installation/",
+            "Guía rápida": "manual/guia-rapida/",
+            "Scene": "manual/escena/",
+            "Objetos": "manual/objetos/",
+            "Animaciones": "manual/animaciones/",
+          ),
+          "Proyecto práctico": (
             "1. Antes de empezar": "guia/antes-de-empezar/",
             "2. Primera escena": "guia/primera-escena/",
             "3. Objetos y estilo": "guia/objetos-estilo/",
@@ -116,7 +125,11 @@
             "7. Del círculo al seno": "guia/circulo-al-seno/",
             "8. Terminar el proyecto": "guia/terminar-proyecto/",
           ),
-          "Flujos de trabajo": (
+          "Taller de escenas": (
+            "Ejemplos básicos": "examples/basic/",
+            "Ejemplos avanzados": "examples/advanced/",
+            "Temas avanzados": "manual/avanzado/",
+            "Layout": "guides/layout/",
             "Proyectos": "guides/projects/",
             "Presentaciones": "guides/slides/",
             "Regresión visual": "guides/visual-regression/",
@@ -133,10 +146,6 @@
               "Recursos": "api/assets/",
               "Audio": "api/audio/",
             ),
-          "Ejemplos": (
-            "Básicos": "examples/basic/",
-            "Avanzados": "examples/advanced/",
-          ),
         )
 
         html.div(class: "layout-container", {
@@ -278,10 +287,13 @@
 
     let source-code = source-labeled
 
-    // Result items (stdout, stderr)
+    let has-webp = result.webp.len() > 0
+
+    // La salida normal del exportador no aporta información cuando ya existe
+    // una vista previa. Los errores siempre permanecen visibles.
     let result-items = ()
 
-    if result.stdout.len() > 0 {
+    if result.stdout.len() > 0 and not has-webp {
       if result.stdout.starts-with("[typst]") {
         result-items.push(eval(result.stdout.replace("[typst]", "").trim(), mode: "markup"))
       } else {
@@ -310,8 +322,6 @@
     }
 
     // Layout: side-by-side if WebP exists, otherwise stacked
-    let has-webp = result.webp.len() > 0
-
     let layout-content = if target() != "bundle" {
       block(
         width: 100%,

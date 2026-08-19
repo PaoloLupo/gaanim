@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::Duration as StdDuration,
@@ -21,6 +22,18 @@ _cell_id = _sys.argv[1] if len(_sys.argv) > 1 else "output"
 import warnings as _warnings
 _warnings.filterwarnings("ignore")
 "#;
+
+fn is_valid_webp(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0_u8; 12];
+    file.read_exact(&mut header).is_ok() && has_valid_webp_signature(&header)
+}
+
+fn has_valid_webp_signature(header: &[u8]) -> bool {
+    header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
+}
 
 fn strip_ansi_escape_codes(s: &str) -> String {
     let mut result = String::new();
@@ -57,6 +70,7 @@ fn adjust_stderr_line_numbers(stderr: &str, temp_file: &str, prelude_lines: usiz
             || trimmed.contains("dependency successfully precompiled")
             || trimmed.contains("dependencies successfully precompiled")
             || trimmed.contains("UserWarning:")
+            || trimmed.eq_ignore_ascii_case("Typst warning: unknown font family: consolas")
         {
             continue;
         }
@@ -415,10 +429,24 @@ pub fn compile_code_cell(
         && cache["hash"].as_str() == Some(hex_hash.as_str())
     {
         let cached_webp = cache["webp"].as_str().unwrap_or("");
-        // Cache hit only if webp file still exists on disk
-        if cached_webp.is_empty() || project_root.join(cached_webp).exists() {
+        // Una celda que promete una exportación no puede reutilizar una entrada
+        // fallida sin WebP. Las celdas puramente textuales sí aceptan una ruta
+        // vacía como resultado válido.
+        let cached_output_exists = !cached_webp.is_empty()
+            && project_root.join(cached_webp).exists()
+            && is_valid_webp(&project_root.join(cached_webp));
+        let cache_output_is_valid = if expected_webp.is_some() {
+            cached_output_exists
+        } else {
+            cached_webp.is_empty() || cached_output_exists
+        };
+        if cache_output_is_valid {
             stdout = strip_ansi_escape_codes(cache["stdout"].as_str().unwrap_or(""));
-            stderr = strip_ansi_escape_codes(cache["stderr"].as_str().unwrap_or(""));
+            stderr = adjust_stderr_line_numbers(
+                &strip_ansi_escape_codes(cache["stderr"].as_str().unwrap_or("")),
+                "",
+                0,
+            );
             webp_path = cached_webp.to_string();
             executed = true;
         }
@@ -427,6 +455,13 @@ pub fn compile_code_cell(
     // Execute if not cached
     if !executed {
         eprintln!("Executing Python cell (id: {})...", cell_id);
+
+        // Cada celda necesita su propio directorio de trabajo. Typst puede
+        // evaluarlas en paralelo y casi todos los ejemplos exportan al mismo
+        // nombre (`preview.webp`). Compartir el directorio provoca carreras,
+        // archivos movidos por otra celda y lecturas de WebP incompletos.
+        let cell_work_dir = project_root.join("target/code_cells").join(&cell_id);
+        fs::create_dir_all(&cell_work_dir).unwrap();
 
         let mut full_script = String::new();
         full_script.push_str(PYTHON_PRELUDE);
@@ -453,7 +488,7 @@ pub fn compile_code_cell(
         command
             .arg(&temp_file)
             .arg(&cell_id)
-            .current_dir(&project_root)
+            .current_dir(&cell_work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("PYTHONUTF8", "1")
@@ -506,12 +541,12 @@ pub fn compile_code_cell(
         if let Some(ref webp_name) = expected_webp {
             // wait for exporter to finish flushing (Windows file lock)
             for _ in 0..15 {
-                if project_root.join(webp_name).exists() {
-                    let s1 = fs::metadata(project_root.join(webp_name))
+                if cell_work_dir.join(webp_name).exists() {
+                    let s1 = fs::metadata(cell_work_dir.join(webp_name))
                         .map(|m| m.len())
                         .unwrap_or(0);
                     std::thread::sleep(std::time::Duration::from_millis(120));
-                    let s2 = fs::metadata(project_root.join(webp_name))
+                    let s2 = fs::metadata(cell_work_dir.join(webp_name))
                         .map(|m| m.len())
                         .unwrap_or(0);
                     if s1 == s2 && s1 > 1024 {
@@ -521,10 +556,11 @@ pub fn compile_code_cell(
                     std::thread::sleep(std::time::Duration::from_millis(80));
                 }
             }
-            let src_path = project_root.join(webp_name);
+            let src_path = cell_work_dir.join(webp_name);
             let src_valid = fs::metadata(&src_path)
                 .map(|m| m.len() > 100)
-                .unwrap_or(false);
+                .unwrap_or(false)
+                && is_valid_webp(&src_path);
             if src_valid {
                 let img_dir = project_root.join("assets/generated");
                 fs::create_dir_all(&img_dir).unwrap();
@@ -569,6 +605,7 @@ pub fn compile_code_cell(
             "stderr": stderr,
         });
         let _ = fs::write(&cache_file, serde_json::to_string(&cache).unwrap());
+        let _ = fs::remove_dir(&cell_work_dir);
     }
 
     // Build result for Typst
@@ -590,4 +627,28 @@ pub fn compile_code_cell(
     }
 
     Ok(Value::Dict(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{adjust_stderr_line_numbers, has_valid_webp_signature};
+
+    #[test]
+    fn validates_the_riff_webp_signature() {
+        assert!(has_valid_webp_signature(b"RIFF\x04\x00\x00\x00WEBP"));
+        assert!(!has_valid_webp_signature(b"not a webp file"));
+        assert!(!has_valid_webp_signature(b"RIFF"));
+    }
+
+    #[test]
+    fn suppresses_the_optional_consolas_fallback_warning() {
+        assert_eq!(
+            adjust_stderr_line_numbers(
+                "Typst warning: unknown font family: consolas",
+                "temp.py",
+                0,
+            ),
+            ""
+        );
+    }
 }

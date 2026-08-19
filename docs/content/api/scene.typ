@@ -11,9 +11,9 @@
 
 = Scene
 
-`Scene` is the public entry point for an animation. It owns mobjects, the
-timeline, rendering, export, and named segments. Create a `Scene` for every
-animation; `Canvas` is retained only as a deprecated compatibility constructor.
+`Scene` es el punto de entrada público de una animación. Es propietaria de los
+objetos, la línea de tiempo, el renderizado, la exportación y los segmentos con
+nombre. Crea una `Scene` para cada animación.
 
 == Constructor y viewport
 
@@ -21,9 +21,9 @@ animation; `Canvas` is retained only as a deprecated compatibility constructor.
   name: "Scene",
   kind: "constructor",
   signature: "Scene(width: int = 1280, height: int = 720, background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
-  params: ((name: "width", type: "int", default: "1280", desc: [Viewport width in pixels.]), (name: "height", type: "int", default: "720", desc: [Viewport height in pixels.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [ColorLike, Brush, or Background; it takes precedence over the theme background.]), (name: "margin", type: "float | None", default: "None", desc: [Uniform safe-frame margin.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Built-in name or reusable centralized theme.]),),
-  returns: (type: "Scene", desc: [A new authoring scene.]),
-  desc: [Installs the theme before objects are authored. Unknown names or invalid theme values raise `ValueError` or `TypeError`.],
+  params: ((name: "width", type: "int", default: "1280", desc: [Ancho del viewport en píxeles.]), (name: "height", type: "int", default: "720", desc: [Alto del viewport en píxeles.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush` o `Background`; tiene prioridad sobre el fondo del tema.]), (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme del marco seguro.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre incluido o tema centralizado reutilizable.]),),
+  returns: (type: "Scene", desc: [Una escena nueva para autoría.]),
+  desc: [Instala el tema antes de crear objetos. Nombres desconocidos o valores inválidos producen `ValueError` o `TypeError`.],
 )[
 
 ```python
@@ -38,12 +38,13 @@ scene.canvas.set_margin(32)
 ```
 ]
 
-The equivalent late form is `scene.canvas.set_theme(theme)`. Theme-compatible
-objects retain semantic metadata until compilation, so rules also reach
-objects authored before that call. See #link("/api/themes/", "Themes and colors").
+La forma tardía equivalente es `scene.canvas.set_theme(theme)`. Los objetos
+compatibles conservan metadatos semánticos hasta la compilación, así que las
+reglas también alcanzan objetos creados antes de esa llamada. Consulta
+#link("/api/themes/", "Temas y colores").
 
-`scene.canvas.set_preset(...)` configures a standard output format and a safe
-area that every layout and edge-placement operation respects:
+`scene.canvas.set_preset(...)` configura un formato de salida estándar y un área
+segura que respetan todas las operaciones de layout y colocación en bordes:
 
 ```python
 scene.canvas.set_preset("vertical")  # 1080×1920, safe around mobile UI
@@ -51,10 +52,10 @@ safe = scene.canvas.safe_area()
 title = safe.place(scene.text("Vertical video", role="title"), Anchor.TOP)
 ```
 
-Available presets are `"widescreen"` (1920×1080 / 16:9), `"vertical"`
-(1080×1920 / 9:16), and `"square"` (1080×1080 / 1:1). Use
-`set_safe_area(top=..., right=..., bottom=..., left=...)` when a brand or
-platform requires custom insets.
+Los presets disponibles son `"widescreen"` (1920×1080 / 16:9), `"vertical"`
+(1080×1920 / 9:16) y `"square"` (1080×1080 / 1:1). Usa
+`set_safe_area(top=..., right=..., bottom=..., left=...)` cuando una marca o
+plataforma requiera márgenes internos personalizados.
 
 == Iluminación 3D y cámara del editor
 
@@ -85,11 +86,11 @@ contains 3D content. Purely 2D scenes retain the regular snapping behavior.
 
 == Creación de objetos
 
-Every factory returns a `Drawable` handle with fluent style and layout methods.
-Unified `Text` uses the bundled New Computer Modern scientific theme by
-default; `$...$` spans use the matching New Computer Modern Math face.
-Use `scene.text("$a + b = 2$")` for inline math and
-`scene.equation("a + b = 2")` for a standalone block equation compiled as
+Cada fábrica devuelve un `Drawable` con métodos fluidos de estilo y layout.
+El `Text` unificado usa de forma predeterminada la familia científica New
+Computer Modern incluida; los fragmentos `$...$` usan su pareja New Computer
+Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
+`scene.equation("a + b = 2")` para una ecuación independiente compilada como
 `$ a + b = 2 $`.
 
 ```python
@@ -173,10 +174,9 @@ curve = space.function(x.sin()).stroke(BLUE, 3)
 marker = scene.dot(6).at_coordinate(space.coord(1, 1))
 ```
 
-The old `scene.plot`, `get_graph`, `function_graph`, Manim monkey patches, and
-fixed-canvas coordinate conversions are not public API. See
-#link("/api/visualization/", "Visualization API") for scales, polar/complex/3D
-spaces, native expressions, data/statistics, and educational helpers.
+Consulta #link("/api/visualization/", "la API de visualización") para conocer
+las escalas, los espacios polares, complejos y 3D, las expresiones nativas, los
+datos y estadísticas, y las herramientas educativas.
 
 `bezier(start, controls, end)` creates a native quadratic Bézier with one
 control point or a cubic Bézier with two. It remains a real Bézier path, so it
@@ -207,15 +207,15 @@ double-headed measurement arrow.
 
 == Geometría reactiva
 
-`ValueTracker` animates a scalar independently of visible mobjects. Use
+`Parameter` anima un escalar independientemente de los objetos visibles. Usa
 `always_redraw_arc` to regenerate a curved arrow from that value each frame.
 Reactive visual helpers are hidden when declared. Add their entry animation to
 `scene.play(...)`—for example `arc.fade_in()`, `trail.fade_in()`, or
 `spring.create()`—before or alongside the animation that drives them. The
-`ValueTracker` itself is a non-visual signal and does not need an entry.
+`Parameter` es una señal no visual y no necesita una animación de entrada.
 
 ```python
-theta = scene.value_tracker(0.2)
+theta = scene.parameter(0.2)
 rotation = scene.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
 scene.play([
     rotation.fade_in().duration(0.3),
@@ -335,12 +335,12 @@ scene.play([snippet.fade_in().duration(0.4)])
 ```
 
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
-normalized value of a `ValueTracker` along a sampled `polyline` or Bézier
+normalized value of a `Parameter` along a sampled `polyline` or Bézier
 path. The value is clamped to
 `[0, 1]` and measured by arc length, with no Python callback during playback.
 
 ```python
-t = scene.value_tracker(0.0)
+t = scene.parameter(0.0)
 curve = scene.polyline([
   (180 * cos(u), 100 * sin(2 * u))
   for u in (2 * PI * index / 240 for index in range(241))

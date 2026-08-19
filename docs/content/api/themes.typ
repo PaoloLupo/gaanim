@@ -10,14 +10,15 @@
 
 = Temas y colores
 
-Use a scene background and the exported color constants to define the visual
-language of an animation. Built-in themes are available through `scene.canvas`.
+Define el lenguaje visual de una animación con el fondo de la escena y las
+constantes de color exportadas. Los temas incluidos se administran mediante
+`scene.canvas`.
 
-For technical or LaTeX-style material, prefer a near-black background, white or
-soft-gray text, muted blue for structural emphasis, and reserve saturated
-semantic colors (green, red, gold) for positive, negative, or exceptional
-meaning. The built-in title cards, bullets, and bar charts follow this quieter
-default.
+Para material técnico o de estilo LaTeX conviene usar un fondo casi negro,
+texto blanco o gris suave y azul apagado para la estructura. Reserva los
+colores semánticos saturados —verde, rojo y dorado— para significados positivos,
+negativos o excepcionales. Las tarjetas de título, viñetas y gráficas de barras
+incluidas siguen de forma predeterminada este lenguaje más sobrio.
 
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
@@ -27,8 +28,8 @@ circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
 label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
 
-You can update the background inside the authored scene bounds through
-`scene.canvas`:
+También puedes cambiar mediante `scene.canvas` el fondo dentro de los límites
+creados para la escena:
 
 ```python
 from gaanim import Color
@@ -38,9 +39,10 @@ scene.canvas.background = Color(40, 42, 54)
 
 == Fondos con gradientes y WGSL
 
-`Scene.background` and `scene.canvas.background` accept the same `Brush`
-gradients used by drawables. Gradient coordinates are scene coordinates, so a
-full-width linear gradient on a 1280×720 scene runs from `x=-640` to `x=640`:
+`Scene.background` y `scene.canvas.background` aceptan los mismos gradientes
+`Brush` que los objetos dibujables. Sus coordenadas pertenecen a la escena: en
+una escena de 1280×720, un gradiente lineal de ancho completo va de `x=-640` a
+`x=640`:
 
 ```python
 from gaanim import Brush, Scene
@@ -53,8 +55,8 @@ sky = Brush.linear(
 scene = Scene(1280, 720, background=sky)
 ```
 
-For procedural or animated art, `Background.shader(source, fallback=...)`
-accepts a WGSL function with this signature:
+Para arte procedural o animado, `Background.shader(source, fallback=...)`
+acepta una función WGSL con esta firma:
 
 ```wgsl
 fn gaanim_background(
@@ -67,16 +69,16 @@ fn gaanim_background(
 }
 ```
 
-`uv=(0, 0)` is the top-left and `uv=(1, 1)` the bottom-right. `resolution` is
-the effective scene size in pixels. `time` is the absolute timeline position
-in seconds; it follows playback and exact seeks, making snapshots and exports
-deterministic. The shader covers the same authored scene rectangle shown by the
-editor's bounds overlay; letterboxed space outside that rectangle uses
-`fallback`. The function is validated when the `Background` is created and
-cached as a Vello texture for the active resolution and time. Resizing the
-editor re-rasterizes it. Legacy two-argument functions without `time` remain
-accepted as static backgrounds. `fallback` defaults to black and is also used
-for native 3D clearing, automatic text contrast, or a GPU rasterization failure.
+`uv=(0, 0)` es la esquina superior izquierda y `uv=(1, 1)` la inferior derecha.
+`resolution` es el tamaño efectivo en píxeles y `time` la posición absoluta de
+la línea temporal en segundos. Como `time` sigue tanto la reproducción como las
+búsquedas exactas, las capturas y exportaciones son deterministas. El shader
+cubre el mismo rectángulo de escena que muestra el editor; el espacio de bandas
+exterior usa `fallback`. La función se valida al crear `Background` y se guarda
+como textura de Vello para la resolución y el tiempo activos. Redimensionar el
+editor vuelve a rasterizarla. `fallback` vale negro por defecto y también se usa
+para limpiar el fondo 3D, calcular contraste automático o recuperarse de un
+fallo de rasterización en la GPU.
 
 ```python
 from gaanim import Background, Scene
@@ -97,16 +99,17 @@ scene = Scene(1280, 720, background=shader)
 
 == Temas incluidos
 
-`technical` is the sober dark default for mathematical explanations and
-technical documentation. `presentation` is optimized for projection: deep navy
-background, warm gold titles, bright body text and cooler secondary labels.
-`paper` uses a literal white canvas with restrained dark ink. An explicit
-`.fill(...)` always takes precedence.
+`technical` es el tema oscuro y sobrio predeterminado para explicaciones
+matemáticas y documentación técnica. `presentation` está optimizado para
+proyección: fondo azul marino, títulos dorados cálidos, cuerpo brillante y
+etiquetas secundarias más frías. `paper` usa un lienzo blanco con tinta oscura
+contenida. Un `.fill(...)` explícito siempre tiene prioridad.
 
-Component defaults also follow the selected theme. Editorial cards, badges,
-banners, callouts, bar charts, tables and code panels inherit compatible
-foreground, accent, panel and rule colors. Bar charts include value labels and
-reserve enough vertical space to keep them inside their bounds.
+Los valores predeterminados de los componentes también siguen el tema elegido.
+Tarjetas, insignias, bandas, avisos, gráficas de barras, tablas y paneles de
+código heredan colores compatibles de primer plano, acento, panel y regla. Las
+gráficas de barras incluyen etiquetas de valor y reservan altura para mantenerlas
+dentro de sus límites.
 
 ```python
 from gaanim import Scene
@@ -119,12 +122,11 @@ subtitle = scene.text("Frequency-domain representation", role="subtitle")
 equation = scene.text("$F(k) = integral f(x) e^(-i k x) dif x$")
 ```
 
-The aliases `scientific`, `deck`, and `light` map to `technical`,
-`presentation`, and `paper`. The former `thesis` alias is no longer accepted.
+Los nombres disponibles de los temas se enumeran a continuación.
 
 == Esquemas de color conocidos
 
-The same short API includes established editor and terminal palettes:
+La misma API breve incluye paletas conocidas de editores y terminales:
 
 ```python
 scene.canvas.set_theme("dracula")
@@ -137,15 +139,15 @@ scene.canvas.set_theme("catppuccin-mocha")
 scene.canvas.set_theme("catppuccin-latte")
 ```
 
-Use `Theme.schemes()` when a tool or GUI needs to enumerate every built-in
-scheme.
+Usa `Theme.schemes()` cuando una herramienta o interfaz necesite enumerar todos
+los esquemas incluidos.
 
 == Temas personalizados y derivados
 
-`Theme` is the single configuration object for semantic colors, structured
-typography, selector rules, data palettes, layout tokens, and font files. It
-can be installed directly with `Scene(theme=...)`; pass a scheme name to
-derive it and override only what changes:
+`Theme` reúne colores semánticos, tipografía estructurada, reglas de selectores,
+paletas de datos, tokens de layout y archivos de fuentes. Se instala directamente
+con `Scene(theme=...)`; pasa el nombre de un esquema para derivarlo y sustituir
+solo lo que cambia:
 
 ```python
 from gaanim import AxesStyle, Scene, StrokeStyle, Style, TextStyle, Theme, colors
@@ -187,16 +189,17 @@ theme = Theme(
 scene = Scene(1920, 1080, theme=theme)
 ```
 
-The `text` dictionary reuses the same `TextStyle` accepted by structured
-`Text` and `part(...)`. It is an overlay: omitted properties continue to come
-from the semantic role. `TextPart` styles and explicit drawable methods retain
-higher priority.
+El diccionario `text` reutiliza el mismo `TextStyle` que aceptan `Text`
+estructurado y `part(...)`. Funciona como una capa: las propiedades omitidas
+siguen viniendo del rol semántico. Los estilos de `TextPart` y los métodos
+explícitos del objeto dibujable conservan mayor prioridad.
 
 == Cascada de selectores
 
-Theme rules may target a family (`shape`, `line`, `text`, `axes`, `plot`), an
-exact factory name (`circle`, `rounded_rect`, `arrow`), a semantic part such as
-`axes/grid` or `axes/labels`, or a user class such as `.warning`.
+Las reglas pueden seleccionar una familia (`shape`, `line`, `text`, `axes`,
+`plot`), el nombre exacto de una fábrica (`circle`, `rounded_rect`, `arrow`),
+una parte semántica como `axes/grid` o `axes/labels`, o una clase del usuario
+como `.warning`.
 
 ```python
 from gaanim import Scene, Style, Theme
@@ -215,22 +218,22 @@ warning = scene.square(100).style_class("danger")
 explicit = scene.circle(40).fill("gold")
 ```
 
-Precedence is base theme, family, exact type or semantic part, ordered user
-classes, constructor values, then fluent overrides. Rules are materialized
-when the scene compiles, so changing the active theme also updates already
-authored compatible objects. Imported asset paints remain source-controlled
-unless explicitly styled.
+La precedencia es: tema base, familia, tipo exacto o parte semántica, clases del
+usuario en orden, valores del constructor y, finalmente, cambios fluidos. Las
+reglas se materializan al compilar la escena, por lo que cambiar el tema activo
+actualiza también objetos compatibles ya creados. La pintura de recursos
+importados permanece controlada por su origen salvo que se estilice explícitamente.
 
-`StrokeStyle` carries paint, width, cap, join, miter limit, dash pattern, and
-dash offset. It can be reused in a theme or applied directly with
-`drawable.stroke_style(style)`. Invalid metrics, selectors, and unresolved
-tokens raise `ValueError`.
+`StrokeStyle` contiene pintura, ancho, remate, unión, límite de inglete, patrón y
+desplazamiento de guiones. Puede reutilizarse en un tema o aplicarse directamente
+con `drawable.stroke_style(style)`. Métricas o selectores inválidos y tokens sin
+resolver producen `ValueError`.
 
-Font files are read when `Theme` is created and embedded in the canvas runtime,
-so exports do not depend on the font being installed on the presentation
-computer. TTF and OTF files are supported by the underlying font registry.
+Los archivos de fuente se leen al crear `Theme` y se incorporan al runtime del
+lienzo. Así, las exportaciones no dependen de que la fuente esté instalada en
+el equipo de presentación. El registro subyacente admite archivos TTF y OTF.
 
-To start without inheriting a named scheme, omit the first argument:
+Para comenzar sin heredar un esquema con nombre, omite el primer argumento:
 
 ```python
 brand = Theme(
@@ -250,8 +253,8 @@ brand = Theme(
 )
 ```
 
-Another `Theme` can be the first argument, which makes modification and reuse
-explicit:
+Otro `Theme` puede ser el primer argumento para hacer explícitas su modificación
+y reutilización:
 
 ```python
 print_theme = Theme(
@@ -261,19 +264,18 @@ print_theme = Theme(
 )
 ```
 
-Built-in color roles are `background`, `foreground`, `muted`, `title`, `accent`,
-`chart`, `panel`, `header`, `rule`, `success`, `warning`, and `danger`. The last
-three drive editorial variants and can be overridden through `Theme(colors=...)`.
-Font roles are `text`, `all`, `title`,
-`subtitle`, `heading`, `body`, `caption`, `label`, `math`, and `code`. The
-`colors` dictionary may also define arbitrary non-empty tokens for selector
-rules.
+Los roles de color incluidos son `background`, `foreground`, `muted`, `title`,
+`accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning` y `danger`.
+Los tres últimos controlan variantes editoriales y pueden sustituirse con
+`Theme(colors=...)`. Los roles de fuente son `text`, `all`, `title`, `subtitle`,
+`heading`, `body`, `caption`, `label`, `math` y `code`. El diccionario `colors`
+también puede definir tokens arbitrarios no vacíos para las reglas de selectores.
 
 == CSS Color 4 y Tailwind
 
-Every `ColorLike` position accepts CSS Color 4 syntax. `Color(...)` also accepts
-a literal directly, and the explicit constructors are useful when values are
-computed:
+Todo argumento `ColorLike` acepta la sintaxis CSS Color 4. `Color(...)` también
+recibe directamente un literal; los constructores explícitos son útiles cuando
+los valores se calculan:
 
 ```python
 from gaanim import Color, colors
@@ -286,20 +288,21 @@ perceptual = Color.from_oklch(0.68, 0.17, 240)
 tailwind_blue = colors.tailwind.blue[500]
 ```
 
-`colors.tailwind` contains all 26 color families and the 50–950 scales from
-Tailwind CSS v4.3.3, including `mauve`, `olive`, `mist`, and `taupe`. The
-embedded version is available as `colors.tailwind.version`.
+`colors.tailwind` contiene las 26 familias y las escalas 50–950 de Tailwind CSS
+v4.3.3, incluidas `mauve`, `olive`, `mist` y `taupe`. La versión incorporada
+está disponible en `colors.tailwind.version`.
 
-Layout templates consume named spacing values through
-`scene.canvas.layout_token(name)`. The default scale includes `space_xs`,
+Las plantillas de layout consumen valores de espaciado con nombre mediante
+`scene.canvas.layout_token(name)`. La escala predeterminada incluye `space_xs`,
 `space_sm`, `space_md`, `space_lg`, `page_padding`, `page_padding_wide`,
 `page_padding_x`, `column_gap`, `vertical_padding`, `vertical_padding_x`, and
-`lower_third_offset`. Custom themes may override these or add project-specific
-tokens through the `layout={...}` argument.
+`lower_third_offset`. Un tema personalizado puede sustituirlos o añadir tokens
+propios del proyecto mediante el argumento `layout={...}`.
 
 == Tokens de tema y legibilidad
 
-Manual vector objects can consume the same semantic tokens as components:
+Los objetos vectoriales manuales pueden consumir los mismos tokens semánticos
+que los componentes:
 
 ```python
 scene.rounded_rect(420, 180, 24) \
@@ -316,10 +319,10 @@ page = scene.column(
 )
 ```
 
-`Theme.validate()` and `scene.canvas.validate_theme()` return actionable
-warnings for insufficient foreground, title, muted, or panel contrast and for
-invalid typography. They return an empty list when the core combinations are
-ready:
+`Theme.validate()` y `scene.canvas.validate_theme()` devuelven advertencias
+accionables si el contraste de primer plano, título, texto atenuado o panel es
+insuficiente, o si la tipografía es inválida. Devuelven una lista vacía cuando
+las combinaciones principales están listas:
 
 ```python
 warnings = scene.canvas.validate_theme()
@@ -327,14 +330,14 @@ if warnings:
     raise ValueError("\n".join(warnings))
 ```
 
-Validation is advisory rather than automatic rejection, so intentional
-low-contrast animation states remain possible.
+La validación es orientativa, no un rechazo automático; por eso siguen siendo
+posibles los estados animados de bajo contraste intencional.
 
 == Pinceles y gradientes
 
-`Drawable.fill(...)` and `Drawable.stroke(...)` accept either an ordinary
-`ColorLike` value or a reusable `Brush`. Gradient coordinates use the
-drawable's local coordinate space, so the paint follows later transforms.
+`Drawable.fill(...)` y `Drawable.stroke(...)` aceptan un `ColorLike` normal o
+un `Brush` reutilizable. Las coordenadas del gradiente usan el espacio local del
+objeto, de modo que la pintura acompaña sus transformaciones posteriores.
 
 ```python
 from gaanim import Brush
@@ -348,8 +351,8 @@ gradient = Brush.linear(
 card = scene.rounded_rect(480, 220, 28).fill(gradient)
 ```
 
-Radial and angular gradients use the same color-list convention. Colors are
-distributed uniformly and two or more stops are required:
+Los gradientes radiales y angulares usan la misma convención de lista de colores.
+Los colores se distribuyen uniformemente y se requieren dos paradas como mínimo:
 
 ```python
 orb = scene.circle(120).fill(
@@ -369,14 +372,15 @@ ring = scene.circle(110).no_fill().stroke(
 )
 ```
 
-`extend="pad"` is the default. Use `"repeat"` or `"reflect"` for repeating
-ramps. Sweep angles are expressed in degrees; linear points and radial radii
-use scene units.
+`extend="pad"` es el valor predeterminado. Usa `"repeat"` o `"reflect"` para
+repetir la rampa. Los ángulos de barrido se expresan en grados; los puntos
+lineales y radios usan unidades de escena.
 
 == Efectos visuales
 
-Effects use the same fluent `Drawable` surface. Defaults keep common calls
-short, while radius, intensity, offset, and blur remain configurable:
+Los efectos usan la misma interfaz fluida de `Drawable`. Los valores
+predeterminados mantienen breves las llamadas comunes, mientras radio,
+intensidad, desplazamiento y desenfoque siguen siendo configurables:
 
 ```python
 title.glow("#38BDF8")
@@ -384,36 +388,36 @@ background_blob.blur(12)
 card.shadow("#00000080", x=10, y=-10, blur=8)
 ```
 
-`glow`, `blur`, and `shadow` are compiled into retained vector fragments, so
-unchanged effects are cached. They work on vector fills and strokes, including
-gradient brushes. `no_effects()` removes all three without changing the
-drawable's fill or stroke.
+`glow`, `blur` y `shadow` se compilan como fragmentos vectoriales retenidos, por
+lo que los efectos sin cambios se reutilizan desde la caché. Funcionan sobre
+rellenos y trazos, incluidos los pinceles de gradiente. `no_effects()` elimina
+los tres sin cambiar el relleno ni el trazo del objeto.
 
 == Constantes de color
 
 #table(
   columns: (1fr, 1fr, 1fr),
-  [*Name*], [*Hex*], [*Usage*],
-  [`BLUE`], [`#3b82f6`], [Primary blue],
-  [`GOLD`], [`#eab308`], [Gold/yellow],
-  [`RED`], [`#ef4444`], [Red],
-  [`GREEN`], [`#22c55e`], [Green],
-  [`WHITE`], [`#ffffff`], [White],
-  [`BLACK`], [`#000000`], [Black],
-  [`YELLOW`], [`#facc15`], [Yellow],
-  [`ORANGE`], [`#f97316`], [Orange],
-  [`PURPLE`], [`#a855f7`], [Purple],
-  [`PINK`], [`#ec4899`], [Pink],
-  [`GRAY`], [`#6b7280`], [Gray],
-  [`CYAN`], [`#06b6d4`], [Cyan],
+  [*Nombre*], [*Hex*], [*Uso*],
+  [`BLUE`], [`#3b82f6`], [Azul principal],
+  [`GOLD`], [`#eab308`], [Dorado/amarillo],
+  [`RED`], [`#ef4444`], [Rojo],
+  [`GREEN`], [`#22c55e`], [Verde],
+  [`WHITE`], [`#ffffff`], [Blanco],
+  [`BLACK`], [`#000000`], [Negro],
+  [`YELLOW`], [`#facc15`], [Amarillo],
+  [`ORANGE`], [`#f97316`], [Naranja],
+  [`PURPLE`], [`#a855f7`], [Morado],
+  [`PINK`], [`#ec4899`], [Rosa],
+  [`GRAY`], [`#6b7280`], [Gris],
+  [`CYAN`], [`#06b6d4`], [Cian],
   [`CORAL`], [`#ff7f50`], [Coral],
-  [`NAVY`], [`#1e3a5f`], [Navy],
-  [`TEAL`], [`#14b8a6`], [Teal],
+  [`NAVY`], [`#1e3a5f`], [Azul marino],
+  [`TEAL`], [`#14b8a6`], [Verde azulado],
 )
 
 == Colores personalizados
 
-`Color` receives RGBA channels from 0 through 255:
+`Color` recibe canales RGBA de 0 a 255:
 
 ```python
 from gaanim import Color

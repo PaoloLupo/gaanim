@@ -91,6 +91,18 @@ def _python_exports(path: Path) -> tuple[set[str], set[str]]:
     return available, exported
 
 
+def _relative_imports(path: Path) -> dict[str, set[str]]:
+    """Return names imported from each direct sibling module."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: dict[str, set[str]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module:
+            imports.setdefault(node.module, set()).update(
+                alias.asname or alias.name for alias in node.names
+            )
+    return imports
+
+
 def agent_guidance_drift(
     agents: str, justfile: str, member_count: int, readme_exists: bool
 ) -> list[Finding]:
@@ -204,25 +216,11 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
         findings.append(_error("python-contract-files", "Python stub or package __init__.py is missing"))
     else:
         stub_names = _stub_names(stub)
-        templates_stub = package.with_name("templates.pyi")
-        if templates_stub.is_file():
-            stub_names.update(_stub_names(templates_stub))
         available, exported = _python_exports(package)
         undefined_exports = sorted(exported - available)
         if undefined_exports:
             findings.append(_error("python-all", f"__all__ contains undefined names: {', '.join(undefined_exports)}"))
-        pure_python_modules = {
-            path.stem
-            for path in package.parent.glob("*.py")
-            if path.name != "__init__.py"
-        }
-        imported_native = available - pure_python_modules - {
-            "Canvas",
-            "_norm_range",
-            "_patched_axes",
-            "_axes_plot",
-            "_axes_plot_parametric",
-        }
+        imported_native = _relative_imports(package).get("gaanim_core", set())
         missing_stub_names = sorted(name for name in imported_native if not name.startswith("_") and name not in stub_names)
         if missing_stub_names:
             findings.append(_error("python-stub", f"Top-level native imports missing from stub: {', '.join(missing_stub_names)}"))

@@ -11,13 +11,15 @@
 
 = Animaciones
 
-Every method on `Drawable` returns an `Anim`. Pass them to `Scene.play([...])` — calls are sequential, lists run in parallel.
+Cada método de animación de `Drawable` devuelve un `Anim`. Pásalos a
+`Scene.play([...])`: varias llamadas se ejecutan en secuencia y los elementos de
+una misma lista se ejecutan en paralelo.
 
 == Animaciones de propiedades compuestas
 
-`Drawable.animate() -> Anim` starts a typed property animation. Chain several
-targets on the returned `Anim`; they share duration, easing, and delay and are
-sampled concurrently from the timeline:
+`Drawable.animate() -> Anim` inicia una animación tipada de propiedades. Encadena
+varios objetivos en el `Anim` devuelto: comparten duración, curva y retraso, y
+se muestrean simultáneamente desde la línea temporal:
 
 ```python
 scene.play([
@@ -32,27 +34,27 @@ scene.play([
 ])
 ```
 
-The proxy supports 2D and 3D movement, absolute 3D scale, relative or absolute
-rotation, opacity, solid fill, and vector stroke. `color(c)` recolors only
-vector paints that are already visible. Calling `fill(c)` from `no_fill()` or
-`stroke(c, width)` from `no_stroke()` reveals the paint smoothly from
-transparent; a new stroke also grows from zero width.
+El proxy admite movimiento 2D y 3D, escala 3D absoluta, rotación relativa o
+absoluta, opacidad, relleno sólido y trazo vectorial. `color(c)` recolorea solo
+la pintura vectorial ya visible. Llamar `fill(c)` tras `no_fill()`, o
+`stroke(c, width)` tras `no_stroke()`, revela suavemente la pintura desde la
+transparencia; un trazo nuevo también crece desde ancho cero.
 
-For `Text` and Typst drawables, fill and stroke channels propagate to every
-visible glyph. Each glyph interpolates from its own current paint, including
-fragment-specific colors. A whole-text `fill(c)` or `color(c)` therefore
-converges those fragment colors to the requested target, while `stroke(c,
-width)` changes the outline without replacing their distinct fills.
+En objetos `Text` y Typst, los canales de relleno y trazo se propagan a cada
+glifo visible. Cada glifo interpola desde su pintura actual, incluso si un
+fragmento tiene color propio. Por eso `fill(c)` o `color(c)` sobre el texto
+completo converge esos colores al objetivo, mientras `stroke(c, width)` cambia
+el contorno sin reemplazar sus rellenos distintos.
 
-For a native `Primitive3D`, `fill(c)` and `color(c)` target the PBR base color
-while preserving roughness, metallic, and emission. Use
-`primitive.animate().material(Material3D(...))` to interpolate the complete PBR
-material together with transforms and opacity. Vector stroke methods on a 3D
-primitive raise `TypeError`.
+En una `Primitive3D` nativa, `fill(c)` y `color(c)` cambian el color base PBR y
+conservan rugosidad, metalicidad y emisión. Usa
+`primitive.animate().material(Material3D(...))` para interpolar el material PBR
+completo junto con transformaciones y opacidad. Los métodos de trazo vectorial
+sobre una primitiva 3D producen `TypeError`.
 
-Only the first property activates the deferred animation queue, so an unused
-`animate()` proxy does not advance scene time. Position targets retain the
-usual layout-ownership restriction.
+Solo la primera propiedad activa la cola diferida; un proxy `animate()` sin usar
+no avanza el tiempo. Los objetivos de posición conservan la restricción normal
+de propiedad del layout.
 
 == Acciones glTF
 
@@ -199,7 +201,7 @@ scene.export("preview.webp", fps=30)
   signature: ".move_along_path(target: Drawable) -> Anim",
   params: ((name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),),
   returns: (type: "Anim", desc: [Follow-path translation.]),
-  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Equivalent to Manim's `MoveAlongPath`. Combine with `.linear()` for uniform speed, or `.smooth()` for ease. Rotation/scale unaffected.],
+  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.linear()` for uniform speed, or `.smooth()` for ease. Rotation/scale unaffected.],
 )[
 ```python
 # show-code: true
@@ -218,7 +220,7 @@ scene.export("preview.webp", fps=30)
   signature: ".pivot(x: float, y: float) -> Anim / .about_point(x: float, y: float) -> Anim",
   params: ((name: "x", type: "float", default: none, desc: [Pivot x in scene pixels.]), (name: "y", type: "float", default: none, desc: [Pivot y in scene pixels.]),),
   returns: (type: "Anim", desc: [Same Anim with orbital pivot.]),
-  desc: [Only valid on `RotateBy` anims (`Drawable.rotate`). Replaces hinge with scene-space point; the engine builds an orbital `Arc` for translation plus a slerped `Rotation` (splits `>π`). Alias `about_point` mirrors Manim.],
+  desc: [Only valid on `RotateBy` anims (`Drawable.rotate`). Replaces hinge with scene-space point; the engine builds an orbital `Arc` for translation plus a slerped `Rotation` (splits `>π`).],
 )[
 ```python
 import math
@@ -259,7 +261,7 @@ scene.export("preview.webp", fps=30)
   signature: ".fade_in_from(direction: Direction, distance=48, duration?) -> Anim",
   params: ((name: "direction", type: "Direction", default: none, desc: [UP/DOWN/LEFT/RIGHT]), (name: "distance", type: "float", default: "48.0", desc: [Offset before entrance.]),),
   returns: (type: "Anim", desc: [Entrance from offset.]),
-  desc: [Manim-style entrance: starts invisible at offset, fades + moves in.],
+  desc: [Starts invisible at the requested offset, then fades and moves into place.],
 )[
 ```python
 # show-code: true

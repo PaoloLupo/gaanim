@@ -2,20 +2,20 @@
 #import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
-  title: "Text",
+  title: "Texto",
   description: "Prosa, matemáticas, partes semánticas, flujo responsive, selecciones y animación estructural",
   route: "/api/text/",
   code-langs: (),
   updated: datetime.today().display(),
 )
 
-= Text
+= Texto
 
-`scene.text()` is the general factory for prose, titles, paragraphs,
-mathematics, and mixed content. `scene.equation()` is its display-math
-convenience wrapper. Both return the same specialized `Text`: a vector
-`Drawable` that keeps semantic structure, is measured intrinsically by Layout
-v2, and exposes local selections and text-specific animations.
+`scene.text()` es la fábrica general de prosa, títulos, párrafos, matemáticas y
+contenido mixto. `scene.equation()` es su atajo para matemáticas en bloque.
+Ambas devuelven el mismo `Text` especializado: un `Drawable` vectorial que
+conserva la estructura semántica, es medido intrínsecamente por Layout v2 y
+expone selecciones locales y animaciones específicas de texto.
 
 ```python
 from gaanim import GOLD, Scene, TextFlow, TextStyle, part
@@ -34,23 +34,21 @@ scene.play([copy.write(1.2, by="part", stagger=0.06)])
 scene.play([copy["formula"]["mass"].indicate(0.6)])
 ```
 
-The old `title`, `subtitle`, `paragraph`, and `math` factories do not have
-compatibility aliases. Use a role for prose or `scene.equation()` for a
-standalone equation. `scene.typst()` remains available for arbitrary Typst
-documents, but it does not provide the structured `Text` selection API
-described here.
+Usa un rol para la prosa y `scene.equation()` para una ecuación independiente.
+`scene.typst()` permite crear documentos Typst arbitrarios, pero no ofrece la
+API de selección estructurada de `Text` descrita aquí.
 
 == Responsabilidades
 
-- `TextStyle` controls glyph appearance and typographic metrics.
-- `TextFlow` controls internal line composition.
-- Layout v2 alone controls the outer box, padding, fit, growth, tracks,
-  constraints, ownership, and reflow.
-- `TextSelection` addresses glyphs inside one `Text`; it never becomes an
-  independent Layout child.
+- `TextStyle` controla el aspecto de los glifos y las métricas tipográficas.
+- `TextFlow` controla la composición interna de líneas.
+- Solo Layout v2 controla caja exterior, relleno, ajuste, crecimiento, pistas,
+  restricciones, propiedad y recomposición.
+- `TextSelection` señala glifos dentro de un `Text`; nunca se convierte en hijo
+  independiente de Layout.
 
-This split means there is no second text box solver. See
-#link("/api/layout/", "Layout v2") for container sizing and placement.
+Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
+#link("/api/layout/", "Layout v2") para dimensionar y colocar contenedores.
 
 == Scene.text
 

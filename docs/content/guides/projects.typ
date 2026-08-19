@@ -86,7 +86,10 @@ assets_dir = "assets"
 output_dir = "exports"
 ```
 
-`entry` debe ser una ruta relativa que permanezca dentro del proyecto. `kind` solo acepta `video` o `slides`. Los valores anteriores `presentation` y `thesis` se rechazan; cambia el manifiesto a `kind = "slides"`. El CLI usa `entry`; la escena carga `assets_dir` mediante `scene.load_project(...)`. `output_dir` es la carpeta convencional para artefactos.
+`entry` debe ser una ruta relativa que permanezca dentro del proyecto. `kind`
+solo acepta `video` o `slides`. La CLI usa `entry`; la escena carga `assets_dir`
+mediante `scene.load_project(...)`. `output_dir` es la carpeta convencional para
+artefactos.
 
 En `main.py`:
 
@@ -107,4 +110,6 @@ Los scripts continúan siendo compatibles:
 gaanim examples/mi_escena.py
 ```
 
-Para convertir uno en proyecto, crea la estructura anterior, mueve el script a `main.py`, añade `scene.load_project(...)` después de construir `Scene` y coloca recursos en `assets/`. No es obligatorio migrar hasta que necesites portabilidad, presentación, validación o exportaciones organizadas.
+Para organizarlo como proyecto, crea la estructura descrita arriba, mueve el
+script a `main.py`, añade `scene.load_project(...)` después de construir `Scene`
+y coloca los recursos en `assets/`.

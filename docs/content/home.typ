@@ -10,7 +10,7 @@
 #html.div(class: "home-hero", [
   #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-gold); margin-bottom: 10px;", [● REC &nbsp;·&nbsp; GPU · Vello · Bevy · Python])
   #html.h1(style: "margin: 0;", [Da vida a tus ideas.])
-  #html.div(class: "home-hero-desc", [Manim-style, GPU-accelerated. Escribe Python, exporta MP4/WebM/WebP/GIF. Timeline fluida, 30+ animaciones, tipografía y math con Typst. Hecho para quienes viven en el viewport.])
+  #html.div(class: "home-hero-desc", [Animación vectorial acelerada por GPU. Escribe Python y exporta MP4, WebM, WebP o GIF. Línea de tiempo fluida, más de 30 animaciones, tipografía y matemáticas con Typst. Hecho para quienes viven en el viewport.])
   #html.div(class: "home-hero-cta", [
     #html.a(href: "guia/antes-de-empezar/", class: "primary", [Leer la guía →])
     #html.a(href: "getting-started/", class: "secondary", [Instalar])

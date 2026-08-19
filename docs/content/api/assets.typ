@@ -10,8 +10,9 @@
 
 = Recursos
 
-Set one asset directory per scene so relative image, SVG, and glTF paths remain
-portable when a project is moved or rendered from another working directory.
+Define un directorio de recursos por escena para que las rutas relativas de
+imágenes, SVG y glTF sigan siendo portables al mover el proyecto o renderizarlo
+desde otro directorio de trabajo.
 
 ```python
 from gaanim import Scene
@@ -24,19 +25,19 @@ cover = scene.image("cover.png")
 robot = scene.gltf("robot.glb")
 ```
 
-Absolute paths continue to work and take precedence over `assets_dir`.
+Las rutas absolutas también funcionan y tienen prioridad sobre `assets_dir`.
 
 == Manifiesto del proyecto
 
-Create a complete starter from the CLI:
+Crea un proyecto completo desde la CLI:
 
 ```text
 gaanim init video my-video
 gaanim init slides my-deck
 ```
 
-Every project contains `main.py`, `gaanim.toml`, `assets/`, `exports/`, a README,
-and a project `.gitignore`. The generated manifest is:
+Cada proyecto contiene `main.py`, `gaanim.toml`, `assets/`, `exports/`, un README
+y un `.gitignore`. El manifiesto generado es:
 
 ```toml
 name = "my-deck"
@@ -46,91 +47,99 @@ assets_dir = "assets"
 output_dir = "exports"
 ```
 
-Then load it before creating drawables:
+Después, cárgalo antes de crear objetos dibujables:
 
 ```python
 scene = Scene()
-scene.load_project()  # reads gaanim.toml beside this Python script
+scene.load_project()  # lee gaanim.toml junto a este script de Python
 ```
 
-The CLI accepts either the entry script or its project directory (`gaanim my-deck`,
-`gaanim check my-deck`). The asset directory is resolved relative to the manifest,
-not the process working directory. With no argument, `load_project()` finds the
-manifest next to the calling script even when Gaanim was started elsewhere.
-`load_project("path/to/gaanim.toml")` accepts an explicit manifest path.
+La CLI acepta el script de entrada o el directorio del proyecto (`gaanim my-deck`,
+`gaanim check my-deck`). El directorio de recursos se resuelve respecto al
+manifiesto, no respecto al directorio de trabajo del proceso. Sin argumentos,
+`load_project()` busca el manifiesto junto al script que hizo la llamada, aunque
+Gaanim se haya iniciado desde otro lugar. `load_project("path/to/gaanim.toml")`
+acepta una ruta explícita al manifiesto.
 
 == Precarga
 
-Use `preload` to validate raster, SVG, and glTF files before playback. Raster images
-are decoded into the same cache used by `scene.image`.
+Usa `preload` para validar archivos ráster, SVG y glTF antes de reproducir la
+escena. Las imágenes ráster se decodifican en la misma caché que usa
+`scene.image`.
 
 ```python
 scene.preload(["logo.svg", "cover.png", "diagram.webp"])
 ```
 
-Failures identify the asset that could not be resolved or decoded. The scene currently
-consumes `assets_dir`; `name`, `kind`, `entry`, and `output_dir` describe the project
-workflow and leave room for future export presets.
+Los errores identifican el recurso que no pudo resolverse o decodificarse. La
+escena consume actualmente `assets_dir`; `name`, `kind`, `entry` y `output_dir`
+describen el flujo del proyecto y reservan espacio para futuros perfiles de
+exportación.
 
 == Actualización de archivos modificados
 
-When a raster asset changes on disk without restarting the process, clear the
-decoded image cache before rebuilding the affected drawables:
+Cuando un recurso ráster cambia en disco sin reiniciar el proceso, limpia la
+caché de imágenes decodificadas antes de reconstruir los objetos afectados:
 
 ```python
 scene.reload_assets()
 cover = scene.image("cover.png")
 ```
 
-SVG files are parsed again whenever `scene.svg(...)` creates a drawable.
+Los archivos SVG vuelven a analizarse cada vez que `scene.svg(...)` crea un
+objeto dibujable.
 
-glTF metadata is cached by canonical path and modification time. `reload_assets()`
-also clears this cache; the editor then removes the old native scene instance and
-all of its descendants before rebuilding it.
+Los metadatos glTF se guardan por ruta canónica y fecha de modificación.
+`reload_assets()` también limpia esta caché; el editor elimina la instancia
+nativa anterior y todos sus descendientes antes de reconstruirla.
 
 == Modelos 3D glTF
 
-`Scene.gltf(path, *, scene=None) -> Drawable` imports local glTF 2.0 `.gltf`
-and `.glb` files. `scene` accepts a scene name, a zero-based index, or `None`
-for the file's default scene.
+`Scene.gltf(path, *, scene=None) -> Drawable` importa archivos locales glTF 2.0
+con extensión `.gltf` o `.glb`. `scene` acepta el nombre de una escena, un índice
+basado en cero o `None` para usar la escena predeterminada del archivo.
 
 ```python
 model = scene.gltf("robot.glb", scene="Presentation")
 arm = model.part("Robot/Rig/Arm")
 
-print(model.parts())       # tuple of stable selectors
-print(model.animations())  # Blender Action names
+print(model.parts())       # tupla de selectores estables
+print(model.animations())  # nombres de acciones de Blender
 ```
 
-A short node name is available only when it is unique. A hierarchical path
-disambiguates repeated names; duplicate full paths receive the stable suffix
-`#<node-index>`. Lookup errors list the candidate selectors.
+El nombre corto de un nodo solo está disponible cuando es único. Una ruta
+jerárquica desambigua los nombres repetidos; las rutas completas duplicadas
+reciben el sufijo estable `#<node-index>`. Los errores de búsqueda enumeran los
+selectores candidatos.
 
-Gaanim preserves the exported units, orientation, node hierarchy, PBR
-metallic-roughness materials, normals, UVs, textures, skins, bones, and morph
-targets. One glTF unit is one Gaanim world unit; models are not centered or
-scaled automatically. Imported cameras and lights are removed in favor of the
-Gaanim camera and neutral default light. Unsupported glTF extensions or missing
-external buffers/textures fail with the source path in the error.
+Gaanim conserva las unidades exportadas, la orientación, la jerarquía de nodos,
+los materiales PBR metallic-roughness, normales, UV, texturas, skins, huesos y
+morph targets. Una unidad glTF equivale a una unidad del mundo de Gaanim; los
+modelos no se centran ni escalan automáticamente. Las cámaras y luces importadas
+se eliminan en favor de la cámara de Gaanim y su iluminación neutra
+predeterminada. Las extensiones glTF no compatibles y los buffers o texturas
+externos ausentes producen un error que incluye la ruta de origen.
 
-The visual payload is loaded through Bevy's native glTF loader. Gaanim creates
-one stable wrapper for each node: manual wrapper transforms compose above the
-Blender-authored node transform and skeletal/morph animation instead of
-overwriting it. Materials are cloned per instance so opacity animation cannot
-mutate another import of the same file.
+La carga visual usa el importador glTF nativo de Bevy. Gaanim crea un contenedor
+estable por nodo: las transformaciones manuales del contenedor se componen sobre
+la transformación creada en Blender y sobre la animación esquelética o morph,
+sin sobrescribirlas. Los materiales se clonan por instancia para que una
+animación de opacidad no pueda modificar otra importación del mismo archivo.
 
 == SVG avanzado
 
-`scene.svg(...)` keeps the document as vector geometry. The importer resolves:
+`scene.svg(...)` conserva el documento como geometría vectorial. El importador
+resuelve:
 
-- nested groups, CSS, transforms, `viewBox` and `<use>`;
-- solid, linear and radial fills or strokes, including gradient spread modes;
-- `clipPath` geometry applied without rasterizing the document;
-- SVG text converted to font outlines using installed system fonts;
-- common `feGaussianBlur` and `feDropShadow` filters through Gaanim's retained
-  vector effects.
+- grupos anidados, CSS, transformaciones, `viewBox` y `<use>`;
+- rellenos y trazos sólidos, lineales y radiales, incluidos los modos de
+  extensión del gradiente;
+- geometría `clipPath` aplicada sin rasterizar el documento;
+- texto SVG convertido en contornos mediante las fuentes instaladas;
+- filtros habituales `feGaussianBlur` y `feDropShadow` mediante los efectos
+  vectoriales retenidos de Gaanim.
 
-Named source groups, paths and text remain addressable:
+Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python
 diagram = scene.svg("architecture.svg")
@@ -138,7 +147,8 @@ diagram.part("database").indicate(0.6)
 diagram.part("caption").fade_to(0.5)
 ```
 
-The import is intentionally vector-first. Pattern paints, luminance/alpha
-masks, embedded raster images and arbitrary SVG filter graphs are not yet
-preserved. For portable text outlines, make sure the requested font is
-installed on every render machine or convert text to paths in the source SVG.
+La importación prioriza deliberadamente los vectores. Todavía no conserva
+patrones de pintura, máscaras de luminancia o alfa, imágenes ráster incrustadas
+ni grafos arbitrarios de filtros SVG. Para obtener contornos de texto portables,
+instala la fuente solicitada en cada máquina de renderizado o convierte el texto
+en trayectorias dentro del SVG de origen.

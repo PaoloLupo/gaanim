@@ -11,16 +11,24 @@
 
 = Visualización
 
-The visualization API separates tabular storytelling from scientific geometry:
+La API de visualización separa dos problemas que se parecen en pantalla, pero
+se construyen de forma distinta:
 
-- `ChartSpec` is an immutable grammar for data, encodings, marks, scales, axes,
-  guides, and stable-key transitions.
-- `Cartesian2D`, `Cartesian3D`, `PolarSpace`, and `ComplexSpace` are typed spaces
-  for functions, calculus, vector fields, and custom geometry.
+- `ChartSpec` es una gramática inmutable para contar historias con tablas de
+  datos: define codificaciones, marcas, escalas, ejes, guías y transiciones con
+  identidad estable.
+- `Cartesian2D`, `Cartesian3D`, `PolarSpace` y `ComplexSpace` son espacios
+  científicos tipados para funciones, cálculo, campos vectoriales y geometría
+  personalizada.
 
-Constructing `ChartSpec` immediately snapshots mappings, dataframes,
-`DataTable`, or `DataSource`. Later external mutation cannot alter an earlier
-timeline seek.
+La regla práctica es sencilla: usa `ChartSpec` cuando cada fila representa una
+observación; usa un espacio tipado cuando las coordenadas tienen significado
+matemático continuo. Ambos producen objetos normales que pueden recibir temas,
+participar en Layout y animarse en la misma línea de tiempo.
+
+Al construir un `ChartSpec`, Gaanim captura inmediatamente una copia de mappings,
+dataframes, `DataTable` o `DataSource`. Una mutación externa posterior no puede
+cambiar el resultado de una búsqueda anterior en la línea de tiempo.
 
 ```python
 from gaanim import Axis, ChartSpec, Field, Guide, Scale, Scene, Value, BLUE
@@ -52,31 +60,48 @@ scene.play(chart.create())
 
 == ChartSpec
 
+Piensa en `ChartSpec` como una receta, no como el gráfico materializado. Cada
+método devuelve una receta nueva. Esto permite conservar un estado inicial y
+derivar de él el siguiente estado sin mutaciones ocultas:
+
+```python
+bars = base.mark("bar").encode(x="category", y="value")
+points = base.mark("point").encode(x="time", y="value")
+```
+
 #api-entry(
   name: "ChartSpec",
   kind: "builder",
   signature: "ChartSpec(data, *, key=None) -> ChartSpec",
   params: (
-    (name: "data", type: "mapping | dataframe | DataTable | DataSource", default: none, desc: [Input captured immediately as an owned immutable snapshot.]),
-    (name: "key", type: "str | None", default: "None", desc: [Stable identity column. Null or duplicate values fail eagerly.]),
+    (name: "data", type: "mapping | dataframe | DataTable | DataSource", default: none, desc: [Entrada capturada inmediatamente como una instantánea inmutable propia.]),
+    (name: "key", type: "str | None", default: "None", desc: [Columna de identidad estable. Los valores nulos o duplicados producen un error inmediato.]),
   ),
-  returns: (type: "ChartSpec", desc: [Immutable declarative chart specification.]),
-  desc: [`mark`, `encode`, `axes`, and `guides` return new specifications and never mutate an existing one.],
+  returns: (type: "ChartSpec", desc: [Especificación declarativa e inmutable de un gráfico.]),
+  desc: [`mark`, `encode`, `axes` y `guides` devuelven especificaciones nuevas; nunca modifican la existente.],
 )[
-Channels are `x`, `y`, `z`, `color`, `size`, `opacity`, and `label`. A channel
-accepts a column name, `Field(column, scale=...)`, or `Value(constant)`.
+Los canales disponibles son `x`, `y`, `z`, `color`, `size`, `opacity` y
+`label`. Un canal acepta el nombre de una columna, `Field(column, scale=...)`
+o `Value(constant)`. Usa `Field` cuando el valor cambia por fila y `Value`
+cuando todos los elementos comparten el mismo valor.
 
-Marks are `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`,
-`error_bar`, `heatmap`, and `surface`. Point, line, and bar have native 2D/3D
-morph compatibility; heatmap and surface are compatible on a shared grid.
+Las marcas son `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`,
+`violin`, `error_bar`, `heatmap` y `surface`. `point`, `line` y `bar` pueden
+transformarse entre representaciones 2D y 3D; `heatmap` y `surface` pueden
+compartir una misma cuadrícula.
 ]
 
 == Escalas, ejes y guías
 
-`Scale.linear`, `log`, `symlog`, `power`, `time`, and `category` configure an
-encoding. The same scale drives normalized positions, colors, legends, and
-colorbars. `Axis` remains the immutable visual scale builder and supports the
-same numeric, temporal, and categorical families.
+`Scale.linear`, `log`, `symlog`, `power`, `time` y `category` configuran una
+codificación. La misma escala gobierna posiciones normalizadas, colores,
+leyendas y barras de color. `Axis` es el constructor visual e inmutable del eje
+y admite las mismas familias numéricas, temporales y categóricas.
+
+Elige la escala según el significado, no según la apariencia: `linear` para
+diferencias uniformes, `log` para órdenes de magnitud positivos, `symlog` para
+datos con signo alrededor de cero, `time` para fechas y `category` para grupos
+discretos.
 
 La tipografía visual predeterminada usa 32 unidades para números de ticks y 36
 para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p.
@@ -91,16 +116,16 @@ guide = Guide.colorbar(title="temperature")
 
 == Gráfico materializado y transiciones
 
-`scene.chart(spec)` returns a `Chart`. Its stable layers are `marks`, `axes`,
-`grid`, and `guides`; each is a regular drawable. Marks are materialized as a
-constant number of retained vector or mesh batches rather than one ECS entity
-per record.
+`scene.chart(spec)` materializa la receta y devuelve un `Chart`. Sus capas
+estables son `marks`, `axes`, `grid` y `guides`; cada una se comporta como un
+objeto dibujable normal. Las marcas se agrupan en un número constante de lotes
+vectoriales o mallas retenidas, en lugar de crear una entidad ECS por registro.
 
-Chart opacity propagates through both vector and native 3D mesh layers, so
-`fade_in`, `fade_out`, and parent opacity remain consistent in mixed scenes.
-For inferred bar axes, the numeric baseline is included automatically and the
-outer domain reserves enough space to keep the first and last bars away from
-the plot boundary. An explicitly authored axis domain is never changed.
+La opacidad del gráfico se propaga por las capas vectoriales y las mallas 3D
+nativas. Por eso `fade_in`, `fade_out` y la opacidad de un padre mantienen el
+mismo comportamiento en escenas mixtas. Si Gaanim infiere los ejes de un gráfico
+de barras, incluye automáticamente la línea base numérica y reserva espacio en
+los extremos. Un dominio definido explícitamente nunca se modifica.
 
 ```python
 target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))
@@ -110,15 +135,21 @@ scene.play([
 ])
 ```
 
-Key matching is the default and requires both specs to define the same valid
-key column. Without a key, request `match_="index"` explicitly. Incompatible
-mark families raise an error unless `fallback="crossfade"` is explicit.
-`Chart.to` never moves the global camera implicitly.
+Por defecto, una transición relaciona elementos mediante `key`; ambas
+especificaciones deben declarar la misma columna de identidad válida. Sin una
+clave, solicita explícitamente `match_="index"`. Las familias de marcas
+incompatibles producen un error, salvo que indiques
+`fallback="crossfade"`. `Chart.to` nunca mueve implícitamente la cámara global.
 
-`chart.inspect(fields=(...), format="...")` opts into preview metadata. The
-inspection flag and fields are excluded from snapshots and exports.
+`chart.inspect(fields=(...), format="...")` activa metadatos de inspección en
+la vista previa. Esa configuración no aparece en capturas ni exportaciones.
 
 == Espacios científicos tipados
+
+Un espacio tipado conserva la relación entre datos y lienzo. En vez de convertir
+manualmente cada valor a píxeles, describes los dominios mediante `Axis` y
+trabajas siempre en coordenadas científicas. Al mover o escalar el espacio,
+curvas, puntos, etiquetas y construcciones de cálculo permanecen unidos.
 
 ```python
 from gaanim import Axis, Scene, math as gm
@@ -136,36 +167,37 @@ world = scene.cartesian_3d(
 surface = world.surface(lambda x, y: x * y)
 ```
 
-`Cartesian2D` exposes `function`, `parametric`, `implicit`, `contour`, and
-`vector_field`, plus calculus constructions. `Cartesian3D` exposes `surface`,
-`parametric`, and `vector_field`. Its scale-aware `grid`, `axes`, `ticks`,
-`numbers`, and billboard `labels` are independent layers. `scene.polar(...)`,
-`scene.complex(...)`, and `scene.number_line(...)` cover the other typed spaces.
+`Cartesian2D` ofrece `function`, `parametric`, `implicit`, `contour` y
+`vector_field`, además de construcciones de cálculo. `Cartesian3D` ofrece
+`surface`, `parametric` y `vector_field`. Sus capas `grid`, `axes`, `ticks`,
+`numbers` y etiquetas billboard conocen la escala y pueden estilizarse por
+separado. `scene.polar(...)`, `scene.complex(...)` y
+`scene.number_line(...)` cubren los demás espacios tipados.
 
-`Expr` and `Parameter` remain the per-frame reactive path. Python lambdas for
-traced scalar functions execute once; sampling and reactive evaluation stay in
-Rust.
+`Expr` y `Parameter` forman la ruta reactiva por fotograma. Las lambdas de
+Python para funciones escalares trazadas se ejecutan una sola vez; el muestreo
+y la evaluación reactiva permanecen en Rust.
 
 == Series de datos muestreadas
 
-`plot_data` and `scatter_data` draw raw `(xs, ys)` series directly in a
-space's data coordinates. The result is parented to the plane, so moving or
-scaling the space carries the series with it; there is no manual
-data-to-pixel mapping to keep in sync.
+`plot_data` y `scatter_data` dibujan series `(xs, ys)` directamente en las
+coordenadas de datos del espacio. El resultado queda emparentado con el plano:
+si el espacio se mueve o escala, la serie lo acompaña. No existe una conversión
+manual entre datos y píxeles que pueda desincronizarse.
 
 #api-entry(
   name: "Cartesian2D.plot_data",
   kind: "method",
   signature: "plot_data(xs, ys, *, step=False, baseline=None, policy=\"gap\", color=None, width=None) -> Drawable",
   params: (
-    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Matching series in data coordinates; `None` marks a missing sample.]),
-    (name: "step", type: "bool", default: "False", desc: [Draw a step chart instead of a continuous line.]),
-    (name: "baseline", type: "float | None", default: "None", desc: [Data-space baseline; a value fills the area under the curve.]),
-    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Non-finite sample handling: split the line, skip staying connected, or raise.]),
-    (name: "color, width", type: "Color | None, float | None", default: "None", desc: [Optional restyle of the default series stroke.]),
+    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Series de igual longitud en coordenadas de datos; `None` representa una muestra ausente.]),
+    (name: "step", type: "bool", default: "False", desc: [Dibuja una gráfica escalonada en lugar de una línea continua.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Línea base en el espacio de datos; un valor rellena el área bajo la curva.]),
+    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Tratamiento de muestras no finitas: separar la línea, omitir la muestra manteniendo la conexión o producir un error.]),
+    (name: "color, width", type: "Color | None, float | None", default: "None", desc: [Color y ancho opcionales para sustituir el trazo predeterminado de la serie.]),
   ),
-  returns: (type: "Drawable", desc: [Retained vector curve parented to the space; supports `create`, `write`, styling, and all drawable animations.]),
-  desc: [Validates non-empty series of matching length. This is the static path for measured series; see `Parameter.drive_from_samples` for time-driven data.],
+  returns: (type: "Drawable", desc: [Curva vectorial retenida y emparentada con el espacio; admite estilo y todas las animaciones de un objeto dibujable.]),
+  desc: [Valida que las series no estén vacías y tengan la misma longitud. Es la ruta estática para datos medidos; usa `Parameter.drive_from_samples` cuando el tiempo de la escena debe recorrer las muestras.],
 )[
 ```python
 from gaanim import CYAN, Axis, Scene
@@ -187,13 +219,13 @@ scene.play([plane.create(0.85), curve.create(2.2)])
   kind: "method",
   signature: "scatter_data(xs, ys, *, radius=6.0, policy=\"gap\", color=None) -> Drawable",
   params: (
-    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Matching series in data coordinates.]),
-    (name: "radius", type: "float", default: "6.0", desc: [Dot radius in local canvas units; must be positive.]),
-    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Non-finite sample handling.]),
-    (name: "color", type: "Color | None", default: "None", desc: [Optional dot fill overriding the theme series color.]),
+    (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Series de igual longitud en coordenadas de datos.]),
+    (name: "radius", type: "float", default: "6.0", desc: [Radio positivo de cada punto en unidades locales del lienzo.]),
+    (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Tratamiento de muestras no finitas.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Relleno opcional que sustituye el color de serie proporcionado por el tema.]),
   ),
-  returns: (type: "Drawable", desc: [Group of dots parented to the space.]),
-  desc: [Use it for highlighted points over a `plot_data` curve; both follow the same plane.],
+  returns: (type: "Drawable", desc: [Grupo de puntos emparentado con el espacio.]),
+  desc: [Úsalo para destacar muestras sobre una curva de `plot_data`; ambos elementos siguen el mismo plano.],
 )[
 ```python
 peaks = plane.scatter_data(peak_times, peak_values, radius=7, color=GOLD)
@@ -203,16 +235,21 @@ scene.play(peaks.fade_in())
 
 == NumberLine reactivo
 
+`NumberLine` es útil cuando una sola magnitud conduce varias representaciones.
+Un mismo `Parameter` puede determinar la posición de un punto, el final visible
+de una función y cualquier desplazamiento normal. Compartir la magnitud evita
+que dos animaciones aparentemente equivalentes acumulen desfase.
+
 #api-entry(
   name: "NumberLine.point_ref",
   kind: "method",
   signature: "point_ref(value, *, normal_offset=None) -> PointRef",
   params: (
-    (name: "value", type: "float | Parameter | Expr", default: none, desc: [Value mapped through the line's continuous scale.]),
-    (name: "normal_offset", type: "float | Parameter | Expr | None", default: "None", desc: [Perpendicular displacement in local canvas units; `None` means zero.]),
+    (name: "value", type: "float | Parameter | Expr", default: none, desc: [Valor convertido mediante la escala continua de la recta.]),
+    (name: "normal_offset", type: "float | Parameter | Expr | None", default: "None", desc: [Desplazamiento perpendicular en unidades locales; `None` equivale a cero.]),
   ),
-  returns: (type: "PointRef", desc: [A non-rendered reactive endpoint that follows the line's transforms.]),
-  desc: [The point remains attached when the number line moves, rotates, or scales. Categorical scales reject reactive scalar values with `ValueError`.],
+  returns: (type: "PointRef", desc: [Extremo reactivo no renderizado que sigue las transformaciones de la recta.]),
+  desc: [El punto permanece unido cuando la recta se mueve, rota o escala. Las escalas categóricas rechazan valores escalares reactivos con `ValueError`.],
 )[]
 
 #api-entry(
@@ -220,15 +257,15 @@ scene.play(peaks.fade_in())
   kind: "method",
   signature: "function(function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75) -> Drawable",
   params: (
-    (name: "function", type: "Callable[[float], scalar]", default: none, desc: [Callable traced once with `gaanim.math`.]),
-    (name: "domain", type: "(float, float) | None", default: "None", desc: [Sampling interval; defaults to the axis domain.]),
-    (name: "normal_scale", type: "float", default: "120.0", desc: [Positive local distance assigned to a function output of one.]),
-    (name: "reveal", type: "float | Parameter | Expr | None", default: "None", desc: [Exact data-space end of the visible curve.]),
-    (name: "samples", type: "int | None", default: "None", desc: [Fixed sample count, or adaptive sampling when omitted.]),
-    (name: "tolerance", type: "float", default: "0.75", desc: [Positive adaptive error tolerance in local canvas units.]),
+    (name: "function", type: "Callable[[float], scalar]", default: none, desc: [Callable trazado una sola vez mediante `gaanim.math`.]),
+    (name: "domain", type: "(float, float) | None", default: "None", desc: [Intervalo de muestreo; usa el dominio del eje si se omite.]),
+    (name: "normal_scale", type: "float", default: "120.0", desc: [Distancia local positiva asignada a una salida de función igual a uno.]),
+    (name: "reveal", type: "float | Parameter | Expr | None", default: "None", desc: [Extremo exacto de la curva visible, expresado en coordenadas de datos.]),
+    (name: "samples", type: "int | None", default: "None", desc: [Cantidad fija de muestras; al omitirse se usa muestreo adaptativo.]),
+    (name: "tolerance", type: "float", default: "0.75", desc: [Tolerancia positiva del error adaptativo en unidades locales.]),
   ),
-  returns: (type: "Drawable", desc: [Retained vector curve parented to the number line.]),
-  desc: [Sampling and reactive parameter updates run in Rust without Python callbacks per frame. A reactive `reveal` shares the same scalar value with moving points, avoiding arc-length drift. Invalid domains, sampling settings, or non-positive scales raise `ValueError`.],
+  returns: (type: "Drawable", desc: [Curva vectorial retenida y emparentada con la recta numérica.]),
+  desc: [El muestreo y las actualizaciones reactivas se ejecutan en Rust, sin callbacks de Python por fotograma. Un `reveal` reactivo puede compartir el mismo escalar que los puntos móviles y evitar desfases de longitud de arco. Dominios inválidos, ajustes de muestreo incorrectos o escalas no positivas producen `ValueError`.],
 )[
 ```python
 import math
@@ -249,27 +286,9 @@ scene.play([theta.animate_to(3 * math.pi, duration=4)])
 ```
 ]
 
-== Migración desde la API anterior
-
-#table(
-  columns: (1fr, 1fr),
-  table.header([Legacy], [Current]),
-  [`scene.axes(x, y)`], [`scene.cartesian_2d(x, y, grid=False)`],
-  [`scene.number_plane(x, y)`], [`scene.cartesian_2d(x, y, grid=True)`],
-  [`scene.axes_3d(x, y, z)`], [`scene.cartesian_3d(x, y, z)`],
-  [`scene.polar_plane(axis)`], [`scene.polar(axis)`],
-  [`scene.complex_plane()`], [`scene.complex()`],
-  [`space.plot(f)`], [`space.function(f)`],
-  [`space.scatter/bars/...`], [`ChartSpec(...).mark(...).encode(...)` o `space.plot_data(xs, ys)`],
-  [`mapeo manual de datos a píxeles`], [`space.plot_data / scatter_data + drawable.at_coordinate(space.coord(x, y))`],
-)
-
-The legacy entry points in this table are not aliases in the primary Python
-API. Migrate them explicitly so a scene has one unambiguous coordinate-space
-contract.
-
 == Límites y responsabilidades
 
-Interaction is preview-only. Interactive export, dashboards, facets,
-streamlines and ODE solvers, volumes, and isosurfaces are deferred to a later
-milestone. Camera animation remains global, explicit, and composable.
+La inspección interactiva solo existe en la vista previa. La exportación
+interactiva, los dashboards, facets, líneas de corriente, solucionadores de EDO,
+volúmenes e isosuperficies no forman parte todavía de esta superficie. La
+animación de cámara sigue siendo global, explícita y componible.

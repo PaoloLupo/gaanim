@@ -10,14 +10,26 @@
 
 = Layout
 
-Layout v2 is the single public composition model in Gaanim. A `Layout` is a
-`Drawable` and owns the translation of its direct children. Build responsive
-trees with `row`, `column`, `grid`, and `stack`; use `item` for per-child rules.
+Layout v2 es el modelo público de composición de Gaanim. Un `Layout` también es
+un `Drawable` y es propietario de la traslación de sus hijos directos. Construye
+árboles adaptables con `row`, `column`, `grid` y `stack`; usa `item` para definir
+reglas particulares de un hijo.
+
+El modelo mental tiene tres niveles:
+
+1. El contenedor decide el flujo, el tamaño exterior, el espacio y la alineación.
+2. `scene.item(...)` explica cómo un hijo consume la caja que recibe.
+3. El contenido se mide dentro de esa caja; el texto puede recomponer líneas y
+   los medios pueden ajustar su geometría.
+
+Una vez que un objeto pertenece a Layout, deja que el árbol determine su
+posición. Mezclar `at()` o `move()` con Layout introduce dos autoridades sobre
+la misma coordenada y Gaanim lo rechaza explícitamente.
 
 ```python
 page = scene.column(
     [
-        scene.text("Result", role="title"),
+        scene.text("Resultado", role="title"),
         scene.row([
             scene.item(copy, grow=2),
             scene.item(diagram, grow=3, fit="contain"),
@@ -34,12 +46,12 @@ page = scene.column(
 )
 ```
 
-`width` and `height` accept a fixed number, `"hug"`, or `"fill"`. Padding
-accepts one value, `(vertical, horizontal)`, or `(top, right, bottom, left)`.
-Alignment is `start`, `center`, `end`, or `stretch`; distribution also supports
-`between`, `around`, and `evenly`.
+`width` y `height` aceptan un número fijo, `"hug"` o `"fill"`. `padding`
+acepta un valor, `(vertical, horizontal)` o `(top, right, bottom, left)`. La
+alineación puede ser `start`, `center`, `end` o `stretch`; la distribución
+también admite `between`, `around` y `evenly`.
 
-The public constructors are:
+Los constructores públicos son:
 
 ```python
 scene.row(children, *, gap=24, padding=0, width="hug", height="hug",
@@ -53,45 +65,45 @@ scene.stack(children, *, padding=0, width="hug", height="hug",
             align="center", within=None)
 ```
 
-`within=None` makes a nested/intrinsic container; root layouts normally choose
-`"safe"` or `"frame"`. Non-negative numeric values use canvas units. Invalid
-sizes, padding, tracks, alignments, or containing blocks raise `ValueError`.
-Responsive text is composed with the width offered by its final row, column,
-grid track, or stack box. Its tighter visible glyph bounds do not become a new
-wrap limit during materialization.
+`within=None` crea un contenedor anidado e intrínseco; las raíces suelen elegir
+`"safe"` o `"frame"`. Los números no negativos se expresan en unidades del
+lienzo. Tamaños, padding, tracks, alineaciones o bloques contenedores inválidos
+producen `ValueError`. El texto adaptable se compone con el ancho ofrecido por
+su fila, columna, track o caja final. Los límites visuales más estrechos de los
+glifos no se convierten después en un nuevo límite de ajuste.
 
 == Atlas de posibilidades de layout
 
-This section is a compact catalogue of the complete public Layout v2 design
-space. The features are orthogonal: a grid can be nested in a column, a stack
-can occupy one fractional track, responsive text can grow inside either, and
-the resulting tree can still be constrained and animated.
+Esta sección resume el espacio de diseño de Layout v2. Las capacidades son
+ortogonales: un grid puede anidarse dentro de una columna, un stack puede ocupar
+un track fraccional, el texto adaptable puede crecer dentro de cualquiera de
+ellos y el árbol resultante aún puede recibir restricciones y animarse.
 
 #table(
   columns: (1.05fr, 1.15fr, 2.4fr),
   inset: 7pt,
-  [*Goal*], [*API*], [*What it controls*],
-  [Horizontal flow], [`scene.row(...)`], [Main axis is left to right; optionally wraps into new rows.],
-  [Vertical flow], [`scene.column(...)`], [Main axis is top to bottom; optionally wraps into new columns.],
-  [Track layout], [`scene.grid(...)`], [Fixed, intrinsic `auto`, and weighted `fr` rows and columns, spans, and auto-placement.],
-  [Overlays], [`scene.stack(...)`], [Shared containing box for backgrounds, media, captions, badges, and absolute children.],
-  [Outer size], [`width` / `height`], [A fixed canvas-unit number, intrinsic `"hug"`, or available-space `"fill"`.],
-  [Flexible children], [`scene.item(...)`], [`grow`, `shrink`, per-item alignment, grid coordinates, spans, offsets, anchors, and fitting.],
-  [Spacing], [`padding`, `gap`], [One inset, vertical/horizontal insets, four side insets, and independent grid row/column gaps.],
-  [Alignment], [`align`, `justify`], [Cross-axis placement and main-axis distribution.],
-  [Root bounds], [`within="safe"` / `"frame"`], [Whether a root consumes the margin-aware safe frame or the complete viewport.],
-  [Responsive content], [`TextFlow(wrap="auto")`], [Remeasures text using the width offered by its final nested Layout box.],
-  [Media fitting], [`fit=...`], [`none`, `contain`, `cover`, `stretch`, or `scale_down`; `cover` also clips.],
-  [Relations], [`scene.constrain(...)`], [Linear equations and inequalities between geometry in different branches.],
-  [Live structure], [`add` / `remove` / `detach` / `replace` / `configure`], [Creates an instant or animated deterministic reflow snapshot.],
-  [Reusable pages], [`scene.template(...)` / `segment.bind(...)`], [Typed slots, built-in presentation patterns, and theme-driven spacing tokens.],
+  [*Objetivo*], [*API*], [*Qué controla*],
+  [Flujo horizontal], [`scene.row(...)`], [El eje principal avanza de izquierda a derecha y puede continuar en filas nuevas.],
+  [Flujo vertical], [`scene.column(...)`], [El eje principal avanza de arriba abajo y puede continuar en columnas nuevas.],
+  [Distribución por tracks], [`scene.grid(...)`], [Filas y columnas fijas, intrínsecas `auto` o ponderadas `fr`, spans y colocación automática.],
+  [Superposición], [`scene.stack(...)`], [Una caja compartida para fondos, medios, captions, badges e hijos absolutos.],
+  [Tamaño exterior], [`width` / `height`], [Un número fijo en unidades del lienzo, el tamaño intrínseco `"hug"` o el espacio disponible `"fill"`.],
+  [Hijos flexibles], [`scene.item(...)`], [`grow`, `shrink`, alineación individual, coordenadas de grid, spans, offsets, anchors y ajuste.],
+  [Espaciado], [`padding`, `gap`], [Inset único, vertical/horizontal o por los cuatro lados, y separaciones independientes de filas y columnas.],
+  [Alineación], [`align`, `justify`], [Colocación en el eje transversal y distribución en el eje principal.],
+  [Límites de la raíz], [`within="safe"` / `"frame"`], [Uso del área segura que respeta márgenes o del viewport completo.],
+  [Contenido adaptable], [`TextFlow(wrap="auto")`], [Vuelve a medir el texto con el ancho ofrecido por su caja final.],
+  [Ajuste de medios], [`fit=...`], [`none`, `contain`, `cover`, `stretch` o `scale_down`; `cover` también recorta.],
+  [Relaciones], [`scene.constrain(...)`], [Ecuaciones e inecuaciones lineales entre geometría de ramas distintas.],
+  [Estructura viva], [`add` / `remove` / `detach` / `replace` / `configure`], [Crea una instantánea determinista del reflow, inmediata o animada.],
+  [Páginas reutilizables], [`scene.template(...)` / `segment.bind(...)`], [Slots tipados, patrones de presentación y tokens de espaciado del tema.],
 )
 
 === Escena completa sin coordenadas
 
-The following scene uses a nested `column -> row -> stack -> column` tree. No
-child calls `at()`: the outer tree decides every translation, and the text is
-remeasured at the width of the card that contains it.
+La escena siguiente usa un árbol `column -> row -> stack -> column`. Ningún hijo
+llama a `at()`: el árbol exterior decide todas las traslaciones y el texto se
+vuelve a medir con el ancho de la tarjeta que lo contiene.
 
 ```python
 from gaanim import BLUE, GOLD, WHITE, Scene, TextFlow
@@ -99,7 +111,7 @@ from gaanim import BLUE, GOLD, WHITE, Scene, TextFlow
 scene = Scene(1280, 720, background="#0b1020", margin=48)
 
 copy = scene.text(
-    "The same tree can drive a slide, a dashboard, or a vertical video.",
+    "El mismo árbol puede componer una diapositiva, un panel o un video vertical.",
     role="body",
     color=WHITE,
     flow=TextFlow(wrap="auto", line_spacing=1.2),
@@ -110,7 +122,7 @@ card = scene.stack(
         scene.item(scene.rounded_rect(360, 220, 18).fill(BLUE), fit="stretch"),
         scene.column(
             [
-                scene.text("Measured content", role="heading", color=GOLD),
+                scene.text("Contenido medido", role="heading", color=GOLD),
                 copy,
             ],
             width="fill",
@@ -138,9 +150,9 @@ body = scene.row(
 
 page = scene.column(
     [
-        scene.text("Layout v2 atlas", role="title", color=GOLD),
+        scene.text("Atlas de Layout v2", role="title", color=GOLD),
         scene.item(body, grow=1, align="stretch"),
-        scene.text("No manual coordinates", role="caption", color=WHITE),
+        scene.text("Sin coordenadas manuales", role="caption", color=WHITE),
     ],
     within="safe",
     width="fill",
@@ -157,10 +169,16 @@ scene.render()
 
 === Tamaños, padding y espacio flexible
 
-`"hug"` measures intrinsic content, a number fixes the outer box in canvas
-units, and `"fill"` consumes the available constraint. `grow` distributes
-remaining main-axis space between siblings; `shrink` decides which siblings
-may contract when the row or column is tighter than their preferred size.
+`"hug"` mide el contenido intrínseco, un número fija la caja exterior en
+unidades del lienzo y `"fill"` consume la restricción disponible. `grow`
+distribuye entre hermanos el espacio sobrante del eje principal; `shrink`
+decide cuáles pueden contraerse cuando la fila o columna es más estrecha que su
+tamaño preferido.
+
+Una forma útil de decidir es comenzar con `"hug"`, cambiar a `"fill"` solo en
+el eje que deba consumir espacio y usar `grow` únicamente para repartir el
+sobrante entre hermanos. Demasiados `fill` anidados suelen indicar que no está
+claro qué contenedor debe controlar el tamaño.
 
 ```python
 badge = scene.row([icon, label], width="hug", padding=(8, 14), gap=8)
@@ -186,16 +204,21 @@ workspace.configure(
 )
 ```
 
-Padding accepts `padding=24`, `padding=(vertical, horizontal)`, or
-`padding=(top, right, bottom, left)`. Rows and columns use one `gap`; grids can
-override it with `row_gap` and `column_gap`.
+`padding` acepta `padding=24`, `padding=(vertical, horizontal)` o
+`padding=(top, right, bottom, left)`. Las filas y columnas usan un único `gap`;
+los grids pueden sustituirlo mediante `row_gap` y `column_gap`.
 
 === Alineación y distribución
 
-`align` controls the cross axis and accepts `start`, `center`, `end`, or
-`stretch`. `justify` controls the main axis and accepts `start`, `center`,
-`end`, `between`, `around`, or `evenly`. A child can override cross-axis
-alignment through `scene.item(..., align=...)`.
+`align` controla el eje transversal y acepta `start`, `center`, `end` o
+`stretch`. `justify` controla el eje principal y acepta `start`, `center`,
+`end`, `between`, `around` o `evenly`. Un hijo puede sustituir la alineación
+transversal mediante `scene.item(..., align=...)`.
+
+En una `row`, el eje principal es horizontal y `align` actúa verticalmente. En
+una `column`, el eje principal es vertical y `align` actúa horizontalmente.
+Esta distinción resuelve la mayoría de dudas sobre cuál de las dos propiedades
+usar.
 
 ```python
 toolbar = scene.row(
@@ -215,29 +238,29 @@ steps = scene.column(
 chips = scene.row(tags, width=620, gap=12, wrap=True, align="center")
 ```
 
-With `wrap=True`, rows start another row when the next child exceeds the
-available width; columns use the corresponding vertical rule and start another
-column. Absolute children never consume flow space.
+Con `wrap=True`, una fila comienza otra fila cuando el siguiente hijo supera el
+ancho disponible; una columna aplica la regla equivalente en vertical y abre
+otra columna. Los hijos absolutos nunca consumen espacio del flujo.
 
 === Reglas por elemento
 
 #table(
   columns: (0.95fr, 1.15fr, 2.7fr),
   inset: 7pt,
-  [*Rule*], [*Values*], [*Effect*],
-  [`grow`], [non-negative number], [Weighted share of unused main-axis space.],
-  [`shrink`], [non-negative number], [Relative permission to contract under pressure; `0` protects the preferred size.],
-  [`align`], [`start | center | end | stretch`], [Overrides the container's cross-axis alignment for this child.],
-  [`row`, `column`], [zero-based integer or `None`], [Chooses an explicit grid origin; omitted coordinates use deterministic auto-placement.],
-  [`row_span`, `column_span`], [integer >= 1], [Occupies multiple grid tracks.],
-  [`absolute`], [`True | False`], [Removes the child from flow measurement and places it against the containing box.],
-  [`anchor`], [`Anchor.*`], [Selects center, edge, or corner placement inside a stack, grid cell, or absolute containing box.],
-  [`offset`], [`(x, y)`], [Adds an intentional editorial displacement without surrendering Layout ownership.],
-  [`fit`], [`none | contain | cover | stretch | scale_down`], [Maps drawable geometry into the assigned box.],
+  [*Regla*], [*Valores*], [*Efecto*],
+  [`grow`], [número no negativo], [Proporción ponderada del espacio sin usar en el eje principal.],
+  [`shrink`], [número no negativo], [Permiso relativo para contraerse bajo presión; `0` protege el tamaño preferido.],
+  [`align`], [`start | center | end | stretch`], [Sustituye la alineación transversal del contenedor para este hijo.],
+  [`row`, `column`], [entero basado en cero o `None`], [Elige un origen explícito en el grid; sin coordenadas se usa colocación automática determinista.],
+  [`row_span`, `column_span`], [entero >= 1], [Ocupa varios tracks del grid.],
+  [`absolute`], [`True | False`], [Retira el hijo de la medición del flujo y lo coloca respecto a la caja contenedora.],
+  [`anchor`], [`Anchor.*`], [Elige el centro, borde o esquina dentro de un stack, celda de grid o caja absoluta.],
+  [`offset`], [`(x, y)`], [Añade un desplazamiento editorial intencional sin abandonar la propiedad de Layout.],
+  [`fit`], [`none | contain | cover | stretch | scale_down`], [Adapta la geometría del objeto a la caja asignada.],
 )
 
-These rules work at construction time and can be changed later without
-rebuilding the tree:
+Estas reglas funcionan durante la construcción y pueden cambiarse después sin
+reconstruir el árbol:
 
 ```python
 page.configure_item(
@@ -253,10 +276,11 @@ page.configure_item(
 
 === Raíces responsive y árboles anidados
 
-Use `within="safe"` for presentation content that respects scene margins and
-`within="frame"` for full-bleed backgrounds. Nested layouts normally leave
-`within=None`; they receive their constraints from the parent. Dirty state and
-responsive measurement propagate to the outermost owner automatically.
+Usa `within="safe"` para contenido de presentación que respete los márgenes de
+la escena y `within="frame"` para fondos a sangre completa. Los layouts anidados
+suelen dejar `within=None` porque reciben sus restricciones del padre. El estado
+sucio y la medición adaptable se propagan automáticamente hasta el propietario
+exterior.
 
 ```python
 background = scene.stack(
@@ -279,15 +303,22 @@ content = scene.column(
 page = scene.stack([background, content], within="frame", width="fill", height="fill")
 ```
 
-The same tree can target 16:9 and 9:16. Flow wrapping, fractional tracks,
-`grow`, and responsive text adapt to the offered viewport; use separate trees
-only when the editorial hierarchy itself changes.
+El mismo árbol puede servir para 16:9 y 9:16. El wrap del flujo, los tracks
+fraccionales, `grow` y el texto adaptable responden al viewport ofrecido. Crea
+árboles distintos solo cuando cambie la jerarquía editorial, no únicamente el
+tamaño.
 
 == Grid y overlays
 
-Grid tracks accept fixed values, `"auto"`, and fractional strings such as
-`"2fr"`. Items can select a row/column and span tracks. Omitted positions use
-deterministic row or column auto-placement.
+Los tracks de un grid aceptan valores fijos, `"auto"` y fracciones como
+`"2fr"`. Los elementos pueden elegir fila y columna, además de abarcar varios
+tracks. Las posiciones omitidas usan colocación automática y determinista por
+filas o columnas.
+
+Usa `auto` para contenido cuyo tamaño intrínseco debe mandar, unidades fijas
+para requisitos editoriales rígidos y `fr` para repartir el resto. Un grid es
+preferible a filas anidadas cuando varias regiones deben compartir líneas de
+alineación.
 
 ```python
 cards = scene.grid(
@@ -304,19 +335,24 @@ overlay = scene.stack([
 ], within="frame", width="fill", height="fill")
 ```
 
-Image and SVG fitting supports `contain`, `cover`, `stretch`, and `scale_down`.
-`cover` clips rendering to the assigned box.
+El ajuste de imágenes y SVG admite `contain`, `cover`, `stretch` y
+`scale_down`. `cover` recorta el renderizado a la caja asignada.
 
-Explicit cells and their spans are reserved before auto-placement, independent
-of child order. An explicit collision, an out-of-range span, or a grid without
-enough free cells aborts layout resolution with the involved node ID.
+Las celdas explícitas y sus spans se reservan antes de la colocación automática,
+independientemente del orden de los hijos. Una colisión explícita, un span fuera
+de rango o un grid sin suficientes celdas libres detiene la resolución e indica
+el ID del nodo implicado.
 
 == Propiedad y reflow
 
-After a drawable is attached, positional calls such as `at`, `next_to`,
-`align_to`, `to_edge`, or manual movement animations raise
-`LayoutOwnershipError`. Rotation and scale remain valid. Express intentional
-displacement with `offset`.
+Después de adjuntar un objeto, las llamadas posicionales como `at`, `next_to`,
+`align_to`, `to_edge` o las animaciones manuales de movimiento producen
+`LayoutOwnershipError`. La rotación y la escala siguen siendo válidas. Expresa
+un desplazamiento intencional mediante `offset`.
+
+Este error no es una limitación accidental: protege la búsqueda temporal. Si
+Layout y una animación escribieran la misma posición, recorrer la línea de
+tiempo podría resolver resultados diferentes según el orden de evaluación.
 
 ```python
 page.add(extra, at=1, animate=0.35)
@@ -329,15 +365,16 @@ page.configure_item(chart, grow=2, offset=(12, 0), animate=0.3)
 page.reflow(animate=0.25)
 ```
 
-Structural mutations propagate through nested layouts. Timeline operations
-store versioned tree snapshots, so direct seek and sequential playback resolve
-the same target geometry.
+Las mutaciones estructurales se propagan por los layouts anidados. Las
+operaciones de la línea de tiempo almacenan instantáneas versionadas del árbol;
+una búsqueda directa y una reproducción secuencial resuelven la misma geometría.
 
-`add`, `remove`, `detach`, and `replace` operate on direct children. `remove`
-performs a visual exit; `detach` instead preserves the child's world position,
-opacity, and scene membership while releasing Layout ownership. A detached
-drawable can immediately use `at`, `move_to`, `next_to`, and other positional
-operations. This is useful after adopting a managed child into a new segment:
+`add`, `remove`, `detach` y `replace` actúan sobre hijos directos. `remove`
+realiza una salida visual; `detach` conserva la posición global, la opacidad y
+la pertenencia a la escena mientras libera la propiedad de Layout. Un objeto
+separado puede usar inmediatamente `at`, `move_to`, `next_to` y las demás
+operaciones posicionales. Esto es útil al llevar un hijo administrado a un
+segmento nuevo:
 
 ```python
 scene.segment("detail", Transition.cross_fade(0.4))
@@ -346,17 +383,21 @@ page.detach(title)
 scene.play([title.move_to(0, 200).duration(0.35)])
 ```
 
-Their `animate` value and the `animate` values on `configure`,
-`configure_item`, and `reflow` are durations in seconds. For `detach`, it
-animates only the remaining children's reflow; the detached child stays
-visible and fixed until explicitly animated. With `None`, the timeline records
-an instant, deterministic transition.
+El valor `animate` de estas operaciones, así como el de `configure`,
+`configure_item` y `reflow`, es una duración en segundos. En `detach` solo se
+anima el reflow de los hijos restantes; el hijo separado permanece visible y
+fijo hasta recibir una animación explícita. Con `None`, la línea de tiempo
+registra una transición instantánea y determinista.
 
 == Constraints lineales
 
-Every drawable exposes `left`, `right`, `top`, `bottom`, `center_x`, `center_y`,
-`width`, and `height`. Expressions are linear: addition/subtraction and scalar
-multiplication/division only.
+Cada objeto expone `left`, `right`, `top`, `bottom`, `center_x`, `center_y`,
+`width` y `height`. Las expresiones son lineales: solo admiten suma, resta y
+multiplicación o división por escalares.
+
+Las restricciones complementan el flujo; no deberían reconstruirlo. Úsalas
+cuando dos ramas separadas deban compartir una relación geométrica, por ejemplo
+alinear una etiqueta externa con el centro de un gráfico.
 
 ```python
 relations = scene.constrain(
@@ -366,30 +407,31 @@ relations = scene.constrain(
 )
 ```
 
-Relations are `required` by default, with `strong`, `medium`, and `weak`
-alternatives. Required conflicts fail before rendering. Stable IDs, canonical
-constraint ordering, and explicit weak stays make equivalent solutions
-reproducible.
+Las relaciones son `required` por defecto y ofrecen las alternativas `strong`,
+`medium` y `weak`. Los conflictos obligatorios fallan antes del renderizado. Los
+IDs estables, el orden canónico y las permanencias débiles explícitas hacen
+reproducibles las soluciones equivalentes.
 
-`scene.check_layout()` returns soft-constraint diagnostics immediately after
-registration and intrinsic composition failures encountered during replay;
-invalid responsive Typst content does not terminate editor hot reload.
-`layout.diagnostics()` filters diagnostics for one root. A
-conflict message includes its label or canonical index and involved node IDs.
-Expressions cannot mix drawables from different scenes.
+`scene.check_layout()` devuelve diagnósticos de restricciones blandas justo
+después del registro y fallos de composición intrínseca encontrados durante la
+reproducción. El contenido Typst adaptable inválido no termina el hot reload del
+editor. `layout.diagnostics()` filtra los diagnósticos de una raíz. Un mensaje de
+conflicto incluye su etiqueta o índice canónico y los IDs implicados. Una
+expresión no puede mezclar objetos de escenas diferentes.
 
 == Texto responsive y plantillas
 
-`scene.text(..., flow=TextFlow(wrap="auto"))` is the only responsive text
-leaf. Free text receives the safe-frame width; managed text consumes the width
-offered by its `BoxConstraints`. `wrap=False` keeps one line and a numeric
-wrap value caps the typographic width without creating a second box model.
+`scene.text(..., flow=TextFlow(wrap="auto"))` es la única hoja de texto
+adaptable. El texto libre recibe el ancho del área segura; el texto administrado
+consume el ancho ofrecido por sus `BoxConstraints`. `wrap=False` conserva una
+sola línea y un valor numérico limita el ancho tipográfico sin crear un segundo
+modelo de cajas.
 
 ```python
 from gaanim import TextFlow
 
 copy = scene.text(
-    "Layout v2 measures this copy at the width of its card.",
+    "Layout v2 mide este texto con el ancho de su tarjeta.",
     flow=TextFlow(wrap="auto", align="justify", line_spacing=1.25),
 )
 page = scene.row([
@@ -398,22 +440,23 @@ page = scene.row([
 ], width="fill", gap=32)
 ```
 
-The `CompiledTextMeasure` adapter reuses the existing intrinsic-measure pass,
-eight-pass convergence, clips, diagnostics, and `ResolvedLayout`; there is no
-text-specific solver. Its cache key includes structured content, resolved
-style, flow, and offered constraints. Metric changes and `become`, `morph_to`,
-`step_to`, or `expand_to` invalidate the shared versioned snapshot and reflow
-parent layouts using the same transition duration. Transient `wiggle`, `pulse`,
-and `wave` effects do not invalidate measurement.
+El adaptador `CompiledTextMeasure` reutiliza la medición intrínseca, la
+convergencia de ocho pasadas, clips, diagnósticos y `ResolvedLayout`; no existe
+un solucionador separado para texto. La clave de caché incluye el contenido
+estructurado, el estilo resuelto, el flujo y las restricciones ofrecidas. Los
+cambios métricos y `become`, `morph_to`, `step_to` o `expand_to` invalidan la
+instantánea versionada compartida y provocan el reflow de los padres con la
+misma duración de transición. Los efectos transitorios `wiggle`, `pulse` y
+`wave` no invalidan la medición.
 
-A managed `Text` rejects `at`, `move`, `next_to`, and manual positional
-animations just like any other Layout-owned child. A `TextSelection` never
-becomes an independent Layout leaf, but its animation methods return normal
-`Anim` values, so selections compose in `scene.play([...])` with any other
-drawable animation. Cross-scene or incompatible-owner text transition targets
-raise `LayoutOwnershipError`.
+Un `Text` administrado rechaza `at`, `move`, `next_to` y las animaciones
+posicionales manuales igual que cualquier otro hijo de Layout. Una
+`TextSelection` nunca se convierte en una hoja independiente, pero sus métodos
+devuelven valores `Anim` normales; por eso sus selecciones se componen en
+`scene.play([...])` con cualquier otra animación. Los destinos de transición de
+otra escena o con propietario incompatible producen `LayoutOwnershipError`.
 
-Templates are typed Python functions:
+Las plantillas son funciones tipadas de Python:
 
 ```python
 from gaanim import comparison, layout_template
@@ -431,9 +474,24 @@ slide = scene.segment("Comparison", template=comparison)
 page = slide.bind(title=title, left=copy, right=diagram)
 ```
 
-Built-ins are `title_slide`, `lecture`, `comparison`, `vertical_short`,
-`minimal`, `lower_third`, and `credits`.
+Las plantillas incluidas son `title_slide`, `lecture`, `comparison`,
+`vertical_short`, `minimal`, `lower_third` y `credits`.
 
-Built-in templates consume theme layout tokens instead of isolated dimensions.
-Read them with `scene.canvas.layout_token(name)` and override them with
+Las plantillas incluidas consumen tokens de Layout del tema en lugar de
+dimensiones aisladas. Léelos con `scene.canvas.layout_token(name)` y
+sustitúyelos mediante
 `Theme(..., layout={"page_padding": 56, "column_gap": 48})`.
+
+== Errores frecuentes
+
+- *Usar `at()` después de adjuntar un objeto.* Expresa la intención mediante
+  `align`, `anchor`, `offset` o una restricción.
+- *Aplicar `fill` en todos los niveles.* Decide qué contenedor posee el espacio
+  disponible y deja que los descendientes usen `hug` cuando corresponda.
+- *Confundir `align` con `justify`.* Identifica primero el eje principal del
+  contenedor.
+- *Usar constraints para construir una cuadrícula completa.* Prefiere `grid` y
+  reserva las restricciones para relaciones entre ramas.
+- *Crear árboles distintos para cada resolución.* Intenta primero tracks
+  fraccionales, wrap, `grow` y texto adaptable; duplica la estructura solo si
+  cambia la jerarquía narrativa.
