@@ -471,6 +471,15 @@ impl CoordinateSpaceHandle {
         self
     }
 
+    /// Write axes, guides, ticks, numbers, and labels concurrently.
+    ///
+    /// A normal group `Write` staggers visual leaves. Coordinate spaces use a
+    /// zero lag so their semantic layers are constructed together, like a
+    /// Manim number plane.
+    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
+        self.root.write(duration).lag_ratio(0.0)
+    }
+
     /// Animate an affine view window. Associated plots and marks are children
     /// of the space's internal view group, so they remain aligned throughout
     /// the view change without overwriting layout transforms on the root.
@@ -2775,5 +2784,26 @@ mod tests {
             animation.inner.anim_type,
             crate::anim::AnimationType::FadeTransform { .. }
         ));
+    }
+
+    #[test]
+    fn coordinate_space_write_reveals_semantic_layers_in_parallel() {
+        let mut canvas = Canvas::new(640, 360);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-1.0, 1.0).unwrap(),
+                Some(400.0),
+                Some(200.0),
+                true,
+            )
+            .unwrap();
+
+        let animation = space.write(Some(1.5));
+        let crate::anim::AnimationType::Write { config } = animation.inner.anim_type else {
+            panic!("coordinate-space write should remain a Write animation");
+        };
+        assert_eq!(config.lag_ratio, Some(0.0));
+        assert_eq!(animation.inner.duration, 1.5);
     }
 }

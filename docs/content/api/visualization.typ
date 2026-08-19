@@ -181,6 +181,18 @@ omitidas continúan heredándose del tema. Así, cambiar únicamente `width` no
 pierde el negro de los ejes en `paper`. Usa `color`, `tick_color`,
 `number_color` o `label_color` para sustituir explícitamente cada color.
 
+`Cartesian2D.write(duration)` construye en paralelo los ejes, las guías, los
+ticks, los números y los títulos. Durante el trazado, las guías asociadas a X
+avanzan de arriba hacia abajo y las asociadas a Y de izquierda a derecha.
+
+```python
+plane = scene.cartesian_2d(
+  Axis.linear(-6, 6).label("x"),
+  Axis.linear(-3, 3).label("y"),
+)
+scene.play(plane.write(1.2))
+```
+
 `Expr` y `Parameter` forman la ruta reactiva por fotograma. Las lambdas de
 Python para funciones escalares trazadas se ejecutan una sola vez; el muestreo
 y la evaluación reactiva permanecen en Rust.

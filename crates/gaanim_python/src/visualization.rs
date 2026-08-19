@@ -1688,7 +1688,7 @@ impl PyCoordinateSpace {
     #[pyo3(signature = (duration=None))]
     fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.inner.drawable().write(duration),
+            inner: self.inner.write(duration),
         }
     }
 

@@ -197,8 +197,10 @@ impl CartesianSpace {
                 } else {
                     &mut minor_grid
                 };
-                target.move_to(Point::new(x, -frame.height * 0.5));
-                target.line_to(Point::new(x, frame.height * 0.5));
+                // Write Cartesian x-guides from the visual top edge toward
+                // the bottom, matching Manim's number-plane reveal.
+                target.move_to(Point::new(x, frame.height * 0.5));
+                target.line_to(Point::new(x, -frame.height * 0.5));
             }
             let style = self.map.x.style_value();
             let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
@@ -368,5 +370,28 @@ mod tests {
         assert!(!geometry.major_grid.is_empty());
         assert!(!geometry.ticks.is_empty());
         assert!(!geometry.numbers.is_empty());
+    }
+
+    #[test]
+    fn cartesian_grid_paths_use_axis_specific_write_directions() {
+        use gaanim_core::kurbo::PathEl;
+
+        let x = Axis::linear(-1.0, 1.0).unwrap().ticks(1.0).unwrap();
+        let y = Axis::linear(-1.0, 1.0).unwrap().ticks(1.0).unwrap();
+        let geometry = CartesianSpace::number_plane(x, y, PlotFrame::new(200.0, 100.0).unwrap())
+            .geometry()
+            .unwrap();
+        let elements = geometry.major_grid.elements();
+
+        assert!(matches!(elements[0], PathEl::MoveTo(point) if point.y == 50.0));
+        assert!(matches!(elements[1], PathEl::LineTo(point) if point.y == -50.0));
+
+        let horizontal = elements
+            .windows(2)
+            .find(|pair| {
+                matches!(pair, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.y == end.y)
+            })
+            .expect("major grid should contain a horizontal guide");
+        assert!(matches!(horizontal, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == -100.0 && end.x == 100.0));
     }
 }
