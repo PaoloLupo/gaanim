@@ -74,9 +74,9 @@ mi-video/
   README.md
 ```
 
-Cada scaffold crea el equivalente a `uv init --bare --python 3.14` y prepara
-`.venv` con Python 3.14. `--force` solo actualiza los archivos del scaffold, no
-borra tus assets.
+Cada scaffold crea el equivalente a `uv init --bare --python 3.14`, añade
+`gaanim` a las dependencias de `pyproject.toml` y prepara `.venv` con Python
+3.14. `--force` solo actualiza los archivos del scaffold, no borra tus assets.
 
 == Usar el proyecto
 

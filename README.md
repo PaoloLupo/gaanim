@@ -55,10 +55,10 @@ gaanim init slides mi-charla
 gaanim .
 ```
 
-Cada `gaanim init` crea un proyecto uv mínimo (`uv init --bare`) con Python
-3.14, deja `pyproject.toml` y `.python-version`, y prepara `.venv` con esa
-misma versión. Los proyectos sin `.venv` pueden usar un Python 3.14+ detectado
-en el sistema.
+Cada `gaanim init` crea un proyecto uv mínimo con Python 3.14, declara `gaanim`
+en las dependencias de `pyproject.toml`, deja `.python-version` y prepara
+`.venv` con esa misma versión. Los proyectos sin `.venv` pueden usar un Python
+3.14+ detectado en el sistema.
 
 Las presentaciones usan el mismo concepto de segmento que los videos. Los
 límites son continuos y solo `stop()` solicita input durante la reproducción:

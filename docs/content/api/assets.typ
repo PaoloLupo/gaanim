@@ -38,8 +38,8 @@ gaanim init slides my-deck
 
 Cada proyecto contiene `main.py`, `gaanim.toml`, `pyproject.toml`,
 `.python-version` (3.14), `assets/`, `exports/`, un README y un `.gitignore`.
-El proyecto Python equivale a `uv init --bare --python 3.14`. El manifiesto
-generado es:
+El proyecto Python parte de `uv init --bare --python 3.14` y declara `gaanim`
+como dependencia en `pyproject.toml`. El manifiesto generado es:
 
 ```toml
 name = "my-deck"

@@ -34,6 +34,10 @@ mi-proyecto/
   exports/
 ```
 
+El `pyproject.toml` declara `gaanim` como dependencia del proyecto. El entorno
+que prepara la aplicación instala el wheel de autoría incluido, y comandos
+posteriores como `uv sync` conservan a Gaanim como parte del entorno.
+
 - `video` — escena animada 16:9 y flujo de exportación.
 - `slides` — segmentos semánticos, notas y paradas para Presenter View.
 
