@@ -485,7 +485,7 @@ def validate_layout_detach_contract(module: object) -> list[str]:
     """A reused layout child can detach and regain positional operations."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    scene.segment("cover")
+    scene.segment("cover", background=module.BLUE)
     title = scene.text("Reusable title", role="title")
     body = scene.text("Body")
     page = scene.column([title, body], width="fill", align="center")

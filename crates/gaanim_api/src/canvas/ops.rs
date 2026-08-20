@@ -12,6 +12,7 @@ use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
 use gaanim_layout::LayoutConstraint;
+use gaanim_renderer::background::BackgroundPaint;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::AnimationBuilder;
@@ -675,6 +676,8 @@ pub struct Segment {
     pub name: String,
     pub notes: Option<String>,
     pub template: Option<String>,
+    /// Optional full-canvas paint used while this segment is active.
+    pub background: Option<BackgroundPaint>,
     pub(crate) stops: Vec<LocalSegmentStop>,
     pub explicit: bool,
     pub(crate) cursor: f64,
@@ -694,6 +697,7 @@ impl Segment {
             name: "_default".to_string(),
             notes: None,
             template: None,
+            background: None,
             stops: Vec::new(),
             explicit: false,
             cursor: 0.0,
@@ -709,12 +713,14 @@ impl Segment {
         name: String,
         notes: Option<String>,
         template: Option<String>,
+        background: Option<BackgroundPaint>,
     ) -> Self {
         Self {
             id,
             name,
             notes,
             template,
+            background,
             stops: Vec::new(),
             explicit: true,
             cursor: 0.0,

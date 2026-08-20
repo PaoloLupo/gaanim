@@ -27,6 +27,7 @@ impl Plugin for GaanimRendererPlugin {
         app.add_systems(
             Update,
             (
+                pipeline::sync_canvas_background_clear_system,
                 pipeline::sync_gaanim_camera_to_bevy_system,
                 pipeline::sync_gaanim_camera_to_bevy_3d_system,
             )

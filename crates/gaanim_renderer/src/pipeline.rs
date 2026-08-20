@@ -22,12 +22,46 @@ use bevy_vello::integrations::scene::VelloScene2d;
 /// the surrounding window background.
 #[derive(Resource, Clone, Debug)]
 pub struct CanvasBackground {
-    /// Background paint of the canvas.
+    /// Default background paint of the canvas.
     pub paint: BackgroundPaint,
+    /// Optional paints selected by the active authored segment.
+    pub segment_paints: Vec<SegmentBackgroundPaint>,
     /// Pixel dimensions used to rasterize shader backgrounds.
     pub pixel_size: (u32, u32),
     /// Frame bounds in world coordinates (Y-up, center-origin).
     pub bounds: gaanim_math::Bounds3D,
+}
+
+/// Background override and time range for one authored segment.
+#[derive(Clone, Debug)]
+pub struct SegmentBackgroundPaint {
+    pub start_time: f64,
+    pub end_time: f64,
+    pub paint: Option<BackgroundPaint>,
+    /// A terminal stop keeps the outgoing segment active at its shared boundary.
+    pub hold_at_end: bool,
+}
+
+impl CanvasBackground {
+    /// Resolve the segment paint at an exact timeline position.
+    pub fn paint_at(&self, time_seconds: f64) -> &BackgroundPaint {
+        const EPSILON: f64 = 1e-5;
+        let segment = self
+            .segment_paints
+            .iter()
+            .find(|segment| {
+                segment.hold_at_end && (segment.end_time - time_seconds).abs() <= EPSILON
+            })
+            .or_else(|| {
+                self.segment_paints.iter().rev().find(|segment| {
+                    segment.start_time <= time_seconds + EPSILON
+                        && time_seconds <= segment.end_time + EPSILON
+                })
+            });
+        segment
+            .and_then(|segment| segment.paint.as_ref())
+            .unwrap_or(&self.paint)
+    }
 }
 
 fn resolve_canvas_background_brush(
@@ -36,12 +70,10 @@ fn resolve_canvas_background_brush(
     pixel_size: (u32, u32),
     time_seconds: f64,
 ) -> (peniko::Brush, Option<kurbo::Affine>) {
-    match background
-        .paint
-        .resolve_brush(pixel_size.0, pixel_size.1, time_seconds)
-    {
+    let paint = background.paint_at(time_seconds);
+    match paint.resolve_brush(pixel_size.0, pixel_size.1, time_seconds) {
         Ok(brush) => {
-            let brush_transform = background.paint.is_shader().then(|| {
+            let brush_transform = paint.is_shader().then(|| {
                 kurbo::Affine::translate((rect.x0, rect.y0))
                     * kurbo::Affine::scale_non_uniform(
                         rect.width() / f64::from(pixel_size.0),
@@ -50,11 +82,24 @@ fn resolve_canvas_background_brush(
             });
             (brush, brush_transform)
         }
-        Err(_) => (
-            peniko::Brush::Solid(background.paint.fallback_color()),
-            None,
-        ),
+        Err(_) => (peniko::Brush::Solid(paint.fallback_color()), None),
     }
+}
+
+/// Keep Bevy's native clear pass aligned with the active segment background.
+pub fn sync_canvas_background_clear_system(
+    playback_state: Option<Res<gaanim_animation::PlaybackState>>,
+    canvas_bg: Option<Res<CanvasBackground>>,
+    clear_color: Option<ResMut<ClearColor>>,
+) {
+    let (Some(canvas_bg), Some(mut clear_color)) = (canvas_bg, clear_color) else {
+        return;
+    };
+    let time_seconds = playback_state
+        .as_ref()
+        .map_or(0.0, |state| state.current_time);
+    let rgba = canvas_bg.paint_at(time_seconds).fallback_color().to_rgba8();
+    clear_color.0 = Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
 }
 
 fn interactive_background_pixel_size(
@@ -1538,6 +1583,7 @@ mod tests {
     fn shader_background_raster_size_tracks_the_interactive_viewport_scale() {
         let background = CanvasBackground {
             paint: BackgroundPaint::solid(peniko::Color::BLACK),
+            segment_paints: Vec::new(),
             pixel_size: (1280, 720),
             bounds: gaanim_math::Bounds3D::new_2d(-640.0, -360.0, 640.0, 360.0),
         };
@@ -1559,6 +1605,7 @@ mod tests {
     fn canvas_background_geometry_matches_the_authored_scene_bounds() {
         let background = CanvasBackground {
             paint: BackgroundPaint::solid(peniko::Color::BLACK),
+            segment_paints: Vec::new(),
             pixel_size: (960, 540),
             bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
         };
@@ -1566,6 +1613,43 @@ mod tests {
 
         assert_eq!(rect, kurbo::Rect::new(-480.0, -270.0, 480.0, 270.0));
         assert_eq!(transform, kurbo::Affine::IDENTITY);
+    }
+
+    #[test]
+    fn segment_backgrounds_override_and_fall_back_at_exact_timeline_positions() {
+        let default = peniko::Color::from_rgb8(10, 20, 30);
+        let first = peniko::Color::from_rgb8(40, 50, 60);
+        let third = peniko::Color::from_rgb8(70, 80, 90);
+        let background = CanvasBackground {
+            paint: BackgroundPaint::solid(default),
+            segment_paints: vec![
+                SegmentBackgroundPaint {
+                    start_time: 0.0,
+                    end_time: 1.0,
+                    paint: Some(BackgroundPaint::solid(first)),
+                    hold_at_end: true,
+                },
+                SegmentBackgroundPaint {
+                    start_time: 1.0,
+                    end_time: 2.0,
+                    paint: None,
+                    hold_at_end: false,
+                },
+                SegmentBackgroundPaint {
+                    start_time: 2.0,
+                    end_time: 3.0,
+                    paint: Some(BackgroundPaint::solid(third)),
+                    hold_at_end: false,
+                },
+            ],
+            pixel_size: (960, 540),
+            bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+        };
+
+        assert_eq!(background.paint_at(0.5).fallback_color(), first);
+        assert_eq!(background.paint_at(1.0).fallback_color(), first);
+        assert_eq!(background.paint_at(1.1).fallback_color(), default);
+        assert_eq!(background.paint_at(2.0).fallback_color(), third);
     }
 
     fn window(width: u32, height: u32) -> Window {

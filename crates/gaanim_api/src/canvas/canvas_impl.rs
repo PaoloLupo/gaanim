@@ -854,6 +854,19 @@ impl Canvas {
         notes: Option<String>,
         template: Option<String>,
     ) -> Result<SegmentHandle, SegmentError> {
+        self.segment_with_background(name, transition, notes, template, None)
+    }
+
+    /// Create a segment with presentation metadata and an optional full-canvas
+    /// background. A missing override uses the canvas background.
+    pub fn segment_with_background(
+        &mut self,
+        name: impl Into<String>,
+        transition: Option<TransitionType>,
+        notes: Option<String>,
+        template: Option<String>,
+        background: Option<gaanim_renderer::background::BackgroundPaint>,
+    ) -> Result<SegmentHandle, SegmentError> {
         let name = name.into().trim().to_string();
         if name.is_empty() {
             return Err(SegmentError::EmptyName);
@@ -876,7 +889,7 @@ impl Canvas {
         }
 
         let id = guard.next_segment_id();
-        let mut segment = Segment::new(id, name, notes, template.clone());
+        let mut segment = Segment::new(id, name, notes, template.clone(), background);
         if replace_implicit {
             guard.segments[0] = segment;
             guard.active_idx = 0;
@@ -6239,6 +6252,43 @@ mod tests {
             .unwrap();
         let manifest = canvas.segment_manifest();
         assert_eq!(manifest.segments[0].template.as_deref(), Some("lecture"));
+    }
+
+    #[test]
+    fn segment_backgrounds_compile_with_scene_fallback_and_terminal_stop_hold() {
+        let scene_color = Color::from_rgb8(10, 20, 30);
+        let segment_color = Color::from_rgb8(40, 50, 60);
+        let mut canvas = Canvas::new(640, 360);
+        canvas.set_background(Some(scene_color));
+        canvas
+            .segment_with_background(
+                "intro",
+                None,
+                None,
+                None,
+                Some(gaanim_renderer::background::BackgroundPaint::solid(
+                    segment_color,
+                )),
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("details", None).unwrap();
+        canvas.wait(1.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let background = world
+            .get_resource::<gaanim_renderer::pipeline::CanvasBackground>()
+            .expect("compiled canvas background");
+
+        assert_eq!(background.paint_at(0.5).fallback_color(), segment_color);
+        assert_eq!(background.paint_at(1.0).fallback_color(), segment_color);
+        assert_eq!(background.paint_at(1.1).fallback_color(), scene_color);
     }
 
     #[test]

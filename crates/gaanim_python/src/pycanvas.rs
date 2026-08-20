@@ -4267,13 +4267,14 @@ impl PyScene {
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 
-    #[pyo3(signature = (name, transition=None, *, notes=None, template=None))]
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None))]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
         name: String,
         transition: Option<&PyTransitionType>,
         notes: Option<String>,
         template: Option<&Bound<'py, PyAny>>,
+        background: Option<crate::brush::PyBackgroundInput>,
     ) -> PyResult<PySegment> {
         let template_name = template.and_then(|template| {
             template
@@ -4286,11 +4287,12 @@ impl PyScene {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .segment_with(
+            .segment_with_background(
                 name,
                 transition.map(|transition| transition.0.clone()),
                 notes,
                 template_name,
+                background.map(|background| background.0),
             )
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         drop(scene);

@@ -1760,6 +1760,24 @@ impl Canvas {
             .background_paint
             .clone()
             .unwrap_or_else(|| gaanim_renderer::background::BackgroundPaint::solid(bg_color));
+        let mut segment_start_time = 0.0;
+        let segment_paints = segments
+            .iter()
+            .map(|segment| {
+                let end_time = segment_start_time + segment.cursor;
+                let paint = gaanim_renderer::pipeline::SegmentBackgroundPaint {
+                    start_time: segment_start_time,
+                    end_time,
+                    paint: segment.background.clone(),
+                    hold_at_end: segment
+                        .stops
+                        .iter()
+                        .any(|stop| (stop.time - segment.cursor).abs() <= 1e-5),
+                };
+                segment_start_time = end_time;
+                paint
+            })
+            .collect();
 
         for seg in &segments {
             let previous_scene = seg
@@ -1818,6 +1836,7 @@ impl Canvas {
             .commands
             .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
                 paint: bg_paint,
+                segment_paints,
                 pixel_size: (self.width, self.height),
                 bounds: raw_bounds,
             });

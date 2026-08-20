@@ -3724,11 +3724,17 @@ class Scene:
         *,
         notes: Optional[str] = None,
         template: Optional[Callable[..., Layout]] = None,
+        background: Optional[BackgroundLike] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 
+        ``background`` accepts the same color, brush, or shader background as
+        ``Scene`` and only applies while this segment is active. When omitted,
+        the segment uses the scene background. Empty or duplicate names, and a
+        transition on the first segment, raise ``ValueError``.
+
         Example:
-            result = scene.segment("example")
+            result = scene.segment("example", background="#0f172a")
         """
         ...
     def link(self, from_: Segment, to: Segment, transition: Transition) -> None:

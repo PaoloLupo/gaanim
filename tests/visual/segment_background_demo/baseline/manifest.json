@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_0_900000",
+      "time_seconds": 0.9,
+      "file": "seek_0000_t_0_900000.png"
+    },
+    {
+      "id": "seek_0001_t_1_900000",
+      "time_seconds": 1.9,
+      "file": "seek_0001_t_1_900000.png"
+    },
+    {
+      "id": "seek_0002_t_2_900000",
+      "time_seconds": 2.9,
+      "file": "seek_0002_t_2_900000.png"
+    }
+  ]
+}

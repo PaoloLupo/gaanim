@@ -384,22 +384,32 @@ scene.play([rect.fade_out().duration(0.5)])
 ```
 
 `segment` is the single structural unit for visibility, transitions, notes,
-and presentation layouts. Segment boundaries remain continuous; use `stop()`
-only where interactive playback must wait for input.
+presentation layouts, and optional backgrounds. Segment boundaries remain
+continuous; use `stop()` only where interactive playback must wait for input.
 
 #api-entry(
   name: "Scene.segment",
   kind: "method",
-  signature: "segment(name, transition=None, *, notes=None, template=None) -> Segment",
-  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "template", type: "LayoutTemplate | None", default: "None", desc: [Typed Python template instantiated later with `Segment.bind`.]),),
+  signature: "segment(name, transition=None, *, notes=None, template=None, background=None) -> Segment",
+  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "template", type: "LayoutTemplate | None", default: "None", desc: [Typed Python template instantiated later with `Segment.bind`.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush`, or `Background` used only while this segment is active; `None` uses the Scene background.]),),
   returns: (type: "Segment", desc: [Stable handle accepted by `link`; `bind(**slots)` returns its root Layout.]),
   desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, or an empty or duplicate name, raises `ValueError`.],
 )[
 ```python
-intro = scene.segment("Introduction", notes="State the goal.", template=title_slide)
+intro = scene.segment(
+    "Introduction",
+    notes="State the goal.",
+    template=title_slide,
+    background="#0f172a",
+)
 intro.bind(title=scene.text("One clear idea", role="title"))
 scene.wait(0.5)
-details = scene.segment("Details", Transition.cross_fade(0.4), template=lecture)
+details = scene.segment(
+    "Details",
+    Transition.cross_fade(0.4),
+    template=lecture,
+    background=Brush.linear(["#172554", "#0f172a"], start=(-640, 0), end=(640, 0)),
+)
 scene.link(intro, details, Transition.cross_fade(0.4))
 ```
 ]
