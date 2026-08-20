@@ -2,21 +2,11 @@
 
 use bevy::prelude::*;
 use gaanim_math::Camera;
+use gaanim_renderer::pipeline::{GaanimFullWindowClearCamera, GaanimPbrCamera};
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::canvas::Canvas;
-
-/// Full-target color clear performed before the fitted PBR viewport.
-///
-/// A camera only clears inside its viewport. Keeping this pass separate avoids
-/// stale 3D pixels when editor chrome changes the fitted canvas viewport.
-#[derive(Component)]
-struct GaanimFullWindowClearCamera;
-
-/// The primary PBR camera owned by the Gaanim scene runtime.
-#[derive(Component)]
-struct GaanimPbrCamera;
 
 /// Replay a [`Canvas`] into a Bevy world.
 ///

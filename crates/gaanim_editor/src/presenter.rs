@@ -87,7 +87,9 @@ type ThumbnailResult = Result<Vec<ThumbnailPixels>, String>;
 pub(crate) struct PresenterThumbnailCache {
     requested_revision: u64,
     requested_dimensions: (u32, u32),
+    request_attempts: u8,
     pixel_revision: u64,
+    pixel_dimensions: (u32, u32),
     pixel_generation: u64,
     pixels: Vec<ThumbnailPixels>,
     receiver: Option<Receiver<(u64, ThumbnailResult)>>,
@@ -96,19 +98,35 @@ pub(crate) struct PresenterThumbnailCache {
 
 impl PresenterThumbnailCache {
     fn request(&mut self, stash: &StashedReplay, timeline: &Timeline, max_edge: u32) {
+        // Never replace the receiver of an in-flight render. Hot reload and
+        // resize can ask for a newer generation while the GPU worker is still
+        // active; dropping that receiver used to orphan the worker and launch
+        // overlapping GPU captures.
+        if self.receiver.is_some() {
+            return;
+        }
         let Some(canvas) = stash.canvas.clone() else {
             return;
         };
         let dimensions = thumbnail_dimensions(canvas.width, canvas.height, max_edge);
-        if stash.revision == 0
-            || (stash.revision == self.requested_revision
-                && dimensions == self.requested_dimensions)
-            || timeline.segments.is_empty()
-        {
+        if stash.revision == 0 || timeline.segments.is_empty() {
             return;
         }
 
         let revision = stash.revision;
+        let request_changed =
+            revision != self.requested_revision || dimensions != self.requested_dimensions;
+        if request_changed {
+            self.requested_revision = revision;
+            self.requested_dimensions = dimensions;
+            self.request_attempts = 0;
+        }
+        if (self.pixel_revision == revision && self.pixel_dimensions == dimensions)
+            || self.request_attempts >= 2
+        {
+            return;
+        }
+
         let requests = timeline
             .segments
             .iter()
@@ -137,8 +155,7 @@ impl PresenterThumbnailCache {
         let (width, height) = dimensions;
         let (sender, receiver) = bounded(1);
 
-        self.requested_revision = revision;
-        self.requested_dimensions = dimensions;
+        self.request_attempts += 1;
         self.receiver = Some(receiver);
         self.error = None;
 
@@ -198,9 +215,26 @@ impl PresenterThumbnailCache {
 
     fn store(&mut self, revision: u64, frames: Vec<ThumbnailPixels>) {
         self.pixel_revision = revision;
+        self.pixel_dimensions = frames
+            .first()
+            .map(|frame| (frame.width, frame.height))
+            .unwrap_or(self.requested_dimensions);
         self.pixel_generation = self.pixel_generation.wrapping_add(1).max(1);
         self.pixels = frames;
         self.error = None;
+    }
+
+    fn fail(&mut self, error: String) {
+        self.error = Some(error);
+    }
+
+    fn retry(&mut self) {
+        if self.receiver.is_none() {
+            self.requested_revision = 0;
+            self.requested_dimensions = (0, 0);
+            self.request_attempts = 0;
+            self.error = None;
+        }
     }
 }
 
@@ -843,6 +877,7 @@ fn show_cue_image(
     texture: Option<&egui::TextureHandle>,
     max_width: f32,
     max_height: f32,
+    empty_message: &str,
 ) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(max_width.max(1.0), max_height.max(1.0)),
@@ -850,6 +885,12 @@ fn show_cue_image(
     );
     ui.painter()
         .rect_filled(rect, 10.0, egui::Color32::from_rgb(3, 6, 13));
+    ui.painter().rect_stroke(
+        rect,
+        10.0,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(31, 45, 69)),
+        egui::StrokeKind::Inside,
+    );
     if let Some(texture) = texture {
         let texture_size = texture.size_vec2();
         let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
@@ -860,7 +901,7 @@ fn show_cue_image(
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Preparing cue preview…",
+            empty_message,
             egui::FontId::proportional(16.0),
             egui::Color32::from_rgb(112, 126, 149),
         );
@@ -875,6 +916,7 @@ fn show_current_cue(
     segment_count: usize,
     stop_index: Option<usize>,
     texture: Option<&egui::TextureHandle>,
+    preview_message: &str,
     requested_seek: &mut Option<f64>,
     timeline: &Timeline,
 ) {
@@ -901,9 +943,20 @@ fn show_current_cue(
             );
         });
     });
-    ui.heading(cue_name);
+    ui.label(
+        egui::RichText::new(cue_name)
+            .strong()
+            .size(28.0)
+            .color(egui::Color32::from_rgb(238, 244, 255)),
+    );
     let preview_height = (ui.available_height() - 92.0).clamp(180.0, 520.0);
-    show_cue_image(ui, texture, ui.available_width(), preview_height);
+    show_cue_image(
+        ui,
+        texture,
+        ui.available_width(),
+        preview_height,
+        preview_message,
+    );
     ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         let entry_active = stop_index.is_none();
@@ -932,6 +985,7 @@ fn show_speaker_column(
     notes: Option<&str>,
     next_label: Option<&str>,
     next_texture: Option<&egui::TextureHandle>,
+    preview_message: &str,
 ) {
     ui.label(
         egui::RichText::new("UP NEXT")
@@ -944,7 +998,12 @@ fn show_speaker_column(
             .strong()
             .size(20.0),
     );
-    show_cue_image(ui, next_texture, ui.available_width(), 150.0);
+    let next_message = if next_label.is_some() {
+        preview_message
+    } else {
+        "Presentation complete"
+    };
+    show_cue_image(ui, next_texture, ui.available_width(), 150.0, next_message);
     ui.add_space(16.0);
     ui.label(
         egui::RichText::new("SPEAKER NOTES")
@@ -961,11 +1020,14 @@ fn show_speaker_column(
                 .auto_shrink([false, false])
                 .max_height(ui.available_height().max(160.0))
                 .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(notes.unwrap_or("No notes for this segment."))
-                            .size(20.0)
-                            .line_height(Some(28.0)),
-                    );
+                    let notes = notes.filter(|notes| !notes.trim().is_empty());
+                    let mut text =
+                        egui::RichText::new(notes.unwrap_or("No speaker notes for this segment."))
+                            .size(20.0);
+                    if notes.is_none() {
+                        text = text.color(egui::Color32::from_rgb(126, 140, 163));
+                    }
+                    ui.label(text.line_height(Some(28.0)));
                 });
         });
 }
@@ -1163,7 +1225,7 @@ pub(crate) fn presenter_view_system(
     {
         match result {
             Ok(frames) => thumbnail_cache.store(revision, frames),
-            Err(error) => thumbnail_cache.error = Some(error),
+            Err(error) => thumbnail_cache.fail(error),
         }
     }
     if thumbnail_upload_required(
@@ -1229,6 +1291,11 @@ pub(crate) fn presenter_view_system(
     let mut actions = Vec::new();
     let mut requested_seek = None;
     let compact_header = ctx.viewport_rect().width() < 900.0;
+    let preview_message = if thumbnail_cache.error.is_some() {
+        "Preview unavailable — retry below"
+    } else {
+        "Rendering cue preview…"
+    };
 
     egui::TopBottomPanel::top("presenter-status")
         .exact_height(if compact_header { 112.0 } else { 94.0 })
@@ -1367,6 +1434,7 @@ pub(crate) fn presenter_view_system(
                         .and_then(|(_, _, segment)| segment.notes.as_deref()),
                     next.as_ref().map(|(label, _)| label.as_str()),
                     next.as_ref().and_then(|(_, texture)| texture.as_ref()),
+                    preview_message,
                 );
             });
     }
@@ -1387,6 +1455,7 @@ pub(crate) fn presenter_view_system(
                         timeline.segments.len(),
                         position.stop_index,
                         current_texture.as_ref(),
+                        preview_message,
                         &mut requested_seek,
                         &timeline,
                     );
@@ -1399,6 +1468,7 @@ pub(crate) fn presenter_view_system(
                             timeline.segments.len(),
                             position.stop_index,
                             current_texture.as_ref(),
+                            preview_message,
                             &mut requested_seek,
                             &timeline,
                         );
@@ -1408,6 +1478,7 @@ pub(crate) fn presenter_view_system(
                             segment.notes.as_deref(),
                             next.as_ref().map(|(label, _)| label.as_str()),
                             next.as_ref().and_then(|(_, texture)| texture.as_ref()),
+                            preview_message,
                         );
                     });
                 }
@@ -1421,11 +1492,16 @@ pub(crate) fn presenter_view_system(
                     ui.spinner();
                     ui.small("Rendering cue previews…");
                 });
-            } else if let Some(error) = &thumbnail_cache.error {
-                ui.colored_label(
-                    egui::Color32::from_rgb(255, 140, 140),
-                    format!("Cue previews unavailable: {error}"),
-                );
+            } else if let Some(error) = thumbnail_cache.error.clone() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 140, 140),
+                        format!("Cue previews unavailable: {error}"),
+                    );
+                    if ui.button("Retry previews").clicked() {
+                        thumbnail_cache.retry();
+                    }
+                });
             }
         });
 
@@ -1471,7 +1547,7 @@ pub(crate) fn presenter_view_system(
                                     let texture = overview
                                         .textures
                                         .get(&(segment.id, ThumbnailMoment::Complete));
-                                    show_cue_image(ui, texture, 250.0, 140.0);
+                                    show_cue_image(ui, texture, 250.0, 140.0, preview_message);
                                     if ui
                                         .button(format!("{:02}  {}", index + 1, segment.name))
                                         .clicked()
@@ -1911,6 +1987,55 @@ mod tests {
             7
         ));
         assert_eq!(cache.pixels.len(), 1);
+    }
+
+    #[test]
+    fn thumbnail_cache_keeps_one_gpu_worker_during_hot_reload() {
+        let mut cache = PresenterThumbnailCache {
+            requested_revision: 1,
+            requested_dimensions: (320, 180),
+            request_attempts: 1,
+            ..default()
+        };
+        let (_sender, receiver) = crossbeam_channel::bounded(1);
+        cache.receiver = Some(receiver);
+        let stash = crate::export::StashedReplay {
+            canvas: Some(gaanim_api::canvas::Canvas::new(1920, 1080)),
+            revision: 2,
+        };
+        let mut timeline = Timeline::new();
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "updated".into(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 1.0,
+            stops: Vec::new(),
+        }]);
+
+        cache.request(&stash, &timeline, 960);
+
+        assert_eq!(cache.requested_revision, 1);
+        assert_eq!(cache.requested_dimensions, (320, 180));
+        assert_eq!(cache.request_attempts, 1);
+    }
+
+    #[test]
+    fn failed_thumbnail_cache_can_be_retried_explicitly() {
+        let mut cache = PresenterThumbnailCache {
+            requested_revision: 4,
+            requested_dimensions: (960, 540),
+            request_attempts: 2,
+            error: Some("adapter temporarily unavailable".into()),
+            ..default()
+        };
+
+        cache.retry();
+
+        assert_eq!(cache.requested_revision, 0);
+        assert_eq!(cache.requested_dimensions, (0, 0));
+        assert_eq!(cache.request_attempts, 0);
+        assert!(cache.error.is_none());
     }
 
     #[test]

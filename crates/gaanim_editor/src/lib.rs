@@ -184,6 +184,9 @@ impl Plugin for GaanimEditorPlugin {
                     .after(sync_editor_input_ignore_system)
                     .before(gaanim_timeline::timeline_playback_system),
                 presenter::sync_presentation_timer_system,
+                sync_fullscreen_letterbox_color_system
+                    .after(editor_fullscreen_keys_system)
+                    .after(presentation_escape_system),
                 presentation_escape_system,
                 fps_overlay::fps_overlay_system,
             ),
@@ -1964,13 +1967,15 @@ fn editor_fullscreen_keys_system(
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut state: ResMut<EditorFullscreenState>,
 ) {
-    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input())
-        || !keys.just_pressed(KeyCode::F11)
-    {
+    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
         return;
     }
     if let Ok(mut window) = windows.single_mut() {
-        toggle_editor_fullscreen(&mut window, &mut state);
+        let escape_from_fullscreen = keys.just_pressed(KeyCode::Escape)
+            && !matches!(window.mode, bevy::window::WindowMode::Windowed);
+        if keys.just_pressed(KeyCode::F11) || escape_from_fullscreen {
+            toggle_editor_fullscreen(&mut window, &mut state);
+        }
     }
 }
 
@@ -2105,6 +2110,38 @@ fn presentation_blank_overlay_system(
             ui.painter().rect_filled(rect, 0.0, color);
             ui.allocate_rect(rect, egui::Sense::hover());
         });
+}
+
+/// Keep the unused area around a fullscreen fitted canvas neutral even when
+/// the authored scene uses a colored, gradient, or shader background.
+fn sync_fullscreen_letterbox_color_system(
+    presentation_mode: Res<PresentationMode>,
+    primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut cameras: Query<(
+        &mut bevy::camera::Camera,
+        Option<&gaanim_renderer::pipeline::GaanimFullWindowClearCamera>,
+        Option<&gaanim_renderer::pipeline::GaanimPbrCamera>,
+    )>,
+) {
+    let fullscreen = presentation_mode.active
+        || primary_window
+            .single()
+            .is_ok_and(|window| !matches!(window.mode, bevy::window::WindowMode::Windowed));
+    for (mut camera, full_window_clear, pbr) in &mut cameras {
+        if full_window_clear.is_some() {
+            camera.clear_color = if fullscreen {
+                bevy::camera::ClearColorConfig::Custom(Color::BLACK)
+            } else {
+                bevy::camera::ClearColorConfig::Default
+            };
+        } else if pbr.is_some() {
+            camera.clear_color = if fullscreen {
+                bevy::camera::ClearColorConfig::Default
+            } else {
+                bevy::camera::ClearColorConfig::None
+            };
+        }
+    }
 }
 
 /// Escape leaves audience mode and restores the editor chrome in a window.
@@ -2554,7 +2591,7 @@ fn viewport_adjust_system(
     presentation: Res<PresentationMode>,
     export_state: Res<export::ExportState>,
 ) {
-    if presentation.active || export_state.active {
+    if export_state.active {
         view_override.0 = None;
         *camera_viewport = CameraViewport::default();
         return;
@@ -2575,6 +2612,27 @@ fn viewport_adjust_system(
 
     let window_h = window.height() as f64;
     let window_w = window.width() as f64;
+    let anim_w = cam.viewport_width as f64;
+    let anim_h = cam.viewport_height as f64;
+    if anim_w < 1.0 || anim_h < 1.0 || window_w < 1.0 || window_h < 1.0 {
+        return;
+    }
+
+    if presentation.active {
+        let fit_scale = (window_w / anim_w).min(window_h / anim_h);
+        let frame_size = glam::DVec2::new(anim_w * fit_scale, anim_h * fit_scale);
+        viewport_frame.origin = glam::DVec2::new(
+            (window_w - frame_size.x) * 0.5,
+            (window_h - frame_size.y) * 0.5,
+        );
+        viewport_frame.size = frame_size;
+        viewport_frame.output_size = glam::DVec2::new(anim_w, anim_h);
+        view_override.0 = None;
+        camera_viewport.scale = fit_scale;
+        camera_viewport.offset_y = 0.0;
+        return;
+    }
+
     let available_h = window_h - inset.bottom as f64;
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
@@ -2584,8 +2642,6 @@ fn viewport_adjust_system(
     }
 
     // Always fit animation into the available area while preserving aspect ratio.
-    let anim_w = cam.viewport_width as f64;
-    let anim_h = cam.viewport_height as f64;
     let scale_x = window_w / anim_w;
     let scale_y = available_h / anim_h;
     let fit_scale = scale_x.min(scale_y);
@@ -2859,6 +2915,39 @@ mod tests {
     }
 
     #[test]
+    fn escape_restores_windowed_mode_from_editor_fullscreen() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .insert_resource(EditorFullscreenState {
+                previous_mode: Some(bevy::window::WindowMode::Windowed),
+            })
+            .insert_resource(PresentationMode::default())
+            .add_systems(Update, editor_fullscreen_keys_system);
+        app.world_mut().spawn((
+            Window {
+                mode: bevy::window::WindowMode::BorderlessFullscreen(
+                    bevy::window::MonitorSelection::Current,
+                ),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+
+        app.update();
+
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
+    }
+
+    #[test]
     fn f11_does_not_replace_presentation_mode() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -2881,6 +2970,38 @@ mod tests {
             .expect("primary window");
         assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
         assert!(app.world().resource::<PresentationMode>().active);
+    }
+
+    #[test]
+    fn escape_exits_presentation_fullscreen() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<AudienceBlank>()
+            .init_resource::<presenter::PresenterOverviewState>()
+            .insert_resource(PresentationMode { active: true })
+            .add_systems(Update, presentation_escape_system);
+        app.world_mut().spawn((
+            Window {
+                mode: bevy::window::WindowMode::BorderlessFullscreen(
+                    bevy::window::MonitorSelection::Current,
+                ),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+
+        app.update();
+
+        assert!(!app.world().resource::<PresentationMode>().active);
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
     }
 
     #[test]
@@ -2949,6 +3070,169 @@ mod tests {
             None,
             "viewport fitting must not override follow, shake, or camera bindings"
         );
+    }
+
+    #[test]
+    fn presentation_viewport_fits_the_scene_to_the_fullscreen_window() {
+        let camera = Camera::ortho_2d(1280, 720);
+        let mut app = App::new();
+        app.insert_resource(ViewportInset::default())
+            .insert_resource(PreviewInteractive::default())
+            .insert_resource(camera)
+            .insert_resource(CameraViewOverride::default())
+            .insert_resource(CameraViewport::default())
+            .insert_resource(ViewportFrame::default())
+            .insert_resource(PresentationMode { active: true })
+            .insert_resource(export::ExportState::default())
+            .add_systems(Update, viewport_adjust_system);
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(2560, 1600),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+
+        app.update();
+
+        assert_eq!(app.world().resource::<CameraViewport>().scale, 2.0);
+        let frame = app.world().resource::<ViewportFrame>();
+        assert_eq!(frame.origin, glam::DVec2::new(0.0, 80.0));
+        assert_eq!(frame.size, glam::DVec2::new(2560.0, 1440.0));
+    }
+
+    #[test]
+    fn presentation_uses_black_outside_the_fitted_scene() {
+        let mut app = App::new();
+        app.insert_resource(PresentationMode { active: true })
+            .add_systems(Update, sync_fullscreen_letterbox_color_system);
+        let clear_camera = app
+            .world_mut()
+            .spawn((
+                bevy::camera::Camera::default(),
+                gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
+            ))
+            .id();
+        let pbr_camera = app
+            .world_mut()
+            .spawn((
+                bevy::camera::Camera::default(),
+                gaanim_renderer::pipeline::GaanimPbrCamera,
+            ))
+            .id();
+
+        app.update();
+
+        let camera = app
+            .world()
+            .get::<bevy::camera::Camera>(clear_camera)
+            .expect("full-window clear camera");
+        assert!(matches!(
+            camera.clear_color,
+            bevy::camera::ClearColorConfig::Custom(color) if color == Color::BLACK
+        ));
+        let pbr = app
+            .world()
+            .get::<bevy::camera::Camera>(pbr_camera)
+            .expect("PBR camera");
+        assert!(matches!(
+            pbr.clear_color,
+            bevy::camera::ClearColorConfig::Default
+        ));
+
+        app.world_mut().resource_mut::<PresentationMode>().active = false;
+        app.update();
+        let camera = app
+            .world()
+            .get::<bevy::camera::Camera>(clear_camera)
+            .expect("full-window clear camera");
+        assert!(matches!(
+            camera.clear_color,
+            bevy::camera::ClearColorConfig::Default
+        ));
+        let pbr = app
+            .world()
+            .get::<bevy::camera::Camera>(pbr_camera)
+            .expect("PBR camera");
+        assert!(matches!(
+            pbr.clear_color,
+            bevy::camera::ClearColorConfig::None
+        ));
+    }
+
+    #[test]
+    fn editor_fullscreen_uses_black_outside_the_fitted_scene() {
+        let mut app = App::new();
+        app.insert_resource(PresentationMode { active: false })
+            .add_systems(Update, sync_fullscreen_letterbox_color_system);
+        app.world_mut().spawn((
+            Window {
+                mode: bevy::window::WindowMode::BorderlessFullscreen(
+                    bevy::window::MonitorSelection::Current,
+                ),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        let clear_camera = app
+            .world_mut()
+            .spawn((
+                bevy::camera::Camera::default(),
+                gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
+            ))
+            .id();
+        let pbr_camera = app
+            .world_mut()
+            .spawn((
+                bevy::camera::Camera::default(),
+                gaanim_renderer::pipeline::GaanimPbrCamera,
+            ))
+            .id();
+
+        app.update();
+
+        let clear = app
+            .world()
+            .get::<bevy::camera::Camera>(clear_camera)
+            .expect("full-window clear camera");
+        assert!(matches!(
+            clear.clear_color,
+            bevy::camera::ClearColorConfig::Custom(color) if color == Color::BLACK
+        ));
+        let pbr = app
+            .world()
+            .get::<bevy::camera::Camera>(pbr_camera)
+            .expect("PBR camera");
+        assert!(matches!(
+            pbr.clear_color,
+            bevy::camera::ClearColorConfig::Default
+        ));
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>();
+        query
+            .single_mut(app.world_mut())
+            .expect("primary window")
+            .mode = bevy::window::WindowMode::Windowed;
+        app.update();
+
+        let clear = app
+            .world()
+            .get::<bevy::camera::Camera>(clear_camera)
+            .expect("full-window clear camera");
+        assert!(matches!(
+            clear.clear_color,
+            bevy::camera::ClearColorConfig::Default
+        ));
+        let pbr = app
+            .world()
+            .get::<bevy::camera::Camera>(pbr_camera)
+            .expect("PBR camera");
+        assert!(matches!(
+            pbr.clear_color,
+            bevy::camera::ClearColorConfig::None
+        ));
     }
 
     #[test]

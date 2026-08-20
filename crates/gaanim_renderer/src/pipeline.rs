@@ -125,6 +125,20 @@ fn interactive_background_pixel_size(
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct MainVelloScene;
 
+/// Full-target color clear performed before the fitted PBR viewport.
+///
+/// A camera only clears inside its viewport. Keeping this pass separate avoids
+/// stale pixels around a fitted canvas and lets presentation hosts choose a
+/// neutral letterbox color without changing the authored scene background.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct GaanimFullWindowClearCamera;
+
+/// The primary PBR camera owned by the shared Gaanim scene runtime.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct GaanimPbrCamera;
+
 /// Retained GPU cache of precompiled local Vello scenes for each Mobject.
 ///
 /// Under the "Fragment Retain" system, local shapes, fills, and strokes are compiled into
@@ -981,11 +995,9 @@ pub fn compile_scene_from_world(
         }
     }
 
-    let composition_bounds = extracted
-        .iter()
-        .fold(opacity_fallback, |bounds, elem| {
-            bounds.union(elem.opacity_bounds)
-        });
+    let composition_bounds = extracted.iter().fold(opacity_fallback, |bounds, elem| {
+        bounds.union(elem.opacity_bounds)
+    });
     append_extracted_elements(&mut main_scene, &extracted, composition_bounds);
 
     main_scene

@@ -82,6 +82,14 @@ tamaño y DPI de la ventana. El encabezado muestra un cronómetro reiniciable pa
   nombre del segmento y mantiene Up Next por encima de las notas con scroll
   independiente.
 
+La salida fullscreen, tanto en el editor como en Presenter Mode, ajusta el lienzo
+completo al monitor sin deformarlo y rellena en negro cualquier franja exterior,
+independientemente del fondo de la escena. En el fullscreen normal del editor,
+`Esc` también restaura la ventana, igual que `F11`. Si el render asíncrono de
+previews falla, Presenter View permite
+reintentarlo; al terminar la charla muestra un estado final en vez de una preview
+pendiente que nunca puede existir.
+
 Para revisar una animación sin pausas en el editor, activa *Continuous* junto a
 los controles de transporte. El toggle dura la sesión y sobrevive al hot reload,
 pero Presenter Mode sigue respetando `scene.stop(...)`. Los seeks, snapshots y
