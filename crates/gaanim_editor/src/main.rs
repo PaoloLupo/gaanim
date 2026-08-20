@@ -469,6 +469,7 @@ ARGUMENTS:
     DIRECTORY           Project directory (defaults to gaanim-<kind>)
 
 OPTIONS:
+    Creates a bare uv project pinned to Python 3.14
     --force             Update scaffold files without deleting user assets
     -h, --help          Print this help"#
     );

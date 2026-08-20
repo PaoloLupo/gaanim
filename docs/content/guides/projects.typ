@@ -26,6 +26,8 @@ Cada comando crea un starter ejecutable:
 ```text
 mi-proyecto/
   gaanim.toml
+  pyproject.toml
+  .python-version # 3.14
   main.py
   README.md
   assets/
@@ -63,7 +65,7 @@ gaanim check .
 El visor conserva hot reload sobre el entry point resuelto. Las rutas de assets se resuelven respecto de `gaanim.toml`, por lo que no dependen del directorio desde el que se inició Gaanim. Puedes crear el `.venv` dentro del proyecto con `uv`:
 
 ```powershell
-uv venv --python 3.12
+uv venv --python 3.14
 .\.venv\Scripts\Activate.ps1
 ```
 

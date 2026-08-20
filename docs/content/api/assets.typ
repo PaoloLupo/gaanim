@@ -36,8 +36,10 @@ gaanim init video my-video
 gaanim init slides my-deck
 ```
 
-Cada proyecto contiene `main.py`, `gaanim.toml`, `assets/`, `exports/`, un README
-y un `.gitignore`. El manifiesto generado es:
+Cada proyecto contiene `main.py`, `gaanim.toml`, `pyproject.toml`,
+`.python-version` (3.14), `assets/`, `exports/`, un README y un `.gitignore`.
+El proyecto Python equivale a `uv init --bare --python 3.14`. El manifiesto
+generado es:
 
 ```toml
 name = "my-deck"

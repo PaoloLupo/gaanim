@@ -66,13 +66,17 @@ Cada `init` genera:
 ```text
 mi-video/
   gaanim.toml   # name/kind/entry/assets_dir/output_dir
+  pyproject.toml # proyecto uv --bare (Python >=3.14)
+  .python-version # 3.14
   main.py       # Scene de ejemplo
   assets/       # imágenes, svg, fuentes
   exports/      # mp4/webm/png (gitignore)
   README.md
 ```
 
-`--force` solo actualiza los archivos del scaffold, no borra tus assets.
+Cada scaffold crea el equivalente a `uv init --bare --python 3.14` y prepara
+`.venv` con Python 3.14. `--force` solo actualiza los archivos del scaffold, no
+borra tus assets.
 
 == Usar el proyecto
 
