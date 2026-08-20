@@ -5,6 +5,9 @@ use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use gaanim_core::peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
@@ -273,7 +276,6 @@ struct DecodeRequest {
     path: PathBuf,
     metadata: VideoMetadata,
     frame: u64,
-    time: f64,
 }
 
 #[derive(Debug)]
@@ -293,8 +295,23 @@ struct SequentialDecoder {
 
 impl SequentialDecoder {
     fn spawn(path: &Path, metadata: &VideoMetadata) -> Result<Self, VideoError> {
-        let mut child = Command::new("ffmpeg")
-            .args(["-v", "error", "-i"])
+        Self::spawn_at(path, metadata, 0)
+    }
+
+    fn spawn_at(
+        path: &Path,
+        metadata: &VideoMetadata,
+        start_frame: u64,
+    ) -> Result<Self, VideoError> {
+        let mut command = Command::new("ffmpeg");
+        command.args(["-v", "error"]);
+        if start_frame > 0 {
+            command
+                .arg("-ss")
+                .arg(format!("{:.9}", start_frame as f64 / metadata.fps));
+        }
+        let mut child = command
+            .arg("-i")
             .arg(path)
             .args([
                 "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
@@ -315,7 +332,7 @@ impl SequentialDecoder {
             child,
             stdout,
             metadata: metadata.clone(),
-            next_frame: 0,
+            next_frame: start_frame,
         })
     }
 
@@ -347,6 +364,50 @@ impl Drop for SequentialDecoder {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+struct RealtimeDecoderSession {
+    path: PathBuf,
+    decoder: SequentialDecoder,
+}
+
+const MAX_REALTIME_SEQUENTIAL_GAP: u64 = 12;
+
+fn decode_realtime_request(
+    sessions: &mut HashMap<Entity, RealtimeDecoderSession>,
+    request: &DecodeRequest,
+) -> (Result<ImageData, VideoError>, bool) {
+    let restart = sessions.get(&request.entity).is_none_or(|session| {
+        session.path != request.path
+            || request.frame < session.decoder.next_frame
+            || request.frame.saturating_sub(session.decoder.next_frame)
+                > MAX_REALTIME_SEQUENTIAL_GAP
+    });
+    if restart {
+        sessions.remove(&request.entity);
+        match SequentialDecoder::spawn_at(&request.path, &request.metadata, request.frame) {
+            Ok(decoder) => {
+                sessions.insert(
+                    request.entity,
+                    RealtimeDecoderSession {
+                        path: request.path.clone(),
+                        decoder,
+                    },
+                );
+            }
+            Err(error) => return (Err(error), true),
+        }
+    }
+
+    let result = sessions
+        .get_mut(&request.entity)
+        .expect("realtime decoder session inserted")
+        .decoder
+        .read_to(&request.path, request.frame);
+    if result.is_err() {
+        sessions.remove(&request.entity);
+    }
+    (result, restart)
 }
 
 /// Frame sampling policy. Exports use deterministic blocking mode; the editor
@@ -402,28 +463,33 @@ struct VideoDecoder {
     lru: VecDeque<(PathBuf, u64)>,
     cache_bytes: usize,
     sequential: HashMap<PathBuf, SequentialDecoder>,
+    #[cfg(test)]
+    realtime_process_spawns: Arc<AtomicUsize>,
 }
 
 impl Default for VideoDecoder {
     fn default() -> Self {
         let (request_tx, request_rx) = crossbeam_channel::unbounded::<DecodeRequest>();
         let (response_tx, response_rx) = crossbeam_channel::unbounded::<DecodeResponse>();
+        #[cfg(test)]
+        let realtime_process_spawns = Arc::new(AtomicUsize::new(0));
+        #[cfg(test)]
+        let worker_process_spawns = realtime_process_spawns.clone();
         thread::Builder::new()
             .name("gaanim-video-decoder".to_string())
             .spawn(move || {
-                while let Ok(mut request) = request_rx.recv() {
-                    // Coalesce scrub/playback bursts so the worker always decodes
-                    // the newest requested frame instead of building latency.
-                    while let Ok(newer) = request_rx.try_recv() {
-                        request = newer;
+                let mut sessions = HashMap::new();
+                while let Ok(request) = request_rx.recv() {
+                    let (image, _spawned) = decode_realtime_request(&mut sessions, &request);
+                    #[cfg(test)]
+                    if _spawned {
+                        worker_process_spawns.fetch_add(1, Ordering::Relaxed);
                     }
-                    let image = decode_video_frame(&request.path, &request.metadata, request.time)
-                        .map_err(|error| error.to_string());
                     let _ = response_tx.send(DecodeResponse {
                         entity: request.entity,
                         generation: request.generation,
                         frame: request.frame,
-                        image,
+                        image: image.map_err(|error| error.to_string()),
                     });
                 }
             })
@@ -437,6 +503,8 @@ impl Default for VideoDecoder {
             lru: VecDeque::new(),
             cache_bytes: 0,
             sequential: HashMap::new(),
+            #[cfg(test)]
+            realtime_process_spawns,
         }
     }
 }
@@ -522,13 +590,12 @@ fn sample_video_system(world: &mut World) {
                 playback.path.clone(),
                 playback.metadata.clone(),
                 playback.frame_index(scene_time),
-                playback.source_time(scene_time),
                 playback.last_frame,
             )
         })
         .collect::<Vec<_>>();
 
-    for (entity, path, metadata, frame, time, last_frame) in targets {
+    for (entity, path, metadata, frame, last_frame) in targets {
         if last_frame == Some(frame) {
             continue;
         }
@@ -557,11 +624,13 @@ fn sample_video_system(world: &mut World) {
                 }
             }
             VideoSamplingMode::Realtime => {
-                if decoder
-                    .pending
-                    .get(&entity)
-                    .is_some_and(|(_, pending)| *pending == frame)
-                {
+                // Keep one in-flight request per video. Superseding it every
+                // editor frame makes every slower FFmpeg response stale, so a
+                // busy decoder can remain on the poster forever. Once the
+                // completed frame is displayed, the next update requests the
+                // newest timeline position and naturally skips intermediate
+                // frames without starving this entity (or other videos).
+                if decoder.pending.contains_key(&entity) {
                     continue;
                 }
                 decoder.generation = decoder.generation.wrapping_add(1);
@@ -573,7 +642,6 @@ fn sample_video_system(world: &mut World) {
                     path,
                     metadata,
                     frame,
-                    time,
                 });
             }
         }
@@ -720,6 +788,16 @@ impl Plugin for GaanimMediaPlugin {
 mod tests {
     use super::*;
 
+    fn image_data(rgba: [u8; 4]) -> ImageData {
+        ImageData {
+            data: Blob::from(rgba.to_vec()),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width: 1,
+            height: 1,
+        }
+    }
+
     fn playback(looping: bool, speed: f64) -> VideoPlayback {
         VideoPlayback {
             path: "clip.mp4".into(),
@@ -760,6 +838,107 @@ mod tests {
     fn parses_fractional_ffprobe_frame_rates() {
         assert!((parse_rate(Some("30000/1001")).unwrap() - 29.970_029_97).abs() < 1e-6);
         assert_eq!(parse_rate(Some("0/0")), None);
+    }
+
+    #[test]
+    fn realtime_sampling_displays_a_completed_frame_when_the_timeline_advances() {
+        let (request_tx, request_rx) = crossbeam_channel::unbounded();
+        let (response_tx, response_rx) = crossbeam_channel::unbounded();
+        let decoder = VideoDecoder {
+            request_tx,
+            response_rx,
+            pending: HashMap::new(),
+            generation: 0,
+            cache: HashMap::new(),
+            lru: VecDeque::new(),
+            cache_bytes: 0,
+            sequential: HashMap::new(),
+            realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+        };
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(VideoSamplingMode::Realtime);
+        world.insert_resource(decoder);
+        let entity = world
+            .spawn((gaanim_scene::RasterImage::none(), playback(false, 1.0)))
+            .id();
+
+        sample_video_system(&mut world);
+        let first = request_rx.recv().expect("initial frame request");
+        world.resource_mut::<Timeline>().current_time = 3.0;
+        sample_video_system(&mut world);
+
+        response_tx
+            .send(DecodeResponse {
+                entity,
+                generation: first.generation,
+                frame: first.frame,
+                image: Ok(image_data([255, 0, 0, 255])),
+            })
+            .unwrap();
+        sample_video_system(&mut world);
+
+        assert_eq!(
+            world.get::<VideoPlayback>(entity).unwrap().last_frame,
+            Some(90)
+        );
+        assert!(world.get::<RasterImage>(entity).unwrap().image.is_some());
+    }
+
+    #[test]
+    fn realtime_decoder_reuses_ffmpeg_for_adjacent_frames() {
+        if Command::new("ffmpeg").arg("-version").output().is_err()
+            || Command::new("ffprobe").arg("-version").output().is_err()
+        {
+            eprintln!("skipping realtime decoder check because FFmpeg is unavailable");
+            return;
+        }
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-realtime-decoder-test-{}.mp4",
+            std::process::id()
+        ));
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=16x12:r=8:d=1",
+                "-c:v",
+                "mpeg4",
+            ])
+            .arg(&path)
+            .status()
+            .expect("ffmpeg was available during the initial probe");
+        assert!(status.success());
+        let metadata = probe_video(&path).expect("fixture should be probeable");
+        let decoder = VideoDecoder::default();
+
+        for frame in [0, 1] {
+            decoder
+                .request_tx
+                .send(DecodeRequest {
+                    entity: Entity::from_bits(1),
+                    generation: frame + 1,
+                    path: path.clone(),
+                    metadata: metadata.clone(),
+                    frame,
+                })
+                .unwrap();
+            decoder
+                .response_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("decoded frame response");
+        }
+
+        assert_eq!(
+            decoder.realtime_process_spawns.load(Ordering::Relaxed),
+            1,
+            "adjacent realtime frames should share one FFmpeg process"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -804,6 +983,11 @@ mod tests {
         let audio =
             decode_preview_audio(&path, 0.0, 0.25, 1.25).expect("embedded audio should decode");
         assert!(audio.len() > 44);
+        let source = bevy::audio::AudioSource { bytes: audio };
+        assert!(
+            bevy::audio::Decodable::decoder(&source).next().is_some(),
+            "Bevy must enable the WAV decoder used by preview audio"
+        );
         let _ = std::fs::remove_file(path);
     }
 }

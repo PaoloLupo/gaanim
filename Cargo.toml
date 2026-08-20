@@ -47,8 +47,10 @@ bevy = {version = "0.18", default-features = false, features = [
   "bevy_gltf",
   "bevy_animation",
   "bevy_audio",
+  "wav",              # registers Bevy's generic AudioSource asset
   "symphonia-aac",
   "symphonia-isomp4",
+  "symphonia-wav",    # decodes FFmpeg's streaming in-memory WAV output
   "gltf_animation",
   "bevy_pbr",
   "bevy_render",
