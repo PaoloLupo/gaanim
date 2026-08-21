@@ -2248,7 +2248,7 @@ class ChartSpec:
         """Capture data and validate a non-null unique key when supplied."""
         ...
     def mark(self, kind: ChartMark, **options: float | str | Color) -> ChartSpec:
-        """Return a copy using the requested mark and mark-specific options."""
+        """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``."""
         ...
     def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None) -> ChartSpec:
         """Return a copy with validated positional and visual channel encodings."""
@@ -2428,8 +2428,8 @@ class Chart:
     def drawable(self) -> Drawable:
         """Return the root drawable used by layout and generic transforms."""
         ...
-    def layer(self, name: Literal["marks", "axes", "grid", "guides"]) -> Drawable:
-        """Return one semantic layer without exposing its internal batches."""
+    def layer(self, name: Literal["marks", "axes", "grid", "guides", "labels"]) -> Drawable:
+        """Return one semantic layer; ``labels`` exists only when a bar label channel materializes text."""
         ...
     def at(self, x: float, y: float) -> Chart:
         """Return a chart handle translated in the 2D canvas plane."""

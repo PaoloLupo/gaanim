@@ -161,14 +161,20 @@ impl Axis {
             return Err(AxisError::InvalidCategories);
         }
         Ok(Self {
-            min: 0.0,
-            max: (values.len().saturating_sub(1)).max(1) as f64,
+            // Categories occupy unit-wide bands rather than points at the
+            // frame edges. This centres category `i` at `i` and leaves a
+            // half-band on each side, so a width <= 1 bar is wholly visible.
+            min: -0.5,
+            max: values.len() as f64 - 0.5,
             scale: Scale::Category { values },
             major_step: Some(1.0),
             minor_subdivisions: 0,
             format: NumberFormat::Auto,
             label: None,
-            crossing: Crossing::Auto,
+            // A categorical axis has no meaningful zero crossing. Keep the
+            // perpendicular axis on the outer band edge instead of through
+            // the first category.
+            crossing: Crossing::Minimum,
             style: AxisStyle::default(),
             style_patch: AxisStylePatch::default(),
         })
@@ -589,6 +595,10 @@ mod tests {
     #[test]
     fn categorical_ticks_preserve_labels() {
         let axis = Axis::category(["A", "B", "C"].map(str::to_owned)).unwrap();
+        assert_eq!(axis.domain(), (-0.5, 2.5));
+        assert_eq!(axis.crossing_value(), -0.5);
+        assert!((axis.normalize(0.0).unwrap() - 1.0 / 6.0).abs() < 1e-12);
+        assert!((axis.normalize(2.0).unwrap() - 5.0 / 6.0).abs() < 1e-12);
         assert_eq!(
             axis.ticks_values(7)
                 .unwrap()
@@ -597,6 +607,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["A", "B", "C"]
         );
+    }
+
+    #[test]
+    fn a_single_category_is_centered_in_its_band() {
+        let axis = Axis::category(["only".to_owned()]).unwrap();
+        assert_eq!(axis.domain(), (-0.5, 0.5));
+        assert_eq!(axis.crossing_value(), -0.5);
+        assert_eq!(axis.normalize(0.0).unwrap(), 0.5);
+        assert_eq!(axis.denormalize(0.5).unwrap(), 0.0);
     }
 
     #[test]

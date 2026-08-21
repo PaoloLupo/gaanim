@@ -1240,7 +1240,7 @@ impl PyChart {
             .layer(name)
             .cloned()
             .map(PyDrawable)
-            .ok_or_else(|| value_error("layer must be marks, axes, grid, or guides"))
+            .ok_or_else(|| value_error("layer must be marks, axes, grid, guides, or labels"))
     }
 
     fn at(&self, x: f64, y: f64) -> Self {

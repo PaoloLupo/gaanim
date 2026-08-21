@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::{BezPath, Circle, Point, Shape};
+use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
 use gaanim_objects::prelude::SvgPath;
@@ -122,6 +122,7 @@ pub struct ChartHandle {
     pub(crate) axes: DrawableHandle,
     pub(crate) grid: Option<DrawableHandle>,
     pub(crate) guides: Option<DrawableHandle>,
+    pub(crate) labels: Option<DrawableHandle>,
     pub(crate) spec: ChartSpec,
 }
 
@@ -140,6 +141,7 @@ impl ChartHandle {
             "axes" => Some(&self.axes),
             "grid" => self.grid.as_ref(),
             "guides" => self.guides.as_ref(),
+            "labels" => self.labels.as_ref(),
             _ => None,
         }
     }
@@ -612,6 +614,31 @@ impl Canvas {
                 .cloned()
                 .unwrap_or(Axis::linear(0.0, 1.0)?);
             let space = self.coordinate_axes(x, y, Some(width), Some(height), true)?;
+            if spec.mark_spec().kind == MarkKind::Bar {
+                let (marks, labels) =
+                    self.materialize_bar_chart(&space, &spec, chart_series_color(self))?;
+                let axes_layer = space
+                    .layer(SpaceLayer::Axes)
+                    .cloned()
+                    .unwrap_or_else(|| space.drawable().clone())
+                    .z_index(20);
+                let grid = space
+                    .layer(SpaceLayer::MajorGrid)
+                    .cloned()
+                    .map(|layer| layer.z_index(-20));
+                if let Some(guide) = &guides {
+                    self.attach_to_space(&space, guide);
+                }
+                return Ok(ChartHandle {
+                    root: space.drawable().clone(),
+                    marks,
+                    axes: axes_layer,
+                    grid,
+                    guides,
+                    labels,
+                    spec,
+                });
+            }
             let source = gaanim_visualization::DataSource::new(spec.data().clone());
             let mark = match spec.mark_spec().kind {
                 MarkKind::Point => self.data_mark(
@@ -758,6 +785,7 @@ impl Canvas {
                 grid,
                 guides,
                 spec,
+                labels: None,
             })
         } else {
             let x = axes
@@ -905,8 +933,112 @@ impl Canvas {
                 grid,
                 guides,
                 spec,
+                labels: None,
             })
         }
+    }
+
+    /// Build categorical and numeric bars from the canonical batch.  A path
+    /// is retained for each resolved fill colour, avoiding an entity per row
+    /// while still honouring a per-datum colour encoding.
+    fn materialize_bar_chart(
+        &mut self,
+        space: &CoordinateSpaceHandle,
+        spec: &ChartSpec,
+        default_color: Color,
+    ) -> Result<(DrawableHandle, Option<DrawableHandle>), VisualizationError> {
+        let batch = spec.batch()?;
+        let width = chart_option_number(spec, "width", 0.8);
+        let baseline = chart_option_number(spec, "baseline", 0.0);
+        let baseline_normalized = space.map.y.normalize(baseline)?;
+        let label_position = match spec.mark_spec().options.get("label_position") {
+            Some(ConstantValue::Text(value)) => value.as_str(),
+            _ => "outside",
+        };
+        let label_offset = chart_option_number(spec, "label_offset", 16.0);
+        let label_color = match spec.mark_spec().options.get("label_color") {
+            Some(ConstantValue::Color(color)) => Some(*color),
+            _ => None,
+        };
+        let mut paths: BTreeMap<[u8; 4], (Color, BezPath)> = BTreeMap::new();
+        let mut labels = Vec::new();
+        let frame = space.map.frame;
+        let category_band = match space.map.x.scale() {
+            Scale::Category { values } => Some(frame.width / values.len() as f64),
+            _ => None,
+        };
+
+        for datum in &batch.data {
+            if !datum.position[0].is_finite() || !datum.position[1].is_finite() {
+                continue;
+            }
+            let center_x = (datum.position[0] - 0.5) * frame.width;
+            let center_y = (datum.position[1] - 0.5) * frame.height;
+            let half_width = if let Some(band) = category_band {
+                band * width * 0.5
+            } else {
+                let value = space.map.x.denormalize(datum.position[0])?;
+                let left = space.map.x.normalize(value - width * 0.5)?;
+                let right = space.map.x.normalize(value + width * 0.5)?;
+                (right - left).abs() * frame.width * 0.5
+            };
+            let baseline_y = (baseline_normalized - 0.5) * frame.height;
+            let color = color_with_opacity(datum.color.unwrap_or(default_color), datum.opacity);
+            let rgba = color.to_rgba8();
+            let path = paths
+                .entry([rgba.r, rgba.g, rgba.b, rgba.a])
+                .or_insert_with(|| (color, BezPath::new()));
+            path.1.extend(
+                Rect::new(
+                    center_x - half_width,
+                    baseline_y.min(center_y),
+                    center_x + half_width,
+                    baseline_y.max(center_y),
+                )
+                .to_path(0.1),
+            );
+
+            if let Some(text) = &datum.label {
+                let sign = if datum.position[1] >= baseline_normalized {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let direction = if label_position == "inside" {
+                    -sign
+                } else {
+                    sign
+                };
+                labels.push(
+                    self.text(text)
+                        .fill(label_color.unwrap_or(color))
+                        .at(center_x, center_y + direction * label_offset)
+                        .z_index(10),
+                );
+            }
+        }
+
+        let mut mark_paths = Vec::with_capacity(paths.len());
+        for (_, (color, path)) in paths {
+            let handle = self
+                .visualization_path(path, frame.bounds(), color, 0.0, "ChartBars")
+                .fill(color)
+                .z_index(0);
+            mark_paths.push(handle);
+        }
+        let mark_refs: Vec<_> = mark_paths.iter().collect();
+        let marks = self.group_no_center(&mark_refs);
+        self.attach_to_space(space, &marks);
+
+        let labels = if labels.is_empty() {
+            None
+        } else {
+            let label_refs: Vec<_> = labels.iter().collect();
+            let labels = self.group_no_center(&label_refs);
+            self.attach_to_space(space, &labels);
+            Some(labels)
+        };
+        Ok((marks, labels))
     }
 
     fn visualization_path(
@@ -2256,6 +2388,42 @@ impl Canvas {
 mod tests {
     use super::*;
 
+    fn group_child_translations(canvas: &Canvas, group: &DrawableHandle) -> Vec<DVec3> {
+        let group_spec = group.spec.lock().expect("group spec poisoned");
+        let SpawnKind::GroupNoCenter(children) = &group_spec.kind else {
+            panic!("expected an uncentered group");
+        };
+        let children = children.clone();
+        drop(group_spec);
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        children
+            .iter()
+            .map(|id| {
+                let spec = state
+                    .active()
+                    .ops
+                    .iter()
+                    .find_map(|op| match op {
+                        Op::Spawn(spec) if spec.lock().expect("object spec poisoned").id == *id => {
+                            Some(spec.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("label must have a spawn spec");
+                spec.lock()
+                    .expect("label spec poisoned")
+                    .layout_ops
+                    .iter()
+                    .rev()
+                    .find_map(|op| match op {
+                        super::super::types::LayoutOp::SetTranslation(value) => Some(*value),
+                        _ => None,
+                    })
+                    .expect("label must have an authored translation")
+            })
+            .collect()
+    }
+
     fn svg_stroke_color(handle: &DrawableHandle) -> Color {
         let spec = handle.spec.lock().expect("object spec poisoned");
         let SpawnKind::SvgPath(path) = &spec.kind else {
@@ -2744,6 +2912,147 @@ mod tests {
         assert!(
             axis_z > mark_z,
             "semantic axes must remain readable when a bar intersects them",
+        );
+    }
+
+    #[test]
+    fn categorical_bars_batch_by_resolved_color_and_expose_labels() {
+        let table = gaanim_visualization::DataTable::new([
+            (
+                "method".to_owned(),
+                gaanim_visualization::Column::Text(vec![
+                    Some("baseline".into()),
+                    Some("cached".into()),
+                    Some("gpu".into()),
+                ]),
+            ),
+            (
+                "elapsed".to_owned(),
+                gaanim_visualization::Column::Numeric(vec![Some(48.0), Some(-12.0), Some(21.0)]),
+            ),
+            (
+                "kind".to_owned(),
+                gaanim_visualization::Column::Text(vec![
+                    Some("slow".into()),
+                    Some("slow".into()),
+                    Some("fast".into()),
+                ]),
+            ),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(
+                MarkKind::Bar,
+                BTreeMap::from([
+                    (
+                        "label_position".into(),
+                        ConstantValue::Text("inside".into()),
+                    ),
+                    ("label_offset".into(), ConstantValue::Number(12.0)),
+                ]),
+            )
+            .encode(Channel::X, Encoding::field("method"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("elapsed"))
+            .unwrap()
+            .encode(Channel::Label, Encoding::field("elapsed"))
+            .unwrap()
+            .encode(
+                Channel::Color,
+                Encoding::scaled_field(
+                    "kind",
+                    gaanim_visualization::ScaleSpec::category(["slow".into(), "fast".into()])
+                        .unwrap()
+                        .colors([
+                            Color::from_rgb8(0x33, 0x66, 0xCC),
+                            Color::from_rgb8(0xDD, 0x55, 0x55),
+                        ]),
+                ),
+            )
+            .unwrap();
+
+        let mut canvas = Canvas::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        assert!(chart.layer("labels").is_some());
+        let mark_spec = chart.marks.spec.lock().expect("bar mark spec poisoned");
+        let SpawnKind::GroupNoCenter(batches) = &mark_spec.kind else {
+            panic!("coloured bars must be grouped vector batches");
+        };
+        assert_eq!(batches.len(), 2, "equal resolved colours share one batch");
+    }
+
+    #[test]
+    fn bar_labels_follow_signed_extremes_inside_and_outside() {
+        let table = gaanim_visualization::DataTable::new([
+            (
+                "method".to_owned(),
+                gaanim_visualization::Column::Text(vec![Some("up".into()), Some("down".into())]),
+            ),
+            (
+                "value".to_owned(),
+                gaanim_visualization::Column::Numeric(vec![Some(40.0), Some(-10.0)]),
+            ),
+        ])
+        .unwrap();
+        let base = ChartSpec::new(table, None)
+            .unwrap()
+            .encode(Channel::X, Encoding::field("method"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("value"))
+            .unwrap()
+            .encode(Channel::Label, Encoding::field("value"))
+            .unwrap()
+            .axis(Channel::Y, Axis::linear(-20.0, 50.0).unwrap())
+            .unwrap();
+
+        let mut outside_canvas = Canvas::new(640, 360);
+        let outside = outside_canvas
+            .chart(base.clone().mark(
+                MarkKind::Bar,
+                BTreeMap::from([("label_offset".into(), ConstantValue::Number(12.0))]),
+            ))
+            .unwrap();
+        let outside_labels = group_child_translations(
+            &outside_canvas,
+            outside.layer("labels").expect("labels should materialize"),
+        );
+
+        let mut inside_canvas = Canvas::new(640, 360);
+        let inside = inside_canvas
+            .chart(base.mark(
+                MarkKind::Bar,
+                BTreeMap::from([
+                    (
+                        "label_position".into(),
+                        ConstantValue::Text("inside".into()),
+                    ),
+                    ("label_offset".into(), ConstantValue::Number(12.0)),
+                ]),
+            ))
+            .unwrap();
+        let inside_labels = group_child_translations(
+            &inside_canvas,
+            inside.layer("labels").expect("labels should materialize"),
+        );
+
+        assert!(
+            outside_labels[0].y > inside_labels[0].y,
+            "positive labels invert inside"
+        );
+        assert!(
+            outside_labels[1].y < inside_labels[1].y,
+            "negative labels invert inside"
+        );
+        assert_eq!(
+            outside_labels[0].y - inside_labels[0].y,
+            24.0,
+            "the positive label moves by twice its offset",
+        );
+        assert_eq!(
+            inside_labels[1].y - outside_labels[1].y,
+            24.0,
+            "the negative label moves by twice its offset",
         );
     }
 

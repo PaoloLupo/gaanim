@@ -69,6 +69,31 @@ bars = base.mark("bar").encode(x="category", y="value")
 points = base.mark("point").encode(x="time", y="value")
 ```
 
+Las barras admiten categorías de texto directamente: `x="method"` centra cada
+barra en su propia banda, incluyendo la primera y la última. Su `width` es una
+fracción de esa banda para ejes categóricos. Añade `label="value"` sólo cuando
+quieras rótulos; se materializan en la capa opcional `labels`. Las opciones de
+barra `label_position="outside"` (predeterminado) o `"inside"`,
+`label_offset=16` en unidades locales y `label_color=...` controlan esos
+rótulos. Los valores negativos se colocan respecto a la línea base.
+
+```python
+from gaanim import BLUE, GOLD, ChartSpec, Field, Scale
+
+bars = (
+  ChartSpec({"method": ["one", "two"], "elapsed": [40, -10], "kind": ["new", "old"]})
+  .mark("bar", width=0.72, label_position="outside", label_offset=16)
+  .encode(
+    x="method", y="elapsed", label="elapsed",
+    color=Field("kind", scale=Scale.category().colors([BLUE, GOLD])),
+  )
+)
+```
+
+Un `Value(BLUE)` conserva un único color técnico para toda la serie. Un
+`Field(..., scale=Scale.category(...).colors(...))` resuelve un color por fila
+y agrupa internamente las barras que comparten ese color.
+
 #api-entry(
   name: "ChartSpec",
   kind: "builder",
@@ -117,9 +142,10 @@ guide = Guide.colorbar(title="temperature")
 == Gráfico materializado y transiciones
 
 `scene.chart(spec)` materializa la receta y devuelve un `Chart`. Sus capas
-estables son `marks`, `axes`, `grid` y `guides`; cada una se comporta como un
-objeto dibujable normal. Las marcas se agrupan en un número constante de lotes
-vectoriales o mallas retenidas, en lugar de crear una entidad ECS por registro.
+estables son `marks`, `axes`, `grid`, `guides` y la opcional `labels`; cada una
+se comporta como un objeto dibujable normal. Las marcas se agrupan por estilo
+resuelto (por ejemplo, un lote por color de barra repetido), en lugar de crear
+una entidad ECS por registro.
 
 La opacidad del gráfico se propaga por las capas vectoriales y las mallas 3D
 nativas. Por eso `fade_in`, `fade_out` y la opacidad de un padre mantienen el

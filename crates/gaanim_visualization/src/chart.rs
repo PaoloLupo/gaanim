@@ -328,10 +328,32 @@ impl ChartSpec {
             MarkKind::Surface => has(Channel::X) && has(Channel::Y) && has(Channel::Z),
         };
         if valid {
-            Ok(())
+            self.validate_mark_options()
         } else {
             Err(ChartError::MissingRequiredEncoding(self.mark.kind))
         }
+    }
+
+    fn validate_mark_options(&self) -> Result<(), ChartError> {
+        if self.mark.kind != MarkKind::Bar {
+            return Ok(());
+        }
+        for (name, value) in &self.mark.options {
+            match (name.as_str(), value) {
+                ("width", ConstantValue::Number(value)) if value.is_finite() && *value > 0.0 => {}
+                ("baseline", ConstantValue::Number(value)) if value.is_finite() => {}
+                ("label_offset", ConstantValue::Number(value))
+                    if value.is_finite() && *value >= 0.0 => {}
+                ("label_position", ConstantValue::Text(value))
+                    if matches!(value.as_str(), "outside" | "inside") => {}
+                ("label_color", ConstantValue::Color(_)) => {}
+                ("width" | "baseline" | "label_offset" | "label_position" | "label_color", _) => {
+                    return Err(ChartError::InvalidMarkOption(name.clone()));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn batch(&self) -> Result<MarkBatch, ChartError> {
@@ -898,6 +920,8 @@ pub enum ChartError {
     EmptyDomain(String),
     #[error("category '{0}' is outside the configured scale")]
     UnknownCategory(String),
+    #[error("mark option '{0}' is invalid")]
+    InvalidMarkOption(String),
     #[error("transition from {source_mark:?} to {target_mark:?} requires fallback='crossfade'")]
     IncompatibleTransition {
         source_mark: MarkKind,
@@ -1050,6 +1074,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(spec.resolved_axes().unwrap()[&Channel::X], authored);
+    }
+
+    #[test]
+    fn categorical_bars_are_centered_and_keep_rows_with_missing_neighbours() {
+        let data = DataTable::new([
+            (
+                "method".to_owned(),
+                Column::Text(vec![
+                    Some("baseline".into()),
+                    Some("cached".into()),
+                    Some("gpu".into()),
+                ]),
+            ),
+            (
+                "elapsed".to_owned(),
+                Column::Numeric(vec![Some(48.0), None, Some(21.0)]),
+            ),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(data, None)
+            .unwrap()
+            .mark(MarkKind::Bar, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("method"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("elapsed"))
+            .unwrap();
+        let axis = &spec.resolved_axes().unwrap()[&Channel::X];
+        assert_eq!(axis.domain(), (-0.5, 2.5));
+        let batch = spec.batch().unwrap();
+        assert_eq!(batch.data[0].position[0], 1.0 / 6.0);
+        assert!(batch.data[1].position[1].is_nan());
+        assert_eq!(batch.data[2].position[0], 5.0 / 6.0);
+    }
+
+    #[test]
+    fn bar_label_options_are_validated() {
+        let data =
+            DataTable::numeric([("x".to_owned(), vec![0.0]), ("y".to_owned(), vec![1.0])]).unwrap();
+        let base = ChartSpec::new(data, None)
+            .unwrap()
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+        for (name, value) in [
+            ("label_offset", ConstantValue::Number(-1.0)),
+            ("label_position", ConstantValue::Text("above".into())),
+            ("label_color", ConstantValue::Number(1.0)),
+        ] {
+            let mut options = BTreeMap::new();
+            options.insert(name.into(), value);
+            assert!(matches!(
+                base.clone().mark(MarkKind::Bar, options).validate(),
+                Err(ChartError::InvalidMarkOption(_))
+            ));
+        }
     }
 
     #[test]
