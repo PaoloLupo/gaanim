@@ -22,7 +22,7 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
-bevy_vello = "0.13.1"
+bevy_vello = "0.14.0"
 indicatif = "0.17"
 pollster = "0.3"
 crossbeam-channel = "0.5"

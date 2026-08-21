@@ -9,7 +9,7 @@ use bevy::{
         WindowResolution,
     },
 };
-use bevy_egui::{EguiContext, EguiMultipassSchedule, egui, input::EguiWantsInput};
+use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
 use crossbeam_channel::{Receiver, TryRecvError, bounded};
 use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, capture_scene_direct};
 use gaanim_timeline::timeline::Timeline;
@@ -391,7 +391,7 @@ fn entry_segment_time(start_time: f64, end_time: f64) -> f64 {
 fn apply_presenter_style(ctx: &egui::Context) {
     use egui::{Color32, FontFamily, FontId, TextStyle};
 
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.spacing.item_spacing = egui::vec2(12.0, 10.0);
     style.spacing.button_padding = egui::vec2(16.0, 10.0);
     style.spacing.window_margin = egui::Margin::same(18);
@@ -424,7 +424,7 @@ fn apply_presenter_style(ctx: &egui::Context) {
         TextStyle::Monospace,
         FontId::new(17.0, FontFamily::Monospace),
     );
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 /// Create the speaker-facing window only for `gaanim --present`.
@@ -478,7 +478,7 @@ pub(crate) fn sync_presenter_camera_system(
             gaanim_scene::AuthoritativeCameraView,
             bevy::core_pipeline::tonemapping::Tonemapping::None,
             RenderTarget::Window(WindowRef::Entity(event.window)),
-            EguiMultipassSchedule::new(PresenterEguiPass),
+            EguiSchedule::new(PresenterEguiPass),
             PresenterCamera {
                 window: event.window,
             },
@@ -1297,14 +1297,22 @@ pub(crate) fn presenter_view_system(
         "Rendering cue preview…"
     };
 
-    egui::TopBottomPanel::top("presenter-status")
-        .exact_height(if compact_header { 112.0 } else { 94.0 })
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "presenter-viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+
+    egui::Panel::top("presenter-status")
+        .exact_size(if compact_header { 112.0 } else { 94.0 })
         .frame(
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(7, 11, 22))
                 .inner_margin(egui::Margin::symmetric(20, 10)),
         )
-        .show(ctx, |ui| {
+        .show(&mut viewport_ui, |ui| {
             show_presenter_status(
                 ui,
                 current
@@ -1322,14 +1330,14 @@ pub(crate) fn presenter_view_system(
             );
         });
 
-    egui::TopBottomPanel::bottom("presenter-dock")
-        .exact_height(72.0)
+    egui::Panel::bottom("presenter-dock")
+        .exact_size(72.0)
         .frame(
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(9, 15, 28))
                 .inner_margin(egui::Margin::symmetric(18, 13)),
         )
-        .show(ctx, |ui| {
+        .show(&mut viewport_ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if ui
@@ -1419,14 +1427,14 @@ pub(crate) fn presenter_view_system(
 
     let wide = ctx.viewport_rect().width() >= 900.0;
     if wide {
-        egui::SidePanel::right("presenter-notes")
-            .exact_width((ctx.viewport_rect().width() * 0.34).clamp(300.0, 470.0))
+        egui::Panel::right("presenter-notes")
+            .exact_size((ctx.viewport_rect().width() * 0.34).clamp(300.0, 470.0))
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(9, 15, 28))
                     .inner_margin(egui::Margin::same(18)),
             )
-            .show(ctx, |ui| {
+            .show(&mut viewport_ui, |ui| {
                 show_speaker_column(
                     ui,
                     current
@@ -1445,7 +1453,7 @@ pub(crate) fn presenter_view_system(
                 .fill(egui::Color32::from_rgb(7, 11, 22))
                 .inner_margin(egui::Margin::same(20)),
         )
-        .show(ctx, |ui| {
+        .show(&mut viewport_ui, |ui| {
             if let Some((index, position, segment)) = &current {
                 if wide {
                     show_current_cue(

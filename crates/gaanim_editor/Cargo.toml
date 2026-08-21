@@ -31,8 +31,8 @@ bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
-bevy_egui = { version = "0.39", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
-bevy_vello = "0.13.1"
+bevy_egui = { version = "0.42.0", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
+bevy_vello = "0.14.0"
 pyo3 = { version = "0.28", features = ["abi3-py312"] }
 notify = { workspace = true }
 crossbeam-channel = { workspace = true }

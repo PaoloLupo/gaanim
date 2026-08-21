@@ -35,7 +35,7 @@ codegen-units = 1
 strip = true
 
 [workspace.dependencies]
-bevy = {version = "0.18", default-features = false, features = [
+bevy = {version = "0.19.1", default-features = false, features = [
   "bevy_winit",       # windowing (not included by bevy_vello)
   "wayland",          # native windowing on Hyprland/Omarchy
   "multi_threaded",   # parallel execution
@@ -43,13 +43,13 @@ bevy = {version = "0.18", default-features = false, features = [
   "mouse",            # MouseButton input
   "default_font",     # font for egui
   "bevy_asset",
-  "bevy_scene",
+  "bevy_world_serialization",
   "bevy_gltf",
   "bevy_animation",
   "bevy_audio",
   "wav",              # registers Bevy's generic AudioSource asset
-  "symphonia-aac",
-  "symphonia-isomp4",
+  "aac",
+  "mp4",
   "symphonia-wav",    # decodes FFmpeg's streaming in-memory WAV output
   "gltf_animation",
   "bevy_pbr",

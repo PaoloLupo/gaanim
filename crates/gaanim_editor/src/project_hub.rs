@@ -94,9 +94,16 @@ fn project_hub_ui_system(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "project-hub-viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(egui::Color32::from_rgb(15, 18, 28)))
-        .show(ctx, |ui| {
+        .show(&mut viewport_ui, |ui| {
             ui.add_space(28.0);
             ui.vertical_centered(|ui| {
                 ui.heading(

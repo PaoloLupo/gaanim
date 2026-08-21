@@ -412,7 +412,7 @@ impl Default for Material3D {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Material3DBaseline {
     pub alpha: f32,
-    pub alpha_mode: bevy::render::alpha::AlphaMode,
+    pub alpha_mode: bevy::material::AlphaMode,
 }
 
 /// Scene-level automatic lighting policy for native 3D content.
@@ -437,7 +437,7 @@ impl Default for Lighting3D {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GltfMaterialBaseline {
     pub alpha: f32,
-    pub alpha_mode: bevy::render::alpha::AlphaMode,
+    pub alpha_mode: bevy::material::AlphaMode,
 }
 
 /// Raw triangle mesh data to be converted to Bevy `Mesh3d` at runtime.

@@ -143,95 +143,92 @@ pub struct GaanimEditorPlugin;
 
 impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
-        #[allow(deprecated)]
-        app.add_plugins(EguiPlugin {
-            enable_multipass_for_primary_context: false,
-            ..default()
-        })
-        .add_plugins(project_hub::ProjectHubPlugin)
-        .init_resource::<EditorState>()
-        .init_resource::<export::ExportState>()
-        .init_resource::<export::StashedReplay>()
-        .init_resource::<presenter::PresenterThumbnailCache>()
-        .init_resource::<presenter::PresenterOverviewState>()
-        .init_resource::<presenter::AudienceControlsState>()
-        .init_resource::<presenter::PresentationTimer>()
-        .init_resource::<fps_overlay::FpsOverlay>()
-        .init_resource::<EditorFullscreenState>()
-        .init_resource::<PresentationMode>()
-        .init_resource::<AudienceBlank>()
-        .init_resource::<ViewportInset>()
-        .init_resource::<ViewportFrame>()
-        .init_resource::<PreviewInteractive>()
-        .init_resource::<overlays::EditorOverlays>()
-        .add_systems(
-            Update,
-            (
-                sync_editor_input_ignore_system
-                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
-                    .before(gaanim_timeline::timeline_playback_system),
-                preview_mode_keys_system
-                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
-                    .after(sync_editor_input_ignore_system),
-                preview_interactive_input_system
-                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
-                    .after(preview_mode_keys_system),
-                editor_picking_system,
-                overlays::overlays_toggle_keys_system,
-                global_playback_keys_system,
-                editor_fullscreen_keys_system,
-                presenter::presentation_input_system
-                    .after(sync_editor_input_ignore_system)
-                    .before(gaanim_timeline::timeline_playback_system),
-                presenter::sync_presentation_timer_system,
-                sync_fullscreen_letterbox_color_system
-                    .after(editor_fullscreen_keys_system)
-                    .after(presentation_escape_system),
-                presentation_escape_system,
-                fps_overlay::fps_overlay_system,
-            ),
-        )
-        .add_systems(Startup, presenter::spawn_presenter_window_system)
-        .add_systems(
-            Update,
-            presenter::cleanup_presenter_before_window_close_system
-                .before(bevy::window::close_when_requested),
-        )
-        .add_systems(Update, presenter::sync_presenter_camera_system)
-        .add_systems(
-            Update,
-            (
-                detect_3d_content_system,
-                frame_free_camera_system,
-                viewport_adjust_system,
+        app.add_plugins(EguiPlugin::default())
+            .add_plugins(project_hub::ProjectHubPlugin)
+            .init_resource::<EditorState>()
+            .init_resource::<export::ExportState>()
+            .init_resource::<export::StashedReplay>()
+            .init_resource::<presenter::PresenterThumbnailCache>()
+            .init_resource::<presenter::PresenterOverviewState>()
+            .init_resource::<presenter::AudienceControlsState>()
+            .init_resource::<presenter::PresentationTimer>()
+            .init_resource::<fps_overlay::FpsOverlay>()
+            .init_resource::<EditorFullscreenState>()
+            .init_resource::<PresentationMode>()
+            .init_resource::<AudienceBlank>()
+            .init_resource::<ViewportInset>()
+            .init_resource::<ViewportFrame>()
+            .init_resource::<PreviewInteractive>()
+            .init_resource::<overlays::EditorOverlays>()
+            .add_systems(
+                Update,
+                (
+                    sync_editor_input_ignore_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .before(gaanim_timeline::timeline_playback_system),
+                    preview_mode_keys_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .after(sync_editor_input_ignore_system),
+                    preview_interactive_input_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .after(preview_mode_keys_system),
+                    editor_picking_system,
+                    overlays::overlays_toggle_keys_system,
+                    global_playback_keys_system,
+                    editor_fullscreen_keys_system,
+                    presenter::presentation_input_system
+                        .after(sync_editor_input_ignore_system)
+                        .before(gaanim_timeline::timeline_playback_system),
+                    presenter::sync_presentation_timer_system,
+                    sync_fullscreen_letterbox_color_system
+                        .after(editor_fullscreen_keys_system)
+                        .after(presentation_escape_system),
+                    presentation_escape_system,
+                    fps_overlay::fps_overlay_system,
+                ),
             )
-                .chain()
-                .in_set(gaanim_scene::hierarchy::SceneSet::Camera)
-                .after(gaanim_timeline::camera_rig_system)
-                .before(gaanim_scene::systems::resolve_camera_system),
-        )
-        .add_systems(EguiPrimaryContextPass, editor_ui_system)
-        .add_systems(
-            EguiPrimaryContextPass,
-            presenter::audience_playback_controls_system.after(editor_ui_system),
-        )
-        .add_systems(
-            EguiPrimaryContextPass,
-            presentation_blank_overlay_system.after(presenter::audience_playback_controls_system),
-        )
-        .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
-        .add_systems(
-            EguiPrimaryContextPass,
-            (
-                overlays::overlays_settings_ui_system,
-                overlays::scene_overlays_system,
+            .add_systems(Startup, presenter::spawn_presenter_window_system)
+            .add_systems(
+                Update,
+                presenter::cleanup_presenter_before_window_close_system
+                    .before(bevy::window::close_when_requested),
             )
-                .after(editor_ui_system),
-        )
-        .add_systems(
-            presenter::PresenterEguiPass,
-            presenter::presenter_view_system,
-        );
+            .add_systems(Update, presenter::sync_presenter_camera_system)
+            .add_systems(
+                Update,
+                (
+                    detect_3d_content_system,
+                    frame_free_camera_system,
+                    viewport_adjust_system,
+                )
+                    .chain()
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Camera)
+                    .after(gaanim_timeline::camera_rig_system)
+                    .before(gaanim_scene::systems::resolve_camera_system),
+            )
+            .add_systems(EguiPrimaryContextPass, editor_ui_system)
+            .add_systems(
+                EguiPrimaryContextPass,
+                presenter::audience_playback_controls_system.after(editor_ui_system),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
+                presentation_blank_overlay_system
+                    .after(presenter::audience_playback_controls_system),
+            )
+            .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
+            .add_systems(
+                EguiPrimaryContextPass,
+                (
+                    overlays::overlays_settings_ui_system,
+                    overlays::scene_overlays_system,
+                )
+                    .after(editor_ui_system),
+            )
+            .add_systems(
+                presenter::PresenterEguiPass,
+                presenter::presenter_view_system,
+            );
     }
 }
 

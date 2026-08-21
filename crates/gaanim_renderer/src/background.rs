@@ -223,8 +223,8 @@ impl ShaderBackground {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gaanim-background-shader-pipeline-layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("gaanim-background-shader-pipeline"),
@@ -316,9 +316,9 @@ struct ShaderGpu {
 
 impl ShaderGpu {
     fn new() -> Result<Self, ShaderBackgroundError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -364,7 +364,7 @@ fn rasterize_shader(
     let device = &gpu.device;
     let queue = &gpu.queue;
 
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let compiled = shader.compiled_shader(device);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("gaanim-background-shader-output"),
@@ -443,7 +443,7 @@ fn rasterize_shader(
         submission_index: Some(submission),
         timeout: None,
     });
-    if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+    if let Some(error) = pollster::block_on(error_scope.pop()) {
         return Err(ShaderBackgroundError::GpuValidation(error.to_string()));
     }
 

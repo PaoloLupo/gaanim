@@ -20,13 +20,13 @@ peniko = { workspace = true }
 thiserror = { workspace = true }
 
 # Graphics & GPU dependencies
-vello = { version = "0.7.0" }
-naga = { version = "27.0.3", features = ["wgsl-in"] }
+vello = { version = "0.9.0" }
+naga = { version = "29.0.0", features = ["wgsl-in"] }
 pollster = "0.4"
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }
-bevy_vello = "0.13.1"
+bevy_vello = "0.14.0"
 
 [features]
 default = []

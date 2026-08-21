@@ -17,7 +17,7 @@ pub use systems::{opacity_propagation_system, sync_new_opacities, transform_prop
 /// Asset configuration used by official Gaanim hosts.
 ///
 /// Gaanim resolves user-selected local assets to canonical absolute paths and
-/// requests them through `AssetServer::load_override`. `Deny` permits those
+/// requests them through an override-enabled `AssetServer` load builder. `Deny` permits those
 /// explicit override requests while continuing to reject ordinary loads from
 /// outside registered asset roots.
 pub fn gaanim_asset_plugin() -> bevy::asset::AssetPlugin {

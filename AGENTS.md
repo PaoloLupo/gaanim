@@ -14,7 +14,7 @@ GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using B
   - `gaanim_animation` — tween entities, signals, writing system.
   - `gaanim_timeline` — BTree-indexed clips, snapshot seek.
   - `gaanim_media` — FFmpeg-backed video frames and timeline-synchronized preview audio.
-  - `gaanim_renderer` — Vello 0.7 backend, `bevy_vello` 0.13.1, fragment retain caching.
+  - `gaanim_renderer` — Vello 0.9 backend, `bevy_vello` 0.14.0, fragment retain caching.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
@@ -59,8 +59,8 @@ builds and launches an example through the application host.
 
 ## Build / toolchain quirks
 
-- **Bevy 0.18** is the current ECS target; abstractions are designed with 0.19 migration in mind. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
-- **Vello 0.7**, **bevy_vello 0.13.1**, **PyO3 0.28**.
+- **Bevy 0.19** is the current ECS target. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
+- **Vello 0.9**, **bevy_vello 0.14.0**, **bevy_egui 0.42.0**, **PyO3 0.28**.
 - Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.

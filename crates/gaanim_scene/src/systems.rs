@@ -8,10 +8,10 @@ use bevy::color::Alpha;
 use bevy::prelude::{
     Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
     DirectionalLight, Entity, GlobalAmbientLight, Handle, Local, MeshMaterial3d, Name, Or,
-    ParamSet, PointLight, Query, Res, ResMut, SceneRoot, SceneSpawner, SpotLight, StandardMaterial,
-    Transform, Visibility, With, Without,
+    ParamSet, PointLight, Query, Res, ResMut, SpotLight, StandardMaterial, Transform, Visibility,
+    With, Without,
 };
-use bevy::scene::SceneInstance;
+use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 
 /// Resolve the timeline-authored camera and an optional presentation override.
@@ -45,13 +45,13 @@ pub fn has_transform_changes(
     !query.is_empty()
 }
 
-/// System: Propagate spatial transforms hierarchically using Bevy 0.18's `ChildOf` relation.
+/// System: Propagate spatial transforms hierarchically using Bevy 0.19's `ChildOf` relation.
 ///
 /// This system computes the `GlobalSpatialTransform` for all entities:
 /// - Root Mobjects (Without<ChildOf>): Global = Local
 /// - Child Mobjects (With<ChildOf>): Global = ParentGlobal * Local
 ///
-/// Under Bevy 0.18, standard `Parent`/`Children` components are replaced with the highly
+/// Under Bevy 0.19, standard `Parent`/`Children` components are replaced with the highly
 /// efficient relationship-based `ChildOf` system, which we target here directly.
 ///
 /// Descendants are updated recursively in parent-before-child order. This prevents
@@ -100,7 +100,7 @@ pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Op
     !query.is_empty()
 }
 
-/// System: Propagate opacity cascade down the hierarchy using Bevy 0.18's `ChildOf` relation.
+/// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
 pub fn opacity_propagation_system(
     roots: Query<(Entity, Option<&ChildOf>), With<Opacity>>,
     children_query: Query<&Children>,
@@ -396,7 +396,10 @@ pub fn request_gltf_assets_system(
     >,
 ) {
     for (entity, model) in &query {
-        let handle: Handle<bevy::gltf::Gltf> = asset_server.load_override(model.path.clone());
+        let handle: Handle<bevy::gltf::Gltf> = asset_server
+            .load_builder()
+            .override_unapproved()
+            .load(model.path.clone());
         commands
             .entity(entity)
             .insert(crate::components::GltfAssetHandle(handle));
@@ -430,7 +433,7 @@ pub fn ensure_default_3d_light_system(
             DirectionalLight {
                 color: bevy::color::Color::srgb(1.0, 0.93, 0.82),
                 illuminance: 11_000.0 * lighting.intensity.max(0.0),
-                shadows_enabled: lighting.shadows,
+                shadow_maps_enabled: lighting.shadows,
                 ..Default::default()
             },
             Transform::from_xyz(4.0, 8.0, 4.0)
@@ -441,7 +444,7 @@ pub fn ensure_default_3d_light_system(
             DirectionalLight {
                 color: bevy::color::Color::srgb(0.58, 0.72, 1.0),
                 illuminance: 4_000.0 * lighting.intensity.max(0.0),
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..Default::default()
             },
             Transform::from_xyz(-5.0, 3.0, -4.0)
@@ -473,7 +476,7 @@ pub fn attach_gltf_scenes_system(
             &crate::components::GltfModelRoot,
             &crate::components::GltfAssetHandle,
         ),
-        Without<SceneRoot>,
+        Without<WorldAssetRoot>,
     >,
 ) {
     for (entity, model, source) in &query {
@@ -481,7 +484,9 @@ pub fn attach_gltf_scenes_system(
             continue;
         };
         if let Some(scene) = gltf.scenes.get(model.scene_index) {
-            commands.entity(entity).insert(SceneRoot(scene.clone()));
+            commands
+                .entity(entity)
+                .insert(WorldAssetRoot(scene.clone()));
         }
     }
 }
@@ -491,7 +496,7 @@ pub fn attach_gltf_scenes_system(
 #[allow(clippy::too_many_arguments)]
 pub fn finalize_gltf_instances_system(
     mut commands: Commands,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -500,7 +505,7 @@ pub fn finalize_gltf_instances_system(
             Entity,
             &crate::components::GltfModelRoot,
             &crate::components::GltfAssetHandle,
-            &SceneInstance,
+            &WorldInstance,
         ),
         Without<crate::components::GltfModelReady>,
     >,
@@ -667,12 +672,12 @@ pub fn sync_gltf_material_opacity_system(
     >,
 ) {
     for (opacity, baseline, handle) in &query {
-        if let Some(material) = materials.get_mut(&handle.0) {
+        if let Some(mut material) = materials.get_mut(&handle.0) {
             material
                 .base_color
                 .set_alpha((baseline.alpha * opacity.0).clamp(0.0, 1.0));
             if opacity.0 < 0.999 {
-                material.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+                material.alpha_mode = bevy::material::AlphaMode::Blend;
             } else {
                 material.alpha_mode = baseline.alpha_mode;
             }
@@ -879,9 +884,9 @@ pub fn build_3d_meshes_system(
         };
         let alpha = source_color.alpha();
         let alpha_mode = if has_transparent_vertex_colors || alpha < 0.999 {
-            bevy::render::alpha::AlphaMode::Blend
+            bevy::material::AlphaMode::Blend
         } else {
-            bevy::render::alpha::AlphaMode::Opaque
+            bevy::material::AlphaMode::Opaque
         };
         let mat = materials.add(bevy::pbr::StandardMaterial {
             base_color: source_color,
@@ -945,18 +950,18 @@ pub fn build_3d_meshes_system(
             (
                 bevy::color::Color::WHITE,
                 if has_transparent_vertex_colors {
-                    bevy::render::alpha::AlphaMode::Blend
+                    bevy::material::AlphaMode::Blend
                 } else {
-                    bevy::render::alpha::AlphaMode::Opaque
+                    bevy::material::AlphaMode::Opaque
                 },
             )
         } else {
             let rgba = data.color.to_rgba8();
             let color = bevy::color::Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
             let mode = if color.alpha() < 0.999 {
-                bevy::render::alpha::AlphaMode::Blend
+                bevy::material::AlphaMode::Blend
             } else {
-                bevy::render::alpha::AlphaMode::Opaque
+                bevy::material::AlphaMode::Opaque
             };
             (color, mode)
         };
@@ -997,7 +1002,7 @@ pub fn sync_material_3d_system(
     >,
 ) {
     for (source, opacity, baseline, handle) in &query {
-        if let Some(material) = materials.get_mut(&handle.0) {
+        if let Some(mut material) = materials.get_mut(&handle.0) {
             let mut color = source
                 .map(|source| bevy_color(source.color))
                 .unwrap_or(material.base_color);
@@ -1009,7 +1014,7 @@ pub fn sync_material_3d_system(
                 material.metallic = source.metallic;
             }
             material.alpha_mode = if color.alpha() < 0.999 {
-                bevy::render::alpha::AlphaMode::Blend
+                bevy::material::AlphaMode::Blend
             } else {
                 baseline.alpha_mode
             };
@@ -1070,7 +1075,7 @@ pub fn update_3d_line_meshes_system(
         // world yet, which makes exact-seek snapshots alternate between old
         // and new geometry. Mutating the existing asset emits the normal
         // asset-change event without that deferred handle swap.
-        if let Some(existing) = meshes.get_mut(&mesh_handle.0) {
+        if let Some(mut existing) = meshes.get_mut(&mesh_handle.0) {
             *existing = mesh;
         } else {
             commands
@@ -1079,11 +1084,11 @@ pub fn update_3d_line_meshes_system(
         }
 
         // Update material alpha mode to match vertex-color presence (transparency)
-        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+        if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
             mat.alpha_mode = if has_vertex_colors {
-                bevy::render::alpha::AlphaMode::Blend
+                bevy::material::AlphaMode::Blend
             } else {
-                bevy::render::alpha::AlphaMode::Opaque
+                bevy::material::AlphaMode::Opaque
             };
             if has_vertex_colors {
                 mat.base_color = bevy::color::Color::WHITE;
@@ -1223,7 +1228,7 @@ mod tests {
             .unwrap();
         assert!(material.unlit);
         assert!((material.base_color.alpha() - 0.25).abs() < f32::EPSILON);
-        assert_eq!(material.alpha_mode, bevy::render::alpha::AlphaMode::Blend);
+        assert_eq!(material.alpha_mode, bevy::material::AlphaMode::Blend);
 
         world.entity_mut(entity).insert(GlobalOpacity(1.0));
         sync.run(&mut world);
@@ -1234,7 +1239,7 @@ mod tests {
         assert!((material.base_color.alpha() - 1.0).abs() < f32::EPSILON);
         assert_eq!(
             material.alpha_mode,
-            bevy::render::alpha::AlphaMode::Opaque,
+            bevy::material::AlphaMode::Opaque,
             "opaque vertex colors restore their authored opaque mode",
         );
     }
@@ -1382,7 +1387,7 @@ mod tests {
         let mut world = World::new();
         let mut materials = Assets::<StandardMaterial>::default();
         let handle = materials.add(StandardMaterial {
-            alpha_mode: bevy::render::alpha::AlphaMode::Opaque,
+            alpha_mode: bevy::material::AlphaMode::Opaque,
             ..Default::default()
         });
         world.insert_resource(materials);
@@ -1391,7 +1396,7 @@ mod tests {
                 GlobalOpacity(0.5),
                 crate::components::GltfMaterialBaseline {
                     alpha: 1.0,
-                    alpha_mode: bevy::render::alpha::AlphaMode::Opaque,
+                    alpha_mode: bevy::material::AlphaMode::Opaque,
                 },
                 MeshMaterial3d(handle.clone()),
             ))
@@ -1406,14 +1411,14 @@ mod tests {
                 .get(&handle)
                 .unwrap()
                 .alpha_mode,
-            bevy::render::alpha::AlphaMode::Blend
+            bevy::material::AlphaMode::Blend
         );
 
         world.entity_mut(entity).insert(GlobalOpacity(1.0));
         schedule.run(&mut world);
         let materials = world.resource::<Assets<StandardMaterial>>();
         let material = materials.get(&handle).unwrap();
-        assert_eq!(material.alpha_mode, bevy::render::alpha::AlphaMode::Opaque);
+        assert_eq!(material.alpha_mode, bevy::material::AlphaMode::Opaque);
         assert!((material.base_color.alpha() - 1.0).abs() < f32::EPSILON);
     }
 }

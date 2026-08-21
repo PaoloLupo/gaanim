@@ -1589,7 +1589,7 @@ impl Canvas {
         builder.commands.spawn((
             bevy::prelude::DirectionalLight {
                 illuminance: 10000.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..Default::default()
             },
             bevy::prelude::Transform::from_xyz(4.0, 8.0, 4.0)

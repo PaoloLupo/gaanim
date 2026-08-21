@@ -1661,7 +1661,7 @@ pub fn gaanim_render_system(
             opacity_group,
             render_order: *render_order,
             scene: Arc::clone(fragment),
-            clip_mask: clip_ref.as_ref().map(|c| (*c).clone()),
+            clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
         });
 
         // Accumulate AABB from WorldBounds if available, otherwise approximate from transform

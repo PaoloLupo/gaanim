@@ -20,9 +20,9 @@ pub struct GpuContext {
 
 impl GpuContext {
     pub fn new(width: u32, height: u32) -> Result<Self, String> {
-        let instance = Instance::new(&InstanceDescriptor {
+        let instance = Instance::new(InstanceDescriptor {
             backends: Backends::all(),
-            ..Default::default()
+            ..InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
