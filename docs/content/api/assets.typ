@@ -27,6 +27,11 @@ robot = scene.gltf("robot.glb")
 
 Las rutas absolutas también funcionan y tienen prioridad sobre `assets_dir`.
 
+Los SVG importados pueden usarse como máscaras y operandos de booleanas porque
+Gaanim conserva sus paths vectoriales. Las etiquetas SVG `<mask>` basadas en
+alfa o luminancia no se convierten a composición ráster; usa una silueta
+vectorial explícita para ese caso.
+
 == Manifiesto del proyecto
 
 Crea un proyecto completo desde la CLI:

@@ -13,13 +13,14 @@ pub use segment::{
     SegmentStop,
 };
 pub use types::{
-    Anim, Axes3DConfig, AxesConfig, CanvasUnits, CurveControl, CurveElement, ImageCrop, ImageFit,
-    ImageOptions, ImageOptionsError, LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec,
-    LayoutTreeSnapshot, LayoutWithin, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions,
+    Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CanvasUnits, CurveControl,
+    CurveElement, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError,
+    LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, Margin,
+    ObjectSpec, OptDuration, SpawnKind, VideoOptions,
 };
 mod drawable;
 pub use drawable::{
-    DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
+    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 mod editorial;
@@ -36,7 +37,7 @@ pub use visualization::{
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
-    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError,
+    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, BooleanError,
     CameraBindingError, CameraConstraintHandle, Canvas, DEFAULT_REACTIVE_TEXT_SIZE,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError,
     SceneObjectError, SupportHandle, ThemeError, VideoLoadError,

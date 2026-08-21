@@ -712,6 +712,54 @@ def validate_matrix_stub_typing() -> list[str]:
     return failures
 
 
+def validate_vector_geometry_contract(module) -> list[str]:
+    """Exercise the public varargs, clipping, and fill-level contracts."""
+    failures: list[str] = []
+    scene = module.Scene(640, 360)
+    left = scene.circle(60).at(-25, 0)
+    right = scene.circle(60).at(25, 0)
+
+    for name, result in (
+        ("union", scene.union(left, right)),
+        ("intersection", scene.intersection(left, right)),
+        ("difference", scene.difference(left, right)),
+        ("xor", scene.xor(left, right)),
+    ):
+        if not isinstance(result, module.Drawable):
+            failures.append(f"Scene.{name} did not return Drawable")
+
+    live = scene.union(left, right, live=True)
+    try:
+        live.at(0, 0)
+    except ValueError:
+        pass
+    else:
+        failures.append("live boolean accepted an independent position")
+
+    clipped = scene.rect(100, 80).clip(left, invert=True)
+    if not isinstance(clipped, module.Drawable):
+        failures.append("Drawable.clip(invert=True) did not return Drawable")
+
+    level = scene.fill_level(left.opacity(0), module.BLUE, 0.25, keep_outline=True)
+    if not isinstance(level.set_fill_level(0.5), module.Drawable):
+        failures.append("Drawable.set_fill_level did not return Drawable")
+    if not isinstance(level.animate().fill_level(0.75), module.Anim):
+        failures.append("Anim.fill_level did not return Anim")
+
+    for call in (
+        lambda: scene.union(left),
+        lambda: scene.fill_level(left, module.BLUE, -0.1),
+        lambda: level.animate().fill_level(1.1),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("vector geometry API accepted invalid input")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -747,6 +795,7 @@ def main() -> int:
     missing.extend(validate_camera_rig_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_stub_typing())
+    missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

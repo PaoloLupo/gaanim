@@ -883,6 +883,9 @@ fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
 
 fn spawn_family(kind: &SpawnKind) -> &'static str {
     match kind {
+        SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
+        SpawnKind::FillLevel { .. } => "fill_level",
+        SpawnKind::Boolean { .. } => "boolean",
         SpawnKind::Circle(_)
         | SpawnKind::Rect(_, _)
         | SpawnKind::RoundedRect(_, _, _)
@@ -926,6 +929,9 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
 
 fn spawn_name(kind: &SpawnKind) -> &'static str {
     match kind {
+        SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
+        SpawnKind::FillLevel { .. } => "fill_level",
+        SpawnKind::Boolean { .. } => "boolean",
         SpawnKind::Circle(_) => "circle",
         SpawnKind::Rect(_, _) => "rect",
         SpawnKind::RoundedRect(_, _, _) => "rounded_rect",

@@ -21,8 +21,9 @@ use crate::canvas::ops::{
     SharedCanvasState,
 };
 use crate::canvas::types::{
-    Anim, CanvasUnits, ImageOptions, ImageOptionsError, LayoutMemberSpec, LayoutSpec,
-    LayoutTreeSnapshot, Margin, ReactiveReadoutLayoutSpec, SpawnKind, VideoOptions,
+    Anim, BooleanOperation, BooleanRule, CanvasUnits, FillLevelDirection, ImageOptions,
+    ImageOptionsError, LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, Margin,
+    ReactiveReadoutLayoutSpec, SpawnKind, VideoOptions,
 };
 use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
@@ -35,6 +36,20 @@ pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 
 /// Default nominal font size for labels, values, and units in reactive annotations.
 pub const DEFAULT_REACTIVE_TEXT_SIZE: f64 = 48.0;
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum BooleanError {
+    #[error("boolean operations require at least two vector drawables")]
+    TooFewOperands,
+    #[error("boolean operands must belong to this Scene")]
+    ForeignScene,
+    #[error("boolean tolerance must be finite and positive")]
+    InvalidTolerance,
+    #[error("fill level must be finite and between zero and one")]
+    InvalidFillLevel,
+    #[error("boolean operands must be closed 2D vector drawables")]
+    NonVectorOperand,
+}
 
 /// Public pieces of a reactive technical dimension.
 #[derive(Debug, Clone)]
@@ -963,6 +978,168 @@ impl Canvas {
     }
     pub fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Line(x1, y1, x2, y2))
+    }
+
+    /// Create a vector boolean result while retaining the source drawables.
+    pub fn boolean(
+        &mut self,
+        operands: &[&DrawableHandle],
+        op: BooleanOperation,
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    ) -> Result<DrawableHandle, BooleanError> {
+        if operands.len() < 2 {
+            return Err(BooleanError::TooFewOperands);
+        }
+        if !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(BooleanError::InvalidTolerance);
+        }
+        if operands
+            .iter()
+            .any(|operand| !Arc::ptr_eq(&operand.state, &self.state))
+        {
+            return Err(BooleanError::ForeignScene);
+        }
+        if operands.iter().any(|operand| {
+            let spec = operand.spec.lock().expect("object spec poisoned");
+            matches!(
+                spec.kind,
+                SpawnKind::Line(..)
+                    | SpawnKind::Arrow(..)
+                    | SpawnKind::DashedLine { .. }
+                    | SpawnKind::DoubleArrow { .. }
+                    | SpawnKind::Arc { .. }
+                    | SpawnKind::Polyline(_)
+                    | SpawnKind::Bezier { .. }
+                    | SpawnKind::Curve(_)
+                    | SpawnKind::Image { .. }
+                    | SpawnKind::Video { .. }
+                    | SpawnKind::Primitive3D(_)
+                    | SpawnKind::Polyline3D { .. }
+                    | SpawnKind::LineSegments3D { .. }
+                    | SpawnKind::GltfNode { .. }
+                    | SpawnKind::GltfModel { .. }
+            )
+        }) {
+            return Err(BooleanError::NonVectorOperand);
+        }
+        let result = self.spawn(SpawnKind::Boolean {
+            sources: operands.iter().map(|operand| operand.id).collect(),
+            op,
+            live,
+            tolerance,
+            rule,
+        });
+        // A boolean is a new drawable, but uses the first operand's visual
+        // treatment so it composes naturally with existing artwork.
+        let source = operands[0]
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .clone();
+        let mut target = result.spec.lock().expect("object spec poisoned");
+        target.fill = source.fill;
+        target.fill_overridden = source.fill_overridden;
+        target.stroke = source.stroke;
+        target.stroke_style = source.stroke_style;
+        target.stroke_overridden = source.stroke_overridden;
+        target.opacity = source.opacity;
+        target.opacity_overridden = source.opacity_overridden;
+        target.glow = source.glow;
+        target.blur = source.blur;
+        target.shadow = source.shadow;
+        drop(target);
+        Ok(result)
+    }
+
+    pub fn union(
+        &mut self,
+        operands: &[&DrawableHandle],
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    ) -> Result<DrawableHandle, BooleanError> {
+        self.boolean(operands, BooleanOperation::Union, live, tolerance, rule)
+    }
+    pub fn intersection(
+        &mut self,
+        operands: &[&DrawableHandle],
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    ) -> Result<DrawableHandle, BooleanError> {
+        self.boolean(
+            operands,
+            BooleanOperation::Intersection,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+    pub fn difference(
+        &mut self,
+        operands: &[&DrawableHandle],
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    ) -> Result<DrawableHandle, BooleanError> {
+        self.boolean(
+            operands,
+            BooleanOperation::Difference,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+    pub fn xor(
+        &mut self,
+        operands: &[&DrawableHandle],
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    ) -> Result<DrawableHandle, BooleanError> {
+        self.boolean(operands, BooleanOperation::Xor, live, tolerance, rule)
+    }
+
+    /// Fill a vector mask from one edge. The mask remains an ordinary drawable,
+    /// which acts as the optional outline when it has a stroke.
+    pub fn fill_level(
+        &mut self,
+        mask: &DrawableHandle,
+        paint: Brush,
+        level: f64,
+        direction: FillLevelDirection,
+        keep_outline: bool,
+    ) -> Result<DrawableHandle, BooleanError> {
+        if !Arc::ptr_eq(&mask.state, &self.state) {
+            return Err(BooleanError::ForeignScene);
+        }
+        if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+            return Err(BooleanError::InvalidFillLevel);
+        }
+        let result = self.spawn(SpawnKind::FillLevel {
+            mask: mask.id,
+            level,
+            direction,
+        });
+        let result = result.fill_brush(paint);
+        result
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .fill_level_cursor = Some(level);
+        if keep_outline {
+            let outline = self.spawn(SpawnKind::FillLevelOutline { mask: mask.id });
+            let source = mask.spec.lock().expect("object spec poisoned").clone();
+            let mut outline_spec = outline.spec.lock().expect("object spec poisoned");
+            outline_spec.fill = None;
+            outline_spec.fill_overridden = true;
+            outline_spec.stroke = source.stroke;
+            outline_spec.stroke_style = source.stroke_style;
+            outline_spec.stroke_overridden = source.stroke_overridden;
+        }
+        Ok(result)
     }
 
     /// Spawn a visible line between static or reactive endpoints.
@@ -6413,5 +6590,101 @@ mod tests {
             foreign.claim_layout(&owner),
             Err(crate::canvas::LayoutOwnershipError::ForeignScene)
         );
+    }
+
+    #[test]
+    fn headless_derived_geometry_resolves_fill_level_and_outline() {
+        let mut canvas = Canvas::new(320, 180);
+        canvas.text("Vector fill level");
+        let mask = canvas
+            .circle(40.0)
+            .no_fill()
+            .stroke(Color::WHITE, 3.0)
+            .at(0.0, -10.0)
+            .opacity(0.0);
+        let fill = canvas
+            .fill_level(
+                &mask,
+                Brush::Solid(Color::from_rgb8(56, 189, 248)),
+                0.0,
+                FillLevelDirection::Up,
+                true,
+            )
+            .unwrap();
+        canvas.play(vec![fill.animate().fill_level(0.75).duration(1.2)]);
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.2);
+        app.update();
+
+        let fill_paths = app
+            .world_mut()
+            .query_filtered::<(
+                &gaanim_scene::Path2D,
+                &gaanim_renderer::effects::FillLevelBinding,
+                Option<&gaanim_scene::FillBrush>,
+                Option<&gaanim_scene::GlobalOpacity>,
+                Option<&gaanim_scene::WorldBounds>,
+                Option<&gaanim_scene::Visible>,
+            ), ()>()
+            .iter(app.world())
+            .map(|(path, binding, fill, opacity, bounds, visible)| {
+                (
+                    path.0.is_empty(),
+                    binding.sources.len(),
+                    fill.is_some_and(|fill| fill.0.is_some()),
+                    opacity.map(|opacity| opacity.0),
+                    bounds.map(|bounds| bounds.0.width()),
+                    visible.is_some(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fill_paths.len(), 1);
+        assert_eq!(fill_paths[0].0, false);
+        assert_eq!(fill_paths[0].1, 1);
+        assert_eq!(fill_paths[0].2, true);
+        assert_eq!(fill_paths[0].3, Some(1.0));
+        assert_eq!(fill_paths[0].5, true);
+        assert!(fill_paths[0].4.is_none());
+
+        let outline_paths = app
+            .world_mut()
+            .query_filtered::<(
+                &gaanim_scene::Path2D,
+                &gaanim_renderer::effects::VectorOutlineBinding,
+                Option<&gaanim_scene::StrokeBrush>,
+                Option<&gaanim_scene::GlobalOpacity>,
+                Option<&gaanim_scene::WorldBounds>,
+                Option<&gaanim_scene::Visible>,
+            ), ()>()
+            .iter(app.world())
+            .map(|(path, binding, stroke, opacity, bounds, visible)| {
+                (
+                    path.0.is_empty(),
+                    binding.sources.len(),
+                    stroke.is_some_and(|stroke| stroke.brush.is_some()),
+                    opacity.map(|opacity| opacity.0),
+                    bounds.map(|bounds| bounds.0.width()),
+                    visible.is_some(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outline_paths.len(), 1);
+        assert_eq!(outline_paths[0].0, false);
+        assert_eq!(outline_paths[0].1, 1);
+        assert_eq!(outline_paths[0].2, true);
+        assert_eq!(outline_paths[0].3, Some(1.0));
+        assert_eq!(outline_paths[0].5, true);
+        assert!(outline_paths[0].4.is_none());
     }
 }

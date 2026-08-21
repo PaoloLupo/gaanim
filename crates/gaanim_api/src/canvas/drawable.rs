@@ -80,6 +80,22 @@ pub enum LayoutOwnershipError {
     PositionalOperation,
 }
 
+/// Options for a vector clipping relationship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipOptions {
+    pub rule: gaanim_core::peniko::Fill,
+    pub invert: bool,
+}
+
+impl Default for ClipOptions {
+    fn default() -> Self {
+        Self {
+            rule: gaanim_core::peniko::Fill::NonZero,
+            invert: false,
+        }
+    }
+}
+
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
 #[derive(Debug, Clone)]
 pub struct FragmentSelection {
@@ -322,6 +338,30 @@ impl DrawableHandle {
 
     pub fn same_canvas(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
+    }
+
+    /// Live derived geometry is defined in source world-space and therefore
+    /// intentionally has no independent layout/transform ownership.
+    pub fn is_live_derived_geometry(&self) -> bool {
+        matches!(
+            self.spec.lock().expect("object spec poisoned").kind,
+            SpawnKind::Boolean { live: true, .. }
+        )
+    }
+
+    /// Set a derived fill level before compilation.
+    pub fn set_fill_level(self, level: f64) -> Result<Self, &'static str> {
+        if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+            return Err("fill level must be finite and between zero and one");
+        }
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        let SpawnKind::FillLevel { level: current, .. } = &mut spec.kind else {
+            return Err("set_fill_level() requires a Scene.fill_level drawable");
+        };
+        *current = level;
+        spec.fill_level_cursor = Some(level);
+        drop(spec);
+        Ok(self)
     }
 
     pub fn claim_layout(&self, owner: &DrawableHandle) -> Result<(), LayoutOwnershipError> {
@@ -730,6 +770,17 @@ impl DrawableHandle {
     /// The mask keeps its own visibility, so call `mask.no_fill().no_stroke()`
     /// when it should act only as clipping geometry.
     pub fn clip(self, mask: &DrawableHandle, rule: gaanim_core::peniko::Fill) -> Self {
+        self.clip_with(
+            mask,
+            ClipOptions {
+                rule,
+                invert: false,
+            },
+        )
+    }
+
+    /// Clip this drawable with explicit fill-rule and inversion options.
+    pub fn clip_with(self, mask: &DrawableHandle, options: ClipOptions) -> Self {
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -738,7 +789,8 @@ impl DrawableHandle {
             .push(Op::SetClip {
                 target: self.id,
                 mask: Some(mask.id),
-                rule,
+                rule: options.rule,
+                invert: options.invert,
             });
         self
     }
@@ -754,6 +806,7 @@ impl DrawableHandle {
                 target: self.id,
                 mask: None,
                 rule: gaanim_core::peniko::Fill::NonZero,
+                invert: false,
             });
         self
     }

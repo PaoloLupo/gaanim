@@ -128,6 +128,22 @@ pub struct Path2D(pub Arc<BezPath>);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PathSource(pub Arc<BezPath>);
 
+/// Normalized amount used by a derived vector fill. Timeline lenses update it
+/// deterministically, including during seek.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FillLevel(pub f64);
+
+/// Direction in which a vector silhouette is filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FillDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 /// The computed local bounding box of a Mobject.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

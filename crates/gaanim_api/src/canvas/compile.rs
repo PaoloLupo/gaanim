@@ -3133,6 +3133,8 @@ impl Canvas {
                                 gaanim_renderer::effects::ClipMask {
                                     path: local_path,
                                     rule: gaanim_core::peniko::Fill::NonZero,
+                                    sources: Vec::new(),
+                                    invert: false,
                                 },
                             );
                         }
@@ -3682,7 +3684,12 @@ impl Canvas {
                     *camera_position = to_pos;
                     builder.wait(*duration);
                 }
-                Op::SetClip { target, mask, rule } => {
+                Op::SetClip {
+                    target,
+                    mask,
+                    rule,
+                    invert,
+                } => {
                     let Some(target) = id_map.get(target).copied() else {
                         continue;
                     };
@@ -3692,6 +3699,10 @@ impl Canvas {
                             continue;
                         };
                         let mask_world = Self::mask_path_in_world(builder, mask);
+                        let sources: Vec<Entity> = Self::visual_leaf_ids(builder, mask)
+                            .into_iter()
+                            .filter_map(|id| builder.states.get(id).map(|state| state.entity))
+                            .collect();
                         for leaf in target_leaves {
                             let Some(state) = builder.states.get(leaf) else {
                                 continue;
@@ -3704,6 +3715,8 @@ impl Canvas {
                                 gaanim_renderer::effects::ClipMask {
                                     path: local_path,
                                     rule: *rule,
+                                    sources: sources.clone(),
+                                    invert: *invert,
                                 },
                             );
                         }
@@ -5199,6 +5212,123 @@ impl Canvas {
         scene_background: gaanim_core::peniko::Color,
     ) -> MobjectRef {
         match &spec.kind {
+            SpawnKind::FillLevelOutline { mask } => {
+                let b = builder.svg_path(&gaanim_objects::prelude::SvgPath {
+                    id: "FillLevelOutline".into(),
+                    path: BezPath::new(),
+                    bounds: Bounds3D::default(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                });
+                let mr = Self::finish_spawn_builder(b, spec);
+                let sources = id_map
+                    .get(mask)
+                    .into_iter()
+                    .flat_map(|id| Self::visual_leaf_ids(builder, *id))
+                    .filter_map(|id| builder.states.get(id).map(|state| state.entity))
+                    .collect();
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_renderer::effects::VectorOutlineBinding { sources });
+                }
+                mr
+            }
+            SpawnKind::FillLevel {
+                mask,
+                level,
+                direction,
+            } => {
+                let b = builder.svg_path(&gaanim_objects::prelude::SvgPath {
+                    id: "FillLevel".into(),
+                    path: BezPath::new(),
+                    bounds: Bounds3D::default(),
+                    fill: spec.fill.clone(),
+                    stroke: StrokeBrush::transparent(),
+                });
+                let mr = Self::finish_spawn_builder(b, spec);
+                let sources = id_map
+                    .get(mask)
+                    .into_iter()
+                    .flat_map(|id| Self::visual_leaf_ids(builder, *id))
+                    .filter_map(|id| builder.states.get(id).map(|state| state.entity))
+                    .collect();
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert((
+                        gaanim_scene::FillLevel(*level),
+                        gaanim_renderer::effects::FillLevelBinding {
+                            sources,
+                            direction: direction.native(),
+                        },
+                    ));
+                }
+                mr
+            }
+            SpawnKind::Boolean {
+                sources,
+                op,
+                live,
+                tolerance,
+                rule,
+            } => {
+                let mut paths = sources.iter().filter_map(|source| {
+                    id_map
+                        .get(source)
+                        .copied()
+                        .map(|id| Self::mask_path_in_world(builder, id))
+                });
+                let mut result = paths.next().unwrap_or_default();
+                for path in paths {
+                    let resolved = gaanim_objects::boolean::apply_with_options(
+                        &result,
+                        &path,
+                        op.native(),
+                        *tolerance,
+                        rule.native(),
+                    );
+                    result = resolved
+                        .paths
+                        .into_iter()
+                        .fold(BezPath::new(), |mut joined, path| {
+                            joined.extend(path);
+                            joined
+                        });
+                }
+                let rect = result.bounding_box();
+                let path = gaanim_objects::prelude::SvgPath {
+                    id: "BooleanResult".into(),
+                    path: result,
+                    bounds: Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+                    fill: spec.fill.clone(),
+                    stroke: StrokeBrush::transparent(),
+                };
+                let mr = Self::finish_spawn_builder(builder.svg_path(&path), spec);
+                if *live {
+                    let source_entities = sources
+                        .iter()
+                        .flat_map(|source| {
+                            id_map
+                                .get(source)
+                                .into_iter()
+                                .flat_map(|id| Self::visual_leaf_ids(builder, *id))
+                        })
+                        .filter_map(|id| builder.states.get(id).map(|state| state.entity))
+                        .collect();
+                    if let Some(state) = builder.states.get(mr.id) {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_renderer::effects::BooleanBinding {
+                                sources: source_entities,
+                                op: op.native(),
+                                tolerance: *tolerance,
+                                rule: rule.native(),
+                            },
+                        );
+                    }
+                }
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Circle(r) => {
                 let b = builder.circle(*r);
                 let mr = Self::finish_spawn_builder(b, spec);

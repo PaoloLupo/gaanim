@@ -12,6 +12,27 @@ use pipeline::MainVelloScene;
 /// Bevy integration plugin for the high-performance Vello vector renderer.
 pub struct GaanimRendererPlugin;
 
+/// Resolves vector geometry derived from other drawables without requiring a
+/// window or the Vello render plugin. Headless vector capture uses this plugin
+/// before compiling the world directly into a Vello scene.
+pub struct GaanimDerivedGeometryPlugin;
+
+impl Plugin for GaanimDerivedGeometryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                pipeline::resolve_dynamic_clip_masks_system,
+                pipeline::resolve_dynamic_boolean_system,
+                pipeline::resolve_fill_level_system,
+                pipeline::resolve_vector_outline_system,
+            )
+                .chain()
+                .in_set(gaanim_scene::SceneSet::DerivedGeometry),
+        );
+    }
+}
+
 impl Plugin for GaanimRendererPlugin {
     fn build(&self, app: &mut App) {
         // Automatically register bevy_vello if not already registered
@@ -33,6 +54,13 @@ impl Plugin for GaanimRendererPlugin {
             )
                 .in_set(gaanim_scene::SceneSet::Bounds),
         );
+
+        // Masks bind to source geometry instead of freezing a path at canvas
+        // compilation time. This runs after hierarchy propagation and before
+        // bounds/extraction, so transform and morph animation are frame exact.
+        if !app.is_plugin_added::<GaanimDerivedGeometryPlugin>() {
+            app.add_plugins(GaanimDerivedGeometryPlugin);
+        }
 
         // Register cache cleanup systems before extraction.
         // Sweep dead fragments by comparing active ObjectIds against cache keys.

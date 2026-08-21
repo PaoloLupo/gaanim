@@ -30,6 +30,7 @@ pub struct PropertyAnimation {
     /// Manim-style color shortcut for currently visible vector paints.
     pub visible_color: Option<Color>,
     pub material: Option<(gaanim_scene::Material3D, gaanim_scene::Material3D)>,
+    pub fill_level: Option<(f64, f64)>,
 }
 
 impl PropertyAnimation {
@@ -43,6 +44,7 @@ impl PropertyAnimation {
             && self.stroke_width.is_none()
             && self.visible_color.is_none()
             && self.material.is_none()
+            && self.fill_level.is_none()
     }
 
     pub(crate) fn is_transform_only(&self) -> bool {
@@ -53,6 +55,7 @@ impl PropertyAnimation {
             && self.stroke_width.is_none()
             && self.visible_color.is_none()
             && self.material.is_none()
+            && self.fill_level.is_none()
     }
 }
 
@@ -216,6 +219,11 @@ pub enum AnimationType {
     Material3DTo {
         from: gaanim_scene::Material3D,
         to: gaanim_scene::Material3D,
+    },
+    /// Interpolate a Scene.fill_level normalized amount.
+    FillLevelTo {
+        from: f64,
+        to: f64,
     },
     /// Manim-style `Write`: progressively draw the target's path(s) along
     /// their arc length, then cross-fade the fill in once the outline is

@@ -1,4 +1,4 @@
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Entity};
 use gaanim_core::peniko::Color;
 
 /// Component: Adds a soft drop shadow effect to a 2D Mobject.
@@ -67,6 +67,34 @@ pub struct ClipMask {
     pub path: gaanim_core::kurbo::BezPath,
     /// The fill rule (NonZero or EvenOdd) used to interpret path interior.
     pub rule: gaanim_core::peniko::Fill,
+    /// Vector leaves that define this mask.  They are resolved each frame in
+    /// `SceneSet::DerivedGeometry`, after hierarchy transforms have settled.
+    pub sources: Vec<Entity>,
+    /// Interpret the mask as its complement. Inversion is represented as an
+    /// even-odd layer with a deliberately large enclosing rectangle.
+    pub invert: bool,
+}
+
+/// A retained reactive vector boolean. Sources are vector leaves in world
+/// space; the result path is rebuilt in `SceneSet::DerivedGeometry`.
+#[derive(Component, Debug, Clone)]
+pub struct BooleanBinding {
+    pub sources: Vec<Entity>,
+    pub op: gaanim_objects::boolean::BooleanOp,
+    pub tolerance: f64,
+    pub rule: gaanim_objects::boolean::BooleanFillRule,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct FillLevelBinding {
+    pub sources: Vec<Entity>,
+    pub direction: gaanim_scene::FillDirection,
+}
+
+/// A stroke-only live copy of a fill-level source silhouette.
+#[derive(Component, Debug, Clone)]
+pub struct VectorOutlineBinding {
+    pub sources: Vec<Entity>,
 }
 
 impl Default for ClipMask {
@@ -74,6 +102,8 @@ impl Default for ClipMask {
         Self {
             path: gaanim_core::kurbo::BezPath::default(),
             rule: gaanim_core::peniko::Fill::NonZero,
+            sources: Vec::new(),
+            invert: false,
         }
     }
 }

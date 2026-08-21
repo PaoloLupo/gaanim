@@ -503,7 +503,8 @@ where
         .add_plugins(gaanim_animation::GaanimAnimationPlugin)
         .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
         .add_plugins(gaanim_media::GaanimMediaPlugin)
-        .add_plugins(gaanim_text::GaanimTextPlugin);
+        .add_plugins(gaanim_text::GaanimTextPlugin)
+        .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
 
     app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
     app.add_systems(Startup, setup_scene_system);
@@ -674,7 +675,8 @@ where
         .add_plugins(gaanim_animation::GaanimAnimationPlugin)
         .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
         .add_plugins(gaanim_media::GaanimMediaPlugin)
-        .add_plugins(gaanim_text::GaanimTextPlugin);
+        .add_plugins(gaanim_text::GaanimTextPlugin)
+        .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
 
     app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
     app.add_systems(Startup, setup_scene_system);

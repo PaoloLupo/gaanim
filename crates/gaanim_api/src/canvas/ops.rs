@@ -305,6 +305,7 @@ pub(crate) enum Op {
         target: ObjectId,
         mask: Option<ObjectId>,
         rule: gaanim_core::peniko::Fill,
+        invert: bool,
     },
     /// Insert an explicit zero-duration interactive stop.
     Stop,

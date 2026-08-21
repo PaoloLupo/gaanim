@@ -209,6 +209,10 @@ pub enum PropertyLensSpec {
         from: f32,
         to: f32,
     },
+    FillLevel {
+        from: f64,
+        to: f64,
+    },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -385,6 +389,10 @@ impl PropertyLensSpec {
                 table: gaanim_animation::MorphTable,
             },
             Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
+                from: *from,
+                to: *to,
+            },
+            Self::FillLevel { from, to } => PropertyLens::FillLevel {
                 from: *from,
                 to: *to,
             },

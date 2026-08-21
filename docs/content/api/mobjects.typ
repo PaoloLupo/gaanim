@@ -14,6 +14,36 @@
 Cada fábrica de `Scene` devuelve un `Drawable`. Encadena estilo, layout y
 animación con la API fluida.
 
+== Booleanas vectoriales
+
+```python
+cut = scene.difference(shape, hole, live=True)
+merged = scene.union(left, right, tolerance=0.25)
+shared = scene.intersection(left, right)
+either = scene.xor(left, right)
+```
+
+Las operaciones trabajan sobre áreas vectoriales cerradas y conservan los
+operandos. El resultado hereda el estilo del primer operando. Con `live=True`
+se reconstruye después de propagación cuando cambian paths o transformaciones;
+las fuentes siguen siendo drawables independientes. `tolerance` debe ser finita
+y positiva; `rule` acepta `"nonzero"` o `"evenodd"`.
+
+== Relleno porcentual de siluetas
+
+`scene.fill_level(mask, paint, level=0.0, direction="up", keep_outline=True)`
+genera un interior vectorial que se intersecta con la silueta en cada frame.
+`level` pertenece a `[0, 1]`; las direcciones disponibles son `up`, `down`,
+`left` y `right`. El SVG o drawable usado como `mask` conserva visibilidad
+independiente. `keep_outline=True` añade una copia reactiva que usa únicamente
+su stroke; oculta el original si su fill no debe cubrir el nivel.
+
+```python
+drop = scene.svg("drop.svg").no_fill().stroke("#dbeafe", 4).opacity(0)
+water = scene.fill_level(drop, "#38bdf8", 0.0)
+scene.play([water.animate().fill_level(0.72).duration(1.4)])
+```
+
 == Clases de tema y trazos completos
 
 #api-entry(

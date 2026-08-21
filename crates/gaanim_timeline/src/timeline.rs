@@ -1894,6 +1894,16 @@ fn apply_lens_spec(
                 em.insert(gaanim_animation::FillDrawProgress(v));
             }
         }
+        PropertyLensSpec::FillLevel { from, to } => {
+            let value = (*from + (*to - *from) * t).clamp(0.0, 1.0);
+            if let Some(mut level) = world.get_mut::<gaanim_scene::FillLevel>(target) {
+                level.0 = value;
+            } else {
+                world
+                    .entity_mut(target)
+                    .insert(gaanim_scene::FillLevel(value));
+            }
+        }
         PropertyLensSpec::CameraPosition { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from.lerp(*to, t);

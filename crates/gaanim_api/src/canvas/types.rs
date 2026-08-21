@@ -15,6 +15,61 @@ use crate::anim::{
 };
 use crate::canvas::ops::{Op, SharedCanvasState};
 
+/// Public operation used by vector boolean drawables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BooleanOperation {
+    Union,
+    Intersection,
+    Difference,
+    Xor,
+}
+
+impl BooleanOperation {
+    pub(crate) fn native(self) -> gaanim_objects::boolean::BooleanOp {
+        match self {
+            Self::Union => gaanim_objects::boolean::BooleanOp::Union,
+            Self::Intersection => gaanim_objects::boolean::BooleanOp::Intersection,
+            Self::Difference => gaanim_objects::boolean::BooleanOp::Difference,
+            Self::Xor => gaanim_objects::boolean::BooleanOp::Exclusion,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BooleanRule {
+    #[default]
+    NonZero,
+    EvenOdd,
+}
+
+impl BooleanRule {
+    pub(crate) fn native(self) -> gaanim_objects::boolean::BooleanFillRule {
+        match self {
+            Self::NonZero => gaanim_objects::boolean::BooleanFillRule::NonZero,
+            Self::EvenOdd => gaanim_objects::boolean::BooleanFillRule::EvenOdd,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FillLevelDirection {
+    #[default]
+    Up,
+    Down,
+    Left,
+    Right,
+}
+impl FillLevelDirection {
+    pub(crate) fn native(self) -> gaanim_scene::FillDirection {
+        match self {
+            Self::Up => gaanim_scene::FillDirection::Up,
+            Self::Down => gaanim_scene::FillDirection::Down,
+            Self::Left => gaanim_scene::FillDirection::Left,
+            Self::Right => gaanim_scene::FillDirection::Right,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasUnits {
     Pixels,
@@ -408,6 +463,22 @@ impl ImageOptions {
 
 #[derive(Debug, Clone)]
 pub enum SpawnKind {
+    FillLevelOutline {
+        mask: ObjectId,
+    },
+    FillLevel {
+        mask: ObjectId,
+        level: f64,
+        direction: FillLevelDirection,
+    },
+    /// A materialized vector boolean. Sources remain visible and independent.
+    Boolean {
+        sources: Vec<ObjectId>,
+        op: BooleanOperation,
+        live: bool,
+        tolerance: f64,
+        rule: BooleanRule,
+    },
     Circle(f64),
     Rect(f64, f64),
     RoundedRect(f64, f64, f64),
@@ -768,6 +839,7 @@ pub struct ObjectSpec {
     pub material_animation_cursor: Option<gaanim_scene::Material3D>,
     pub layout_ops: Vec<LayoutOp>,
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
+    pub fill_level_cursor: Option<f64>,
 }
 
 impl ObjectSpec {
@@ -799,6 +871,7 @@ impl ObjectSpec {
             material_animation_cursor: None,
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
+            fill_level_cursor: None,
         }
     }
 }
@@ -952,14 +1025,19 @@ impl Anim {
     }
 
     fn assert_free_position(&self) {
-        let layout_owned = self
+        let unavailable = self
             .property_spec
             .as_ref()
-            .and_then(|spec| spec.lock().ok().and_then(|spec| spec.layout_owner))
-            .is_some();
+            .and_then(|spec| {
+                spec.lock().ok().map(|spec| {
+                    spec.layout_owner.is_some()
+                        || matches!(spec.kind, SpawnKind::Boolean { live: true, .. })
+                })
+            })
+            .unwrap_or(false);
         assert!(
-            !layout_owned,
-            "layout owns this drawable's translation; animate the LayoutItem offset instead"
+            !unavailable,
+            "layout or live derived geometry owns this drawable's transform"
         );
     }
 
@@ -967,7 +1045,12 @@ impl Anim {
     pub fn property_position_is_free(&self) -> bool {
         self.property_spec
             .as_ref()
-            .and_then(|spec| spec.lock().ok().map(|spec| spec.layout_owner.is_none()))
+            .and_then(|spec| {
+                spec.lock().ok().map(|spec| {
+                    spec.layout_owner.is_none()
+                        && !matches!(spec.kind, SpawnKind::Boolean { live: true, .. })
+                })
+            })
             .unwrap_or(true)
     }
 
@@ -1079,6 +1162,28 @@ impl Anim {
 
     pub fn opacity(self, opacity: f32) -> Self {
         self.update_properties(|properties| properties.opacity = Some(opacity.clamp(0.0, 1.0)))
+    }
+
+    pub fn try_fill_level(self, level: f64) -> Result<Self, &'static str> {
+        if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+            return Err("fill level must be finite and between zero and one");
+        }
+        let spec = self
+            .property_spec
+            .as_ref()
+            .ok_or("fill_level() requires Drawable.animate()")?;
+        let mut spec = spec.lock().expect("object spec poisoned");
+        let from = spec
+            .fill_level_cursor
+            .ok_or("fill_level() requires a Scene.fill_level drawable")?;
+        spec.fill_level_cursor = Some(level);
+        drop(spec);
+        Ok(self.update_properties(|properties| properties.fill_level = Some((from, level))))
+    }
+
+    pub fn fill_level(self, level: f64) -> Self {
+        self.try_fill_level(level)
+            .expect("invalid fill level animation")
     }
 
     pub fn r#move(self, dx: f64, dy: f64) -> Self {

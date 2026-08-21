@@ -21,9 +21,11 @@ pub enum SceneSet {
     Layout,
     /// Phase 6: Propagating child-parent hierarchies (e.g. spatial transforms and opacity cascade).
     Propagation,
-    /// Phase 7: Computing local and world bounding boxes (AABBs) for culling and clipping.
+    /// Phase 7: Rebuild geometry derived from other vector paths (masks and booleans).
+    DerivedGeometry,
+    /// Phase 8: Computing local and world bounding boxes (AABBs) for culling and clipping.
     Bounds,
-    /// Phase 8: Extracting visible Mobjects into the Vello or 3D rendering cache.
+    /// Phase 9: Extracting visible Mobjects into the Vello or 3D rendering cache.
     Extraction,
     /// Phase 9: Performing pointer hover, click, drag hit testing and dispatching event callbacks.
     Interaction,
@@ -49,6 +51,7 @@ impl Plugin for GaanimScenePlugin {
                 SceneSet::Layout,
                 SceneSet::Camera,
                 SceneSet::Propagation,
+                SceneSet::DerivedGeometry,
                 SceneSet::Bounds,
                 SceneSet::Extraction,
                 SceneSet::Interaction,

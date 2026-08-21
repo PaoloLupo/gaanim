@@ -474,6 +474,9 @@ class Anim:
     def opacity(self, value: float) -> Anim:
         """Target drawable opacity, clamped to the 0..1 range."""
         ...
+    def fill_level(self, level: float) -> Anim:
+        """Animate a ``Scene.fill_level`` drawable to a normalized value in ``[0, 1]``."""
+        ...
     def move(self, dx: float, dy: float) -> Anim:
         """Target a relative 2D translation in a compound property animation."""
         ...
@@ -765,8 +768,12 @@ class Drawable:
         self,
         mask: Drawable,
         rule: Literal["nonzero", "evenodd"] = "nonzero",
+        invert: bool = False,
     ) -> Drawable:
-        """Apply clip to this drawable and return the result.
+        """Dynamically clip this drawable to a vector mask and return it.
+
+        The mask keeps following its own geometry and transforms. ``invert``
+        uses the area outside the mask; invalid fill rules raise ``ValueError``.
 
         Example:
             result = drawable.clip(mask)
@@ -778,6 +785,9 @@ class Drawable:
         Example:
             result = drawable.no_clip()
         """
+        ...
+    def set_fill_level(self, level: float) -> Drawable:
+        """Set a ``Scene.fill_level`` drawable immediately; invalid values or other drawables raise ``ValueError``."""
         ...
     def opacity(self, op: float) -> Self:
         """Apply opacity to this drawable and return the result.
@@ -3384,6 +3394,26 @@ class Scene:
         Example:
             result = scene.group([drawable])
         """
+        ...
+    def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the union of at least two vector drawables.
+
+        Sources remain available. With ``live=True`` the result follows source
+        path and transform changes; invalid scenes, operands, rules, or
+        tolerances raise ``ValueError``.
+        """
+        ...
+    def intersection(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the shared vector area of at least two drawables."""
+        ...
+    def difference(self, subject: Drawable, *clips: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Subtract each clip from the subject in deterministic left-to-right order."""
+        ...
+    def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the symmetric difference of at least two vector drawables."""
+        ...
+    def fill_level(self, mask: Drawable, paint: Paint, level: float = 0.0, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
+        """Create a dynamic vector fill clipped to ``mask``. The source mask remains visible as the outline when requested."""
         ...
     def measure_text(
         self,

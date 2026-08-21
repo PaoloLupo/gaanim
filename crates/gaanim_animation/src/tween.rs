@@ -140,6 +140,10 @@ pub enum PropertyLens {
         from: f32,
         to: f32,
     },
+    FillLevel {
+        from: f64,
+        to: f64,
+    },
 
     // === Camera ===
     CameraPosition {
@@ -281,6 +285,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
+            Self::FillLevel { from, to } => write!(f, "FillLevel({from} -> {to})"),
             Self::CameraPosition { from, to } => {
                 write!(f, "CameraPosition({:?} -> {:?})", from, to)
             }
@@ -358,6 +363,7 @@ pub fn evaluate_tweens_system(
     mut sources: Query<&mut PathSource>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
+    mut fill_levels: Query<&mut gaanim_scene::FillLevel>,
     mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
     mut path_reveals: Query<&mut PathReveal>,
@@ -470,6 +476,11 @@ pub fn evaluate_tweens_system(
                 let v = *from + (*to - *from) * t as f32;
                 if let Ok(mut fdp) = fill_progress.get_mut(tween.target) {
                     fdp.0 = v;
+                }
+            }
+            PropertyLens::FillLevel { from, to } => {
+                if let Ok(mut level) = fill_levels.get_mut(tween.target) {
+                    level.0 = (*from + (*to - *from) * t).clamp(0.0, 1.0);
                 }
             }
             PropertyLens::CameraPosition { from: _, to: _ } => {

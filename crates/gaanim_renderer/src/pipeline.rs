@@ -1,13 +1,17 @@
 use crate::background::BackgroundPaint;
-use crate::effects::{ClipMask, DropShadow, GaussianBlur, Glow};
+use crate::effects::{
+    BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
+    VectorOutlineBinding,
+};
 use bevy::prelude::*;
 use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
 use gaanim_core::ObjectId;
+use gaanim_core::kurbo::Shape;
 use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, MobjectId, Path2D, PathSource, RasterImage, RenderLayer, RenderOrder,
-    StrokeBrush, Visible, WorldBounds,
+    FillBrush, FillDirection, FillLevel, GlobalOpacity, LocalBounds, MobjectId, Path2D, PathSource,
+    RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -291,6 +295,247 @@ fn path_reveal_is_empty(tip: Option<&WriteTipGlow>) -> bool {
 
 fn opacity_is_empty(opacity: &GlobalOpacity) -> bool {
     opacity.0 <= f32::EPSILON
+}
+
+/// Resolve source paths for vector clipping after global transforms are known.
+///
+/// `ClipMask` stores source leaf entities rather than a compiler-time snapshot;
+/// this deliberately keeps clipping correct when either the target or its mask
+/// is translated, scaled, rotated, or morphed by the timeline.
+pub fn resolve_dynamic_clip_masks_system(
+    mut masks: Query<(&GlobalSpatialTransform, &LocalBounds, &mut ClipMask)>,
+    sources: Query<(&Path2D, &GlobalSpatialTransform)>,
+) {
+    for (target_transform, target_bounds, mut mask) in &mut masks {
+        if mask.sources.is_empty() {
+            continue;
+        }
+        let mut world = kurbo::BezPath::new();
+        for source in &mask.sources {
+            let Ok((path, transform)) = sources.get(*source) else {
+                continue;
+            };
+            let mut path = (*path.0).clone();
+            path.apply_affine(transform.affine_2d);
+            world.extend(path);
+        }
+        let mut local = world;
+        local.apply_affine(target_transform.affine_2d.inverse());
+        if mask.invert {
+            // The renderer's layer clips to filled geometry. A stable enclosing
+            // rectangle plus even-odd filling is the vector equivalent of an
+            // inverse mask without requiring raster alpha composition.
+            let b = target_bounds.0;
+            let margin = b.width().max(b.height()).max(1.0) * 2.0;
+            let mut inverse = kurbo::Rect::new(
+                b.min.x - margin,
+                b.min.y - margin,
+                b.max.x + margin,
+                b.max.y + margin,
+            )
+            .to_path(0.1);
+            inverse.extend(local);
+            local = inverse;
+            mask.rule = peniko::Fill::EvenOdd;
+        }
+        if mask.path != local {
+            mask.path = local;
+        }
+    }
+}
+
+/// Rebuild live booleans from their source paths after propagation. The output
+/// remains a normal drawable, so renderer caching and bounds work unchanged.
+pub fn resolve_dynamic_boolean_system(
+    mut queries: ParamSet<(
+        Query<(Entity, &BooleanBinding, &GlobalSpatialTransform)>,
+        Query<(&Path2D, &GlobalSpatialTransform)>,
+        Query<(&mut Path2D, &mut PathSource, &mut LocalBounds), With<BooleanBinding>>,
+    )>,
+) {
+    let jobs = queries
+        .p0()
+        .iter()
+        .map(|(entity, binding, transform)| (entity, binding.clone(), *transform))
+        .collect::<Vec<_>>();
+    let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    {
+        let sources = queries.p1();
+        for (entity, binding, target_transform) in jobs {
+            let mut operands = binding.sources.iter().filter_map(|entity| {
+                sources.get(*entity).ok().map(|(path, transform)| {
+                    let mut world = (*path.0).clone();
+                    world.apply_affine(transform.affine_2d);
+                    world
+                })
+            });
+            let mut output = operands.next().unwrap_or_default();
+            for operand in operands {
+                let resolved = gaanim_objects::boolean::apply_with_options(
+                    &output,
+                    &operand,
+                    binding.op,
+                    binding.tolerance,
+                    binding.rule,
+                );
+                output =
+                    resolved
+                        .paths
+                        .into_iter()
+                        .fold(kurbo::BezPath::new(), |mut joined, part| {
+                            joined.extend(part);
+                            joined
+                        });
+            }
+            output.apply_affine(target_transform.affine_2d.inverse());
+            resolved_jobs.push((entity, output));
+        }
+    }
+
+    let mut results = queries.p2();
+    for (entity, output) in resolved_jobs {
+        let Ok((mut path, mut source_path, mut bounds)) = results.get_mut(entity) else {
+            continue;
+        };
+        if *path.0 != output {
+            let rect = output.bounding_box();
+            *bounds = LocalBounds(gaanim_math::Bounds3D::new_2d(
+                rect.x0, rect.y0, rect.x1, rect.y1,
+            ));
+            let output = Arc::new(output);
+            *path = Path2D(output.clone());
+            *source_path = PathSource(output);
+        }
+    }
+}
+
+pub fn resolve_fill_level_system(
+    mut queries: ParamSet<(
+        Query<(
+            Entity,
+            &FillLevelBinding,
+            &FillLevel,
+            &GlobalSpatialTransform,
+        )>,
+        Query<(&Path2D, &GlobalSpatialTransform)>,
+        Query<(&mut Path2D, &mut PathSource, &mut LocalBounds), With<FillLevelBinding>>,
+    )>,
+) {
+    let jobs = queries
+        .p0()
+        .iter()
+        .map(|(entity, binding, level, transform)| (entity, binding.clone(), *level, *transform))
+        .collect::<Vec<_>>();
+    let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    {
+        let sources = queries.p1();
+        for (entity, binding, level, target_transform) in jobs {
+            let mut mask = kurbo::BezPath::new();
+            for source_entity in &binding.sources {
+                if let Ok((source, transform)) = sources.get(*source_entity) {
+                    let mut world = (*source.0).clone();
+                    world.apply_affine(transform.affine_2d);
+                    mask.extend(world);
+                }
+            }
+            let bbox = mask.bounding_box();
+            let level = level.0.clamp(0.0, 1.0);
+            let band = match binding.direction {
+                FillDirection::Up => {
+                    kurbo::Rect::new(bbox.x0, bbox.y0, bbox.x1, bbox.y0 + bbox.height() * level)
+                }
+                FillDirection::Down => {
+                    kurbo::Rect::new(bbox.x0, bbox.y1 - bbox.height() * level, bbox.x1, bbox.y1)
+                }
+                FillDirection::Left => {
+                    kurbo::Rect::new(bbox.x0, bbox.y0, bbox.x0 + bbox.width() * level, bbox.y1)
+                }
+                FillDirection::Right => {
+                    kurbo::Rect::new(bbox.x1 - bbox.width() * level, bbox.y0, bbox.x1, bbox.y1)
+                }
+            }
+            .to_path(0.1);
+            let resolved = gaanim_objects::boolean::apply_with_options(
+                &mask,
+                &band,
+                gaanim_objects::boolean::BooleanOp::Intersection,
+                0.25,
+                gaanim_objects::boolean::BooleanFillRule::NonZero,
+            );
+            let mut output =
+                resolved
+                    .paths
+                    .into_iter()
+                    .fold(kurbo::BezPath::new(), |mut out, part| {
+                        out.extend(part);
+                        out
+                    });
+            output.apply_affine(target_transform.affine_2d.inverse());
+            resolved_jobs.push((entity, output));
+        }
+    }
+
+    let mut results = queries.p2();
+    for (entity, output) in resolved_jobs {
+        let Ok((mut path, mut source_path, mut bounds)) = results.get_mut(entity) else {
+            continue;
+        };
+        if *path.0 != output {
+            let rect = output.bounding_box();
+            *bounds = LocalBounds(gaanim_math::Bounds3D::new_2d(
+                rect.x0, rect.y0, rect.x1, rect.y1,
+            ));
+            let output = Arc::new(output);
+            *path = Path2D(output.clone());
+            *source_path = PathSource(output);
+        }
+    }
+}
+
+pub fn resolve_vector_outline_system(
+    mut queries: ParamSet<(
+        Query<(Entity, &VectorOutlineBinding, &GlobalSpatialTransform)>,
+        Query<(&Path2D, &GlobalSpatialTransform)>,
+        Query<(&mut Path2D, &mut PathSource, &mut LocalBounds), With<VectorOutlineBinding>>,
+    )>,
+) {
+    let jobs = queries
+        .p0()
+        .iter()
+        .map(|(entity, binding, transform)| (entity, binding.clone(), *transform))
+        .collect::<Vec<_>>();
+    let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    {
+        let sources = queries.p1();
+        for (entity, binding, transform) in jobs {
+            let mut output = kurbo::BezPath::new();
+            for source_entity in &binding.sources {
+                if let Ok((source, source_transform)) = sources.get(*source_entity) {
+                    let mut world = (*source.0).clone();
+                    world.apply_affine(source_transform.affine_2d);
+                    output.extend(world);
+                }
+            }
+            output.apply_affine(transform.affine_2d.inverse());
+            resolved_jobs.push((entity, output));
+        }
+    }
+
+    let mut outlines = queries.p2();
+    for (entity, output) in resolved_jobs {
+        let Ok((mut path, mut source_path, mut bounds)) = outlines.get_mut(entity) else {
+            continue;
+        };
+        if *path.0 != output {
+            let rect = output.bounding_box();
+            *bounds = LocalBounds(gaanim_math::Bounds3D::new_2d(
+                rect.x0, rect.y0, rect.x1, rect.y1,
+            ));
+            let output = Arc::new(output);
+            *path = Path2D(output.clone());
+            *source_path = PathSource(output);
+        }
+    }
 }
 const BLUR_KERNEL: [((f64, f64), f32); 13] = [
     ((0.0, 0.0), 0.20),
@@ -1545,6 +1790,86 @@ fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Bru
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
+        Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn live_boolean_system_runs_with_overlapping_path_queries() {
+        let mut app = App::new();
+        let left = app
+            .world_mut()
+            .spawn((
+                Path2D(rect_path(0.0, 0.0, 10.0, 10.0)),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn((
+                Path2D(rect_path(5.0, 0.0, 15.0, 10.0)),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let result = app
+            .world_mut()
+            .spawn((
+                BooleanBinding {
+                    sources: vec![left, right],
+                    op: gaanim_objects::boolean::BooleanOp::Intersection,
+                    tolerance: 0.25,
+                    rule: gaanim_objects::boolean::BooleanFillRule::NonZero,
+                },
+                GlobalSpatialTransform::default(),
+                Path2D::default(),
+                PathSource::default(),
+                LocalBounds::default(),
+            ))
+            .id();
+        app.add_systems(Update, resolve_dynamic_boolean_system);
+
+        app.update();
+
+        let bounds = app.world().get::<Path2D>(result).unwrap().0.bounding_box();
+        assert_eq!(bounds, kurbo::Rect::new(5.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn fill_level_system_tracks_level_and_direction() {
+        let mut app = App::new();
+        let mask = app
+            .world_mut()
+            .spawn((
+                Path2D(rect_path(0.0, 0.0, 100.0, 80.0)),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let fill = app
+            .world_mut()
+            .spawn((
+                FillLevelBinding {
+                    sources: vec![mask],
+                    direction: FillDirection::Up,
+                },
+                FillLevel(0.25),
+                GlobalSpatialTransform::default(),
+                Path2D::default(),
+                PathSource::default(),
+                LocalBounds::default(),
+            ))
+            .id();
+        app.add_systems(Update, resolve_fill_level_system);
+
+        app.update();
+        let quarter = app.world().get::<Path2D>(fill).unwrap().0.bounding_box();
+        assert_eq!(quarter, kurbo::Rect::new(0.0, 0.0, 100.0, 20.0));
+
+        app.world_mut().get_mut::<FillLevel>(fill).unwrap().0 = 1.0;
+        app.update();
+        let full = app.world().get::<Path2D>(fill).unwrap().0.bounding_box();
+        assert_eq!(full, kurbo::Rect::new(0.0, 0.0, 100.0, 80.0));
+    }
 
     #[test]
     fn zero_path_reveal_is_rendered_as_empty_geometry() {

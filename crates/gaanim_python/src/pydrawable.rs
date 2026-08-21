@@ -26,7 +26,9 @@ fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProp
     }
 }
 
-pub(crate) fn parse_sampled_interpolation(value: &str) -> PyResult<gaanim_animation::SampledInterpolation> {
+pub(crate) fn parse_sampled_interpolation(
+    value: &str,
+) -> PyResult<gaanim_animation::SampledInterpolation> {
     match value {
         "linear" => Ok(gaanim_animation::SampledInterpolation::Linear),
         "step" => Ok(gaanim_animation::SampledInterpolation::Step),
@@ -48,6 +50,27 @@ pub struct PyCanvasAnim {
 
 #[pymethods]
 impl PyCanvasAnim {
+    fn require_transformable(&self) -> PyResult<()> {
+        if self.inner.property_position_is_free() {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(
+                "live derived geometry or layout owns this drawable's transform",
+            ))
+        }
+    }
+    fn fill_level(&self, level: f64) -> PyResult<Self> {
+        if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+            return Err(PyValueError::new_err(
+                "fill level must be finite and between zero and one",
+            ));
+        }
+        self.inner
+            .clone()
+            .try_fill_level(level)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
     fn fill(&self, color: PyColor) -> Self {
         Self {
             inner: self.inner.clone().fill(color.0),
@@ -189,6 +212,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().scale(factor),
         })
@@ -200,6 +224,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().scale_to(factor),
         })
@@ -211,6 +236,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().scale_to_3d(x, y, z),
         })
@@ -222,6 +248,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().rotate(radians),
         })
@@ -233,6 +260,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().rotate_to(radians),
         })
@@ -244,6 +272,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         self.inner
             .clone()
             .rotate_by_3d(axis, radians)
@@ -257,6 +286,7 @@ impl PyCanvasAnim {
                 "TextSelection.animate() supports only fill/color and opacity targets",
             ));
         }
+        self.require_transformable()?;
         Ok(Self {
             inner: self.inner.clone().rotate_to_3d(x, y, z),
         })
@@ -394,6 +424,11 @@ pub(crate) fn resolve_at_target(
 
 impl PyDrawable {
     fn require_free_position(&self, operation: &str) -> PyResult<()> {
+        if self.0.is_live_derived_geometry() {
+            return Err(PyValueError::new_err(format!(
+                "live derived geometry owns this drawable's path and position; operation '{operation}' is not available"
+            )));
+        }
         if self.0.layout_owner().is_some() {
             Err(crate::LayoutOwnershipError::new_err(format!(
                 "layout owns this drawable's translation; use scene.item(..., offset=...) or layout.configure_item(...). Operation: {operation}"
@@ -599,8 +634,8 @@ impl PyDrawable {
         Self(self.0.clone().no_effects())
     }
     /// Clip this drawable to another drawable's vector outline.
-    #[pyo3(signature = (mask, rule="nonzero"))]
-    fn clip(&self, mask: &PyDrawable, rule: &str) -> PyResult<Self> {
+    #[pyo3(signature = (mask, rule="nonzero", invert=false))]
+    fn clip(&self, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<Self> {
         let rule = match rule {
             "nonzero" => gaanim_core::peniko::Fill::NonZero,
             "evenodd" | "even_odd" => gaanim_core::peniko::Fill::EvenOdd,
@@ -608,11 +643,21 @@ impl PyDrawable {
                 return Err(PyValueError::new_err("rule must be 'nonzero' or 'evenodd'"));
             }
         };
-        Ok(Self(self.0.clone().clip(&mask.0, rule)))
+        Ok(Self(self.0.clone().clip_with(
+            &mask.0,
+            gaanim_api::canvas::ClipOptions { rule, invert },
+        )))
     }
     /// Remove the clipping mask from this drawable.
     fn no_clip(&self) -> Self {
         Self(self.0.clone().no_clip())
+    }
+    fn set_fill_level(&self, level: f64) -> PyResult<Self> {
+        self.0
+            .clone()
+            .set_fill_level(level)
+            .map(Self)
+            .map_err(PyValueError::new_err)
     }
     fn opacity(&self, op: f32) -> Self {
         Self(self.0.clone().opacity(op))

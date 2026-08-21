@@ -1005,6 +1005,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FillColorTo { .. } => "Fill",
             AnimationType::TextSelectionProperties { .. } => "TextSelectionProperties",
             AnimationType::Material3DTo { .. } => "Material3D",
+            AnimationType::FillLevelTo { .. } => "FillLevel",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
             AnimationType::GrowFromCenter => "Grow",
@@ -2055,6 +2056,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some((from, to)) = properties.material {
                 channels.push(AnimationType::Material3DTo { from, to });
             }
+            if let Some((from, to)) = properties.fill_level {
+                channels.push(AnimationType::FillLevelTo { from, to });
+            }
 
             for anim_type in channels {
                 self.play_internal(AnimationBuilder {
@@ -2460,6 +2464,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 PropertyLensSpec::StrokeWidth { from, to }
             }
             AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
+            AnimationType::FillLevelTo { from, to } => PropertyLensSpec::FillLevel { from, to },
             AnimationType::Properties(_) => {
                 unreachable!("property animations expand before lens resolution")
             }

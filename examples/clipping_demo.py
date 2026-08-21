@@ -34,6 +34,11 @@ stripe_group.clip(panel_mask)
 scene.rounded_rect(390, 235, 42).no_fill().stroke("#A9B1D6", 4).at(287, 5)
 scene.text("Group mask").at(287, -155, anchor=Anchor.CENTER)
 
+# A vector silhouette can be filled by a normalized, animatable level.
+drop = scene.circle(72).no_fill().stroke("#A9B1D6", 4).at(0, -235).opacity(0)
+water = scene.fill_level(drop, "#38BDF8", 0.0)
+scene.play([water.animate().fill_level(0.68).duration(0.8)])
+
 scene.wait(1.0)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

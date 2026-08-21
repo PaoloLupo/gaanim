@@ -9,13 +9,15 @@ use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
     AngleDimensionOptions, Axes3DConfig, AxesConfig, BadgeSpec, BannerPosition, BannerSpec,
-    CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay, CanvasTheme, CardSpec,
-    ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle, DimensionOptions,
-    EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant, ImageCrop, ImageFit,
-    ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PresentationBrand, QuoteCardSpec,
-    SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont, VideoOptions,
+    BooleanRule, CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay,
+    CanvasTheme, CardSpec, ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle,
+    DimensionOptions, EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant,
+    ImageCrop, ImageFit, ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec,
+    PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont,
+    VideoOptions,
 };
 
+use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
@@ -873,6 +875,51 @@ fn require_duration(duration: f64) -> PyResult<f64> {
         Err(pyo3::exceptions::PyValueError::new_err(
             "duration must be finite and non-negative",
         ))
+    }
+}
+
+impl PyScene {
+    fn boolean_py_tuple(
+        &self,
+        operands: &Bound<'_, PyTuple>,
+        op: gaanim_api::canvas::BooleanOperation,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        self.boolean_py(
+            operands.extract::<Vec<PyDrawable>>()?,
+            op,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+
+    fn boolean_py(
+        &self,
+        operands: Vec<PyDrawable>,
+        op: gaanim_api::canvas::BooleanOperation,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        let rule = match rule {
+            "nonzero" => BooleanRule::NonZero,
+            "evenodd" | "even_odd" => BooleanRule::EvenOdd,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "rule must be 'nonzero' or 'evenodd'",
+                ))
+            }
+        };
+        let refs: Vec<_> = operands.iter().map(|drawable| &drawable.0).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .boolean(&refs, op, live, tolerance, rule)
+            .map(PyDrawable)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 }
 
@@ -3423,6 +3470,102 @@ impl PyScene {
                 .expect("scene canvas poisoned")
                 .group(&refs),
         )
+    }
+
+    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    fn union(
+        &self,
+        operands: &Bound<'_, PyTuple>,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        self.boolean_py_tuple(
+            operands,
+            gaanim_api::canvas::BooleanOperation::Union,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    fn intersection(
+        &self,
+        operands: &Bound<'_, PyTuple>,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        self.boolean_py_tuple(
+            operands,
+            gaanim_api::canvas::BooleanOperation::Intersection,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+    #[pyo3(signature = (subject, *clips, live=false, tolerance=0.25, rule="nonzero"))]
+    fn difference(
+        &self,
+        subject: PyDrawable,
+        clips: &Bound<'_, PyTuple>,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        let mut operands = vec![subject];
+        operands.extend(clips.extract::<Vec<PyDrawable>>()?);
+        self.boolean_py(
+            operands,
+            gaanim_api::canvas::BooleanOperation::Difference,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    fn xor(
+        &self,
+        operands: &Bound<'_, PyTuple>,
+        live: bool,
+        tolerance: f64,
+        rule: &str,
+    ) -> PyResult<PyDrawable> {
+        self.boolean_py_tuple(
+            operands,
+            gaanim_api::canvas::BooleanOperation::Xor,
+            live,
+            tolerance,
+            rule,
+        )
+    }
+
+    #[pyo3(signature = (mask, paint, level=0.0, *, direction="up", keep_outline=true))]
+    fn fill_level(
+        &self,
+        mask: &PyDrawable,
+        paint: PyPaint,
+        level: f64,
+        direction: &str,
+        keep_outline: bool,
+    ) -> PyResult<PyDrawable> {
+        let direction = match direction {
+            "up" => gaanim_api::canvas::FillLevelDirection::Up,
+            "down" => gaanim_api::canvas::FillLevelDirection::Down,
+            "left" => gaanim_api::canvas::FillLevelDirection::Left,
+            "right" => gaanim_api::canvas::FillLevelDirection::Right,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "direction must be 'up', 'down', 'left', or 'right'",
+                ))
+            }
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .fill_level(&mask.0, paint.0, level, direction, keep_outline)
+            .map(PyDrawable)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     /// Measure laid-out text without spawning it, through the same pipeline

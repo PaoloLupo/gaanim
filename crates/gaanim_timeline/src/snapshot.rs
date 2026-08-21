@@ -2,8 +2,8 @@ use bevy::prelude::{BuildChildrenTransformExt, Component, Entity, EntityWorldMut
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
-    RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
+    FillBrush, FillLevel, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D,
+    PathSource, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
 };
 use std::collections::HashMap;
 
@@ -52,6 +52,8 @@ pub struct EntitySnapshot {
     pub path_source: Option<std::sync::Arc<gaanim_core::kurbo::BezPath>>,
     /// Fill-draw progress for write/unwrite animations (0.0 = outline only, 1.0 = full fill).
     pub fill_draw_progress: Option<f32>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fill_level: Option<f64>,
     /// Runtime progress for the transient Write pen-tip illumination.
     /// Restoring it prevents a partial glyph/head highlight from surviving a rewind.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -174,6 +176,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         snap.fill_draw_progress
             .map(gaanim_animation::FillDrawProgress),
     );
+    sync_optional(entity_mut, snap.fill_level.map(FillLevel));
     sync_optional(entity_mut, snap.write_tip_glow.clone());
     sync_optional(
         entity_mut,
@@ -382,6 +385,7 @@ impl WorldSnapshot {
                     fill_draw_progress: world
                         .get::<gaanim_animation::FillDrawProgress>(entity)
                         .map(|p| p.0),
+                    fill_level: world.get::<FillLevel>(entity).map(|level| level.0),
                     write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)
@@ -604,6 +608,20 @@ mod tests {
             .query_filtered::<bevy::prelude::Entity, Changed<T>>()
             .iter(world)
             .count()
+    }
+
+    #[test]
+    fn restoring_snapshot_rewinds_fill_level() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((MobjectId(ObjectId::from_parts(1, 1)), FillLevel(0.2)))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        world.get_mut::<FillLevel>(entity).unwrap().0 = 0.9;
+        snapshot.restore(&mut world);
+
+        assert_eq!(world.get::<FillLevel>(entity), Some(&FillLevel(0.2)));
     }
 
     #[test]

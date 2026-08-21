@@ -87,6 +87,15 @@ contains 3D content. Purely 2D scenes retain the regular snapping behavior.
 == Creación de objetos
 
 Cada fábrica devuelve un `Drawable` con métodos fluidos de estilo y layout.
+
+== Máscaras vectoriales dinámicas
+
+`drawable.clip(mask, rule="nonzero", invert=False)` conserva una relación
+vectorial viva: la máscara puede moverse, escalarse, rotarse o transformarse y
+el recorte se recalcula antes de bounds y extracción. La máscara sigue visible;
+usa `no_fill().no_stroke()` si solo debe definir la silueta. `invert=True`
+recorta al exterior de la silueta. Las máscaras son 2D vectoriales; no admiten
+alfa/luminancia ráster.
 El `Text` unificado usa de forma predeterminada la familia científica New
 Computer Modern incluida; los fragmentos `$...$` usan su pareja New Computer
 Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
