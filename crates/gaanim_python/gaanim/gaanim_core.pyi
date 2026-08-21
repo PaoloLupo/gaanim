@@ -3340,8 +3340,13 @@ class Scene:
         height: Optional[float] = None,
         fit: str = "contain",
         crop: Optional[tuple[float, float, float, float]] = None,
+        quality: Literal["low", "medium", "high"] = "medium",
     ) -> Drawable:
-        """Create a image drawable in the scene.
+        """Create an image drawable in the scene.
+
+        ``quality`` selects Vello image sampling: ``"low"`` is nearest-like,
+        ``"medium"`` is bilinear-like, and ``"high"`` requests bicubic sampling.
+        Invalid fit, crop, dimensions, or quality values raise ``ValueError``.
 
         Example:
             result = scene.image("assets/example.svg")
@@ -3355,6 +3360,7 @@ class Scene:
         height: Optional[float] = None,
         fit: Literal["contain", "cover", "stretch"] = "contain",
         crop: Optional[tuple[float, float, float, float]] = None,
+        quality: Literal["low", "medium", "high"] = "medium",
         start: Optional[float] = None,
         offset: float = 0.0,
         duration: Optional[float] = None,
@@ -3367,7 +3373,8 @@ class Scene:
 
         ``start`` defaults to the current cursor. ``offset`` and ``duration``
         select source seconds, ``loop`` repeats that interval, and ``speed``
-        preserves audio pitch. The first/last frame remains visible outside
+        preserves audio pitch. ``quality="high"`` keeps bicubic sampling for
+        every decoded frame. The first/last frame remains visible outside
         non-looping playback. Requires ``ffmpeg`` and ``ffprobe`` in PATH and
         raises ValueError for invalid ranges or RuntimeError for media failures.
         """

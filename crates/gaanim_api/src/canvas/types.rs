@@ -2,7 +2,7 @@
 
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3, EulerRot};
-use gaanim_core::peniko::{Brush, Color, ImageData};
+use gaanim_core::peniko::{Brush, Color, ImageData, ImageQuality};
 use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
 use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
@@ -344,13 +344,15 @@ pub struct ImageCrop {
     pub height: f64,
 }
 
-/// Optional destination sizing and source crop for `Canvas::image_with_options`.
+/// Optional destination sizing, crop, and sampling quality for `Canvas::image_with_options`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ImageOptions {
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub fit: ImageFit,
     pub crop: Option<ImageCrop>,
+    /// Vello sampling hint. `High` selects bicubic sampling in Vello 0.9.
+    pub quality: ImageQuality,
 }
 
 /// Playback, sizing, and embedded-audio options for `Canvas::video_with_options`.
@@ -457,6 +459,7 @@ impl ImageOptions {
             display_height,
             scale_x,
             scale_y,
+            quality: self.quality,
         })
     }
 }
@@ -1488,6 +1491,7 @@ impl OptDuration for Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{ImageCrop, ImageFit, ImageOptions};
+    use gaanim_core::peniko::ImageQuality;
 
     #[test]
     fn image_fit_resolves_contain_cover_and_crop() {
@@ -1496,6 +1500,7 @@ mod tests {
             height: Some(100.0),
             fit: ImageFit::Contain,
             crop: None,
+            quality: ImageQuality::Medium,
         }
         .resolve(400, 100)
         .unwrap();
@@ -1510,6 +1515,7 @@ mod tests {
             height: Some(100.0),
             fit: ImageFit::Cover,
             crop: None,
+            quality: ImageQuality::Medium,
         }
         .resolve(400, 100)
         .unwrap();
@@ -1526,10 +1532,22 @@ mod tests {
                 width: 120.0,
                 height: 60.0,
             }),
+            quality: ImageQuality::Medium,
         }
         .resolve(400, 100)
         .unwrap();
         assert_eq!((crop.source_x, crop.source_y), (50.0, 20.0));
         assert_eq!((crop.display_width, crop.display_height), (120.0, 60.0));
+    }
+
+    #[test]
+    fn image_quality_is_preserved_in_the_resolved_view() {
+        let view = ImageOptions {
+            quality: ImageQuality::High,
+            ..Default::default()
+        }
+        .resolve(640, 360)
+        .unwrap();
+        assert_eq!(view.quality, ImageQuality::High);
     }
 }

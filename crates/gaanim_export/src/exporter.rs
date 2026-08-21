@@ -494,8 +494,7 @@ where
         "------------------------------------------------------------",
     );
 
-    let mut gpu = GpuContext::new(config.width, config.height)
-        .map_err(crate::encoder::ExportError::General)?;
+    let mut gpu = GpuContext::new(config.width, config.height)?;
 
     let mut app = App::new();
     app.add_plugins(bevy::prelude::MinimalPlugins)
@@ -596,9 +595,7 @@ where
             })
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
-        let frame_data = gpu
-            .render_frame(&vello_scene, bg_color)
-            .map_err(ExportError::General)?;
+        let frame_data = gpu.render_frame(&vello_scene, bg_color)?;
 
         encoder
             .push_frame(frame_data)
@@ -667,7 +664,7 @@ where
         )));
     }
 
-    let mut gpu = GpuContext::new(config.width, config.height).map_err(ExportError::General)?;
+    let mut gpu = GpuContext::new(config.width, config.height)?;
 
     let mut app = App::new();
     app.add_plugins(bevy::prelude::MinimalPlugins)
@@ -738,9 +735,7 @@ where
             })
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
-        let rgba = gpu
-            .render_frame(&scene, background)
-            .map_err(ExportError::General)?;
+        let rgba = gpu.render_frame(&scene, background)?;
         frames.push(CapturedFrame {
             time,
             width: config.width,

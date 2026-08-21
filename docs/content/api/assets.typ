@@ -27,6 +27,21 @@ robot = scene.gltf("robot.glb")
 
 Las rutas absolutas también funcionan y tienen prioridad sobre `assets_dir`.
 
+== Calidad de imágenes y vídeo
+
+`scene.image` y `scene.video` aceptan `quality="low"`, `"medium"` (el valor
+predeterminado) o `"high"`. La calidad alta solicita muestreo bicúbico de
+Vello 0.9, especialmente útil para fotos, capturas y vídeo que se escalan o
+rotan; tiene un coste de GPU mayor que la calidad media.
+
+```python
+hero = scene.image("cover.png", width=960, quality="high")
+clip = scene.video("intro.mp4", height=540, quality="high", audio=False)
+```
+
+Los valores de calidad no válidos, las dimensiones no positivas y los crops
+fuera de la imagen producen `ValueError`.
+
 Los SVG importados pueden usarse como máscaras y operandos de booleanas porque
 Gaanim conserva sus paths vectoriales. Las etiquetas SVG `<mask>` basadas en
 alfa o luminancia no se convierten a composición ráster; usa una silueta

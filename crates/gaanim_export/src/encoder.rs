@@ -14,6 +14,8 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
     #[error("Frame capture error: {0}")]
     Capture(String),
+    #[error(transparent)]
+    Gpu(#[from] crate::gpu::GpuContextError),
     #[error("Crate error: {0}")]
     General(String),
 }

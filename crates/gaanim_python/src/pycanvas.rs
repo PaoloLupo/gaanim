@@ -30,6 +30,17 @@ use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
 use crate::transition::PyTransitionType;
 use crate::visualization::{extract_expr, PyParameter, PyVariable};
 
+fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
+    match value {
+        "low" => Ok(gaanim_core::peniko::ImageQuality::Low),
+        "medium" => Ok(gaanim_core::peniko::ImageQuality::Medium),
+        "high" => Ok(gaanim_core::peniko::ImageQuality::High),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "quality must be 'low', 'medium', or 'high'",
+        )),
+    }
+}
+
 fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
     let frame = py.import("inspect")?.call_method0("currentframe")?;
     let filename = frame
@@ -3305,9 +3316,9 @@ impl PyScene {
         Ok(())
     }
     /// Dim an equation except for the requested semantic tags, then pulse them.
-    /// Load a PNG, JPEG, or WebP image with optional size, fit mode, and crop.
+    /// Load a PNG, JPEG, or WebP image with optional size, fit mode, crop, and sampling quality.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
-    #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None))]
+    #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None, quality="medium"))]
     fn image(
         &self,
         path: &str,
@@ -3315,6 +3326,7 @@ impl PyScene {
         height: Option<f64>,
         fit: &str,
         crop: Option<(f64, f64, f64, f64)>,
+        quality: &str,
     ) -> PyResult<PyDrawable> {
         let fit = match fit {
             "contain" => ImageFit::Contain,
@@ -3336,6 +3348,7 @@ impl PyScene {
                 width,
                 height,
             }),
+            quality: image_quality(quality)?,
         };
         self.inner
             .lock()
@@ -3358,6 +3371,7 @@ impl PyScene {
         height=None,
         fit="contain",
         crop=None,
+        quality="medium",
         start=None,
         offset=0.0,
         duration=None,
@@ -3373,6 +3387,7 @@ impl PyScene {
         height: Option<f64>,
         fit: &str,
         crop: Option<(f64, f64, f64, f64)>,
+        quality: &str,
         start: Option<f64>,
         offset: f64,
         duration: Option<f64>,
@@ -3402,6 +3417,7 @@ impl PyScene {
                     width,
                     height,
                 }),
+                quality: image_quality(quality)?,
             },
             start,
             offset,
@@ -5534,6 +5550,16 @@ fn resolve_ray(obj: &Bound<'_, PyAny>) -> PyResult<CanvasRay> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_quality_accepts_the_public_values_and_rejects_unknown_ones() {
+        use gaanim_core::peniko::ImageQuality;
+
+        assert_eq!(image_quality("low").unwrap(), ImageQuality::Low);
+        assert_eq!(image_quality("medium").unwrap(), ImageQuality::Medium);
+        assert_eq!(image_quality("high").unwrap(), ImageQuality::High);
+        assert!(image_quality("bicubic").is_err());
+    }
 
     #[pyfunction]
     fn caller_default_manifest(py: Python<'_>) -> PyResult<String> {

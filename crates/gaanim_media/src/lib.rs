@@ -556,6 +556,19 @@ impl VideoDecoder {
     }
 }
 
+/// Swap a decoded frame without losing the sampling policy selected for the
+/// video drawable (notably Vello 0.9's bicubic `ImageQuality::High`).
+fn replace_raster_image(raster: &mut RasterImage, image: gaanim_core::peniko::ImageData) {
+    let sampler = raster
+        .image
+        .as_ref()
+        .map(|brush| brush.sampler)
+        .unwrap_or_default();
+    let mut brush = ImageBrush::new(image);
+    brush.sampler = sampler;
+    raster.image = Some(brush);
+}
+
 fn sample_video_system(world: &mut World) {
     let scene_time = world.resource::<Timeline>().current_time;
     let mode = *world.resource::<VideoSamplingMode>();
@@ -573,7 +586,7 @@ fn sample_video_system(world: &mut World) {
                 decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
             }
             if let Some(mut raster) = world.get_mut::<RasterImage>(response.entity) {
-                raster.image = Some(ImageBrush::new(image));
+                replace_raster_image(&mut raster, image);
             }
             if let Some(mut playback) = world.get_mut::<VideoPlayback>(response.entity) {
                 playback.last_frame = Some(response.frame);
@@ -601,7 +614,7 @@ fn sample_video_system(world: &mut World) {
         }
         if let Some(image) = decoder.cache.get(&(path.clone(), frame)).cloned() {
             if let Some(mut raster) = world.get_mut::<RasterImage>(entity) {
-                raster.image = Some(ImageBrush::new(image));
+                replace_raster_image(&mut raster, image);
             }
             if let Some(mut playback) = world.get_mut::<VideoPlayback>(entity) {
                 playback.last_frame = Some(frame);
@@ -614,7 +627,7 @@ fn sample_video_system(world: &mut World) {
                     Ok(image) => {
                         decoder.insert_cache((path, frame), image.clone());
                         if let Some(mut raster) = world.get_mut::<RasterImage>(entity) {
-                            raster.image = Some(ImageBrush::new(image));
+                            replace_raster_image(&mut raster, image);
                         }
                         if let Some(mut playback) = world.get_mut::<VideoPlayback>(entity) {
                             playback.last_frame = Some(frame);

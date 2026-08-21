@@ -1857,6 +1857,30 @@ impl Canvas {
             }
         }
 
+        // Keep the invisible clip geometry inside the clipped group's hierarchy.
+        // Group-level layout operations (scale, rotation, translation) must affect
+        // the mask exactly like the visible descendants they clip.
+        let clip_mask = group.clip_path.as_ref().map(|clip_path| {
+            let rect = clip_path.bounding_box();
+            self.spawn_registered(
+                SpawnKind::SvgPath(Box::new(gaanim_objects::prelude::SvgPath {
+                    id: String::new(),
+                    path: clip_path.clone(),
+                    bounds: gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+                    fill: None,
+                    stroke: gaanim_scene::StrokeBrush::transparent(),
+                })),
+                false,
+            )
+        });
+        if let Some(mask) = &clip_mask {
+            mask.spec
+                .lock()
+                .expect("SVG clip mask spec poisoned")
+                .exclude_from_parent_draw = true;
+            children.push(mask.clone());
+        }
+
         let child_ids = children.iter().map(|child| child.id).collect();
         let mut handle = self.spawn_registered(SpawnKind::Group(child_ids), register_top_level);
         handle.spec.lock().expect("SVG group spec poisoned").opacity = group.opacity;
@@ -1871,18 +1895,7 @@ impl Canvas {
                 shadow.blur_radius,
             );
         }
-        if let Some(clip_path) = &group.clip_path {
-            let rect = clip_path.bounding_box();
-            let mask = self.spawn_registered(
-                SpawnKind::SvgPath(Box::new(gaanim_objects::prelude::SvgPath {
-                    id: String::new(),
-                    path: clip_path.clone(),
-                    bounds: gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
-                    fill: None,
-                    stroke: gaanim_scene::StrokeBrush::transparent(),
-                })),
-                false,
-            );
+        if let Some(mask) = clip_mask {
             handle = handle.clip(&mask, gaanim_core::peniko::Fill::NonZero);
         }
         if !group.id.is_empty() {
@@ -5232,6 +5245,101 @@ mod tests {
             canvas.circle(10.0).part("body"),
             Err(crate::canvas::SvgPartError::NotSvg)
         ));
+    }
+
+    #[test]
+    fn scaled_svg_clip_mask_inherits_the_visible_hierarchy_transform() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_scaled_clip_api_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+                <defs><clipPath id="window"><rect x="10" y="10" width="80" height="80"/></clipPath></defs>
+                <g clip-path="url(#window)"><rect width="100" height="100" fill="#00aaff"/></g>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = Canvas::new(320, 180);
+        canvas.svg(&temp).unwrap().scaled(2.0);
+        std::fs::remove_file(temp).unwrap();
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let (target_scale, source) = app
+            .world_mut()
+            .query::<(
+                &gaanim_renderer::effects::ClipMask,
+                &gaanim_math::GlobalSpatialTransform,
+            )>()
+            .iter(app.world())
+            .find_map(|(mask, target)| mask.sources.first().copied().map(|source| (target, source)))
+            .expect("compiled SVG clip mask and source");
+        let source_scale = app
+            .world()
+            .get::<gaanim_math::GlobalSpatialTransform>(source)
+            .expect("clip source transform");
+
+        let target_coeffs = target_scale.affine_2d.as_coeffs();
+        let source_coeffs = source_scale.affine_2d.as_coeffs();
+        assert!((target_coeffs[0].abs() - source_coeffs[0].abs()).abs() < 1e-9);
+        assert!((target_coeffs[3].abs() - source_coeffs[3].abs()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn svg_clip_mask_is_not_consumed_by_group_create_animation() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_create_clip_api_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+                <defs><clipPath id="window"><rect x="10" y="10" width="80" height="80"/></clipPath></defs>
+                <g clip-path="url(#window)"><rect width="100" height="100" fill="#00aaff"/></g>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = Canvas::new(320, 180);
+        let svg = canvas.svg(&temp).unwrap();
+        canvas.play(vec![svg.create(1.0)]);
+        std::fs::remove_file(temp).unwrap();
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let source = world
+            .query::<&gaanim_renderer::effects::ClipMask>()
+            .iter(&world)
+            .find_map(|mask| mask.sources.first().copied())
+            .expect("compiled SVG clip source");
+        let source_path = world
+            .get::<gaanim_scene::components::Path2D>(source)
+            .expect("clip source path");
+        assert!(!source_path.0.elements().is_empty());
+        assert!(world.get::<gaanim_animation::PathReveal>(source).is_none());
+        assert!(
+            world
+                .get::<gaanim_animation::FillDrawProgress>(source)
+                .is_none()
+        );
     }
 
     #[test]

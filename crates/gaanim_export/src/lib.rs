@@ -16,5 +16,5 @@ pub mod prelude {
         CapturedFrame, capture_scene_direct, capture_scene_hybrid, export_scene,
         export_scene_direct,
     };
-    pub use crate::gpu::GpuContext;
+    pub use crate::gpu::{GpuContext, GpuContextError};
 }

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 pub mod background;
+pub mod diagnostics;
 pub mod effects;
 pub mod pipeline;
 pub mod prelude;
@@ -42,6 +43,9 @@ impl Plugin for GaanimRendererPlugin {
 
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();
+        app.init_resource::<diagnostics::RenderHealth>();
+        app.init_resource::<diagnostics::VelloDiagnostics>();
+        diagnostics::install_render_error_handler(app);
 
         // Register camera sync systems in Bounds phase so the Bevy cameras
         // match gaanim's Camera resource before rendering in Extraction.
@@ -73,6 +77,11 @@ impl Plugin for GaanimRendererPlugin {
         app.add_systems(
             Update,
             pipeline::gaanim_render_system.in_set(gaanim_scene::SceneSet::Extraction),
+        );
+        app.add_systems(
+            Update,
+            diagnostics::collect_vello_diagnostics_system
+                .in_set(gaanim_scene::SceneSet::Extraction),
         );
     }
 }

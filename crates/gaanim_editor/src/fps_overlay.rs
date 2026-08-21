@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
+use gaanim_renderer::prelude::{RenderHealth, VelloDiagnostics};
 
 const HISTORY_LEN: usize = 120;
 
@@ -45,7 +46,7 @@ impl FpsOverlay {
         self.count = (self.count + 1).min(HISTORY_LEN);
     }
 
-    pub fn render(&self, ctx: &egui::Context) {
+    pub fn render(&self, ctx: &egui::Context, diagnostics: Option<&VelloDiagnostics>) {
         if !self.visible {
             return;
         }
@@ -91,10 +92,35 @@ impl FpsOverlay {
                     Color32::from_rgb(180, 255, 180),
                 );
 
+                if let Some(diagnostics) = diagnostics {
+                    let complexity = format!(
+                        "Vello  paths:{}  segs:{}  clips:{}  scenes:{}",
+                        diagnostics
+                            .paths
+                            .map_or_else(|| "—".into(), |value| value.to_string()),
+                        diagnostics
+                            .path_segments
+                            .map_or_else(|| "—".into(), |value| value.to_string()),
+                        diagnostics
+                            .clips
+                            .map_or_else(|| "—".into(), |value| value.to_string()),
+                        diagnostics
+                            .world_scenes
+                            .map_or_else(|| "—".into(), |value| value.to_string()),
+                    );
+                    p.text(
+                        egui::Pos2::new(rect.min.x + 6.0, rect.min.y + 22.0),
+                        egui::Align2::LEFT_TOP,
+                        complexity,
+                        egui::FontId::proportional(9.0),
+                        Color32::from_rgb(160, 200, 255),
+                    );
+                }
+
                 // Bar graph area
                 let graph_rect = egui::Rect::from_min_max(
-                    egui::Pos2::new(rect.min.x + 4.0, rect.min.y + 24.0),
-                    egui::Pos2::new(rect.max.x - 4.0, rect.min.y + 24.0 + graph_h),
+                    egui::Pos2::new(rect.min.x + 4.0, rect.min.y + 38.0),
+                    egui::Pos2::new(rect.max.x - 4.0, rect.min.y + 38.0 + graph_h),
                 );
                 let p = ui.painter_at(graph_rect);
 
@@ -146,6 +172,55 @@ impl FpsOverlay {
                 }
             });
     }
+}
+
+/// Render a non-modal GPU failure banner and return whether retry was requested.
+///
+/// Keeping this separate from the optional FPS overlay makes an unrecovered GPU
+/// error visible even when the performance HUD is hidden.
+pub fn render_render_health(ctx: &egui::Context, health: Option<&RenderHealth>) -> bool {
+    let Some(failure) = health.and_then(|health| health.last_failure.as_ref()) else {
+        return false;
+    };
+
+    let detail = if failure.description.is_empty() {
+        failure.kind.label().to_string()
+    } else {
+        format!("{}: {}", failure.kind.label(), failure.description)
+    };
+    let mut retry = false;
+    egui::Area::new(egui::Id::new("gaanim_gpu_failure"))
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_rgba_premultiplied(90, 24, 20, 238))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(255, 145, 115)))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            egui::RichText::new("GPU: ")
+                                .strong()
+                                .color(Color32::from_rgb(255, 205, 185)),
+                        );
+                        ui.label(
+                            egui::RichText::new(detail).color(Color32::from_rgb(255, 235, 225)),
+                        );
+                        if ui
+                            .button("Reintentar renderer")
+                            .on_hover_text(
+                                "Crea de nuevo el dispositivo GPU sin descartar la escena",
+                            )
+                            .clicked()
+                        {
+                            retry = true;
+                        }
+                    });
+                });
+        });
+    retry
 }
 
 /// System: updates FpsOverlay with frame delta time each frame.

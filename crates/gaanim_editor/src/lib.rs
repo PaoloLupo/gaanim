@@ -371,6 +371,8 @@ fn editor_ui_system(
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut commands: Commands,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
+    mut render_health: Option<ResMut<gaanim_renderer::prelude::RenderHealth>>,
+    vello_diagnostics: Option<Res<gaanim_renderer::prelude::VelloDiagnostics>>,
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
     hub: Option<Res<project_hub::ProjectHubState>>,
@@ -1168,7 +1170,12 @@ fn editor_ui_system(
         state.bar_hovered = hover_pos.is_some_and(|p| area_resp.response.rect.contains(p));
     }
 
-    fps_overlay.render(ctx);
+    if fps_overlay::render_render_health(ctx, render_health.as_deref())
+        && let Some(health) = render_health.as_deref_mut()
+    {
+        health.request_retry();
+    }
+    fps_overlay.render(ctx, vello_diagnostics.as_deref());
 }
 
 /// Format seconds as `M:SS.ss` for the playback overlay.

@@ -22,6 +22,8 @@ pub struct ImageView {
     pub display_height: f64,
     pub scale_x: f64,
     pub scale_y: f64,
+    /// Sampling quality passed directly to Vello for this image.
+    pub quality: gaanim_core::peniko::ImageQuality,
 }
 
 /// A standard, complete Bevy Bundle representing a 2D vector Mobject.
@@ -102,7 +104,7 @@ pub fn image(
     bundle.fill = FillBrush::transparent();
     bundle.tag = ObjectTag("ImageMobject".into());
     bundle.raster_image = RasterImage::new(
-        gaanim_core::peniko::ImageBrush::new(image),
+        gaanim_core::peniko::ImageBrush::new(image).with_quality(view.quality),
         // Image pixels are top-left/Y-down; gaanim mobjects are centred/Y-up.
         kurbo::Affine::new([
             view.scale_x,

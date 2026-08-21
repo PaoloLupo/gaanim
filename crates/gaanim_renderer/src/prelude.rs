@@ -1,4 +1,8 @@
 pub use crate::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
+pub use crate::diagnostics::{
+    RenderFailure, RenderFailureKind, RenderHealth, VelloDiagnostics,
+    collect_vello_diagnostics_system,
+};
 pub use crate::effects::{
     BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
     VectorOutlineBinding,
