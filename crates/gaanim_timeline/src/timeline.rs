@@ -617,10 +617,10 @@ impl Timeline {
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
     /// animations in correct temporal order up to `target_time`.
     ///
-    /// During sequential forward playback (the common case), the full snapshot restore is
-    /// skipped because each clip stores explicit `from`/`to` values, making clip replay
-    /// deterministic and independent of prior entity state. This avoids cloning and writing
-    /// all entity components every frame.
+    /// Every seek restores the closest keyframe so transitions and reactive state remain
+    /// deterministic. Snapshot restoration is change-aware for renderer-invalidating geometry
+    /// and styles, avoiding false fragment-cache invalidation during playback of static content
+    /// such as repeated SVG paths. Local transforms and hierarchy are still fully reconciled.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
         let max_time = self
             .loop_range
@@ -661,7 +661,8 @@ impl Timeline {
             // Transitions (slide, crossfade, etc.) apply one-shot offsets that
             // accumulate without a full restore, so skipping the restore on
             // forward seeks produces incorrect results.
-            // TODO: optimise with intermediate keyframes to avoid per-frame restore.
+            // Restoring is change-aware, so matching static components do not receive
+            // false `Changed` ticks or invalidate retained renderer fragments.
             snapshot.restore(world);
             self.last_restore_kf_time = Some(kf_time);
             kf_time.0

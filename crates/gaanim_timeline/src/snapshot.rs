@@ -1,4 +1,4 @@
-use bevy::prelude::{BuildChildrenTransformExt, Entity, EntityWorldMut, World};
+use bevy::prelude::{BuildChildrenTransformExt, Component, Entity, EntityWorldMut, World};
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
@@ -99,97 +99,98 @@ pub struct WorldSnapshot {
     pub camera: Option<gaanim_math::Camera>,
 }
 
+/// Insert a component only when the snapshot differs from the live world.
+///
+/// Bevy marks a component as changed even if an insertion replaces it with an
+/// equal value. Snapshot restores run for every seek, so unconditional inserts
+/// would invalidate renderer caches for otherwise static SVG paths.
+fn insert_if_changed<T: Component + PartialEq>(entity_mut: &mut EntityWorldMut<'_>, value: T) {
+    if entity_mut.get::<T>() != Some(&value) {
+        entity_mut.insert(value);
+    }
+}
+
+/// Remove a component only when it is present, preserving Bevy change ticks for
+/// a snapshot that already matches the world.
+fn remove_if_present<T: Component>(entity_mut: &mut EntityWorldMut<'_>) {
+    if entity_mut.contains::<T>() {
+        entity_mut.remove::<T>();
+    }
+}
+
+fn sync_optional<T: Component + PartialEq>(entity_mut: &mut EntityWorldMut<'_>, value: Option<T>) {
+    if let Some(value) = value {
+        insert_if_changed(entity_mut, value);
+    } else {
+        remove_if_present::<T>(entity_mut);
+    }
+}
+
 /// Insert or update all components of an `EntitySnapshot` onto a Bevy entity.
 ///
-/// This helper centralizes the heavy component-insertion logic that was previously
-/// duplicated across `restore`, `apply`, and entity spawning paths.
+/// Restoration remains complete and deterministic, while equal renderer-invalidating
+/// values are left untouched so Bevy does not report false geometry/style changes.
 fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &EntitySnapshot) {
-    // Batch insert always-present components in a single archetype move.
-    // This reduces up to ~15 individual inserts to 1 batch + conditional inserts.
     let global_transform = snap
         .global_transform
         .unwrap_or_else(|| GlobalSpatialTransform::from_local(&snap.transform));
     let global_opacity = snap.global_opacity.unwrap_or(GlobalOpacity(snap.opacity));
 
-    entity_mut.insert((
-        snap.transform,
-        Opacity(snap.opacity),
+    // Restoring local transforms/opacity must wake the propagation systems.
+    // Their derived global values are intentionally recomputed after every
+    // exact seek, even when the authored local value itself is unchanged.
+    // Unlike path/style changes this does not invalidate retained geometry.
+    entity_mut.insert(snap.transform);
+    entity_mut.insert(Opacity(snap.opacity));
+    insert_if_changed(
+        entity_mut,
         RenderOrder {
             z_index: snap.render_order,
             creation_order: snap.creation_order,
         },
-        snap.render_layer,
-        global_transform,
-        global_opacity,
-    ));
+    );
+    insert_if_changed(entity_mut, snap.render_layer);
+    insert_if_changed(entity_mut, global_transform);
+    insert_if_changed(entity_mut, global_opacity);
 
-    if snap.has_fill_component {
-        entity_mut.insert(FillBrush(snap.fill.clone()));
-    } else {
-        entity_mut.remove::<FillBrush>();
-    }
-
-    // Handle conditional components (insert or remove)
-    if let Some(ref style) = snap.stroke_style {
-        entity_mut.insert(StrokeBrush {
+    sync_optional(
+        entity_mut,
+        snap.has_fill_component
+            .then(|| FillBrush(snap.fill.clone())),
+    );
+    sync_optional(
+        entity_mut,
+        snap.stroke_style.as_ref().map(|style| StrokeBrush {
             brush: snap.stroke.clone(),
             style: style.clone(),
-        });
-    } else {
-        entity_mut.remove::<StrokeBrush>();
+        }),
+    );
+    sync_optional(entity_mut, snap.visible.then_some(Visible));
+    sync_optional(entity_mut, snap.tags.first().cloned().map(ObjectTag));
+    sync_optional(entity_mut, snap.path2d.clone().map(Path2D));
+    sync_optional(entity_mut, snap.path_source.clone().map(PathSource));
+    sync_optional(
+        entity_mut,
+        snap.fill_draw_progress
+            .map(gaanim_animation::FillDrawProgress),
+    );
+    sync_optional(entity_mut, snap.write_tip_glow.clone());
+    sync_optional(
+        entity_mut,
+        snap.path_reveal.map(gaanim_animation::PathReveal),
+    );
+    match snap.float_signal {
+        Some(value)
+            if entity_mut
+                .get::<gaanim_animation::FloatSignal>()
+                .is_none_or(|signal| signal.value != value) =>
+        {
+            entity_mut.insert(gaanim_animation::FloatSignal::new(value));
+        }
+        None => remove_if_present::<gaanim_animation::FloatSignal>(entity_mut),
+        _ => {}
     }
-
-    if snap.visible {
-        entity_mut.insert(Visible);
-    } else {
-        entity_mut.remove::<Visible>();
-    }
-
-    if !snap.tags.is_empty() {
-        entity_mut.insert(ObjectTag(snap.tags[0].clone()));
-    }
-
-    if let Some(ref path) = snap.path2d {
-        entity_mut.insert(Path2D(path.clone()));
-    } else {
-        entity_mut.remove::<Path2D>();
-    }
-
-    if let Some(ref path) = snap.path_source {
-        entity_mut.insert(PathSource(path.clone()));
-    } else {
-        entity_mut.remove::<PathSource>();
-    }
-
-    if let Some(progress) = snap.fill_draw_progress {
-        entity_mut.insert(gaanim_animation::FillDrawProgress(progress));
-    } else {
-        entity_mut.remove::<gaanim_animation::FillDrawProgress>();
-    }
-
-    if let Some(tip) = &snap.write_tip_glow {
-        entity_mut.insert(tip.clone());
-    } else {
-        entity_mut.remove::<gaanim_animation::WriteTipGlow>();
-    }
-
-    if let Some(progress) = snap.path_reveal {
-        entity_mut.insert(gaanim_animation::PathReveal(progress));
-    } else {
-        entity_mut.remove::<gaanim_animation::PathReveal>();
-    }
-
-    if let Some(value) = snap.float_signal {
-        entity_mut.insert(gaanim_animation::FloatSignal::new(value));
-    } else {
-        entity_mut.remove::<gaanim_animation::FloatSignal>();
-    }
-
-    if let Some(material) = snap.material_3d {
-        entity_mut.insert(material);
-    } else {
-        entity_mut.remove::<gaanim_scene::Material3D>();
-    }
+    sync_optional(entity_mut, snap.material_3d);
 
     if let Some(points) = &snap.traced_path_points
         && let Some(mut traced_path) = entity_mut.get_mut::<gaanim_animation::TracedPath>()
@@ -305,29 +306,13 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         }
     }
 
-    if snap.is_group {
-        entity_mut.insert(gaanim_scene::GroupMarker);
-    } else {
-        entity_mut.remove::<gaanim_scene::GroupMarker>();
-    }
-
-    if let Some(lb) = snap.local_bounds {
-        entity_mut.insert(lb);
-    } else {
-        entity_mut.remove::<LocalBounds>();
-    }
-
-    if let Some(wb) = snap.world_bounds {
-        entity_mut.insert(wb);
-    } else {
-        entity_mut.remove::<WorldBounds>();
-    }
-
-    if let Some(scene_id) = snap.scene {
-        entity_mut.insert(SceneMember(scene_id));
-    } else {
-        entity_mut.remove::<SceneMember>();
-    }
+    sync_optional(
+        entity_mut,
+        snap.is_group.then_some(gaanim_scene::GroupMarker),
+    );
+    sync_optional(entity_mut, snap.local_bounds);
+    sync_optional(entity_mut, snap.world_bounds);
+    sync_optional(entity_mut, snap.scene.map(SceneMember));
 }
 
 impl WorldSnapshot {
@@ -441,7 +426,9 @@ impl WorldSnapshot {
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
         if let Some(camera) = self.camera {
-            world.insert_resource(camera);
+            if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
+                world.insert_resource(camera);
+            }
         }
         // 1. Gather all existing entities and build a dynamic mapping of ObjectIds to Bevy Entities
         let mut existing_entities = Vec::new();
@@ -456,7 +443,7 @@ impl WorldSnapshot {
 
         // 2. Hide any active Mobjects that do not exist in the snapshot
         for (entity, obj_id) in &existing_entities {
-            if !self.entities.contains_key(obj_id) {
+            if !self.entities.contains_key(obj_id) && world.get::<Visible>(*entity).is_some() {
                 world.entity_mut(*entity).remove::<Visible>();
             }
         }
@@ -484,6 +471,11 @@ impl WorldSnapshot {
             if let Some(&entity) = entity_map.get(obj_id) {
                 if let Some(parent_id) = snap.parent {
                     if let Some(&parent_entity) = entity_map.get(&parent_id) {
+                        // `set_parent_in_place` also reconciles Bevy's native
+                        // `Transform` from the preserved `GlobalTransform`.
+                        // Those components are runtime state, not snapshot
+                        // fields, so this must run even when `ChildOf` already
+                        // names the expected parent.
                         world.entity_mut(entity).set_parent_in_place(parent_entity);
                     }
                 } else {
@@ -601,7 +593,156 @@ impl SnapshotDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::prelude::{BuildChildrenTransformExt, Schedule, World};
+    use bevy::prelude::{
+        BuildChildrenTransformExt, Changed, ChildOf, GlobalTransform, Schedule, Transform, Vec3,
+        World,
+    };
+    use std::sync::Arc;
+
+    fn changed_count<T: bevy::prelude::Component>(world: &mut World) -> usize {
+        world
+            .query_filtered::<bevy::prelude::Entity, Changed<T>>()
+            .iter(world)
+            .count()
+    }
+
+    #[test]
+    fn restoring_an_identical_svg_like_snapshot_does_not_change_render_components() {
+        let mut world = World::new();
+        let path = Arc::new(gaanim_core::kurbo::BezPath::from_svg("M0,0 L10,10").unwrap());
+        let fill = FillBrush::color(gaanim_core::peniko::Color::from_rgb8(0x2d, 0x7d, 0xff));
+        let stroke = StrokeBrush::new(gaanim_core::peniko::Color::BLACK, 1.5);
+
+        // Model 100 `scene.svg()` copies, each with several leaf paths. This
+        // deliberately exercises the cache-invalidating components without a
+        // brittle wall-clock assertion.
+        for copy in 0..100 {
+            let group = world
+                .spawn((
+                    MobjectId(ObjectId::from_parts(copy, 0)),
+                    gaanim_scene::GroupMarker,
+                ))
+                .id();
+            for leaf in 1..=4 {
+                let child = world
+                    .spawn((
+                        MobjectId(ObjectId::from_parts(copy, leaf)),
+                        Path2D(path.clone()),
+                        PathSource(path.clone()),
+                        fill.clone(),
+                        stroke.clone(),
+                    ))
+                    .id();
+                world.entity_mut(child).set_parent_in_place(group);
+            }
+        }
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        world.clear_trackers();
+        snapshot.restore(&mut world);
+
+        assert_eq!(changed_count::<Path2D>(&mut world), 0);
+        assert_eq!(changed_count::<PathSource>(&mut world), 0);
+        assert_eq!(changed_count::<FillBrush>(&mut world), 0);
+        assert_eq!(changed_count::<StrokeBrush>(&mut world), 0);
+    }
+
+    #[test]
+    fn restoring_an_identical_hierarchy_reconciles_native_transforms() {
+        let mut world = World::new();
+        let parent = world
+            .spawn((
+                MobjectId(ObjectId::from_parts(10, 0)),
+                Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+                GlobalTransform::from(Transform::from_translation(Vec3::new(10.0, 0.0, 0.0))),
+            ))
+            .id();
+        let child = world
+            .spawn((
+                MobjectId(ObjectId::from_parts(11, 0)),
+                Transform::from_translation(Vec3::ZERO),
+                GlobalTransform::from(Transform::from_translation(Vec3::new(15.0, 0.0, 0.0))),
+            ))
+            .id();
+        world.entity_mut(child).set_parent_in_place(parent);
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        world
+            .entity_mut(child)
+            .insert(Transform::from_translation(Vec3::splat(99.0)));
+        snapshot.restore(&mut world);
+
+        assert_eq!(
+            world.get::<Transform>(child).unwrap().translation,
+            Vec3::new(5.0, 0.0, 0.0),
+            "restoring an unchanged ChildOf must still reconcile Bevy Transform from GlobalTransform"
+        );
+    }
+
+    #[test]
+    fn restoring_an_identical_snapshot_marks_local_state_for_propagation() {
+        let mut world = World::new();
+        world.spawn((
+            MobjectId(ObjectId::from_parts(12, 0)),
+            SpatialTransform::default(),
+            Opacity::default(),
+        ));
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        world.clear_trackers();
+        snapshot.restore(&mut world);
+
+        assert_eq!(changed_count::<SpatialTransform>(&mut world), 1);
+        assert_eq!(changed_count::<Opacity>(&mut world), 1);
+    }
+
+    #[test]
+    fn restoring_a_different_snapshot_updates_components_and_hierarchy() {
+        let mut world = World::new();
+        let parent_id = ObjectId::from_parts(1, 0);
+        let child_id = ObjectId::from_parts(1, 1);
+        let parent = world.spawn(MobjectId(parent_id)).id();
+        let child = world
+            .spawn((
+                MobjectId(child_id),
+                Path2D(Arc::new(
+                    gaanim_core::kurbo::BezPath::from_svg("M0,0 L1,1").unwrap(),
+                )),
+                PathSource(Arc::new(
+                    gaanim_core::kurbo::BezPath::from_svg("M0,0 L1,1").unwrap(),
+                )),
+                FillBrush::color(gaanim_core::peniko::Color::from_rgb8(0xff, 0x00, 0x00)),
+                StrokeBrush::new(gaanim_core::peniko::Color::BLACK, 1.0),
+            ))
+            .id();
+        world.entity_mut(child).set_parent_in_place(parent);
+        let snapshot = WorldSnapshot::capture(&mut world);
+
+        let other_parent = world.spawn(MobjectId(ObjectId::from_parts(2, 0))).id();
+        world.entity_mut(child).insert((
+            Path2D(Arc::new(
+                gaanim_core::kurbo::BezPath::from_svg("M0,0 L2,2").unwrap(),
+            )),
+            PathSource(Arc::new(
+                gaanim_core::kurbo::BezPath::from_svg("M0,0 L2,2").unwrap(),
+            )),
+            FillBrush::color(gaanim_core::peniko::Color::from_rgb8(0x00, 0x00, 0xff)),
+            StrokeBrush::new(gaanim_core::peniko::Color::BLACK, 2.0),
+        ));
+        world.entity_mut(child).set_parent_in_place(other_parent);
+        world.clear_trackers();
+        snapshot.restore(&mut world);
+
+        assert_eq!(
+            world.get::<ChildOf>(child).map(|parent| parent.parent()),
+            Some(parent)
+        );
+        assert_eq!(changed_count::<Path2D>(&mut world), 1);
+        assert_eq!(changed_count::<PathSource>(&mut world), 1);
+        assert_eq!(changed_count::<FillBrush>(&mut world), 1);
+        assert_eq!(changed_count::<StrokeBrush>(&mut world), 1);
+        assert_eq!(changed_count::<ChildOf>(&mut world), 1);
+    }
 
     #[test]
     fn restoring_an_unstyled_group_does_not_clear_child_fills() {
