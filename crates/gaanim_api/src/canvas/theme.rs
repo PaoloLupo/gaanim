@@ -291,7 +291,7 @@ impl CanvasTheme {
                 muted: Color::BLACK,
                 title: Color::BLACK,
                 accent: rgb(0x2563EB),
-                chart: rgb(0x2563EB),
+                chart: Color::BLACK,
                 panel: rgb(0xF1F5F9),
                 header: rgb(0xE2E8F0),
                 rule: rgb(0xB8C4D4),
