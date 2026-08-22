@@ -1280,6 +1280,7 @@ pub fn gaanim_render_system(
             Ref<RenderLayer>,
             Option<Ref<Path2D>>,
             Option<Ref<PathSource>>,
+            Option<Ref<FillLevel>>,
             Option<Ref<FillBrush>>,
             Option<Ref<StrokeBrush>>,
             Option<Ref<RasterImage>>,
@@ -1347,6 +1348,7 @@ pub fn gaanim_render_system(
         render_layer,
         path_ref,
         path_source_ref,
+        fill_level_ref,
         fill_ref,
         stroke_ref,
         raster_image_ref,
@@ -1413,6 +1415,10 @@ pub fn gaanim_render_system(
         let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
         let changed = path_changed
             || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
+            // Fill-level geometry is derived later in the frame. Track the
+            // source value too, so a retained fragment can never outlive a
+            // rewind or a segment replay that changes only this component.
+            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
             || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -1793,6 +1799,54 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn changing_fill_level_rebuilds_its_retained_fragment() {
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        let id = ObjectId::from_raw(47);
+        let entity = app
+            .world_mut()
+            .spawn((
+                MobjectId(id),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(rect_path(0.0, 0.0, 20.0, 20.0)),
+                PathSource(rect_path(0.0, 0.0, 20.0, 20.0)),
+                FillBrush::color(peniko::Color::from_rgb8(251, 146, 60)),
+                StrokeBrush::transparent(),
+                FillLevel(0.0),
+                Visible,
+            ))
+            .id();
+
+        app.update();
+        let first = app
+            .world()
+            .resource::<GaanimRenderCache>()
+            .fragment_cache
+            .get(&id)
+            .expect("initial fragment")
+            .clone();
+
+        app.world_mut().get_mut::<FillLevel>(entity).unwrap().0 = 0.55;
+        app.update();
+        let second = app
+            .world()
+            .resource::<GaanimRenderCache>()
+            .fragment_cache
+            .get(&id)
+            .expect("rebuilt fragment")
+            .clone();
+
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "a retained fragment must not survive a fill-level change"
+        );
     }
 
     #[test]

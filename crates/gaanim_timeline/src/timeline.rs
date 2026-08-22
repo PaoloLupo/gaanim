@@ -684,13 +684,14 @@ impl Timeline {
             entity_map.insert(mobj_id.0, entity);
         }
 
-        // A draw animation that starts later still owns the object's state
-        // before its first clip: it must remain at the lens' `from` value.
-        // Path2D objects are pre-seeded during scene construction, but native
-        // 3D lines have no Path2D to replace. Initialize only the earliest
-        // future PathCompletion per object, then let past/current clips below
-        // replay over it as usual.
-        let mut future_path_initials = HashMap::new();
+        // A future animation still owns the property's state before its first
+        // clip: it must remain at the lens' `from` value. Path2D objects are
+        // pre-seeded during scene construction, but native 3D lines have no
+        // Path2D to replace; FillLevel can likewise retain its previous value
+        // when continuous playback loops or crosses a segment boundary.
+        // Initialize only the earliest future clip per object, then let
+        // past/current clips below replay over it as usual.
+        let mut future_property_initials = HashMap::new();
         for clip in self.clips_in_range(self.current_time, self.cached_duration) {
             if clip.start <= self.current_time {
                 continue;
@@ -698,11 +699,14 @@ impl Timeline {
             let ClipPayload::Animation(anim) = &clip.payload else {
                 continue;
             };
-            if !matches!(anim.lens, PropertyLensSpec::PathCompletion { .. }) {
+            if !matches!(
+                anim.lens,
+                PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::FillLevel { .. }
+            ) {
                 continue;
             }
             let initial_t = anim.rate_func.evaluate(0.0);
-            future_path_initials
+            future_property_initials
                 .entry(anim.target)
                 .and_modify(|current: &mut (f64, PropertyLensSpec, f64)| {
                     if clip.start < current.0 {
@@ -711,7 +715,7 @@ impl Timeline {
                 })
                 .or_insert_with(|| (clip.start, anim.lens.clone(), initial_t));
         }
-        for (target, (_, lens, initial_t)) in future_path_initials {
+        for (target, (_, lens, initial_t)) in future_property_initials {
             if let Some(&target_entity) = entity_map.get(&target) {
                 apply_lens_spec(world, target_entity, &lens, initial_t, false);
             }
@@ -2272,7 +2276,7 @@ mod tests {
     use gaanim_core::ObjectId;
     use gaanim_core::kurbo::BezPath;
     use gaanim_math::{RateFunc, SpatialTransform};
-    use gaanim_scene::{Material3D, MobjectId, PathSource};
+    use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
 
     #[test]
@@ -2367,6 +2371,40 @@ mod tests {
         assert!((middle.roughness - 0.5).abs() < 1e-6);
         assert!((middle.metallic - 0.5).abs() < 1e-6);
         assert!((middle.emissive_strength - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn future_fill_level_clip_resets_to_its_initial_value_without_a_snapshot() {
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(91);
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                FillLevel(0.75),
+            ))
+            .id();
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("FillLevel", 0);
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::FillLevel {
+                    from: 0.0,
+                    to: 0.75,
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("FillLevel".into()),
+            }),
+        );
+
+        timeline.seek(&mut world, 0.5);
+
+        assert_eq!(world.get::<FillLevel>(entity).unwrap().0, 0.0);
     }
 
     #[test]
