@@ -10,8 +10,8 @@ use gaanim_api::canvas::{
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
-    Axis as NativeAxis, AxisStylePatch, Channel, ChartSpec as NativeChartSpec, Column,
-    ConstantValue, Crossing, DataMarkKind, DataSource as NativeDataSource,
+    Axis as NativeAxis, AxisLabelPosition, AxisStylePatch, Channel, ChartSpec as NativeChartSpec,
+    Column, ConstantValue, Crossing, DataMarkKind, DataSource as NativeDataSource,
     DataTable as NativeDataTable, Encoding, GuideSpec, MarkKind, MatchPolicy, NonFinitePolicy,
     NumberFormat, Sampling, ScaleSpec as NativeScaleSpec, SpaceLayer, TransitionFallback,
 };
@@ -249,8 +249,19 @@ impl PyAxis {
         Ok(Self(self.0.clone().numbers(format)))
     }
 
-    fn label(&self, text: String) -> Self {
-        Self(self.0.clone().label(text))
+    #[pyo3(signature = (text, *, position="center"))]
+    fn label(&self, text: String, position: &str) -> PyResult<Self> {
+        let position = match position {
+            "start" | "bottom" => AxisLabelPosition::Start,
+            "center" | "middle" => AxisLabelPosition::Center,
+            "end" | "top" => AxisLabelPosition::End,
+            _ => {
+                return Err(value_error(
+                    "label position must be start, center, end, top, or bottom",
+                ));
+            }
+        };
+        Ok(Self(self.0.clone().label(text).label_position(position)))
     }
 
     fn crossing(&self, value: Bound<'_, PyAny>) -> PyResult<Self> {

@@ -42,6 +42,19 @@ pub enum Crossing {
     Value(f64),
 }
 
+/// Position of an axis title along its own axis.
+///
+/// Cartesian spaces resolve `Start` and `End` against the minimum and maximum
+/// ends respectively, while `Center` keeps the title in the middle. The side
+/// of the axis is chosen by the space so titles remain outside their ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AxisLabelPosition {
+    Start,
+    #[default]
+    Center,
+    End,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberFormat {
     Auto,
@@ -108,6 +121,7 @@ pub struct Axis {
     minor_subdivisions: usize,
     format: NumberFormat,
     label: Option<String>,
+    label_position: AxisLabelPosition,
     crossing: Crossing,
     style: AxisStyle,
     style_patch: AxisStylePatch,
@@ -171,6 +185,7 @@ impl Axis {
             minor_subdivisions: 0,
             format: NumberFormat::Auto,
             label: None,
+            label_position: AxisLabelPosition::Center,
             // A categorical axis has no meaningful zero crossing. Keep the
             // perpendicular axis on the outer band edge instead of through
             // the first category.
@@ -192,6 +207,7 @@ impl Axis {
             minor_subdivisions: 0,
             format: NumberFormat::Auto,
             label: None,
+            label_position: AxisLabelPosition::Center,
             crossing: Crossing::Auto,
             style: AxisStyle::default(),
             style_patch: AxisStylePatch::default(),
@@ -223,6 +239,12 @@ impl Axis {
 
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Place the title at the start, center, or end of this axis.
+    pub fn label_position(mut self, position: AxisLabelPosition) -> Self {
+        self.label_position = position;
         self
     }
 
@@ -317,6 +339,10 @@ impl Axis {
 
     pub fn label_text(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    pub fn label_position_value(&self) -> AxisLabelPosition {
+        self.label_position
     }
 
     pub fn style_value(&self) -> AxisStyle {
@@ -606,6 +632,17 @@ mod tests {
                 .map(|tick| tick.label.as_str())
                 .collect::<Vec<_>>(),
             ["A", "B", "C"]
+        );
+    }
+
+    #[test]
+    fn axis_titles_default_to_center_and_can_use_an_endpoint() {
+        let axis = Axis::linear(0.0, 1.0).unwrap().label("velocity");
+        assert_eq!(axis.label_position_value(), AxisLabelPosition::Center);
+        assert_eq!(
+            axis.label_position(AxisLabelPosition::End)
+                .label_position_value(),
+            AxisLabelPosition::End
         );
     }
 

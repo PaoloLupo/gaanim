@@ -133,9 +133,18 @@ para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p
 Los selectores de tema `axes/numbers` y `axes/labels` permiten sustituir estos
 valores globalmente.
 
+Los títulos de eje se sitúan fuera del número más ancho y de la etiqueta de
+tick más alta, con un margen moderado. Por tanto, las categorías y los títulos
+pueden usar saltos de línea sin invadir el área de trazado ni entre sí. El
+título del eje y queda centrado y gira +90° de forma predeterminada. Usa
+`position="start"`, `"center"` o `"end"` para mover el título a lo largo del
+eje; en un eje vertical, `"top"` y `"bottom"` son alias legibles de sus
+extremos.
+
 ```python
 color = Field("temperature", scale=Scale.symlog((-100, 100), threshold=1))
 x = Axis.log(0.1, 1000, base=10).ticks(10).label("frequency")
+y = Axis.linear(0, 1).label("relative value", position="top")
 guide = Guide.colorbar(title="temperature")
 ```
 

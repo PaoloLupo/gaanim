@@ -211,7 +211,7 @@ def validate_visualization_contract(module: object) -> list[str]:
     failures: list[str] = []
     scene = module.Scene(640, 360)
     x_axis = module.Axis.linear(-4.0, 4.0).ticks(1.0).label("x")
-    y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y")
+    y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y", position="top")
     space = scene.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
 
     amplitude = scene.parameter(1.0)

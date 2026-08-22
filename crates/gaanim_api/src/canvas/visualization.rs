@@ -8,11 +8,12 @@ use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
 use gaanim_objects::prelude::SvgPath;
 use gaanim_visualization::{
-    Axis, CartesianSpace, Channel, ChartSpec, ConstantValue, CoordinateMap2D, CoordinateMap3D,
-    DataMarkKind, Encoding, MarkKind, MatchPolicy, NonFinitePolicy, NumberLine, PlotFrame,
-    PolarSpace, Sampling, Scale, SpaceLayer, TransitionFallback, area_path, bars, box_stats,
-    error_bar_path, histogram, implicit_contours, line_path, sample_function, sample_parametric,
-    sample_surface, sample_vector_field, scatter_points, step_path, violin_path,
+    Axis, AxisLabelPosition, CartesianSpace, Channel, ChartSpec, ConstantValue, CoordinateMap2D,
+    CoordinateMap3D, DataMarkKind, Encoding, MarkKind, MatchPolicy, NonFinitePolicy, NumberLine,
+    PlotFrame, PolarSpace, Sampling, Scale, SpaceGeometry2D, SpaceLayer, TransitionFallback,
+    area_path, bars, box_stats, error_bar_path, histogram, implicit_contours, line_path,
+    sample_function, sample_parametric, sample_surface, sample_vector_field, scatter_points,
+    step_path, violin_path,
 };
 
 use super::ops::Op;
@@ -40,6 +41,14 @@ pub enum VisualizationError {
     InvalidParameter,
     #[error("mark {0:?} does not have a 3D batch materializer")]
     UnsupportedChartMark3D(MarkKind),
+}
+
+fn axis_title_coordinate(position: AxisLabelPosition, extent: f64) -> f64 {
+    match position {
+        AxisLabelPosition::Start => -extent * 0.5,
+        AxisLabelPosition::Center => 0.0,
+        AxisLabelPosition::End => extent * 0.5,
+    }
 }
 
 /// A point expressed in one coordinate space's local data mapping.
@@ -1131,6 +1140,135 @@ impl Canvas {
         axis.with_theme_style(style)
     }
 
+    fn axis_text_size(&self, text: &str, scale: f64) -> (f64, f64) {
+        let font_size =
+            self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size * scale;
+        let lines: Vec<&str> = text.lines().collect();
+        let line_count = lines.len().max(1) as f64;
+        let longest_line = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0) as f64;
+        // Axis text is intentionally measured conservatively here. Text shaping
+        // happens later during compilation, but reserving 0.65em per character
+        // keeps labels clear without creating a shaping pass for every tick.
+        (
+            longest_line * font_size * 0.65,
+            line_count * font_size * 1.2,
+        )
+    }
+
+    fn x_tick_label_extra_offset(&self, text: &str, scale: f64) -> f64 {
+        const SINGLE_LINE_EXTRA: f64 = 4.0;
+        let font_size =
+            self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size * scale;
+        let additional_lines = text.lines().count().saturating_sub(1) as f64;
+        // Text is centered on its authored position. Shift it by half of each
+        // added line so that a multiline label grows away from the axis while
+        // its closest line keeps the same gap as a single-line label.
+        SINGLE_LINE_EXTRA + additional_lines * font_size * 0.6
+    }
+
+    fn lay_out_cartesian_axis_labels(
+        &self,
+        space: &CartesianSpace,
+        geometry: &mut SpaceGeometry2D,
+        number_scale: f64,
+        label_scale: f64,
+    ) {
+        const NUMBER_GAP: f64 = 12.0;
+        const TITLE_GAP: f64 = 12.0;
+
+        let x_cross = space.map.x.crossing_value();
+        let y_cross = space.map.y.crossing_value();
+        let Ok(axis_origin) = space.map.data_to_local(x_cross, y_cross) else {
+            return;
+        };
+        let x_tick_labels: Vec<_> = space
+            .map
+            .x
+            .ticks_values(7)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|tick| tick.major && !tick.label.is_empty())
+            .collect();
+        let x_tick_height = x_tick_labels
+            .iter()
+            .map(|tick| self.axis_text_size(&tick.label, number_scale).1)
+            .fold(0.0, f64::max);
+        let x_tick_extra_offset = x_tick_labels
+            .iter()
+            .map(|tick| self.x_tick_label_extra_offset(&tick.label, number_scale))
+            .fold(0.0, f64::max);
+        // When the value axis includes negative values, bars extend below the
+        // zero axis. Put categorical tick labels above that axis so neither
+        // the labels nor their multiline expansion collide with those bars.
+        let x_labels_direction = if space.map.y.domain().0 < 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        for label in geometry.numbers.iter_mut().take(x_tick_labels.len()) {
+            let distance = (label.position.y - axis_origin.y).abs()
+                + self.x_tick_label_extra_offset(&label.text, number_scale);
+            label.position.y = axis_origin.y + x_labels_direction * distance;
+        }
+        let y_tick_width = space
+            .map
+            .y
+            .ticks_values(7)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|tick| tick.major && !tick.label.is_empty() && tick.value != x_cross)
+            .map(|tick| self.axis_text_size(&tick.label, number_scale).0)
+            .fold(0.0, f64::max);
+
+        geometry.labels.clear();
+        if let Some(label) = space.map.x.label_text() {
+            let (_, height) = self.axis_text_size(label, label_scale);
+            geometry.labels.push(gaanim_visualization::LabelGeometry {
+                text: label.to_owned(),
+                position: Point::new(
+                    axis_title_coordinate(
+                        space.map.x.label_position_value(),
+                        space.map.frame.width,
+                    ),
+                    axis_origin.y
+                        + x_labels_direction
+                            * (space.map.x.style_value().tick_length
+                                + NUMBER_GAP
+                                + x_tick_extra_offset
+                                + x_tick_height * 0.5
+                                + TITLE_GAP
+                                + height * 0.5),
+                ),
+                rotation: 0.0,
+                color: space.map.x.style_value().label_color,
+            });
+        }
+        if let Some(label) = space.map.y.label_text() {
+            let (_, height) = self.axis_text_size(label, label_scale);
+            geometry.labels.push(gaanim_visualization::LabelGeometry {
+                text: label.to_owned(),
+                position: Point::new(
+                    axis_origin.x
+                        - space.map.y.style_value().tick_length
+                        - NUMBER_GAP
+                        - y_tick_width * 0.5
+                        - TITLE_GAP
+                        - height * 0.5,
+                    axis_title_coordinate(
+                        space.map.y.label_position_value(),
+                        space.map.frame.height,
+                    ),
+                ),
+                rotation: std::f64::consts::FRAC_PI_2,
+                color: space.map.y.style_value().label_color,
+            });
+        }
+    }
+
     fn attach_to_space(&mut self, space: &CoordinateSpaceHandle, child: &DrawableHandle) {
         child
             .spec
@@ -1537,7 +1675,28 @@ impl Canvas {
             let rgba = grid_color.to_rgba8();
             space.minor_grid_color = Color::from_rgba8(rgba.r, rgba.g, rgba.b, rgba.a / 2);
         }
-        let geometry = space.geometry()?;
+        let mut geometry = space.geometry()?;
+        let number_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/numbers"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| {
+                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
+            })
+            .unwrap_or(1.0);
+        let label_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/labels"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| {
+                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
+            })
+            .unwrap_or(1.125);
+        self.lay_out_cartesian_axis_labels(&space, &mut geometry, number_scale, label_scale);
         let mut layers = HashMap::new();
         let grid_major = self.visualization_path(
             geometry.major_grid,
@@ -1583,26 +1742,6 @@ impl Canvas {
         );
         layers.insert(SpaceLayer::Ticks, ticks.clone());
 
-        let number_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/numbers"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| {
-                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
-            })
-            .unwrap_or(1.0);
-        let label_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/labels"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| {
-                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
-            })
-            .unwrap_or(1.125);
         let number_handles: Vec<DrawableHandle> = geometry
             .numbers
             .iter()
@@ -1625,6 +1764,7 @@ impl Canvas {
                     .fill(label.color)
                     .scaled(label_scale)
                     .at(label.position.x, label.position.y)
+                    .rotated(label.rotation)
             })
             .collect();
         let label_refs: Vec<&DrawableHandle> = label_handles.iter().collect();
@@ -2390,8 +2530,9 @@ mod tests {
 
     fn group_child_translations(canvas: &Canvas, group: &DrawableHandle) -> Vec<DVec3> {
         let group_spec = group.spec.lock().expect("group spec poisoned");
-        let SpawnKind::GroupNoCenter(children) = &group_spec.kind else {
-            panic!("expected an uncentered group");
+        let children = match &group_spec.kind {
+            SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children,
+            _ => panic!("expected a group"),
         };
         let children = children.clone();
         drop(group_spec);
@@ -2422,6 +2563,179 @@ mod tests {
                     .expect("label must have an authored translation")
             })
             .collect()
+    }
+
+    fn group_child_rotations(canvas: &Canvas, group: &DrawableHandle) -> Vec<f64> {
+        let group_spec = group.spec.lock().expect("group spec poisoned");
+        let children = match &group_spec.kind {
+            SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children,
+            _ => panic!("expected a group"),
+        };
+        let children = children.clone();
+        drop(group_spec);
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        children
+            .iter()
+            .map(|id| {
+                let spec = state
+                    .active()
+                    .ops
+                    .iter()
+                    .find_map(|op| match op {
+                        Op::Spawn(spec) if spec.lock().expect("object spec poisoned").id == *id => {
+                            Some(spec.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("label must have a spawn spec");
+                spec.lock()
+                    .expect("label spec poisoned")
+                    .layout_ops
+                    .iter()
+                    .rev()
+                    .find_map(|op| match op {
+                        super::super::types::LayoutOp::SetRotation(value) => Some(*value),
+                        _ => None,
+                    })
+                    .expect("label must have an authored rotation")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cartesian_axis_titles_clear_multiline_ticks_with_moderate_spacing() {
+        let mut canvas = Canvas::new(640, 360);
+        let space = canvas
+            .coordinate_axes(
+                Axis::category(["Ladrillo\no bloque".into(), "Piedra\ncon barro".into()])
+                    .unwrap()
+                    .label("Material predominante"),
+                Axis::linear(0.0, 70.0)
+                    .unwrap()
+                    .ticks(10.0)
+                    .unwrap()
+                    .label("Viviendas\nprueba (%)"),
+                Some(640.0),
+                Some(360.0),
+                true,
+            )
+            .unwrap();
+        let labels = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Labels).expect("axis titles"),
+        );
+        let rotations = group_child_rotations(
+            &canvas,
+            space.layer(SpaceLayer::Labels).expect("axis titles"),
+        );
+
+        assert_eq!(labels.len(), 2);
+        assert!(labels[0].x.abs() < 1e-9, "x title remains centered");
+        assert!(
+            labels[0].y < -295.0 && labels[0].y > -335.0,
+            "x title clears the multiline category ticks"
+        );
+        assert!(
+            labels[1].x < -380.0 && labels[1].x > -460.0,
+            "rotated y title clears the widest numeric tick with a moderate gap"
+        );
+        assert!(
+            labels[1].y.abs() < 1e-9,
+            "y title remains vertically centered"
+        );
+        let numbers = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Numbers).expect("axis tick labels"),
+        );
+        assert!(
+            numbers[0].y < -220.0 && numbers[0].y > -240.0,
+            "multiline category labels clear the x axis"
+        );
+        assert_eq!(rotations[0], 0.0);
+        assert!((rotations[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn multiline_category_ticks_align_their_first_line_with_single_line_ticks() {
+        let mut canvas = Canvas::new(400, 200);
+        let space = canvas
+            .coordinate_axes(
+                Axis::category(["Una línea".into(), "Dos\nlíneas".into()]).unwrap(),
+                Axis::linear(0.0, 1.0).unwrap(),
+                Some(400.0),
+                Some(200.0),
+                true,
+            )
+            .unwrap();
+        let numbers = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Numbers).expect("axis tick labels"),
+        );
+
+        let expected_offset = canvas.x_tick_label_extra_offset("Dos\nlíneas", 1.0)
+            - canvas.x_tick_label_extra_offset("Una línea", 1.0);
+        assert!(
+            ((numbers[0].y - numbers[1].y) - expected_offset).abs() < 1e-9,
+            "multiline labels grow away from the axis without changing their nearest-line gap"
+        );
+    }
+
+    #[test]
+    fn negative_value_domains_place_category_ticks_above_the_x_axis() {
+        let mut canvas = Canvas::new(400, 200);
+        let space = canvas
+            .coordinate_axes(
+                Axis::category(["Una línea".into(), "Dos\nlíneas".into()])
+                    .unwrap()
+                    .label("Categoría"),
+                Axis::linear(-10.0, 10.0).unwrap(),
+                Some(400.0),
+                Some(200.0),
+                true,
+            )
+            .unwrap();
+        let numbers = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Numbers).expect("axis tick labels"),
+        );
+        let labels = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Labels).expect("axis titles"),
+        );
+
+        assert!(numbers[0].y > 0.0 && numbers[1].y > numbers[0].y);
+        assert!(
+            labels[0].y > numbers[1].y,
+            "the x title continues above the multiline category labels"
+        );
+    }
+
+    #[test]
+    fn cartesian_axis_titles_can_move_to_the_axis_end() {
+        let mut canvas = Canvas::new(400, 200);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .label("x")
+                    .label_position(AxisLabelPosition::End),
+                Axis::linear(0.0, 2.0)
+                    .unwrap()
+                    .label("y")
+                    .label_position(AxisLabelPosition::End),
+                Some(400.0),
+                Some(200.0),
+                true,
+            )
+            .unwrap();
+        let labels = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Labels).expect("axis titles"),
+        );
+
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].x, 200.0, "x title moves to the axis end");
+        assert_eq!(labels[1].y, 100.0, "y title moves to the top axis end");
     }
 
     fn svg_stroke_color(handle: &DrawableHandle) -> Color {

@@ -1,8 +1,16 @@
-use crate::{Axis, AxisError};
+use crate::{Axis, AxisError, AxisLabelPosition};
 use gaanim_core::kurbo::{BezPath, Point};
 use gaanim_core::peniko::Color;
 use gaanim_expr::Expr;
 use gaanim_math::Bounds3D;
+
+fn axis_title_coordinate(position: AxisLabelPosition, extent: f64) -> f64 {
+    match position {
+        AxisLabelPosition::Start => -extent * 0.5,
+        AxisLabelPosition::Center => 0.0,
+        AxisLabelPosition::End => extent * 0.5,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlotFrame {
@@ -104,6 +112,7 @@ pub enum SpaceLayer {
 pub struct LabelGeometry {
     pub text: String,
     pub position: Point,
+    pub rotation: f64,
     pub color: Color,
 }
 
@@ -209,7 +218,8 @@ impl CartesianSpace {
             if self.numbers && tick.major && !tick.label.is_empty() {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(x, x_axis_y - style.tick_length - 18.0),
+                    position: Point::new(x, x_axis_y - style.tick_length - 12.0),
+                    rotation: 0.0,
                     color: style.number_color,
                 });
             }
@@ -233,7 +243,8 @@ impl CartesianSpace {
             if self.numbers && tick.major && !tick.label.is_empty() && tick.value != x_cross {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(y_axis_x - style.tick_length - 24.0, y),
+                    position: Point::new(y_axis_x - style.tick_length - 12.0, y),
+                    rotation: 0.0,
                     color: style.number_color,
                 });
             }
@@ -248,14 +259,22 @@ impl CartesianSpace {
             if let Some(label) = self.map.x.label_text() {
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(frame.width * 0.5 + 24.0, x_axis_y),
+                    position: Point::new(
+                        axis_title_coordinate(self.map.x.label_position_value(), frame.width),
+                        x_axis_y - self.map.x.style_value().tick_length - 12.0,
+                    ),
+                    rotation: 0.0,
                     color: self.map.x.style_value().label_color,
                 });
             }
             if let Some(label) = self.map.y.label_text() {
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(y_axis_x, frame.height * 0.5 + 24.0),
+                    position: Point::new(
+                        y_axis_x - self.map.y.style_value().tick_length - 12.0,
+                        axis_title_coordinate(self.map.y.label_position_value(), frame.height),
+                    ),
+                    rotation: std::f64::consts::FRAC_PI_2,
                     color: self.map.y.style_value().label_color,
                 });
             }
@@ -392,6 +411,8 @@ mod tests {
                 matches!(pair, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.y == end.y)
             })
             .expect("major grid should contain a horizontal guide");
-        assert!(matches!(horizontal, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == -100.0 && end.x == 100.0));
+        assert!(
+            matches!(horizontal, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == -100.0 && end.x == 100.0)
+        );
     }
 }
