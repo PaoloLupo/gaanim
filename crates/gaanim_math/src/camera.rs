@@ -253,7 +253,7 @@ impl Camera {
         self.position = eye;
         self.target = target;
         self.up = up;
-        let view = DMat4::look_at_rh(eye, target, up);
+        let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, target, up);
         // view = (T*R)^-1  => T*R = view.inverse()
         let cam_to_world = view.inverse();
         let (_scale, rot, _trans) = cam_to_world.to_scale_rotation_translation();
@@ -356,11 +356,15 @@ impl Camera {
             Projection::Orthographic { zoom } => {
                 let hw = (self.viewport_width as f64) / (2.0 * zoom);
                 let hh = (self.viewport_height as f64) / (2.0 * zoom);
-                DMat4::orthographic_rh(-hw, hw, -hh, hh, -1000.0, 1000.0)
+                gaanim_core::glam::dcamera::rh::proj::directx::orthographic(
+                    -hw, hw, -hh, hh, -1000.0, 1000.0,
+                )
             }
             Projection::Perspective { fov_y, near, far } => {
                 let aspect = (self.viewport_width as f64) / (self.viewport_height as f64);
-                DMat4::perspective_rh(fov_y, aspect, near, far)
+                gaanim_core::glam::dcamera::rh::proj::directx::perspective(
+                    fov_y, aspect, near, far,
+                )
             }
         }
     }

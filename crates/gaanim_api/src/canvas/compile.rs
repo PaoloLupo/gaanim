@@ -3552,7 +3552,9 @@ impl Canvas {
                     let to_eye = *eye;
                     let from_target = *camera_target;
                     let to_target = *target;
-                    let view_to = gaanim_core::glam::DMat4::look_at_rh(to_eye, to_target, *up);
+                    let view_to = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
+                        to_eye, to_target, *up,
+                    );
                     let to_rot = view_to.inverse().to_scale_rotation_translation().1;
                     builder.timeline.add_clip(
                         builder.default_track,
@@ -4954,7 +4956,9 @@ impl Canvas {
                         up: *up,
                     },
                 );
-                let to_rotation = gaanim_core::glam::DMat4::look_at_rh(*eye, *target, *up)
+                let to_rotation = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
+                    *eye, *target, *up,
+                )
                     .inverse()
                     .to_scale_rotation_translation()
                     .1;
@@ -4994,7 +4998,9 @@ impl Canvas {
                     gaanim_animation::TrackingEndpoint::Static(target),
                 ) = (compiled_eye, compiled_target)
                 {
-                    let view = gaanim_core::glam::DMat4::look_at_rh(eye, target, *up);
+                    let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
+                        eye, target, *up,
+                    );
                     *camera_position = eye;
                     *camera_target = target;
                     *camera_rotation = view.inverse().to_scale_rotation_translation().1;

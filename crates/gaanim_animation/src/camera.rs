@@ -1,7 +1,7 @@
 //! Reactive camera bindings evaluated after scene updaters and layout.
 
 use bevy::prelude::{Component, World};
-use gaanim_core::glam::{DMat4, DQuat, DVec3};
+use gaanim_core::glam::{DQuat, DVec3};
 
 use crate::updaters::{TrackingEndpoint, TrackingScalar, resolve_tracking_endpoint};
 
@@ -51,7 +51,7 @@ fn look_at_rotation(eye: DVec3, target: DVec3, up: DVec3) -> Option<DQuat> {
     {
         return None;
     }
-    let view = DMat4::look_at_rh(eye, target, up);
+    let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, target, up);
     Some(view.inverse().to_scale_rotation_translation().1)
 }
 

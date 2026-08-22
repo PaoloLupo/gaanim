@@ -2018,7 +2018,11 @@ fn apply_lens_spec(
                 // Keep rotation consistent with look_at
                 let eye = camera.position;
                 let up = camera.up;
-                let view = gaanim_core::glam::DMat4::look_at_rh(eye, camera.target, up);
+                let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
+                    eye,
+                    camera.target,
+                    up,
+                );
                 let rot = view.inverse().to_scale_rotation_translation().1;
                 camera.rotation = rot;
             }
