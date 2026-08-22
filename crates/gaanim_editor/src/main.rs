@@ -96,12 +96,11 @@ fn main() {
         (
             script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
             reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
-            reload_status_overlay_system,
         ),
     )
     .add_systems(
         bevy_egui::EguiPrimaryContextPass,
-        script_error_overlay_system,
+        (reload_status_overlay_system, script_error_overlay_system),
     )
     .add_systems(Update, open_project_request_system);
 
