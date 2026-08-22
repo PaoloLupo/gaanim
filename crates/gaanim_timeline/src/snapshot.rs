@@ -54,6 +54,9 @@ pub struct EntitySnapshot {
     pub fill_draw_progress: Option<f32>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub fill_level: Option<f64>,
+    /// Live target/interpolation state for a reactive surrounding rectangle.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub surrounding_rect: Option<gaanim_animation::SurroundingRect>,
     /// Runtime progress for the transient Write pen-tip illumination.
     /// Restoring it prevents a partial glyph/head highlight from surviving a rewind.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -177,6 +180,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
             .map(gaanim_animation::FillDrawProgress),
     );
     sync_optional(entity_mut, snap.fill_level.map(FillLevel));
+    sync_optional(entity_mut, snap.surrounding_rect.clone());
     sync_optional(entity_mut, snap.write_tip_glow.clone());
     sync_optional(
         entity_mut,
@@ -386,6 +390,9 @@ impl WorldSnapshot {
                         .get::<gaanim_animation::FillDrawProgress>(entity)
                         .map(|p| p.0),
                     fill_level: world.get::<FillLevel>(entity).map(|level| level.0),
+                    surrounding_rect: world
+                        .get::<gaanim_animation::SurroundingRect>(entity)
+                        .cloned(),
                     write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)

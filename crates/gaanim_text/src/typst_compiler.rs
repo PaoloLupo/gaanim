@@ -742,12 +742,13 @@ fn compile_typst_source_with_resources(
     let text_center = total_bounds.center();
     let mut centered_children = Vec::with_capacity(extracted_children.len());
     for child in extracted_children {
-        let mut new_bounds = child.bounds;
-        new_bounds.min -= text_center;
-        new_bounds.max -= text_center;
         centered_children.push(CachedTypstChild {
             path: child.path,
-            bounds: new_bounds,
+            // Keep bounds in the same local coordinate space as the path.
+            // The child transform below centers both for rendering and world
+            // bounds propagation; shifting bounds here would apply the offset
+            // twice to bounds-driven derived geometry.
+            bounds: child.bounds,
             transform: SpatialTransform::new_2d(-text_center.x, -text_center.y),
             fill: child.fill,
             stroke: child.stroke,
@@ -1045,6 +1046,37 @@ mod tests {
             "a subscripted formula baseline must not collapse to its visual center"
         );
         assert_eq!(compiled.metrics.line_count, 1);
+    }
+
+    #[test]
+    fn typst_child_local_bounds_share_the_path_coordinate_space() {
+        let registry = FontRegistry::new();
+        let compiled = compile_typst_source(
+            &registry,
+            "#set page(width: auto, height: auto, margin: 0pt)\n$E = m c^2$",
+            false,
+            Some("New Computer Modern"),
+            Some("New Computer Modern Math"),
+            Some(48.0),
+            Some(48.0),
+            &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+            &StrokeBrush::transparent(),
+        )
+        .expect("equation should compile");
+
+        for child in compiled.children {
+            let path_bounds = child.path.bounding_box();
+            assert_eq!(
+                child.bounds,
+                Bounds3D::new_2d(
+                    path_bounds.x0,
+                    path_bounds.y0,
+                    path_bounds.x1,
+                    path_bounds.y1
+                ),
+                "LocalBounds must describe Path2D before SpatialTransform is applied"
+            );
+        }
     }
 
     #[test]

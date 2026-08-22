@@ -7,6 +7,17 @@ use gaanim_math::RateFunc;
 
 use crate::canvas::CanvasEndpoint;
 
+/// An authored source whose live visual bounds can drive derived geometry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundsTarget {
+    Drawable(ObjectId),
+    TextSelection {
+        target: ObjectId,
+        fragment: String,
+        occurrence: Option<usize>,
+    },
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DrawAnimationConfig {
     pub stroke_width: Option<f64>,
@@ -224,6 +235,11 @@ pub enum AnimationType {
     FillLevelTo {
         from: f64,
         to: f64,
+    },
+    /// Move and resize a live surrounding rectangle between object sets.
+    SurroundingRectRetarget {
+        from: Vec<BoundsTarget>,
+        to: Vec<BoundsTarget>,
     },
     /// Manim-style `Write`: progressively draw the target's path(s) along
     /// their arc length, then cross-fade the fill in once the outline is

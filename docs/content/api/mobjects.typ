@@ -219,6 +219,27 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Scene.surrounding_rect",
+  kind: "factory",
+  signature: "surrounding_rect(targets, *, padding=12, corner_radius=8) -> SurroundingRect",
+  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [One or more live object, text-part, or equation-part bounds.]), (name: "padding", type: "float | (v,h) | (t,r,b,l)", default: "12", desc: [Finite non-negative scene-unit inset around the union.]), (name: "corner_radius", type: "float", default: "8", desc: [Non-negative radius, clamped to the current frame size.])),
+  returns: (type: "SurroundingRect", desc: [Theme-stroked, unfilled live frame.]),
+  desc: [Uses the targets' world-space AABB and follows movement, scaling, rotation, and layout in the same frame. Empty, foreign-scene, or invalid targets and dimensions raise `TypeError` or `ValueError`. Position, scale, rotation, and Layout ownership belong to the binding; animate the target or call `retarget`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene, part
+scene = Scene(480, 270, background="#0f172a")
+eq = scene.equation("E =", part("mass", "m"), part("light", "c^2"))
+frame = scene.surrounding_rect(eq["mass"]).stroke(GOLD, 3)
+scene.play([eq.fade_in(), frame.create()])
+scene.play([frame.retarget(eq["light"], duration=0.8)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Scene.square",
   kind: "factory",
   signature: "square(size: float) -> Drawable",

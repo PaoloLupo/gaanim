@@ -1,5 +1,6 @@
 pub mod ops;
 mod segment;
+pub use crate::anim::BoundsTarget;
 pub use gaanim_animation::AxisMask;
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
 pub use ops::{
@@ -40,7 +41,8 @@ pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, BooleanError,
     CameraBindingError, CameraConstraintHandle, Canvas, DEFAULT_REACTIVE_TEXT_SIZE,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError,
-    SceneObjectError, SupportHandle, ThemeError, VideoLoadError,
+    SceneObjectError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
+    VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

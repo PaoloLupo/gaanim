@@ -485,6 +485,8 @@ pub enum SpawnKind {
     Circle(f64),
     Rect(f64, f64),
     RoundedRect(f64, f64, f64),
+    /// Placeholder path regenerated from live object bounds.
+    SurroundingRect,
     Square(f64),
     Dot(f64),
     Ellipse(f64, f64),

@@ -1904,6 +1904,13 @@ fn apply_lens_spec(
                     .insert(gaanim_scene::FillLevel(value));
             }
         }
+        PropertyLensSpec::SurroundingRectTargets { from, to } => {
+            if let Some(mut frame) = world.get_mut::<gaanim_animation::SurroundingRect>(target) {
+                frame.from.clone_from(from);
+                frame.to.clone_from(to);
+                frame.progress = t.clamp(0.0, 1.0);
+            }
+        }
         PropertyLensSpec::CameraPosition { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from.lerp(*to, t);
@@ -2267,6 +2274,56 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn surrounding_rect_retarget_seek_is_exact_and_reversible() {
+        let mut world = World::new();
+        let frame_id = ObjectId::from_parts(1, 1);
+        let from = ObjectId::from_parts(2, 1);
+        let to = ObjectId::from_parts(3, 1);
+        let frame_entity = world
+            .spawn((
+                MobjectId(frame_id),
+                SpatialTransform::default(),
+                gaanim_animation::SurroundingRect::new(vec![from], [12.0; 4], 8.0),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("SurroundingRect", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: frame_id,
+                lens: PropertyLensSpec::SurroundingRectTargets {
+                    from: vec![from],
+                    to: vec![to],
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        timeline.seek(&mut world, 1.5);
+        let active = world
+            .get::<gaanim_animation::SurroundingRect>(frame_entity)
+            .unwrap();
+        assert_eq!(active.from, vec![from]);
+        assert_eq!(active.to, vec![to]);
+        assert_eq!(active.progress, 0.5);
+
+        timeline.seek(&mut world, 0.5);
+        let restored = world
+            .get::<gaanim_animation::SurroundingRect>(frame_entity)
+            .unwrap();
+        assert_eq!(restored.from, vec![from]);
+        assert_eq!(restored.to, vec![from]);
+        assert_eq!(restored.progress, 1.0);
+    }
 
     #[test]
     fn material_3d_seek_is_exact_and_reversible() {

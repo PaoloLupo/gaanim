@@ -913,7 +913,8 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::Bezier { .. }
         | SpawnKind::Curve(_)
         | SpawnKind::TracedPathLine
-        | SpawnKind::TrackingLine => "line",
+        | SpawnKind::TrackingLine
+        | SpawnKind::SurroundingRect => "line",
         SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ExpressionReadout { .. } => {
             "text"
         }
@@ -935,6 +936,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Circle(_) => "circle",
         SpawnKind::Rect(_, _) => "rect",
         SpawnKind::RoundedRect(_, _, _) => "rounded_rect",
+        SpawnKind::SurroundingRect => "surrounding_rect",
         SpawnKind::Square(_) => "square",
         SpawnKind::Dot(_) => "dot",
         SpawnKind::Ellipse(_, _) => "ellipse",

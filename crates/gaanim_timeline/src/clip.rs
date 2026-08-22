@@ -213,6 +213,10 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    SurroundingRectTargets {
+        from: Vec<ObjectId>,
+        to: Vec<ObjectId>,
+    },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -395,6 +399,10 @@ impl PropertyLensSpec {
             Self::FillLevel { from, to } => PropertyLens::FillLevel {
                 from: *from,
                 to: *to,
+            },
+            Self::SurroundingRectTargets { from, to } => PropertyLens::SurroundingRectTargets {
+                from: from.clone(),
+                to: to.clone(),
             },
             Self::CameraPosition { from, to } => PropertyLens::CameraPosition {
                 from: *from,

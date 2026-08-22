@@ -133,6 +133,10 @@ fn math_source_terms(source: &str) -> Vec<String> {
 }
 
 impl DrawableHandle {
+    pub fn bounds_target(&self) -> crate::anim::BoundsTarget {
+        crate::anim::BoundsTarget::Drawable(self.id)
+    }
+
     /// Return a non-rendered point bound to this drawable's local bounds.
     pub fn anchor_point(&self, anchor: Anchor, offset: DVec3) -> AnchorPoint {
         let normalized = anchor.to_offset();
@@ -345,7 +349,7 @@ impl DrawableHandle {
     pub fn is_live_derived_geometry(&self) -> bool {
         matches!(
             self.spec.lock().expect("object spec poisoned").kind,
-            SpawnKind::Boolean { live: true, .. }
+            SpawnKind::Boolean { live: true, .. } | SpawnKind::SurroundingRect
         )
     }
 
@@ -367,6 +371,9 @@ impl DrawableHandle {
     pub fn claim_layout(&self, owner: &DrawableHandle) -> Result<(), LayoutOwnershipError> {
         if !self.same_canvas(owner) {
             return Err(LayoutOwnershipError::ForeignScene);
+        }
+        if self.is_live_derived_geometry() {
+            return Err(LayoutOwnershipError::PositionalOperation);
         }
         let mut spec = self.spec.lock().expect("object spec poisoned");
         if spec.manual_position_animation
@@ -1124,6 +1131,18 @@ impl DrawableHandle {
         Anim::queued(self.id, ty, self.state.clone(), active_idx).with_duration(dur)
     }
 
+    pub(crate) fn surrounding_rect_retarget(
+        &self,
+        from: Vec<crate::anim::BoundsTarget>,
+        to: Vec<crate::anim::BoundsTarget>,
+        duration: Option<f64>,
+    ) -> Anim {
+        self.anim_dur(
+            AnimationType::SurroundingRectRetarget { from, to },
+            duration,
+        )
+    }
+
     /// Animates a `ValueTracker` to `to`. Regular drawables ignore this lens.
     pub fn animate_value_to(&self, to: f64) -> Anim {
         self.anim(AnimationType::SignalFloat { to })
@@ -1581,6 +1600,14 @@ impl DrawableHandle {
 }
 
 impl FragmentSelection {
+    pub fn bounds_target(&self) -> crate::anim::BoundsTarget {
+        crate::anim::BoundsTarget::TextSelection {
+            target: self.target,
+            fragment: self.fragment.clone(),
+            occurrence: self.occurrence,
+        }
+    }
+
     fn push(&self, op: Op) {
         self.state
             .lock()

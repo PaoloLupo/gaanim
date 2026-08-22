@@ -3936,6 +3936,44 @@ impl Canvas {
                     }
                 }
 
+                Op::AttachSurroundingRect {
+                    target,
+                    sources,
+                    padding,
+                    corner_radius,
+                } => {
+                    let compiled = sources
+                        .iter()
+                        .flat_map(|source| match source {
+                            crate::anim::BoundsTarget::Drawable(source) => {
+                                id_map.get(source).copied().into_iter().collect::<Vec<_>>()
+                            }
+                            crate::anim::BoundsTarget::TextSelection {
+                                target,
+                                fragment,
+                                occurrence,
+                            } => Self::fragment_child_ids(
+                                builder,
+                                &id_map,
+                                *target,
+                                fragment,
+                                *occurrence,
+                            ),
+                        })
+                        .collect::<Vec<_>>();
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_animation::SurroundingRect::new(
+                                compiled,
+                                *padding,
+                                *corner_radius,
+                            ),
+                        );
+                    }
+                }
+
                 Op::AttachTrackingSpring {
                     target,
                     from,
@@ -5126,6 +5164,29 @@ impl Canvas {
                 target_occurrence: *target_occurrence,
                 copy: *copy,
             },
+            AnimationType::SurroundingRectRetarget { from, to } => {
+                let remap_target = |target: &crate::anim::BoundsTarget| match target {
+                    crate::anim::BoundsTarget::Drawable(id) => id_map
+                        .get(id)
+                        .copied()
+                        .map(crate::anim::BoundsTarget::Drawable),
+                    crate::anim::BoundsTarget::TextSelection {
+                        target,
+                        fragment,
+                        occurrence,
+                    } => id_map.get(target).copied().map(|target| {
+                        crate::anim::BoundsTarget::TextSelection {
+                            target,
+                            fragment: fragment.clone(),
+                            occurrence: *occurrence,
+                        }
+                    }),
+                };
+                AnimationType::SurroundingRectRetarget {
+                    from: from.iter().filter_map(remap_target).collect(),
+                    to: to.iter().filter_map(remap_target).collect(),
+                }
+            }
             AnimationType::MoveAlongPath { path, path_target } => AnimationType::MoveAlongPath {
                 path: path.clone(),
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
@@ -5346,6 +5407,10 @@ impl Canvas {
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
+            }
+            SpawnKind::SurroundingRect => {
+                let b = builder.surrounding_rectangle(0.0, 0.0, 0.0);
+                Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::Square(sz) => {
                 let b = builder.square(*sz);

@@ -24,14 +24,14 @@ pub use updaters::{
     DimensionLabelPlacement, EndpointAngle, EndpointDistance, EndpointFollow, FollowOffsetSpace,
     InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
-    TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine,
-    TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
+    SurroundingRect, TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint,
+    TrackingLine, TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
     advance_x_updater, angle_label_placement_system, bob_updater, dimension_label_placement_system,
     endpoint_angle_system, endpoint_distance_system, endpoint_follow_system, follow_updater,
     mechanism_binding_system, orbit_updater, pulse_updater, resolve_entity_bounds,
     resolve_tracking_endpoint, resolve_tracking_endpoint_with_offset, rotate_updater,
-    sampled_series_system, seek_updaters, traced_path_3d_system, traced_path_system,
-    tracking_angle_system, tracking_line_system, tracking_vector_head_system,
+    sampled_series_system, seek_updaters, surrounding_rect_system, traced_path_3d_system,
+    traced_path_system, tracking_angle_system, tracking_line_system, tracking_vector_head_system,
     tracking_world_to_local, updater_system,
 };
 pub use writing::{
@@ -113,6 +113,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 curvature_on_curve_system.after(normal_on_curve_system),
             )
                 .in_set(SceneSet::Updaters),
+        );
+        app.add_systems(
+            Update,
+            surrounding_rect_system.in_set(SceneSet::DerivedGeometry),
         );
         app.add_systems(
             Update,

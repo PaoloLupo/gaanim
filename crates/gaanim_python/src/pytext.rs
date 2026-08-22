@@ -528,6 +528,14 @@ impl PyTextSelection {
             None => self.handle.select(self.fragment.clone()),
         }
     }
+
+    pub(crate) fn bounds_target(&self) -> gaanim_api::canvas::BoundsTarget {
+        self.inner().bounds_target()
+    }
+
+    pub(crate) fn owner(&self) -> &gaanim_api::canvas::DrawableHandle {
+        &self.handle
+    }
 }
 
 #[pymethods]

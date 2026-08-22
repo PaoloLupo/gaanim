@@ -143,6 +143,19 @@ scene.render()
 ]
 
 #api-entry(
+  name: "SurroundingRect.retarget",
+  kind: "animation",
+  signature: ".retarget(targets, *, duration=None) -> Anim",
+  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [New live bounds, including semantic text or equation parts.]), (name: "duration", type: "float | None", default: "None", desc: [Positive finite seconds; `None` uses the animation default.])),
+  returns: (type: "Anim", desc: [Edge-interpolation animation supporting normal easing.]),
+  desc: [Interpolates left, right, top, and bottom while both source and destination may continue moving. At completion the frame remains bound to the destination. Timeline seeks and rewinds reproduce the same geometry.],
+)[
+```python
+scene.play([frame.retarget(equation["result"], duration=0.9).spring()])
+```
+]
+
+#api-entry(
   name: "Drawable.glide_to",
   kind: "method",
   signature: ".glide_to(x: float, y: float) -> Anim",

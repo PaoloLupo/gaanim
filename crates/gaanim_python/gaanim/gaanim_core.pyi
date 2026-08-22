@@ -1357,6 +1357,29 @@ class AngleDimension(Drawable):
     @property
     def unit(self) -> Optional[Drawable]: ...
 
+class SurroundingRect(Drawable):
+    """Live axis-aligned frame around drawable or text-selection bounds.
+
+    The frame follows its current targets after movement, scaling, rotation,
+    or layout. Its path and transform are owned by the binding; use
+    :meth:`retarget` instead of positional or geometric Drawable operations.
+    Visual styling, create/write, fade, opacity, and effects remain available.
+    """
+    def retarget(
+        self,
+        targets: Drawable | TextSelection | Sequence[Drawable | TextSelection],
+        *,
+        duration: Optional[float] = None,
+    ) -> Anim:
+        """Tween all four frame edges to new live targets and keep following them.
+
+        ``duration`` is measured in seconds; ``None`` uses the standard
+        animation duration. The returned animation supports normal easing.
+        Empty, foreign-scene, or invalid targets raise ``ValueError`` or
+        ``TypeError``.
+        """
+        ...
+
 class ForceVector(Drawable):
     """Reactive force/vector with independently styleable shaft, solid head, and readout parts."""
     @property
@@ -2839,6 +2862,22 @@ class Scene:
 
         Example:
             result = scene.rounded_rect(1.0, 1.0, 1.0)
+        """
+        ...
+    def surrounding_rect(
+        self,
+        targets: Drawable | TextSelection | Sequence[Drawable | TextSelection],
+        *,
+        padding: Padding = 12.0,
+        corner_radius: float = 8.0,
+    ) -> SurroundingRect:
+        """Create a live outline around objects, text parts, or equation parts.
+
+        ``padding`` accepts a scalar, ``(vertical, horizontal)``, or
+        ``(top, right, bottom, left)`` in scene units. Targets are combined by
+        their world-space axis-aligned bounds. The default theme foreground
+        stroke is used with no fill. Invalid dimensions, empty targets, and
+        targets from another Scene raise ``ValueError`` or ``TypeError``.
         """
         ...
     def square(self, s: float) -> Drawable:

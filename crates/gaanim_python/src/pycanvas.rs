@@ -13,8 +13,8 @@ use gaanim_api::canvas::{
     CanvasTheme, CardSpec, ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle,
     DimensionOptions, EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant,
     ImageCrop, ImageFit, ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec,
-    PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec, ThemeFont,
-    VideoOptions,
+    PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec,
+    SurroundingRectHandle, ThemeFont, VideoOptions,
 };
 
 use crate::brush::PyPaint;
@@ -26,7 +26,7 @@ use crate::pylayout::{
     stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
 };
 use crate::pystyle::{PyAxesStyle, PyStyle};
-use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextStyle};
+use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextSelection, PyTextStyle};
 use crate::transition::PyTransitionType;
 use crate::visualization::{extract_expr, PyParameter, PyVariable};
 
@@ -95,6 +95,158 @@ pub struct PyAngleDimension {
     label: Option<PyDrawable>,
     number: Option<PyDrawable>,
     unit: Option<PyDrawable>,
+}
+
+#[pyclass(name = "SurroundingRect", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PySurroundingRect {
+    handle: SurroundingRectHandle,
+    scene: Arc<Mutex<ApiCanvas>>,
+}
+
+impl PySurroundingRect {
+    fn initializer(
+        handle: SurroundingRectHandle,
+        scene: Arc<Mutex<ApiCanvas>>,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.drawable.clone()))
+            .add_subclass(Self { handle, scene })
+    }
+}
+
+fn bounds_targets(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<
+    Vec<(
+        gaanim_api::canvas::BoundsTarget,
+        gaanim_api::canvas::DrawableHandle,
+    )>,
+> {
+    fn one(
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<(
+        gaanim_api::canvas::BoundsTarget,
+        gaanim_api::canvas::DrawableHandle,
+    )> {
+        if let Ok(selection) = value.extract::<PyRef<'_, PyTextSelection>>() {
+            return Ok((selection.bounds_target(), selection.owner().clone()));
+        }
+        if let Ok(drawable) = value.extract::<PyRef<'_, PyDrawable>>() {
+            return Ok((drawable.0.bounds_target(), drawable.0.clone()));
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "targets must contain only Drawable or TextSelection values",
+        ))
+    }
+
+    if let Ok(target) = one(value) {
+        return Ok(vec![target]);
+    }
+    let sequence = value.cast::<PySequence>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "targets must be a Drawable, TextSelection, or a non-empty sequence of them",
+        )
+    })?;
+    let mut result = Vec::new();
+    for item in sequence.try_iter()? {
+        result.push(one(&item?)?);
+    }
+    if result.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "targets must contain at least one value",
+        ));
+    }
+    Ok(result)
+}
+
+fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[f64; 4]> {
+    let padding = if let Some(value) = value {
+        if let Ok(all) = value.extract::<f64>() {
+            [all; 4]
+        } else if let Ok((vertical, horizontal)) = value.extract::<(f64, f64)>() {
+            [vertical, horizontal, vertical, horizontal]
+        } else if let Ok((top, right, bottom, left)) = value.extract::<(f64, f64, f64, f64)>() {
+            [top, right, bottom, left]
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "padding must be a scalar, (vertical, horizontal), or (top, right, bottom, left)",
+            ));
+        }
+    } else {
+        [12.0; 4]
+    };
+    if padding
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "padding must contain finite non-negative values",
+        ));
+    }
+    Ok(padding)
+}
+
+#[pymethods]
+impl PySurroundingRect {
+    fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyRef<'py, Self> {
+        slf.handle.drawable.clone().fill_brush(paint.0);
+        slf
+    }
+
+    fn no_fill(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf.handle.drawable.clone().no_fill();
+        slf
+    }
+
+    fn stroke<'py>(slf: PyRef<'py, Self>, paint: PyPaint, width: f64) -> PyRef<'py, Self> {
+        slf.handle.drawable.clone().stroke_brush(paint.0, width);
+        slf
+    }
+
+    fn no_stroke(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf.handle.drawable.clone().no_stroke();
+        slf
+    }
+
+    fn opacity(slf: PyRef<'_, Self>, value: f32) -> PyRef<'_, Self> {
+        slf.handle.drawable.clone().opacity(value);
+        slf
+    }
+
+    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyRef<'_, Self> {
+        slf.handle.drawable.clone().z_index(value);
+        slf
+    }
+
+    /// Move and resize this frame to new live drawable or text-selection bounds.
+    #[pyo3(signature = (targets, *, duration=None))]
+    fn retarget(
+        &self,
+        targets: &Bound<'_, PyAny>,
+        duration: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        if let Some(duration) = duration {
+            require_duration(duration)?;
+        }
+        let targets = bounds_targets(targets)?;
+        let canvas = self.scene.lock().expect("scene canvas poisoned");
+        if targets
+            .iter()
+            .any(|(_, target)| !canvas.owns_drawable(target))
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "every surrounding_rect target must belong to this Scene",
+            ));
+        }
+        drop(canvas);
+        let targets = targets.into_iter().map(|(target, _)| target).collect();
+        Ok(PyCanvasAnim {
+            inner: self
+                .handle
+                .retarget(targets, duration)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+        })
+    }
 }
 
 impl PyAngleDimension {
@@ -1812,6 +1964,36 @@ impl PyScene {
                 .lock()
                 .expect("scene canvas poisoned")
                 .rounded_rect(w, h, r),
+        )
+    }
+    /// Create a live frame around drawable or text-selection bounds.
+    #[pyo3(signature = (targets, *, padding=None, corner_radius=8.0))]
+    fn surrounding_rect(
+        &self,
+        py: Python<'_>,
+        targets: &Bound<'_, PyAny>,
+        padding: Option<Bound<'_, PyAny>>,
+        corner_radius: f64,
+    ) -> PyResult<Py<PySurroundingRect>> {
+        let targets = bounds_targets(targets)?;
+        let padding = surrounding_padding(padding)?;
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        if targets
+            .iter()
+            .any(|(_, target)| !canvas.owns_drawable(target))
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "every surrounding_rect target must belong to this Scene",
+            ));
+        }
+        let targets = targets.into_iter().map(|(target, _)| target).collect();
+        let handle = canvas
+            .surrounding_rect(targets, padding, corner_radius)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        drop(canvas);
+        Py::new(
+            py,
+            PySurroundingRect::initializer(handle, self.inner.clone()),
         )
     }
     fn square(&self, s: f64) -> PyDrawable {

@@ -2,7 +2,7 @@ use crate::tween::DeltaTime;
 use bevy::prelude::{Children, Component};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
-use gaanim_core::kurbo::BezPath;
+use gaanim_core::kurbo::{BezPath, Shape};
 use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
@@ -1156,6 +1156,131 @@ pub struct TrackingLine {
     pub to: TrackingEndpoint,
 }
 
+/// A live, axis-aligned frame around one or more scene objects.
+///
+/// `from` and `to` contain compiled object ids (including text glyph ids).
+/// Timeline lenses update `progress`; the derived-geometry system resolves
+/// both sets from their current world bounds every frame, so a retarget can
+/// interpolate while either endpoint continues moving.
+#[derive(Component, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SurroundingRect {
+    pub from: Vec<gaanim_core::ObjectId>,
+    pub to: Vec<gaanim_core::ObjectId>,
+    pub progress: f64,
+    /// Padding ordered as top, right, bottom, left.
+    pub padding: [f64; 4],
+    pub corner_radius: f64,
+    pub last_bounds: Option<gaanim_math::Bounds3D>,
+}
+
+impl SurroundingRect {
+    pub fn new(targets: Vec<gaanim_core::ObjectId>, padding: [f64; 4], corner_radius: f64) -> Self {
+        Self {
+            from: targets.clone(),
+            to: targets,
+            progress: 1.0,
+            padding,
+            corner_radius,
+            last_bounds: None,
+        }
+    }
+}
+
+fn object_set_bounds(
+    ids: &[gaanim_core::ObjectId],
+    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    world: &World,
+) -> Option<gaanim_math::Bounds3D> {
+    ids.iter()
+        .filter_map(|id| entities.get(id))
+        .filter_map(|entity| resolve_entity_bounds(*entity, world))
+        .reduce(|left, right| left.union(&right))
+}
+
+fn padded_bounds(bounds: gaanim_math::Bounds3D, padding: [f64; 4]) -> gaanim_math::Bounds3D {
+    let [top, right, bottom, left] = padding;
+    gaanim_math::Bounds3D::new_2d(
+        bounds.min.x - left,
+        bounds.min.y - bottom,
+        bounds.max.x + right,
+        bounds.max.y + top,
+    )
+}
+
+fn lerp_bounds(
+    from: gaanim_math::Bounds3D,
+    to: gaanim_math::Bounds3D,
+    progress: f64,
+) -> gaanim_math::Bounds3D {
+    let progress = progress.clamp(0.0, 1.0);
+    gaanim_math::Bounds3D::new(
+        from.min.lerp(to.min, progress),
+        from.max.lerp(to.max, progress),
+    )
+}
+
+/// Rebuild all live surrounding rectangles after layout and transform
+/// propagation, immediately before normal bounds extraction.
+pub fn surrounding_rect_system(world: &mut World) {
+    let entities = {
+        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
+        query
+            .iter(world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    let frames = {
+        let mut query = world.query::<(Entity, &SurroundingRect)>();
+        query
+            .iter(world)
+            .map(|(entity, frame)| (entity, frame.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    for (entity, frame) in frames {
+        let from = object_set_bounds(&frame.from, &entities, world)
+            .map(|bounds| padded_bounds(bounds, frame.padding));
+        let to = object_set_bounds(&frame.to, &entities, world)
+            .map(|bounds| padded_bounds(bounds, frame.padding));
+        let bounds = match (from, to) {
+            (Some(from), Some(to)) => Some(lerp_bounds(from, to, frame.progress)),
+            (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
+            (None, None) => frame.last_bounds,
+        };
+        let Some(bounds) = bounds else {
+            write_path(world, entity, BezPath::new());
+            continue;
+        };
+
+        let radius = frame
+            .corner_radius
+            .min(bounds.width().abs() * 0.5)
+            .min(bounds.height().abs() * 0.5)
+            .max(0.0);
+        let path = if radius > 0.0 {
+            gaanim_core::kurbo::RoundedRect::new(
+                bounds.min.x,
+                bounds.min.y,
+                bounds.max.x,
+                bounds.max.y,
+                radius,
+            )
+            .to_path(0.1)
+        } else {
+            gaanim_core::kurbo::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
+                .to_path(0.1)
+        };
+        write_path(world, entity, path);
+        if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
+            local.0 = bounds;
+        }
+        if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            live.last_bounds = Some(bounds);
+        }
+    }
+}
+
 impl TrackingLine {
     pub fn new(from: TrackingEndpoint, to: TrackingEndpoint) -> Self {
         Self { from, to }
@@ -1894,6 +2019,60 @@ mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn surrounding_rect_unions_live_bounds_and_interpolates_edges() {
+        let mut world = World::new();
+        let left_id = ObjectId::from_parts(1, 1);
+        let right_id = ObjectId::from_parts(2, 1);
+        world.spawn((
+            gaanim_scene::MobjectId(left_id),
+            SpatialTransform::new_2d(-20.0, 5.0),
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-10.0, -5.0, 10.0, 5.0)),
+        ));
+        world.spawn((
+            gaanim_scene::MobjectId(right_id),
+            SpatialTransform::new_2d(80.0, 25.0),
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-20.0, -10.0, 20.0, 10.0)),
+        ));
+        let empty = Arc::new(BezPath::new());
+        let frame = world
+            .spawn((
+                gaanim_scene::MobjectId(ObjectId::from_parts(3, 1)),
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                SurroundingRect {
+                    from: vec![left_id],
+                    to: vec![right_id],
+                    progress: 0.5,
+                    padding: [2.0, 4.0, 6.0, 8.0],
+                    corner_radius: 8.0,
+                    last_bounds: None,
+                },
+            ))
+            .id();
+
+        surrounding_rect_system(&mut world);
+
+        let bounds = world.get::<LocalBounds>(frame).unwrap().0;
+        assert_eq!(bounds, gaanim_math::Bounds3D::new_2d(7.0, 1.5, 49.0, 24.5));
+        assert!(world.get::<PathSource>(frame).unwrap().0.elements().len() > 4);
+
+        let right_entity = world
+            .query::<(Entity, &gaanim_scene::MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == right_id).then_some(entity))
+            .unwrap();
+        world
+            .get_mut::<SpatialTransform>(right_entity)
+            .unwrap()
+            .translation
+            .x += 20.0;
+        surrounding_rect_system(&mut world);
+        assert_eq!(world.get::<LocalBounds>(frame).unwrap().0.max.x, 59.0);
+    }
 
     #[test]
     fn regenerated_paths_preserve_create_reveal_progress() {

@@ -1006,6 +1006,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::TextSelectionProperties { .. } => "TextSelectionProperties",
             AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::FillLevelTo { .. } => "FillLevel",
+            AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
             AnimationType::GrowFromCenter => "Grow",
@@ -2105,6 +2106,40 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
         let track = self.ensure_track(anim.target);
 
+        if let AnimationType::SurroundingRectRetarget { from, to } = anim.anim_type.clone() {
+            let mut resolve = |targets: Vec<crate::anim::BoundsTarget>| {
+                targets
+                    .into_iter()
+                    .flat_map(|target| match target {
+                        crate::anim::BoundsTarget::Drawable(id) => vec![id],
+                        crate::anim::BoundsTarget::TextSelection {
+                            target,
+                            fragment,
+                            occurrence,
+                        } => {
+                            self.select_occurrence(MobjectRef { id: target }, &fragment, occurrence)
+                                .child_ids
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let from = resolve(from);
+            let to = resolve(to);
+            self.timeline.add_clip(
+                track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::SurroundingRectTargets { from, to },
+                    rate_func: anim.rate_func,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+            return;
+        }
+
         if let AnimationType::TextTransition {
             target,
             copy,
@@ -2465,6 +2500,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
             AnimationType::FillLevelTo { from, to } => PropertyLensSpec::FillLevel { from, to },
+            AnimationType::SurroundingRectRetarget { .. } => {
+                unreachable!(
+                    "surrounding-rectangle retargeting is dispatched before lens resolution"
+                )
+            }
             AnimationType::Properties(_) => {
                 unreachable!("property animations expand before lens resolution")
             }

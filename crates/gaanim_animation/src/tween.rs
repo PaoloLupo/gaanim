@@ -144,6 +144,11 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    /// Interpolate a live surrounding rectangle between two object sets.
+    SurroundingRectTargets {
+        from: Vec<gaanim_core::ObjectId>,
+        to: Vec<gaanim_core::ObjectId>,
+    },
 
     // === Camera ===
     CameraPosition {
@@ -286,6 +291,7 @@ impl std::fmt::Debug for PropertyLens {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
             Self::FillLevel { from, to } => write!(f, "FillLevel({from} -> {to})"),
+            Self::SurroundingRectTargets { .. } => write!(f, "SurroundingRectTargets"),
             Self::CameraPosition { from, to } => {
                 write!(f, "CameraPosition({:?} -> {:?})", from, to)
             }
@@ -364,6 +370,7 @@ pub fn evaluate_tweens_system(
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
     mut fill_levels: Query<&mut gaanim_scene::FillLevel>,
+    mut surrounding_rects: Query<&mut crate::SurroundingRect>,
     mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
     mut path_reveals: Query<&mut PathReveal>,
@@ -481,6 +488,13 @@ pub fn evaluate_tweens_system(
             PropertyLens::FillLevel { from, to } => {
                 if let Ok(mut level) = fill_levels.get_mut(tween.target) {
                     level.0 = (*from + (*to - *from) * t).clamp(0.0, 1.0);
+                }
+            }
+            PropertyLens::SurroundingRectTargets { from, to } => {
+                if let Ok(mut frame) = surrounding_rects.get_mut(tween.target) {
+                    frame.from.clone_from(from);
+                    frame.to.clone_from(to);
+                    frame.progress = t.clamp(0.0, 1.0);
                 }
             }
             PropertyLens::CameraPosition { from: _, to: _ } => {

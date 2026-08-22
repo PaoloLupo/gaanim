@@ -13,7 +13,7 @@ use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, Sv
 use gaanim_objects::primitives3d;
 use gaanim_timeline::transition::TransitionType;
 
-use crate::anim::{AnimationBuilder, AnimationType};
+use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
     CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
@@ -49,6 +49,47 @@ pub enum BooleanError {
     InvalidFillLevel,
     #[error("boolean operands must be closed 2D vector drawables")]
     NonVectorOperand,
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SurroundingRectError {
+    #[error("surrounding_rect requires at least one target")]
+    NoTargets,
+    #[error("padding must contain finite non-negative values")]
+    InvalidPadding,
+    #[error("corner_radius must be finite and non-negative")]
+    InvalidCornerRadius,
+}
+
+/// A live bounds frame with a typed retarget operation.
+#[derive(Debug, Clone)]
+pub struct SurroundingRectHandle {
+    pub drawable: DrawableHandle,
+    targets: Arc<Mutex<Vec<BoundsTarget>>>,
+}
+
+impl SurroundingRectHandle {
+    pub fn retarget(
+        &self,
+        targets: Vec<BoundsTarget>,
+        duration: Option<f64>,
+    ) -> Result<Anim, SurroundingRectError> {
+        if targets.is_empty() {
+            return Err(SurroundingRectError::NoTargets);
+        }
+        let from = {
+            let mut current = self
+                .targets
+                .lock()
+                .expect("surrounding rect targets poisoned");
+            let from = current.clone();
+            current.clone_from(&targets);
+            from
+        };
+        Ok(self
+            .drawable
+            .surrounding_rect_retarget(from, targets, duration))
+    }
 }
 
 /// Public pieces of a reactive technical dimension.
@@ -966,6 +1007,42 @@ impl Canvas {
     }
     pub fn rounded_rect(&mut self, w: f64, h: f64, r: f64) -> DrawableHandle {
         self.spawn(SpawnKind::RoundedRect(w, h, r))
+    }
+    pub fn surrounding_rect(
+        &mut self,
+        targets: Vec<BoundsTarget>,
+        padding: [f64; 4],
+        corner_radius: f64,
+    ) -> Result<SurroundingRectHandle, SurroundingRectError> {
+        if targets.is_empty() {
+            return Err(SurroundingRectError::NoTargets);
+        }
+        if padding
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(SurroundingRectError::InvalidPadding);
+        }
+        if !corner_radius.is_finite() || corner_radius < 0.0 {
+            return Err(SurroundingRectError::InvalidCornerRadius);
+        }
+        let drawable = self.spawn(SpawnKind::SurroundingRect).no_fill();
+        let id = drawable.id;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachSurroundingRect {
+                target: id,
+                sources: targets.clone(),
+                padding,
+                corner_radius,
+            });
+        Ok(SurroundingRectHandle {
+            drawable,
+            targets: Arc::new(Mutex::new(targets)),
+        })
     }
     pub fn square(&mut self, s: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Square(s))
@@ -4182,6 +4259,26 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surrounding_rect_validates_geometry_and_tracks_retarget_cursor() {
+        let mut canvas = Canvas::new(640, 360);
+        let left = canvas.circle(20.0);
+        let right = canvas.rect(80.0, 30.0);
+        assert!(matches!(
+            canvas.surrounding_rect(vec![], [12.0; 4], 8.0),
+            Err(SurroundingRectError::NoTargets)
+        ));
+        let frame = canvas
+            .surrounding_rect(vec![left.bounds_target()], [8.0, 12.0, 8.0, 12.0], 6.0)
+            .unwrap();
+        let animation = frame
+            .retarget(vec![right.bounds_target()], Some(0.75))
+            .unwrap();
+        assert_eq!(animation.inner.duration, 0.75);
+        assert_eq!(*frame.targets.lock().unwrap(), vec![right.bounds_target()]);
+        assert!(frame.drawable.is_live_derived_geometry());
+    }
     use crate::canvas::ops::Op;
     use bevy::prelude::World;
     use gaanim_math::SpatialTransform;

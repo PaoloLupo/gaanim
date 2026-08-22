@@ -386,6 +386,13 @@ pub(crate) enum Op {
         from: CanvasEndpoint,
         to: CanvasEndpoint,
     },
+    /// Attach a live frame to compiled drawable or text-selection bounds.
+    AttachSurroundingRect {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        padding: [f64; 4],
+        corner_radius: f64,
+    },
     /// Attach a helical spring whose endpoints follow entities or fixed positions.
     AttachTrackingSpring {
         target: ObjectId,
