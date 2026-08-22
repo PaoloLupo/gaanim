@@ -288,7 +288,7 @@ enum PlaybackDensity {
 
 impl PlaybackDensity {
     fn for_width(width: f32) -> Self {
-        if width >= 900.0 {
+        if width >= 1080.0 {
             Self::Wide
         } else if width >= 560.0 {
             Self::Compact
@@ -822,18 +822,10 @@ fn editor_ui_system(
                             } else {
                                 egui::Color32::from_rgb(100, 100, 110)
                             };
-                            let loop_label = if density == PlaybackDensity::Wide {
-                                "↻ Segment"
-                            } else {
-                                "↻"
-                            };
                             let loop_btn = egui::Button::new(
-                                egui::RichText::new(loop_label).size(13.0).color(loop_color),
+                                egui::RichText::new("↻").size(14.0).color(loop_color),
                             )
-                            .min_size(egui::vec2(
-                                if density == PlaybackDensity::Wide { 78.0 } else { 28.0 },
-                                24.0,
-                            ))
+                            .min_size(egui::vec2(28.0, 24.0))
                             .corner_radius(4.0)
                             .fill(egui::Color32::TRANSPARENT);
                             if ui
@@ -856,10 +848,11 @@ fn editor_ui_system(
                                 egui::Color32::from_rgb(120, 120, 132)
                             };
                             let continuous_btn = egui::Button::new(
-                                egui::RichText::new("Continuous")
-                                    .size(12.0)
+                                egui::RichText::new("∞")
+                                    .size(14.0)
                                     .color(continuous_color),
                             )
+                            .min_size(egui::vec2(28.0, 24.0))
                             .selected(state.continuous_preview);
                             if ui
                                 .add(continuous_btn)
@@ -932,13 +925,16 @@ fn editor_ui_system(
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 60, 75, 70)))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                            // Right-aligned window and output controls.
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                            // Compact window and output controls. Keeping this as a
+                            // normal horizontal row avoids a right-to-left layout
+                            // claiming the remaining overlay width and covering the
+                            // scene label on narrower windows.
                                     if ui
-                                        .button("⛶ Fullscreen")
+                                        .add(
+                                            egui::Button::new("⛶")
+                                                .min_size(egui::vec2(28.0, 24.0)),
+                                        )
                                         .on_hover_text("F11: toggle editor fullscreen")
                                         .clicked()
                                         && let Ok(mut window) = windows.single_mut()
@@ -950,11 +946,11 @@ fn editor_ui_system(
                                     }
 
                                     let present_btn = egui::Button::new(
-                                        egui::RichText::new("▶ Present")
-                                            .size(12.5)
+                                        egui::RichText::new("▶")
+                                            .size(13.0)
                                             .color(egui::Color32::from_rgb(150, 215, 255)),
                                     )
-                                    .min_size(egui::vec2(72.0, 24.0))
+                                    .min_size(egui::vec2(30.0, 24.0))
                                     .corner_radius(4.0)
                                     .fill(egui::Color32::from_rgba_premultiplied(
                                         35, 70, 95, 180,
@@ -997,11 +993,11 @@ fn editor_ui_system(
                                         );
                                     } else {
                                         let export_btn = egui::Button::new(
-                                            egui::RichText::new("⬇ Export")
-                                                .size(12.5)
+                                            egui::RichText::new("⬇")
+                                                .size(13.0)
                                                 .color(egui::Color32::from_rgb(150, 200, 255)),
                                         )
-                                        .min_size(egui::vec2(62.0, 24.0))
+                                        .min_size(egui::vec2(30.0, 24.0))
                                         .corner_radius(4.0)
                                         .fill(egui::Color32::from_rgba_premultiplied(
                                             30, 30, 55, 140,
@@ -1049,13 +1045,12 @@ fn editor_ui_system(
                                             };
                                         }
                                      }
-                                    });
                                 });
                             });
                             }
                             if density != PlaybackDensity::Wide {
                                 ui.add_space(4.0);
-                                ui.menu_button("⋯ More", |ui| {
+                                ui.menu_button("⋯", |ui| {
                                     if density == PlaybackDensity::Minimal {
                                         if ui.button("Start").clicked() {
                                             timeline.is_playing = false;
@@ -1158,7 +1153,9 @@ fn editor_ui_system(
                                             };
                                         }
                                     }
-                                });
+                                })
+                                .response
+                                .on_hover_text("Más controles");
                             }
                             // cerrar grupos
                          });
@@ -1538,19 +1535,20 @@ fn paint_seek_bar(
                     } else {
                         egui::Color32::from_rgba_premultiplied(205, 210, 230, 195)
                     };
+                    let font_id = egui::FontId::proportional(if is_active { 12.0 } else { 11.0 });
                     // Subtle shadow for legibility
                     painter.text(
-                        egui::pos2(label_x + 0.5, label_y + 0.5),
+                        egui::pos2(label_x + 0.4, label_y + 0.4),
                         egui::Align2::CENTER_CENTER,
                         &label,
-                        egui::FontId::proportional(11.0),
-                        egui::Color32::from_black_alpha(130),
+                        font_id.clone(),
+                        egui::Color32::from_black_alpha(90),
                     );
                     painter.text(
                         egui::pos2(label_x, label_y),
                         egui::Align2::CENTER_CENTER,
                         &label,
-                        egui::FontId::proportional(if is_active { 12.0 } else { 11.0 }),
+                        font_id,
                         text_color,
                     );
                 }
@@ -2890,8 +2888,9 @@ mod tests {
     #[test]
     fn playback_density_and_width_follow_the_responsive_breakpoints() {
         assert_eq!(PlaybackDensity::for_width(1280.0), PlaybackDensity::Wide);
-        assert_eq!(PlaybackDensity::for_width(900.0), PlaybackDensity::Wide);
-        assert_eq!(PlaybackDensity::for_width(899.0), PlaybackDensity::Compact);
+        assert_eq!(PlaybackDensity::for_width(1080.0), PlaybackDensity::Wide);
+        assert_eq!(PlaybackDensity::for_width(1079.0), PlaybackDensity::Compact);
+        assert_eq!(PlaybackDensity::for_width(900.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(560.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(559.0), PlaybackDensity::Minimal);
 

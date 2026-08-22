@@ -199,10 +199,11 @@ impl DiffViewer {
 }
 
 impl eframe::App for DiffViewer {
-    fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
-        self.keyboard_shortcuts(context);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let context = ui.ctx().clone();
+        self.keyboard_shortcuts(&context);
 
-        egui::TopBottomPanel::top("toolbar").show(context, |ui| {
+        egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal_wrapped(|ui| {
                 ui.heading("gaanim diff");
@@ -250,7 +251,7 @@ impl eframe::App for DiffViewer {
                         .max_decimals(6),
                 );
                 if ui.button("Recalcular").clicked() {
-                    self.recompute(context);
+                    self.recompute(&context);
                 }
                 ui.weak("Atajos: 1 baseline · 2 actual · 3 diff · ←/→ navegar");
             });
@@ -260,10 +261,10 @@ impl eframe::App for DiffViewer {
             ui.add_space(4.0);
         });
 
-        egui::SidePanel::left("seeks")
+        egui::Panel::left("seeks")
             .resizable(true)
-            .default_width(285.0)
-            .show(context, |ui| {
+            .default_size(285.0)
+            .show(ui, |ui| {
                 ui.heading("Seeks");
                 ui.separator();
                 let visible = self.visible_indices();
@@ -291,7 +292,7 @@ impl eframe::App for DiffViewer {
                 });
             });
 
-        egui::CentralPanel::default().show(context, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let Some(frame) = self.report.frames.get(self.selected) else {
                 ui.centered_and_justified(|ui| ui.weak("No hay seeks para mostrar"));
                 return;

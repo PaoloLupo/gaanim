@@ -16,7 +16,7 @@ gui = ["dep:eframe"]
 [dependencies]
 gaanim_api = { path = "../gaanim_api" }
 gaanim_export = { path = "../gaanim_export" }
-eframe = { version = "0.33.3", optional = true }
+eframe = { version = "0.36.1", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
