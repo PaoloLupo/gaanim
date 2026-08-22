@@ -470,6 +470,9 @@ pub fn export_dialog_system(
                     }
                 } else {
                     let mut config = ExportConfig::new(&out).with_quality(qual.preset());
+                    config.width = canvas.width;
+                    config.height = canvas.height;
+                    config.aspect_ratio = AspectRatioPreset::Custom;
                     config.fps = fps;
                     config.crf = qual.crf();
                     config.encoding_speed = qual.encoding_speed();

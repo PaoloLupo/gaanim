@@ -279,6 +279,9 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     };
     let mut config =
         gaanim_export::prelude::ExportConfig::new(&worker.output).with_quality(quality);
+    config.width = canvas.width;
+    config.height = canvas.height;
+    config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
     config.headless = true;
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())

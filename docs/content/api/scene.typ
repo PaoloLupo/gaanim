@@ -659,6 +659,10 @@ without changing it:
 gaanim export my_animation.py --output output.webp --quality standard
 ```
 
+`--quality` ajusta el FPS, la compresión y la velocidad de codificación; no
+modifica el ancho ni el alto. La exportación conserva siempre la resolución
+definida por la escena.
+
 Run a script through the Gaanim application:
 
 ```bash
