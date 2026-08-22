@@ -6,6 +6,7 @@ script. All camera durations are in seconds; 3D angles are in radians.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 from .matrix import Matrix
 
@@ -107,17 +108,19 @@ class Background:
         """Wrap a solid or gradient Brush for use inside the full scene bounds."""
         ...
     @staticmethod
-    def shader(source: str, *, fallback: Optional[ColorLike] = None) -> Background:
+    def shader(source: str | os.PathLike[str], *, fallback: Optional[ColorLike] = None) -> Background:
         """Create a timeline-driven WGSL scene background.
 
-        ``source`` must define ``gaanim_background(uv, resolution, time)``
-        returning ``vec4<f32>``. ``time`` is the absolute timeline position in
-        seconds, so preview, seeks, snapshots, and exports are deterministic.
+        A string is inline WGSL. An ``os.PathLike`` value loads a WGSL asset
+        immediately. ``source`` must define ``gaanim_background(uv, resolution,
+        time)`` returning ``vec4<f32>``. ``time`` is the absolute timeline
+        position in seconds, so preview, seeks, snapshots, and exports are deterministic.
         UV coordinates are normalized from the top-left and the shader covers
         the authored scene bounds at their effective viewport resolution.
         Legacy two-argument shaders remain accepted as static backgrounds.
-        Invalid WGSL raises ``ValueError``; ``fallback`` is used outside the
-        scene bounds, by native 3D clears, and if rasterization is unavailable.
+        Invalid WGSL raises ``ValueError`` and an unreadable asset raises
+        ``RuntimeError``. ``fallback`` is used outside the scene bounds, by
+        native 3D clears, and if rasterization is unavailable.
         """
         ...
     @property
@@ -3350,11 +3353,17 @@ class Scene:
         raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
         """
         ...
-    def typst(self, source: str, *, width: Optional[str | float | int] = None) -> Drawable:
-        """Create a typst drawable in the scene.
+    def typst(self, source: str | os.PathLike[str], *, width: Optional[str | float | int] = None) -> Drawable:
+        """Create a Typst drawable from inline markup or a Typst asset.
+
+        A string is compiled as inline Typst. An ``os.PathLike`` value loads a
+        ``.typ`` asset; relative paths use :meth:`assets_dir`. Empty inline
+        source raises ``ValueError`` and an unreadable asset raises
+        ``RuntimeError``.
 
         Example:
-            result = scene.typst("example")
+            from pathlib import Path
+            result = scene.typst(Path("assets/title.typ"))
         """
         ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:

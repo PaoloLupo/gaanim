@@ -342,6 +342,17 @@ pub enum AssetRootError {
     },
 }
 
+/// Failures while loading Typst source from an asset file.
+#[derive(Debug, thiserror::Error)]
+pub enum TypstAssetError {
+    #[error("could not read Typst asset '{path}': {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Error returned when a scene-lifetime operation receives an incompatible drawable.
 #[derive(Debug, thiserror::Error)]
 pub enum SceneObjectError {
@@ -1602,6 +1613,36 @@ impl Canvas {
     /// Compile full Typst markup with a custom page width (e.g. `"16cm"`, `"800pt"`, `"12in"`).
     pub fn typst_with_width(&mut self, source: &str, page_width: &str) -> DrawableHandle {
         self.typst_inner(source, Some(page_width))
+    }
+
+    /// Compile full Typst markup loaded from an asset path.
+    ///
+    /// Relative paths use the directory configured with [`Self::set_asset_root`].
+    pub fn typst_asset(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<DrawableHandle, TypstAssetError> {
+        self.typst_asset_inner(path, None)
+    }
+
+    /// Compile Typst markup loaded from an asset path with a custom page width.
+    pub fn typst_asset_with_width(
+        &mut self,
+        path: impl AsRef<Path>,
+        page_width: &str,
+    ) -> Result<DrawableHandle, TypstAssetError> {
+        self.typst_asset_inner(path, Some(page_width))
+    }
+
+    fn typst_asset_inner(
+        &mut self,
+        path: impl AsRef<Path>,
+        page_width: Option<&str>,
+    ) -> Result<DrawableHandle, TypstAssetError> {
+        let path = self.resolve_asset_path(path);
+        let source = std::fs::read_to_string(&path)
+            .map_err(|source| TypstAssetError::Read { path, source })?;
+        Ok(self.typst_inner(&source, page_width))
     }
 
     fn typst_inner(&mut self, source: &str, page_width: Option<&str>) -> DrawableHandle {
@@ -4259,6 +4300,25 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typst_asset_uses_the_configured_asset_root() {
+        let root = std::env::temp_dir().join(format!(
+            "gaanim_typst_asset_canvas_test_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("title.typ"), "= Asset-backed Typst").unwrap();
+
+        let mut canvas = Canvas::new(640, 360);
+        canvas.set_asset_root(&root).unwrap();
+        let handle = canvas.typst_asset("title.typ").unwrap();
+        let spec = handle.spec.lock().unwrap();
+        let SpawnKind::Typst { source, .. } = &spec.kind else {
+            panic!("typst asset should create a Typst drawable");
+        };
+        assert_eq!(source, "= Asset-backed Typst");
+    }
 
     #[test]
     fn surrounding_rect_validates_geometry_and_tracks_retarget_cursor() {

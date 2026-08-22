@@ -80,6 +80,10 @@ editor vuelve a rasterizarla. `fallback` vale negro por defecto y también se us
 para limpiar el fondo 3D, calcular contraste automático o recuperarse de un
 fallo de rasterización en la GPU.
 
+Una cadena es WGSL inline. Para cargar un asset `.wgsl`, pasa un `pathlib.Path`;
+el archivo se lee y valida al crear el fondo, por lo que un asset ilegible lanza
+`RuntimeError` y WGSL inválido lanza `ValueError`.
+
 ```python
 from gaanim import Background, Scene
 
@@ -95,6 +99,9 @@ fn gaanim_background(
 }
 """, fallback="#071022")
 scene = Scene(1280, 720, background=shader)
+
+from pathlib import Path
+asset_shader = Background.shader(Path("assets/background.wgsl"), fallback="#071022")
 ```
 
 == Temas incluidos

@@ -3398,14 +3398,23 @@ impl PyScene {
     fn typst(
         &self,
         py: pyo3::Python<'_>,
-        source: &str,
+        source: &Bound<'_, PyAny>,
         width: Option<pyo3::Py<pyo3::PyAny>>,
     ) -> PyResult<PyDrawable> {
-        if source.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Typst source must not be empty",
-            ));
-        }
+        let source = if let Ok(source) = source.extract::<String>() {
+            if source.trim().is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Typst source must not be empty",
+                ));
+            }
+            TypstSource::Inline(source)
+        } else {
+            TypstSource::Asset(source.extract::<PathBuf>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "source must be inline Typst text or an os.PathLike .typ asset",
+                )
+            })?)
+        };
         let handle = if let Some(w) = width {
             // ponytail: String first, then f64 (covers int) — i64 branch is dead code
             let width_str = if let Ok(s) = w.extract::<String>(py) {
@@ -3432,15 +3441,23 @@ impl PyScene {
                     "width must be a valid Typst length like '16cm' or '800pt'",
                 ));
             }
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .typst_with_width(source, &width_str)
+            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+            match source {
+                TypstSource::Inline(source) => canvas.typst_with_width(&source, &width_str),
+                TypstSource::Asset(path) => canvas
+                    .typst_asset_with_width(path, &width_str)
+                    .map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                    })?,
+            }
         } else {
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .typst(source)
+            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+            match source {
+                TypstSource::Inline(source) => canvas.typst(&source),
+                TypstSource::Asset(path) => canvas.typst_asset(path).map_err(|error| {
+                    pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                })?,
+            }
         };
 
         Ok(PyDrawable(handle))
@@ -5669,6 +5686,11 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyDrawable(handle))
     }
+}
+
+enum TypstSource {
+    Inline(String),
+    Asset(PathBuf),
 }
 
 /// Resolve a Python object into a CanvasEndpoint.

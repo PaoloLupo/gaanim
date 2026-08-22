@@ -42,7 +42,7 @@ pub use canvas_impl::{
     CameraBindingError, CameraConstraintHandle, Canvas, DEFAULT_REACTIVE_TEXT_SIZE,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError,
     SceneObjectError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
-    VideoLoadError,
+    TypstAssetError, VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

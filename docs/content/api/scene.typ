@@ -323,6 +323,10 @@ structures; `text("$...$")` is the concise API for math-only content. The
 embedded world resolves `@preview/...` imports through the standard Typst
 Universe cache; the first use downloads the requested package.
 
+A string is inline markup. Pass a `pathlib.Path` to load a `.typ` asset instead;
+relative paths use `scene.assets_dir(...)`, and a missing or unreadable asset
+raises `RuntimeError` before the drawable is created.
+
 ```python
 comparison = scene.typst('''
 #table(
@@ -332,6 +336,9 @@ comparison = scene.typst('''
   [GPU], [0.04],
 )
 ''')
+
+from pathlib import Path
+title = scene.typst(Path("assets/title.typ"))
 ```
 
 `code(source, language=...)` creates a monospaced vector code block with a

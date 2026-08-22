@@ -1,6 +1,7 @@
 use gaanim_core::peniko::{self, Brush, Extend, Gradient};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use std::path::PathBuf;
 
 use crate::color::PyColor;
 
@@ -34,12 +35,27 @@ impl PyBackground {
     /// Build a WGSL background evaluated with exact timeline time.
     #[staticmethod]
     #[pyo3(signature = (source, *, fallback=None))]
-    fn shader(source: String, fallback: Option<PyColor>) -> PyResult<Self> {
+    fn shader(source: &Bound<'_, PyAny>, fallback: Option<PyColor>) -> PyResult<Self> {
         let fallback = fallback.map_or(peniko::Color::BLACK, |color| color.0);
-        gaanim_api::canvas::ShaderBackground::new(source, fallback)
+        let shader = if let Ok(source) = source.extract::<String>() {
+            gaanim_api::canvas::ShaderBackground::new(source, fallback)
+        } else {
+            let path = source.extract::<PathBuf>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "source must be inline WGSL text or an os.PathLike .wgsl asset",
+                )
+            })?;
+            gaanim_api::canvas::ShaderBackground::from_file(path, fallback)
+        };
+        shader
             .map(gaanim_api::canvas::BackgroundPaint::Shader)
             .map(Self)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+            .map_err(|error| match error {
+                gaanim_api::canvas::ShaderBackgroundError::ReadSource { .. } => {
+                    pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                }
+                _ => PyValueError::new_err(error.to_string()),
+            })
     }
 
     #[getter]

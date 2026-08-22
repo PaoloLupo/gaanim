@@ -2,6 +2,7 @@ use gaanim_core::peniko::{Blob, Brush, Color, ImageAlphaType, ImageBrush, ImageD
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use std::borrow::Cow;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 use vello::wgpu;
@@ -143,6 +144,23 @@ impl ShaderBackground {
         })
     }
 
+    /// Load WGSL source from an asset file.
+    ///
+    /// The contents are validated with the same entry-point contract as
+    /// [`Self::new`]. Relative paths are resolved by the caller.
+    pub fn from_file(
+        path: impl AsRef<Path>,
+        fallback: Color,
+    ) -> Result<Self, ShaderBackgroundError> {
+        let path = path.as_ref().to_path_buf();
+        let source =
+            std::fs::read_to_string(&path).map_err(|source| ShaderBackgroundError::ReadSource {
+                path,
+                message: source.to_string(),
+            })?;
+        Self::new(source, fallback)
+    }
+
     pub fn source(&self) -> &str {
         &self.source
     }
@@ -245,6 +263,8 @@ impl ShaderBackground {
 
 #[derive(Clone, Debug, Error)]
 pub enum ShaderBackgroundError {
+    #[error("could not read background WGSL asset '{path}': {message}")]
+    ReadSource { path: PathBuf, message: String },
     #[error("invalid background WGSL: {0}")]
     InvalidWgsl(String),
     #[error("background shader output size must be positive, got {width}x{height}")]
@@ -504,6 +524,24 @@ mod tests {
         .unwrap();
         assert!(shader.source().contains("gaanim_background"));
         assert!(!shader.is_animated());
+    }
+
+    #[test]
+    fn shader_source_can_be_loaded_from_an_asset_file() {
+        let path = std::env::temp_dir().join(format!(
+            "gaanim_shader_background_{}.wgsl",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             return vec4<f32>(uv, time + resolution.x * 0.0, 1.0);\n}",
+        )
+        .unwrap();
+
+        let shader = ShaderBackground::from_file(&path, Color::BLACK).unwrap();
+        assert!(shader.is_animated());
+        assert!(shader.source().contains("time: f32"));
     }
 
     #[test]
