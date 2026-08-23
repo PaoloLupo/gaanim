@@ -77,6 +77,11 @@ wheel:
 validate-python-api:
     cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
 
+# Export every supported format and inspect dimensions, duration, codecs, and audio.
+test-exports:
+    cargo build -p gaanim_editor --bin gaanim-core
+    {{ system_python }} tests/validate_exports.py --output target/export-smoke
+
 # ---- Run --------------------------------------------------------------------
 
 # Run an example script inside the Gaanim application. Usage: just run my_example

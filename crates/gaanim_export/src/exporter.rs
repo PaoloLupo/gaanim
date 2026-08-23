@@ -798,6 +798,7 @@ fn capture_camera_to_vello_transform(
 struct HybridCapturePipeline {
     times: Vec<f64>,
     index: usize,
+    warmup_pending: bool,
     phase: u8,
     frames: Vec<CapturedFrame>,
     tx: SyncSender<Vec<u8>>,
@@ -812,6 +813,10 @@ struct HybridCapturePipeline {
 /// screenshot request is submitted. Native mesh extraction and GPU pipeline
 /// preparation can take more than two frames on a cold Vulkan renderer.
 const HYBRID_CAPTURE_SETTLE_FRAMES: u8 = 6;
+/// The first hybrid frame also pays for render-pipeline and shader creation.
+/// A longer one-time warm-up prevents an otherwise valid first seek from being
+/// captured before native 3D content reaches the swapchain.
+const HYBRID_CAPTURE_COLD_SETTLE_FRAMES: u8 = 30;
 const HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES: u8 = 6;
 
 fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
@@ -821,6 +826,26 @@ fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
     let frames = core::mem::take(&mut pipeline.frames);
     let _ = pipeline.result_tx.send(frames);
     pipeline.result_sent = true;
+}
+
+fn accept_hybrid_capture(pipeline: &mut HybridCapturePipeline, rgba: Vec<u8>) {
+    if pipeline.warmup_pending {
+        // The first screenshot request primes Bevy's swapchain/render graph.
+        // Discard it and repeat the same exact seek for the first fixture.
+        pipeline.warmup_pending = false;
+        pipeline.phase = 0;
+        return;
+    }
+
+    let time = pipeline.times[pipeline.index];
+    pipeline.frames.push(CapturedFrame {
+        time,
+        width: pipeline.width,
+        height: pipeline.height,
+        rgba,
+    });
+    pipeline.index += 1;
+    pipeline.phase = 0;
 }
 
 fn hybrid_capture_system(
@@ -849,19 +874,24 @@ fn hybrid_capture_system(
         exit.write(AppExit::Success);
         return;
     }
+    let settle_frames = if pipeline.warmup_pending {
+        HYBRID_CAPTURE_COLD_SETTLE_FRAMES
+    } else {
+        HYBRID_CAPTURE_SETTLE_FRAMES
+    };
     match pipeline.phase {
         0 => {
             timeline.seek_request = Some(pipeline.times[pipeline.index]);
             pipeline.phase = 1;
         }
-        phase if phase <= HYBRID_CAPTURE_SETTLE_FRAMES => {
+        phase if phase <= settle_frames => {
             // Propagate the exact seek through camera, hierarchy, material,
             // and mesh systems, then allow changed assets to reach Bevy's
             // render world. Several frames are required on a cold renderer
             // while native mesh pipelines are being prepared asynchronously.
             pipeline.phase += 1;
         }
-        phase if phase == HYBRID_CAPTURE_SETTLE_FRAMES + 1 => {
+        phase if phase == settle_frames + 1 => {
             let expects_visible_gltf = gltf_models.iter().any(|visible| visible.is_some());
             let has_visible_gltf_mesh = visible_gltf_meshes.iter().any(|visible| visible.get());
             if expects_visible_gltf && !has_visible_gltf_mesh {
@@ -873,20 +903,13 @@ fn hybrid_capture_system(
                 // from hidden to visible. Count a bounded warm-up below.
                 pipeline.phase += 1;
             } else {
-                pipeline.phase =
-                    HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
+                pipeline.phase = settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
             }
         }
-        phase
-            if phase
-                <= HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 =>
-        {
+        phase if phase <= settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 => {
             pipeline.phase += 1;
         }
-        phase
-            if phase
-                == HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 =>
-        {
+        phase if phase == settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 => {
             let tx = pipeline.tx.clone();
             let width = pipeline.width;
             let height = pipeline.height;
@@ -931,17 +954,7 @@ fn hybrid_capture_system(
             let received = pipeline.rx.lock().unwrap().try_recv();
             match received {
                 Ok(rgba) => {
-                    let time = pipeline.times[pipeline.index];
-                    let width = pipeline.width;
-                    let height = pipeline.height;
-                    pipeline.frames.push(CapturedFrame {
-                        time,
-                        width,
-                        height,
-                        rgba,
-                    });
-                    pipeline.index += 1;
-                    pipeline.phase = 0;
+                    accept_hybrid_capture(&mut pipeline, rgba);
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
@@ -1004,6 +1017,7 @@ where
     .insert_resource(HybridCapturePipeline {
         times: times.to_vec(),
         index: 0,
+        warmup_pending: true,
         phase: 0,
         frames: Vec::with_capacity(times.len()),
         tx,
@@ -1102,6 +1116,7 @@ mod tests {
         let mut pipeline = HybridCapturePipeline {
             times: vec![0.25],
             index: 1,
+            warmup_pending: false,
             phase: 0,
             frames: vec![CapturedFrame {
                 time: 0.25,
@@ -1123,5 +1138,35 @@ mod tests {
         let frames = result_rx.recv().expect("external capture result");
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].rgba, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn hybrid_capture_discards_the_cold_swapchain_frame() {
+        let (frame_tx, frame_rx) = sync_channel(1);
+        let (result_tx, _result_rx) = sync_channel(1);
+        let mut pipeline = HybridCapturePipeline {
+            times: vec![0.25],
+            index: 0,
+            warmup_pending: true,
+            phase: 99,
+            frames: Vec::new(),
+            tx: frame_tx,
+            rx: Mutex::new(frame_rx),
+            width: 1,
+            height: 1,
+            result_tx,
+            result_sent: false,
+        };
+
+        accept_hybrid_capture(&mut pipeline, vec![0, 0, 0, 255]);
+        assert!(!pipeline.warmup_pending);
+        assert_eq!(pipeline.phase, 0);
+        assert_eq!(pipeline.index, 0);
+        assert!(pipeline.frames.is_empty());
+
+        accept_hybrid_capture(&mut pipeline, vec![1, 2, 3, 4]);
+        assert_eq!(pipeline.index, 1);
+        assert_eq!(pipeline.frames.len(), 1);
+        assert_eq!(pipeline.frames[0].rgba, vec![1, 2, 3, 4]);
     }
 }

@@ -5,11 +5,13 @@ para crear escenas programáticas desde Python. El flujo actual ejecuta los
 scripts Python dentro de la aplicación `gaanim`, que proporciona la ventana de
 previsualización, hot reload y exportación.
 
-Gaanim ofrece dos modos de uso:
+Gaanim se distribuye en dos piezas complementarias:
 
-- La aplicación embebida, recomendada para previsualización y hot reload.
-- El paquete Python local, útil para integrar la API y ejecutar exportaciones
-  headless. Requiere Python 3.12 o superior.
+- El ejecutable `gaanim`, que es el único runtime y proporciona ejecución,
+  previsualización, hot reload, render y exportación.
+- El wheel de autoría, que solo instala helpers Python, stubs y `py.typed` para
+  el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
+  headless independiente. Requiere Python 3.12 o superior.
 
 ## Inicio rápido
 
@@ -44,6 +46,18 @@ scene.render()
 Para crear una escena nueva, guarde un script en `examples/` y ejecútelo con
 `just run nombre_del_script` (sin `.py`). Durante la previsualización, guardar
 el archivo recarga la escena.
+
+## Plataformas y artefactos
+
+| Plataforma | CI | Artefacto instalable | Estado declarado |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.1.x` |
+| Ubuntu x64 | Sí | No | Desarrollo desde fuente |
+| macOS | No | No | Experimental, sin garantía de release |
+
+El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
+runtime. Esta tabla se refiere al ejecutable, que es lo necesario para abrir o
+exportar una escena.
 
 El binario de usuario también administra proyectos. `gaanim` sin argumentos
 abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez
@@ -123,8 +137,8 @@ El snapping temporal del editor permanece desactivado mientras haya contenido
 
 ## Paquete Python local
 
-El wheel instala helpers y stubs para autocompletado; el binding nativo vive
-exclusivamente dentro del ejecutable:
+El wheel instala helpers y stubs para autocompletado; el binding nativo y todo
+el runtime viven exclusivamente dentro del ejecutable:
 
 ```powershell
 just bootstrap
@@ -135,6 +149,11 @@ Para construir una wheel distribuible use `just wheel`; el resultado se escribe
 en `target/wheels/`. Es un wheel universal `py3-none-any` sin renderer ni
 extensión nativa. Ejecutar o importar escenas con Python plano produce un error
 que dirige al usuario a la aplicación `gaanim`.
+
+Esta separación es un contrato de producto, no una limitación temporal del
+empaquetado: no se publicará un wheel autónomo. Los proyectos declaran el wheel
+para obtener la experiencia de autoría, pero siempre se ejecutan con
+`gaanim <script.py>` o `gaanim export ...`.
 
 Después de `just python-develop`, ejecute `just validate-python-api` para
 comprobar que el stub tipado público sigue coincidiendo con el módulo PyO3

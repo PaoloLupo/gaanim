@@ -291,10 +291,6 @@ impl ExportConfig {
     pub fn apply_presets(mut self) -> Self {
         self.encoding_speed = self.quality.encoding_speed();
 
-        if matches!(self.video_encoder, VideoEncoder::Libx264) {
-            self.video_encoder = crate::encoder::detect_best_encoder();
-        }
-
         match self.quality {
             QualityPreset::Draft => {
                 self.fps = 30;
@@ -331,7 +327,15 @@ impl ExportConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioTrack, ExportTelemetry};
+    use super::{AudioTrack, ExportConfig, ExportTelemetry};
+    use crate::encoder::VideoEncoder;
+
+    #[test]
+    fn presets_preserve_the_requested_software_encoder() {
+        let config = ExportConfig::default().apply_presets();
+
+        assert_eq!(config.video_encoder, VideoEncoder::Libx264);
+    }
 
     #[test]
     fn telemetry_clones_share_progress_and_logs() {

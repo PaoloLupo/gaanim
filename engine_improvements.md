@@ -1,6 +1,6 @@
 # Gaanim — estado actual y plan de evolución
 
-> Corte auditado: **2026-08-19** sobre el workspace local. La configuración, el código y
+> Corte auditado: **2026-08-23** sobre el workspace local. La configuración, el código y
 > las pruebas tienen prioridad sobre este documento. Gaanim sigue en **0.1.0** y debe
 > considerarse un alfa funcional, no una API estable.
 
@@ -15,11 +15,11 @@ compila y prueba estas capacidades en varios niveles.
 La principal brecha ya no es la cantidad de objetos disponibles. Es la diferencia entre
 **capacidad implementada** y **contrato de producto verificable**:
 
-- la auditoría objetiva falla porque diez exports Python nuevos de composición y matrices
-  no están declarados en el stub superior `gaanim_core.pyi`;
-- hay 67 juegos de baselines visuales, pero CI compara solo cuatro ejemplos;
+- el contrato Python distingue símbolos nativos de helpers puros y la auditoría objetiva
+  pasa sin errores;
+- hay 73 juegos de baselines visuales y CI compara una muestra de 12 subsistemas;
 - existen video embebido y audio de preview para ese video, pero la ruta depende de
-  `ffmpeg`/`ffprobe` y todavía carece de una matriz E2E multiplataforma;
+  `ffmpeg`/`ffprobe`; los cinco formatos ya tienen smoke E2E en Ubuntu/Windows;
 - el wheel distribuible es deliberadamente una capa de autoría `py3-none-any`, sin
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
 - no hay presupuestos ni benchmarks reproducibles para seek, hot reload, preview o
@@ -37,12 +37,12 @@ aumentaría la superficie inestable.
 | Animación vectorial 2D | 🟢 | Núcleo, preview, seek y exportación funcionales |
 | Texto, ecuaciones y contenido educativo | 🟢 | Typst, partes semánticas y transforms son una fortaleza |
 | Visualización de datos | 🟡 | API declarativa, escalas, charts y estadísticas; contrato reciente |
-| Matrices y álgebra animada | 🟡 | API estructurada y SymPy opcional; integración de stub aún rota |
+| Matrices y álgebra animada | 🟢 | API estructurada, helpers tipados y SymPy opcional |
 | Presentaciones en vivo | 🟢 | Segmentos, stops, notas, overview y Presenter View disponibles |
 | Escenas 3D y glTF | 🟡 | Ruta funcional con baselines; compatibilidad y E2E aún estrechos |
-| Video y audio | 🟡 | Video sincronizado y audio embebido audible; faltan waveform y E2E |
-| Distribución como librería Python autónoma | 🔴 | El wheel es solo autoría/tipos; el runtime vive en la aplicación |
-| Pipeline audiovisual de producción | 🟡 | Muchos formatos y features, sin matriz de release suficientemente probada |
+| Video y audio | 🟡 | Video sincronizado, audio embebido y export E2E; falta preview de pistas independientes |
+| Distribución como librería Python autónoma | ⚪ | Fuera de objetivo: el wheel es solo autoría/tipos y el runtime vive en el ejecutable |
+| Pipeline audiovisual de producción | 🟡 | Cinco formatos cubiertos por smoke; faltan presupuesto de rendimiento y releases multiplataforma |
 
 ## Evidencia del corte
 
@@ -53,29 +53,16 @@ siguientes se obtuvieron de manifests, CI, código y fixtures, no del roadmap an
 |---|---|
 | Workspace | 20 miembros: 19 crates `gaanim_*` y `docs` |
 | Versiones | Todos los crates y el paquete Python declaran `0.1.0` |
-| Código Rust | 124 archivos `.rs` bajo `crates/` |
-| Pruebas Rust | 469 atributos `#[test]`/`#[tokio::test]` encontrados |
-| Ejemplos Python | 101 archivos bajo `examples/` |
+| Código Rust | 128 archivos `.rs` bajo `crates/` |
+| Pruebas Rust | 540 atributos `#[test]`/`#[tokio::test]` encontrados |
+| Ejemplos Python | 107 archivos bajo `examples/` |
 | Documentación Typst | 35 archivos bajo `docs/content/` |
-| Regresión visual | 67 manifests de baseline |
-| CI visual | 4 ejemplos: transform, image, SVG y camera |
+| Regresión visual | 73 manifests de baseline |
+| CI visual | 12 ejemplos representativos de 2D, texto, layout, datos, cámara, 3D/glTF y presentación |
 | CI general | fmt, check, workspace tests y Clippy en Ubuntu/Windows |
 | Paquete Python | wheel universal de autoría, sin binario nativo |
-| Auditoría del plugin | 1 error objetivo de sincronización del stub superior |
-
-Error de contrato detectado:
-
-```text
-Top-level native imports missing from stub:
-AnimationGroup, LaggedStart, Succession,
-Matrix, MatrixAlgebraError, MatrixDerivation, MatrixEntry,
-MatrixSelection, MatrixSelectionAnimation, MatrixStep
-```
-
-Esto no significa que esas clases falten: existen en `composition.py`, `matrix.py` y sus
-stubs específicos, y se reexportan desde `gaanim.__init__`. Significa que el validador y
-el stub canónico aún no modelan correctamente una API pública compuesta por módulos
-puros y símbolos PyO3. Es deuda P0 porque hoy la auditoría de repositorio no pasa.
+| Auditoría del plugin | 0 errores objetivos |
+| Export E2E | MP4/H.264+AAC, WebM/VP9+Opus, WebP, GIF y PNG; dimensiones y duración inspeccionadas |
 
 ## Arquitectura actual
 
@@ -88,9 +75,9 @@ puros y símbolos PyO3. Es deuda P0 porque hoy la auditoría de repositorio no p
 | Render y objetos | `gaanim_renderer`, `gaanim_objects`, `gaanim_text` | 2D maduro, 3D reciente |
 | Layout y visualización | `gaanim_layout`, `gaanim_visualization` | Amplios; APIs en consolidación |
 | Fachada Rust | `gaanim_api` | Canónica, con alta dependencia transversal |
-| Fachada Python | `gaanim_python` | Amplia; contrato modular todavía desalineado |
+| Fachada Python | `gaanim_python` | Amplia; contrato nativo/helper verificado |
 | Aplicación | `gaanim_editor`, `gaanim_launcher`, `gaanim_project` | Flujo principal de ejecución |
-| Salida y comparación | `gaanim_export`, `gaanim_diff` | Funcionales; matriz E2E incompleta |
+| Salida y comparación | `gaanim_export`, `gaanim_diff` | Cinco formatos en smoke E2E; hardening GPU pendiente |
 
 La dirección arquitectónica se debe preservar: Python construye specs diferidos, la
 aplicación los materializa en ECS y timeline, y preview/export comparten el modelo
@@ -111,6 +98,8 @@ La distribución actual tiene dos piezas distintas:
 
 El proyecto debe documentar esta frontera siempre con los mismos términos. Hablar de una
 “wheel headless” o de importación autónoma contradice el empaquetado actual.
+Esta frontera es una decisión permanente de producto: Gaanim requiere el ejecutable y no
+buscará convertir el wheel en un runtime autónomo.
 
 ## Capacidades confirmadas
 
@@ -131,8 +120,9 @@ El proyecto debe documentar esta frontera siempre con los mismos términos. Habl
 - matrices con selección por filas/columnas/bloques/diagonales, órdenes animados,
   morphing y álgebra opcional mediante SymPy.
 
-La API de matrices es más avanzada que lo descrito en el corte anterior, pero sigue en
-estado beta hasta que auditoría, validación del wheel, ejemplos y docs se ejecuten juntos.
+La API de matrices es más avanzada que lo descrito en el corte anterior. Sus helpers y
+stubs forman parte del contrato modular verificado; la estabilidad general continúa en
+beta mientras Gaanim permanezca en `0.1.x`.
 
 ### 3D y assets
 
@@ -159,23 +149,22 @@ no tienen waveform ni scrubbing audible de primera clase.
 
 ## Riesgos técnicos y mejoras propuestas
 
-### 1. Contrato Python fragmentado — P0
+### 1. Contrato Python modular — baseline cerrado
 
 El binding PyO3, `gaanim_core.pyi`, módulos Python, `__init__.py`, ejemplos y docs forman
-una sola API, pero la validación actual mezcla “nativo” con “público”. El error de
-auditoría demuestra la deriva.
+una sola API. La auditoría ya distingue imports de `gaanim_core` de helpers puros y el
+wheel se prueba en un intérprete aislado para confirmar que exige el runtime ejecutable.
 
-**Mejora:** definir un manifiesto de API pública generado o declarativo que enumere
-propietario, reexport y origen (`native` o `python`) de cada símbolo. Usarlo para validar
-`__all__`, stubs, runtime embebido y documentación.
+**Siguiente mejora:** añadir niveles de estabilidad y propietario al contrato declarativo
+actual (`__all__`, imports modulares y stubs), sin duplicar helpers en el stub nativo.
 
 **Criterio de salida:** auditoría limpia; imports y tipos coinciden; cada símbolo público
 tiene prueba de importación y referencia documental.
 
-### 2. Cobertura visual amplia pero poco continua — P0
+### 2. Cobertura visual — baseline representativo cerrado
 
-67 baselines frente a cuatro comparaciones de CI dejan sin gate continuo matrices,
-charts, layouts, presentación, glTF y 3D.
+CI ejecuta 12 comparaciones que cubren matrices, charts, layouts, ecuaciones,
+presentación, glTF y 3D además de los cuatro casos originales.
 
 **Mejora:** clasificar baselines por subsistema y crear una suite smoke de 10–15 escenas
 en cada PR, con shards o rotación determinista. Ejecutar la matriz completa de forma
@@ -184,14 +173,14 @@ programada y antes de release.
 **Criterio de salida:** cada subsistema de render tiene al menos una escena gated; la
 suite completa tiene dueño, frecuencia y tiempo máximo documentados.
 
-### 3. Exportación y media dependen del entorno — P0
+### 3. Exportación y media dependen del entorno — smoke cerrado, hardening pendiente
 
-FFmpeg, ffprobe, codecs, GPU y drivers varían por plataforma. Hay unit tests y un fixture
-de media, pero no una matriz CI que produzca y sondee cada formato, audio incluido.
+FFmpeg, ffprobe, codecs, GPU y drivers varían por plataforma. La matriz CI ya produce y
+sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM.
 
-**Mejora:** fixtures mínimos reproducibles y smoke tests que exporten MP4, WebM, WebP,
-GIF y PNG; validar dimensiones, duración, frames, alpha y streams con ffprobe. Separar
-explícitamente rutas GPU, CPU y export 3D aislado.
+**Siguiente mejora:** mantener `libx264` como ruta estable por defecto y probar los
+encoders hardware solo como opt-in acotado. Añadir verificación de alpha y cubrir por
+separado export GPU, CPU y 3D aislado.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
@@ -212,9 +201,8 @@ reportan automáticamente, aunque inicialmente no bloqueen PRs.
 El release crea un zip Windows, CI prueba Ubuntu y el README menciona Linux/macOS. No hay
 una matriz que distinga “compila”, “CI”, “paquete instalable” y “soportado”.
 
-**Mejora:** publicar esa tabla y escoger una estrategia: aplicación nativa por plataforma,
-archivo portable, o runtime separado del wheel de autoría. Mantener el wheel puro mientras
-esa decisión siga vigente.
+**Mejora:** publicar esa tabla y distribuir la aplicación nativa por cada plataforma
+declarada. El wheel de autoría permanece universal y puro, y nunca sustituye al ejecutable.
 
 **Criterio de salida:** un usuario nuevo instala, crea proyecto, previsualiza y exporta
 siguiendo un quickstart probado por release para cada plataforma declarada.
@@ -233,7 +221,7 @@ reproducir, pausar, cambiar velocidad y hacer seek repetido.
 
 ### 7. Complejidad de API en expansión — P1
 
-101 ejemplos y una superficie extensa facilitan demos, pero aumentan duplicación,
+107 ejemplos y una superficie extensa facilitan demos, pero aumentan duplicación,
 compatibilidad y coste documental.
 
 **Mejora:** establecer niveles `stable`, `experimental` e `internal`; introducir pruebas
@@ -256,19 +244,18 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 
 ## Roadmap recomendado
 
-### 0.1.x — Reparar el baseline
+### 0.1.x — Baseline implementado
 
-1. Corregir el contrato de stubs para composición y matrices.
-2. Hacer que `audit.py` y `validate-python-api` entiendan símbolos nativos y helpers
-   Python sin falsos positivos ni huecos.
-3. Actualizar docs de matrices, composición, video y distribución del wheel.
-4. Añadir un smoke CI de matrices y otro de video con audio.
-5. Declarar la matriz real de plataformas y artefactos disponibles.
+1. Contrato modular de stubs, helpers y exports corregido.
+2. Wheel authoring-only validado estructuralmente y mediante import aislado.
+3. Documentación alineada con el ejecutable como único runtime.
+4. Suite visual representativa ampliada de 4 a 12 ejemplos.
+5. Smoke E2E de los cinco formatos, con codecs y audio inspeccionados.
 
 ### 0.2 — Hardening de creación y publicación
 
 1. Suite visual representativa por subsistema y ejecución completa programada.
-2. Matriz E2E de los cinco formatos de exportación en Ubuntu/Windows.
+2. Hardening de export: alpha, errores FFmpeg y encoders hardware opt-in con timeout.
 3. Preview unificado para pistas de audio y video, con sync bajo seek.
 4. Benchmarks iniciales de seek, preview, reload y export.
 5. Clasificación de estabilidad de API y política de deprecación.
@@ -295,12 +282,12 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 
 | Indicador | Baseline actual | Objetivo 1.0 |
 |---|---:|---:|
-| Auditoría objetiva | 1 error | 0 errores |
+| Auditoría objetiva | 0 errores | 0 errores |
 | Miembros workspace | 20 | Informativo; no maximizar |
-| Ejemplos Python | 101 | 100% clasificados y ejecutables |
-| Baselines visuales | 67 | 100% con frecuencia definida |
-| Baselines ejecutados en CI por PR | 4 | Al menos uno por subsistema crítico |
-| Formatos con smoke E2E multiplataforma | Incompleto | 5/5 |
+| Ejemplos Python | 107 | 100% clasificados y ejecutables |
+| Baselines visuales | 73 | 100% con frecuencia definida |
+| Baselines ejecutados en CI por PR | 12 | Al menos uno por subsistema crítico |
+| Formatos con smoke E2E multiplataforma | 5/5 configurados | 5/5 |
 | Plataformas de CI | Ubuntu, Windows | Igual a plataformas soportadas |
 | Benchmarks con presupuesto | 0 | Seek, reload, preview y export |
 | API pública cubierta por stubs/docs | <100% | 100% |
@@ -317,6 +304,6 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 8. Tipos 3D-ready y uso directo de `peniko`, `kurbo` y `glam`.
 
 La oportunidad diferencial de Gaanim es ofrecer **autoría Python expresiva con un motor
-Rust/GPU determinista y seekable**. Para convertirla en ventaja de producto, el siguiente
-paso debe demostrar que una escena puede instalarse, reproducirse, inspeccionarse y
-exportarse de forma repetible. La profundidad ya existe; ahora debe volverse contrato.
+Rust/GPU determinista y seekable**. El baseline de contrato ya cubre autoría, ejecución,
+snapshots y exportación. La siguiente prioridad es medir p50/p95 y memoria, endurecer los
+releases nativos y hacer explícita la estabilidad de cada familia de API.

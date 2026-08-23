@@ -37,18 +37,20 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Lint workspace | `just clippy` |
 | Build application binaries (debug) | `just build` |
 | Build application binaries (release) | `just build-release` |
-| Install Python extension in `.venv` | `just python-develop` |
+| Install authoring wheel in `.venv` | `just python-develop` |
 | Build wheel | `just wheel` → outputs to `target/wheels/` |
 | Run example by name | `just run <name>` (e.g., `just run math_animation`) |
 | Validate installed Python API | `just validate-python-api` |
+| Validate all export formats | `just test-exports` |
 | Build documentation | `just docs` |
 | Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
 | Bootstrap venv | `just bootstrap` — creates `.venv` and installs `build`/`hatchling` |
 | Full clean | `just clean` — deletes `.venv` and `cargo clean` |
 
-**Python bridge order:** `just bootstrap` (once) → `just python-develop` before
-directly importing `gaanim` or running `just validate-python-api`. `just run`
-builds and launches an example through the application host.
+**Python bridge order:** `just bootstrap` (once) → `just python-develop` installs
+the authoring-only helpers and types. Plain Python cannot import or execute
+Gaanim scenes: `just run`, `just validate-python-api`, and `just test-exports`
+all use the application host, which owns the native runtime.
 
 ## Python bridge specifics
 
@@ -74,6 +76,8 @@ builds and launches an example through the application host.
 - Run workspace tests: `cargo test --workspace`.
 - Verify the Rust→Python bridge with `just python-develop` followed by
   `just validate-python-api`.
+- Verify the five output formats, including audio streams in MP4/WebM, with
+  `just test-exports` (requires FFmpeg and ffprobe).
 - Use `just doctor` for a fast application/toolchain sanity check.
 
 ## Agent plugin

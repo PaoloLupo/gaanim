@@ -21,6 +21,12 @@ Gaanim `0.1.0` se distribuye como un zip de GitHub Releases. No necesitas `just`
 
 El binario es `gaanim.exe` (launcher, 300KB) + `gaanim-core.exe` (motor, ~140MB). El launcher no depende de `python3.dll`, por eso puede arrancar sin tener Python en `PATH` antes de ejecutarlo: detecta el venv, añade su directorio al `PATH` y luego lanza el core.
 
+El zip también incluye un wheel universal `py3-none-any`. Ese wheel solo aporta
+helpers, stubs y `py.typed` al entorno del proyecto: no contiene el binding
+nativo, renderer ni exportador. Importarlo con Python plano falla de forma
+intencional. Preview, validación y exportación siempre se ejecutan mediante
+`gaanim`; no existe ni está previsto un runtime autónomo instalable con `pip`.
+
 == Descargar y poner en PATH
 
 1. Ve a *Releases* en GitHub y descarga `gaanim-v0.1.0-windows-x64.zip` (y su `.sha256` si quieres verificar).
@@ -146,7 +152,7 @@ gaanim --help             # debe funcionar incluso sin .venv
 mkdir C:\proyectos\demo-hello; cd C:\proyectos\demo-hello
 uv venv --python 3.12
 # no hace falta Activate.ps1: el launcher encuentra .venv por walk-up
-# El launcher proporciona el paquete Python embebido; no instales gaanim con pip.
+# El ejecutable aporta el runtime; el wheel del proyecto solo aporta autoría y tipos.
 
 # 4. Generar el scaffold (yo lo hago así)
 gaanim init video .       # crea gaanim.toml, main.py, assets/, exports/

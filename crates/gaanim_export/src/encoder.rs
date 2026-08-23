@@ -250,6 +250,30 @@ fn adaptive_buffer_depth(width: u32, height: u32) -> usize {
     }
 }
 
+fn png_pixels(
+    frame: Vec<u8>,
+    width: u32,
+    height: u32,
+    transparent: bool,
+) -> Result<(Vec<u8>, image::ExtendedColorType)> {
+    let expected_rgba = width as usize * height as usize * 4;
+    if frame.len() != expected_rgba {
+        return Err(ExportError::Capture(format!(
+            "PNG frame contains {} bytes; expected {expected_rgba} RGBA bytes for {width}x{height}",
+            frame.len()
+        )));
+    }
+    if transparent {
+        return Ok((frame, image::ExtendedColorType::Rgba8));
+    }
+
+    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
+    for pixel in frame.chunks_exact(4) {
+        rgb.extend_from_slice(&pixel[..3]);
+    }
+    Ok((rgb, image::ExtendedColorType::Rgb8))
+}
+
 impl ParallelEncoder {
     pub fn new(config: EncoderConfig) -> Result<Self> {
         let depth = adaptive_buffer_depth(config.width, config.height);
@@ -419,15 +443,12 @@ impl ParallelEncoder {
 
                     let width = config.width;
                     let height = config.height;
-                    let color_type = if config.transparent {
-                        image::ExtendedColorType::Rgba8
-                    } else {
-                        image::ExtendedColorType::Rgb8
-                    };
+                    let (pixels, color_type) =
+                        png_pixels(frame, width, height, config.transparent)?;
 
                     let mut png_buffer = Vec::new();
                     let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
-                    image::ImageEncoder::write_image(encoder, &frame, width, height, color_type)
+                    image::ImageEncoder::write_image(encoder, &pixels, width, height, color_type)
                         .map_err(|e| ExportError::General(format!("PNG encode error: {}", e)))?;
 
                     std::fs::write(dest_path, png_buffer)?;
@@ -618,5 +639,34 @@ impl ParallelEncoder {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::png_pixels;
+
+    #[test]
+    fn opaque_png_frames_drop_alpha_before_rgb_encoding() {
+        let rgba = vec![10, 20, 30, 40, 50, 60, 70, 80];
+        let (pixels, color_type) = png_pixels(rgba, 2, 1, false).unwrap();
+
+        assert_eq!(pixels, vec![10, 20, 30, 50, 60, 70]);
+        assert_eq!(color_type, image::ExtendedColorType::Rgb8);
+    }
+
+    #[test]
+    fn transparent_png_frames_preserve_rgba() {
+        let rgba = vec![10, 20, 30, 40];
+        let (pixels, color_type) = png_pixels(rgba.clone(), 1, 1, true).unwrap();
+
+        assert_eq!(pixels, rgba);
+        assert_eq!(color_type, image::ExtendedColorType::Rgba8);
+    }
+
+    #[test]
+    fn png_frames_reject_unexpected_buffer_lengths() {
+        let error = png_pixels(vec![0; 3], 1, 1, false).unwrap_err();
+        assert!(error.to_string().contains("expected 4 RGBA bytes"));
     }
 }

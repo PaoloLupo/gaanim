@@ -29,6 +29,7 @@ REQUIRED_RECIPES = {
     "docs",
     "doctor",
     "python-develop",
+    "test-exports",
     "validate-python-api",
 }
 

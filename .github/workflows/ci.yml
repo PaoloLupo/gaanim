@@ -74,32 +74,74 @@ jobs:
         shell: pwsh
         run: .\tests\validate_scene_examples.ps1
 
-      - name: Compare transform snapshots
-        run: .\target\debug\gaanim.exe --diff --example examples\transform_demo.py --no-gui
-
-      - name: Compare image snapshots
-        run: .\target\debug\gaanim.exe --diff --example examples\image_demo.py --no-gui
-
-      - name: Compare SVG snapshots
-        run: .\target\debug\gaanim.exe --diff --example examples\svg_demo.py --no-gui
-
-      - name: Compare camera snapshots
-        run: .\target\debug\gaanim.exe --diff --example examples\camera_demo.py --no-gui
+      - name: Compare representative subsystem snapshots
+        shell: pwsh
+        run: |
+          $examples = @(
+            "transform_demo",
+            "image_demo",
+            "svg_demo",
+            "camera_demo",
+            "matrix_showcase",
+            "chart_marks_gallery",
+            "layout_reflow_demo",
+            "equation_step",
+            "primitives_3d_demo",
+            "gltf_animation_demo",
+            "vector_field_streamlines",
+            "presentation_demo"
+          )
+          $hybridExamples = @("chart_marks_gallery", "primitives_3d_demo", "gltf_animation_demo")
+          foreach ($example in $examples) {
+            $pixelThreshold = if ($hybridExamples -contains $example) { "2" } else { "16" }
+            $maxChangedRatio = if ($hybridExamples -contains $example) { "0.001" } else { "0.00001" }
+            .\target\debug\gaanim.exe --diff --example "examples\$example.py" --no-gui `
+              --pixel-threshold $pixelThreshold --max-changed-ratio $maxChangedRatio
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Upload visual diff report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: transform-demo-visual-diff
+          name: representative-visual-diffs
           path: |
-            tests/visual/transform_demo/current
-            tests/visual/transform_demo/report
-            tests/visual/image_demo/current
-            tests/visual/image_demo/report
-            tests/visual/svg_demo/current
-            tests/visual/svg_demo/report
-            tests/visual/camera_demo/current
-            tests/visual/camera_demo/report
+            tests/visual/**/current
+            tests/visual/**/report
+          if-no-files-found: warn
+          retention-days: 14
+
+  export-smoke:
+    name: Export smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build executable runtime
+        run: cargo build -p gaanim_editor --bin gaanim-core
+
+      - name: Export and inspect all formats
+        run: python tests/validate_exports.py --output target/export-smoke
+
+      - name: Upload export diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-smoke-${{ matrix.os }}
+          path: target/export-smoke
           if-no-files-found: warn
           retention-days: 14
 
