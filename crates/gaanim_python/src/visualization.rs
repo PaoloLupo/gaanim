@@ -339,7 +339,7 @@ impl PyAxis {
         Ok(Self(self.0.clone().numbers(format)))
     }
 
-    #[pyo3(signature = (text, *, position="center"))]
+    #[pyo3(signature = (text, *, position="end"))]
     fn label(&self, text: String, position: &str) -> PyResult<Self> {
         let position = match position {
             "start" | "bottom" => AxisLabelPosition::Start,

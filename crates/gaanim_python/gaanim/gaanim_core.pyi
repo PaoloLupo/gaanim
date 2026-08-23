@@ -2220,15 +2220,14 @@ class Axis:
         self,
         text: str,
         *,
-        position: Literal["start", "center", "end", "top", "bottom"] = "center",
+        position: Literal["start", "center", "end", "top", "bottom"] = "end",
     ) -> Axis:
         """Return a copy with a title clear of ticks.
 
         ``position`` locates it along the axis: ``start``/``end`` select its
-        minimum/maximum end and ``center`` is the default. ``top`` and
-        ``bottom`` are convenient aliases for a vertical axis. Cartesian y
-        titles are centered, outside the left ticks, and rotated -90° by
-        default.
+        minimum/maximum end and ``end`` is the default. ``top`` and ``bottom``
+        are aliases for a vertical axis. Paired Cartesian titles stay upright,
+        use equal edge clearance, and appear on the positive side of each axis.
         """
         ...
     def crossing(self, value: Literal["auto", "zero", "min", "max", "minimum", "maximum"] | float) -> Axis: ...

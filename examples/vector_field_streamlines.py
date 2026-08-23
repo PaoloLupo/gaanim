@@ -42,7 +42,7 @@ particles = vortex.particles(
 
 scene.play(
     [
-        plane.create(1.0),
+        plane.write(1.0),
         arrows.write(1.4),
         streams.create(1.4),
         particles.create(1.0),
