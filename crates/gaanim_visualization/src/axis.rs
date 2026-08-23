@@ -45,13 +45,13 @@ pub enum Crossing {
 /// Position of an axis title along its own axis.
 ///
 /// Cartesian spaces resolve `Start` and `End` against the minimum and maximum
-/// ends respectively, while `Center` keeps the title in the middle. The side
-/// of the axis is chosen by the space so titles remain outside their ticks.
+/// ends respectively, while `Center` keeps the title in the middle. `End` is
+/// the default so paired Cartesian titles sit at their positive ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AxisLabelPosition {
     Start,
-    #[default]
     Center,
+    #[default]
     End,
 }
 
@@ -185,7 +185,7 @@ impl Axis {
             minor_subdivisions: 0,
             format: NumberFormat::Auto,
             label: None,
-            label_position: AxisLabelPosition::Center,
+            label_position: AxisLabelPosition::End,
             // A categorical axis has no meaningful zero crossing. Keep the
             // perpendicular axis on the outer band edge instead of through
             // the first category.
@@ -207,7 +207,7 @@ impl Axis {
             minor_subdivisions: 0,
             format: NumberFormat::Auto,
             label: None,
-            label_position: AxisLabelPosition::Center,
+            label_position: AxisLabelPosition::End,
             crossing: Crossing::Auto,
             style: AxisStyle::default(),
             style_patch: AxisStylePatch::default(),
@@ -636,13 +636,13 @@ mod tests {
     }
 
     #[test]
-    fn axis_titles_default_to_center_and_can_use_an_endpoint() {
+    fn axis_titles_default_to_the_positive_endpoint() {
         let axis = Axis::linear(0.0, 1.0).unwrap().label("velocity");
-        assert_eq!(axis.label_position_value(), AxisLabelPosition::Center);
+        assert_eq!(axis.label_position_value(), AxisLabelPosition::End);
         assert_eq!(
-            axis.label_position(AxisLabelPosition::End)
+            axis.label_position(AxisLabelPosition::Center)
                 .label_position_value(),
-            AxisLabelPosition::End
+            AxisLabelPosition::Center
         );
     }
 

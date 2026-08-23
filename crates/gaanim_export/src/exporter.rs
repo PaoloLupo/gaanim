@@ -6,13 +6,15 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::{ExportConfig, ExportTelemetry};
-use crate::encoder::{EncoderConfig, ExportError, ParallelEncoder, Result};
+use crate::encoder::{
+    EncoderConfig, ExportError, ParallelEncoder, Result, VideoEncoder, resolve_video_encoder,
+};
 use crate::gpu::GpuContext;
 
 /// An exact timeline seek rendered into an RGBA8 pixel buffer.
@@ -74,6 +76,28 @@ fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64
     }
 }
 
+fn publish_benchmark_timings(
+    encoder: VideoEncoder,
+    render_gpu: Duration,
+    encoder_wait: Duration,
+    encode_active: Duration,
+    finalize: Duration,
+    total: Duration,
+) {
+    if std::env::var("GAANIM_BENCHMARK_SCENARIO").as_deref() != Ok("export") {
+        return;
+    }
+    println!(
+        "GAANIM_EXPORT_TIMINGS encoder={} render_gpu_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3}",
+        encoder.ffmpeg_name(),
+        render_gpu.as_secs_f64() * 1000.0,
+        encoder_wait.as_secs_f64() * 1000.0,
+        encode_active.as_secs_f64() * 1000.0,
+        finalize.as_secs_f64() * 1000.0,
+        total.as_secs_f64() * 1000.0,
+    );
+}
+
 #[derive(Resource)]
 struct ExportPipeline {
     pub encoder: ParallelEncoder,
@@ -91,6 +115,20 @@ struct ExportPipeline {
     pub export_height: u32,
     pub resize_filter: image::imageops::FilterType,
     pub telemetry: Option<ExportTelemetry>,
+    pub result_tx: SyncSender<Result<()>>,
+    pub result_sent: bool,
+}
+
+fn publish_export_result(
+    result_tx: &SyncSender<Result<()>>,
+    result_sent: &mut bool,
+    result: Result<()>,
+) {
+    if *result_sent {
+        return;
+    }
+    let _ = result_tx.send(result);
+    *result_sent = true;
 }
 
 #[derive(Resource)]
@@ -125,7 +163,9 @@ fn export_pipeline_system(
         match rx.try_recv() {
             Ok(frame_data) => {
                 if let Err(e) = pipeline.encoder.push_frame(frame_data) {
+                    export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
                     bevy::prelude::error!("Encoder error: {}", e);
+                    publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
                     return;
                 }
@@ -156,6 +196,13 @@ fn export_pipeline_system(
                     if let Err(e) = pipeline.encoder.finalize() {
                         export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
                         bevy::prelude::error!("Encoder finalization error: {}", e);
+                        publish_export_result(
+                            &pipeline.result_tx,
+                            &mut pipeline.result_sent,
+                            Err(e),
+                        );
+                        exit.write(AppExit::Success);
+                        return;
                     }
 
                     let duration = pipeline.start_time.elapsed();
@@ -175,6 +222,7 @@ fn export_pipeline_system(
                         "------------------------------------------------------------",
                     );
 
+                    publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Ok(()));
                     exit.write(AppExit::Success);
                     return;
                 }
@@ -186,7 +234,10 @@ fn export_pipeline_system(
                 return;
             }
             Err(TryRecvError::Disconnected) => {
-                bevy::prelude::error!("GPU frame channel disconnected");
+                let error = ExportError::Capture("GPU frame channel disconnected".to_string());
+                export_log(&pipeline.telemetry, format!("  ERROR: {error}"));
+                bevy::prelude::error!("{error}");
+                publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(error));
                 exit.write(AppExit::Success);
                 return;
             }
@@ -288,7 +339,8 @@ where
 {
     let start_time = Instant::now();
     let telemetry = config.telemetry.clone();
-    let config = config.apply_presets();
+    let mut config = config.apply_presets();
+    config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
     if let Some(telemetry) = &telemetry {
         telemetry.set_encoder(encoder_label(&config));
     }
@@ -413,6 +465,7 @@ where
 
     // Bounded channel: at most 4 pending GPU frames to prevent memory blow-up
     let (tx, rx) = sync_channel::<Vec<u8>>(4);
+    let (result_tx, result_rx) = sync_channel::<Result<()>>(1);
 
     app.insert_resource(ExportPipeline {
         encoder,
@@ -430,13 +483,20 @@ where
         export_height: config.height,
         resize_filter,
         telemetry,
+        result_tx,
+        result_sent: false,
     });
 
     app.add_systems(Update, export_pipeline_system);
 
     app.run();
 
-    Ok(())
+    match result_rx.try_recv() {
+        Ok(result) => result,
+        Err(_) => Err(ExportError::General(
+            "export pipeline exited without reporting a result".to_string(),
+        )),
+    }
 }
 
 /// Headless GPU-direct export: bypasses Bevy's render graph and winit entirely.
@@ -451,7 +511,8 @@ where
 {
     let start_time = Instant::now();
     let telemetry = config.telemetry.clone();
-    let config = config.apply_presets();
+    let mut config = config.apply_presets();
+    config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
     if let Some(telemetry) = &telemetry {
         telemetry.set_encoder(encoder_label(&config));
     }
@@ -544,6 +605,8 @@ where
 
     let mut current_time = render_start;
     let mut last_report = Instant::now();
+    let mut render_gpu_time = Duration::ZERO;
+    let mut encoder_wait_time = Duration::ZERO;
 
     for frame_idx in 0..total_frames {
         {
@@ -595,11 +658,15 @@ where
             })
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
+        let render_started_at = Instant::now();
         let frame_data = gpu.render_frame(&vello_scene, bg_color)?;
+        render_gpu_time += render_started_at.elapsed();
 
+        let encoder_wait_started_at = Instant::now();
         encoder
             .push_frame(frame_data)
             .map_err(|e| ExportError::Capture(format!("Encoder push error: {}", e)))?;
+        encoder_wait_time += encoder_wait_started_at.elapsed();
 
         if frame_idx.is_multiple_of(10) || frame_idx == total_frames - 1 {
             let speed = 10.0 / last_report.elapsed().as_secs_f64();
@@ -615,12 +682,22 @@ where
     pb.finish_with_message("Done!");
     export_log(&telemetry, "  Finalizing video file...");
 
-    if let Err(e) = encoder.finalize() {
+    let finalize_started_at = Instant::now();
+    let encode_active_time = encoder.finalize_with_timings().inspect_err(|e| {
         export_log(&telemetry, format!("  ERROR: {e}"));
         bevy::prelude::error!("Encoder finalization error: {}", e);
-    }
+    })?;
+    let finalize_time = finalize_started_at.elapsed();
 
     let duration = start_time.elapsed();
+    publish_benchmark_timings(
+        config.video_encoder,
+        render_gpu_time,
+        encoder_wait_time,
+        encode_active_time,
+        finalize_time,
+        duration,
+    );
     export_log(
         &telemetry,
         "------------------------------------------------------------",
@@ -798,6 +875,7 @@ fn capture_camera_to_vello_transform(
 struct HybridCapturePipeline {
     times: Vec<f64>,
     index: usize,
+    warmup_pending: bool,
     phase: u8,
     frames: Vec<CapturedFrame>,
     tx: SyncSender<Vec<u8>>,
@@ -812,6 +890,10 @@ struct HybridCapturePipeline {
 /// screenshot request is submitted. Native mesh extraction and GPU pipeline
 /// preparation can take more than two frames on a cold Vulkan renderer.
 const HYBRID_CAPTURE_SETTLE_FRAMES: u8 = 6;
+/// The first hybrid frame also pays for render-pipeline and shader creation.
+/// A longer one-time warm-up prevents an otherwise valid first seek from being
+/// captured before native 3D content reaches the swapchain.
+const HYBRID_CAPTURE_COLD_SETTLE_FRAMES: u8 = 30;
 const HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES: u8 = 6;
 
 fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
@@ -821,6 +903,26 @@ fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
     let frames = core::mem::take(&mut pipeline.frames);
     let _ = pipeline.result_tx.send(frames);
     pipeline.result_sent = true;
+}
+
+fn accept_hybrid_capture(pipeline: &mut HybridCapturePipeline, rgba: Vec<u8>) {
+    if pipeline.warmup_pending {
+        // The first screenshot request primes Bevy's swapchain/render graph.
+        // Discard it and repeat the same exact seek for the first fixture.
+        pipeline.warmup_pending = false;
+        pipeline.phase = 0;
+        return;
+    }
+
+    let time = pipeline.times[pipeline.index];
+    pipeline.frames.push(CapturedFrame {
+        time,
+        width: pipeline.width,
+        height: pipeline.height,
+        rgba,
+    });
+    pipeline.index += 1;
+    pipeline.phase = 0;
 }
 
 fn hybrid_capture_system(
@@ -849,19 +951,24 @@ fn hybrid_capture_system(
         exit.write(AppExit::Success);
         return;
     }
+    let settle_frames = if pipeline.warmup_pending {
+        HYBRID_CAPTURE_COLD_SETTLE_FRAMES
+    } else {
+        HYBRID_CAPTURE_SETTLE_FRAMES
+    };
     match pipeline.phase {
         0 => {
             timeline.seek_request = Some(pipeline.times[pipeline.index]);
             pipeline.phase = 1;
         }
-        phase if phase <= HYBRID_CAPTURE_SETTLE_FRAMES => {
+        phase if phase <= settle_frames => {
             // Propagate the exact seek through camera, hierarchy, material,
             // and mesh systems, then allow changed assets to reach Bevy's
             // render world. Several frames are required on a cold renderer
             // while native mesh pipelines are being prepared asynchronously.
             pipeline.phase += 1;
         }
-        phase if phase == HYBRID_CAPTURE_SETTLE_FRAMES + 1 => {
+        phase if phase == settle_frames + 1 => {
             let expects_visible_gltf = gltf_models.iter().any(|visible| visible.is_some());
             let has_visible_gltf_mesh = visible_gltf_meshes.iter().any(|visible| visible.get());
             if expects_visible_gltf && !has_visible_gltf_mesh {
@@ -873,20 +980,13 @@ fn hybrid_capture_system(
                 // from hidden to visible. Count a bounded warm-up below.
                 pipeline.phase += 1;
             } else {
-                pipeline.phase =
-                    HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
+                pipeline.phase = settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
             }
         }
-        phase
-            if phase
-                <= HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 =>
-        {
+        phase if phase <= settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 => {
             pipeline.phase += 1;
         }
-        phase
-            if phase
-                == HYBRID_CAPTURE_SETTLE_FRAMES + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 =>
-        {
+        phase if phase == settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 => {
             let tx = pipeline.tx.clone();
             let width = pipeline.width;
             let height = pipeline.height;
@@ -931,17 +1031,7 @@ fn hybrid_capture_system(
             let received = pipeline.rx.lock().unwrap().try_recv();
             match received {
                 Ok(rgba) => {
-                    let time = pipeline.times[pipeline.index];
-                    let width = pipeline.width;
-                    let height = pipeline.height;
-                    pipeline.frames.push(CapturedFrame {
-                        time,
-                        width,
-                        height,
-                        rgba,
-                    });
-                    pipeline.index += 1;
-                    pipeline.phase = 0;
+                    accept_hybrid_capture(&mut pipeline, rgba);
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
@@ -1004,6 +1094,7 @@ where
     .insert_resource(HybridCapturePipeline {
         times: times.to_vec(),
         index: 0,
+        warmup_pending: true,
         phase: 0,
         frames: Vec::with_capacity(times.len()),
         tx,
@@ -1036,6 +1127,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_result_channel_preserves_the_first_failure() {
+        let (result_tx, result_rx) = sync_channel(1);
+        let mut result_sent = false;
+
+        publish_export_result(
+            &result_tx,
+            &mut result_sent,
+            Err(ExportError::Capture("encoder failed".to_string())),
+        );
+        publish_export_result(&result_tx, &mut result_sent, Ok(()));
+
+        let error = result_rx.recv().unwrap().unwrap_err();
+        assert!(error.to_string().contains("encoder failed"));
+    }
 
     #[test]
     fn direct_capture_scales_a_canvas_down_to_a_thumbnail() {
@@ -1102,6 +1209,7 @@ mod tests {
         let mut pipeline = HybridCapturePipeline {
             times: vec![0.25],
             index: 1,
+            warmup_pending: false,
             phase: 0,
             frames: vec![CapturedFrame {
                 time: 0.25,
@@ -1123,5 +1231,35 @@ mod tests {
         let frames = result_rx.recv().expect("external capture result");
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].rgba, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn hybrid_capture_discards_the_cold_swapchain_frame() {
+        let (frame_tx, frame_rx) = sync_channel(1);
+        let (result_tx, _result_rx) = sync_channel(1);
+        let mut pipeline = HybridCapturePipeline {
+            times: vec![0.25],
+            index: 0,
+            warmup_pending: true,
+            phase: 99,
+            frames: Vec::new(),
+            tx: frame_tx,
+            rx: Mutex::new(frame_rx),
+            width: 1,
+            height: 1,
+            result_tx,
+            result_sent: false,
+        };
+
+        accept_hybrid_capture(&mut pipeline, vec![0, 0, 0, 255]);
+        assert!(!pipeline.warmup_pending);
+        assert_eq!(pipeline.phase, 0);
+        assert_eq!(pipeline.index, 0);
+        assert!(pipeline.frames.is_empty());
+
+        accept_hybrid_capture(&mut pipeline, vec![1, 2, 3, 4]);
+        assert_eq!(pipeline.index, 1);
+        assert_eq!(pipeline.frames.len(), 1);
+        assert_eq!(pipeline.frames[0].rgba, vec![1, 2, 3, 4]);
     }
 }

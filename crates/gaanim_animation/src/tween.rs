@@ -4,7 +4,9 @@ use bevy::prelude::{Component, Entity, Query, Res, ResMut, Resource};
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform, get_point_at_alpha};
-use gaanim_scene::{FillBrush, Opacity, Path2D, PathSource, StrokeBrush};
+use gaanim_scene::{
+    FillBrush, LineListData, LineListSource, Opacity, Path2D, PathSource, StrokeBrush,
+};
 
 use crate::writing::{FillDrawProgress, PathReveal, WriteTipGlow};
 
@@ -81,6 +83,14 @@ impl Tween {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MorphTable;
 
+/// Concrete or timeline-captured source for a complete authored camera pose.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CameraStateSource {
+    Concrete(gaanim_math::CameraPose),
+    Captured(u64),
+}
+
 /// Represents which Mobject property the tween should interpolate.
 ///
 /// Lenses are generic and support 2D/3D spaces natively.
@@ -151,6 +161,10 @@ pub enum PropertyLens {
     },
 
     // === Camera ===
+    CameraState {
+        from: CameraStateSource,
+        to: CameraStateSource,
+    },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -254,6 +268,10 @@ pub enum PropertyLens {
     PathFollow {
         path: Arc<BezPath>,
     },
+    /// Move the entity along a 3D polyline at normalized arc length.
+    PathFollow3D {
+        points: Arc<Vec<gaanim_core::glam::DVec3>>,
+    },
 
     // === Reactive Signals ===
     /// Tween a reactive FloatSignal from an initial to target value.
@@ -292,6 +310,7 @@ impl std::fmt::Debug for PropertyLens {
             }
             Self::FillLevel { from, to } => write!(f, "FillLevel({from} -> {to})"),
             Self::SurroundingRectTargets { .. } => write!(f, "SurroundingRectTargets"),
+            Self::CameraState { .. } => write!(f, "CameraState"),
             Self::CameraPosition { from, to } => {
                 write!(f, "CameraPosition({:?} -> {:?})", from, to)
             }
@@ -325,6 +344,7 @@ impl std::fmt::Debug for PropertyLens {
                 from_fov, to_fov, ..
             } => write!(f, "CameraPerspective({} -> {})", from_fov, to_fov),
             Self::PathFollow { .. } => write!(f, "PathFollow"),
+            Self::PathFollow3D { .. } => write!(f, "PathFollow3D"),
             Self::SignalFloat { from, to } => write!(f, "SignalFloat({} -> {})", from, to),
             Self::PathRange {
                 from,
@@ -500,6 +520,7 @@ pub fn evaluate_tweens_system(
             PropertyLens::CameraPosition { from: _, to: _ } => {
                 // Camera is a resource, not a component. Custom lenses can handle this.
             }
+            PropertyLens::CameraState { .. } => {}
             PropertyLens::CameraPositionSource { .. } => {}
             PropertyLens::CameraRotation { from: _, to: _ } => {}
             PropertyLens::CameraZoom { from: _, to: _ } => {}
@@ -543,6 +564,11 @@ pub fn evaluate_tweens_system(
                     transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
                 }
             }
+            PropertyLens::PathFollow3D { points } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.translation = gaanim_math::get_point_on_polyline(points, t);
+                }
+            }
             PropertyLens::SignalFloat { from, to } => {
                 if let Ok(mut signal) = float_signals.get_mut(tween.target) {
                     signal.value = *from + (*to - *from) * t;
@@ -567,6 +593,112 @@ pub fn evaluate_tweens_system(
                 unreachable!("Custom lenses are skipped at the start of the system")
             }
         }
+    }
+}
+
+/// Applies moving path windows to 3D line strips after the main tween system
+/// has advanced the shared tween clock.
+pub fn evaluate_line_path_ranges_system(
+    tweens: Query<(&Tween, &PropertyLens)>,
+    line_sources: Query<&LineListSource>,
+    mut line_lists: Query<&mut LineListData>,
+) {
+    for (tween, lens) in &tweens {
+        let PropertyLens::PathRange {
+            from,
+            to,
+            time_width,
+        } = lens
+        else {
+            continue;
+        };
+        if tween.state == TweenState::Pending {
+            continue;
+        }
+        let progress = if tween.state == TweenState::Completed {
+            1.0
+        } else {
+            ((tween.elapsed - tween.delay) / tween.duration).clamp(0.0, 1.0)
+        };
+        let p = *from + (*to - *from) * tween.rate_func.evaluate(progress);
+        let start = (p - *time_width).max(0.0);
+        let end = p.min(1.0);
+        if let Ok(source) = line_sources.get(tween.target)
+            && let Ok(mut line) = line_lists.get_mut(tween.target)
+            && source.0.strip
+            && source.0.indices.is_none()
+        {
+            *line = trim_line_strip_range(&source.0, start, end);
+        }
+    }
+}
+
+fn lerp_line_value<const N: usize>(from: [f32; N], to: [f32; N], t: f32) -> [f32; N] {
+    std::array::from_fn(|index| from[index] + (to[index] - from[index]) * t)
+}
+
+fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineListData {
+    let segment_count = source.points.len().saturating_sub(1);
+    let start = start.clamp(0.0, 1.0);
+    let end = end.clamp(start, 1.0);
+    if segment_count == 0 || end <= start + f64::EPSILON {
+        return LineListData {
+            points: Vec::new(),
+            indices: None,
+            strip: true,
+            color: source.color,
+            colors: source.colors.as_ref().map(|_| Vec::new()),
+        };
+    }
+
+    let scaled_start = start * segment_count as f64;
+    let scaled_end = end * segment_count as f64;
+    let start_segment = (scaled_start.floor() as usize).min(segment_count - 1);
+    let end_segment = (scaled_end.floor() as usize).min(segment_count - 1);
+    let start_fraction = (scaled_start - start_segment as f64) as f32;
+    let end_fraction = if end >= 1.0 {
+        1.0
+    } else {
+        (scaled_end - end_segment as f64) as f32
+    };
+
+    let mut points = vec![lerp_line_value(
+        source.points[start_segment],
+        source.points[start_segment + 1],
+        start_fraction,
+    )];
+    for index in (start_segment + 1)..=end_segment {
+        points.push(source.points[index]);
+    }
+    points.push(lerp_line_value(
+        source.points[end_segment],
+        source.points[end_segment + 1],
+        end_fraction,
+    ));
+
+    let colors = source.colors.as_ref().map(|colors| {
+        let mut visible = vec![lerp_line_value(
+            colors[start_segment],
+            colors[start_segment + 1],
+            start_fraction,
+        )];
+        for index in (start_segment + 1)..=end_segment {
+            visible.push(colors[index]);
+        }
+        visible.push(lerp_line_value(
+            colors[end_segment],
+            colors[end_segment + 1],
+            end_fraction,
+        ));
+        visible
+    });
+
+    LineListData {
+        points,
+        indices: None,
+        strip: true,
+        color: source.color,
+        colors,
     }
 }
 

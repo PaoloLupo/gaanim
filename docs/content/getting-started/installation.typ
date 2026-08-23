@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Instalación",
-  description: "Instalación para usuario final (Windows + uv) y para desarrollo local",
+  description: "Instalación nativa para Windows y Ubuntu, y desarrollo local",
   route: "/getting-started/installation/",
   updated: datetime.today().display(),
   code-langs: (),
@@ -20,6 +20,12 @@ Gaanim `0.1.0` se distribuye como un zip de GitHub Releases. No necesitas `just`
 - *FFmpeg opcional* — necesario para exportar `mp4`/`webm` y para usar `scene.video()`. Si no está, exporta `png` y evita videos embebidos.
 
 El binario es `gaanim.exe` (launcher, 300KB) + `gaanim-core.exe` (motor, ~140MB). El launcher no depende de `python3.dll`, por eso puede arrancar sin tener Python en `PATH` antes de ejecutarlo: detecta el venv, añade su directorio al `PATH` y luego lanza el core.
+
+El zip también incluye un wheel universal `py3-none-any`. Ese wheel solo aporta
+helpers, stubs y `py.typed` al entorno del proyecto: no contiene el binding
+nativo, renderer ni exportador. Importarlo con Python plano falla de forma
+intencional. Preview, validación y exportación siempre se ejecutan mediante
+`gaanim`; no existe ni está previsto un runtime autónomo instalable con `pip`.
 
 == Descargar y poner en PATH
 
@@ -121,6 +127,24 @@ Luego antepone `home` y `home\Scripts` al `PATH` del proceso hijo (`gaanim-core.
 
 Tip: `gaanim --help` también funciona sin proyecto, usando el fallback del sistema.
 
+= Usuario final — Ubuntu 24.04 x64
+
+Descarga `gaanim-v0.1.0-linux-x64.tar.gz` desde GitHub Releases. El paquete
+contiene `gaanim`, `gaanim-core` y el mismo wheel universal de autoría que la
+distribución Windows.
+
+```bash
+tar -xzf gaanim-v0.1.0-linux-x64.tar.gz
+mkdir -p ~/.local/bin ~/.local/share/gaanim
+install -m 755 gaanim gaanim-core ~/.local/bin/
+install -m 644 gaanim-*-py3-none-any.whl ~/.local/share/gaanim/
+gaanim --help
+```
+
+Requiere Python 3.12 y las bibliotecas base de Ubuntu 24.04. Instala FFmpeg para
+exportar MP4/WebM o usar video embebido. Mantén ambos ejecutables en la misma
+carpeta: el launcher localiza `gaanim-core` junto a sí mismo.
+
 = Ejemplo completo — de cero a proyecto nuevo usando el PATH
 
 Este es el flujo que yo uso en local y el que usará cualquier usuario con el zip en `PATH`. No requiere activar el venv para que `gaanim` funcione:
@@ -146,7 +170,7 @@ gaanim --help             # debe funcionar incluso sin .venv
 mkdir C:\proyectos\demo-hello; cd C:\proyectos\demo-hello
 uv venv --python 3.12
 # no hace falta Activate.ps1: el launcher encuentra .venv por walk-up
-# El launcher proporciona el paquete Python embebido; no instales gaanim con pip.
+# El ejecutable aporta el runtime; el wheel del proyecto solo aporta autoría y tipos.
 
 # 4. Generar el scaffold (yo lo hago así)
 gaanim init video .       # crea gaanim.toml, main.py, assets/, exports/

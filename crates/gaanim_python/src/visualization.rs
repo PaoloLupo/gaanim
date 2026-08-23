@@ -4,23 +4,25 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    Canvas as ApiCanvas, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
-    CoordinateSpaceHandle, NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle,
-    DEFAULT_REACTIVE_TEXT_SIZE,
+    ArrowFieldOptions, ArrowVectorFieldHandle, Canvas as ApiCanvas, ChartHandle, CoordinateRef,
+    CoordinateSpace3DHandle, CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle,
+    NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle, StreamLinesHandle,
+    StreamLinesStyle, VectorField2DHandle, VectorField3DHandle, DEFAULT_REACTIVE_TEXT_SIZE,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
     Axis as NativeAxis, AxisLabelPosition, AxisStylePatch, Channel, ChartSpec as NativeChartSpec,
     Column, ConstantValue, Crossing, DataMarkKind, DataSource as NativeDataSource,
     DataTable as NativeDataTable, Encoding, GuideSpec, MarkKind, MatchPolicy, NonFinitePolicy,
-    NumberFormat, Sampling, ScaleSpec as NativeScaleSpec, SpaceLayer, TransitionFallback,
+    NumberFormat, Sampling, ScaleSpec as NativeScaleSpec, SpaceLayer, StreamDirection,
+    StreamlineOptions, TransitionFallback,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pyclass_init::PyClassInitializer;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyDict, PyTuple};
 
-use crate::color::PyColor;
+use crate::color::{PyColor, PyColorMapArg};
 use crate::pycanvas::{PyPointRef, PyScene};
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 
@@ -80,6 +82,94 @@ fn trace_scalar_function(
             "{owner} lambda must return a scalar traced with gaanim.math"
         ))
     })
+}
+
+fn traced_vector_items<const N: usize>(result: Bound<'_, PyAny>) -> PyResult<[NativeExpr; N]> {
+    let tuple = result.cast::<PyTuple>().map_err(|_| {
+        PyTypeError::new_err(format!(
+            "vector field function must return a {N}-element tuple"
+        ))
+    })?;
+    if tuple.len() != N {
+        return Err(PyTypeError::new_err(format!(
+            "vector field function must return exactly {N} components"
+        )));
+    }
+    tuple
+        .iter()
+        .map(extract_expr)
+        .collect::<PyResult<Vec<_>>>()?
+        .try_into()
+        .map_err(|_| PyTypeError::new_err("invalid vector field result"))
+}
+
+fn trace_vector_function_2d(function: &Bound<'_, PyAny>) -> PyResult<[NativeExpr; 2]> {
+    let x = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
+    let y = Py::new(function.py(), PyExpr(NativeExpr::variable("y")))?;
+    traced_vector_items(function.call1((x, y))?)
+}
+
+fn trace_vector_function_3d(function: &Bound<'_, PyAny>) -> PyResult<[NativeExpr; 3]> {
+    let x = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
+    let y = Py::new(function.py(), PyExpr(NativeExpr::variable("y")))?;
+    let z = Py::new(function.py(), PyExpr(NativeExpr::variable("z")))?;
+    traced_vector_items(function.call1((x, y, z))?)
+}
+
+fn field_evaluator_2d(
+    function: Bound<'_, PyAny>,
+    canvas: &ApiCanvas,
+    space: &CoordinateSpaceHandle,
+) -> PyResult<(VectorField2DHandle, &'static str)> {
+    if !function.is_callable() {
+        return Err(PyTypeError::new_err("function must be callable"));
+    }
+    if let Ok(expressions) = trace_vector_function_2d(&function) {
+        let field = canvas
+            .vector_field_2d_expression(space, expressions)
+            .map_err(value_error)?;
+        return Ok((field, "native"));
+    }
+    let callback = function.unbind();
+    let field = canvas.vector_field_2d(space, move |[x, y]| {
+        Python::attach(|py| {
+            callback
+                .bind(py)
+                .call1((x, y))
+                .and_then(|value| value.extract::<(f64, f64)>())
+                .map(|(vx, vy)| [vx, vy])
+                .ok()
+        })
+    });
+    Ok((field, "python"))
+}
+
+fn field_evaluator_3d(
+    function: Bound<'_, PyAny>,
+    canvas: &ApiCanvas,
+    space: &CoordinateSpace3DHandle,
+) -> PyResult<(VectorField3DHandle, &'static str)> {
+    if !function.is_callable() {
+        return Err(PyTypeError::new_err("function must be callable"));
+    }
+    if let Ok(expressions) = trace_vector_function_3d(&function) {
+        let field = canvas
+            .vector_field_3d_expression(space, expressions)
+            .map_err(value_error)?;
+        return Ok((field, "native"));
+    }
+    let callback = function.unbind();
+    let field = canvas.vector_field_3d(space, move |[x, y, z]| {
+        Python::attach(|py| {
+            callback
+                .bind(py)
+                .call1((x, y, z))
+                .and_then(|value| value.extract::<(f64, f64, f64)>())
+                .map(|(vx, vy, vz)| [vx, vy, vz])
+                .ok()
+        })
+    });
+    Ok((field, "python"))
 }
 
 fn build_readout_parts(
@@ -249,7 +339,7 @@ impl PyAxis {
         Ok(Self(self.0.clone().numbers(format)))
     }
 
-    #[pyo3(signature = (text, *, position="center"))]
+    #[pyo3(signature = (text, *, position="end"))]
     fn label(&self, text: String, position: &str) -> PyResult<Self> {
         let position = match position {
             "start" | "bottom" => AxisLabelPosition::Start,
@@ -1219,6 +1309,525 @@ pub struct PyCoordinateSpace3D {
     canvas: Arc<Mutex<ApiCanvas>>,
 }
 
+#[derive(Clone)]
+enum PyVectorFieldInner {
+    Two(VectorField2DHandle),
+    Three(VectorField3DHandle),
+}
+
+/// Reusable field evaluator. Geometry is materialized explicitly with
+/// `arrows()` or `streamlines()`.
+#[pyclass(name = "VectorField", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyVectorField {
+    inner: PyVectorFieldInner,
+    canvas: Arc<Mutex<ApiCanvas>>,
+    evaluation: &'static str,
+}
+
+/// Materialized arrow glyphs for a vector field.
+#[pyclass(name = "ArrowVectorField", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyArrowVectorField {
+    inner: ArrowVectorFieldHandle,
+}
+
+/// Materialized deterministic integral curves for a vector field.
+#[pyclass(name = "StreamLines", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyStreamLines {
+    inner: StreamLinesHandle,
+}
+
+/// Deterministically seeded particles with finite advection clips.
+#[pyclass(name = "FlowParticles", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyFlowParticles {
+    inner: FlowParticlesHandle,
+}
+
+fn stream_direction(value: &str) -> PyResult<StreamDirection> {
+    match value {
+        "forward" => Ok(StreamDirection::Forward),
+        "backward" => Ok(StreamDirection::Backward),
+        "both" => Ok(StreamDirection::Both),
+        _ => Err(value_error(
+            "direction must be 'forward', 'backward', or 'both'",
+        )),
+    }
+}
+
+#[pymethods]
+impl PyVectorField {
+    #[getter]
+    fn dimensions(&self) -> usize {
+        match self.inner {
+            PyVectorFieldInner::Two(_) => 2,
+            PyVectorFieldInner::Three(_) => 3,
+        }
+    }
+
+    #[getter]
+    fn evaluation(&self) -> &'static str {
+        self.evaluation
+    }
+
+    #[pyo3(signature = (*, resolution=None, min_length=0.0, max_length=None, length_scale=1.0, width=2.0, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None))]
+    fn arrows(
+        &self,
+        resolution: Option<Bound<'_, PyAny>>,
+        min_length: f64,
+        max_length: Option<f64>,
+        length_scale: f64,
+        width: f64,
+        tip_length: Option<f64>,
+        tip_width: Option<f64>,
+        color: Option<PyColor>,
+        colormap: Option<PyColorMapArg>,
+        color_range: Option<(f64, f64)>,
+    ) -> PyResult<PyArrowVectorField> {
+        if color.is_some() && colormap.is_some() {
+            return Err(value_error("color and colormap are mutually exclusive"));
+        }
+        let color = color.map(|value| value.0);
+        let options = ArrowFieldOptions {
+            min_length,
+            max_length: max_length.unwrap_or(match self.inner {
+                PyVectorFieldInner::Two(_) => 28.0,
+                PyVectorFieldInner::Three(_) => 24.0,
+            }),
+            length_scale,
+            width,
+            tip_length,
+            tip_width,
+            color,
+            colormap: if color.is_none() {
+                colormap
+                    .map(|value| value.0)
+                    .or_else(|| gaanim_core::ColorMap::named("viridis").ok())
+            } else {
+                None
+            },
+            color_range,
+        };
+        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let inner = match &self.inner {
+            PyVectorFieldInner::Two(field) => {
+                let resolution = resolution
+                    .map(|value| value.extract::<(usize, usize)>())
+                    .transpose()?
+                    .unwrap_or((20, 12));
+                canvas.arrow_vector_field_2d(field, [resolution.0, resolution.1], options)
+            }
+            PyVectorFieldInner::Three(field) => {
+                let resolution = resolution
+                    .map(|value| value.extract::<(usize, usize, usize)>())
+                    .transpose()?
+                    .unwrap_or((8, 8, 6));
+                canvas.arrow_vector_field_3d(
+                    field,
+                    [resolution.0, resolution.1, resolution.2],
+                    options,
+                )
+            }
+        }
+        .map_err(value_error)?;
+        Ok(PyArrowVectorField { inner })
+    }
+
+    #[pyo3(signature = (*, seeds=None, direction="both", tolerance=1e-4, min_step=1e-5, max_step=0.1, max_time=3.0, max_length=None, max_steps=10_000, stagnation=1e-10, padding=0.05, separation=0.035, width=2.0, opacity=1.0, color=None, colormap=None, color_range=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn streamlines(
+        &self,
+        seeds: Option<Bound<'_, PyAny>>,
+        direction: &str,
+        tolerance: f64,
+        min_step: f64,
+        max_step: f64,
+        max_time: f64,
+        max_length: Option<f64>,
+        max_steps: usize,
+        stagnation: f64,
+        padding: f64,
+        separation: f64,
+        width: f64,
+        opacity: f64,
+        color: Option<PyColor>,
+        colormap: Option<PyColorMapArg>,
+        color_range: Option<(f64, f64)>,
+    ) -> PyResult<PyStreamLines> {
+        if color.is_some() && colormap.is_some() {
+            return Err(value_error("color and colormap are mutually exclusive"));
+        }
+        let integration = StreamlineOptions {
+            direction: stream_direction(direction)?,
+            tolerance,
+            min_step,
+            max_step,
+            max_time,
+            max_length,
+            max_steps,
+            stagnation,
+            padding,
+            separation,
+        };
+        let color = color.map(|value| value.0);
+        let style = StreamLinesStyle {
+            integration,
+            width,
+            opacity,
+            color,
+            colormap: if color.is_none() {
+                colormap
+                    .map(|value| value.0)
+                    .or_else(|| gaanim_core::ColorMap::named("viridis").ok())
+            } else {
+                None
+            },
+            color_range,
+        };
+        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let inner = match &self.inner {
+            PyVectorFieldInner::Two(field) => {
+                let seeds = seeds
+                    .map(|value| value.extract::<(usize, usize)>())
+                    .transpose()?
+                    .unwrap_or((18, 12));
+                canvas.stream_lines_2d(field, [seeds.0, seeds.1], style)
+            }
+            PyVectorFieldInner::Three(field) => {
+                let seeds = seeds
+                    .map(|value| value.extract::<(usize, usize, usize)>())
+                    .transpose()?
+                    .unwrap_or((8, 6, 4));
+                canvas.stream_lines_3d(field, [seeds.0, seeds.1, seeds.2], style)
+            }
+        }
+        .map_err(value_error)?;
+        Ok(PyStreamLines { inner })
+    }
+
+    #[pyo3(signature = (target, seed, *, duration=3.0, direction="forward", tolerance=1e-4, min_step=1e-5, max_step=0.1, max_time=3.0, max_length=None, max_steps=10_000, stagnation=1e-10, padding=0.05))]
+    #[allow(clippy::too_many_arguments)]
+    fn advect(
+        &self,
+        target: &PyDrawable,
+        seed: Bound<'_, PyAny>,
+        duration: f64,
+        direction: &str,
+        tolerance: f64,
+        min_step: f64,
+        max_step: f64,
+        max_time: f64,
+        max_length: Option<f64>,
+        max_steps: usize,
+        stagnation: f64,
+        padding: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        let integration = StreamlineOptions {
+            direction: stream_direction(direction)?,
+            tolerance,
+            min_step,
+            max_step,
+            max_time,
+            max_length,
+            max_steps,
+            stagnation,
+            padding,
+            separation: 0.0,
+        };
+        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let inner = match &self.inner {
+            PyVectorFieldInner::Two(field) => {
+                let (x, y) = seed.extract::<(f64, f64)>()?;
+                canvas.advect_2d(field, &target.0, [x, y], integration, duration)
+            }
+            PyVectorFieldInner::Three(field) => {
+                let (x, y, z) = seed.extract::<(f64, f64, f64)>()?;
+                canvas.advect_3d(field, &target.0, [x, y, z], integration, duration)
+            }
+        }
+        .map_err(value_error)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    #[pyo3(signature = (count=32, *, radius=None, duration=3.0, tolerance=1e-4, min_step=1e-5, max_step=0.1, max_time=3.0, max_length=None, max_steps=10_000, stagnation=1e-10, padding=0.05, color=None, colormap=None, color_range=None, opacity=1.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn particles(
+        &self,
+        count: usize,
+        radius: Option<f64>,
+        duration: f64,
+        tolerance: f64,
+        min_step: f64,
+        max_step: f64,
+        max_time: f64,
+        max_length: Option<f64>,
+        max_steps: usize,
+        stagnation: f64,
+        padding: f64,
+        color: Option<PyColor>,
+        colormap: Option<PyColorMapArg>,
+        color_range: Option<(f64, f64)>,
+        opacity: f64,
+    ) -> PyResult<PyFlowParticles> {
+        if color.is_some() && colormap.is_some() {
+            return Err(value_error("color and colormap are mutually exclusive"));
+        }
+        let integration = StreamlineOptions {
+            direction: StreamDirection::Forward,
+            tolerance,
+            min_step,
+            max_step,
+            max_time,
+            max_length,
+            max_steps,
+            stagnation,
+            padding,
+            separation: 0.0,
+        };
+        let color = color.map(|value| value.0);
+        let options = FlowParticleOptions {
+            integration,
+            duration,
+            radius: radius.unwrap_or(match self.inner {
+                PyVectorFieldInner::Two(_) => 5.0,
+                PyVectorFieldInner::Three(_) => 0.06,
+            }),
+            color,
+            colormap: if color.is_none() {
+                colormap
+                    .map(|value| value.0)
+                    .or_else(|| gaanim_core::ColorMap::named("viridis").ok())
+            } else {
+                None
+            },
+            color_range,
+            opacity,
+        };
+        let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let inner = match &self.inner {
+            PyVectorFieldInner::Two(field) => canvas.flow_particles_2d(field, count, options),
+            PyVectorFieldInner::Three(field) => canvas.flow_particles_3d(field, count, options),
+        }
+        .map_err(value_error)?;
+        Ok(PyFlowParticles { inner })
+    }
+}
+
+#[pymethods]
+impl PyArrowVectorField {
+    fn drawable(&self) -> PyDrawable {
+        PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.write(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_in(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_out(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.uncreate(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.unwrite(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.grow_from_center(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.shrink_to_center(duration),
+        }
+    }
+}
+
+#[pymethods]
+impl PyStreamLines {
+    fn drawable(&self) -> PyDrawable {
+        PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.write(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_in(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_out(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.uncreate(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.unwrite(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.grow_from_center(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.shrink_to_center(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=2.0, *, time_width=0.15))]
+    fn flow(&self, duration: f64, time_width: f64) -> PyResult<Vec<PyCanvasAnim>> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(value_error("duration must be finite and positive"));
+        }
+        if !time_width.is_finite() || !(0.0..=1.0).contains(&time_width) || time_width == 0.0 {
+            return Err(value_error("time_width must be in (0, 1]"));
+        }
+        Ok(self
+            .inner
+            .flow(duration, time_width)
+            .into_iter()
+            .map(|inner| PyCanvasAnim { inner })
+            .collect())
+    }
+}
+
+#[pymethods]
+impl PyFlowParticles {
+    fn drawable(&self) -> PyDrawable {
+        PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.create(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.write(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_in(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.fade_out(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.uncreate(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.unwrite(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.grow_from_center(duration),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.shrink_to_center(duration),
+        }
+    }
+
+    fn flow(&self) -> Vec<PyCanvasAnim> {
+        self.inner
+            .flow()
+            .into_iter()
+            .map(|inner| PyCanvasAnim { inner })
+            .collect()
+    }
+}
+
 /// Materialized declarative chart with stable semantic layers.
 #[pyclass(name = "Chart", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1635,33 +2244,15 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(8, 8, 6), max_length=24.0))]
-    fn vector_field(
-        &self,
-        function: Bound<'_, PyAny>,
-        resolution: (usize, usize, usize),
-        max_length: f64,
-    ) -> PyResult<PyDrawable> {
-        if !function.is_callable() {
-            return Err(PyTypeError::new_err("function must be callable"));
-        }
-        self.canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .vector_field_plot_3d(
-                &self.inner,
-                [resolution.0, resolution.1, resolution.2],
-                max_length,
-                |x, y, z| {
-                    function
-                        .call1((x, y, z))
-                        .and_then(|value| value.extract::<(f64, f64, f64)>())
-                        .map(|vector| [vector.0, vector.1, vector.2])
-                        .ok()
-                },
-            )
-            .map(PyDrawable)
-            .map_err(value_error)
+    fn field(&self, function: Bound<'_, PyAny>) -> PyResult<PyVectorField> {
+        let canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let (inner, evaluation) = field_evaluator_3d(function, &canvas, &self.inner)?;
+        drop(canvas);
+        Ok(PyVectorField {
+            inner: PyVectorFieldInner::Three(inner),
+            canvas: self.canvas.clone(),
+            evaluation,
+        })
     }
 }
 
@@ -1877,32 +2468,15 @@ impl PyCoordinateSpace {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(20, 12), max_length=28.0))]
-    fn vector_field(
-        &self,
-        function: Bound<'_, PyAny>,
-        resolution: (usize, usize),
-        max_length: f64,
-    ) -> PyResult<PyDrawable> {
-        if !function.is_callable() {
-            return Err(PyTypeError::new_err("function must be callable"));
-        }
-        self.canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .vector_field_plot(
-                &self.inner,
-                [resolution.0, resolution.1],
-                max_length,
-                |x, y| {
-                    function
-                        .call1((x, y))
-                        .and_then(|value| value.extract::<(f64, f64)>())
-                        .ok()
-                },
-            )
-            .map(PyDrawable)
-            .map_err(value_error)
+    fn field(&self, function: Bound<'_, PyAny>) -> PyResult<PyVectorField> {
+        let canvas = self.canvas.lock().expect("scene canvas poisoned");
+        let (inner, evaluation) = field_evaluator_2d(function, &canvas, &self.inner)?;
+        drop(canvas);
+        Ok(PyVectorField {
+            inner: PyVectorFieldInner::Two(inner),
+            canvas: self.canvas.clone(),
+            evaluation,
+        })
     }
 
     /// Orthogonal projections from a data point to both coordinate axes.
@@ -2063,7 +2637,9 @@ impl PyCoordinateSpace {
             ));
         }
         if !radius.is_finite() || radius <= 0.0 {
-            return Err(value_error("scatter_data requires a positive finite radius"));
+            return Err(value_error(
+                "scatter_data requires a positive finite radius",
+            ));
         }
         let policy = parse_non_finite_policy(policy)?;
         let handle = self

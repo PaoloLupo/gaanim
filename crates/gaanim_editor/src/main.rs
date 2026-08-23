@@ -12,6 +12,7 @@
 
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
+use gaanim_export::encoder::VideoEncoder;
 use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -20,6 +21,7 @@ use std::sync::mpsc;
 mod file_watcher;
 mod hot_reload;
 mod python_home;
+mod runtime_benchmark;
 mod script_runner;
 
 use hot_reload::{
@@ -28,6 +30,9 @@ use hot_reload::{
 };
 
 fn main() {
+    if runtime_benchmark::dispatch_reload_benchmark_mode() {
+        return;
+    }
     if dispatch_python_api_validation_mode() {
         return;
     }
@@ -85,7 +90,7 @@ fn main() {
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
     .add_plugins(gaanim_editor::GaanimEditorPlugin)
     .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
-    .insert_resource(gaanim_media::VideoPreviewAudioEnabled(true))
+    .insert_resource(gaanim_media::PreviewAudioEnabled(true))
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
@@ -132,6 +137,8 @@ fn dispatch_export_mode() -> bool {
     let mut script = None;
     let mut output = None;
     let mut quality = "standard".to_string();
+    let mut encoder = VideoEncoder::Auto;
+    let mut transparent = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -143,6 +150,20 @@ fn dispatch_export_mode() -> bool {
                 index += 1;
                 quality = args.get(index).cloned().unwrap_or_default();
             }
+            "--encoder" => {
+                index += 1;
+                encoder = args
+                    .get(index)
+                    .and_then(|value| VideoEncoder::parse_arg(value))
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "gaanim export: encoder must be {}",
+                            VideoEncoder::ARG_VALUES.join(", ")
+                        );
+                        std::process::exit(2);
+                    });
+            }
+            "--transparent" => transparent = true,
             value if value.starts_with('-') => {
                 eprintln!("gaanim export: unknown option `{value}`");
                 std::process::exit(2);
@@ -158,7 +179,7 @@ fn dispatch_export_mode() -> bool {
     let script = script
         .and_then(|path| gaanim_project::resolve_entry(&path).ok())
         .unwrap_or_else(|| {
-            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production]");
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]");
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {
@@ -178,11 +199,21 @@ fn dispatch_export_mode() -> bool {
             eprintln!("gaanim export: output extension must be mp4, webm, webp, gif, or png");
             std::process::exit(2);
         });
+    if transparent && !matches!(format.as_str(), "webm" | "webp" | "png") {
+        eprintln!("gaanim export: --transparent requires WebM, WebP, or PNG output");
+        std::process::exit(2);
+    }
+    if format != "mp4" && encoder != VideoEncoder::Auto {
+        eprintln!("gaanim export: --encoder requires MP4 output");
+        std::process::exit(2);
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
         quality,
         format,
+        encoder,
+        transparent,
     }) {
         eprintln!("gaanim export: {error}");
         std::process::exit(1);
@@ -214,12 +245,14 @@ struct ExportWorkerArgs {
     output: String,
     quality: String,
     format: String,
+    encoder: VideoEncoder,
+    transparent: bool,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
-    if args.len() != 4 {
+    if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png>"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]"
                 .to_string(),
         );
     }
@@ -229,11 +262,34 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     if !matches!(args[3].as_str(), "mp4" | "webm" | "webp" | "gif" | "png") {
         return Err(format!("unknown export format '{}'", args[3]));
     }
+    let mut encoder = VideoEncoder::Auto;
+    let mut transparent = false;
+    let mut index = 4;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--transparent" => transparent = true,
+            "--encoder" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--encoder requires a value".to_string())?;
+                encoder = VideoEncoder::parse_arg(value)
+                    .ok_or_else(|| format!("unknown export encoder '{value}'"))?;
+            }
+            value => return Err(format!("unknown export worker option '{value}'")),
+        }
+        index += 1;
+    }
+    if args[3] != "mp4" && encoder != VideoEncoder::Auto {
+        return Err("--encoder requires MP4 output".to_string());
+    }
     Ok(ExportWorkerArgs {
         script: PathBuf::from(&args[0]),
         output: args[1].clone(),
         quality: args[2].clone(),
         format: args[3].clone(),
+        encoder,
+        transparent,
     })
 }
 
@@ -283,6 +339,10 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     config.height = canvas.height;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
+    config.video_encoder = worker.encoder;
+    if worker.transparent {
+        config.transparent = true;
+    }
     config.headless = true;
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
@@ -725,6 +785,7 @@ struct DiffModeArgs {
     open_gui: bool,
     example: Option<PathBuf>,
     capture: bool,
+    capture_only: bool,
     bless: bool,
 }
 
@@ -794,6 +855,11 @@ fn dispatch_diff_mode() -> bool {
         std::process::exit(0);
     }
 
+    if parsed.capture_only {
+        println!("Snapshots captured: {}", parsed.current.display());
+        std::process::exit(0);
+    }
+
     let report = match gaanim_diff::compare_directories(
         &parsed.baseline,
         &parsed.current,
@@ -842,6 +908,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     let mut options = gaanim_diff::CompareOptions::default();
     let mut open_gui = true;
     let mut capture = None;
+    let mut capture_only = false;
     let mut bless = false;
     let mut index = 0;
 
@@ -874,10 +941,18 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             }
             "--no-gui" => open_gui = false,
             "--no-capture" => capture = Some(false),
+            "--capture-only" => capture_only = true,
             "--bless" => bless = true,
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown option `{flag}`")),
         }
+    }
+
+    if capture_only && bless {
+        return Err("--capture-only cannot be combined with --bless".to_string());
+    }
+    if capture_only && capture == Some(false) {
+        return Err("--capture-only cannot be combined with --no-capture".to_string());
     }
 
     if let Some(example) = example {
@@ -890,12 +965,16 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             open_gui,
             example: Some(example),
             capture: capture.unwrap_or(true),
+            capture_only,
             bless,
         }));
     }
 
     if bless {
         return Err("--bless requires --example <SCRIPT_OR_PROJECT>".to_string());
+    }
+    if capture_only {
+        return Err("--capture-only requires --example <SCRIPT_OR_PROJECT>".to_string());
     }
 
     Ok(Some(DiffModeArgs {
@@ -910,6 +989,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
         open_gui,
         example: None,
         capture: false,
+        capture_only: false,
         bless: false,
     }))
 }
@@ -949,6 +1029,7 @@ OPTIONS:
                                      Capture and compare one project automatically
         --tests-root <DIR>           Global snapshot root (default: tests/visual)
         --bless                      Capture this example as its baseline and exit
+        --capture-only               Capture into current/ (or --current) and exit
         --no-capture                 Reuse the example's existing current snapshots
     -b, --baseline <DIR>            Known-good snapshot directory
     -c, --current <DIR>             Candidate snapshot directory
@@ -1016,7 +1097,7 @@ fn parse_args() -> LaunchArgs {
         eprintln!("  gaanim");
         eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
         eprintln!("  gaanim init <video|slides> [DIRECTORY] [--force]");
-        eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE>");
+        eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--encoder <ENCODER>]");
         eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
         std::process::exit(0);
@@ -1105,7 +1186,26 @@ mod tests {
                 output: "exports/output.mp4".to_string(),
                 quality: "standard".to_string(),
                 format: "mp4".to_string(),
+                encoder: VideoEncoder::Auto,
+                transparent: false,
             }
+        );
+
+        let transparent =
+            ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);
+        assert!(parse_export_worker_args(&transparent).unwrap().transparent);
+        let hardware = [
+            "scene.py",
+            "output.mp4",
+            "draft",
+            "mp4",
+            "--encoder",
+            "nvenc",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            parse_export_worker_args(&hardware).unwrap().encoder,
+            VideoEncoder::H264Nvenc
         );
     }
 
@@ -1115,6 +1215,53 @@ mod tests {
         assert!(parse_export_worker_args(&quality).is_err());
         let format = ["scene.py", "out.avi", "draft", "avi"].map(str::to_string);
         assert!(parse_export_worker_args(&format).is_err());
+        let encoder =
+            ["scene.py", "out.mp4", "draft", "mp4", "--encoder", "magic"].map(str::to_string);
+        assert!(parse_export_worker_args(&encoder).is_err());
+    }
+
+    #[test]
+    fn parses_capture_only_diff_without_requiring_a_baseline() {
+        let args = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--current",
+            "target/performance/seek",
+            "--capture-only",
+            "--no-gui",
+        ]
+        .map(str::to_string);
+        let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
+
+        assert!(parsed.capture);
+        assert!(parsed.capture_only);
+        assert!(!parsed.bless);
+        assert!(!parsed.open_gui);
+        assert_eq!(parsed.current, PathBuf::from("target/performance/seek"));
+    }
+
+    #[test]
+    fn capture_only_diff_rejects_non_capture_combinations() {
+        let no_example = ["--capture-only"].map(str::to_string);
+        assert!(parse_diff_mode_args(&no_example).is_err());
+
+        let no_capture = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--capture-only",
+            "--no-capture",
+        ]
+        .map(str::to_string);
+        assert!(parse_diff_mode_args(&no_capture).is_err());
+
+        let bless = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--capture-only",
+            "--bless",
+        ]
+        .map(str::to_string);
+        assert!(parse_diff_mode_args(&bless).is_err());
     }
 
     #[test]

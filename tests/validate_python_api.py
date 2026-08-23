@@ -16,6 +16,7 @@ TYPE_CHECKING_ONLY = {
     "CurveControl",
     "CurveCommand",
     "ColorLike",
+    "ColorMapLike",
     "Paint",
 }
 TEXT_API_CLASSES = {
@@ -225,7 +226,39 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("legacy reactive classes remain public")
     space.parametric(lambda t: (t, t * t), (-1.0, 1.0), samples=32)
     space.implicit(lambda px, py: px * px + py * py - 1.0, resolution=(16, 16))
-    space.vector_field(lambda px, py: (-py, px), resolution=(4, 4))
+    field = space.field(lambda px, py: (-py, px))
+    arrows = field.arrows(resolution=(4, 4), colormap="viridis")
+    streams = field.streamlines(seeds=(4, 3), max_time=0.4)
+    if field.dimensions != 2 or field.evaluation != "native":
+        failures.append("2D VectorField did not retain its native traced evaluator")
+    if not isinstance(arrows.drawable(), module.Drawable):
+        failures.append("ArrowVectorField did not materialize a Drawable")
+    if not streams.flow(0.5):
+        failures.append("StreamLines.flow did not produce finite animations")
+    field.advect(scene.dot(2.0), (1.0, 0.0), duration=0.5, max_time=0.4)
+    particles = field.particles(3, duration=0.5, max_time=0.3)
+    if not particles.flow() or not isinstance(particles.drawable(), module.Drawable):
+        failures.append("FlowParticles did not expose drawable and flow handles")
+    for aggregate in (arrows, streams, particles):
+        for method in (
+            "create",
+            "write",
+            "fade_in",
+            "fade_out",
+            "uncreate",
+            "unwrite",
+            "grow_from_center",
+            "shrink_to_center",
+        ):
+            animation = getattr(aggregate, method)(0.1)
+            if not isinstance(animation, module.Anim):
+                failures.append(
+                    f"{type(aggregate).__name__}.{method} did not return Anim"
+                )
+    if len(module.ColorMap.names("matplotlib")) != 39:
+        failures.append("Matplotlib ColorMap catalog is incomplete")
+    if len(module.ColorMap.names("scientific")) != 39:
+        failures.append("Scientific ColorMap catalog is incomplete")
     space.tangent(lambda value: value * value, 1.0)
     space.riemann_sum(lambda value: value * value, (0.0, 2.0), rectangles=4)
 
@@ -258,7 +291,10 @@ def validate_visualization_contract(module: object) -> list[str]:
     )
     space_3d.surface(lambda px, py: px * px - py * py, resolution=(8, 8))
     space_3d.parametric(lambda t: (t, t * t, t * t * t), (-1.0, 1.0), samples=16)
-    space_3d.vector_field(lambda px, py, pz: (-py, px, -pz), resolution=(2, 2, 2))
+    field_3d = space_3d.field(lambda px, py, pz: (-py, px, -pz))
+    field_3d.arrows(resolution=(2, 2, 2), colormap="batlow")
+    field_3d.streamlines(seeds=(2, 2, 2), max_time=0.25)
+    field_3d.particles(2, duration=0.4, max_time=0.2)
 
     for removed in ("axes", "number_plane", "axes_3d", "polar_plane", "complex_plane"):
         if hasattr(module.Scene, removed):
@@ -610,6 +646,16 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     parameter = scene.parameter(1.0)
     point = scene.point_ref(parameter * 20.0, 10.0)
 
+    state_2d = scene.camera.state_2d(center=(12.0, -8.0), zoom=1.25, rotation=0.1)
+    state_3d = scene.camera.state_3d((4.0, 3.0, 8.0), (0.0, 0.0, 0.0), fov_y=0.8)
+    captured = scene.camera.capture()
+    saved = scene.camera.save("overview")
+    if not all(
+        isinstance(state, module.CameraState)
+        for state in (state_2d, state_3d, captured, saved)
+    ):
+        failures.append("camera state factories did not return CameraState")
+
     constraint = scene.camera.bind_2d(center=point, zoom=parameter)
     if not isinstance(constraint, module.CameraConstraint):
         failures.append("Camera.bind_2d did not return CameraConstraint")
@@ -626,6 +672,8 @@ def validate_camera_rig_contract(module: object) -> list[str]:
         scene.camera.look_at((4.0, 3.0, 8.0), point, duration=0.0),
         scene.camera.orthographic(1.0, duration=0.0),
         scene.camera.reset(duration=0.0),
+        scene.camera.to(state_2d, duration=0.0),
+        scene.camera.restore("overview", duration=0.0),
     )
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("one or more camera rig operations did not return Anim")
@@ -645,6 +693,10 @@ def validate_camera_rig_contract(module: object) -> list[str]:
         lambda: scene.camera.perspective(3.141592653589793),
         lambda: scene.camera.look_at((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
         lambda: scene.camera.bind_2d(center=point, influence=1.5),
+        lambda: scene.camera.state_2d(zoom=0.0),
+        lambda: scene.camera.restore("missing"),
+        lambda: scene.camera.save(""),
+        lambda: module.Scene(320, 180).camera.to(state_2d),
     )
     for call in invalid_calls:
         try:

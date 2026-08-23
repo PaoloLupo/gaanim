@@ -7,6 +7,7 @@
 //!
 //! Ported from the reference implementation in `crabanim::engine::geometry`.
 
+use gaanim_core::glam::DVec3;
 #[allow(unused_imports)]
 use kurbo::{BezPath, ParamCurve, ParamCurveArclen, PathEl, PathSeg, Point, Shape};
 
@@ -214,6 +215,41 @@ pub fn get_point_at_alpha(path: &BezPath, alpha: f64) -> Point {
         }
     }
     last_point
+}
+
+/// Sample a 3D polyline at normalized arc length.
+pub fn get_point_on_polyline(points: &[DVec3], alpha: f64) -> DVec3 {
+    let Some(first) = points.first().copied() else {
+        return DVec3::ZERO;
+    };
+    if points.len() == 1 || alpha <= 0.0 {
+        return first;
+    }
+    if alpha >= 1.0 {
+        return points.last().copied().unwrap_or(first);
+    }
+    let lengths = points
+        .windows(2)
+        .map(|pair| pair[0].distance(pair[1]))
+        .collect::<Vec<_>>();
+    let total = lengths.iter().sum::<f64>();
+    if total <= f64::EPSILON {
+        return first;
+    }
+    let target = alpha.clamp(0.0, 1.0) * total;
+    let mut traversed = 0.0;
+    for (index, length) in lengths.into_iter().enumerate() {
+        if target <= traversed + length || index + 2 == points.len() {
+            let local = if length <= f64::EPSILON {
+                0.0
+            } else {
+                (target - traversed) / length
+            };
+            return points[index].lerp(points[index + 1], local.clamp(0.0, 1.0));
+        }
+        traversed += length;
+    }
+    points.last().copied().unwrap_or(first)
 }
 
 /// Trims a path to a range [from_alpha, to_alpha] proportionally.
@@ -759,5 +795,20 @@ mod morph_tests {
             (p100.x - 100.0).abs() < 1e-3 && p100.y.abs() < 1e-3,
             "p100 should be (100,0), got {p100:?}"
         );
+    }
+
+    #[test]
+    fn samples_3d_polyline_by_arc_length() {
+        let points = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(2.0, 0.0, 0.0),
+            DVec3::new(2.0, 6.0, 0.0),
+        ];
+        assert_eq!(get_point_on_polyline(&points, 0.25), points[1]);
+        assert_eq!(
+            get_point_on_polyline(&points, 0.625),
+            DVec3::new(2.0, 3.0, 0.0)
+        );
+        assert_eq!(get_point_on_polyline(&points, 1.0), points[2]);
     }
 }

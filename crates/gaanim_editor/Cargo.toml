@@ -39,3 +39,5 @@ crossbeam-channel = { workspace = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 rfd = "0.17"
 open = "5.3"
+serde = { workspace = true }
+serde_json = { workspace = true }

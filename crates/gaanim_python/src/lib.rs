@@ -33,6 +33,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add_class::<transition::PyTransitionType>()?;
     m.add_class::<color::PyColor>()?;
+    m.add_class::<color::PyColorMap>()?;
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<brush::PyBackground>()?;
     m.add_class::<pylayout::PyAnchor>()?;
@@ -43,6 +44,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyTheme>()?;
     m.add_class::<pycanvas::PyCanvas>()?;
     m.add_class::<pycanvas::PyCamera>()?;
+    m.add_class::<pycanvas::PyCameraState>()?;
     m.add_class::<pycanvas::PyCameraConstraint>()?;
     m.add_class::<pycanvas::PyScene>()?;
     m.add_class::<pycanvas::PySegment>()?;
@@ -88,6 +90,10 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpace3D>()?;
+    m.add_class::<visualization::PyVectorField>()?;
+    m.add_class::<visualization::PyArrowVectorField>()?;
+    m.add_class::<visualization::PyStreamLines>()?;
+    m.add_class::<visualization::PyFlowParticles>()?;
     m.add_class::<visualization::PyNumberLine>()?;
     m.add_class::<visualization::PyPolarSpace>()?;
     m.add_class::<visualization::PyDataTable>()?;

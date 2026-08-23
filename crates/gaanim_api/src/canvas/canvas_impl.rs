@@ -186,6 +186,32 @@ pub struct CameraConstraintHandle {
     state: SharedCanvasState,
 }
 
+/// Reusable complete camera state owned by one scene.
+#[derive(Clone)]
+pub struct CameraStateHandle {
+    source: gaanim_animation::CameraStateSource,
+    state: SharedCanvasState,
+}
+
+impl std::fmt::Debug for CameraStateHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CameraStateHandle")
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CameraStateError {
+    #[error("camera state names must not be empty")]
+    EmptyName,
+    #[error("unknown camera state '{0}'")]
+    UnknownName(String),
+    #[error("camera states can only be used with their owning Scene")]
+    ForeignScene,
+}
+
 impl std::fmt::Debug for CameraConstraintHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.debug_struct("CameraConstraintHandle").finish()
@@ -448,7 +474,7 @@ pub struct Canvas {
     pub theme_style: Option<CanvasTheme>,
     pub margin: Margin,
     pub asset_root: Option<PathBuf>,
-    /// Audio sources mixed by FFmpeg when this canvas is exported.
+    /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
@@ -775,8 +801,7 @@ impl Canvas {
     }
 
     /// Add an audio source at an absolute scene time, or at the current cursor
-    /// when `start_time` is omitted. Audio is mixed and muxed into MP4/WebM
-    /// exports; preview playback remains visual-only for now.
+    /// when `start_time` is omitted. Preview and export share the same timing.
     pub fn audio(
         &mut self,
         path: impl AsRef<Path>,
@@ -1565,13 +1590,6 @@ impl Canvas {
         })
     }
 
-    pub(crate) fn line_segments_3d(&mut self, points: Vec<[f32; 3]>) -> DrawableHandle {
-        self.spawn(SpawnKind::LineSegments3D {
-            points,
-            colors: None,
-        })
-    }
-
     pub(crate) fn line_segments_3d_with_colors(
         &mut self,
         points: Vec<[f32; 3]>,
@@ -2244,6 +2262,100 @@ impl Canvas {
             active_idx,
         )
         .duration(duration.max(0.0))
+    }
+
+    fn camera_state_handle(
+        &self,
+        source: gaanim_animation::CameraStateSource,
+    ) -> CameraStateHandle {
+        CameraStateHandle {
+            source,
+            state: self.state.clone(),
+        }
+    }
+
+    /// Create a reusable concrete orthographic camera state.
+    pub fn camera_state_2d(
+        &self,
+        center: DVec2,
+        zoom: f64,
+        rotation: f64,
+    ) -> Result<CameraStateHandle, gaanim_math::CameraValidationError> {
+        let pose = gaanim_math::CameraPose::orthographic_2d(center, zoom, rotation)?;
+        Ok(self.camera_state_handle(gaanim_animation::CameraStateSource::Concrete(pose)))
+    }
+
+    /// Create a reusable concrete perspective look-at camera state.
+    pub fn camera_state_3d(
+        &self,
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> Result<CameraStateHandle, gaanim_math::CameraValidationError> {
+        let pose = gaanim_math::CameraPose::perspective_3d(eye, target, up, fov_y, near, far)?;
+        Ok(self.camera_state_handle(gaanim_animation::CameraStateSource::Concrete(pose)))
+    }
+
+    /// Capture the authored camera at the current timeline cursor.
+    pub fn camera_capture(&self) -> CameraStateHandle {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let id = state.next_camera_state_id();
+        state.active_mut().ops.push(Op::CaptureCameraState { id });
+        drop(state);
+        self.camera_state_handle(gaanim_animation::CameraStateSource::Captured(id))
+    }
+
+    /// Save (or replace) a named camera capture at the current cursor.
+    pub fn camera_save(&self, name: &str) -> Result<CameraStateHandle, CameraStateError> {
+        if name.trim().is_empty() {
+            return Err(CameraStateError::EmptyName);
+        }
+        let state_handle = self.camera_capture();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .saved_camera_states
+            .insert(name.to_owned(), state_handle.source);
+        Ok(state_handle)
+    }
+
+    /// Animate to a reusable concrete or captured camera state.
+    pub fn camera_to(
+        &self,
+        state_handle: &CameraStateHandle,
+        duration: f64,
+    ) -> Result<Anim, CameraStateError> {
+        if !Arc::ptr_eq(&self.state, &state_handle.state) {
+            return Err(CameraStateError::ForeignScene);
+        }
+        let from_id = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .next_camera_state_id();
+        Ok(self.camera_anim(
+            AnimationType::CameraState {
+                from: gaanim_animation::CameraStateSource::Captured(from_id),
+                to: state_handle.source,
+            },
+            duration,
+        ))
+    }
+
+    /// Animate to a previously saved named camera state.
+    pub fn camera_restore(&self, name: &str, duration: f64) -> Result<Anim, CameraStateError> {
+        let source = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .saved_camera_states
+            .get(name)
+            .copied()
+            .ok_or_else(|| CameraStateError::UnknownName(name.to_owned()))?;
+        self.camera_to(&self.camera_state_handle(source), duration)
     }
 
     /// Pan the orthographic camera to a world-space point.
@@ -2989,11 +3101,11 @@ impl Canvas {
 
     /// Spawn a hidden 3D traced path that accumulates the 3D trajectory of
     /// `source` as a `LineList`.
-    /// Supports optional colormap (`"inferno"`, `"viridis"`, `"plasma"`) for time-based coloring.
+    /// Supports any built-in or custom [`gaanim_core::ColorMap`] for time-based coloring.
     pub fn traced_path_3d(
         &mut self,
         source: &DrawableHandle,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
         max_points: Option<usize>,
         min_distance: f64,
     ) -> DrawableHandle {
@@ -3004,7 +3116,7 @@ impl Canvas {
     pub fn traced_path_3d_with_options(
         &mut self,
         source: &DrawableHandle,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
         max_points: Option<usize>,
         min_distance: f64,
         dissipating_time: Option<f64>,

@@ -1,4 +1,4 @@
-name: Release (Windows)
+name: Release
 
 on:
   push:
@@ -13,9 +13,6 @@ jobs:
   release-windows:
     name: Build gaanim.exe (Windows x64)
     runs-on: windows-latest
-    env:
-      CARGO_BUILD_JOBS: 2
-
     steps:
       - uses: actions/checkout@v4
 
@@ -94,7 +91,71 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gaanim-windows-x64
-          path: dist/*
+          path: |
+            dist/gaanim-v*-windows-x64.zip
+            dist/gaanim-v*-windows-x64.zip.sha256
+
+  release-linux:
+    name: Build gaanim (Ubuntu x64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binaries
+        run: |
+          cargo build -p gaanim_launcher --release --bin gaanim
+          cargo build -p gaanim_editor --release --bin gaanim-core
+
+      - name: Build authoring wheel
+        run: |
+          python -m pip install build hatchling
+          python -m build --wheel --no-isolation --outdir target/wheels crates/gaanim_python
+          python tests/validate_authoring_wheel.py target/wheels
+
+      - name: Verify version and launcher
+        run: |
+          cargo_ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gaanim_editor/Cargo.toml | head -n 1)
+          echo "Cargo version: $cargo_ver"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            test "v$cargo_ver" = "${{ github.ref_name }}"
+          fi
+          target/release/gaanim --help
+
+      - name: Package tarball
+        run: |
+          ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gaanim_editor/Cargo.toml | head -n 1)
+          archive="gaanim-v$ver-linux-x64.tar.gz"
+          stage="dist/stage"
+          mkdir -p "$stage"
+          install -m 755 target/release/gaanim target/release/gaanim-core "$stage/"
+          install -m 644 target/wheels/gaanim-*-py3-none-any.whl README.md "$stage/"
+          tar -C "$stage" -czf "dist/$archive" .
+          (cd dist && sha256sum "$archive" > "$archive.sha256")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaanim-linux-x64
+          path: |
+            dist/gaanim-v*-linux-x64.tar.gz
+            dist/gaanim-v*-linux-x64.tar.gz.sha256
+
+  publish:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-windows, release-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

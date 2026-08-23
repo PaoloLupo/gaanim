@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
@@ -184,6 +184,15 @@ class ImpactTests(unittest.TestCase):
             )
         self.assertEqual(["just docs"], result.commands)
 
+    def test_runtime_hot_paths_select_performance_smoke(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = impact.analyze_paths(
+                Path(temp),
+                ["crates/gaanim_timeline/src/timeline.rs"],
+            )
+        self.assertIn("performance", result.categories)
+        self.assertIn("just benchmark smoke", result.commands)
+
 
 class VerifySafetyTests(unittest.TestCase):
     @classmethod
@@ -202,6 +211,25 @@ class VerifySafetyTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 self.verify.main(["visual", "--bless"])
         self.assertEqual(2, raised.exception.code)
+
+    def test_performance_profile_selects_requested_workload(self):
+        change = impact.Impact([], [], [], [], [], [])
+        self.assertEqual(
+            [["just", "benchmark", "smoke"]],
+            self.verify._profile_commands(Path.cwd(), "performance", change),
+        )
+        self.assertEqual(
+            [["just", "benchmark", "standard"]],
+            self.verify._profile_commands(
+                Path.cwd(), "performance", change, "standard"
+            ),
+        )
+
+    def test_performance_profile_dry_run_is_non_mutating(self):
+        with redirect_stdout(io.StringIO()) as output:
+            status = self.verify.main(["performance", "--dry-run"])
+        self.assertEqual(0, status)
+        self.assertIn("just benchmark smoke", output.getvalue())
 
 
 class AuditTests(unittest.TestCase):
@@ -248,6 +276,38 @@ class AuditTests(unittest.TestCase):
             codes,
         )
 
+    def test_performance_contract_rejects_fixed_cargo_job_limits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            for relative in audit.PERFORMANCE_FILES:
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            budgets = {
+                "schema_version": 1,
+                "profiles": {
+                    profile: {
+                        "scenarios": {scenario: {} for scenario in audit.PERFORMANCE_SCENARIOS}
+                    }
+                    for profile in ("smoke", "standard")
+                },
+            }
+            (repo / "tests" / "performance" / "budgets.json").write_text(
+                json.dumps(budgets), encoding="utf-8"
+            )
+            workflow = repo / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "CARGO_BUILD_JOBS: 2\npython tests/benchmark_runtime.py --profile standard\n",
+                encoding="utf-8",
+            )
+
+            codes = {
+                finding.code for finding in audit.performance_contract_findings(repo)
+            }
+
+        self.assertEqual({"cargo-job-limit"}, codes)
+
 
 class ManifestTests(unittest.TestCase):
     def test_portable_manifest_and_skill_layout(self):
@@ -275,7 +335,7 @@ class ManifestTests(unittest.TestCase):
             manifest["$schema"],
         )
         skills = sorted((PLUGIN / "skills").glob("*/SKILL.md"))
-        self.assertEqual(6, len(skills))
+        self.assertEqual(7, len(skills))
 
     def test_codex_manifest_points_to_skills(self):
         manifest = json.loads(

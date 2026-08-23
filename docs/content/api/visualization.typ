@@ -133,13 +133,12 @@ para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p
 Los selectores de tema `axes/numbers` y `axes/labels` permiten sustituir estos
 valores globalmente.
 
-Los títulos de eje se sitúan fuera del número más ancho y de la etiqueta de
-tick más alta, con un margen moderado. Por tanto, las categorías y los títulos
-pueden usar saltos de línea sin invadir el área de trazado ni entre sí. El
-título del eje y queda centrado y gira +90° de forma predeterminada. Usa
-`position="start"`, `"center"` o `"end"` para mover el título a lo largo del
-eje; en un eje vertical, `"top"` y `"bottom"` son alias legibles de sus
-extremos.
+En espacios cartesianos 2D, ambos títulos permanecen horizontales y usan la
+misma separación visual desde su eje. De forma predeterminada se colocan en el
+extremo positivo (`position="end"`): el título x queda sobre el eje horizontal
+y el título y a la derecha del vertical. Usa `position="start"`, `"center"` o
+`"end"` para moverlos a lo largo de su propio eje; en un eje vertical,
+`"top"` y `"bottom"` son alias de los extremos.
 
 ```python
 color = Field("temperature", scale=Scale.symlog((-100, 100), threshold=1))
@@ -203,8 +202,8 @@ surface = world.surface(lambda x, y: x * y)
 ```
 
 `Cartesian2D` ofrece `function`, `parametric`, `implicit`, `contour` y
-`vector_field`, además de construcciones de cálculo. `Cartesian3D` ofrece
-`surface`, `parametric` y `vector_field`. Sus capas `grid`, `axes`, `ticks`,
+`field`, además de construcciones de cálculo. `Cartesian3D` ofrece
+`surface`, `parametric` y `field`. Sus capas `grid`, `axes`, `ticks`,
 `numbers` y etiquetas billboard conocen la escala y pueden estilizarse por
 separado. `scene.polar(...)`, `scene.complex(...)` y
 `scene.number_line(...)` cubren los demás espacios tipados.
@@ -231,6 +230,108 @@ scene.play(plane.write(1.2))
 `Expr` y `Parameter` forman la ruta reactiva por fotograma. Las lambdas de
 Python para funciones escalares trazadas se ejecutan una sola vez; el muestreo
 y la evaluación reactiva permanecen en Rust.
+
+== Campos vectoriales y líneas de corriente
+
+`space.field(function)` separa la función matemática de sus representaciones.
+El mismo `VectorField` puede producir flechas y líneas de corriente sin volver
+a definir el campo. Gaanim intenta capturar primero una expresión nativa; si la
+lambda usa operaciones de Python que no pueden trazarse, conserva un callback
+como ruta secundaria. `field.evaluation` permite inspeccionar cuál se eligió.
+Cuando la expresión nativa contiene un `Parameter`, las flechas y las líneas se
+regeneran en Rust con el valor actual del timeline; la ruta Python se muestrea
+al materializar la geometría y no instala callbacks por fotograma.
+
+```python
+from gaanim import Axis, Scene
+
+scene = Scene()
+plane = scene.cartesian_2d(
+  Axis.linear(-4, 4).ticks(1),
+  Axis.linear(-3, 3).ticks(1),
+)
+field = plane.field(lambda x, y: (-y, x))
+arrows = field.arrows(resolution=(18, 12), colormap="batlow")
+streams = field.streamlines(
+  seeds=(16, 10), direction="both", tolerance=1e-5,
+  max_time=3.5, separation=0.045, colormap="vik",
+)
+scene.play([plane.create(), arrows.write(), streams.write()])
+scene.play(streams.flow(3.0, time_width=0.12))
+```
+
+#api-entry(
+  name: "Cartesian2D.field / Cartesian3D.field",
+  kind: "method",
+  signature: "field(function) -> VectorField",
+  params: (
+    (name: "function", type: "Callable", default: none, desc: [Devuelve dos componentes en 2D o tres en 3D. Las expresiones compatibles con `gaanim.math` se trazan una sola vez.]),
+  ),
+  returns: (type: "VectorField", desc: [Evaluador reutilizable asociado al dominio y la transformación del espacio.]),
+  desc: [No dibuja por sí solo. Usa `arrows`, `streamlines` o las operaciones de advección del campo. La propiedad `evaluation` vale `"native"` o `"python"`.],
+)[]
+
+#api-entry(
+  name: "VectorField.arrows",
+  kind: "method",
+  signature: "arrows(*, resolution=None, min_length=0, max_length=None, length_scale=1, width=2, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None) -> ArrowVectorField",
+  params: (
+    (name: "resolution", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Muestras regulares por eje; los valores predeterminados dependen de la dimensión.]),
+    (name: "min_length / max_length", type: "float", default: "0 / automático", desc: [Límites en unidades locales después de transformar el vector desde coordenadas de datos.]),
+    (name: "color / colormap", type: "ColorLike | ColorMapLike | None", default: "None / viridis", desc: [Opciones mutuamente excluyentes. El mapa usa la magnitud del campo.]),
+    (name: "color_range", type: "(float,float) | None", default: "None", desc: [Dominio explícito de magnitudes; si se omite se obtiene de las muestras finitas.]),
+  ),
+  returns: (type: "ArrowVectorField", desc: [Grupo retenido con astas y puntas explícitas en 2D o 3D.]),
+  desc: [Valida resolución, longitudes y rangos antes de crear geometría. El grupo ofrece `create`, `write`, `fade_in`, `fade_out`, `uncreate`, `unwrite`, `grow_from_center` y `shrink_to_center`.],
+)[]
+
+#api-entry(
+  name: "VectorField.streamlines",
+  kind: "method",
+  signature: "streamlines(*, seeds=None, direction=\"both\", tolerance=1e-4, min_step=1e-5, max_step=.1, max_time=3, max_length=None, max_steps=10000, stagnation=1e-10, padding=.05, separation=.035, width=2, opacity=1, color=None, colormap=None, color_range=None) -> StreamLines",
+  params: (
+    (name: "seeds", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Resolución determinista de candidatos de semilla.]),
+    (name: "direction", type: "forward | backward | both", default: "both", desc: [Sentido temporal de integración desde cada semilla.]),
+    (name: "tolerance / min_step / max_step", type: "float", default: "1e-4 / 1e-5 / .1", desc: [Control adaptativo Dormand–Prince RK45.]),
+    (name: "max_time / max_length / max_steps", type: "float | int", default: "3 / None / 10000", desc: [Límites finitos que hacen reproducible cada trayectoria.]),
+    (name: "padding / separation", type: "float", default: ".05 / .035", desc: [Margen normalizado del dominio y distancia mínima de cobertura.]),
+  ),
+  returns: (type: "StreamLines", desc: [Curvas integrales retenidas con color por velocidad.]),
+  desc: [`create`, `write`, `fade_in`, `fade_out`, `uncreate`, `unwrite`, `grow_from_center` y `shrink_to_center` animan las curvas base. `flow(duration, time_width=...)` mueve resaltados más claros sobre ellas sin recortar la geometría base; sus clips son finitos y seekables.],
+)[]
+
+La integración es determinista: las semillas se recorren en orden regular, las
+trayectorias se filtran por cobertura y todos los límites son explícitos. En
+3D, los colores se conservan por vértice y la ventana móvil de `flow` recorta
+la línea nativa también durante seeks y capturas exactas.
+
+`field.advect(drawable, seed, ...)` mueve el centro de cualquier `Drawable`
+por una trayectoria 2D o 3D calculada con el mismo integrador. La semilla es
+explícita y está en coordenadas de datos; el clip resultante es finito, usa
+longitud de arco y puede buscarse exactamente. `field.particles(count, ...)`
+genera semillas de Halton deterministas, crea puntos 2D o esferas 3D, y devuelve
+un `FlowParticles`. Las partículas permanecen ocultas hasta su primera animación:
+pueden entrar con `create`, `write`, `fade_in` o `grow_from_center`, y luego
+advectarse con `scene.play(particles.flow())`. También ofrece `fade_out`,
+`uncreate`, `unwrite` y `shrink_to_center`; `particles.drawable()` conserva el
+acceso al grupo para layout o estilo.
+
+Los colores o colormaps indicados explícitamente en flechas y streamlines tienen
+prioridad sobre las reglas `plot` de `set_theme`; el tema todavía controla el
+fondo, los ejes y cualquier estilo no sobrescrito por el usuario.
+
+#api-entry(
+  name: "VectorField.advect / VectorField.particles",
+  kind: "method",
+  signature: "advect(target, seed, *, duration=3, ...) -> Anim; particles(count=32, *, radius=None, duration=3, ...) -> FlowParticles",
+  params: (
+    (name: "target / seed", type: "Drawable / tuple", default: none, desc: [Objeto cuyo centro se mueve y posición inicial en coordenadas de datos.]),
+    (name: "count / radius", type: "int / float | None", default: "32 / automático", desc: [Cantidad de partículas y radio local; el predeterminado depende de 2D o 3D.]),
+    (name: "duration", type: "float", default: "3", desc: [Duración finita de los clips seekables.]),
+  ),
+  returns: (type: "Anim | FlowParticles", desc: [Una trayectoria individual o un grupo con sus clips de flujo.]),
+  desc: [La advección transforma el centro; no deforma punto a punto la geometría del objeto. Las partículas usan bases 2, 3 y 5 para una distribución reproducible.],
+)[]
 
 == Series de datos muestreadas
 
@@ -343,6 +444,6 @@ scene.play([theta.animate_to(3 * math.pi, duration=4)])
 == Límites y responsabilidades
 
 La inspección interactiva solo existe en la vista previa. La exportación
-interactiva, los dashboards, facets, líneas de corriente, solucionadores de EDO,
-volúmenes e isosuperficies no forman parte todavía de esta superficie. La
+interactiva, los dashboards, facets, volúmenes e isosuperficies no forman parte
+todavía de esta superficie. La
 animación de cámara sigue siendo global, explícita y componible.

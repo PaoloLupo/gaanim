@@ -98,6 +98,230 @@ fn compile_tracking_scalar(
     }
 }
 
+fn compile_field_parameters<const N: usize>(
+    expressions: &[gaanim_expr::Expr; N],
+    id_map: &HashMap<ObjectId, ObjectId>,
+    states: &MobjectStateMap,
+) -> Vec<(ObjectId, Entity)> {
+    let mut ids = expressions
+        .iter()
+        .flat_map(gaanim_expr::Expr::parameter_ids)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|logical| {
+            let actual = id_map.get(&logical).copied()?;
+            states.get(actual).map(|state| (logical, state.entity))
+        })
+        .collect()
+}
+
+fn runtime_field_2d(
+    expressions: &[gaanim_expr::Expr; 2],
+    parameters: &[(ObjectId, Entity)],
+    world: &World,
+    point: [f64; 2],
+) -> Option<[f64; 2]> {
+    let mut context = gaanim_expr::EvalContext::new()
+        .with_variable("x", point[0])
+        .with_variable("y", point[1]);
+    for (logical, entity) in parameters {
+        context.set_parameter(
+            *logical,
+            world.get::<gaanim_animation::FloatSignal>(*entity)?.value,
+        );
+    }
+    Some([
+        expressions[0].eval(&context).ok()?,
+        expressions[1].eval(&context).ok()?,
+    ])
+}
+
+fn reactive_field_color(
+    value: f64,
+    range: (f64, f64),
+    color: Option<PenikoColor>,
+    colormap: Option<&gaanim_core::ColorMap>,
+    opacity: f64,
+) -> PenikoColor {
+    let base = color.unwrap_or_else(|| {
+        let position = ((value - range.0) / (range.1 - range.0)).clamp(0.0, 1.0);
+        colormap
+            .and_then(|map| map.sample(position).ok())
+            .unwrap_or(PenikoColor::WHITE)
+    });
+    let rgba = base.to_rgba8();
+    PenikoColor::from_rgba8(
+        rgba.r,
+        rgba.g,
+        rgba.b,
+        (f64::from(rgba.a) * opacity.clamp(0.0, 1.0)).round() as u8,
+    )
+}
+
+fn reactive_arrow_path_2d(
+    map: &gaanim_visualization::CoordinateMap2D,
+    position: [f64; 2],
+    vector: [f64; 2],
+    options: &crate::canvas::ArrowFieldOptions,
+) -> Option<BezPath> {
+    let start = map.data_to_local(position[0], position[1]).ok()?;
+    let displaced = map
+        .data_to_local(position[0] + vector[0], position[1] + vector[1])
+        .ok()?;
+    let delta = displaced - start;
+    let raw_length = delta.hypot() * options.length_scale;
+    if raw_length <= f64::EPSILON {
+        return None;
+    }
+    let length = raw_length.clamp(options.min_length, options.max_length);
+    let direction = delta / delta.hypot();
+    let end = start + direction * length;
+    let tip_length = options
+        .tip_length
+        .unwrap_or((length * 0.3).clamp(5.0, 12.0));
+    let tip_width = options.tip_width.unwrap_or(tip_length * 0.8);
+    let perpendicular = Vec2::new(-direction.y, direction.x);
+    let shoulder = end - direction * tip_length;
+    let mut path = BezPath::new();
+    path.move_to(start);
+    path.line_to(end);
+    path.move_to(shoulder + perpendicular * (tip_width * 0.5));
+    path.line_to(end);
+    path.line_to(shoulder - perpendicular * (tip_width * 0.5));
+    Some(path)
+}
+
+fn runtime_model_2d(
+    expressions: [gaanim_expr::Expr; 2],
+    parameters: &[(ObjectId, Entity)],
+    world: &World,
+) -> Option<gaanim_visualization::VectorField<2>> {
+    let values = parameters
+        .iter()
+        .map(|(logical, entity)| {
+            world
+                .get::<gaanim_animation::FloatSignal>(*entity)
+                .map(|signal| (*logical, signal.value))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(gaanim_visualization::VectorField::new(move |[x, y]| {
+        let mut context = gaanim_expr::EvalContext::new()
+            .with_variable("x", x)
+            .with_variable("y", y);
+        for (logical, value) in &values {
+            context.set_parameter(*logical, *value);
+        }
+        Some([
+            expressions[0].eval(&context).ok()?,
+            expressions[1].eval(&context).ok()?,
+        ])
+    }))
+}
+
+fn runtime_model_3d(
+    expressions: [gaanim_expr::Expr; 3],
+    parameters: &[(ObjectId, Entity)],
+    world: &World,
+) -> Option<gaanim_visualization::VectorField<3>> {
+    let values = parameters
+        .iter()
+        .map(|(logical, entity)| {
+            world
+                .get::<gaanim_animation::FloatSignal>(*entity)
+                .map(|signal| (*logical, signal.value))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(gaanim_visualization::VectorField::new(move |[x, y, z]| {
+        let mut context = gaanim_expr::EvalContext::new()
+            .with_variable("x", x)
+            .with_variable("y", y)
+            .with_variable("z", z);
+        for (logical, value) in &values {
+            context.set_parameter(*logical, *value);
+        }
+        Some([
+            expressions[0].eval(&context).ok()?,
+            expressions[1].eval(&context).ok()?,
+            expressions[2].eval(&context).ok()?,
+        ])
+    }))
+}
+
+fn reactive_arrow_lines_3d(
+    field: &gaanim_visualization::VectorField<3>,
+    map: &gaanim_visualization::CoordinateMap3D,
+    resolution: [usize; 3],
+    options: &crate::canvas::ArrowFieldOptions,
+    color_range: (f64, f64),
+) -> Option<gaanim_scene::LineListData> {
+    let domains = [map.x.domain(), map.y.domain(), map.z.domain()];
+    let samples = field.sample_grid(domains, resolution).ok()?;
+    let mut points = Vec::new();
+    let mut colors = Vec::new();
+    for sample in samples {
+        let start = DVec3::from_array(map.data_to_local(sample.position).ok()?);
+        let displaced = DVec3::from_array(
+            map.data_to_local([
+                sample.position[0] + sample.vector[0],
+                sample.position[1] + sample.vector[1],
+                sample.position[2] + sample.vector[2],
+            ])
+            .ok()?,
+        );
+        let delta = displaced - start;
+        let raw_length = delta.length() * options.length_scale;
+        if raw_length <= f64::EPSILON {
+            continue;
+        }
+        let length = raw_length.clamp(options.min_length, options.max_length);
+        let direction = delta.normalize();
+        let end = start + direction * length;
+        let tip_length = options
+            .tip_length
+            .unwrap_or((length * 0.3).clamp(4.0, 10.0));
+        let tip_width = options.tip_width.unwrap_or(tip_length * 0.75);
+        let reference = if direction.cross(DVec3::Z).length_squared() > 1e-8 {
+            DVec3::Z
+        } else {
+            DVec3::Y
+        };
+        let side = direction.cross(reference).normalize() * tip_width * 0.5;
+        let shoulder = end - direction * tip_length;
+        for (from, to) in [(start, end), (end, shoulder + side), (end, shoulder - side)] {
+            points.extend([
+                from.to_array().map(|value| value as f32),
+                to.to_array().map(|value| value as f32),
+            ]);
+        }
+        let rgba = reactive_field_color(
+            sample.magnitude,
+            color_range,
+            options.color,
+            options.colormap.as_ref(),
+            1.0,
+        )
+        .to_rgba8();
+        colors.extend(std::iter::repeat_n(
+            [
+                f32::from(rgba.r) / 255.0,
+                f32::from(rgba.g) / 255.0,
+                f32::from(rgba.b) / 255.0,
+                f32::from(rgba.a) / 255.0,
+            ],
+            6,
+        ));
+    }
+    Some(gaanim_scene::LineListData {
+        points,
+        indices: None,
+        strip: false,
+        color: PenikoColor::WHITE,
+        colors: Some(colors),
+    })
+}
+
 fn compile_tracking_endpoint(
     endpoint: &CanvasEndpoint,
     id_map: &HashMap<ObjectId, ObjectId>,
@@ -1849,6 +2073,9 @@ impl Canvas {
         builder
             .commands
             .insert_resource(ClearColor(Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)));
+        builder
+            .commands
+            .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
     }
 
@@ -2021,6 +2248,14 @@ impl Canvas {
                             })
                             .collect(),
                     });
+                }
+                Op::CaptureCameraState { id } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        0.0,
+                        gaanim_timeline::clip::ClipPayload::CameraCapture { id: *id },
+                    );
                 }
                 Op::Animate { anim, active } => {
                     if *active {
@@ -4431,6 +4666,255 @@ impl Canvas {
                             .insert(updater.clone().starting_at(builder.current_time));
                     }
                 }
+                Op::AttachReactiveArrowField2D {
+                    target,
+                    expressions,
+                    position,
+                    map,
+                    options,
+                    color_range,
+                } => {
+                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        let expressions = expressions.clone();
+                        let position = *position;
+                        let map = map.clone();
+                        let options = options.clone();
+                        let color_range = *color_range;
+                        let updater = Updater::new(move |_dt, _elapsed, entity, world| {
+                            let Some(vector) =
+                                runtime_field_2d(&expressions, &parameters, world, position)
+                            else {
+                                return true;
+                            };
+                            let Some(path) =
+                                reactive_arrow_path_2d(&map, position, vector, &options)
+                            else {
+                                return true;
+                            };
+                            let magnitude = (vector[0] * vector[0] + vector[1] * vector[1]).sqrt();
+                            let color = reactive_field_color(
+                                magnitude,
+                                color_range,
+                                options.color,
+                                options.colormap.as_ref(),
+                                1.0,
+                            );
+                            let path = Arc::new(path);
+                            if let Some(mut visible) = world.get_mut::<gaanim_scene::Path2D>(entity)
+                            {
+                                visible.0 = path.clone();
+                            }
+                            if let Some(mut source) =
+                                world.get_mut::<gaanim_scene::PathSource>(entity)
+                            {
+                                source.0 = path;
+                            }
+                            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(entity) {
+                                stroke.brush = Some(gaanim_core::peniko::Brush::Solid(color));
+                            }
+                            true
+                        })
+                        .starting_at(builder.current_time);
+                        builder.commands.entity(state.entity).insert(updater);
+                    }
+                }
+                Op::AttachReactiveArrowField3D {
+                    target,
+                    expressions,
+                    resolution,
+                    map,
+                    options,
+                    color_range,
+                } => {
+                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        let expressions = expressions.clone();
+                        let resolution = *resolution;
+                        let map = map.clone();
+                        let options = options.clone();
+                        let color_range = *color_range;
+                        let updater = Updater::new(move |_dt, _elapsed, entity, world| {
+                            let Some(field) =
+                                runtime_model_3d(expressions.clone(), &parameters, world)
+                            else {
+                                return true;
+                            };
+                            let Some(lines) = reactive_arrow_lines_3d(
+                                &field,
+                                &map,
+                                resolution,
+                                &options,
+                                color_range,
+                            ) else {
+                                return true;
+                            };
+                            if let Some(mut visible) =
+                                world.get_mut::<gaanim_scene::LineListData>(entity)
+                            {
+                                *visible = lines.clone();
+                            }
+                            if let Some(mut source) =
+                                world.get_mut::<gaanim_scene::LineListSource>(entity)
+                            {
+                                source.0 = lines;
+                            }
+                            true
+                        })
+                        .starting_at(builder.current_time);
+                        builder.commands.entity(state.entity).insert(updater);
+                    }
+                }
+                Op::AttachReactiveStreamLine2D {
+                    target,
+                    expressions,
+                    seed,
+                    map,
+                    style,
+                    color_range,
+                } => {
+                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        let expressions = expressions.clone();
+                        let seed = *seed;
+                        let map = map.clone();
+                        let style = style.clone();
+                        let color_range = *color_range;
+                        let updater = Updater::new(move |_dt, _elapsed, entity, world| {
+                            let Some(field) =
+                                runtime_model_2d(expressions.clone(), &parameters, world)
+                            else {
+                                return true;
+                            };
+                            let domains = [map.x.domain(), map.y.domain()];
+                            let Some(line) = field.integrate(seed, domains, style.integration)
+                            else {
+                                return true;
+                            };
+                            let mut path = BezPath::new();
+                            for (index, point) in line.points.iter().enumerate() {
+                                let Ok(local) = map.data_to_local(point[0], point[1]) else {
+                                    return true;
+                                };
+                                if index == 0 {
+                                    path.move_to(local);
+                                } else {
+                                    path.line_to(local);
+                                }
+                            }
+                            let speed = line.speeds.iter().sum::<f64>() / line.speeds.len() as f64;
+                            let color = reactive_field_color(
+                                speed,
+                                color_range,
+                                style.color,
+                                style.colormap.as_ref(),
+                                style.opacity,
+                            );
+                            let path = Arc::new(path);
+                            if let Some(mut visible) = world.get_mut::<gaanim_scene::Path2D>(entity)
+                            {
+                                visible.0 = path.clone();
+                            }
+                            if let Some(mut source) =
+                                world.get_mut::<gaanim_scene::PathSource>(entity)
+                            {
+                                source.0 = path;
+                            }
+                            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(entity) {
+                                stroke.brush = Some(gaanim_core::peniko::Brush::Solid(color));
+                            }
+                            true
+                        })
+                        .starting_at(builder.current_time);
+                        builder.commands.entity(state.entity).insert(updater);
+                    }
+                }
+                Op::AttachReactiveStreamLine3D {
+                    target,
+                    expressions,
+                    seed,
+                    map,
+                    style,
+                    color_range,
+                } => {
+                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        let expressions = expressions.clone();
+                        let seed = *seed;
+                        let map = map.clone();
+                        let style = style.clone();
+                        let color_range = *color_range;
+                        let updater = Updater::new(move |_dt, _elapsed, entity, world| {
+                            let Some(field) =
+                                runtime_model_3d(expressions.clone(), &parameters, world)
+                            else {
+                                return true;
+                            };
+                            let domains = [map.x.domain(), map.y.domain(), map.z.domain()];
+                            let Some(line) = field.integrate(seed, domains, style.integration)
+                            else {
+                                return true;
+                            };
+                            let points = line
+                                .points
+                                .iter()
+                                .filter_map(|point| map.data_to_local(*point).ok())
+                                .map(|point| point.map(|value| value as f32))
+                                .collect::<Vec<_>>();
+                            if points.len() < 2 {
+                                return true;
+                            }
+                            let colors = line
+                                .speeds
+                                .iter()
+                                .map(|speed| {
+                                    let rgba = reactive_field_color(
+                                        *speed,
+                                        color_range,
+                                        style.color,
+                                        style.colormap.as_ref(),
+                                        style.opacity,
+                                    )
+                                    .to_rgba8();
+                                    [
+                                        f32::from(rgba.r) / 255.0,
+                                        f32::from(rgba.g) / 255.0,
+                                        f32::from(rgba.b) / 255.0,
+                                        f32::from(rgba.a) / 255.0,
+                                    ]
+                                })
+                                .collect();
+                            let lines = gaanim_scene::LineListData {
+                                points,
+                                indices: None,
+                                strip: true,
+                                color: PenikoColor::WHITE,
+                                colors: Some(colors),
+                            };
+                            if let Some(mut visible) =
+                                world.get_mut::<gaanim_scene::LineListData>(entity)
+                            {
+                                *visible = lines.clone();
+                            }
+                            if let Some(mut source) =
+                                world.get_mut::<gaanim_scene::LineListSource>(entity)
+                            {
+                                source.0 = lines;
+                            }
+                            true
+                        })
+                        .starting_at(builder.current_time);
+                        builder.commands.entity(state.entity).insert(updater);
+                    }
+                }
                 Op::AttachTracedPath3D {
                     target,
                     source,
@@ -4695,6 +5179,40 @@ impl Canvas {
         use gaanim_timeline::clip::PropertyLensSpec;
 
         match &anim.anim_type {
+            AnimationType::CameraState { from, to } => {
+                if let gaanim_animation::CameraStateSource::Captured(id) = from {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        start + anim.delay.max(0.0),
+                        0.0,
+                        gaanim_timeline::clip::ClipPayload::CameraCapture { id: *id },
+                    );
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraState {
+                        from: *from,
+                        to: *to,
+                    },
+                );
+                if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
+                    *camera_position = pose.position;
+                    *camera_rotation = pose.rotation;
+                    *camera_target = pose.target;
+                    *camera_up = pose.up;
+                    match pose.projection {
+                        gaanim_math::Projection::Orthographic { zoom } => {
+                            *camera_zoom = zoom;
+                            *camera_fov = None;
+                        }
+                        gaanim_math::Projection::Perspective { fov_y, near, far } => {
+                            *camera_fov = Some((fov_y, near, far));
+                        }
+                    }
+                }
+            }
             AnimationType::CameraPosition { to } => {
                 Self::add_camera_lens(
                     builder,
@@ -7706,6 +8224,117 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    #[test]
+    fn named_camera_state_restores_complete_authored_pose() {
+        let mut canvas = Canvas::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        canvas.camera_pan_to(120.0, -30.0, 1.0);
+        let saved = canvas.camera_save("detail").unwrap();
+        canvas.camera_pan_to(0.0, 0.0, 1.0);
+        let restored = canvas.camera_restore("detail", 1.0).unwrap();
+        let _ = saved;
+        assert!(matches!(
+            restored.inner.anim_type,
+            AnimationType::CameraState { .. }
+        ));
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(120.0, -30.0, 0.0)).length() < 1e-9);
+
+        timeline.seek(&mut world, 0.25);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(120.0, -30.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn camera_state_handles_validate_names_ownership_and_projection() {
+        let first = Canvas::new(960, 540);
+        let second = Canvas::new(960, 540);
+        let state = first
+            .camera_state_3d(
+                DVec3::new(7.0, 5.0, 6.0),
+                DVec3::ZERO,
+                DVec3::Y,
+                0.8,
+                0.1,
+                1000.0,
+            )
+            .unwrap();
+        assert_eq!(
+            second.camera_to(&state, 1.0).unwrap_err(),
+            crate::canvas::CameraStateError::ForeignScene
+        );
+        assert_eq!(
+            first.camera_save("").unwrap_err(),
+            crate::canvas::CameraStateError::EmptyName
+        );
+        assert_eq!(
+            first.camera_restore("missing", 1.0).unwrap_err(),
+            crate::canvas::CameraStateError::UnknownName("missing".into())
+        );
+        assert!(first.camera_state_2d(DVec2::ZERO, 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn camera_capture_freezes_reactive_value_at_its_cursor() {
+        let mut canvas = Canvas::new(960, 540);
+        let parameter = canvas.parameter(0.0).unwrap();
+        let point = canvas.point_ref(
+            parameter.expression() * 260.0 - 130.0,
+            gaanim_expr::Expr::constant(25.0),
+        );
+        let parameter_anim = parameter.animate_to(1.0).unwrap().duration(1.0);
+        let camera_anim = canvas.camera_pan_to_endpoint(point.0, 1.0);
+        canvas.play(vec![parameter_anim, camera_anim]);
+        let captured = canvas.camera_capture();
+        canvas.camera_pan_to(0.0, 0.0, 1.0);
+        canvas.camera_to(&captured, 1.0).unwrap();
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(130.0, 25.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn camera_state_transitions_between_2d_and_3d() {
+        let mut canvas = Canvas::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas
+            .camera_state_3d(
+                DVec3::new(7.0, 5.0, 6.0),
+                DVec3::ZERO,
+                DVec3::Y,
+                0.8,
+                0.1,
+                1000.0,
+            )
+            .unwrap();
+        canvas.camera_to(&perspective, 1.0).unwrap();
+        let orthographic = canvas
+            .camera_state_2d(DVec2::new(40.0, -20.0), 1.5, 0.2)
+            .unwrap();
+        canvas.camera_to(&orthographic, 0.0).unwrap();
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 0.0);
+        timeline.seek(&mut world, 0.5);
+        assert!(matches!(
+            world.resource::<gaanim_math::Camera>().projection,
+            gaanim_math::Projection::Perspective { .. }
+        ));
+        timeline.seek(&mut world, 1.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert_eq!(camera.position, DVec3::new(40.0, -20.0, 0.0));
+        assert!(matches!(
+            camera.projection,
+            gaanim_math::Projection::Orthographic { zoom } if (zoom - 1.5).abs() < 1e-9
+        ));
     }
 
     #[test]

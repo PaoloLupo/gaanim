@@ -38,6 +38,21 @@ VISUAL_CANDIDATES = {
     "gaanim_timeline": ["transform_demo"],
 }
 
+PERFORMANCE_CRATES = {
+    "gaanim_editor",
+    "gaanim_export",
+    "gaanim_media",
+    "gaanim_renderer",
+    "gaanim_timeline",
+}
+
+PERFORMANCE_PATHS = {
+    "examples/performance_benchmark.py",
+    "tests/benchmark_runtime.py",
+    "tests/performance/budgets.json",
+    "tests/test_benchmark_runtime.py",
+}
+
 
 @dataclass(frozen=True)
 class Impact:
@@ -136,6 +151,9 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     rust_api = any(path.startswith("crates/gaanim_api/") for path in normalized)
     public_api = rust_api or python_binding
     visual = bool(set(crates) & VISUAL_CRATES)
+    performance = bool(set(crates) & PERFORMANCE_CRATES) or any(
+        path in PERFORMANCE_PATHS for path in normalized
+    )
     plugin = any(path.startswith("plugins/gaanim-dev/") for path in normalized)
     repo_config = any(
         path in {"Cargo.toml", "justfile", "AGENTS.md", "README.md"}
@@ -150,6 +168,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
         (python_binding, "python-api"),
         (bool(docs_files), "documentation"),
         (visual, "visual"),
+        (performance, "performance"),
         (plugin, "plugin"),
         (repo_config, "repository-config"),
     ):
@@ -187,6 +206,8 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
         commands.append("just docs")
     if plugin:
         commands.append("python -m unittest discover -s plugins/gaanim-dev/tests")
+    if performance:
+        commands.append("just benchmark smoke")
     for example in visual_examples:
         commands.append(
             f"target/debug/gaanim --diff --example examples/{example}.py --no-gui"

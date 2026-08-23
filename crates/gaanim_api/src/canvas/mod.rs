@@ -32,17 +32,19 @@ pub use editorial::{
 };
 mod visualization;
 pub use visualization::{
-    ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle,
-    Parameter, PolarSpaceHandle, VisualizationError,
+    ArrowFieldOptions, ArrowVectorFieldHandle, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
+    CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, Parameter,
+    PolarSpaceHandle, StreamLinesHandle, StreamLinesStyle, VectorField2DHandle,
+    VectorField3DHandle, VisualizationError,
 };
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, BooleanError,
-    CameraBindingError, CameraConstraintHandle, Canvas, DEFAULT_REACTIVE_TEXT_SIZE,
-    DimensionExtensionStyle, DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError,
-    SceneObjectError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
-    TypstAssetError, VideoLoadError,
+    CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle, Canvas,
+    DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle, DimensionOptions,
+    ForceVectorHandle, ImageLoadError, SceneObjectError, SupportHandle, SurroundingRectError,
+    SurroundingRectHandle, ThemeError, TypstAssetError, VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

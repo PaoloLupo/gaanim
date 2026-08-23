@@ -65,7 +65,10 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
 
 
 def _profile_commands(
-    repo: Path, profile: str, change: impact_tool.Impact
+    repo: Path,
+    profile: str,
+    change: impact_tool.Impact,
+    benchmark_profile: str = "smoke",
 ) -> list[list[str]]:
     if profile == "fast":
         return _fast_commands(repo, change)
@@ -80,6 +83,8 @@ def _profile_commands(
         ):
             _append_unique(commands, command)
         return commands
+    if profile == "performance":
+        return [["just", "benchmark", benchmark_profile]]
     if profile == "full":
         return [
             ["cargo", "fmt", "--all", "--", "--check"],
@@ -88,6 +93,7 @@ def _profile_commands(
             ["just", "wheel"],
             ["just", "validate-python-api"],
             ["just", "docs"],
+            ["just", "benchmark", "smoke"],
             [sys.executable, "-m", "unittest", "discover", "-s", "plugins/gaanim-dev/tests"],
             [sys.executable, "plugins/gaanim-dev/scripts/audit.py"],
         ]
@@ -143,11 +149,19 @@ def _visual(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("fast", "api", "visual", "full"))
+    parser.add_argument(
+        "profile", choices=("fast", "api", "visual", "performance", "full")
+    )
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--base")
     parser.add_argument("--example", action="append", default=[])
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--benchmark-profile",
+        choices=("smoke", "standard"),
+        default="smoke",
+        help="Benchmark workload used by the performance profile",
+    )
     parser.add_argument("--bless", action="store_true", help="Update selected visual baselines")
     parser.add_argument(
         "--allow-bless",
@@ -167,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"verify: {error}", file=sys.stderr)
         return 2
 
-    commands = _profile_commands(repo, args.profile, change)
+    commands = _profile_commands(repo, args.profile, change, args.benchmark_profile)
     if not commands and args.profile != "visual":
         print("No checks selected for the current change.")
     for command in commands:

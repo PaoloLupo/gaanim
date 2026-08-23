@@ -33,12 +33,16 @@ pub(crate) struct CanvasState {
     pub next_id: u32,
     pub next_segment_id: u32,
     pub next_camera_binding_order: u64,
+    pub next_camera_state_id: u64,
+    pub saved_camera_states: HashMap<String, gaanim_animation::CameraStateSource>,
     pub all_drawables: Vec<ObjectId>,
     pub layout_constraints: Vec<LayoutConstraint>,
     pub layout_diagnostics: Vec<(Option<ObjectId>, String)>,
     /// Latest authoritative authoring snapshot for every Layout v2 root.
     /// Python layout handles and width-sensitive leaves share this registry.
     pub latest_layouts: HashMap<ObjectId, LayoutTreeSnapshot>,
+    /// Authoring-side mirrors for parameters embedded in native expressions.
+    pub parameter_values: HashMap<ObjectId, Arc<Mutex<f64>>>,
 }
 
 impl CanvasState {
@@ -49,10 +53,13 @@ impl CanvasState {
             next_id: 1,
             next_segment_id: 1,
             next_camera_binding_order: 0,
+            next_camera_state_id: 1,
+            saved_camera_states: HashMap::new(),
             all_drawables: Vec::new(),
             layout_constraints: Vec::new(),
             layout_diagnostics: Vec::new(),
             latest_layouts: HashMap::new(),
+            parameter_values: HashMap::new(),
         }
     }
 
@@ -80,6 +87,12 @@ impl CanvasState {
         let order = self.next_camera_binding_order;
         self.next_camera_binding_order += 1;
         order
+    }
+
+    pub fn next_camera_state_id(&mut self) -> u64 {
+        let id = self.next_camera_state_id;
+        self.next_camera_state_id += 1;
+        id
     }
 }
 
@@ -134,6 +147,8 @@ pub(crate) enum Op {
     Spawn(SharedObjectSpec),
     /// Spawn a non-rendered persistent camera binding.
     SpawnCameraBinding(SharedCameraBindingSpec),
+    /// Capture the authored camera pose at the current timeline cursor.
+    CaptureCameraState { id: u64 },
     /// Play a single animation sequentially (auto-queued). `active=false`
     /// means the animation was later regrouped by `Canvas::play(...)`.
     Animate {
@@ -528,13 +543,45 @@ pub(crate) enum Op {
     },
     /// Custom callback updater retained by the deferred canvas operation.
     AttachCustomUpdater { target: ObjectId, updater: Updater },
+    AttachReactiveArrowField2D {
+        target: ObjectId,
+        expressions: [Expr; 2],
+        position: [f64; 2],
+        map: gaanim_visualization::CoordinateMap2D,
+        options: super::ArrowFieldOptions,
+        color_range: (f64, f64),
+    },
+    AttachReactiveArrowField3D {
+        target: ObjectId,
+        expressions: [Expr; 3],
+        resolution: [usize; 3],
+        map: gaanim_visualization::CoordinateMap3D,
+        options: super::ArrowFieldOptions,
+        color_range: (f64, f64),
+    },
+    AttachReactiveStreamLine2D {
+        target: ObjectId,
+        expressions: [Expr; 2],
+        seed: [f64; 2],
+        map: gaanim_visualization::CoordinateMap2D,
+        style: super::StreamLinesStyle,
+        color_range: (f64, f64),
+    },
+    AttachReactiveStreamLine3D {
+        target: ObjectId,
+        expressions: [Expr; 3],
+        seed: [f64; 3],
+        map: gaanim_visualization::CoordinateMap3D,
+        style: super::StreamLinesStyle,
+        color_range: (f64, f64),
+    },
     /// 3D traced path that accumulates source position as a LineList with optional colormap.
     AttachTracedPath3D {
         target: ObjectId,
         source: ObjectId,
         min_distance: f64,
         max_points: Option<usize>,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
         dissipating_time: Option<f64>,
     },
 }

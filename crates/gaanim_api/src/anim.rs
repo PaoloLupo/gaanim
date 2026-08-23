@@ -102,6 +102,10 @@ pub enum AnimationType {
         occurrence: Option<usize>,
         properties: PropertyAnimation,
     },
+    CameraState {
+        from: gaanim_animation::CameraStateSource,
+        to: gaanim_animation::CameraStateSource,
+    },
     CameraPosition {
         to: DVec3,
     },
@@ -364,6 +368,10 @@ pub enum AnimationType {
         path: gaanim_core::kurbo::BezPath,
         path_target: Option<ObjectId>,
     },
+    /// Move the target along a retained 3D polyline at normalized arc length.
+    MoveAlongPath3D {
+        points: Vec<DVec3>,
+    },
     /// Specialized Create animation for `Arrow` mobjects. Draws the
     /// outline first, then finishes with a brief scale "punch" that
     /// emphasizes the arrowhead's appearance at the end.
@@ -502,7 +510,8 @@ impl AnimationType {
     pub(crate) fn is_camera(&self) -> bool {
         matches!(
             self,
-            Self::CameraPosition { .. }
+            Self::CameraState { .. }
+                | Self::CameraPosition { .. }
                 | Self::CameraPositionSource { .. }
                 | Self::CameraZoom { .. }
                 | Self::CameraZoomSource { .. }
@@ -958,6 +967,16 @@ impl MobjectRef {
             duration: 2.0,
             rate_func: RateFunc::Linear,
             delay: 0.0,
+        }
+    }
+
+    pub fn move_along_path_3d(self, points: Vec<DVec3>) -> AnimationBuilder {
+        AnimationBuilder {
+            target: self.id,
+            anim_type: AnimationType::MoveAlongPath3D { points },
+            duration: 2.0,
+            delay: 0.0,
+            rate_func: RateFunc::Linear,
         }
     }
 

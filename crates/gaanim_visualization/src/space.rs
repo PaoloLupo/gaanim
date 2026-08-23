@@ -261,7 +261,7 @@ impl CartesianSpace {
                     text: label.to_owned(),
                     position: Point::new(
                         axis_title_coordinate(self.map.x.label_position_value(), frame.width),
-                        x_axis_y - self.map.x.style_value().tick_length - 12.0,
+                        x_axis_y + self.map.x.style_value().tick_length * 0.5 + 12.0,
                     ),
                     rotation: 0.0,
                     color: self.map.x.style_value().label_color,
@@ -271,10 +271,10 @@ impl CartesianSpace {
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
                     position: Point::new(
-                        y_axis_x - self.map.y.style_value().tick_length - 12.0,
+                        y_axis_x + self.map.y.style_value().tick_length * 0.5 + 12.0,
                         axis_title_coordinate(self.map.y.label_position_value(), frame.height),
                     ),
-                    rotation: std::f64::consts::FRAC_PI_2,
+                    rotation: 0.0,
                     color: self.map.y.style_value().label_color,
                 });
             }

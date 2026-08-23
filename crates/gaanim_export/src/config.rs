@@ -1,117 +1,8 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
-
-/// A source file mixed into the exported video.
-///
-/// Times are expressed in the scene timeline. A track with `start_time = 2.0`
-/// begins two seconds after the start of the scene, independently of an export
-/// range selected later.
-#[derive(Debug, Clone)]
-pub struct AudioTrack {
-    pub path: PathBuf,
-    pub start_time: f64,
-    /// Optional output-timeline duration after playback-rate conversion.
-    pub duration: Option<f64>,
-    pub volume: f64,
-    pub fade_in: f64,
-    pub fade_out: f64,
-    pub source_offset: f64,
-    pub source_duration: Option<f64>,
-    pub speed: f64,
-    pub looping: bool,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AudioTrackError {
-    #[error("audio file '{path}' does not exist or is not a file")]
-    InvalidPath { path: PathBuf },
-    #[error("{name} must be a finite non-negative number")]
-    InvalidNumber { name: &'static str },
-    #[error("fade_out requires an explicit track duration")]
-    FadeOutNeedsDuration,
-    #[error("fade duration cannot exceed the track duration")]
-    FadeExceedsDuration,
-}
-
-impl AudioTrack {
-    pub fn new(
-        path: impl Into<PathBuf>,
-        start_time: f64,
-        duration: Option<f64>,
-        volume: f64,
-        fade_in: f64,
-        fade_out: f64,
-    ) -> Result<Self, AudioTrackError> {
-        let path = path.into();
-        if !path.is_file() {
-            return Err(AudioTrackError::InvalidPath { path });
-        }
-        for (name, value) in [
-            ("start_time", start_time),
-            ("volume", volume),
-            ("fade_in", fade_in),
-            ("fade_out", fade_out),
-        ] {
-            if !value.is_finite() || value < 0.0 {
-                return Err(AudioTrackError::InvalidNumber { name });
-            }
-        }
-        if let Some(duration) = duration {
-            if !duration.is_finite() || duration <= 0.0 {
-                return Err(AudioTrackError::InvalidNumber { name: "duration" });
-            }
-            if fade_in + fade_out > duration {
-                return Err(AudioTrackError::FadeExceedsDuration);
-            }
-        } else if fade_out > 0.0 {
-            return Err(AudioTrackError::FadeOutNeedsDuration);
-        }
-        Ok(Self {
-            path,
-            start_time,
-            duration,
-            volume,
-            fade_in,
-            fade_out,
-            source_offset: 0.0,
-            source_duration: duration,
-            speed: 1.0,
-            looping: false,
-        })
-    }
-
-    /// Build a track sourced from an embedded media stream.
-    pub fn from_media(
-        path: impl Into<PathBuf>,
-        start_time: f64,
-        source_offset: f64,
-        source_duration: f64,
-        speed: f64,
-        looping: bool,
-        volume: f64,
-    ) -> Result<Self, AudioTrackError> {
-        if !source_offset.is_finite() || source_offset < 0.0 {
-            return Err(AudioTrackError::InvalidNumber {
-                name: "source_offset",
-            });
-        }
-        for (name, value) in [("source_duration", source_duration), ("speed", speed)] {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(AudioTrackError::InvalidNumber { name });
-            }
-        }
-        let output_duration = (!looping).then_some(source_duration / speed);
-        let mut track = Self::new(path, start_time, output_duration, volume, 0.0, 0.0)?;
-        track.source_offset = source_offset;
-        track.source_duration = Some(source_duration);
-        track.speed = speed;
-        track.looping = looping;
-        Ok(track)
-    }
-}
+pub use gaanim_media::{AudioTrack, AudioTrackError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AspectRatioPreset {
@@ -248,7 +139,7 @@ impl Default for ExportConfig {
             end_time: None,
             crf: 18,
             encoding_speed: EncodingSpeed::Balanced,
-            video_encoder: VideoEncoder::Libx264,
+            video_encoder: VideoEncoder::Auto,
             headless: false,
             audio_tracks: Vec::new(),
             telemetry: None,
@@ -291,10 +182,6 @@ impl ExportConfig {
     pub fn apply_presets(mut self) -> Self {
         self.encoding_speed = self.quality.encoding_speed();
 
-        if matches!(self.video_encoder, VideoEncoder::Libx264) {
-            self.video_encoder = crate::encoder::detect_best_encoder();
-        }
-
         match self.quality {
             QualityPreset::Draft => {
                 self.fps = 30;
@@ -331,7 +218,21 @@ impl ExportConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioTrack, ExportTelemetry};
+    use super::{AudioTrack, ExportConfig, ExportTelemetry};
+    use crate::encoder::VideoEncoder;
+
+    #[test]
+    fn presets_preserve_automatic_and_explicit_encoder_selection() {
+        let automatic = ExportConfig::default().apply_presets();
+        let explicit = ExportConfig {
+            video_encoder: VideoEncoder::Libx264,
+            ..ExportConfig::default()
+        }
+        .apply_presets();
+
+        assert_eq!(automatic.video_encoder, VideoEncoder::Auto);
+        assert_eq!(explicit.video_encoder, VideoEncoder::Libx264);
+    }
 
     #[test]
     fn telemetry_clones_share_progress_and_logs() {

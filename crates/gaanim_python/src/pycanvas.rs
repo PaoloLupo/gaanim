@@ -18,7 +18,7 @@ use gaanim_api::canvas::{
 };
 
 use crate::brush::PyPaint;
-use crate::color::PyColor;
+use crate::color::{PyColor, PyColorMapArg};
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
 use crate::pylayout::{
@@ -1001,6 +1001,13 @@ pub struct PyCamera {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// Reusable complete authored camera state.
+#[pyclass(name = "CameraState", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCameraState {
+    inner: gaanim_api::canvas::CameraStateHandle,
+}
+
 /// Stable handle for a persistent native camera constraint.
 #[pyclass(name = "CameraConstraint", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1111,6 +1118,96 @@ fn validate_force_metrics(
 
 #[pymethods]
 impl PyCamera {
+    /// Create a concrete orthographic camera state.
+    #[pyo3(signature = (center=(0.0, 0.0), zoom=1.0, rotation=0.0))]
+    fn state_2d(&self, center: (f64, f64), zoom: f64, rotation: f64) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_state_2d(
+                gaanim_core::glam::DVec2::new(center.0, center.1),
+                zoom,
+                rotation,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Create a concrete perspective look-at camera state.
+    #[pyo3(signature = (eye, target, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0))]
+    fn state_3d(
+        &self,
+        eye: (f64, f64, f64),
+        target: (f64, f64, f64),
+        up: (f64, f64, f64),
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_state_3d(
+                gaanim_core::glam::DVec3::new(eye.0, eye.1, eye.2),
+                gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
+                gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
+                fov_y,
+                near,
+                far,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Capture authored camera state at the current timeline cursor.
+    fn capture(&self) -> PyCameraState {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_capture();
+        PyCameraState { inner }
+    }
+
+    /// Animate to a reusable camera state.
+    #[pyo3(signature = (state, duration=1.0))]
+    fn to(&self, state: &PyCameraState, duration: f64) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_to(&state.inner, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Save or replace a named camera capture at the current cursor.
+    fn save(&self, name: &str) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_save(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Animate to a previously saved named camera state.
+    #[pyo3(signature = (name, duration=1.0))]
+    fn restore(&self, name: &str, duration: f64) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_restore(name, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCanvasAnim { inner })
+    }
+
     /// Pan to a world-space point.
     #[pyo3(signature = (target, y=None, duration=1.0))]
     fn pan_to(
@@ -1925,8 +2022,8 @@ impl PyScene {
             .reload_assets();
     }
 
-    /// Mix an audio file into MP4/WebM exports. With no explicit `start`, the
-    /// file begins at the scene's current timeline cursor.
+    /// Play an audio file in preview and mix it into MP4/WebM exports. With no
+    /// explicit `start`, it begins at the current timeline cursor.
     #[pyo3(signature = (
         path,
         *,
@@ -3274,7 +3371,7 @@ impl PyScene {
         points: Vec<(f64, f64, f64)>,
         color: Option<PyColor>,
         colors: Option<Vec<PyColor>>,
-        colormap: Option<String>,
+        colormap: Option<PyColorMapArg>,
     ) -> PyResult<PyDrawable> {
         if points.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -3303,67 +3400,12 @@ impl PyScene {
                 )));
             }
             Some(cols.into_iter().map(|c| c.0).collect())
-        } else if let Some(name) = colormap {
-            let name = name.to_lowercase();
-            // Supported colormaps: inferno (Makie default), viridis, plasma
-            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                "inferno" => vec![
-                    (0, 0, 4),
-                    (31, 12, 72),
-                    (85, 15, 109),
-                    (136, 34, 106),
-                    (168, 50, 88),
-                    (210, 72, 55),
-                    (233, 100, 28),
-                    (249, 157, 87),
-                    (247, 209, 61),
-                    (252, 255, 164),
-                ],
-                "viridis" => vec![
-                    (68, 1, 84),
-                    (59, 82, 139),
-                    (33, 144, 140),
-                    (94, 201, 98),
-                    (253, 231, 37),
-                ],
-                "plasma" => vec![
-                    (13, 8, 135),
-                    (126, 3, 168),
-                    (203, 70, 121),
-                    (248, 149, 64),
-                    (240, 249, 33),
-                ],
-                _ => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "colormap must be 'inferno', 'viridis' or 'plasma'",
-                    ));
-                }
-            };
-            let n = points.len();
-            let mut out = Vec::with_capacity(n);
-            for i in 0..n {
-                let t = if n > 1 {
-                    i as f32 / (n - 1) as f32
-                } else {
-                    0.0
-                };
-                let scaled = t * (palette.len() - 1) as f32;
-                let idx = scaled.floor() as usize;
-                let f = scaled - idx as f32;
-                let (r, g, b) = if idx >= palette.len() - 1 {
-                    palette[palette.len() - 1]
-                } else {
-                    let (r0, g0, b0) = palette[idx];
-                    let (r1, g1, b1) = palette[idx + 1];
-                    (
-                        (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                        (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                        (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                    )
-                };
-                out.push(gaanim_core::peniko::Color::from_rgb8(r, g, b));
-            }
-            Some(out)
+        } else if let Some(map) = colormap {
+            Some(
+                map.0
+                    .colors(points.len())
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+            )
         } else {
             None
         };
@@ -4896,12 +4938,12 @@ impl PyScene {
     }
 
     /// 3D traced path — accumulates the 3D world position of `source` as a `LineList`.
-    /// `colormap` may be "inferno", "viridis" or "plasma" to color by time (like Makie).
+    /// `colormap` may be any built-in name or a custom `ColorMap`.
     #[pyo3(signature = (source, *, colormap=None, dissipating_time=None, max_points=None, min_distance=0.1))]
     fn traced_path_3d(
         &self,
         source: &PyDrawable,
-        colormap: Option<String>,
+        colormap: Option<PyColorMapArg>,
         dissipating_time: Option<f64>,
         max_points: Option<usize>,
         min_distance: f64,
@@ -4925,21 +4967,13 @@ impl PyScene {
                 ));
             }
         }
-        if let Some(ref name) = colormap {
-            let low = name.to_lowercase();
-            if !["inferno", "viridis", "plasma"].contains(&low.as_str()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "colormap must be 'inferno', 'viridis' or 'plasma'",
-                ));
-            }
-        }
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .traced_path_3d_with_options(
                     &source.0,
-                    colormap,
+                    colormap.map(|map| map.0),
                     max_points,
                     min_distance,
                     dissipating_time,

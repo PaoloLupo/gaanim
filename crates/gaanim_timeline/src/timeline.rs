@@ -748,6 +748,23 @@ impl Timeline {
                         }
                     }
                 }
+                ClipPayload::CameraCapture { id } => {
+                    if clip.start <= self.current_time
+                        && let Some(pose) = world
+                            .get_resource::<gaanim_math::Camera>()
+                            .map(|camera| camera.pose())
+                    {
+                        if let Some(mut states) =
+                            world.get_resource_mut::<crate::snapshot::CapturedCameraStates>()
+                        {
+                            states.0.insert(id, pose);
+                        } else {
+                            let mut states = crate::snapshot::CapturedCameraStates::default();
+                            states.0.insert(id, pose);
+                            world.insert_resource(states);
+                        }
+                    }
+                }
                 ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
                     // Scene boundary markers — visibility is handled in the post-pass below.
                 }
@@ -1099,6 +1116,7 @@ impl Timeline {
                         if matches!(
                             anim.lens,
                             PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraState { .. }
                                 | PropertyLensSpec::CameraFollow { .. }
                         )
                 )
@@ -1244,68 +1262,9 @@ fn restore_reactive_state(
                     .map(|p| [p.x as f32, p.y as f32, p.z as f32])
                     .collect();
                 line.points = pts.clone();
-                // Regenerate vertex colors if colormap present
-                let colormap = colormap_clone.clone();
-                if let Some(name) = colormap {
-                    let n = pts.len();
-                    let cols: Vec<[f32; 4]> = (0..n)
-                        .map(|i| {
-                            let t = if n > 1 {
-                                i as f32 / (n - 1) as f32
-                            } else {
-                                0.0
-                            };
-                            // inline inferno/viridis/plasma
-                            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                                "inferno" => vec![
-                                    (0, 0, 4),
-                                    (31, 12, 72),
-                                    (85, 15, 109),
-                                    (136, 34, 106),
-                                    (168, 50, 88),
-                                    (210, 72, 55),
-                                    (233, 100, 28),
-                                    (249, 157, 87),
-                                    (247, 209, 61),
-                                    (252, 255, 164),
-                                ],
-                                "viridis" => vec![
-                                    (68, 1, 84),
-                                    (59, 82, 139),
-                                    (33, 144, 140),
-                                    (94, 201, 98),
-                                    (253, 231, 37),
-                                ],
-                                "plasma" => vec![
-                                    (13, 8, 135),
-                                    (126, 3, 168),
-                                    (203, 70, 121),
-                                    (248, 149, 64),
-                                    (240, 249, 33),
-                                ],
-                                _ => vec![(255, 255, 255), (255, 255, 255)],
-                            };
-                            let scaled = t * (palette.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            let (r, g, b) = if idx >= palette.len() - 1 {
-                                palette[palette.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = palette[idx];
-                                let (r1, g1, b1) = palette[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            };
-                            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-                        })
-                        .collect();
-                    line.colors = Some(cols);
-                } else {
-                    line.colors = None;
-                }
+                line.colors = colormap_clone
+                    .as_ref()
+                    .and_then(|map| map.rgba_f32(pts.len()).ok());
             }
             if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
                 if points.is_empty() {
@@ -1351,7 +1310,7 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         Entity,
         f64,
         Option<usize>,
-        Option<String>,
+        Option<gaanim_core::ColorMap>,
         f64,
         Option<f64>,
     )> = {
@@ -1535,65 +1494,9 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             .collect();
         if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
             line.points = pts_f32.clone();
-            if let Some(name) = colormap_clone.or_else(|| colormap.clone()) {
-                let n = pts_f32.len();
-                let cols: Vec<[f32; 4]> = (0..n)
-                    .map(|i| {
-                        let t = if n > 1 {
-                            i as f32 / (n - 1) as f32
-                        } else {
-                            0.0
-                        };
-                        let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                            "inferno" => vec![
-                                (0, 0, 4),
-                                (31, 12, 72),
-                                (85, 15, 109),
-                                (136, 34, 106),
-                                (168, 50, 88),
-                                (210, 72, 55),
-                                (233, 100, 28),
-                                (249, 157, 87),
-                                (247, 209, 61),
-                                (252, 255, 164),
-                            ],
-                            "viridis" => vec![
-                                (68, 1, 84),
-                                (59, 82, 139),
-                                (33, 144, 140),
-                                (94, 201, 98),
-                                (253, 231, 37),
-                            ],
-                            "plasma" => vec![
-                                (13, 8, 135),
-                                (126, 3, 168),
-                                (203, 70, 121),
-                                (248, 149, 64),
-                                (240, 249, 33),
-                            ],
-                            _ => vec![(255, 255, 255), (255, 255, 255)],
-                        };
-                        let scaled = t * (palette.len() - 1) as f32;
-                        let idx = scaled.floor() as usize;
-                        let f = scaled - idx as f32;
-                        let (r, g, b) = if idx >= palette.len() - 1 {
-                            palette[palette.len() - 1]
-                        } else {
-                            let (r0, g0, b0) = palette[idx];
-                            let (r1, g1, b1) = palette[idx + 1];
-                            (
-                                (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                            )
-                        };
-                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-                    })
-                    .collect();
-                line.colors = Some(cols);
-            } else {
-                line.colors = None;
-            }
+            line.colors = colormap_clone
+                .or_else(|| colormap.clone())
+                .and_then(|map| map.rgba_f32(pts_f32.len()).ok());
         }
         if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(*trace_entity) {
             if points.is_empty() {
@@ -1761,6 +1664,71 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
     }
 }
 
+fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineListData {
+    let segment_count = source.points.len().saturating_sub(1);
+    let start = start.clamp(0.0, 1.0);
+    let end = end.clamp(start, 1.0);
+    if segment_count == 0 || end <= start + f64::EPSILON {
+        return LineListData {
+            points: Vec::new(),
+            indices: None,
+            strip: true,
+            color: source.color,
+            colors: source.colors.as_ref().map(|_| Vec::new()),
+        };
+    }
+
+    let scaled_start = start * segment_count as f64;
+    let scaled_end = end * segment_count as f64;
+    let start_segment = (scaled_start.floor() as usize).min(segment_count - 1);
+    let end_segment = (scaled_end.floor() as usize).min(segment_count - 1);
+    let start_fraction = (scaled_start - start_segment as f64) as f32;
+    let end_fraction = if end >= 1.0 {
+        1.0
+    } else {
+        (scaled_end - end_segment as f64) as f32
+    };
+
+    let mut points = vec![lerp_line_point(
+        source.points[start_segment],
+        source.points[start_segment + 1],
+        start_fraction,
+    )];
+    for index in (start_segment + 1)..=end_segment {
+        points.push(source.points[index]);
+    }
+    points.push(lerp_line_point(
+        source.points[end_segment],
+        source.points[end_segment + 1],
+        end_fraction,
+    ));
+
+    let colors = source.colors.as_ref().map(|colors| {
+        let mut visible = vec![lerp_line_color(
+            colors[start_segment],
+            colors[start_segment + 1],
+            start_fraction,
+        )];
+        for index in (start_segment + 1)..=end_segment {
+            visible.push(colors[index]);
+        }
+        visible.push(lerp_line_color(
+            colors[end_segment],
+            colors[end_segment + 1],
+            end_fraction,
+        ));
+        visible
+    });
+
+    LineListData {
+        points,
+        indices: None,
+        strip: true,
+        color: source.color,
+        colors,
+    }
+}
+
 fn apply_lens_spec(
     world: &mut World,
     target: Entity,
@@ -1913,6 +1881,24 @@ fn apply_lens_spec(
                 frame.from.clone_from(from);
                 frame.to.clone_from(to);
                 frame.progress = t.clamp(0.0, 1.0);
+            }
+        }
+        PropertyLensSpec::CameraState { from, to } => {
+            let resolve = |source: &gaanim_animation::CameraStateSource| match source {
+                gaanim_animation::CameraStateSource::Concrete(pose) => Some(*pose),
+                gaanim_animation::CameraStateSource::Captured(id) => world
+                    .get_resource::<crate::snapshot::CapturedCameraStates>()
+                    .and_then(|states| states.0.get(id).copied()),
+            };
+            if let Some((from, to)) = resolve(from).zip(resolve(to)) {
+                let pose = from.interpolate(to, t);
+                if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                    camera.position = pose.position;
+                    camera.rotation = pose.rotation;
+                    camera.target = pose.target;
+                    camera.up = pose.up;
+                    camera.projection = pose.projection;
+                }
             }
         }
         PropertyLensSpec::CameraPosition { from, to } => {
@@ -2114,6 +2100,11 @@ fn apply_lens_spec(
                 transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
             }
         }
+        PropertyLensSpec::PathFollow3D { points } => {
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+                transform.translation = gaanim_math::get_point_on_polyline(points, t);
+            }
+        }
         PropertyLensSpec::SignalFloat { from, to } => {
             if let Some(mut signal) =
                 world.get_mut::<gaanim_animation::signals::FloatSignal>(target)
@@ -2141,6 +2132,23 @@ fn apply_lens_spec(
                 let trimmed = gaanim_math::get_subpath_range(&source.0, start, end);
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
                     path.0 = std::sync::Arc::new(trimmed);
+                }
+            }
+            if world.get::<LineListSource>(target).is_none() {
+                let line_clone = world.get::<LineListData>(target).cloned();
+                if let Some(line) = line_clone
+                    && let Ok(mut entity) = world.get_entity_mut(target)
+                {
+                    entity.insert(LineListSource(line));
+                }
+            }
+            if let Some(source) = world.get::<LineListSource>(target)
+                && source.0.strip
+                && source.0.indices.is_none()
+            {
+                let visible = trim_line_strip_range(&source.0, start, end);
+                if let Some(mut line) = world.get_mut::<LineListData>(target) {
+                    *line = visible;
                 }
             }
         }
@@ -2282,6 +2290,91 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn captured_camera_state_restores_deterministically_across_seeks() {
+        let mut world = World::new();
+        let camera_id = ObjectId::from_parts(0, 1);
+        world.spawn((MobjectId(camera_id), SpatialTransform::default()));
+        world.insert_resource(gaanim_math::Camera::ortho_2d(960, 540));
+        world.insert_resource(crate::snapshot::CapturedCameraStates::default());
+
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraPosition {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::CameraCapture { id: 10 });
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::CameraCapture { id: 11 });
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraPosition {
+                    from: gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0),
+                    to: gaanim_core::glam::DVec3::ZERO,
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_clip(track, 2.0, 0.0, ClipPayload::CameraCapture { id: 12 });
+        timeline.add_clip(
+            track,
+            2.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraState {
+                    from: gaanim_animation::CameraStateSource::Captured(12),
+                    to: gaanim_animation::CameraStateSource::Captured(10),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        timeline.seek(&mut world, 3.0);
+        let expected = world.resource::<gaanim_math::Camera>().pose();
+        assert_eq!(
+            expected.position,
+            gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0)
+        );
+
+        timeline.seek(&mut world, 0.25);
+        timeline.seek(&mut world, 3.0);
+        assert_eq!(world.resource::<gaanim_math::Camera>().pose(), expected);
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        world
+            .resource_mut::<crate::snapshot::CapturedCameraStates>()
+            .0
+            .clear();
+        snapshot.restore(&mut world);
+        assert!(
+            world
+                .resource::<crate::snapshot::CapturedCameraStates>()
+                .0
+                .contains_key(&10)
+        );
+    }
 
     #[test]
     fn surrounding_rect_retarget_seek_is_exact_and_reversible() {

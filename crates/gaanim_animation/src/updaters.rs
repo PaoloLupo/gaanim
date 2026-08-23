@@ -625,7 +625,7 @@ pub struct TracedPath3D {
     pub sample_times: Vec<f64>,
     pub max_points: Option<usize>,
     pub min_distance: f64,
-    pub colormap: Option<String>,
+    pub colormap: Option<gaanim_core::ColorMap>,
     pub start_at: f64,
     pub dissipating_time: Option<f64>,
 }
@@ -635,7 +635,7 @@ impl TracedPath3D {
         source: Entity,
         min_distance: f64,
         max_points: Option<usize>,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
     ) -> Self {
         Self {
             source,
@@ -661,53 +661,17 @@ impl TracedPath3D {
     }
 }
 
-fn colormap_rgba(name: &str, t: f32) -> [f32; 4] {
-    let t = t.clamp(0.0, 1.0);
-    // Palettes as u8 RGB
-    let palette: Vec<(u8, u8, u8)> = match name {
-        "inferno" => vec![
-            (0, 0, 4),
-            (31, 12, 72),
-            (85, 15, 109),
-            (136, 34, 106),
-            (168, 50, 88),
-            (210, 72, 55),
-            (233, 100, 28),
-            (249, 157, 87),
-            (247, 209, 61),
-            (252, 255, 164),
-        ],
-        "viridis" => vec![
-            (68, 1, 84),
-            (59, 82, 139),
-            (33, 144, 140),
-            (94, 201, 98),
-            (253, 231, 37),
-        ],
-        "plasma" => vec![
-            (13, 8, 135),
-            (126, 3, 168),
-            (203, 70, 121),
-            (248, 149, 64),
-            (240, 249, 33),
-        ],
-        _ => vec![(255, 255, 255), (255, 255, 255)],
-    };
-    let scaled = t * (palette.len() - 1) as f32;
-    let idx = scaled.floor() as usize;
-    let f = scaled - idx as f32;
-    let (r, g, b) = if idx >= palette.len() - 1 {
-        palette[palette.len() - 1]
-    } else {
-        let (r0, g0, b0) = palette[idx];
-        let (r1, g1, b1) = palette[idx + 1];
-        (
-            (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-            (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-            (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-        )
-    };
-    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+fn colormap_rgba(map: &gaanim_core::ColorMap, t: f32) -> [f32; 4] {
+    let color = map
+        .sample(f64::from(t))
+        .unwrap_or(gaanim_core::peniko::Color::WHITE)
+        .to_rgba8();
+    [
+        f32::from(color.r) / 255.0,
+        f32::from(color.g) / 255.0,
+        f32::from(color.b) / 255.0,
+        f32::from(color.a) / 255.0,
+    ]
 }
 
 /// Sistema que actualiza `LineListData` para cada `TracedPath3D`.
@@ -780,7 +744,7 @@ pub fn traced_path_3d_system(world: &mut World) {
                 .iter()
                 .map(|p| [p.x as f32, p.y as f32, p.z as f32])
                 .collect();
-            let vertex_colors: Option<Vec<[f32; 4]>> = colormap_clone.as_deref().map(|name| {
+            let vertex_colors: Option<Vec<[f32; 4]>> = colormap_clone.as_ref().map(|map| {
                 let n = line_points.len();
                 (0..n)
                     .map(|i| {
@@ -789,7 +753,7 @@ pub fn traced_path_3d_system(world: &mut World) {
                         } else {
                             0.0
                         };
-                        colormap_rgba(name, t)
+                        colormap_rgba(map, t)
                     })
                     .collect()
             });
@@ -1001,7 +965,9 @@ pub enum SampledInterpolation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("sampled series requires non-empty finite non-decreasing times, matching finite values, and finite scale/offset")]
+#[error(
+    "sampled series requires non-empty finite non-decreasing times, matching finite values, and finite scale/offset"
+)]
 pub struct InvalidSampledSeries;
 
 /// Conduce una propiedad de la entidad a lo largo de una serie muestreada
@@ -2661,42 +2627,50 @@ mod tests {
 
     #[test]
     fn sampled_series_rejects_invalid_input() {
-        assert!(SampledSeriesDriver::new(
-            vec![],
-            vec![],
-            SampledProperty::TranslateX,
-            SampledInterpolation::Linear,
-            1.0,
-            0.0
-        )
-        .is_err());
-        assert!(SampledSeriesDriver::new(
-            vec![0.0, 1.0],
-            vec![1.0],
-            SampledProperty::TranslateX,
-            SampledInterpolation::Linear,
-            1.0,
-            0.0
-        )
-        .is_err());
-        assert!(SampledSeriesDriver::new(
-            vec![1.0, 0.0],
-            vec![1.0, 2.0],
-            SampledProperty::TranslateX,
-            SampledInterpolation::Linear,
-            1.0,
-            0.0
-        )
-        .is_err());
-        assert!(SampledSeriesDriver::new(
-            vec![0.0, f64::NAN],
-            vec![1.0, 2.0],
-            SampledProperty::TranslateX,
-            SampledInterpolation::Linear,
-            1.0,
-            0.0
-        )
-        .is_err());
+        assert!(
+            SampledSeriesDriver::new(
+                vec![],
+                vec![],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                1.0,
+                0.0
+            )
+            .is_err()
+        );
+        assert!(
+            SampledSeriesDriver::new(
+                vec![0.0, 1.0],
+                vec![1.0],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                1.0,
+                0.0
+            )
+            .is_err()
+        );
+        assert!(
+            SampledSeriesDriver::new(
+                vec![1.0, 0.0],
+                vec![1.0, 2.0],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                1.0,
+                0.0
+            )
+            .is_err()
+        );
+        assert!(
+            SampledSeriesDriver::new(
+                vec![0.0, f64::NAN],
+                vec![1.0, 2.0],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                1.0,
+                0.0
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -1,19 +1,19 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 use gaanim_core::peniko::Color;
-use gaanim_expr::Expr;
+use gaanim_core::{ColorMap, ObjectId};
+use gaanim_expr::{EvalContext, Expr};
 use gaanim_objects::prelude::SvgPath;
 use gaanim_visualization::{
     Axis, AxisLabelPosition, CartesianSpace, Channel, ChartSpec, ConstantValue, CoordinateMap2D,
     CoordinateMap3D, DataMarkKind, Encoding, MarkKind, MatchPolicy, NonFinitePolicy, NumberLine,
-    PlotFrame, PolarSpace, Sampling, Scale, SpaceGeometry2D, SpaceLayer, TransitionFallback,
-    area_path, bars, box_stats, error_bar_path, histogram, implicit_contours, line_path,
-    sample_function, sample_parametric, sample_surface, sample_vector_field, scatter_points,
-    step_path, violin_path,
+    PlotFrame, PolarSpace, Sampling, Scale, SpaceGeometry2D, SpaceLayer, StreamlineOptions,
+    TransitionFallback, VectorField as FieldModel, area_path, bars, box_stats, error_bar_path,
+    histogram, implicit_contours, line_path, sample_function, sample_parametric, sample_surface,
+    scatter_points, step_path, violin_path,
 };
 
 use super::ops::Op;
@@ -27,6 +27,8 @@ pub enum VisualizationError {
     Sampling(#[from] gaanim_visualization::SamplingError),
     #[error(transparent)]
     Chart(#[from] gaanim_visualization::ChartError),
+    #[error(transparent)]
+    VectorField(#[from] gaanim_visualization::VectorFieldError),
     #[error("data columns must have the same non-zero length")]
     LengthMismatch,
     #[error("mark dimensions must be finite and positive")]
@@ -43,11 +45,11 @@ pub enum VisualizationError {
     UnsupportedChartMark3D(MarkKind),
 }
 
-fn axis_title_coordinate(position: AxisLabelPosition, extent: f64) -> f64 {
+fn axis_title_coordinate(position: AxisLabelPosition, extent: f64, label_extent: f64) -> f64 {
     match position {
-        AxisLabelPosition::Start => -extent * 0.5,
+        AxisLabelPosition::Start => -extent * 0.5 + label_extent * 0.5,
         AxisLabelPosition::Center => 0.0,
-        AxisLabelPosition::End => extent * 0.5,
+        AxisLabelPosition::End => extent * 0.5 - label_extent * 0.5,
     }
 }
 
@@ -121,6 +123,253 @@ pub struct CoordinateSpace3DHandle {
     pub(crate) root: DrawableHandle,
     pub(crate) map: CoordinateMap3D,
     pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
+}
+
+#[derive(Clone)]
+pub struct VectorField2DHandle {
+    pub(crate) space: CoordinateSpaceHandle,
+    pub(crate) field: FieldModel<2>,
+    pub(crate) expressions: Option<[Expr; 2]>,
+}
+
+#[derive(Clone)]
+pub struct VectorField3DHandle {
+    pub(crate) space: CoordinateSpace3DHandle,
+    pub(crate) field: FieldModel<3>,
+    pub(crate) expressions: Option<[Expr; 3]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrowVectorFieldHandle {
+    pub(crate) drawable: DrawableHandle,
+}
+
+impl ArrowVectorFieldHandle {
+    pub fn drawable(&self) -> &DrawableHandle {
+        &self.drawable
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamLinesHandle {
+    pub(crate) drawable: DrawableHandle,
+    pub(crate) lines: Vec<DrawableHandle>,
+    pub(crate) flow_lines: Vec<DrawableHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowParticlesHandle {
+    pub(crate) drawable: DrawableHandle,
+    pub(crate) animations: Vec<super::types::Anim>,
+}
+
+impl FlowParticlesHandle {
+    pub fn drawable(&self) -> &DrawableHandle {
+        &self.drawable
+    }
+
+    pub fn flow(&self) -> Vec<super::types::Anim> {
+        self.animations.clone()
+    }
+
+    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.create(duration)
+    }
+
+    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.write(duration).lag_ratio(0.0)
+    }
+
+    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_in(duration)
+    }
+
+    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_out(duration)
+    }
+
+    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.uncreate(duration)
+    }
+
+    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.unwrite(duration)
+    }
+
+    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.grow_from_center(duration)
+    }
+
+    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.shrink_to_center(duration)
+    }
+}
+
+impl StreamLinesHandle {
+    pub fn drawable(&self) -> &DrawableHandle {
+        &self.drawable
+    }
+
+    /// Build one finite, seekable passing-flash animation per streamline.
+    pub fn flow(&self, duration: f64, time_width: f64) -> Vec<super::types::Anim> {
+        let fade_duration = (duration * 0.1).min(0.2).max(f64::EPSILON);
+        self.lines
+            .iter()
+            .zip(&self.flow_lines)
+            .flat_map(|(base, line)| {
+                debug_assert_ne!(base.id, line.id);
+                [
+                    line.show_passing_flash(duration, time_width),
+                    line.fade_in(Some(fade_duration)),
+                ]
+            })
+            .collect()
+    }
+
+    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.create(duration)
+    }
+
+    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.write(duration).lag_ratio(0.0)
+    }
+
+    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_in(duration)
+    }
+
+    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_out(duration)
+    }
+
+    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.uncreate(duration)
+    }
+
+    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.unwrite(duration)
+    }
+
+    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.grow_from_center(duration)
+    }
+
+    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.shrink_to_center(duration)
+    }
+}
+
+impl ArrowVectorFieldHandle {
+    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.create(duration)
+    }
+
+    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.write(duration).lag_ratio(0.0)
+    }
+
+    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_in(duration)
+    }
+
+    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.fade_out(duration)
+    }
+
+    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.uncreate(duration)
+    }
+
+    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.unwrite(duration)
+    }
+
+    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.grow_from_center(duration)
+    }
+
+    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
+        self.drawable.shrink_to_center(duration)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrowFieldOptions {
+    pub min_length: f64,
+    pub max_length: f64,
+    pub length_scale: f64,
+    pub width: f64,
+    pub tip_length: Option<f64>,
+    pub tip_width: Option<f64>,
+    pub color: Option<Color>,
+    pub colormap: Option<ColorMap>,
+    pub color_range: Option<(f64, f64)>,
+}
+
+impl Default for ArrowFieldOptions {
+    fn default() -> Self {
+        Self {
+            min_length: 0.0,
+            max_length: 28.0,
+            length_scale: 1.0,
+            width: 2.0,
+            tip_length: None,
+            tip_width: None,
+            color: None,
+            colormap: ColorMap::named("viridis").ok(),
+            color_range: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamLinesStyle {
+    pub integration: StreamlineOptions,
+    pub width: f64,
+    pub opacity: f64,
+    pub color: Option<Color>,
+    pub colormap: Option<ColorMap>,
+    pub color_range: Option<(f64, f64)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowParticleOptions {
+    pub integration: StreamlineOptions,
+    pub duration: f64,
+    pub radius: f64,
+    pub color: Option<Color>,
+    pub colormap: Option<ColorMap>,
+    pub color_range: Option<(f64, f64)>,
+    pub opacity: f64,
+}
+
+impl Default for FlowParticleOptions {
+    fn default() -> Self {
+        let mut integration = StreamlineOptions::default();
+        integration.direction = gaanim_visualization::StreamDirection::Forward;
+        Self {
+            integration,
+            duration: 3.0,
+            radius: 5.0,
+            color: None,
+            colormap: ColorMap::named("viridis").ok(),
+            color_range: None,
+            opacity: 1.0,
+        }
+    }
+}
+
+impl Default for StreamLinesStyle {
+    fn default() -> Self {
+        Self {
+            integration: StreamlineOptions::default(),
+            width: 2.0,
+            opacity: 1.0,
+            color: None,
+            colormap: ColorMap::named("viridis").ok(),
+            color_range: None,
+        }
+    }
 }
 
 /// Materialized declarative chart with stable semantic layers.
@@ -261,6 +510,83 @@ fn color_with_opacity(color: Color, opacity: f64) -> Color {
         rgba.b,
         (f64::from(rgba.a) * opacity.clamp(0.0, 1.0)).round() as u8,
     )
+}
+
+fn value_range(
+    values: impl IntoIterator<Item = f64>,
+    explicit: Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    if let Some((min, max)) = explicit {
+        return (min.is_finite() && max.is_finite() && min < max).then_some((min, max));
+    }
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for value in values.into_iter().filter(|value| value.is_finite()) {
+        min = min.min(value);
+        max = max.max(value);
+    }
+    if !min.is_finite() {
+        None
+    } else if (max - min).abs() <= f64::EPSILON {
+        Some((min - 0.5, max + 0.5))
+    } else {
+        Some((min, max))
+    }
+}
+
+fn mapped_color(
+    value: f64,
+    range: (f64, f64),
+    color: Option<Color>,
+    colormap: Option<&ColorMap>,
+    opacity: f64,
+) -> Color {
+    let base = color.unwrap_or_else(|| {
+        let t = ((value - range.0) / (range.1 - range.0)).clamp(0.0, 1.0);
+        colormap
+            .and_then(|map| map.sample(t).ok())
+            .unwrap_or(Color::from_rgb8(0x2E, 0x86, 0xAB))
+    });
+    color_with_opacity(base, opacity)
+}
+
+fn flow_highlight_color(color: Color) -> Color {
+    let rgba = color.to_rgba8();
+    let brighten = |channel: u8| channel.saturating_add(((255 - channel as u16) / 3) as u8);
+    Color::from_rgba8(brighten(rgba.r), brighten(rgba.g), brighten(rgba.b), rgba.a)
+}
+
+fn flow_highlight_style(style: &StreamLinesStyle) -> StreamLinesStyle {
+    let mut highlighted = style.clone();
+    highlighted.width *= 1.6;
+    highlighted.color = highlighted.color.map(flow_highlight_color);
+    highlighted.colormap = highlighted.colormap.as_ref().and_then(|map| {
+        let colors = map
+            .colors(256)
+            .ok()?
+            .into_iter()
+            .map(flow_highlight_color)
+            .collect();
+        ColorMap::from_colors(colors, None).ok()
+    });
+    highlighted
+}
+
+fn halton(mut index: usize, base: usize) -> f64 {
+    let mut result = 0.0;
+    let mut fraction = 1.0 / base as f64;
+    while index > 0 {
+        result += fraction * (index % base) as f64;
+        index /= base;
+        fraction /= base as f64;
+    }
+    result
+}
+
+fn expressions_have_parameters<const N: usize>(expressions: &[Expr; N]) -> bool {
+    expressions
+        .iter()
+        .any(|expression| !expression.parameter_ids().is_empty())
 }
 
 fn normalized_local(position: [f64; 3], size: [f64; 3]) -> [f32; 3] {
@@ -554,10 +880,32 @@ impl Canvas {
         if !initial.is_finite() {
             return Err(VisualizationError::InvalidParameter);
         }
-        Ok(Parameter {
-            handle: self.value_tracker(initial),
-            value: Arc::new(Mutex::new(initial)),
-        })
+        let handle = self.value_tracker(initial);
+        let value = Arc::new(Mutex::new(initial));
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .parameter_values
+            .insert(handle.id, value.clone());
+        Ok(Parameter { handle, value })
+    }
+
+    /// Resolve the live mirrors required by a traced expression evaluator.
+    #[doc(hidden)]
+    pub fn expression_parameter_values(
+        &self,
+        ids: &[ObjectId],
+    ) -> Option<Vec<(ObjectId, Arc<Mutex<f64>>)>> {
+        let state = self.state.lock().expect("canvas state poisoned");
+        ids.iter()
+            .map(|id| {
+                state
+                    .parameter_values
+                    .get(id)
+                    .cloned()
+                    .map(|value| (*id, value))
+            })
+            .collect()
     }
 
     /// Materialize an immutable declarative chart into stable semantic layers.
@@ -1177,7 +1525,6 @@ impl Canvas {
         number_scale: f64,
         label_scale: f64,
     ) {
-        const NUMBER_GAP: f64 = 12.0;
         const TITLE_GAP: f64 = 12.0;
 
         let x_cross = space.map.x.crossing_value();
@@ -1193,77 +1540,51 @@ impl Canvas {
             .into_iter()
             .filter(|tick| tick.major && !tick.label.is_empty())
             .collect();
-        let x_tick_height = x_tick_labels
-            .iter()
-            .map(|tick| self.axis_text_size(&tick.label, number_scale).1)
-            .fold(0.0, f64::max);
-        let x_tick_extra_offset = x_tick_labels
-            .iter()
-            .map(|tick| self.x_tick_label_extra_offset(&tick.label, number_scale))
-            .fold(0.0, f64::max);
-        // When the value axis includes negative values, bars extend below the
-        // zero axis. Put categorical tick labels above that axis so neither
-        // the labels nor their multiline expansion collide with those bars.
-        let x_labels_direction = if space.map.y.domain().0 < 0.0 {
-            1.0
-        } else {
-            -1.0
-        };
+        // Cartesian x tick labels remain below the horizontal axis. Titles
+        // occupy the positive side, so the two text systems cannot collide
+        // when an axis crosses the interior of the plot.
+        let x_labels_direction = -1.0;
         for label in geometry.numbers.iter_mut().take(x_tick_labels.len()) {
             let distance = (label.position.y - axis_origin.y).abs()
                 + self.x_tick_label_extra_offset(&label.text, number_scale);
             label.position.y = axis_origin.y + x_labels_direction * distance;
         }
-        let y_tick_width = space
-            .map
-            .y
-            .ticks_values(7)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|tick| tick.major && !tick.label.is_empty() && tick.value != x_cross)
-            .map(|tick| self.axis_text_size(&tick.label, number_scale).0)
-            .fold(0.0, f64::max);
-
         geometry.labels.clear();
         if let Some(label) = space.map.x.label_text() {
-            let (_, height) = self.axis_text_size(label, label_scale);
+            let (width, height) = self.axis_text_size(label, label_scale);
             geometry.labels.push(gaanim_visualization::LabelGeometry {
                 text: label.to_owned(),
                 position: Point::new(
                     axis_title_coordinate(
                         space.map.x.label_position_value(),
                         space.map.frame.width,
+                        width,
                     ),
                     axis_origin.y
-                        + x_labels_direction
-                            * (space.map.x.style_value().tick_length
-                                + NUMBER_GAP
-                                + x_tick_extra_offset
-                                + x_tick_height * 0.5
-                                + TITLE_GAP
-                                + height * 0.5),
+                        + space.map.x.style_value().tick_length * 0.5
+                        + TITLE_GAP
+                        + height * 0.5,
                 ),
                 rotation: 0.0,
                 color: space.map.x.style_value().label_color,
             });
         }
         if let Some(label) = space.map.y.label_text() {
-            let (_, height) = self.axis_text_size(label, label_scale);
+            let (width, height) = self.axis_text_size(label, label_scale);
             geometry.labels.push(gaanim_visualization::LabelGeometry {
                 text: label.to_owned(),
                 position: Point::new(
                     axis_origin.x
-                        - space.map.y.style_value().tick_length
-                        - NUMBER_GAP
-                        - y_tick_width * 0.5
-                        - TITLE_GAP
-                        - height * 0.5,
+                        + space.map.y.style_value().tick_length * 0.5
+                        + TITLE_GAP
+                        + width * 0.5,
                     axis_title_coordinate(
                         space.map.y.label_position_value(),
                         space.map.frame.height,
+                        height,
                     ),
                 ),
-                rotation: std::f64::consts::FRAC_PI_2,
+                rotation: 0.0,
                 color: space.map.y.style_value().label_color,
             });
         }
@@ -1556,82 +1877,6 @@ impl Canvas {
             return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
         }
         let handle = self.polyline_3d(points);
-        self.attach_to_space_3d(space, &handle);
-        Ok(handle)
-    }
-
-    pub fn vector_field_plot_3d(
-        &mut self,
-        space: &CoordinateSpace3DHandle,
-        resolution: [usize; 3],
-        max_length: f64,
-        mut evaluator: impl FnMut(f64, f64, f64) -> Option<[f64; 3]>,
-    ) -> Result<DrawableHandle, VisualizationError> {
-        if resolution.iter().any(|count| *count < 2) || !max_length.is_finite() || max_length <= 0.0
-        {
-            return Err(VisualizationError::InvalidSize);
-        }
-        let domains = [
-            space.map.x.domain(),
-            space.map.y.domain(),
-            space.map.z.domain(),
-        ];
-        let mut points = Vec::new();
-        for iz in 0..resolution[2] {
-            for iy in 0..resolution[1] {
-                for ix in 0..resolution[0] {
-                    let data = [
-                        domains[0].0
-                            + (domains[0].1 - domains[0].0) * ix as f64
-                                / (resolution[0] - 1) as f64,
-                        domains[1].0
-                            + (domains[1].1 - domains[1].0) * iy as f64
-                                / (resolution[1] - 1) as f64,
-                        domains[2].0
-                            + (domains[2].1 - domains[2].0) * iz as f64
-                                / (resolution[2] - 1) as f64,
-                    ];
-                    let Some(vector) = evaluator(data[0], data[1], data[2]) else {
-                        continue;
-                    };
-                    if vector.iter().any(|value| !value.is_finite()) {
-                        continue;
-                    }
-                    let start = space.map.data_to_local(data)?;
-                    let displaced = [
-                        data[0] + vector[0],
-                        data[1] + vector[1],
-                        data[2] + vector[2],
-                    ];
-                    let Ok(displaced) = space.map.data_to_local(displaced) else {
-                        continue;
-                    };
-                    let direction = [
-                        displaced[0] - start[0],
-                        displaced[1] - start[1],
-                        displaced[2] - start[2],
-                    ];
-                    let magnitude = (direction[0] * direction[0]
-                        + direction[1] * direction[1]
-                        + direction[2] * direction[2])
-                        .sqrt();
-                    if magnitude <= f64::EPSILON {
-                        continue;
-                    }
-                    let length = magnitude.min(max_length);
-                    let end = [
-                        start[0] + direction[0] / magnitude * length,
-                        start[1] + direction[1] / magnitude * length,
-                        start[2] + direction[2] / magnitude * length,
-                    ];
-                    points.push([start[0] as f32, start[1] as f32, start[2] as f32]);
-                    points.push([end[0] as f32, end[1] as f32, end[2] as f32]);
-                }
-            }
-        }
-        let handle = self
-            .line_segments_3d(points)
-            .fill(Color::from_rgb8(0x2E, 0x86, 0xAB));
         self.attach_to_space_3d(space, &handle);
         Ok(handle)
     }
@@ -2204,28 +2449,691 @@ impl Canvas {
         Ok(handle)
     }
 
-    pub fn vector_field_plot(
-        &mut self,
+    pub fn vector_field_2d(
+        &self,
         space: &CoordinateSpaceHandle,
-        resolution: [usize; 2],
-        max_length: f64,
-        evaluator: impl FnMut(f64, f64) -> Option<(f64, f64)>,
-    ) -> Result<DrawableHandle, VisualizationError> {
-        let glyphs = sample_vector_field(&space.map, resolution, max_length, evaluator)?;
-        let mut path = BezPath::new();
-        for glyph in glyphs {
-            path.move_to(glyph.start);
-            path.line_to(glyph.end);
+        evaluator: impl Fn([f64; 2]) -> Option<[f64; 2]> + Send + Sync + 'static,
+    ) -> VectorField2DHandle {
+        VectorField2DHandle {
+            space: space.clone(),
+            field: FieldModel::new(evaluator),
+            expressions: None,
         }
-        let handle = self.visualization_path(
-            path,
-            space.map.frame.bounds(),
-            Color::from_rgb8(0x2E, 0x86, 0xAB),
-            2.0,
-            "VectorField",
-        );
-        self.attach_to_space(space, &handle);
-        Ok(handle)
+    }
+
+    pub fn vector_field_2d_expression(
+        &self,
+        space: &CoordinateSpaceHandle,
+        expressions: [Expr; 2],
+    ) -> Result<VectorField2DHandle, VisualizationError> {
+        let mut ids = expressions
+            .iter()
+            .flat_map(Expr::parameter_ids)
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
+        let mirrors = self
+            .expression_parameter_values(&ids)
+            .ok_or(VisualizationError::InvalidParameter)?;
+        let evaluator_expressions = expressions.clone();
+        Ok(VectorField2DHandle {
+            space: space.clone(),
+            field: FieldModel::new(move |[x, y]| {
+                let mut context = EvalContext::new()
+                    .with_variable("x", x)
+                    .with_variable("y", y);
+                for (id, value) in &mirrors {
+                    context.set_parameter(*id, *value.lock().expect("parameter poisoned"));
+                }
+                Some([
+                    evaluator_expressions[0].eval(&context).ok()?,
+                    evaluator_expressions[1].eval(&context).ok()?,
+                ])
+            }),
+            expressions: Some(expressions),
+        })
+    }
+
+    pub fn vector_field_3d(
+        &self,
+        space: &CoordinateSpace3DHandle,
+        evaluator: impl Fn([f64; 3]) -> Option<[f64; 3]> + Send + Sync + 'static,
+    ) -> VectorField3DHandle {
+        VectorField3DHandle {
+            space: space.clone(),
+            field: FieldModel::new(evaluator),
+            expressions: None,
+        }
+    }
+
+    pub fn vector_field_3d_expression(
+        &self,
+        space: &CoordinateSpace3DHandle,
+        expressions: [Expr; 3],
+    ) -> Result<VectorField3DHandle, VisualizationError> {
+        let mut ids = expressions
+            .iter()
+            .flat_map(Expr::parameter_ids)
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
+        let mirrors = self
+            .expression_parameter_values(&ids)
+            .ok_or(VisualizationError::InvalidParameter)?;
+        let evaluator_expressions = expressions.clone();
+        Ok(VectorField3DHandle {
+            space: space.clone(),
+            field: FieldModel::new(move |[x, y, z]| {
+                let mut context = EvalContext::new()
+                    .with_variable("x", x)
+                    .with_variable("y", y)
+                    .with_variable("z", z);
+                for (id, value) in &mirrors {
+                    context.set_parameter(*id, *value.lock().expect("parameter poisoned"));
+                }
+                Some([
+                    evaluator_expressions[0].eval(&context).ok()?,
+                    evaluator_expressions[1].eval(&context).ok()?,
+                    evaluator_expressions[2].eval(&context).ok()?,
+                ])
+            }),
+            expressions: Some(expressions),
+        })
+    }
+
+    pub fn arrow_vector_field_2d(
+        &mut self,
+        field: &VectorField2DHandle,
+        resolution: [usize; 2],
+        options: ArrowFieldOptions,
+    ) -> Result<ArrowVectorFieldHandle, VisualizationError> {
+        if !options.min_length.is_finite()
+            || options.min_length < 0.0
+            || !options.max_length.is_finite()
+            || options.max_length <= 0.0
+            || options.min_length > options.max_length
+            || !options.length_scale.is_finite()
+            || options.length_scale <= 0.0
+            || !options.width.is_finite()
+            || options.width <= 0.0
+        {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [field.space.map.x.domain(), field.space.map.y.domain()];
+        let samples = field.field.sample_grid(domains, resolution)?;
+        let range = value_range(
+            samples.iter().map(|sample| sample.magnitude),
+            options.color_range,
+        )
+        .ok_or(VisualizationError::InvalidSize)?;
+        let mut arrows = Vec::with_capacity(samples.len());
+        for sample in samples {
+            let start = field
+                .space
+                .map
+                .data_to_local(sample.position[0], sample.position[1])?;
+            let displaced = field.space.map.data_to_local(
+                sample.position[0] + sample.vector[0],
+                sample.position[1] + sample.vector[1],
+            )?;
+            let delta = displaced - start;
+            let raw_length = delta.hypot() * options.length_scale;
+            if raw_length <= f64::EPSILON {
+                continue;
+            }
+            let length = raw_length.clamp(options.min_length, options.max_length);
+            let direction = delta / delta.hypot();
+            let end = start + direction * length;
+            let tip_length = options
+                .tip_length
+                .unwrap_or((length * 0.3).clamp(5.0, 12.0));
+            let tip_width = options.tip_width.unwrap_or(tip_length * 0.8);
+            let perpendicular = gaanim_core::kurbo::Vec2::new(-direction.y, direction.x);
+            let shoulder = end - direction * tip_length;
+            let mut path = BezPath::new();
+            path.move_to(start);
+            path.line_to(end);
+            path.move_to(shoulder + perpendicular * (tip_width * 0.5));
+            path.line_to(end);
+            path.line_to(shoulder - perpendicular * (tip_width * 0.5));
+            let color = mapped_color(
+                sample.magnitude,
+                range,
+                options.color,
+                options.colormap.as_ref(),
+                1.0,
+            );
+            let glyph = self
+                .visualization_path(
+                    path,
+                    field.space.map.frame.bounds(),
+                    color,
+                    options.width,
+                    "ArrowVectorFieldGlyph",
+                )
+                .stroke(color, options.width);
+            if let Some(expressions) = &field.expressions
+                && expressions_have_parameters(expressions)
+            {
+                self.state
+                    .lock()
+                    .expect("canvas state poisoned")
+                    .active_mut()
+                    .ops
+                    .push(Op::AttachReactiveArrowField2D {
+                        target: glyph.id,
+                        expressions: expressions.clone(),
+                        position: sample.position,
+                        map: field.space.map.clone(),
+                        options: options.clone(),
+                        color_range: range,
+                    });
+            }
+            arrows.push(glyph);
+        }
+        if arrows.is_empty() {
+            return Err(gaanim_visualization::VectorFieldError::Empty.into());
+        }
+        let members: Vec<_> = arrows.iter().collect();
+        let drawable = self.group_no_center(&members);
+        self.attach_to_space(&field.space, &drawable);
+        Ok(ArrowVectorFieldHandle { drawable })
+    }
+
+    pub fn arrow_vector_field_3d(
+        &mut self,
+        field: &VectorField3DHandle,
+        resolution: [usize; 3],
+        mut options: ArrowFieldOptions,
+    ) -> Result<ArrowVectorFieldHandle, VisualizationError> {
+        if (options.max_length - ArrowFieldOptions::default().max_length).abs() < f64::EPSILON {
+            options.max_length = 24.0;
+        }
+        if !options.max_length.is_finite() || options.max_length <= 0.0 {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [
+            field.space.map.x.domain(),
+            field.space.map.y.domain(),
+            field.space.map.z.domain(),
+        ];
+        let samples = field.field.sample_grid(domains, resolution)?;
+        let range = value_range(
+            samples.iter().map(|sample| sample.magnitude),
+            options.color_range,
+        )
+        .ok_or(VisualizationError::InvalidSize)?;
+        let mut points = Vec::new();
+        let mut colors = Vec::new();
+        for sample in samples {
+            let start = DVec3::from_array(field.space.map.data_to_local(sample.position)?);
+            let displaced = DVec3::from_array(field.space.map.data_to_local([
+                sample.position[0] + sample.vector[0],
+                sample.position[1] + sample.vector[1],
+                sample.position[2] + sample.vector[2],
+            ])?);
+            let delta = displaced - start;
+            let raw_length = delta.length() * options.length_scale;
+            if raw_length <= f64::EPSILON {
+                continue;
+            }
+            let length = raw_length.clamp(options.min_length, options.max_length);
+            let direction = delta.normalize();
+            let end = start + direction * length;
+            let tip_length = options
+                .tip_length
+                .unwrap_or((length * 0.3).clamp(4.0, 10.0));
+            let tip_width = options.tip_width.unwrap_or(tip_length * 0.75);
+            let reference = if direction.cross(DVec3::Z).length_squared() > 1e-8 {
+                DVec3::Z
+            } else {
+                DVec3::Y
+            };
+            let side = direction.cross(reference).normalize() * tip_width * 0.5;
+            let shoulder = end - direction * tip_length;
+            for (from, to) in [(start, end), (end, shoulder + side), (end, shoulder - side)] {
+                points.extend([
+                    from.to_array().map(|v| v as f32),
+                    to.to_array().map(|v| v as f32),
+                ]);
+            }
+            let color = mapped_color(
+                sample.magnitude,
+                range,
+                options.color,
+                options.colormap.as_ref(),
+                1.0,
+            );
+            colors.extend(std::iter::repeat_n(color, 6));
+        }
+        if points.is_empty() {
+            return Err(gaanim_visualization::VectorFieldError::Empty.into());
+        }
+        let drawable = self.line_segments_3d_with_colors(points, colors);
+        if let Some(expressions) = &field.expressions
+            && expressions_have_parameters(expressions)
+        {
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::AttachReactiveArrowField3D {
+                    target: drawable.id,
+                    expressions: expressions.clone(),
+                    resolution,
+                    map: field.space.map.clone(),
+                    options: options.clone(),
+                    color_range: range,
+                });
+        }
+        self.attach_to_space_3d(&field.space, &drawable);
+        Ok(ArrowVectorFieldHandle { drawable })
+    }
+
+    pub fn stream_lines_2d(
+        &mut self,
+        field: &VectorField2DHandle,
+        seed_resolution: [usize; 2],
+        style: StreamLinesStyle,
+    ) -> Result<StreamLinesHandle, VisualizationError> {
+        if !style.width.is_finite()
+            || style.width <= 0.0
+            || !style.opacity.is_finite()
+            || !(0.0..=1.0).contains(&style.opacity)
+        {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [field.space.map.x.domain(), field.space.map.y.domain()];
+        let integrated = field
+            .field
+            .streamlines(domains, seed_resolution, style.integration)?;
+        let range = value_range(
+            integrated
+                .iter()
+                .flat_map(|line| line.speeds.iter().copied()),
+            style.color_range,
+        )
+        .ok_or(VisualizationError::InvalidSize)?;
+        let mut lines = Vec::with_capacity(integrated.len());
+        let mut flow_lines = Vec::with_capacity(integrated.len());
+        for line in integrated {
+            let seed = line.seed;
+            let mut path = BezPath::new();
+            for (index, point) in line.points.iter().enumerate() {
+                let local = field.space.map.data_to_local(point[0], point[1])?;
+                if index == 0 {
+                    path.move_to(local);
+                } else {
+                    path.line_to(local);
+                }
+            }
+            let speed = line.speeds.iter().sum::<f64>() / line.speeds.len() as f64;
+            let color = mapped_color(
+                speed,
+                range,
+                style.color,
+                style.colormap.as_ref(),
+                style.opacity,
+            );
+            let handle = self
+                .visualization_path(
+                    path.clone(),
+                    field.space.map.frame.bounds(),
+                    color,
+                    style.width,
+                    "StreamLine",
+                )
+                .stroke(color, style.width);
+            let highlight = flow_highlight_color(color);
+            let flow_handle = self
+                .visualization_path(
+                    path,
+                    field.space.map.frame.bounds(),
+                    highlight,
+                    style.width * 1.6,
+                    "StreamLineFlow",
+                )
+                .stroke(highlight, style.width * 1.6)
+                .opacity(0.0);
+            if let Some(expressions) = &field.expressions
+                && expressions_have_parameters(expressions)
+            {
+                let flow_style = flow_highlight_style(&style);
+                let mut state = self.state.lock().expect("canvas state poisoned");
+                for (target, target_style) in
+                    [(handle.id, style.clone()), (flow_handle.id, flow_style)]
+                {
+                    state.active_mut().ops.push(Op::AttachReactiveStreamLine2D {
+                        target,
+                        expressions: expressions.clone(),
+                        seed,
+                        map: field.space.map.clone(),
+                        style: target_style,
+                        color_range: range,
+                    });
+                }
+            }
+            lines.push(handle);
+            flow_lines.push(flow_handle);
+        }
+        let members: Vec<_> = lines.iter().collect();
+        let drawable = self.group_no_center(&members);
+        self.attach_to_space(&field.space, &drawable);
+        let flow_members: Vec<_> = flow_lines.iter().collect();
+        let flow_drawable = self.group_no_center(&flow_members);
+        self.attach_to_space(&field.space, &flow_drawable);
+        Ok(StreamLinesHandle {
+            drawable,
+            lines,
+            flow_lines,
+        })
+    }
+
+    pub fn stream_lines_3d(
+        &mut self,
+        field: &VectorField3DHandle,
+        seed_resolution: [usize; 3],
+        style: StreamLinesStyle,
+    ) -> Result<StreamLinesHandle, VisualizationError> {
+        let domains = [
+            field.space.map.x.domain(),
+            field.space.map.y.domain(),
+            field.space.map.z.domain(),
+        ];
+        let integrated = field
+            .field
+            .streamlines(domains, seed_resolution, style.integration)?;
+        let range = value_range(
+            integrated
+                .iter()
+                .flat_map(|line| line.speeds.iter().copied()),
+            style.color_range,
+        )
+        .ok_or(VisualizationError::InvalidSize)?;
+        let mut lines = Vec::with_capacity(integrated.len());
+        let mut flow_lines = Vec::with_capacity(integrated.len());
+        for line in integrated {
+            let seed = line.seed;
+            let points = line
+                .points
+                .iter()
+                .map(|point| field.space.map.data_to_local(*point))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|point| point.map(|value| value as f32))
+                .collect::<Vec<_>>();
+            let colors: Vec<Color> = line
+                .speeds
+                .iter()
+                .map(|speed| {
+                    mapped_color(
+                        *speed,
+                        range,
+                        style.color,
+                        style.colormap.as_ref(),
+                        style.opacity,
+                    )
+                })
+                .collect();
+            let flow_colors = colors
+                .iter()
+                .copied()
+                .map(flow_highlight_color)
+                .collect::<Vec<_>>();
+            let handle = self.polyline_3d_with_colors(points.clone(), colors);
+            let flow_handle = self
+                .polyline_3d_with_colors(points, flow_colors)
+                .opacity(0.0);
+            if let Some(expressions) = &field.expressions
+                && expressions_have_parameters(expressions)
+            {
+                let flow_style = flow_highlight_style(&style);
+                let mut state = self.state.lock().expect("canvas state poisoned");
+                for (target, target_style) in
+                    [(handle.id, style.clone()), (flow_handle.id, flow_style)]
+                {
+                    state.active_mut().ops.push(Op::AttachReactiveStreamLine3D {
+                        target,
+                        expressions: expressions.clone(),
+                        seed,
+                        map: field.space.map.clone(),
+                        style: target_style,
+                        color_range: range,
+                    });
+                }
+            }
+            lines.push(handle);
+            flow_lines.push(flow_handle);
+        }
+        let members: Vec<_> = lines.iter().collect();
+        let drawable = self.group_no_center(&members);
+        self.attach_to_space_3d(&field.space, &drawable);
+        let flow_members: Vec<_> = flow_lines.iter().collect();
+        let flow_drawable = self.group_no_center(&flow_members);
+        self.attach_to_space_3d(&field.space, &flow_drawable);
+        Ok(StreamLinesHandle {
+            drawable,
+            lines,
+            flow_lines,
+        })
+    }
+
+    pub fn advect_2d(
+        &mut self,
+        field: &VectorField2DHandle,
+        target: &DrawableHandle,
+        seed: [f64; 2],
+        integration: StreamlineOptions,
+        duration: f64,
+    ) -> Result<super::types::Anim, VisualizationError> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [field.space.map.x.domain(), field.space.map.y.domain()];
+        let line = field
+            .field
+            .integrate(seed, domains, integration)
+            .ok_or(gaanim_visualization::VectorFieldError::Empty)?;
+        let mut path = BezPath::new();
+        for (index, point) in line.points.into_iter().enumerate() {
+            let local = field.space.map.data_to_local(point[0], point[1])?;
+            if index == 0 {
+                path.move_to(local);
+            } else {
+                path.line_to(local);
+            }
+        }
+        self.attach_to_space(&field.space, target);
+        Ok(target.move_along_path(path).duration(duration))
+    }
+
+    pub fn advect_3d(
+        &mut self,
+        field: &VectorField3DHandle,
+        target: &DrawableHandle,
+        seed: [f64; 3],
+        integration: StreamlineOptions,
+        duration: f64,
+    ) -> Result<super::types::Anim, VisualizationError> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [
+            field.space.map.x.domain(),
+            field.space.map.y.domain(),
+            field.space.map.z.domain(),
+        ];
+        let line = field
+            .field
+            .integrate(seed, domains, integration)
+            .ok_or(gaanim_visualization::VectorFieldError::Empty)?;
+        let points = line
+            .points
+            .into_iter()
+            .map(|point| field.space.map.data_to_local(point).map(DVec3::from_array))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.attach_to_space_3d(&field.space, target);
+        Ok(target.move_along_path_3d(points).duration(duration))
+    }
+
+    pub fn flow_particles_2d(
+        &mut self,
+        field: &VectorField2DHandle,
+        count: usize,
+        options: FlowParticleOptions,
+    ) -> Result<FlowParticlesHandle, VisualizationError> {
+        if count == 0
+            || !options.radius.is_finite()
+            || options.radius <= 0.0
+            || !options.duration.is_finite()
+            || options.duration <= 0.0
+        {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [field.space.map.x.domain(), field.space.map.y.domain()];
+        let seeds = (1..=count)
+            .map(|index| {
+                [
+                    domains[0].0 + (domains[0].1 - domains[0].0) * halton(index, 2),
+                    domains[1].0 + (domains[1].1 - domains[1].0) * halton(index, 3),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let range = value_range(
+            seeds
+                .iter()
+                .filter_map(|seed| field.field.evaluate(*seed).map(|sample| sample.magnitude)),
+            options.color_range,
+        )
+        .ok_or(gaanim_visualization::VectorFieldError::Empty)?;
+        let mut particles = Vec::new();
+        let mut animations = Vec::new();
+        for seed in seeds {
+            let Some(line) = field.field.integrate(seed, domains, options.integration) else {
+                continue;
+            };
+            let speed = line.speeds.first().copied().unwrap_or(0.0);
+            let color = mapped_color(
+                speed,
+                range,
+                options.color,
+                options.colormap.as_ref(),
+                options.opacity,
+            );
+            let mut path = BezPath::new();
+            for (index, point) in line.points.into_iter().enumerate() {
+                let local = field.space.map.data_to_local(point[0], point[1])?;
+                if index == 0 {
+                    path.move_to(local);
+                } else {
+                    path.line_to(local);
+                }
+            }
+            let start = gaanim_math::get_point_at_alpha(&path, 0.0);
+            let particle = self
+                .circle(options.radius)
+                .fill(color)
+                .no_stroke()
+                .at(start.x, start.y);
+            particle.defer_visibility_until_play();
+            animations.push(particle.move_along_path(path).duration(options.duration));
+            particles.push(particle);
+        }
+        if particles.is_empty() {
+            return Err(gaanim_visualization::VectorFieldError::Empty.into());
+        }
+        let members = particles.iter().collect::<Vec<_>>();
+        let drawable = self.group_no_center(&members);
+        self.attach_to_space(&field.space, &drawable);
+        Ok(FlowParticlesHandle {
+            drawable,
+            animations,
+        })
+    }
+
+    pub fn flow_particles_3d(
+        &mut self,
+        field: &VectorField3DHandle,
+        count: usize,
+        options: FlowParticleOptions,
+    ) -> Result<FlowParticlesHandle, VisualizationError> {
+        if count == 0
+            || !options.radius.is_finite()
+            || options.radius <= 0.0
+            || !options.duration.is_finite()
+            || options.duration <= 0.0
+        {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let domains = [
+            field.space.map.x.domain(),
+            field.space.map.y.domain(),
+            field.space.map.z.domain(),
+        ];
+        let seeds = (1..=count)
+            .map(|index| {
+                [
+                    domains[0].0 + (domains[0].1 - domains[0].0) * halton(index, 2),
+                    domains[1].0 + (domains[1].1 - domains[1].0) * halton(index, 3),
+                    domains[2].0 + (domains[2].1 - domains[2].0) * halton(index, 5),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let range = value_range(
+            seeds
+                .iter()
+                .filter_map(|seed| field.field.evaluate(*seed).map(|sample| sample.magnitude)),
+            options.color_range,
+        )
+        .ok_or(gaanim_visualization::VectorFieldError::Empty)?;
+        let mut particles = Vec::new();
+        let mut animations = Vec::new();
+        for seed in seeds {
+            let Some(line) = field.field.integrate(seed, domains, options.integration) else {
+                continue;
+            };
+            let speed = line.speeds.first().copied().unwrap_or(0.0);
+            let color = mapped_color(
+                speed,
+                range,
+                options.color,
+                options.colormap.as_ref(),
+                options.opacity,
+            );
+            let points = line
+                .points
+                .into_iter()
+                .map(|point| field.space.map.data_to_local(point).map(DVec3::from_array))
+                .collect::<Result<Vec<_>, _>>()?;
+            let start = points[0];
+            let particle = self
+                .sphere(
+                    options.radius,
+                    12,
+                    8,
+                    gaanim_scene::Material3D::matte(color),
+                )
+                .map_err(|_| VisualizationError::InvalidSize)?
+                .at_3d(start.x, start.y, start.z);
+            particle.defer_visibility_until_play();
+            animations.push(
+                particle
+                    .move_along_path_3d(points)
+                    .duration(options.duration),
+            );
+            particles.push(particle);
+        }
+        if particles.is_empty() {
+            return Err(gaanim_visualization::VectorFieldError::Empty.into());
+        }
+        let members = particles.iter().collect::<Vec<_>>();
+        let drawable = self.group_no_center(&members);
+        self.attach_to_space_3d(&field.space, &drawable);
+        Ok(FlowParticlesHandle {
+            drawable,
+            animations,
+        })
     }
 
     pub fn data_line(
@@ -2603,7 +3511,7 @@ mod tests {
     }
 
     #[test]
-    fn cartesian_axis_titles_clear_multiline_ticks_with_moderate_spacing() {
+    fn cartesian_axis_titles_default_to_positive_ends_with_equal_clearance() {
         let mut canvas = Canvas::new(640, 360);
         let space = canvas
             .coordinate_axes(
@@ -2630,18 +3538,20 @@ mod tests {
         );
 
         assert_eq!(labels.len(), 2);
-        assert!(labels[0].x.abs() < 1e-9, "x title remains centered");
+        assert!(labels[0].x > 0.0, "x title belongs at the positive end");
+        assert!(labels[1].y > 0.0, "y title belongs at the positive/top end");
+        assert_eq!(rotations, [0.0, 0.0], "axis titles remain upright");
+        let axis_origin = space
+            .map
+            .data_to_local(space.map.x.crossing_value(), space.map.y.crossing_value())
+            .unwrap();
+        let (_, x_height) = canvas.axis_text_size("Material predominante", 1.125);
+        let (y_width, _) = canvas.axis_text_size("Viviendas\nprueba (%)", 1.125);
+        let x_clearance = labels[0].y - x_height * 0.5 - axis_origin.y;
+        let y_clearance = labels[1].x - y_width * 0.5 - axis_origin.x;
         assert!(
-            labels[0].y < -295.0 && labels[0].y > -335.0,
-            "x title clears the multiline category ticks"
-        );
-        assert!(
-            labels[1].x < -380.0 && labels[1].x > -460.0,
-            "rotated y title clears the widest numeric tick with a moderate gap"
-        );
-        assert!(
-            labels[1].y.abs() < 1e-9,
-            "y title remains vertically centered"
+            (x_clearance - y_clearance).abs() < 1e-9,
+            "horizontal and vertical axis titles need the same edge clearance"
         );
         let numbers = group_child_translations(
             &canvas,
@@ -2651,8 +3561,6 @@ mod tests {
             numbers[0].y < -220.0 && numbers[0].y > -240.0,
             "multiline category labels clear the x axis"
         );
-        assert_eq!(rotations[0], 0.0);
-        assert!((rotations[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
     }
 
     #[test]
@@ -2681,7 +3589,7 @@ mod tests {
     }
 
     #[test]
-    fn negative_value_domains_place_category_ticks_above_the_x_axis() {
+    fn x_tick_labels_remain_below_while_the_title_stays_above() {
         let mut canvas = Canvas::new(400, 200);
         let space = canvas
             .coordinate_axes(
@@ -2703,10 +3611,10 @@ mod tests {
             space.layer(SpaceLayer::Labels).expect("axis titles"),
         );
 
-        assert!(numbers[0].y > 0.0 && numbers[1].y > numbers[0].y);
+        assert!(numbers[0].y < 0.0 && numbers[1].y < numbers[0].y);
         assert!(
-            labels[0].y > numbers[1].y,
-            "the x title continues above the multiline category labels"
+            labels[0].y > 0.0,
+            "the x title remains above the axis while ticks remain below"
         );
     }
 
@@ -2732,10 +3640,23 @@ mod tests {
             &canvas,
             space.layer(SpaceLayer::Labels).expect("axis titles"),
         );
+        let rotations = group_child_rotations(
+            &canvas,
+            space.layer(SpaceLayer::Labels).expect("axis titles"),
+        );
 
         assert_eq!(labels.len(), 2);
-        assert_eq!(labels[0].x, 200.0, "x title moves to the axis end");
-        assert_eq!(labels[1].y, 100.0, "y title moves to the top axis end");
+        assert_eq!(rotations, [0.0, 0.0]);
+        let (x_width, _) = canvas.axis_text_size("x", 1.125);
+        let (_, y_height) = canvas.axis_text_size("y", 1.125);
+        assert!(
+            (labels[0].x + x_width * 0.5 - 200.0).abs() < 1e-9,
+            "x title's outer edge aligns with the axis end"
+        );
+        assert!(
+            (labels[1].y + y_height * 0.5 - 100.0).abs() < 1e-9,
+            "y title's outer edge aligns with the top axis end"
+        );
     }
 
     fn svg_stroke_color(handle: &DrawableHandle) -> Color {
@@ -3428,5 +4349,293 @@ mod tests {
         };
         assert_eq!(config.lag_ratio, Some(0.0));
         assert_eq!(animation.inner.duration, 1.5);
+    }
+
+    #[test]
+    fn composed_vector_field_materializes_arrows_streams_and_particles() {
+        let mut canvas = Canvas::new(640, 360);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Some(400.0),
+                Some(300.0),
+                false,
+            )
+            .unwrap();
+        let field = canvas.vector_field_2d(&space, |[x, y]| Some([-y, x]));
+        let arrows = canvas
+            .arrow_vector_field_2d(&field, [5, 5], ArrowFieldOptions::default())
+            .unwrap();
+        let style = StreamLinesStyle {
+            integration: StreamlineOptions {
+                max_time: 0.3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let streams = canvas.stream_lines_2d(&field, [4, 4], style).unwrap();
+        let particles = canvas
+            .flow_particles_2d(
+                &field,
+                4,
+                FlowParticleOptions {
+                    duration: 0.5,
+                    integration: StreamlineOptions {
+                        direction: gaanim_visualization::StreamDirection::Forward,
+                        max_time: 0.25,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_ne!(arrows.drawable().id, streams.drawable().id);
+        let stream_flow = streams.flow(0.5, 0.1);
+        assert!(!stream_flow.is_empty());
+        assert_eq!(stream_flow.len(), streams.flow_lines.len() * 2);
+        assert!(stream_flow.iter().all(|animation| {
+            streams
+                .flow_lines
+                .iter()
+                .any(|line| line.id == animation.inner.target)
+                && streams
+                    .lines
+                    .iter()
+                    .all(|line| line.id != animation.inner.target)
+        }));
+        assert!(streams.flow_lines.iter().all(|line| {
+            let spec = line.spec.lock().unwrap();
+            spec.opacity == 0.0 && spec.opacity_overridden
+        }));
+        assert_eq!(
+            stream_flow
+                .iter()
+                .filter(|animation| matches!(
+                    animation.inner.anim_type,
+                    crate::anim::AnimationType::ShowPassingFlash { .. }
+                ))
+                .count(),
+            streams.flow_lines.len()
+        );
+        assert!(matches!(
+            streams.write(Some(0.5)).inner.anim_type,
+            crate::anim::AnimationType::Write { .. }
+        ));
+        assert!(matches!(
+            particles.create(Some(0.5)).inner.anim_type,
+            crate::anim::AnimationType::Create { .. }
+        ));
+        assert!(matches!(
+            particles.fade_out(Some(0.5)).inner.anim_type,
+            crate::anim::AnimationType::FadeOut
+        ));
+        assert_eq!(particles.flow().len(), 4);
+        assert!(particles.flow().iter().all(|animation| matches!(
+            animation.inner.anim_type,
+            crate::anim::AnimationType::MoveAlongPath { .. }
+        )));
+        let particle_ids = match &particles.drawable.spec.lock().unwrap().kind {
+            SpawnKind::GroupNoCenter(children) => children.clone(),
+            other => panic!("expected particle group, got {other:?}"),
+        };
+        let state = canvas.state.lock().unwrap();
+        assert!(particle_ids.iter().all(|id| state.active().ops.iter().any(
+            |op| matches!(op, Op::Spawn(spec) if spec.lock().unwrap().id == *id && spec.lock().unwrap().defer_visibility_until_play)
+        )));
+    }
+
+    #[test]
+    fn vector_field_explicit_colors_win_over_theme_plot_rules() {
+        fn authored_and_resolved_stroke(
+            handle: &DrawableHandle,
+            theme: &crate::canvas::CanvasTheme,
+        ) -> (gaanim_core::peniko::Brush, gaanim_core::peniko::Brush) {
+            let authored = handle.spec.lock().expect("field spec poisoned").clone();
+            let authored_stroke = match &authored.kind {
+                SpawnKind::SvgPath(path) => path
+                    .stroke
+                    .brush
+                    .clone()
+                    .expect("field paths have a stroke"),
+                other => panic!("expected an SVG field path, got {other:?}"),
+            };
+            let resolved = theme.resolve_object(&authored).unwrap();
+            let resolved_stroke = resolved
+                .stroke
+                .expect("the resolved field path should retain a stroke")
+                .0;
+            (authored_stroke, resolved_stroke)
+        }
+
+        let mut canvas = Canvas::new(640, 360);
+        canvas.set_theme("technical").unwrap();
+        let theme = canvas.theme_style.clone().unwrap();
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Some(400.0),
+                Some(300.0),
+                false,
+            )
+            .unwrap();
+        let field = canvas.vector_field_2d(&space, |[x, y]| Some([-y, x]));
+        let arrows = canvas
+            .arrow_vector_field_2d(&field, [3, 3], ArrowFieldOptions::default())
+            .unwrap();
+        let streams = canvas
+            .stream_lines_2d(
+                &field,
+                [3, 3],
+                StreamLinesStyle {
+                    integration: StreamlineOptions {
+                        max_time: 0.2,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let arrow_id = match &arrows.drawable.spec.lock().unwrap().kind {
+            SpawnKind::GroupNoCenter(children) => children[0],
+            other => panic!("expected arrow group, got {other:?}"),
+        };
+        let arrow_spec = canvas
+            .state
+            .lock()
+            .unwrap()
+            .active()
+            .ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Spawn(spec) if spec.lock().unwrap().id == arrow_id => Some(spec.clone()),
+                _ => None,
+            })
+            .expect("arrow glyph should have a spawn spec");
+        let arrow = DrawableHandle::new(
+            arrow_id,
+            arrow_spec.lock().unwrap().kind.clone(),
+            arrows.drawable.state.clone(),
+            arrows.drawable.segment_idx,
+        );
+        *arrow.spec.lock().unwrap() = arrow_spec.lock().unwrap().clone();
+        let (authored, resolved) = authored_and_resolved_stroke(&arrow, &theme);
+        assert_eq!(resolved, authored, "theme replaced an arrow colormap color");
+
+        let (authored, resolved) = authored_and_resolved_stroke(&streams.lines[0], &theme);
+        assert_eq!(
+            resolved, authored,
+            "theme replaced a streamline colormap color"
+        );
+    }
+
+    #[test]
+    fn three_dimensional_advection_uses_native_polyline_lens() {
+        let mut canvas = Canvas::new(640, 360);
+        let space = canvas
+            .coordinate_axes_3d(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                [4.0, 4.0, 4.0],
+                false,
+            )
+            .unwrap();
+        let field = canvas.vector_field_3d(&space, |[x, y, z]| Some([-y, x, 0.2 - z]));
+        let target = canvas
+            .sphere(0.05, 8, 6, gaanim_scene::Material3D::matte(Color::WHITE))
+            .unwrap();
+        let animation = canvas
+            .advect_3d(
+                &field,
+                &target,
+                [1.0, 0.0, 0.0],
+                StreamlineOptions {
+                    direction: gaanim_visualization::StreamDirection::Forward,
+                    max_time: 0.3,
+                    ..Default::default()
+                },
+                0.5,
+            )
+            .unwrap();
+        assert!(matches!(
+            animation.inner.anim_type,
+            crate::anim::AnimationType::MoveAlongPath3D { .. }
+        ));
+    }
+
+    #[test]
+    fn traced_parameter_fields_compile_native_geometry_regenerators() {
+        let mut canvas = Canvas::new(640, 360);
+        let parameter = canvas.parameter(1.0).unwrap();
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Some(400.0),
+                Some(300.0),
+                false,
+            )
+            .unwrap();
+        let x = Expr::variable("x");
+        let y = Expr::variable("y");
+        let gain = parameter.expression();
+        let field = canvas
+            .vector_field_2d_expression(&space, [-y * gain.clone(), x * gain])
+            .unwrap();
+        canvas
+            .arrow_vector_field_2d(&field, [3, 3], ArrowFieldOptions::default())
+            .unwrap();
+        canvas
+            .stream_lines_2d(
+                &field,
+                [3, 3],
+                StreamLinesStyle {
+                    integration: StreamlineOptions {
+                        max_time: 0.2,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let space_3d = canvas
+            .coordinate_axes_3d(
+                Axis::linear(-1.0, 1.0).unwrap(),
+                Axis::linear(-1.0, 1.0).unwrap(),
+                Axis::linear(-1.0, 1.0).unwrap(),
+                [2.0, 2.0, 2.0],
+                false,
+            )
+            .unwrap();
+        let x = Expr::variable("x");
+        let y = Expr::variable("y");
+        let z = Expr::variable("z");
+        let gain = parameter.expression();
+        let field_3d = canvas
+            .vector_field_3d_expression(&space_3d, [-y * gain.clone(), x * gain.clone(), -z * gain])
+            .unwrap();
+        canvas
+            .arrow_vector_field_3d(&field_3d, [2, 2, 2], ArrowFieldOptions::default())
+            .unwrap();
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let regenerators = world
+            .query::<&gaanim_animation::Updater>()
+            .iter(&world)
+            .count();
+        assert!(
+            regenerators > 1,
+            "every traced field representation should remain native and reactive"
+        );
     }
 }

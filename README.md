@@ -5,11 +5,13 @@ para crear escenas programáticas desde Python. El flujo actual ejecuta los
 scripts Python dentro de la aplicación `gaanim`, que proporciona la ventana de
 previsualización, hot reload y exportación.
 
-Gaanim ofrece dos modos de uso:
+Gaanim se distribuye en dos piezas complementarias:
 
-- La aplicación embebida, recomendada para previsualización y hot reload.
-- El paquete Python local, útil para integrar la API y ejecutar exportaciones
-  headless. Requiere Python 3.12 o superior.
+- El ejecutable `gaanim`, que es el único runtime y proporciona ejecución,
+  previsualización, hot reload, render y exportación.
+- El wheel de autoría, que solo instala helpers Python, stubs y `py.typed` para
+  el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
+  headless independiente. Requiere Python 3.12 o superior.
 
 ## Inicio rápido
 
@@ -44,6 +46,23 @@ scene.render()
 Para crear una escena nueva, guarde un script en `examples/` y ejecútelo con
 `just run nombre_del_script` (sin `.py`). Durante la previsualización, guardar
 el archivo recarga la escena.
+
+## Plataformas y artefactos
+
+| Plataforma | CI | Artefacto instalable | Estado declarado |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.1.x` |
+| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core y wheel de autoría | Soportada en `0.1.x` |
+| macOS | No | No | Experimental, sin garantía de release |
+
+El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
+runtime. Esta tabla se refiere al ejecutable, que es lo necesario para abrir o
+exportar una escena.
+
+En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
+`gaanim` y `gaanim-core` juntos a una carpeta de `PATH`, por ejemplo
+`~/.local/bin`. Requiere Python 3.12 y las bibliotecas de sistema de Ubuntu
+24.04; FFmpeg sigue siendo opcional salvo para video y audio.
 
 El binario de usuario también administra proyectos. `gaanim` sin argumentos
 abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez
@@ -123,8 +142,8 @@ El snapping temporal del editor permanece desactivado mientras haya contenido
 
 ## Paquete Python local
 
-El wheel instala helpers y stubs para autocompletado; el binding nativo vive
-exclusivamente dentro del ejecutable:
+El wheel instala helpers y stubs para autocompletado; el binding nativo y todo
+el runtime viven exclusivamente dentro del ejecutable:
 
 ```powershell
 just bootstrap
@@ -135,6 +154,11 @@ Para construir una wheel distribuible use `just wheel`; el resultado se escribe
 en `target/wheels/`. Es un wheel universal `py3-none-any` sin renderer ni
 extensión nativa. Ejecutar o importar escenas con Python plano produce un error
 que dirige al usuario a la aplicación `gaanim`.
+
+Esta separación es un contrato de producto, no una limitación temporal del
+empaquetado: no se publicará un wheel autónomo. Los proyectos declaran el wheel
+para obtener la experiencia de autoría, pero siempre se ejecutan con
+`gaanim <script.py>` o `gaanim export ...`.
 
 Después de `just python-develop`, ejecute `just validate-python-api` para
 comprobar que el stub tipado público sigue coincidiendo con el módulo PyO3
@@ -147,11 +171,24 @@ ejecutable:
 
 ```powershell
 gaanim export . --output output.mp4 --quality standard
+gaanim export . --output output.mp4 --encoder nvenc
+gaanim export . --output overlay.webm --transparent
 ```
 
 Se admiten MP4, WebM, WebP animado, GIF y secuencias PNG. La exportación de
 video requiere FFmpeg disponible en `PATH`; si no está instalado, use primero
 una secuencia PNG o instale FFmpeg según su plataforma.
+Para MP4, Gaanim prueba automáticamente NVENC, AMF y QSV y usa el primer encoder
+hardware funcional. `libx264` queda como fallback cuando ninguno pasa el probe
+real; el editor muestra el encoder efectivo durante la exportación. Para exigir
+una implementación concreta, use `--encoder libx264|nvenc|amf|qsv|vaapi` o el
+selector del editor. Una selección explícita nunca cae a otro encoder: si el
+hardware o driver no funciona, la exportación falla. `--encoder auto` conserva
+el probe y fallback anteriores. VAAPI es explícito y muestra una advertencia
+porque un fallo del driver puede bloquear la GPU completa, fuera del aislamiento
+que puede ofrecer Gaanim.
+`--transparent` está disponible para WebM, WebP y PNG; MP4 y GIF se rechazan
+explícitamente porque no forman parte del contrato alpha de Gaanim.
 
 También puede colocar un MP4 dentro de la escena. El clip es un `Drawable`,
 responde al seek del editor y permite trim, loop, velocidad y audio embebido:
@@ -172,6 +209,7 @@ Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
 | Verificar entorno y aplicación | `just doctor` |
 | Compilar la aplicación | `just build` |
 | Ejecutar un ejemplo | `just run quickstart` |
+| Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
 
 La API pública de Python comienza en `Scene`; `Canvas(...)` es un constructor

@@ -1,4 +1,6 @@
-use bevy::prelude::{BuildChildrenTransformExt, Component, Entity, EntityWorldMut, World};
+use bevy::prelude::{
+    BuildChildrenTransformExt, Component, Entity, EntityWorldMut, Resource, World,
+};
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
@@ -9,6 +11,10 @@ use std::collections::HashMap;
 
 use crate::clip::SceneId;
 use crate::scene::SceneMember;
+
+/// Authored camera poses captured by timeline events and referenced by later clips.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct CapturedCameraStates(pub HashMap<u64, gaanim_math::CameraPose>);
 
 /// A snapshot capturing the complete state of a single Mobject entity.
 ///
@@ -102,6 +108,9 @@ pub struct WorldSnapshot {
     /// Complete authored camera state. Presentation viewport fit is excluded.
     #[cfg_attr(feature = "serde", serde(default))]
     pub camera: Option<gaanim_math::Camera>,
+    /// Timeline camera captures required by later state transitions.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub camera_states: HashMap<u64, gaanim_math::CameraPose>,
 }
 
 /// Insert a component only when the snapshot differs from the live world.
@@ -205,7 +214,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         traced_path.points = points.clone();
         traced_path.sample_times = snap.traced_path_sample_times.clone().unwrap_or_default();
     }
-    // 3D traced path — generic, handles inferno/viridis/plasma colormaps
+    // 3D traced path — restore geometry and any registered colormap.
     if let Some(points) = &snap.traced_path_points {
         if let Some(mut traced_3d) = entity_mut.get_mut::<gaanim_animation::TracedPath3D>() {
             traced_3d.points = points.clone();
@@ -220,96 +229,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
                 .map(|p| [p.x as f32, p.y as f32, p.z as f32])
                 .collect();
             line.points.clone_from(&pts);
-            if let Some(name) = colormap_opt {
-                let n = pts.len();
-                let mut cols = Vec::with_capacity(n);
-                for i in 0..n {
-                    let t = if n > 1 {
-                        i as f32 / (n - 1) as f32
-                    } else {
-                        0.0
-                    };
-                    let (r, g, b) = match name.as_str() {
-                        "inferno" => {
-                            const PALETTE: [(u8, u8, u8); 10] = [
-                                (0, 0, 4),
-                                (31, 12, 72),
-                                (85, 15, 109),
-                                (136, 34, 106),
-                                (168, 50, 88),
-                                (210, 72, 55),
-                                (233, 100, 28),
-                                (249, 157, 87),
-                                (247, 209, 61),
-                                (252, 255, 164),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        "viridis" => {
-                            const PALETTE: [(u8, u8, u8); 5] = [
-                                (68, 1, 84),
-                                (59, 82, 139),
-                                (33, 144, 140),
-                                (94, 201, 98),
-                                (253, 231, 37),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        "plasma" => {
-                            const PALETTE: [(u8, u8, u8); 5] = [
-                                (13, 8, 135),
-                                (126, 3, 168),
-                                (203, 70, 121),
-                                (248, 149, 64),
-                                (240, 249, 33),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        _ => (255, 255, 255),
-                    };
-                    cols.push([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]);
-                }
-                line.colors = Some(cols);
-            }
+            line.colors = colormap_opt.and_then(|map| map.rgba_f32(pts.len()).ok());
         }
     }
 
@@ -327,6 +247,10 @@ impl WorldSnapshot {
     pub fn capture(world: &mut World) -> Self {
         let mut entities = HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
+        let camera_states = world
+            .get_resource::<CapturedCameraStates>()
+            .map(|states| states.0.clone())
+            .unwrap_or_default();
 
         // Query all entities with a MobjectId component
         let mut query = world.query::<(Entity, &MobjectId)>();
@@ -431,7 +355,11 @@ impl WorldSnapshot {
             entities.insert(id, snapshot);
         }
 
-        Self { entities, camera }
+        Self {
+            entities,
+            camera,
+            camera_states,
+        }
     }
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
@@ -441,6 +369,7 @@ impl WorldSnapshot {
                 world.insert_resource(camera);
             }
         }
+        world.insert_resource(CapturedCameraStates(self.camera_states.clone()));
         // 1. Gather all existing entities and build a dynamic mapping of ObjectIds to Bevy Entities
         let mut existing_entities = Vec::new();
         let mut entity_map = HashMap::new();

@@ -767,7 +767,7 @@ axes = scene.cartesian_3d(
   name: "Scene.polyline_3d",
   kind: "factory",
   signature: "polyline_3d(points, color=None, *, colors=None, colormap=None) -> Drawable",
-  params: ((name: "points", type: "list[(float,float,float)]", default: none, desc: [At least two finite world-space points.]), (name: "color", type: "Color", default: "None", desc: [Uniform color.]), (name: "colors", type: "list[Color]", default: "None", desc: [One color per point; takes precedence over colormap.]), (name: "colormap", type: "str", default: "None", desc: ["inferno", "viridis", or "plasma".]),),
+  params: ((name: "points", type: "list[(float,float,float)]", default: none, desc: [At least two finite world-space points.]), (name: "color", type: "Color", default: "None", desc: [Uniform color.]), (name: "colors", type: "list[Color]", default: "None", desc: [One color per point; takes precedence over colormap.]), (name: "colormap", type: "ColorMap | str", default: "None", desc: [Any built-in Matplotlib or Scientific Colour Map, or a custom `ColorMap`.]),),
   returns: (type: "Drawable", desc: [3D line strip in world space.]),
   desc: [Use `color` for a uniform line, `colors` for explicit vertex colors, or `colormap` for a time-ordered gradient. A colors list must have exactly the same length as `points`.],
 )[
