@@ -1032,7 +1032,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::DrawBorderThenFill { .. } => "DrawFill",
             AnimationType::Flash { .. } => "Flash",
             AnimationType::Circumscribe { .. } => "Circum",
-            AnimationType::MoveAlongPath { .. } => "Follow",
+            AnimationType::MoveAlongPath { .. } | AnimationType::MoveAlongPath3D { .. } => "Follow",
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
             AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
@@ -2349,6 +2349,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_move_along_path_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::MoveAlongPath3D { .. }) {
+            self.play_move_along_path_3d_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::RotateBy { .. }) {
             self.play_rotate_by_internal(anim, track);
             return;
@@ -2561,6 +2565,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
             | AnimationType::MoveAlongPath { .. }
+            | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
             | AnimationType::GrowArrow => {
@@ -4661,6 +4666,35 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    fn play_move_along_path_3d_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let points = match &anim.anim_type {
+            AnimationType::MoveAlongPath3D { points } => points.clone(),
+            _ => unreachable!(),
+        };
+        if points.len() < 2 || points.iter().any(|point| !point.is_finite()) {
+            return;
+        }
+        let end_translation = *points.last().expect("validated non-empty path");
+        if let Some(state) = self.states.get_mut(anim.target) {
+            state.transform.translation = end_translation;
+            state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
+            self.commands.entity(state.entity).insert(state.transform);
+        }
+        let clip_start = self.current_time + anim.delay;
+        self.timeline.add_clip(
+            parent_track,
+            clip_start,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::PathFollow3D { points },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+    }
+
     fn play_rotate_by_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (angle_radians, pivot) = match &anim.anim_type {
             AnimationType::RotateBy {
@@ -5602,6 +5636,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             max = gaanim_core::glam::DVec3::ZERO;
         }
         let bounds = Bounds3D::new(min, max);
+        let line_data = LineListData {
+            points,
+            indices: None,
+            strip,
+            color,
+            colors,
+        };
         let entity = self
             .commands
             .spawn((
@@ -5610,13 +5651,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 GlobalSpatialTransform::default(),
                 LocalBounds(bounds),
                 WorldBounds::default(),
-                LineListData {
-                    points,
-                    indices: None,
-                    strip,
-                    color,
-                    colors,
-                },
+                line_data.clone(),
+                gaanim_scene::LineListSource(line_data),
                 Mesh3DMarker,
                 Transform::default(),
                 GlobalTransform::default(),

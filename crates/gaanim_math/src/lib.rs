@@ -13,7 +13,7 @@ pub use camera::{
 };
 pub use easing::{EasingCurve, RateFunc};
 pub use path::{
-    get_path_length, get_point_at_alpha, get_subpath, get_subpath_range, interpolate_paths,
-    interpolate_paths_continuous,
+    get_path_length, get_point_at_alpha, get_point_on_polyline, get_subpath, get_subpath_range,
+    interpolate_paths, interpolate_paths_continuous,
 };
 pub use spatial::{GlobalSpatialTransform, SpatialTransform};

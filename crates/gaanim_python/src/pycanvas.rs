@@ -18,7 +18,7 @@ use gaanim_api::canvas::{
 };
 
 use crate::brush::PyPaint;
-use crate::color::PyColor;
+use crate::color::{PyColor, PyColorMapArg};
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
 use crate::pylayout::{
@@ -3274,7 +3274,7 @@ impl PyScene {
         points: Vec<(f64, f64, f64)>,
         color: Option<PyColor>,
         colors: Option<Vec<PyColor>>,
-        colormap: Option<String>,
+        colormap: Option<PyColorMapArg>,
     ) -> PyResult<PyDrawable> {
         if points.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -3303,67 +3303,12 @@ impl PyScene {
                 )));
             }
             Some(cols.into_iter().map(|c| c.0).collect())
-        } else if let Some(name) = colormap {
-            let name = name.to_lowercase();
-            // Supported colormaps: inferno (Makie default), viridis, plasma
-            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                "inferno" => vec![
-                    (0, 0, 4),
-                    (31, 12, 72),
-                    (85, 15, 109),
-                    (136, 34, 106),
-                    (168, 50, 88),
-                    (210, 72, 55),
-                    (233, 100, 28),
-                    (249, 157, 87),
-                    (247, 209, 61),
-                    (252, 255, 164),
-                ],
-                "viridis" => vec![
-                    (68, 1, 84),
-                    (59, 82, 139),
-                    (33, 144, 140),
-                    (94, 201, 98),
-                    (253, 231, 37),
-                ],
-                "plasma" => vec![
-                    (13, 8, 135),
-                    (126, 3, 168),
-                    (203, 70, 121),
-                    (248, 149, 64),
-                    (240, 249, 33),
-                ],
-                _ => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "colormap must be 'inferno', 'viridis' or 'plasma'",
-                    ));
-                }
-            };
-            let n = points.len();
-            let mut out = Vec::with_capacity(n);
-            for i in 0..n {
-                let t = if n > 1 {
-                    i as f32 / (n - 1) as f32
-                } else {
-                    0.0
-                };
-                let scaled = t * (palette.len() - 1) as f32;
-                let idx = scaled.floor() as usize;
-                let f = scaled - idx as f32;
-                let (r, g, b) = if idx >= palette.len() - 1 {
-                    palette[palette.len() - 1]
-                } else {
-                    let (r0, g0, b0) = palette[idx];
-                    let (r1, g1, b1) = palette[idx + 1];
-                    (
-                        (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                        (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                        (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                    )
-                };
-                out.push(gaanim_core::peniko::Color::from_rgb8(r, g, b));
-            }
-            Some(out)
+        } else if let Some(map) = colormap {
+            Some(
+                map.0
+                    .colors(points.len())
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+            )
         } else {
             None
         };
@@ -4896,12 +4841,12 @@ impl PyScene {
     }
 
     /// 3D traced path — accumulates the 3D world position of `source` as a `LineList`.
-    /// `colormap` may be "inferno", "viridis" or "plasma" to color by time (like Makie).
+    /// `colormap` may be any built-in name or a custom `ColorMap`.
     #[pyo3(signature = (source, *, colormap=None, dissipating_time=None, max_points=None, min_distance=0.1))]
     fn traced_path_3d(
         &self,
         source: &PyDrawable,
-        colormap: Option<String>,
+        colormap: Option<PyColorMapArg>,
         dissipating_time: Option<f64>,
         max_points: Option<usize>,
         min_distance: f64,
@@ -4925,21 +4870,13 @@ impl PyScene {
                 ));
             }
         }
-        if let Some(ref name) = colormap {
-            let low = name.to_lowercase();
-            if !["inferno", "viridis", "plasma"].contains(&low.as_str()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "colormap must be 'inferno', 'viridis' or 'plasma'",
-                ));
-            }
-        }
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .traced_path_3d_with_options(
                     &source.0,
-                    colormap,
+                    colormap.map(|map| map.0),
                     max_points,
                     min_distance,
                     dissipating_time,

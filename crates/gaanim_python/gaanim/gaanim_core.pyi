@@ -48,6 +48,32 @@ class Color:
 
 ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
 
+class ColorMap:
+    """A continuous or categorical map from normalized values to colors.
+
+    Built-ins include the canonical Matplotlib and Scientific Colour Maps.
+    Names are case-insensitive.
+    """
+    def __init__(self, name: str) -> None: ...
+    @staticmethod
+    def named(name: str) -> ColorMap: ...
+    @staticmethod
+    def from_colors(colors: Sequence[ColorLike], positions: Optional[Sequence[float]] = None) -> ColorMap: ...
+    @staticmethod
+    def names(category: Optional[Literal["matplotlib", "scientific"]] = None) -> list[str]: ...
+    @property
+    def name(self) -> Optional[str]: ...
+    @property
+    def category(self) -> Optional[str]: ...
+    @property
+    def categorical(self) -> bool: ...
+    def sample(self, position: float) -> Color: ...
+    def colors(self, count: int) -> list[Color]: ...
+    def reversed(self) -> ColorMap: ...
+    def with_alpha(self, alpha: float) -> ColorMap: ...
+
+ColorMapLike: TypeAlias = ColorMap | str
+
 class Brush:
     @staticmethod
     def solid(color: ColorLike) -> Brush:
@@ -2503,6 +2529,173 @@ class Chart:
         """Report whether preview inspection was enabled for this handle."""
         ...
 
+class VectorField:
+    """A reusable 2D or 3D vector-valued function bound to a coordinate space."""
+    @property
+    def dimensions(self) -> Literal[2, 3]: ...
+    @property
+    def evaluation(self) -> Literal["native", "python"]:
+        """Report whether symbolic tracing succeeded or Python fallback is used."""
+        ...
+    def arrows(
+        self,
+        *,
+        resolution: Optional[tuple[int, int] | tuple[int, int, int]] = None,
+        min_length: float = 0.0,
+        max_length: Optional[float] = None,
+        length_scale: float = 1.0,
+        width: float = 2.0,
+        tip_length: Optional[float] = None,
+        tip_width: Optional[float] = None,
+        color: Optional[ColorLike] = None,
+        colormap: Optional[ColorMapLike] = None,
+        color_range: Optional[tuple[float, float]] = None,
+    ) -> ArrowVectorField: ...
+    def streamlines(
+        self,
+        *,
+        seeds: Optional[tuple[int, int] | tuple[int, int, int]] = None,
+        direction: Literal["forward", "backward", "both"] = "both",
+        tolerance: float = 1e-4,
+        min_step: float = 1e-5,
+        max_step: float = 0.1,
+        max_time: float = 3.0,
+        max_length: Optional[float] = None,
+        max_steps: int = 10_000,
+        stagnation: float = 1e-10,
+        padding: float = 0.05,
+        separation: float = 0.035,
+        width: float = 2.0,
+        opacity: float = 1.0,
+        color: Optional[ColorLike] = None,
+        colormap: Optional[ColorMapLike] = None,
+        color_range: Optional[tuple[float, float]] = None,
+    ) -> StreamLines: ...
+    def advect(
+        self,
+        target: Drawable,
+        seed: tuple[float, float] | tuple[float, float, float],
+        *,
+        duration: float = 3.0,
+        direction: Literal["forward", "backward", "both"] = "forward",
+        tolerance: float = 1e-4,
+        min_step: float = 1e-5,
+        max_step: float = 0.1,
+        max_time: float = 3.0,
+        max_length: Optional[float] = None,
+        max_steps: int = 10_000,
+        stagnation: float = 1e-10,
+        padding: float = 0.05,
+    ) -> Anim:
+        """Advect a drawable's center along one finite seekable trajectory."""
+        ...
+    def particles(
+        self,
+        count: int = 32,
+        *,
+        radius: Optional[float] = None,
+        duration: float = 3.0,
+        tolerance: float = 1e-4,
+        min_step: float = 1e-5,
+        max_step: float = 0.1,
+        max_time: float = 3.0,
+        max_length: Optional[float] = None,
+        max_steps: int = 10_000,
+        stagnation: float = 1e-10,
+        padding: float = 0.05,
+        color: Optional[ColorLike] = None,
+        colormap: Optional[ColorMapLike] = None,
+        color_range: Optional[tuple[float, float]] = None,
+        opacity: float = 1.0,
+    ) -> FlowParticles: ...
+
+class ArrowVectorField:
+    def drawable(self) -> Drawable: ...
+    def create(self, duration: Optional[float] = None) -> Anim:
+        """Reveal all arrow glyphs using their drawable creation animation."""
+        ...
+    def write(self, duration: Optional[float] = None) -> Anim:
+        """Write the arrow glyphs using their authored strokes."""
+        ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Fade all arrows from transparent to their authored opacity."""
+        ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Fade all arrows to transparent."""
+        ...
+    def uncreate(self, duration: Optional[float] = None) -> Anim:
+        """Erase the arrow glyphs using the reverse creation animation."""
+        ...
+    def unwrite(self, duration: Optional[float] = None) -> Anim:
+        """Erase the arrow glyph strokes using the reverse writing animation."""
+        ...
+    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
+        """Grow the arrow-field group from its center."""
+        ...
+    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
+        """Shrink the arrow-field group into its center."""
+        ...
+
+class StreamLines:
+    def drawable(self) -> Drawable: ...
+    def create(self, duration: Optional[float] = None) -> Anim:
+        """Reveal the persistent base streamlines."""
+        ...
+    def write(self, duration: Optional[float] = None) -> Anim:
+        """Write the persistent base streamlines along their paths."""
+        ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Fade the persistent base streamlines in."""
+        ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Fade the persistent base streamlines out."""
+        ...
+    def uncreate(self, duration: Optional[float] = None) -> Anim:
+        """Erase the base streamlines using the reverse creation animation."""
+        ...
+    def unwrite(self, duration: Optional[float] = None) -> Anim:
+        """Erase the base streamlines using the reverse writing animation."""
+        ...
+    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
+        """Grow the streamline group from its center."""
+        ...
+    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
+        """Shrink the streamline group into its center."""
+        ...
+    def flow(self, duration: float = 2.0, *, time_width: float = 0.15) -> list[Anim]:
+        """Animate brighter moving highlights without clipping the persistent base lines."""
+        ...
+
+class FlowParticles:
+    def drawable(self) -> Drawable: ...
+    def create(self, duration: Optional[float] = None) -> Anim:
+        """Reveal all particles; particles remain hidden before their first entry animation."""
+        ...
+    def write(self, duration: Optional[float] = None) -> Anim:
+        """Write all particle shapes using the standard drawable animation."""
+        ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Fade all particles in from transparent."""
+        ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Fade all particles to transparent."""
+        ...
+    def uncreate(self, duration: Optional[float] = None) -> Anim:
+        """Erase all particles using the reverse creation animation."""
+        ...
+    def unwrite(self, duration: Optional[float] = None) -> Anim:
+        """Erase all particle shapes using the reverse writing animation."""
+        ...
+    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
+        """Grow the particle group from its center."""
+        ...
+    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
+        """Shrink the particle group into its center."""
+        ...
+    def flow(self) -> list[Anim]:
+        """Return one finite seekable advection clip per retained particle."""
+        ...
+
 class CoordinateSpace:
     def drawable(self) -> Drawable: ...
     def at(self, x: float, y: float) -> CoordinateSpace: ...
@@ -2542,7 +2735,9 @@ class CoordinateSpace:
     def parametric(self, function: Callable[[float], tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.75) -> Drawable: ...
     def implicit(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def contour(self, function: Callable[[float, float], float], levels: Sequence[float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
-    def vector_field(self, function: Callable[[float, float], tuple[float, float]], *, resolution: tuple[int, int] = (20, 12), max_length: float = 28.0) -> Drawable: ...
+    def field(self, function: Callable[[float, float], tuple[_TracedScalar, _TracedScalar]]) -> VectorField:
+        """Capture a native expression when possible, otherwise retain a Python evaluator."""
+        ...
     def projections(self, x: float, y: float) -> Drawable: ...
     def secant(self, function: Callable[[float], float], x0: float, x1: float) -> Drawable: ...
     def tangent(self, function: Callable[[float], float], x: float, *, length: Optional[float] = None, dx: Optional[float] = None) -> Drawable: ...
@@ -2652,7 +2847,7 @@ class CoordinateSpace3D:
     def local_to_data(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def surface(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (64, 48)) -> Drawable: ...
     def parametric(self, function: Callable[[float], tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320) -> Drawable: ...
-    def vector_field(self, function: Callable[[float, float, float], tuple[float, float, float]], *, resolution: tuple[int, int, int] = (8, 8, 6), max_length: float = 24.0) -> Drawable: ...
+    def field(self, function: Callable[[float, float, float], tuple[_TracedScalar, _TracedScalar, _TracedScalar]]) -> VectorField: ...
 
 Cartesian2D: TypeAlias = CoordinateSpace
 Cartesian3D: TypeAlias = CoordinateSpace3D

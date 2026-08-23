@@ -16,6 +16,31 @@ use std::str::FromStr;
 #[derive(Clone, Copy, Debug)]
 pub struct PyColor(pub peniko::Color);
 
+#[pyclass(name = "ColorMap", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyColorMap(pub gaanim_core::ColorMap);
+
+#[derive(Clone, Debug)]
+pub struct PyColorMapArg(pub gaanim_core::ColorMap);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyColorMapArg {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(map) = obj.cast::<PyColorMap>() {
+            return Ok(Self(map.borrow().0.clone()));
+        }
+        if let Ok(name) = obj.extract::<&str>() {
+            return gaanim_core::ColorMap::named(name)
+                .map(Self)
+                .map_err(|error| PyValueError::new_err(error.to_string()));
+        }
+        Err(PyValueError::new_err(
+            "expected a ColorMap or a built-in colormap name",
+        ))
+    }
+}
+
 /// Accept `Color` objects, hex/CSS strings, and `(r, g, b)` / `(r, g, b, a)` tuples.
 impl<'a, 'py> FromPyObject<'a, 'py> for PyColor {
     type Error = PyErr;
@@ -210,5 +235,84 @@ impl PyColor {
         let a = self.0.to_rgba8();
         let b = other.0.to_rgba8();
         a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a
+    }
+}
+
+#[pymethods]
+impl PyColorMap {
+    #[new]
+    fn new(name: &str) -> PyResult<Self> {
+        gaanim_core::ColorMap::named(name)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    #[staticmethod]
+    fn named(name: &str) -> PyResult<Self> {
+        Self::new(name)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (colors, positions=None))]
+    fn from_colors(colors: Vec<PyColor>, positions: Option<Vec<f64>>) -> PyResult<Self> {
+        gaanim_core::ColorMap::from_colors(
+            colors.into_iter().map(|color| color.0).collect(),
+            positions,
+        )
+        .map(Self)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (category=None))]
+    fn names(category: Option<&str>) -> Vec<&'static str> {
+        gaanim_core::ColorMap::names(category)
+    }
+
+    #[getter]
+    fn name(&self) -> Option<&str> {
+        self.0.name()
+    }
+
+    #[getter]
+    fn category(&self) -> Option<&str> {
+        self.0.category()
+    }
+
+    #[getter]
+    fn categorical(&self) -> bool {
+        self.0.is_categorical()
+    }
+
+    fn sample(&self, position: f64) -> PyResult<PyColor> {
+        self.0
+            .sample(position)
+            .map(PyColor)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    fn colors(&self, count: usize) -> PyResult<Vec<PyColor>> {
+        self.0
+            .colors(count)
+            .map(|colors| colors.into_iter().map(PyColor).collect())
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    fn reversed(&self) -> Self {
+        Self(self.0.reversed())
+    }
+
+    fn with_alpha(&self, alpha: f64) -> PyResult<Self> {
+        self.0
+            .with_alpha(alpha)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    fn __repr__(&self) -> String {
+        self.0.name().map_or_else(
+            || "ColorMap(custom)".to_owned(),
+            |name| format!("ColorMap('{name}')"),
+        )
     }
 }

@@ -1376,11 +1376,25 @@ impl DrawableHandle {
         self.anim_dur(AnimationType::Wiggle, dur.into_opt())
     }
 
+    /// Reveal a sliding window along this path over a finite timeline clip.
+    pub fn show_passing_flash(&self, duration: f64, time_width: f64) -> Anim {
+        self.anim_dur(
+            AnimationType::ShowPassingFlash {
+                time_width: time_width.clamp(f64::EPSILON, 1.0),
+            },
+            Some(duration.max(f64::EPSILON)),
+        )
+    }
+
     pub fn move_along_path(&self, path: BezPath) -> Anim {
         self.anim(AnimationType::MoveAlongPath {
             path,
             path_target: None,
         })
+    }
+
+    pub fn move_along_path_3d(&self, points: Vec<gaanim_core::glam::DVec3>) -> Anim {
+        self.anim(AnimationType::MoveAlongPath3D { points })
     }
 
     pub fn move_along_drawable(&self, target: &DrawableHandle) -> Anim {

@@ -32,8 +32,10 @@ pub use editorial::{
 };
 mod visualization;
 pub use visualization::{
-    ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle, NumberLineHandle,
-    Parameter, PolarSpaceHandle, VisualizationError,
+    ArrowFieldOptions, ArrowVectorFieldHandle, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
+    CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, Parameter,
+    PolarSpaceHandle, StreamLinesHandle, StreamLinesStyle, VectorField2DHandle,
+    VectorField3DHandle, VisualizationError,
 };
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};

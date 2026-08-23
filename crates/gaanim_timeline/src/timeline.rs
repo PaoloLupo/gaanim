@@ -1244,68 +1244,9 @@ fn restore_reactive_state(
                     .map(|p| [p.x as f32, p.y as f32, p.z as f32])
                     .collect();
                 line.points = pts.clone();
-                // Regenerate vertex colors if colormap present
-                let colormap = colormap_clone.clone();
-                if let Some(name) = colormap {
-                    let n = pts.len();
-                    let cols: Vec<[f32; 4]> = (0..n)
-                        .map(|i| {
-                            let t = if n > 1 {
-                                i as f32 / (n - 1) as f32
-                            } else {
-                                0.0
-                            };
-                            // inline inferno/viridis/plasma
-                            let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                                "inferno" => vec![
-                                    (0, 0, 4),
-                                    (31, 12, 72),
-                                    (85, 15, 109),
-                                    (136, 34, 106),
-                                    (168, 50, 88),
-                                    (210, 72, 55),
-                                    (233, 100, 28),
-                                    (249, 157, 87),
-                                    (247, 209, 61),
-                                    (252, 255, 164),
-                                ],
-                                "viridis" => vec![
-                                    (68, 1, 84),
-                                    (59, 82, 139),
-                                    (33, 144, 140),
-                                    (94, 201, 98),
-                                    (253, 231, 37),
-                                ],
-                                "plasma" => vec![
-                                    (13, 8, 135),
-                                    (126, 3, 168),
-                                    (203, 70, 121),
-                                    (248, 149, 64),
-                                    (240, 249, 33),
-                                ],
-                                _ => vec![(255, 255, 255), (255, 255, 255)],
-                            };
-                            let scaled = t * (palette.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            let (r, g, b) = if idx >= palette.len() - 1 {
-                                palette[palette.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = palette[idx];
-                                let (r1, g1, b1) = palette[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            };
-                            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-                        })
-                        .collect();
-                    line.colors = Some(cols);
-                } else {
-                    line.colors = None;
-                }
+                line.colors = colormap_clone
+                    .as_ref()
+                    .and_then(|map| map.rgba_f32(pts.len()).ok());
             }
             if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
                 if points.is_empty() {
@@ -1351,7 +1292,7 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
         Entity,
         f64,
         Option<usize>,
-        Option<String>,
+        Option<gaanim_core::ColorMap>,
         f64,
         Option<f64>,
     )> = {
@@ -1535,65 +1476,9 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             .collect();
         if let Some(mut line) = world.get_mut::<gaanim_scene::LineListData>(*trace_entity) {
             line.points = pts_f32.clone();
-            if let Some(name) = colormap_clone.or_else(|| colormap.clone()) {
-                let n = pts_f32.len();
-                let cols: Vec<[f32; 4]> = (0..n)
-                    .map(|i| {
-                        let t = if n > 1 {
-                            i as f32 / (n - 1) as f32
-                        } else {
-                            0.0
-                        };
-                        let palette: Vec<(u8, u8, u8)> = match name.as_str() {
-                            "inferno" => vec![
-                                (0, 0, 4),
-                                (31, 12, 72),
-                                (85, 15, 109),
-                                (136, 34, 106),
-                                (168, 50, 88),
-                                (210, 72, 55),
-                                (233, 100, 28),
-                                (249, 157, 87),
-                                (247, 209, 61),
-                                (252, 255, 164),
-                            ],
-                            "viridis" => vec![
-                                (68, 1, 84),
-                                (59, 82, 139),
-                                (33, 144, 140),
-                                (94, 201, 98),
-                                (253, 231, 37),
-                            ],
-                            "plasma" => vec![
-                                (13, 8, 135),
-                                (126, 3, 168),
-                                (203, 70, 121),
-                                (248, 149, 64),
-                                (240, 249, 33),
-                            ],
-                            _ => vec![(255, 255, 255), (255, 255, 255)],
-                        };
-                        let scaled = t * (palette.len() - 1) as f32;
-                        let idx = scaled.floor() as usize;
-                        let f = scaled - idx as f32;
-                        let (r, g, b) = if idx >= palette.len() - 1 {
-                            palette[palette.len() - 1]
-                        } else {
-                            let (r0, g0, b0) = palette[idx];
-                            let (r1, g1, b1) = palette[idx + 1];
-                            (
-                                (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                            )
-                        };
-                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-                    })
-                    .collect();
-                line.colors = Some(cols);
-            } else {
-                line.colors = None;
-            }
+            line.colors = colormap_clone
+                .or_else(|| colormap.clone())
+                .and_then(|map| map.rgba_f32(pts_f32.len()).ok());
         }
         if let Some(mut bounds) = world.get_mut::<gaanim_scene::LocalBounds>(*trace_entity) {
             if points.is_empty() {
@@ -1756,6 +1641,71 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
         points,
         indices: None,
         strip: false,
+        color: source.color,
+        colors,
+    }
+}
+
+fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineListData {
+    let segment_count = source.points.len().saturating_sub(1);
+    let start = start.clamp(0.0, 1.0);
+    let end = end.clamp(start, 1.0);
+    if segment_count == 0 || end <= start + f64::EPSILON {
+        return LineListData {
+            points: Vec::new(),
+            indices: None,
+            strip: true,
+            color: source.color,
+            colors: source.colors.as_ref().map(|_| Vec::new()),
+        };
+    }
+
+    let scaled_start = start * segment_count as f64;
+    let scaled_end = end * segment_count as f64;
+    let start_segment = (scaled_start.floor() as usize).min(segment_count - 1);
+    let end_segment = (scaled_end.floor() as usize).min(segment_count - 1);
+    let start_fraction = (scaled_start - start_segment as f64) as f32;
+    let end_fraction = if end >= 1.0 {
+        1.0
+    } else {
+        (scaled_end - end_segment as f64) as f32
+    };
+
+    let mut points = vec![lerp_line_point(
+        source.points[start_segment],
+        source.points[start_segment + 1],
+        start_fraction,
+    )];
+    for index in (start_segment + 1)..=end_segment {
+        points.push(source.points[index]);
+    }
+    points.push(lerp_line_point(
+        source.points[end_segment],
+        source.points[end_segment + 1],
+        end_fraction,
+    ));
+
+    let colors = source.colors.as_ref().map(|colors| {
+        let mut visible = vec![lerp_line_color(
+            colors[start_segment],
+            colors[start_segment + 1],
+            start_fraction,
+        )];
+        for index in (start_segment + 1)..=end_segment {
+            visible.push(colors[index]);
+        }
+        visible.push(lerp_line_color(
+            colors[end_segment],
+            colors[end_segment + 1],
+            end_fraction,
+        ));
+        visible
+    });
+
+    LineListData {
+        points,
+        indices: None,
+        strip: true,
         color: source.color,
         colors,
     }
@@ -2110,6 +2060,11 @@ fn apply_lens_spec(
                 transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
             }
         }
+        PropertyLensSpec::PathFollow3D { points } => {
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
+                transform.translation = gaanim_math::get_point_on_polyline(points, t);
+            }
+        }
         PropertyLensSpec::SignalFloat { from, to } => {
             if let Some(mut signal) =
                 world.get_mut::<gaanim_animation::signals::FloatSignal>(target)
@@ -2137,6 +2092,23 @@ fn apply_lens_spec(
                 let trimmed = gaanim_math::get_subpath_range(&source.0, start, end);
                 if let Some(mut path) = world.get_mut::<Path2D>(target) {
                     path.0 = std::sync::Arc::new(trimmed);
+                }
+            }
+            if world.get::<LineListSource>(target).is_none() {
+                let line_clone = world.get::<LineListData>(target).cloned();
+                if let Some(line) = line_clone
+                    && let Ok(mut entity) = world.get_entity_mut(target)
+                {
+                    entity.insert(LineListSource(line));
+                }
+            }
+            if let Some(source) = world.get::<LineListSource>(target)
+                && source.0.strip
+                && source.0.indices.is_none()
+            {
+                let visible = trim_line_strip_range(&source.0, start, end);
+                if let Some(mut line) = world.get_mut::<LineListData>(target) {
+                    *line = visible;
                 }
             }
         }

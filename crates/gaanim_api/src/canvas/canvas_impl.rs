@@ -1565,13 +1565,6 @@ impl Canvas {
         })
     }
 
-    pub(crate) fn line_segments_3d(&mut self, points: Vec<[f32; 3]>) -> DrawableHandle {
-        self.spawn(SpawnKind::LineSegments3D {
-            points,
-            colors: None,
-        })
-    }
-
     pub(crate) fn line_segments_3d_with_colors(
         &mut self,
         points: Vec<[f32; 3]>,
@@ -2989,11 +2982,11 @@ impl Canvas {
 
     /// Spawn a hidden 3D traced path that accumulates the 3D trajectory of
     /// `source` as a `LineList`.
-    /// Supports optional colormap (`"inferno"`, `"viridis"`, `"plasma"`) for time-based coloring.
+    /// Supports any built-in or custom [`gaanim_core::ColorMap`] for time-based coloring.
     pub fn traced_path_3d(
         &mut self,
         source: &DrawableHandle,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
         max_points: Option<usize>,
         min_distance: f64,
     ) -> DrawableHandle {
@@ -3004,7 +2997,7 @@ impl Canvas {
     pub fn traced_path_3d_with_options(
         &mut self,
         source: &DrawableHandle,
-        colormap: Option<String>,
+        colormap: Option<gaanim_core::ColorMap>,
         max_points: Option<usize>,
         min_distance: f64,
         dissipating_time: Option<f64>,

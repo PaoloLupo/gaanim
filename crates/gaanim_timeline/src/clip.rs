@@ -330,6 +330,9 @@ pub enum PropertyLensSpec {
     PathFollow {
         path: BezPath,
     },
+    PathFollow3D {
+        points: Vec<gaanim_core::glam::DVec3>,
+    },
     /// Tween a reactive FloatSignal.
     SignalFloat {
         from: f64,
@@ -547,6 +550,9 @@ impl PropertyLensSpec {
             },
             Self::PathFollow { path } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),
+            },
+            Self::PathFollow3D { points } => PropertyLens::PathFollow3D {
+                points: std::sync::Arc::new(points.clone()),
             },
             Self::SignalFloat { from, to } => PropertyLens::SignalFloat {
                 from: *from,

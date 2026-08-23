@@ -6,7 +6,9 @@ pub use peniko::{Brush, Color, Fill};
 pub use thiserror::Error;
 
 pub mod color;
+pub mod colormap;
 pub use color::{interpolate_color, interpolate_rgba8};
+pub use colormap::{ColorMap, ColorMapError};
 
 pub mod id;
 pub use id::ObjectId;

@@ -1,4 +1,5 @@
 #import "../../components/section.typ": docs-chapter
+#import "../../components/api.typ": api-entry
 
 #show: docs-chapter.with(
   title: "Temas y colores",
@@ -298,6 +299,44 @@ tailwind_blue = colors.tailwind.blue[500]
 `colors.tailwind` contiene las 26 familias y las escalas 50–950 de Tailwind CSS
 v4.3.3, incluidas `mauve`, `olive`, `mist` y `taupe`. La versión incorporada
 está disponible en `colors.tailwind.version`.
+
+== Mapas de color científicos
+
+`ColorMap` ofrece 39 mapas canónicos de Matplotlib y 39 de Scientific Colour
+Maps. El catálogo se incorpora como datos Rust: no necesita Julia, Matplotlib,
+archivos externos ni un registro global durante la ejecución.
+
+```python
+from gaanim import ColorMap
+
+viridis = ColorMap("viridis")
+vik = ColorMap.named("vik")
+custom = ColorMap.from_colors(["#0f172a", "#06b6d4", "#f8fafc"])
+
+midpoint = vik.sample(0.5)
+swatches = viridis.colors(8)
+transparent = custom.with_alpha(0.65)
+reverse = viridis.reversed()
+scientific_names = ColorMap.names("scientific")
+```
+
+Las posiciones se normalizan al intervalo 0–1 y los mapas continuos interpolan
+componentes sRGB. Los mapas categóricos conservan escalones discretos. Los
+nombres no distinguen mayúsculas de minúsculas; un nombre, categoría, posición,
+alpha o lista de colores inválida produce `ValueError` inmediatamente.
+
+#api-entry(
+  name: "ColorMap",
+  kind: "type",
+  signature: "ColorMap(name) | ColorMap.from_colors(colors, positions=None)",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Nombre incluido de Matplotlib o Scientific Colour Maps.]),
+    (name: "colors", type: "sequence[ColorLike]", default: none, desc: [Al menos dos colores para un mapa personalizado.]),
+    (name: "positions", type: "sequence[float] | None", default: "None", desc: [Posiciones estrictamente crecientes entre 0 y 1; por defecto se distribuyen uniformemente.]),
+  ),
+  returns: (type: "ColorMap", desc: [Valor inmutable, clonable y reutilizable por líneas 3D, campos y futuras escalas.]),
+  desc: [`sample`, `colors`, `reversed`, `with_alpha` y `names` forman la API completa del catálogo.],
+)[]
 
 Las plantillas de layout consumen valores de espaciado con nombre mediante
 `scene.canvas.layout_token(name)`. La escala predeterminada incluye `space_xs`,

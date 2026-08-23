@@ -205,7 +205,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
         traced_path.points = points.clone();
         traced_path.sample_times = snap.traced_path_sample_times.clone().unwrap_or_default();
     }
-    // 3D traced path — generic, handles inferno/viridis/plasma colormaps
+    // 3D traced path — restore geometry and any registered colormap.
     if let Some(points) = &snap.traced_path_points {
         if let Some(mut traced_3d) = entity_mut.get_mut::<gaanim_animation::TracedPath3D>() {
             traced_3d.points = points.clone();
@@ -220,96 +220,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
                 .map(|p| [p.x as f32, p.y as f32, p.z as f32])
                 .collect();
             line.points.clone_from(&pts);
-            if let Some(name) = colormap_opt {
-                let n = pts.len();
-                let mut cols = Vec::with_capacity(n);
-                for i in 0..n {
-                    let t = if n > 1 {
-                        i as f32 / (n - 1) as f32
-                    } else {
-                        0.0
-                    };
-                    let (r, g, b) = match name.as_str() {
-                        "inferno" => {
-                            const PALETTE: [(u8, u8, u8); 10] = [
-                                (0, 0, 4),
-                                (31, 12, 72),
-                                (85, 15, 109),
-                                (136, 34, 106),
-                                (168, 50, 88),
-                                (210, 72, 55),
-                                (233, 100, 28),
-                                (249, 157, 87),
-                                (247, 209, 61),
-                                (252, 255, 164),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        "viridis" => {
-                            const PALETTE: [(u8, u8, u8); 5] = [
-                                (68, 1, 84),
-                                (59, 82, 139),
-                                (33, 144, 140),
-                                (94, 201, 98),
-                                (253, 231, 37),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        "plasma" => {
-                            const PALETTE: [(u8, u8, u8); 5] = [
-                                (13, 8, 135),
-                                (126, 3, 168),
-                                (203, 70, 121),
-                                (248, 149, 64),
-                                (240, 249, 33),
-                            ];
-                            let scaled = t * (PALETTE.len() - 1) as f32;
-                            let idx = scaled.floor() as usize;
-                            let f = scaled - idx as f32;
-                            if idx >= PALETTE.len() - 1 {
-                                PALETTE[PALETTE.len() - 1]
-                            } else {
-                                let (r0, g0, b0) = PALETTE[idx];
-                                let (r1, g1, b1) = PALETTE[idx + 1];
-                                (
-                                    (r0 as f32 + (r1 as f32 - r0 as f32) * f) as u8,
-                                    (g0 as f32 + (g1 as f32 - g0 as f32) * f) as u8,
-                                    (b0 as f32 + (b1 as f32 - b0 as f32) * f) as u8,
-                                )
-                            }
-                        }
-                        _ => (255, 255, 255),
-                    };
-                    cols.push([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]);
-                }
-                line.colors = Some(cols);
-            }
+            line.colors = colormap_opt.and_then(|map| map.rgba_f32(pts.len()).ok());
         }
     }
 

@@ -6,6 +6,7 @@ pub mod data;
 pub mod sampling;
 pub mod space;
 pub mod statistics;
+pub mod vector_field;
 
 pub use axis::{
     Axis, AxisError, AxisLabelPosition, AxisStyle, AxisStylePatch, Crossing, NumberFormat, Scale,
@@ -29,4 +30,7 @@ pub use statistics::{
     BoxStats, DataMarkKind, Histogram, MarkError, NonFinitePolicy, RectMark, area_path, bars,
     box_stats, data_mark_path, error_bar_path, histogram, line_path, scatter_points, step_path,
     violin_path,
+};
+pub use vector_field::{
+    FieldSample, StreamDirection, Streamline, StreamlineOptions, VectorField, VectorFieldError,
 };
