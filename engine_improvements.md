@@ -18,8 +18,8 @@ La principal brecha ya no es la cantidad de objetos disponibles. Es la diferenci
 - el contrato Python distingue símbolos nativos de helpers puros y la auditoría objetiva
   pasa sin errores;
 - hay 73 juegos de baselines visuales y CI compara una muestra de 12 subsistemas;
-- existen video embebido y audio de preview para ese video, pero la ruta depende de
-  `ffmpeg`/`ffprobe`; los cinco formatos ya tienen smoke E2E en Ubuntu/Windows;
+- video embebido y pistas `scene.audio(...)` comparten reloj de preview, seek, pausa y
+  velocidad; la ruta depende de `ffmpeg`/`ffprobe`;
 - el wheel distribuible es deliberadamente una capa de autoría `py3-none-any`, sin
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
 - existe un harness reproducible e informativo para reload persistente, seek, preview
@@ -40,7 +40,7 @@ aumentaría la superficie inestable.
 | Matrices y álgebra animada | 🟢 | API estructurada, helpers tipados y SymPy opcional |
 | Presentaciones en vivo | 🟢 | Segmentos, stops, notas, overview y Presenter View disponibles |
 | Escenas 3D y glTF | 🟡 | Ruta funcional con baselines; compatibilidad y E2E aún estrechos |
-| Video y audio | 🟡 | Video sincronizado, audio embebido y export E2E; falta preview de pistas independientes |
+| Video y audio | 🟢 | Video y pistas independientes sincronizados en preview y export E2E |
 | Distribución como librería Python autónoma | ⚪ | Fuera de objetivo: el wheel es solo autoría/tipos y el runtime vive en el ejecutable |
 | Pipeline audiovisual de producción | 🟡 | Cinco formatos cubiertos por smoke; faltan presupuesto de rendimiento y releases multiplataforma |
 
@@ -137,15 +137,14 @@ ejecuta en CI.
 ### Multimedia y exportación
 
 - MP4/H.264, WebM/VP9, WebP animado, GIF y secuencia PNG;
-- mezcla de pistas declaradas con `scene.audio(...)` para MP4/WebM;
+- preview y mezcla MP4/WebM de pistas declaradas con `scene.audio(...)`;
 - `scene.video(...)` como drawable sincronizado, con trim, loop, velocidad, volumen,
   seek visual y audio embebido audible en preview;
 - decodificación secuencial durante playback y solicitudes coalescidas durante scrub;
 - proceso aislado para exportaciones 3D iniciadas desde el editor.
 
-La distinción actual es importante: el audio de un video embebido tiene preview; las
-pistas independientes añadidas con `scene.audio(...)` siguen orientadas a exportación y
-no tienen waveform ni scrubbing audible de primera clase.
+Las pistas independientes y el audio de video comparten el reloj de preview. Aún no hay
+waveform ni snapping audiovisual de primera clase.
 
 ## Riesgos técnicos y mejoras propuestas
 
@@ -213,13 +212,12 @@ solo cuando exista CI y un responsable de soporte. El wheel permanece universal 
 **Criterio de salida:** un usuario nuevo instala, crea proyecto, previsualiza y exporta
 siguiendo un quickstart probado por release para cada plataforma declarada.
 
-### 6. Dos modelos de audio en preview — P1
+### 6. Audio unificado en preview — baseline cerrado
 
-El video embebido reproduce audio; `scene.audio(...)` no. Esta asimetría será confusa al
-crear contenido sincronizado con voz o música.
+El video embebido y `scene.audio(...)` se reproducen mediante el mismo sincronizador,
+incluyendo pausa, seek, velocidad, volumen y fades de pistas independientes.
 
-**Mejora:** unificar ambos como fuentes de una mezcla de preview, con reloj, seek, pausa,
-velocidad y latencia compartidos. Añadir waveform cacheada y marcadores sin reconstruir
+**Siguiente mejora:** añadir waveform cacheada y marcadores sin reconstruir
 prematuramente un editor multipista.
 
 **Criterio de salida:** una pista independiente y el audio de un video conservan sync al

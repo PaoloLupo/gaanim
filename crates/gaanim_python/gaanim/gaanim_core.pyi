@@ -3092,10 +3092,13 @@ class Scene:
         fade_in: float = 0.0,
         fade_out: float = 0.0,
     ) -> None:
-        """Use audio on this Scene or create the requested value.
+        """Synchronize an audio file with preview and MP4/WebM export.
+
+        Playback follows timeline pause, seek, and speed. With no ``start``,
+        the track begins at the current scene cursor.
 
         Example:
-            scene.audio("example")
+            scene.audio("music.ogg", volume=0.5)
         """
         ...
     def circle(self, r: float) -> Drawable:

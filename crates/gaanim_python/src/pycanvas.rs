@@ -2022,8 +2022,8 @@ impl PyScene {
             .reload_assets();
     }
 
-    /// Mix an audio file into MP4/WebM exports. With no explicit `start`, the
-    /// file begins at the scene's current timeline cursor.
+    /// Play an audio file in preview and mix it into MP4/WebM exports. With no
+    /// explicit `start`, it begins at the current timeline cursor.
     #[pyo3(signature = (
         path,
         *,

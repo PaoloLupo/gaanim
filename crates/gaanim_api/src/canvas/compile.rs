@@ -2073,6 +2073,9 @@ impl Canvas {
         builder
             .commands
             .insert_resource(ClearColor(Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)));
+        builder
+            .commands
+            .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
     }
 

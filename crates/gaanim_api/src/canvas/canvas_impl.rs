@@ -474,7 +474,7 @@ pub struct Canvas {
     pub theme_style: Option<CanvasTheme>,
     pub margin: Margin,
     pub asset_root: Option<PathBuf>,
-    /// Audio sources mixed by FFmpeg when this canvas is exported.
+    /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
@@ -801,8 +801,7 @@ impl Canvas {
     }
 
     /// Add an audio source at an absolute scene time, or at the current cursor
-    /// when `start_time` is omitted. Audio is mixed and muxed into MP4/WebM
-    /// exports; preview playback remains visual-only for now.
+    /// when `start_time` is omitted. Preview and export share the same timing.
     pub fn audio(
         &mut self,
         path: impl AsRef<Path>,

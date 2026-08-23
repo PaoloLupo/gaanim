@@ -160,6 +160,30 @@ mod tests {
     }
 
     #[test]
+    fn replay_exposes_authored_audio_to_preview() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-preview-audio-{}.wav", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+        let mut canvas = Canvas::new(640, 360);
+        canvas
+            .audio(&path, Some(1.5), Some(2.0), 0.5, 0.1, 0.2)
+            .unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        replay_canvas_into(&mut world, canvas);
+        world.flush();
+
+        let tracks = &world.resource::<gaanim_media::PreviewAudioTracks>().0;
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].start_time, 1.5);
+        assert_eq!(tracks[0].volume, 0.5);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn invalid_typst_math_in_layout_does_not_remove_runtime_resources() {
         let mut canvas = Canvas::new(640, 360);
         let equation = canvas.text("$integral alpha dt + 2 = 0$");

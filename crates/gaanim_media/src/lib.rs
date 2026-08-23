@@ -45,8 +45,111 @@ pub enum VideoError {
         time: f64,
         message: String,
     },
-    #[error("ffmpeg could not decode embedded audio from '{path}': {message}")]
+    #[error("ffmpeg could not decode preview audio from '{path}': {message}")]
     AudioDecodeFailed { path: PathBuf, message: String },
+}
+
+/// One audio source aligned to the scene timeline for preview and export.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioTrack {
+    pub path: PathBuf,
+    pub start_time: f64,
+    pub duration: Option<f64>,
+    pub volume: f64,
+    pub fade_in: f64,
+    pub fade_out: f64,
+    pub source_offset: f64,
+    pub source_duration: Option<f64>,
+    pub speed: f64,
+    pub looping: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AudioTrackError {
+    #[error("audio file '{path}' does not exist or is not a file")]
+    InvalidPath { path: PathBuf },
+    #[error("{name} must be a finite non-negative number")]
+    InvalidNumber { name: &'static str },
+    #[error("fade_out requires an explicit track duration")]
+    FadeOutNeedsDuration,
+    #[error("fade duration cannot exceed the track duration")]
+    FadeExceedsDuration,
+}
+
+impl AudioTrack {
+    pub fn new(
+        path: impl Into<PathBuf>,
+        start_time: f64,
+        duration: Option<f64>,
+        volume: f64,
+        fade_in: f64,
+        fade_out: f64,
+    ) -> Result<Self, AudioTrackError> {
+        let path = path.into();
+        if !path.is_file() {
+            return Err(AudioTrackError::InvalidPath { path });
+        }
+        for (name, value) in [
+            ("start_time", start_time),
+            ("volume", volume),
+            ("fade_in", fade_in),
+            ("fade_out", fade_out),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name });
+            }
+        }
+        if let Some(duration) = duration {
+            if !duration.is_finite() || duration <= 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name: "duration" });
+            }
+            if fade_in + fade_out > duration {
+                return Err(AudioTrackError::FadeExceedsDuration);
+            }
+        } else if fade_out > 0.0 {
+            return Err(AudioTrackError::FadeOutNeedsDuration);
+        }
+        Ok(Self {
+            path,
+            start_time,
+            duration,
+            volume,
+            fade_in,
+            fade_out,
+            source_offset: 0.0,
+            source_duration: duration,
+            speed: 1.0,
+            looping: false,
+        })
+    }
+
+    pub fn from_media(
+        path: impl Into<PathBuf>,
+        start_time: f64,
+        source_offset: f64,
+        source_duration: f64,
+        speed: f64,
+        looping: bool,
+        volume: f64,
+    ) -> Result<Self, AudioTrackError> {
+        if !source_offset.is_finite() || source_offset < 0.0 {
+            return Err(AudioTrackError::InvalidNumber {
+                name: "source_offset",
+            });
+        }
+        for (name, value) in [("source_duration", source_duration), ("speed", speed)] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(AudioTrackError::InvalidNumber { name });
+            }
+        }
+        let output_duration = (!looping).then_some(source_duration / speed);
+        let mut track = Self::new(path, start_time, output_duration, volume, 0.0, 0.0)?;
+        track.source_offset = source_offset;
+        track.source_duration = Some(source_duration);
+        track.speed = speed;
+        track.looping = looping;
+        Ok(track)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,13 +285,17 @@ fn append_atempo_args(filter: &mut String, mut tempo: f64) {
 
 /// Decode the selected embedded audio interval to WAV, preserving pitch when
 /// applying the authored video speed.
-pub fn decode_preview_audio(
+fn decode_preview_audio_range(
     path: &Path,
     offset: f64,
-    duration: f64,
+    duration: Option<f64>,
     speed: f64,
 ) -> Result<Arc<[u8]>, VideoError> {
-    let mut filter = format!("atrim=start={offset:.9}:duration={duration:.9},asetpts=PTS-STARTPTS");
+    let mut filter = format!("atrim=start={offset:.9}");
+    if let Some(duration) = duration {
+        filter.push_str(&format!(":duration={duration:.9}"));
+    }
+    filter.push_str(",asetpts=PTS-STARTPTS");
     append_atempo_args(&mut filter, speed);
     let output = Command::new("ffmpeg")
         .args(["-v", "error", "-i"])
@@ -205,6 +312,15 @@ pub fn decode_preview_audio(
         });
     }
     Ok(output.stdout.into())
+}
+
+pub fn decode_preview_audio(
+    path: &Path,
+    offset: f64,
+    duration: f64,
+    speed: f64,
+) -> Result<Arc<[u8]>, VideoError> {
+    decode_preview_audio_range(path, offset, Some(duration), speed)
 }
 
 impl VideoPlayback {
@@ -419,36 +535,44 @@ pub enum VideoSamplingMode {
     Deterministic,
 }
 
-/// Enables audible embedded-video tracks. It is disabled in headless export
-/// apps and enabled by the interactive editor host.
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct VideoPreviewAudioEnabled(pub bool);
+/// Audio tracks authored by the current canvas.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PreviewAudioTracks(pub Vec<AudioTrack>);
 
-#[derive(Component)]
-struct VideoAudioOwner;
+/// Enables audible timeline tracks. It is disabled in headless export apps and
+/// enabled by the interactive editor host.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct PreviewAudioEnabled(pub bool);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PreviewAudioKey {
     path: PathBuf,
     offset_bits: u64,
-    duration_bits: u64,
+    duration_bits: Option<u64>,
     speed_bits: u64,
 }
 
 impl PreviewAudioKey {
-    fn new(playback: &VideoPlayback) -> Self {
+    fn new(track: &AudioTrack) -> Self {
         Self {
-            path: playback.path.clone(),
-            offset_bits: playback.source_offset.to_bits(),
-            duration_bits: playback.source_duration.to_bits(),
-            speed_bits: playback.speed.to_bits(),
+            path: track.path.clone(),
+            offset_bits: track.source_offset.to_bits(),
+            duration_bits: track.source_duration.map(f64::to_bits),
+            speed_bits: track.speed.to_bits(),
         }
     }
 }
 
+#[derive(Clone, Copy)]
+struct PreviewAudioEntry {
+    entity: Entity,
+    duration: f64,
+}
+
 #[derive(Resource, Default)]
-struct VideoAudioRegistry {
-    owners: HashMap<Entity, Entity>,
+struct PreviewAudioRegistry {
+    tracks: Vec<AudioTrack>,
+    entries: Vec<Option<PreviewAudioEntry>>,
     cache: HashMap<PreviewAudioKey, Arc<[u8]>>,
     failed: std::collections::HashSet<PreviewAudioKey>,
 }
@@ -662,110 +786,125 @@ fn sample_video_system(world: &mut World) {
     world.insert_resource(decoder);
 }
 
-fn sync_video_audio_system(world: &mut World) {
+fn sync_preview_audio_system(world: &mut World) {
     use bevy::audio::{
-        AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, PlaybackSettings, Volume,
+        AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, Decodable, PlaybackSettings,
+        Source, Volume,
     };
 
-    if !world.resource::<VideoPreviewAudioEnabled>().0
+    if !world.resource::<PreviewAudioEnabled>().0
         || !world.contains_resource::<Assets<AudioSource>>()
     {
         return;
     }
 
     let mut registry = world
-        .remove_resource::<VideoAudioRegistry>()
+        .remove_resource::<PreviewAudioRegistry>()
         .unwrap_or_default();
-    let stale = registry
-        .owners
-        .iter()
-        .filter_map(|(owner, audio)| {
-            (world.get_entity(*owner).is_err()).then_some((*owner, *audio))
-        })
-        .collect::<Vec<_>>();
-    for (owner, audio) in stale {
-        registry.owners.remove(&owner);
-        let _ = world.despawn(audio);
+    let tracks = world.resource::<PreviewAudioTracks>().0.clone();
+    if registry.tracks != tracks {
+        for entry in registry.entries.drain(..).flatten() {
+            let _ = world.despawn(entry.entity);
+        }
+        registry.tracks = tracks;
+        registry.entries = vec![None; registry.tracks.len()];
     }
 
-    let missing = world
-        .query::<(Entity, &VideoPlayback)>()
-        .iter(world)
-        .filter_map(|(entity, playback)| {
-            (playback.audio
-                && playback.metadata.has_audio
-                && !registry.owners.contains_key(&entity))
-            .then(|| (entity, playback.clone()))
-        })
-        .collect::<Vec<_>>();
-    for (owner, playback) in missing {
-        let key = PreviewAudioKey::new(&playback);
+    for index in 0..registry.tracks.len() {
+        if registry.entries[index].is_some() {
+            continue;
+        }
+        let track = registry.tracks[index].clone();
+        let key = PreviewAudioKey::new(&track);
         if registry.failed.contains(&key) {
             continue;
         }
         let bytes = if let Some(bytes) = registry.cache.get(&key).cloned() {
             bytes
         } else {
-            match decode_preview_audio(
-                &playback.path,
-                playback.source_offset,
-                playback.source_duration,
-                playback.speed,
+            match decode_preview_audio_range(
+                &track.path,
+                track.source_offset,
+                track.source_duration,
+                track.speed,
             ) {
                 Ok(bytes) => {
                     registry.cache.insert(key.clone(), bytes.clone());
                     bytes
                 }
                 Err(error) => {
-                    eprintln!("[gaanim] embedded video audio is unavailable: {error}");
+                    eprintln!("[gaanim] preview audio is unavailable: {error}");
                     registry.failed.insert(key);
                     continue;
                 }
             }
         };
-        let duration = playback.source_duration / playback.speed;
-        let handle = world
-            .resource_mut::<Assets<AudioSource>>()
-            .add(AudioSource { bytes });
+        let source = AudioSource { bytes };
+        let duration = source
+            .decoder()
+            .total_duration()
+            .map(|duration| duration.as_secs_f64())
+            .filter(|duration| duration.is_finite() && *duration > 0.0);
+        let Some(duration) = duration else {
+            eprintln!(
+                "[gaanim] preview audio duration is unavailable: {}",
+                track.path.display()
+            );
+            registry.failed.insert(key);
+            continue;
+        };
+        let handle = world.resource_mut::<Assets<AudioSource>>().add(source);
         let audio = world
             .spawn((
                 AudioPlayer(handle),
                 PlaybackSettings::LOOP
                     .paused()
-                    .with_volume(Volume::Linear(playback.volume as f32))
+                    .with_volume(Volume::Linear(track.volume as f32))
                     .with_duration(std::time::Duration::from_secs_f64(duration)),
-                VideoAudioOwner,
             ))
             .id();
-        registry.owners.insert(owner, audio);
+        registry.entries[index] = Some(PreviewAudioEntry {
+            entity: audio,
+            duration,
+        });
     }
 
     let timeline = world.resource::<Timeline>();
     let scene_time = timeline.current_time;
     let timeline_playing = timeline.is_playing;
     let playback_rate = timeline.playback_rate.max(0.01);
-    let pairs = registry
-        .owners
-        .iter()
-        .map(|(a, b)| (*a, *b))
-        .collect::<Vec<_>>();
-    for (owner, audio) in pairs {
-        let Some(playback) = world.get::<VideoPlayback>(owner).cloned() else {
+    for (index, entry) in registry.entries.iter().copied().enumerate() {
+        let Some(entry) = entry else {
             continue;
         };
-        let output_duration = playback.source_duration / playback.speed;
-        let elapsed = (scene_time - playback.scene_start).max(0.0);
-        let active =
-            scene_time >= playback.scene_start && (playback.looping || elapsed < output_duration);
-        let target = if playback.looping {
-            elapsed.rem_euclid(output_duration)
+        let track = &registry.tracks[index];
+        let elapsed = (scene_time - track.start_time).max(0.0);
+        let active_duration = track
+            .duration
+            .map(|duration| duration.min(entry.duration))
+            .unwrap_or(entry.duration);
+        let active = scene_time >= track.start_time && (track.looping || elapsed < active_duration);
+        let target = if track.looping {
+            elapsed.rem_euclid(entry.duration)
         } else {
-            elapsed.min((output_duration - 1e-6).max(0.0))
+            elapsed.min((entry.duration - 1e-6).max(0.0))
         };
-        let Some(mut sink) = world.get_mut::<AudioSink>(audio) else {
+        let Some(mut sink) = world.get_mut::<AudioSink>(entry.entity) else {
             continue;
         };
-        sink.set_volume(Volume::Linear(playback.volume as f32));
+        let fade_in = if track.fade_in > 0.0 {
+            (elapsed / track.fade_in).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let fade_out = if track.fade_out > 0.0 {
+            ((active_duration - elapsed) / track.fade_out).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        sink.set_volume(Volume::Linear(
+            (track.volume * fade_in.min(fade_out)) as f32,
+        ));
         sink.set_speed(playback_rate as f32);
         let observed = sink.position().as_secs_f64() * playback_rate;
         if (observed - target).abs() > 0.05 {
@@ -785,12 +924,13 @@ pub struct GaanimMediaPlugin;
 impl Plugin for GaanimMediaPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<VideoSamplingMode>()
-            .init_resource::<VideoPreviewAudioEnabled>()
+            .init_resource::<PreviewAudioEnabled>()
+            .init_resource::<PreviewAudioTracks>()
             .init_resource::<VideoDecoder>()
-            .init_resource::<VideoAudioRegistry>()
+            .init_resource::<PreviewAudioRegistry>()
             .add_systems(
                 Update,
-                (sample_video_system, sync_video_audio_system)
+                (sample_video_system, sync_preview_audio_system)
                     .chain()
                     .in_set(SceneSet::Updaters),
             );

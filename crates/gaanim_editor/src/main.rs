@@ -89,7 +89,7 @@ fn main() {
     .add_plugins(gaanim_renderer::GaanimRendererPlugin)
     .add_plugins(gaanim_editor::GaanimEditorPlugin)
     .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
-    .insert_resource(gaanim_media::VideoPreviewAudioEnabled(true))
+    .insert_resource(gaanim_media::PreviewAudioEnabled(true))
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
