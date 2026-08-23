@@ -23,6 +23,7 @@ impl Plugin for GaanimTimelinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Timeline>()
             .init_resource::<PlaybackStopPolicy>()
+            .init_resource::<snapshot::CapturedCameraStates>()
             .add_systems(PostStartup, capture_initial_keyframe_system)
             .add_systems(
                 Update,

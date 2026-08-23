@@ -33,6 +33,8 @@ pub(crate) struct CanvasState {
     pub next_id: u32,
     pub next_segment_id: u32,
     pub next_camera_binding_order: u64,
+    pub next_camera_state_id: u64,
+    pub saved_camera_states: HashMap<String, gaanim_animation::CameraStateSource>,
     pub all_drawables: Vec<ObjectId>,
     pub layout_constraints: Vec<LayoutConstraint>,
     pub layout_diagnostics: Vec<(Option<ObjectId>, String)>,
@@ -51,6 +53,8 @@ impl CanvasState {
             next_id: 1,
             next_segment_id: 1,
             next_camera_binding_order: 0,
+            next_camera_state_id: 1,
+            saved_camera_states: HashMap::new(),
             all_drawables: Vec::new(),
             layout_constraints: Vec::new(),
             layout_diagnostics: Vec::new(),
@@ -83,6 +87,12 @@ impl CanvasState {
         let order = self.next_camera_binding_order;
         self.next_camera_binding_order += 1;
         order
+    }
+
+    pub fn next_camera_state_id(&mut self) -> u64 {
+        let id = self.next_camera_state_id;
+        self.next_camera_state_id += 1;
+        id
     }
 }
 
@@ -137,6 +147,8 @@ pub(crate) enum Op {
     Spawn(SharedObjectSpec),
     /// Spawn a non-rendered persistent camera binding.
     SpawnCameraBinding(SharedCameraBindingSpec),
+    /// Capture the authored camera pose at the current timeline cursor.
+    CaptureCameraState { id: u64 },
     /// Play a single animation sequentially (auto-queued). `active=false`
     /// means the animation was later regrouped by `Canvas::play(...)`.
     Animate {

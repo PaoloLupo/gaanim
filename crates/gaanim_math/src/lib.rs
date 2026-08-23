@@ -8,8 +8,8 @@ pub mod spatial;
 
 pub use bounds::Bounds3D;
 pub use camera::{
-    Camera, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport, Projection,
-    ResolvedCamera,
+    Camera, CameraPose, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport,
+    Projection, ResolvedCamera,
 };
 pub use easing::{EasingCurve, RateFunc};
 pub use path::{

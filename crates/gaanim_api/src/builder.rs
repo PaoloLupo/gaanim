@@ -965,7 +965,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
-            AnimationType::CameraPosition { .. }
+            AnimationType::CameraState { .. }
+            | AnimationType::CameraPosition { .. }
             | AnimationType::CameraPositionSource { .. }
             | AnimationType::CameraZoom { .. }
             | AnimationType::CameraZoomSource { .. }
@@ -2527,7 +2528,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.transform.scale = to;
                 PropertyLensSpec::Scale { from, to }
             }
-            AnimationType::CameraPosition { .. }
+            AnimationType::CameraState { .. }
+            | AnimationType::CameraPosition { .. }
             | AnimationType::CameraPositionSource { .. }
             | AnimationType::CameraZoom { .. }
             | AnimationType::CameraZoomSource { .. }

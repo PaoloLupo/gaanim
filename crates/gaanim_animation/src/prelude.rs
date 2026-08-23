@@ -4,7 +4,9 @@ pub use crate::signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec,
     PositionBinding, Signal, SignalBinding, SpecValue, Vec3Signal,
 };
-pub use crate::tween::{AnimatableLens, DeltaTime, PropertyLens, Tween, TweenState};
+pub use crate::tween::{
+    AnimatableLens, CameraStateSource, DeltaTime, PropertyLens, Tween, TweenState,
+};
 pub use crate::updaters::{
     AngleArrowheads, AngleLabelPlacement, AngleSweep, EndpointAngle, EndpointFollow,
     FollowOffsetSpace, PlaybackState, RotationBinding, RotationTranslationBinding, TracedPath,

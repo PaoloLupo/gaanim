@@ -1001,6 +1001,13 @@ pub struct PyCamera {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// Reusable complete authored camera state.
+#[pyclass(name = "CameraState", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCameraState {
+    inner: gaanim_api::canvas::CameraStateHandle,
+}
+
 /// Stable handle for a persistent native camera constraint.
 #[pyclass(name = "CameraConstraint", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1111,6 +1118,96 @@ fn validate_force_metrics(
 
 #[pymethods]
 impl PyCamera {
+    /// Create a concrete orthographic camera state.
+    #[pyo3(signature = (center=(0.0, 0.0), zoom=1.0, rotation=0.0))]
+    fn state_2d(&self, center: (f64, f64), zoom: f64, rotation: f64) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_state_2d(
+                gaanim_core::glam::DVec2::new(center.0, center.1),
+                zoom,
+                rotation,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Create a concrete perspective look-at camera state.
+    #[pyo3(signature = (eye, target, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0))]
+    fn state_3d(
+        &self,
+        eye: (f64, f64, f64),
+        target: (f64, f64, f64),
+        up: (f64, f64, f64),
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_state_3d(
+                gaanim_core::glam::DVec3::new(eye.0, eye.1, eye.2),
+                gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
+                gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
+                fov_y,
+                near,
+                far,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Capture authored camera state at the current timeline cursor.
+    fn capture(&self) -> PyCameraState {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_capture();
+        PyCameraState { inner }
+    }
+
+    /// Animate to a reusable camera state.
+    #[pyo3(signature = (state, duration=1.0))]
+    fn to(&self, state: &PyCameraState, duration: f64) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_to(&state.inner, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Save or replace a named camera capture at the current cursor.
+    fn save(&self, name: &str) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_save(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    /// Animate to a previously saved named camera state.
+    #[pyo3(signature = (name, duration=1.0))]
+    fn restore(&self, name: &str, duration: f64) -> PyResult<PyCanvasAnim> {
+        let duration = require_duration(duration)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_restore(name, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCanvasAnim { inner })
+    }
+
     /// Pan to a world-space point.
     #[pyo3(signature = (target, y=None, duration=1.0))]
     fn pan_to(

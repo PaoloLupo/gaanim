@@ -748,6 +748,23 @@ impl Timeline {
                         }
                     }
                 }
+                ClipPayload::CameraCapture { id } => {
+                    if clip.start <= self.current_time
+                        && let Some(pose) = world
+                            .get_resource::<gaanim_math::Camera>()
+                            .map(|camera| camera.pose())
+                    {
+                        if let Some(mut states) =
+                            world.get_resource_mut::<crate::snapshot::CapturedCameraStates>()
+                        {
+                            states.0.insert(id, pose);
+                        } else {
+                            let mut states = crate::snapshot::CapturedCameraStates::default();
+                            states.0.insert(id, pose);
+                            world.insert_resource(states);
+                        }
+                    }
+                }
                 ClipPayload::SceneStart(_) | ClipPayload::SceneEnd(_) => {
                     // Scene boundary markers — visibility is handled in the post-pass below.
                 }
@@ -1099,6 +1116,7 @@ impl Timeline {
                         if matches!(
                             anim.lens,
                             PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraState { .. }
                                 | PropertyLensSpec::CameraFollow { .. }
                         )
                 )
@@ -1865,6 +1883,24 @@ fn apply_lens_spec(
                 frame.progress = t.clamp(0.0, 1.0);
             }
         }
+        PropertyLensSpec::CameraState { from, to } => {
+            let resolve = |source: &gaanim_animation::CameraStateSource| match source {
+                gaanim_animation::CameraStateSource::Concrete(pose) => Some(*pose),
+                gaanim_animation::CameraStateSource::Captured(id) => world
+                    .get_resource::<crate::snapshot::CapturedCameraStates>()
+                    .and_then(|states| states.0.get(id).copied()),
+            };
+            if let Some((from, to)) = resolve(from).zip(resolve(to)) {
+                let pose = from.interpolate(to, t);
+                if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                    camera.position = pose.position;
+                    camera.rotation = pose.rotation;
+                    camera.target = pose.target;
+                    camera.up = pose.up;
+                    camera.projection = pose.projection;
+                }
+            }
+        }
         PropertyLensSpec::CameraPosition { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from.lerp(*to, t);
@@ -2250,6 +2286,91 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn captured_camera_state_restores_deterministically_across_seeks() {
+        let mut world = World::new();
+        let camera_id = ObjectId::from_parts(0, 1);
+        world.spawn((MobjectId(camera_id), SpatialTransform::default()));
+        world.insert_resource(gaanim_math::Camera::ortho_2d(960, 540));
+        world.insert_resource(crate::snapshot::CapturedCameraStates::default());
+
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraPosition {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::CameraCapture { id: 10 });
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::CameraCapture { id: 11 });
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraPosition {
+                    from: gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0),
+                    to: gaanim_core::glam::DVec3::ZERO,
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_clip(track, 2.0, 0.0, ClipPayload::CameraCapture { id: 12 });
+        timeline.add_clip(
+            track,
+            2.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: camera_id,
+                lens: PropertyLensSpec::CameraState {
+                    from: gaanim_animation::CameraStateSource::Captured(12),
+                    to: gaanim_animation::CameraStateSource::Captured(10),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        timeline.seek(&mut world, 3.0);
+        let expected = world.resource::<gaanim_math::Camera>().pose();
+        assert_eq!(
+            expected.position,
+            gaanim_core::glam::DVec3::new(120.0, -30.0, 0.0)
+        );
+
+        timeline.seek(&mut world, 0.25);
+        timeline.seek(&mut world, 3.0);
+        assert_eq!(world.resource::<gaanim_math::Camera>().pose(), expected);
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        world
+            .resource_mut::<crate::snapshot::CapturedCameraStates>()
+            .0
+            .clear();
+        snapshot.restore(&mut world);
+        assert!(
+            world
+                .resource::<crate::snapshot::CapturedCameraStates>()
+                .0
+                .contains_key(&10)
+        );
+    }
 
     #[test]
     fn surrounding_rect_retarget_seek_is_exact_and_reversible() {

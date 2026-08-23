@@ -3,15 +3,15 @@ pub use crate::anim::{AnimationBuilder, AnimationType, ValueTrackerRef};
 pub use crate::builder::{MobjectRef, MobjectSpawnBuilder, SceneBuilder};
 pub use crate::canvas::{
     Anchor, AnchorPoint, AngleDimensionHandle, AngleDimensionOptions, Anim, ArrowFieldOptions,
-    ArrowVectorFieldHandle, BadgeSpec, BannerPosition, BannerSpec, CameraConstraintHandle, Canvas,
-    CanvasEndpoint, CanvasRay, CanvasTheme, CanvasUnits, CardSpec, ChartHandle, ChipSpec,
-    DimensionExtensionStyle, DimensionHandle, DimensionOptions, Direction, DrawableHandle,
-    EditorialAlign, EditorialAppearance, EditorialError, EditorialStyle, EditorialVariant,
-    FlowParticleOptions, FlowParticlesHandle, ForceVectorHandle, LowerThirdSide, LowerThirdSpec,
-    ObjectSpec, Parameter, PointRef, QuoteCardSpec, SectionHeaderSpec, SegmentError, SegmentHandle,
-    SegmentId, SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, StatCardSpec,
-    StreamLinesHandle, StreamLinesStyle, SupportHandle, TextAnchor, ThemePalette,
-    VectorField2DHandle, VectorField3DHandle,
+    ArrowVectorFieldHandle, BadgeSpec, BannerPosition, BannerSpec, CameraConstraintHandle,
+    CameraStateError, CameraStateHandle, Canvas, CanvasEndpoint, CanvasRay, CanvasTheme,
+    CanvasUnits, CardSpec, ChartHandle, ChipSpec, DimensionExtensionStyle, DimensionHandle,
+    DimensionOptions, Direction, DrawableHandle, EditorialAlign, EditorialAppearance,
+    EditorialError, EditorialStyle, EditorialVariant, FlowParticleOptions, FlowParticlesHandle,
+    ForceVectorHandle, LowerThirdSide, LowerThirdSpec, ObjectSpec, Parameter, PointRef,
+    QuoteCardSpec, SectionHeaderSpec, SegmentError, SegmentHandle, SegmentId, SegmentManifest,
+    SegmentSpec, SegmentStop, SpawnKind, StatCardSpec, StreamLinesHandle, StreamLinesStyle,
+    SupportHandle, TextAnchor, ThemePalette, VectorField2DHandle, VectorField3DHandle,
 };
 pub use crate::matrix::{
     MatrixError, MatrixIndex, MatrixOrder, MatrixShape, order_indices, validate_rows,

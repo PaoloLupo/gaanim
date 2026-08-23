@@ -2246,6 +2246,14 @@ impl Canvas {
                             .collect(),
                     });
                 }
+                Op::CaptureCameraState { id } => {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        builder.current_time,
+                        0.0,
+                        gaanim_timeline::clip::ClipPayload::CameraCapture { id: *id },
+                    );
+                }
                 Op::Animate { anim, active } => {
                     if *active {
                         Self::reveal_deferred_on_play(
@@ -5166,6 +5174,40 @@ impl Canvas {
         use gaanim_timeline::clip::PropertyLensSpec;
 
         match &anim.anim_type {
+            AnimationType::CameraState { from, to } => {
+                if let gaanim_animation::CameraStateSource::Captured(id) = from {
+                    builder.timeline.add_clip(
+                        builder.default_track,
+                        start + anim.delay.max(0.0),
+                        0.0,
+                        gaanim_timeline::clip::ClipPayload::CameraCapture { id: *id },
+                    );
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraState {
+                        from: *from,
+                        to: *to,
+                    },
+                );
+                if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
+                    *camera_position = pose.position;
+                    *camera_rotation = pose.rotation;
+                    *camera_target = pose.target;
+                    *camera_up = pose.up;
+                    match pose.projection {
+                        gaanim_math::Projection::Orthographic { zoom } => {
+                            *camera_zoom = zoom;
+                            *camera_fov = None;
+                        }
+                        gaanim_math::Projection::Perspective { fov_y, near, far } => {
+                            *camera_fov = Some((fov_y, near, far));
+                        }
+                    }
+                }
+            }
             AnimationType::CameraPosition { to } => {
                 Self::add_camera_lens(
                     builder,
@@ -8173,6 +8215,117 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    #[test]
+    fn named_camera_state_restores_complete_authored_pose() {
+        let mut canvas = Canvas::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        canvas.camera_pan_to(120.0, -30.0, 1.0);
+        let saved = canvas.camera_save("detail").unwrap();
+        canvas.camera_pan_to(0.0, 0.0, 1.0);
+        let restored = canvas.camera_restore("detail", 1.0).unwrap();
+        let _ = saved;
+        assert!(matches!(
+            restored.inner.anim_type,
+            AnimationType::CameraState { .. }
+        ));
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(120.0, -30.0, 0.0)).length() < 1e-9);
+
+        timeline.seek(&mut world, 0.25);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(120.0, -30.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn camera_state_handles_validate_names_ownership_and_projection() {
+        let first = Canvas::new(960, 540);
+        let second = Canvas::new(960, 540);
+        let state = first
+            .camera_state_3d(
+                DVec3::new(7.0, 5.0, 6.0),
+                DVec3::ZERO,
+                DVec3::Y,
+                0.8,
+                0.1,
+                1000.0,
+            )
+            .unwrap();
+        assert_eq!(
+            second.camera_to(&state, 1.0).unwrap_err(),
+            crate::canvas::CameraStateError::ForeignScene
+        );
+        assert_eq!(
+            first.camera_save("").unwrap_err(),
+            crate::canvas::CameraStateError::EmptyName
+        );
+        assert_eq!(
+            first.camera_restore("missing", 1.0).unwrap_err(),
+            crate::canvas::CameraStateError::UnknownName("missing".into())
+        );
+        assert!(first.camera_state_2d(DVec2::ZERO, 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn camera_capture_freezes_reactive_value_at_its_cursor() {
+        let mut canvas = Canvas::new(960, 540);
+        let parameter = canvas.parameter(0.0).unwrap();
+        let point = canvas.point_ref(
+            parameter.expression() * 260.0 - 130.0,
+            gaanim_expr::Expr::constant(25.0),
+        );
+        let parameter_anim = parameter.animate_to(1.0).unwrap().duration(1.0);
+        let camera_anim = canvas.camera_pan_to_endpoint(point.0, 1.0);
+        canvas.play(vec![parameter_anim, camera_anim]);
+        let captured = canvas.camera_capture();
+        canvas.camera_pan_to(0.0, 0.0, 1.0);
+        canvas.camera_to(&captured, 1.0).unwrap();
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 3.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!((camera.position - DVec3::new(130.0, 25.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn camera_state_transitions_between_2d_and_3d() {
+        let mut canvas = Canvas::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas
+            .camera_state_3d(
+                DVec3::new(7.0, 5.0, 6.0),
+                DVec3::ZERO,
+                DVec3::Y,
+                0.8,
+                0.1,
+                1000.0,
+            )
+            .unwrap();
+        canvas.camera_to(&perspective, 1.0).unwrap();
+        let orthographic = canvas
+            .camera_state_2d(DVec2::new(40.0, -20.0), 1.5, 0.2)
+            .unwrap();
+        canvas.camera_to(&orthographic, 0.0).unwrap();
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 0.0);
+        timeline.seek(&mut world, 0.5);
+        assert!(matches!(
+            world.resource::<gaanim_math::Camera>().projection,
+            gaanim_math::Projection::Perspective { .. }
+        ));
+        timeline.seek(&mut world, 1.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert_eq!(camera.position, DVec3::new(40.0, -20.0, 0.0));
+        assert!(matches!(
+            camera.projection,
+            gaanim_math::Projection::Orthographic { zoom } if (zoom - 1.5).abs() < 1e-9
+        ));
     }
 
     #[test]

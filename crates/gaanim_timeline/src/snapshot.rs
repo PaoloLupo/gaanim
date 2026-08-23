@@ -1,4 +1,6 @@
-use bevy::prelude::{BuildChildrenTransformExt, Component, Entity, EntityWorldMut, World};
+use bevy::prelude::{
+    BuildChildrenTransformExt, Component, Entity, EntityWorldMut, Resource, World,
+};
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
@@ -9,6 +11,10 @@ use std::collections::HashMap;
 
 use crate::clip::SceneId;
 use crate::scene::SceneMember;
+
+/// Authored camera poses captured by timeline events and referenced by later clips.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct CapturedCameraStates(pub HashMap<u64, gaanim_math::CameraPose>);
 
 /// A snapshot capturing the complete state of a single Mobject entity.
 ///
@@ -102,6 +108,9 @@ pub struct WorldSnapshot {
     /// Complete authored camera state. Presentation viewport fit is excluded.
     #[cfg_attr(feature = "serde", serde(default))]
     pub camera: Option<gaanim_math::Camera>,
+    /// Timeline camera captures required by later state transitions.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub camera_states: HashMap<u64, gaanim_math::CameraPose>,
 }
 
 /// Insert a component only when the snapshot differs from the live world.
@@ -238,6 +247,10 @@ impl WorldSnapshot {
     pub fn capture(world: &mut World) -> Self {
         let mut entities = HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
+        let camera_states = world
+            .get_resource::<CapturedCameraStates>()
+            .map(|states| states.0.clone())
+            .unwrap_or_default();
 
         // Query all entities with a MobjectId component
         let mut query = world.query::<(Entity, &MobjectId)>();
@@ -342,7 +355,11 @@ impl WorldSnapshot {
             entities.insert(id, snapshot);
         }
 
-        Self { entities, camera }
+        Self {
+            entities,
+            camera,
+            camera_states,
+        }
     }
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
@@ -352,6 +369,7 @@ impl WorldSnapshot {
                 world.insert_resource(camera);
             }
         }
+        world.insert_resource(CapturedCameraStates(self.camera_states.clone()));
         // 1. Gather all existing entities and build a dynamic mapping of ObjectIds to Bevy Entities
         let mut existing_entities = Vec::new();
         let mut entity_map = HashMap::new();

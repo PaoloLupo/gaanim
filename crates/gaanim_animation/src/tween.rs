@@ -83,6 +83,14 @@ impl Tween {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MorphTable;
 
+/// Concrete or timeline-captured source for a complete authored camera pose.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CameraStateSource {
+    Concrete(gaanim_math::CameraPose),
+    Captured(u64),
+}
+
 /// Represents which Mobject property the tween should interpolate.
 ///
 /// Lenses are generic and support 2D/3D spaces natively.
@@ -153,6 +161,10 @@ pub enum PropertyLens {
     },
 
     // === Camera ===
+    CameraState {
+        from: CameraStateSource,
+        to: CameraStateSource,
+    },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -298,6 +310,7 @@ impl std::fmt::Debug for PropertyLens {
             }
             Self::FillLevel { from, to } => write!(f, "FillLevel({from} -> {to})"),
             Self::SurroundingRectTargets { .. } => write!(f, "SurroundingRectTargets"),
+            Self::CameraState { .. } => write!(f, "CameraState"),
             Self::CameraPosition { from, to } => {
                 write!(f, "CameraPosition({:?} -> {:?})", from, to)
             }
@@ -507,6 +520,7 @@ pub fn evaluate_tweens_system(
             PropertyLens::CameraPosition { from: _, to: _ } => {
                 // Camera is a resource, not a component. Custom lenses can handle this.
             }
+            PropertyLens::CameraState { .. } => {}
             PropertyLens::CameraPositionSource { .. } => {}
             PropertyLens::CameraRotation { from: _, to: _ } => {}
             PropertyLens::CameraZoom { from: _, to: _ } => {}

@@ -646,6 +646,16 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     parameter = scene.parameter(1.0)
     point = scene.point_ref(parameter * 20.0, 10.0)
 
+    state_2d = scene.camera.state_2d(center=(12.0, -8.0), zoom=1.25, rotation=0.1)
+    state_3d = scene.camera.state_3d((4.0, 3.0, 8.0), (0.0, 0.0, 0.0), fov_y=0.8)
+    captured = scene.camera.capture()
+    saved = scene.camera.save("overview")
+    if not all(
+        isinstance(state, module.CameraState)
+        for state in (state_2d, state_3d, captured, saved)
+    ):
+        failures.append("camera state factories did not return CameraState")
+
     constraint = scene.camera.bind_2d(center=point, zoom=parameter)
     if not isinstance(constraint, module.CameraConstraint):
         failures.append("Camera.bind_2d did not return CameraConstraint")
@@ -662,6 +672,8 @@ def validate_camera_rig_contract(module: object) -> list[str]:
         scene.camera.look_at((4.0, 3.0, 8.0), point, duration=0.0),
         scene.camera.orthographic(1.0, duration=0.0),
         scene.camera.reset(duration=0.0),
+        scene.camera.to(state_2d, duration=0.0),
+        scene.camera.restore("overview", duration=0.0),
     )
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("one or more camera rig operations did not return Anim")
@@ -681,6 +693,10 @@ def validate_camera_rig_contract(module: object) -> list[str]:
         lambda: scene.camera.perspective(3.141592653589793),
         lambda: scene.camera.look_at((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
         lambda: scene.camera.bind_2d(center=point, influence=1.5),
+        lambda: scene.camera.state_2d(zoom=0.0),
+        lambda: scene.camera.restore("missing"),
+        lambda: scene.camera.save(""),
+        lambda: module.Scene(320, 180).camera.to(state_2d),
     )
     for call in invalid_calls:
         try:

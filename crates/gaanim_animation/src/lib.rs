@@ -16,7 +16,7 @@ pub use signals::{
     right_aligned_readout_baseline, signal_binding_system, tangent_on_curve_system,
 };
 pub use tween::{
-    AnimatableLens, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
+    AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
     evaluate_custom_tweens_system, evaluate_line_path_ranges_system, evaluate_tweens_system,
     sync_delta_time_system,
 };

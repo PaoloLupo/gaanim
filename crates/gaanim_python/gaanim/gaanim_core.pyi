@@ -2004,6 +2004,14 @@ class Segment:
         """
         ...
 
+class CameraState:
+    """Opaque reusable authored camera state owned by one Scene.
+
+    States are created by ``Camera.state_2d``, ``Camera.state_3d``,
+    ``Camera.capture``, or ``Camera.save`` and are consumed by ``Camera.to``.
+    """
+    ...
+
 class CameraConstraint:
     """Persistent native camera binding with timeline-recorded activation."""
     def enable(self) -> None:
@@ -2014,6 +2022,60 @@ class CameraConstraint:
         ...
 
 class Camera:
+    def state_2d(
+        self,
+        center: tuple[float, float] = (0.0, 0.0),
+        zoom: float = 1.0,
+        rotation: float = 0.0,
+    ) -> CameraState:
+        """Create a concrete orthographic state without advancing the timeline.
+
+        ``rotation`` is in radians and ``zoom`` must be finite and positive;
+        invalid values raise ``ValueError``.
+        """
+        ...
+    def state_3d(
+        self,
+        eye: tuple[float, float, float],
+        target: tuple[float, float, float],
+        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        fov_y: float = 0.7853981633974483,
+        near: float = 0.1,
+        far: float = 1000.0,
+    ) -> CameraState:
+        """Create a concrete perspective look-at state.
+
+        Angles are radians; eye/target/up and projection parameters are
+        validated and invalid or degenerate poses raise ``ValueError``.
+        """
+        ...
+    def capture(self) -> CameraState:
+        """Capture authored camera state at the current cursor without advancing it.
+
+        The value is evaluated during playback before camera bindings, shake,
+        and editor-only view overrides.
+        """
+        ...
+    def to(self, state: CameraState, duration: float = 1.0) -> Anim:
+        """Animate to a reusable camera state and return a composable Anim.
+
+        ``duration`` is finite and non-negative. A state owned by another
+        Scene raises ``ValueError``.
+        """
+        ...
+    def save(self, name: str) -> CameraState:
+        """Capture and save a named state, replacing the same name if present.
+
+        The operation does not advance the timeline; an empty name raises
+        ``ValueError``.
+        """
+        ...
+    def restore(self, name: str, duration: float = 1.0) -> Anim:
+        """Animate to a named saved state and return a composable Anim.
+
+        Unknown names and invalid durations raise ``ValueError``.
+        """
+        ...
     @overload
     def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
         """Configure the camera with pan to.

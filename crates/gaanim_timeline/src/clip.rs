@@ -78,6 +78,8 @@ pub enum ClipPayload {
     },
     /// A custom event marker (e.g. for syncing external hooks or triggers).
     Marker(String),
+    /// Capture the authored camera pose at this exact timeline cursor.
+    CameraCapture { id: u64 },
     /// An explicit zero-duration interactive playback stop.
     Stop,
     /// Named segment start marker for dividing long sequences.
@@ -216,6 +218,10 @@ pub enum PropertyLensSpec {
     SurroundingRectTargets {
         from: Vec<ObjectId>,
         to: Vec<ObjectId>,
+    },
+    CameraState {
+        from: gaanim_animation::CameraStateSource,
+        to: gaanim_animation::CameraStateSource,
     },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
@@ -406,6 +412,10 @@ impl PropertyLensSpec {
             Self::SurroundingRectTargets { from, to } => PropertyLens::SurroundingRectTargets {
                 from: from.clone(),
                 to: to.clone(),
+            },
+            Self::CameraState { from, to } => PropertyLens::CameraState {
+                from: *from,
+                to: *to,
             },
             Self::CameraPosition { from, to } => PropertyLens::CameraPosition {
                 from: *from,

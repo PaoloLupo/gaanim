@@ -511,6 +511,11 @@ of the outgoing scene introduces the following section.
 == Cámara
 
 ```python
+overview = scene.camera.save("overview")
+detail = scene.camera.state_2d(center=(-160, 40), zoom=1.5)
+scene.camera.to(detail, duration=0.8)
+scene.camera.restore("overview", duration=0.6)
+
 scene.camera.pan_to(-160, 40, duration=0.8)
 scene.camera.zoom_to(1.5, duration=0.6)
 scene.camera.frame_to([circle, label], margin=(32, 48), duration=0.9, dynamic=True)
@@ -524,6 +529,22 @@ scene.play([
     scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.2),
 ])
 ```
+
+`CameraState` represents a complete reusable authored pose without canvas or
+host viewport dimensions. `camera.state_2d(center=(0, 0), zoom=1,
+rotation=0)` creates an orthographic state; `camera.state_3d(eye, target,
+up=(0, 1, 0), fov_y=pi/4, near=0.1, far=1000)` creates a perspective look-at
+state. Both validate their complete pose without advancing the timeline.
+
+`camera.capture()` records the authored camera evaluated at the current cursor
+and returns a `CameraState`; the operation itself has zero duration. It runs
+before persistent bindings, temporary rig effects, shake, and editor view
+overrides, so restoring it is deterministic across preview, seek, and export.
+`camera.save(name)` captures and stores the same state under a non-empty name,
+replacing an existing entry. `camera.to(state, duration=1)` and
+`camera.restore(name, duration=1)` return ordinary composable `Anim` values.
+States belong to their creating `Scene`; unknown names and cross-scene use
+raise `ValueError`.
 
 `camera.frame_to` accepts one drawable or a sequence, with scalar, two-side, or
 CSS-order four-side margins. With `dynamic=True`, it recomputes the union after

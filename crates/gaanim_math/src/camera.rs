@@ -77,6 +77,136 @@ pub enum Projection {
     },
 }
 
+/// Complete authored camera pose independent of canvas or host viewport size.
+///
+/// A pose can be saved and reused across scenes with different output
+/// resolutions. Applying it to a [`Camera`] preserves that camera's logical
+/// viewport dimensions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CameraPose {
+    pub position: DVec3,
+    pub rotation: DQuat,
+    pub target: DVec3,
+    pub up: DVec3,
+    pub projection: Projection,
+}
+
+impl CameraPose {
+    /// Build and validate an orthographic 2D pose.
+    pub fn orthographic_2d(
+        center: DVec2,
+        zoom: f64,
+        rotation: f64,
+    ) -> Result<Self, CameraValidationError> {
+        if !center.is_finite() || !rotation.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return Err(CameraValidationError::InvalidZoom);
+        }
+        Ok(Self {
+            position: center.extend(0.0),
+            rotation: DQuat::from_rotation_z(rotation),
+            target: DVec3::ZERO,
+            up: DVec3::Y,
+            projection: Projection::Orthographic { zoom },
+        })
+    }
+
+    /// Build and validate a perspective look-at pose.
+    pub fn perspective_3d(
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> Result<Self, CameraValidationError> {
+        Camera::validate_look_at(eye, target, up)?;
+        Camera::validate_perspective(fov_y, near, far)?;
+        let view = DMat4::look_at_rh(eye, target, up);
+        let rotation = view.inverse().to_scale_rotation_translation().1;
+        Ok(Self {
+            position: eye,
+            rotation,
+            target,
+            up: up.normalize(),
+            projection: Projection::Perspective { fov_y, near, far },
+        })
+    }
+
+    /// Validate all pose and projection invariants.
+    pub fn validate(&self) -> Result<(), CameraValidationError> {
+        if !self.position.is_finite()
+            || !self.rotation.is_finite()
+            || !self.target.is_finite()
+            || !self.up.is_finite()
+        {
+            return Err(CameraValidationError::NonFinite);
+        }
+        match self.projection {
+            Projection::Orthographic { zoom } => {
+                if !zoom.is_finite() || zoom <= 0.0 {
+                    return Err(CameraValidationError::InvalidZoom);
+                }
+            }
+            Projection::Perspective { fov_y, near, far } => {
+                Camera::validate_perspective(fov_y, near, far)?;
+                Camera::validate_look_at(self.position, self.target, self.up)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Interpolate complete authored state using the destination projection.
+    ///
+    /// Cross-projection transitions select the destination projection at the
+    /// start and interpolate from its conventional default parameters.
+    pub fn interpolate(self, to: Self, t: f64) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        let up = self.up.lerp(to.up, t).normalize_or(to.up);
+        let projection = match (self.projection, to.projection) {
+            (Projection::Orthographic { zoom: from }, Projection::Orthographic { zoom: to }) => {
+                Projection::Orthographic {
+                    zoom: from + (to - from) * t,
+                }
+            }
+            (
+                Projection::Perspective {
+                    fov_y: from_fov,
+                    near: from_near,
+                    far: from_far,
+                },
+                Projection::Perspective {
+                    fov_y: to_fov,
+                    near: to_near,
+                    far: to_far,
+                },
+            ) => Projection::Perspective {
+                fov_y: from_fov + (to_fov - from_fov) * t,
+                near: from_near + (to_near - from_near) * t,
+                far: from_far + (to_far - from_far) * t,
+            },
+            (_, Projection::Orthographic { zoom }) => Projection::Orthographic {
+                zoom: 1.0 + (zoom - 1.0) * t,
+            },
+            (_, Projection::Perspective { fov_y, near, far }) => Projection::Perspective {
+                fov_y: std::f64::consts::FRAC_PI_4 + (fov_y - std::f64::consts::FRAC_PI_4) * t,
+                near: 0.1 + (near - 0.1) * t,
+                far: 1000.0 + (far - 1000.0) * t,
+            },
+        };
+        Self {
+            position: self.position.lerp(to.position, t),
+            rotation: self.rotation.slerp(to.rotation, t),
+            target: self.target.lerp(to.target, t),
+            up,
+            projection,
+        }
+    }
+}
+
 /// A dimension-agnostic camera supporting both 2D Vector (Vello) and 3D Raster (wgpu) rendering.
 ///
 /// This serves as a global scene resource that defines the viewpoint, rotation, zoom/fov,
@@ -149,6 +279,28 @@ impl DerefMut for ResolvedCamera {
 pub struct CameraViewOverride(pub Option<Camera>);
 
 impl Camera {
+    /// Return the authored pose without logical viewport dimensions.
+    pub const fn pose(&self) -> CameraPose {
+        CameraPose {
+            position: self.position,
+            rotation: self.rotation,
+            target: self.target,
+            up: self.up,
+            projection: self.projection,
+        }
+    }
+
+    /// Apply a validated pose while preserving logical viewport dimensions.
+    pub fn apply_pose(&mut self, pose: CameraPose) -> Result<(), CameraValidationError> {
+        pose.validate()?;
+        self.position = pose.position;
+        self.rotation = pose.rotation;
+        self.target = pose.target;
+        self.up = pose.up;
+        self.projection = pose.projection;
+        Ok(())
+    }
+
     /// Validate all authored pose, projection, and logical viewport invariants.
     pub fn validate(&self) -> Result<(), CameraValidationError> {
         if !self.position.is_finite()
@@ -491,6 +643,40 @@ mod tests {
             cam.projection,
             Projection::Orthographic { zoom: 1.0 }
         ));
+    }
+
+    #[test]
+    fn camera_pose_roundtrip_preserves_viewport() {
+        let mut camera = Camera::ortho_2d(960, 540);
+        let pose = CameraPose::perspective_3d(
+            DVec3::new(7.0, 5.0, 6.0),
+            DVec3::ZERO,
+            DVec3::Y,
+            0.8,
+            0.1,
+            500.0,
+        )
+        .unwrap();
+        camera.apply_pose(pose).unwrap();
+        assert_eq!(camera.pose(), pose);
+        assert_eq!((camera.viewport_width, camera.viewport_height), (960, 540));
+    }
+
+    #[test]
+    fn camera_pose_cross_projection_uses_destination_projection() {
+        let from = CameraPose::orthographic_2d(DVec2::ZERO, 2.0, 0.0).unwrap();
+        let to = CameraPose::perspective_3d(
+            DVec3::new(0.0, 0.0, 10.0),
+            DVec3::ZERO,
+            DVec3::Y,
+            0.9,
+            0.2,
+            800.0,
+        )
+        .unwrap();
+        let middle = from.interpolate(to, 0.5);
+        assert!(matches!(middle.projection, Projection::Perspective { .. }));
+        assert_eq!(from.interpolate(to, 1.0), to);
     }
 
     #[test]

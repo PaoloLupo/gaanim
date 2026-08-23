@@ -102,6 +102,10 @@ pub enum AnimationType {
         occurrence: Option<usize>,
         properties: PropertyAnimation,
     },
+    CameraState {
+        from: gaanim_animation::CameraStateSource,
+        to: gaanim_animation::CameraStateSource,
+    },
     CameraPosition {
         to: DVec3,
     },
@@ -506,7 +510,8 @@ impl AnimationType {
     pub(crate) fn is_camera(&self) -> bool {
         matches!(
             self,
-            Self::CameraPosition { .. }
+            Self::CameraState { .. }
+                | Self::CameraPosition { .. }
                 | Self::CameraPositionSource { .. }
                 | Self::CameraZoom { .. }
                 | Self::CameraZoomSource { .. }
