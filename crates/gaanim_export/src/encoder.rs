@@ -277,7 +277,7 @@ pub struct EncoderConfig {
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
 pub struct ParallelEncoder {
     sender: SyncSender<Option<Vec<u8>>>,
-    thread_handle: Option<JoinHandle<Result<()>>>,
+    thread_handle: Option<JoinHandle<Result<Duration>>>,
 }
 
 /// Compute an adaptive channel depth: reserve at least 4 slots, up to 8,
@@ -353,15 +353,21 @@ impl ParallelEncoder {
     }
 
     pub fn finalize(&mut self) -> Result<()> {
+        self.finalize_with_timings().map(|_| ())
+    }
+
+    /// Finish the encoder and return time spent actively writing/encoding frames.
+    /// This excludes time waiting for frames and the final drain while joining.
+    pub(crate) fn finalize_with_timings(&mut self) -> Result<Duration> {
         let _ = self.sender.send(None);
 
         if let Some(handle) = self.thread_handle.take() {
             match handle.join() {
-                Ok(res) => res?,
+                Ok(res) => return res,
                 Err(_) => return Err(ExportError::General("Encoder thread panicked".to_string())),
             }
         }
-        Ok(())
+        Ok(Duration::ZERO)
     }
 
     fn x264_preset(speed: EncodingSpeed) -> &'static str {
@@ -477,7 +483,11 @@ impl ParallelEncoder {
         Ok(Some("[audio_out]".to_string()))
     }
 
-    fn encoder_worker(config: EncoderConfig, receiver: Receiver<Option<Vec<u8>>>) -> Result<()> {
+    fn encoder_worker(
+        config: EncoderConfig,
+        receiver: Receiver<Option<Vec<u8>>>,
+    ) -> Result<Duration> {
+        let mut encode_time = Duration::ZERO;
         match config.format {
             ExportFormat::PngSequence => {
                 let base_path = std::path::Path::new(&config.output_path);
@@ -487,6 +497,7 @@ impl ParallelEncoder {
 
                 let mut frame_idx = 0;
                 while let Ok(Some(frame)) = receiver.recv() {
+                    let encode_started_at = Instant::now();
                     let filename = format!(
                         "{}_{:05}.png",
                         base_path
@@ -511,6 +522,7 @@ impl ParallelEncoder {
                         .map_err(|e| ExportError::General(format!("PNG encode error: {}", e)))?;
 
                     std::fs::write(dest_path, png_buffer)?;
+                    encode_time += encode_started_at.elapsed();
                     frame_idx += 1;
                 }
             }
@@ -679,10 +691,12 @@ impl ParallelEncoder {
 
                 let mut write_error = None;
                 while let Ok(Some(frame)) = receiver.recv() {
+                    let encode_started_at = Instant::now();
                     if let Err(error) = stdin.write_all(&frame) {
                         write_error = Some(error);
                         break;
                     }
+                    encode_time += encode_started_at.elapsed();
                 }
 
                 drop(stdin);
@@ -715,7 +729,7 @@ impl ParallelEncoder {
             }
         }
 
-        Ok(())
+        Ok(encode_time)
     }
 }
 

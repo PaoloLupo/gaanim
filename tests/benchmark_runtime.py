@@ -22,6 +22,14 @@ from typing import Any
 
 SCENARIOS = ("reload", "seek", "preview", "export")
 POLL_SECONDS = 0.025
+EXPORT_TIMING_PREFIX = "GAANIM_EXPORT_TIMINGS "
+EXPORT_PHASES = (
+    "render_gpu_ms",
+    "encoder_wait_ms",
+    "encode_active_ms",
+    "finalize_ms",
+    "total_ms",
+)
 
 
 class BenchmarkFailure(RuntimeError):
@@ -212,6 +220,21 @@ def budget_violations(result: dict[str, Any], budget: dict[str, float]) -> list[
     return violations
 
 
+def parse_export_timings(log_path: Path) -> dict[str, float]:
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        marker = next(line for line in reversed(lines) if line.startswith(EXPORT_TIMING_PREFIX))
+        fields = dict(part.split("=", 1) for part in marker.split()[1:])
+        timings = {phase: float(fields[phase]) for phase in EXPORT_PHASES}
+        if any(not math.isfinite(value) or value < 0 for value in timings.values()):
+            raise ValueError("phase timings must be finite and non-negative")
+        return timings
+    except (OSError, KeyError, StopIteration, ValueError) as error:
+        raise BenchmarkFailure(
+            f"export did not report valid phase timings in {log_path}"
+        ) from error
+
+
 def validate_artifacts(
     scenario: str, artifact_dir: Path, frames: int
 ) -> dict[str, Any] | None:
@@ -246,6 +269,7 @@ def validate_artifacts(
         artifact = artifact_dir / "benchmark.mp4"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise BenchmarkFailure(f"export did not produce a non-empty {artifact}")
+        return {"phase_timings_ms": parse_export_timings(artifact_dir / "command.log")}
     return None
 
 
@@ -309,6 +333,7 @@ def main() -> int:
             process_timings = []
             peak_rss_values = []
             memory_scope = "unavailable"
+            export_phase_samples = {phase: [] for phase in EXPORT_PHASES}
 
             for sample_index in range(warmups + samples):
                 is_warmup = sample_index < warmups
@@ -335,6 +360,9 @@ def main() -> int:
                 memory_scope = sampled_scope
                 if is_warmup:
                     continue
+                if scenario == "export" and artifact_report is not None:
+                    for phase, value in artifact_report["phase_timings_ms"].items():
+                        export_phase_samples[phase].append(float(value))
                 process_timings.append(elapsed_ms)
                 timings.append(
                     float(artifact_report["total_ms"])
@@ -368,6 +396,15 @@ def main() -> int:
                 else None,
                 "budget": scenario_config["budget"],
             }
+            if scenario == "export":
+                result["phases"] = {
+                    phase: {
+                        "timings_ms": [round(value, 3) for value in values],
+                        "p50_ms": round(percentile(values, 0.50), 3),
+                        "p95_ms": round(percentile(values, 0.95), 3),
+                    }
+                    for phase, values in export_phase_samples.items()
+                }
             result["violations"] = budget_violations(result, result["budget"])
             result["status"] = "warning" if result["violations"] else "pass"
             any_violations |= bool(result["violations"])

@@ -185,9 +185,9 @@ y los probes de FFmpeg tienen un límite de tiempo acotado. Los fallos de captur
 finalización del encoder se propagan al editor y al código de salida del CLI, sin reportar
 éxito sobre un archivo incompleto.
 
-**Siguiente mejora:** mantener `libx264` como ruta estable por defecto y probar los
-encoders hardware solo como opt-in acotado, y separar el diagnóstico de render GPU del
-tiempo de encode CPU.
+**Siguiente mejora:** seleccionar y validar encoders hardware automáticamente para MP4,
+con `libx264` como fallback explícito cuando el probe real falle. El benchmark ya separa
+render GPU, backpressure, trabajo activo de encode y finalización.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
@@ -202,8 +202,8 @@ densa. Para `reload`, Python y el mundo ECS se inicializan una vez y la muestra 
 siguiente carga y replay dentro del mismo proceso.
 
 **Mejora:** acumular historia del perfil estándar y calibrar sus límites por plataforma.
-Separar después CPU, GPU y FFmpeg para
-que una regresión señale su subsistema, no solo el tiempo end-to-end.
+El escenario export ya separa GPU, backpressure, encode y finalización para que una
+regresión señale su subsistema, no solo el tiempo end-to-end.
 
 **Criterio de salida:** presupuestos versionados y comparables; las regresiones se
 reportan automáticamente, aunque inicialmente no bloqueen PRs.
@@ -267,8 +267,8 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 ### 0.2 — Hardening de creación y publicación
 
 1. Suite visual representativa por subsistema y ejecución completa programada.
-2. Hardening de export: alpha, cancelación/timeout y errores FFmpeg cerrados; encoders
-   hardware opt-in pendientes.
+2. Hardening de export: alpha, cancelación/timeout y errores FFmpeg cerrados; selección
+   automática de encoders hardware pendiente y requerida antes del cierre de 0.2.
 3. Preview unificado para pistas de audio y video, con sync bajo seek.
 4. Calibración e instrumentación persistente de los benchmarks iniciales.
 5. Clasificación de estabilidad de API y política de deprecación.

@@ -6,7 +6,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
@@ -72,6 +72,26 @@ fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64
     if std::env::var_os("GAANIM_EXPORT_WORKER").is_some() {
         println!("GAANIM_EXPORT_PROGRESS {current} {total}");
     }
+}
+
+fn publish_benchmark_timings(
+    render_gpu: Duration,
+    encoder_wait: Duration,
+    encode_active: Duration,
+    finalize: Duration,
+    total: Duration,
+) {
+    if std::env::var("GAANIM_BENCHMARK_SCENARIO").as_deref() != Ok("export") {
+        return;
+    }
+    println!(
+        "GAANIM_EXPORT_TIMINGS render_gpu_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3}",
+        render_gpu.as_secs_f64() * 1000.0,
+        encoder_wait.as_secs_f64() * 1000.0,
+        encode_active.as_secs_f64() * 1000.0,
+        finalize.as_secs_f64() * 1000.0,
+        total.as_secs_f64() * 1000.0,
+    );
 }
 
 #[derive(Resource)]
@@ -579,6 +599,8 @@ where
 
     let mut current_time = render_start;
     let mut last_report = Instant::now();
+    let mut render_gpu_time = Duration::ZERO;
+    let mut encoder_wait_time = Duration::ZERO;
 
     for frame_idx in 0..total_frames {
         {
@@ -630,11 +652,15 @@ where
             })
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
+        let render_started_at = Instant::now();
         let frame_data = gpu.render_frame(&vello_scene, bg_color)?;
+        render_gpu_time += render_started_at.elapsed();
 
+        let encoder_wait_started_at = Instant::now();
         encoder
             .push_frame(frame_data)
             .map_err(|e| ExportError::Capture(format!("Encoder push error: {}", e)))?;
+        encoder_wait_time += encoder_wait_started_at.elapsed();
 
         if frame_idx.is_multiple_of(10) || frame_idx == total_frames - 1 {
             let speed = 10.0 / last_report.elapsed().as_secs_f64();
@@ -650,12 +676,21 @@ where
     pb.finish_with_message("Done!");
     export_log(&telemetry, "  Finalizing video file...");
 
-    encoder.finalize().inspect_err(|e| {
+    let finalize_started_at = Instant::now();
+    let encode_active_time = encoder.finalize_with_timings().inspect_err(|e| {
         export_log(&telemetry, format!("  ERROR: {e}"));
         bevy::prelude::error!("Encoder finalization error: {}", e);
     })?;
+    let finalize_time = finalize_started_at.elapsed();
 
     let duration = start_time.elapsed();
+    publish_benchmark_timings(
+        render_gpu_time,
+        encoder_wait_time,
+        encode_active_time,
+        finalize_time,
+        duration,
+    );
     export_log(
         &telemetry,
         "------------------------------------------------------------",

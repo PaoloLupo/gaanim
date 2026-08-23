@@ -56,6 +56,20 @@ class RuntimeBenchmarkTests(unittest.TestCase):
             with self.assertRaises(benchmark_runtime.BenchmarkFailure):
                 benchmark_runtime.validate_artifacts("preview", artifact_dir, 3)
 
+    def test_export_artifact_validation_reads_phase_timings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_dir = Path(temporary)
+            (artifact_dir / "benchmark.mp4").write_bytes(b"video")
+            (artifact_dir / "command.log").write_text(
+                "GAANIM_EXPORT_TIMINGS render_gpu_ms=10.5 encoder_wait_ms=2.0 "
+                "encode_active_ms=8.25 finalize_ms=1.0 total_ms=15.0\n",
+                encoding="utf-8",
+            )
+
+            report = benchmark_runtime.validate_artifacts("export", artifact_dir, 1)
+
+            self.assertEqual(report["phase_timings_ms"]["encode_active_ms"], 8.25)
+
 
 if __name__ == "__main__":
     unittest.main()

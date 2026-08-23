@@ -40,7 +40,10 @@ marcar la métrica como no disponible.
   renderer GPU y readback PNG.
 - `preview` captura una secuencia densa a 1920x1080 y reporta frames por segundo.
   Mide la ruta headless, no la presentación con ventana y vsync.
-- `export` produce 300 frames H.264 a 1920x1080 con el preset draft.
+- `export` produce 300 frames H.264 a 1920x1080 con el preset draft. Además del
+  tiempo end-to-end, separa render GPU, espera por backpressure, trabajo activo
+  de encode y drenaje/finalización. Como render y encode corren en paralelo,
+  estas fases sirven para diagnóstico y no deben sumarse entre sí.
 
 Se puede acotar una investigación sin cambiar el archivo versionado:
 
