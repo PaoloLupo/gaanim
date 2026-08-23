@@ -304,12 +304,54 @@ def export_format(
     }
 
 
+def export_three_d_worker(
+    executable: Path,
+    scene: Path,
+    output_dir: Path,
+    *,
+    repo: Path,
+) -> dict[str, Any]:
+    artifact = output_dir / "smoke-3d.mp4"
+    artifact.unlink(missing_ok=True)
+    environment = os.environ.copy()
+    environment.pop("GAANIM_EXPORT_SMOKE_AUDIO", None)
+    environment["GAANIM_EXPORT_WORKER"] = "1"
+
+    run(
+        [
+            str(executable),
+            "--export-worker",
+            str(scene),
+            str(artifact),
+            "draft",
+            "mp4",
+        ],
+        cwd=repo,
+        env=environment,
+    )
+
+    if not artifact.is_file() or artifact.stat().st_size == 0:
+        raise SmokeFailure(f"Isolated 3D export did not create a non-empty {artifact}")
+    probe = ffprobe(artifact, cwd=repo)
+    video = require_stream(probe, "video", "h264", artifact)
+    validate_dimensions(video, artifact)
+    return {
+        "mode": "isolated-3d-worker",
+        "artifact": str(artifact),
+        "bytes": artifact.stat().st_size,
+        "probe": probe,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path)
     parser.add_argument("--scene", type=Path, default=Path("examples/export_smoke.py"))
     parser.add_argument(
         "--alpha-scene", type=Path, default=Path("examples/export_alpha_smoke.py")
+    )
+    parser.add_argument(
+        "--three-d-scene", type=Path, default=Path("examples/export_3d_smoke.py")
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--formats", nargs="+", choices=ALL_FORMATS, default=ALL_FORMATS)
@@ -332,6 +374,11 @@ def main() -> int:
         (repo / args.alpha_scene).resolve()
         if not args.alpha_scene.is_absolute()
         else args.alpha_scene
+    )
+    three_d_scene = (
+        (repo / args.three_d_scene).resolve()
+        if not args.three_d_scene.is_absolute()
+        else args.three_d_scene
     )
     output_dir = args.output.resolve()
 
@@ -369,13 +416,26 @@ def main() -> int:
             for format_name in args.formats
             if format_name in ALPHA_FORMATS
         ]
+        three_d_report = (
+            export_three_d_worker(
+                executable,
+                three_d_scene,
+                output_dir,
+                repo=repo,
+            )
+            if "mp4" in args.formats
+            else None
+        )
     except (OSError, ValueError, json.JSONDecodeError, SmokeFailure) as error:
         print(f"Export smoke failed: {error}", file=sys.stderr)
         return 1
 
     report_path = output_dir / "export-smoke-report.json"
     report_path.write_text(
-        json.dumps({"formats": reports, "alpha": alpha_reports}, indent=2),
+        json.dumps(
+            {"formats": reports, "alpha": alpha_reports, "three_d": three_d_report},
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print(f"Export smoke passed for {', '.join(args.formats)}: {report_path}")

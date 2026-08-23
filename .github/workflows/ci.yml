@@ -127,7 +127,7 @@ jobs:
       - name: Build executable runtime
         run: cargo build -p gaanim_editor --bin gaanim-core
 
-      - name: Export and inspect all formats
+      - name: Export formats and isolated 3D smoke
         run: python tests/validate_exports.py --output target/export-smoke
 
       - name: Upload export diagnostics

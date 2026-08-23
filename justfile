@@ -78,7 +78,7 @@ wheel:
 validate-python-api:
     cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
 
-# Export every supported format and inspect dimensions, duration, codecs, and audio.
+# Export every supported format plus one isolated 3D MP4 and inspect their contracts.
 test-exports:
     cargo build -p gaanim_editor --bin gaanim-core
     {{ system_python }} tests/validate_exports.py --output target/export-smoke
