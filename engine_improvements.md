@@ -176,11 +176,14 @@ suite completa tiene dueño, frecuencia y tiempo máximo documentados.
 
 FFmpeg, ffprobe, codecs, GPU y drivers varían por plataforma. La matriz CI ya produce y
 sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM. WebM, WebP y PNG
-también decodifican una escena transparente y verifican su canal alpha real.
+también decodifican una escena transparente y verifican su canal alpha real. Los exports
+iniciados desde un proyecto corren fuera del proceso del editor para no alterar su viewport;
+cancelarlos termina el worker y su árbol de procesos. Un watchdog corta workers sin progreso
+y los probes de FFmpeg tienen un límite de tiempo acotado.
 
 **Siguiente mejora:** mantener `libx264` como ruta estable por defecto y probar los
-encoders hardware solo como opt-in acotado. Mejorar diagnóstico/timeout de FFmpeg y
-cubrir por separado export GPU, CPU y 3D aislado.
+encoders hardware solo como opt-in acotado, y cubrir por separado export GPU, CPU y 3D
+aislado.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
@@ -260,7 +263,8 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 ### 0.2 — Hardening de creación y publicación
 
 1. Suite visual representativa por subsistema y ejecución completa programada.
-2. Hardening de export: alpha, errores FFmpeg y encoders hardware opt-in con timeout.
+2. Hardening de export: alpha, cancelación/timeout y errores FFmpeg cerrados; encoders
+   hardware opt-in pendientes.
 3. Preview unificado para pistas de audio y video, con sync bajo seek.
 4. Calibración e instrumentación persistente de los benchmarks iniciales.
 5. Clasificación de estabilidad de API y política de deprecación.

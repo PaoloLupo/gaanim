@@ -7,9 +7,13 @@ use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const EXPORT_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const EXPORT_WORKER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Resource, Clone, Debug)]
 pub struct ProjectPaths {
@@ -40,6 +44,7 @@ pub struct ExportState {
     pub completed_output_path: Option<PathBuf>,
     pub completed_successfully: bool,
     pub progress_shared: Arc<Mutex<Option<ExportProgress>>>,
+    pub cancel_requested: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -117,6 +122,7 @@ impl Default for ExportState {
             completed_output_path: None,
             completed_successfully: false,
             progress_shared: Arc::new(Mutex::new(None)),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -234,6 +240,7 @@ pub fn export_dialog_system(
                     let succeeded = matches!(progress.result.as_ref(), Some(Ok(())));
                     let message = match progress.result.as_ref() {
                         Some(Ok(())) => "Export completed successfully".to_string(),
+                        Some(Err(error)) if error.starts_with("export cancelled") => error.clone(),
                         Some(Err(error)) => format!("Export failed: {error}"),
                         None => "Export finished without a result".to_string(),
                     };
@@ -261,6 +268,7 @@ pub fn export_dialog_system(
             }
             state.show_complete = true;
             state.active = false;
+            state.cancel_requested.store(false, Ordering::Release);
             *state.progress_shared.lock().unwrap() = None;
         } else {
             let progress = if prog_total > 0 {
@@ -307,13 +315,19 @@ pub fn export_dialog_system(
                         elapsed_seconds, eta_seconds
                     ));
                     ui.add_space(8.0);
-                    if ui.button("Cancel").clicked() {
+                    let cancelling = state.cancel_requested.load(Ordering::Acquire);
+                    if cancelling {
+                        ui.label("Stopping export...");
+                    }
+                    if ui
+                        .add_enabled(!cancelling, egui::Button::new("Cancel"))
+                        .clicked()
+                    {
                         trigger_cancel = true;
                     }
                 });
             if trigger_cancel || !active_open {
-                state.active = false;
-                *state.progress_shared.lock().unwrap() = None;
+                state.cancel_requested.store(true, Ordering::Release);
             }
             return;
         }
@@ -328,6 +342,10 @@ pub fn export_dialog_system(
     let mut current_quality = state.quality;
     let mut current_output = state.output_path.clone();
     let has_replay = replay_stash.canvas.is_some();
+    let scene_resolution = replay_stash
+        .canvas
+        .as_ref()
+        .map(|canvas| (canvas.width, canvas.height));
     let dur = timeline.cached_duration;
     let fps = current_quality.fps();
     let total = (dur * fps as f64).ceil() as u64;
@@ -356,17 +374,17 @@ pub fn export_dialog_system(
                         ui.selectable_value(
                             &mut current_quality,
                             ExportQuality::Draft,
-                            "Draft (480p30)",
+                            "Draft (fast, 30 fps)",
                         );
                         ui.selectable_value(
                             &mut current_quality,
                             ExportQuality::Standard,
-                            "Standard (1080p60)",
+                            "Standard (balanced, 60 fps)",
                         );
                         ui.selectable_value(
                             &mut current_quality,
                             ExportQuality::Production,
-                            "Production (4K60)",
+                            "Production (best, 60 fps)",
                         );
                     });
             });
@@ -378,6 +396,9 @@ pub fn export_dialog_system(
                 "Duration: {:.1}s → {} frames at {}fps",
                 dur, total, fps
             ));
+            if let Some((width, height)) = scene_resolution {
+                ui.label(format!("Resolution: {width}×{height} (scene)"));
+            }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button("Export").clicked() {
@@ -428,6 +449,7 @@ pub fn export_dialog_system(
             let fmt = state.format;
             let qual = state.quality;
             let progress = state.progress_shared.clone();
+            let cancel_requested = state.cancel_requested.clone();
             let telemetry = ExportTelemetry::new();
             let canvas = replay_stash.canvas.clone().unwrap();
             let worker_paths = project_paths
@@ -442,6 +464,7 @@ pub fn export_dialog_system(
             state.completed_successfully = false;
             state.elapsed_seconds = None;
             state.encoder_label = None;
+            state.cancel_requested.store(false, Ordering::Release);
 
             *progress.lock().unwrap() = Some(ExportProgress {
                 current_frame: 0,
@@ -453,33 +476,33 @@ pub fn export_dialog_system(
 
             let progress_clone = progress.clone();
             std::thread::spawn(move || {
-                let result = if needs_worker {
-                    match worker_paths {
-                        Some((script_path, project_dir)) => run_export_worker(
-                            &script_path,
-                            &project_dir,
-                            &out,
-                            qual,
-                            fmt,
-                            telemetry.clone(),
-                        ),
-                        None => Err(
-                            "3D export requires an open project script so it can run in an isolated process"
-                                .to_string(),
-                        ),
+                let result = match worker_paths {
+                    Some((script_path, project_dir)) => run_export_worker(
+                        &script_path,
+                        &project_dir,
+                        &out,
+                        qual,
+                        fmt,
+                        telemetry.clone(),
+                        cancel_requested,
+                    ),
+                    None if needs_worker => Err(
+                        "3D export requires an open project script so it can run in an isolated process"
+                            .to_string(),
+                    ),
+                    None => {
+                        let mut config = ExportConfig::new(&out).with_quality(qual.preset());
+                        config.width = canvas.width;
+                        config.height = canvas.height;
+                        config.aspect_ratio = AspectRatioPreset::Custom;
+                        config.fps = fps;
+                        config.crf = qual.crf();
+                        config.encoding_speed = qual.encoding_speed();
+                        config.format = fmt;
+                        config.headless = true;
+                        config.telemetry = Some(telemetry.clone());
+                        export_canvas(canvas, config).map_err(|error| error.to_string())
                     }
-                } else {
-                    let mut config = ExportConfig::new(&out).with_quality(qual.preset());
-                    config.width = canvas.width;
-                    config.height = canvas.height;
-                    config.aspect_ratio = AspectRatioPreset::Custom;
-                    config.fps = fps;
-                    config.crf = qual.crf();
-                    config.encoding_speed = qual.encoding_speed();
-                    config.format = fmt;
-                    config.headless = true;
-                    config.telemetry = Some(telemetry.clone());
-                    export_canvas(canvas, config).map_err(|error| error.to_string())
                 };
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
@@ -550,6 +573,81 @@ where
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerStopReason {
+    Cancelled,
+    Stalled,
+}
+
+fn worker_stop_reason(
+    cancel_requested: bool,
+    last_progress_at: Instant,
+    now: Instant,
+    stall_timeout: Duration,
+) -> Option<WorkerStopReason> {
+    if cancel_requested {
+        Some(WorkerStopReason::Cancelled)
+    } else if now.duration_since(last_progress_at) >= stall_timeout {
+        Some(WorkerStopReason::Stalled)
+    } else {
+        None
+    }
+}
+
+fn configure_export_worker(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
+
+fn terminate_export_worker(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let process_group = format!("-{}", child.id());
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &process_group])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid, "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn worker_error_context(summary: &str, output_path: &str, telemetry: &ExportTelemetry) -> String {
+    let encoder = telemetry
+        .encoder()
+        .unwrap_or_else(|| "not reported".to_string());
+    let logs = telemetry.logs();
+    let last_output = logs
+        .iter()
+        .rev()
+        .take(8)
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{summary} (encoder: {encoder}, output: {output_path}). Last worker output:\n{}",
+        if last_output.is_empty() {
+            "(no output)"
+        } else {
+            &last_output
+        }
+    )
+}
+
 fn run_export_worker(
     script_path: &std::path::Path,
     project_dir: &std::path::Path,
@@ -557,10 +655,12 @@ fn run_export_worker(
     quality: ExportQuality,
     format: ExportFormat,
     telemetry: ExportTelemetry,
+    cancel_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the Gaanim executable: {error}"))?;
-    let mut child = std::process::Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("--export-worker")
         .arg(script_path)
         .arg(output_path)
@@ -569,7 +669,9 @@ fn run_export_worker(
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_export_worker(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("could not start the isolated export worker: {error}"))?;
     let stdout_thread = child
@@ -580,9 +682,44 @@ fn run_export_worker(
         .stderr
         .take()
         .map(|stderr| forward_worker_stream(stderr, telemetry.clone()));
-    let status = child
-        .wait()
-        .map_err(|error| format!("could not wait for the isolated export worker: {error}"))?;
+    let mut last_frame = telemetry.progress().0;
+    let mut last_progress_at = Instant::now();
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not poll the isolated export worker: {error}"))?
+        {
+            break status;
+        }
+
+        let current_frame = telemetry.progress().0;
+        if current_frame != last_frame {
+            last_frame = current_frame;
+            last_progress_at = Instant::now();
+        }
+        if let Some(reason) = worker_stop_reason(
+            cancel_requested.load(Ordering::Acquire),
+            last_progress_at,
+            Instant::now(),
+            EXPORT_WORKER_STALL_TIMEOUT,
+        ) {
+            terminate_export_worker(&mut child);
+            let summary = match reason {
+                WorkerStopReason::Cancelled => "export cancelled",
+                WorkerStopReason::Stalled => {
+                    "export worker made no frame progress for 120 seconds and was terminated"
+                }
+            };
+            if let Some(thread) = stdout_thread {
+                let _ = thread.join();
+            }
+            if let Some(thread) = stderr_thread {
+                let _ = thread.join();
+            }
+            return Err(worker_error_context(summary, output_path, &telemetry));
+        }
+        std::thread::sleep(EXPORT_WORKER_POLL_INTERVAL);
+    };
     if let Some(thread) = stdout_thread {
         let _ = thread.join();
     }
@@ -592,7 +729,11 @@ fn run_export_worker(
     if status.success() {
         Ok(())
     } else {
-        Err(format!("export worker exited with {status}"))
+        Err(worker_error_context(
+            &format!("export worker exited with {status}"),
+            output_path,
+            &telemetry,
+        ))
     }
 }
 
@@ -621,9 +762,35 @@ pub fn export_per_frame_system() {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportTelemetry, forward_worker_line, open_exported_file_with, resolve_output_path,
+        ExportTelemetry, WorkerStopReason, forward_worker_line, open_exported_file_with,
+        resolve_output_path, worker_stop_reason,
     };
     use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn worker_watchdog_stops_on_cancel_or_stalled_progress() {
+        let last_progress_at = Instant::now();
+
+        assert_eq!(
+            worker_stop_reason(
+                true,
+                last_progress_at,
+                last_progress_at,
+                Duration::from_secs(120),
+            ),
+            Some(WorkerStopReason::Cancelled)
+        );
+        assert_eq!(
+            worker_stop_reason(
+                false,
+                last_progress_at,
+                last_progress_at + Duration::from_secs(120),
+                Duration::from_secs(120),
+            ),
+            Some(WorkerStopReason::Stalled)
+        );
+    }
 
     #[test]
     fn worker_progress_markers_update_shared_telemetry_without_polluting_log() {

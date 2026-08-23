@@ -1,10 +1,14 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::io::{Read, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::config::AudioTrack;
+
+const FFMPEG_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const FFMPEG_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Error, Debug)]
 pub enum ExportError {
@@ -73,13 +77,31 @@ impl VideoEncoder {
 pub fn detect_available_encoders() -> Vec<VideoEncoder> {
     let mut encoders = vec![VideoEncoder::Libx264];
 
-    if let Ok(output) = Command::new("ffmpeg")
+    let Ok(mut child) = Command::new("ffmpeg")
         .args(["-hide_banner", "-encoders"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-    {
-        let text = String::from_utf8_lossy(&output.stdout);
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return encoders;
+    };
+    let stdout_thread = child.stdout.take().map(|mut stdout| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+    let status = wait_for_child(&mut child, FFMPEG_PROBE_TIMEOUT);
+    if !matches!(&status, Ok(Some(status)) if status.success()) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let bytes = stdout_thread
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default();
+    if matches!(&status, Ok(Some(status)) if status.success()) {
+        let text = String::from_utf8_lossy(&bytes);
         if text.contains("h264_nvenc") {
             encoders.push(VideoEncoder::H264Nvenc);
         }
@@ -95,6 +117,21 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
     }
 
     encoders
+}
+
+fn wait_for_child(child: &mut Child, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
+    let started_at = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(FFMPEG_PROBE_POLL_INTERVAL);
+    }
 }
 
 /// Pick the best available encoder preferring hardware acceleration.
@@ -183,11 +220,18 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
 
     if let Ok(mut child) = cmd.spawn() {
         // Feed one empty RGBA frame (640x360x4 bytes).
-        if let Some(mut stdin) = child.stdin.take() {
+        let writer = child.stdin.take().map(|mut stdin| {
             let blank = vec![0u8; 640 * 360 * 4];
-            let _ = stdin.write_all(&blank);
+            std::thread::spawn(move || stdin.write_all(&blank))
+        });
+        let succeeded = matches!(
+            wait_for_child(&mut child, FFMPEG_PROBE_TIMEOUT),
+            Ok(Some(status)) if status.success()
+        );
+        if let Some(writer) = writer {
+            let _ = writer.join();
         }
-        child.wait().map(|s| s.success()).unwrap_or(false)
+        succeeded
     } else {
         false
     }
@@ -645,7 +689,6 @@ impl ParallelEncoder {
 
                 let status = child.wait()?;
                 let mut stderr_content = String::new();
-                use std::io::Read;
                 let mut stderr_reader = std::io::BufReader::new(stderr);
                 let _ = stderr_reader.read_to_string(&mut stderr_content);
                 let stderr_content = stderr_content.trim();

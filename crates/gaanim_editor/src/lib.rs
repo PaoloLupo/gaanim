@@ -2591,13 +2591,7 @@ fn viewport_adjust_system(
     mut viewport_frame: ResMut<ViewportFrame>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,
-    export_state: Res<export::ExportState>,
 ) {
-    if export_state.active {
-        view_override.0 = None;
-        *camera_viewport = CameraViewport::default();
-        return;
-    }
     let Some(base_camera) = rig
         .as_deref()
         .map(|rig| rig.0)
@@ -3073,6 +3067,34 @@ mod tests {
             None,
             "viewport fitting must not override follow, shake, or camera bindings"
         );
+    }
+
+    #[test]
+    fn active_export_preserves_the_editor_viewport_fit() {
+        let mut export_state = export::ExportState::default();
+        export_state.active = true;
+        let mut app = App::new();
+        app.insert_resource(ViewportInset { bottom: 120.0 })
+            .insert_resource(PreviewInteractive::default())
+            .insert_resource(Camera::ortho_2d(1280, 720))
+            .insert_resource(CameraViewOverride::default())
+            .insert_resource(CameraViewport::default())
+            .insert_resource(ViewportFrame::default())
+            .insert_resource(PresentationMode::default())
+            .insert_resource(export_state)
+            .add_systems(Update, viewport_adjust_system);
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(1280, 720),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+
+        app.update();
+
+        assert_eq!(app.world().resource::<CameraViewport>().scale, 5.0 / 6.0);
+        assert_eq!(app.world().resource::<ViewportFrame>().size.y, 600.0);
     }
 
     #[test]
