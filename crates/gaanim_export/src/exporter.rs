@@ -12,7 +12,9 @@ use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::{ExportConfig, ExportTelemetry};
-use crate::encoder::{EncoderConfig, ExportError, ParallelEncoder, Result};
+use crate::encoder::{
+    EncoderConfig, ExportError, ParallelEncoder, Result, VideoEncoder, resolve_video_encoder,
+};
 use crate::gpu::GpuContext;
 
 /// An exact timeline seek rendered into an RGBA8 pixel buffer.
@@ -75,6 +77,7 @@ fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64
 }
 
 fn publish_benchmark_timings(
+    encoder: VideoEncoder,
     render_gpu: Duration,
     encoder_wait: Duration,
     encode_active: Duration,
@@ -85,7 +88,8 @@ fn publish_benchmark_timings(
         return;
     }
     println!(
-        "GAANIM_EXPORT_TIMINGS render_gpu_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3}",
+        "GAANIM_EXPORT_TIMINGS encoder={} render_gpu_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3}",
+        encoder.ffmpeg_name(),
         render_gpu.as_secs_f64() * 1000.0,
         encoder_wait.as_secs_f64() * 1000.0,
         encode_active.as_secs_f64() * 1000.0,
@@ -335,7 +339,8 @@ where
 {
     let start_time = Instant::now();
     let telemetry = config.telemetry.clone();
-    let config = config.apply_presets();
+    let mut config = config.apply_presets();
+    config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
     if let Some(telemetry) = &telemetry {
         telemetry.set_encoder(encoder_label(&config));
     }
@@ -506,7 +511,8 @@ where
 {
     let start_time = Instant::now();
     let telemetry = config.telemetry.clone();
-    let config = config.apply_presets();
+    let mut config = config.apply_presets();
+    config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
     if let Some(telemetry) = &telemetry {
         telemetry.set_encoder(encoder_label(&config));
     }
@@ -685,6 +691,7 @@ where
 
     let duration = start_time.elapsed();
     publish_benchmark_timings(
+        config.video_encoder,
         render_gpu_time,
         encoder_wait_time,
         encode_active_time,

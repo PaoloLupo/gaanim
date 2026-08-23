@@ -185,9 +185,11 @@ y los probes de FFmpeg tienen un límite de tiempo acotado. Los fallos de captur
 finalización del encoder se propagan al editor y al código de salida del CLI, sin reportar
 éxito sobre un archivo incompleto.
 
-**Siguiente mejora:** seleccionar y validar encoders hardware automáticamente para MP4,
-con `libx264` como fallback explícito cuando el probe real falle. El benchmark ya separa
-render GPU, backpressure, trabajo activo de encode y finalización.
+MP4 selecciona y valida automáticamente NVENC, AMF o QSV, con `libx264` como
+fallback explícito cuando ningún probe real funciona. VAAPI permanece disponible
+solo mediante selección Rust explícita: probarlo automáticamente puede colgar el
+driver del kernel y no puede aislarse a nivel de proceso. El benchmark registra el
+encoder efectivo y separa render GPU, backpressure, trabajo activo y finalización.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
@@ -267,8 +269,8 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 ### 0.2 — Hardening de creación y publicación
 
 1. Suite visual representativa por subsistema y ejecución completa programada.
-2. Hardening de export: alpha, cancelación/timeout y errores FFmpeg cerrados; selección
-   automática de encoders hardware pendiente y requerida antes del cierre de 0.2.
+2. Hardening de export: alpha, cancelación/timeout, errores FFmpeg y selección automática
+   de encoders hardware cerrados.
 3. Preview unificado para pistas de audio y video, con sync bajo seek.
 4. Calibración e instrumentación persistente de los benchmarks iniciales.
 5. Clasificación de estabilidad de API y política de deprecación.

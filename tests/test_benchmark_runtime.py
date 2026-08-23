@@ -61,13 +61,14 @@ class RuntimeBenchmarkTests(unittest.TestCase):
             artifact_dir = Path(temporary)
             (artifact_dir / "benchmark.mp4").write_bytes(b"video")
             (artifact_dir / "command.log").write_text(
-                "GAANIM_EXPORT_TIMINGS render_gpu_ms=10.5 encoder_wait_ms=2.0 "
+                "GAANIM_EXPORT_TIMINGS encoder=h264_vaapi render_gpu_ms=10.5 encoder_wait_ms=2.0 "
                 "encode_active_ms=8.25 finalize_ms=1.0 total_ms=15.0\n",
                 encoding="utf-8",
             )
 
             report = benchmark_runtime.validate_artifacts("export", artifact_dir, 1)
 
+            self.assertEqual(report["encoder"], "h264_vaapi")
             self.assertEqual(report["phase_timings_ms"]["encode_active_ms"], 8.25)
 
 

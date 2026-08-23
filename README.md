@@ -177,6 +177,12 @@ gaanim export . --output overlay.webm --transparent
 Se admiten MP4, WebM, WebP animado, GIF y secuencias PNG. La exportación de
 video requiere FFmpeg disponible en `PATH`; si no está instalado, use primero
 una secuencia PNG o instale FFmpeg según su plataforma.
+Para MP4, Gaanim prueba automáticamente NVENC, AMF y QSV y usa el primer encoder
+hardware funcional. `libx264` queda como fallback cuando ninguno pasa el probe
+real; el editor muestra el encoder efectivo durante la exportación. VAAPI se
+mantiene como selección explícita en la API Rust: no se prueba automáticamente
+porque un fallo del driver puede bloquear la GPU completa, fuera del aislamiento
+que puede ofrecer Gaanim.
 `--transparent` está disponible para WebM, WebP y PNG; MP4 y GIF se rechazan
 explícitamente porque no forman parte del contrato alpha de Gaanim.
 

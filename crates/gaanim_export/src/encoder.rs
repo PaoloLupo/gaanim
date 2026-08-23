@@ -38,8 +38,10 @@ pub enum ExportFormat {
 /// Hardware / software video encoder selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VideoEncoder {
-    /// CPU libx264 — always available
+    /// Probe safe automatic candidates and fall back to libx264 when none works.
     #[default]
+    Auto,
+    /// CPU libx264 — always available
     Libx264,
     /// NVIDIA NVENC
     H264Nvenc,
@@ -47,13 +49,14 @@ pub enum VideoEncoder {
     H264Amf,
     /// Intel Quick Sync
     H264Qsv,
-    /// Linux VAAPI (works with RADV/Mesa)
+    /// Linux VAAPI. Explicit-only because driver failures can reset the GPU.
     H264Vaapi,
 }
 
 impl VideoEncoder {
     pub fn ffmpeg_name(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Libx264 => "libx264",
             Self::H264Nvenc => "h264_nvenc",
             Self::H264Amf => "h264_amf",
@@ -64,6 +67,7 @@ impl VideoEncoder {
 
     pub fn display_name(self) -> &'static str {
         match self {
+            Self::Auto => "Automatic (hardware preferred)",
             Self::Libx264 => "CPU (libx264)",
             Self::H264Nvenc => "NVIDIA (NVENC)",
             Self::H264Amf => "AMD (AMF)",
@@ -95,7 +99,13 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
     let status = wait_for_child(&mut child, FFMPEG_PROBE_TIMEOUT);
     if !matches!(&status, Ok(Some(status)) if status.success()) {
         let _ = child.kill();
-        let _ = child.wait();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            if let Some(stdout_thread) = stdout_thread {
+                let _ = stdout_thread.join();
+            }
+        });
+        return encoders;
     }
     let bytes = stdout_thread
         .and_then(|thread| thread.join().ok())
@@ -126,8 +136,6 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> std::io::Result<Optio
             return Ok(Some(status));
         }
         if started_at.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
             return Ok(None);
         }
         std::thread::sleep(FFMPEG_PROBE_POLL_INTERVAL);
@@ -141,17 +149,33 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> std::io::Result<Optio
 /// setup or proprietary drivers, e.g. AMF needs AMDGPU-PRO on Linux).
 pub fn detect_best_encoder() -> VideoEncoder {
     let available = detect_available_encoders();
-    for &candidate in &[
+    select_best_encoder(&available, probe_encoder)
+}
+
+fn select_best_encoder(
+    available: &[VideoEncoder],
+    mut probe: impl FnMut(VideoEncoder) -> bool,
+) -> VideoEncoder {
+    // Do not auto-probe VAAPI: a one-frame success does not prove that a
+    // sustained encode is safe, and a VCE/driver failure can hang the kernel.
+    for candidate in [
         VideoEncoder::H264Nvenc,
         VideoEncoder::H264Amf,
         VideoEncoder::H264Qsv,
-        VideoEncoder::H264Vaapi,
     ] {
-        if available.contains(&candidate) && probe_encoder(candidate) {
+        if available.contains(&candidate) && probe(candidate) {
             return candidate;
         }
     }
     VideoEncoder::Libx264
+}
+
+pub(crate) fn resolve_video_encoder(format: ExportFormat, requested: VideoEncoder) -> VideoEncoder {
+    match (format, requested) {
+        (ExportFormat::Mp4, VideoEncoder::Auto) => detect_best_encoder(),
+        (_, VideoEncoder::Auto) => VideoEncoder::Libx264,
+        (_, requested) => requested,
+    }
 }
 
 fn probe_encoder(encoder: VideoEncoder) -> bool {
@@ -178,6 +202,7 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
         .arg("1");
 
     match encoder {
+        VideoEncoder::Auto => return false,
         VideoEncoder::Libx264 => {
             cmd.arg("-c:v")
                 .arg("libx264")
@@ -224,12 +249,20 @@ fn probe_encoder(encoder: VideoEncoder) -> bool {
             let blank = vec![0u8; 640 * 360 * 4];
             std::thread::spawn(move || stdin.write_all(&blank))
         });
-        let succeeded = matches!(
-            wait_for_child(&mut child, FFMPEG_PROBE_TIMEOUT),
-            Ok(Some(status)) if status.success()
-        );
-        if let Some(writer) = writer {
-            let _ = writer.join();
+        let status = wait_for_child(&mut child, FFMPEG_PROBE_TIMEOUT);
+        let succeeded = matches!(&status, Ok(Some(status)) if status.success());
+        if matches!(status, Ok(Some(_))) {
+            if let Some(writer) = writer {
+                let _ = writer.join();
+            }
+        } else {
+            let _ = child.kill();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                if let Some(writer) = writer {
+                    let _ = writer.join();
+                }
+            });
         }
         succeeded
     } else {
@@ -333,8 +366,9 @@ fn validate_transparency(format: ExportFormat, transparent: bool) -> Result<()> 
 }
 
 impl ParallelEncoder {
-    pub fn new(config: EncoderConfig) -> Result<Self> {
+    pub fn new(mut config: EncoderConfig) -> Result<Self> {
         validate_transparency(config.format, config.transparent)?;
+        config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
         let depth = adaptive_buffer_depth(config.width, config.height);
         let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
 
@@ -550,6 +584,9 @@ impl ParallelEncoder {
                 match config.format {
                     ExportFormat::Mp4 => {
                         match config.video_encoder {
+                            VideoEncoder::Auto => {
+                                unreachable!("automatic video encoder must be resolved before use")
+                            }
                             VideoEncoder::Libx264 => {
                                 cmd.arg("-c:v")
                                     .arg("libx264")
@@ -600,7 +637,9 @@ impl ParallelEncoder {
                                 cmd.arg("-vf")
                                     .arg("format=nv12,hwupload")
                                     .arg("-c:v")
-                                    .arg("h264_vaapi");
+                                    .arg("h264_vaapi")
+                                    .arg("-qp")
+                                    .arg(config.crf.to_string());
                             }
                         }
 
@@ -735,7 +774,28 @@ impl ParallelEncoder {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExportFormat, png_pixels, validate_transparency};
+    use super::{
+        ExportFormat, VideoEncoder, png_pixels, select_best_encoder, validate_transparency,
+    };
+
+    #[test]
+    fn automatic_selection_uses_the_first_working_hardware_encoder_or_software() {
+        let available = [
+            VideoEncoder::Libx264,
+            VideoEncoder::H264Nvenc,
+            VideoEncoder::H264Qsv,
+            VideoEncoder::H264Vaapi,
+        ];
+
+        assert_eq!(
+            select_best_encoder(&available, |encoder| encoder == VideoEncoder::H264Qsv),
+            VideoEncoder::H264Qsv
+        );
+        assert_eq!(
+            select_best_encoder(&available, |encoder| encoder == VideoEncoder::H264Vaapi),
+            VideoEncoder::Libx264
+        );
+    }
 
     #[test]
     fn opaque_png_frames_drop_alpha_before_rgb_encoding() {

@@ -220,7 +220,7 @@ def budget_violations(result: dict[str, Any], budget: dict[str, float]) -> list[
     return violations
 
 
-def parse_export_timings(log_path: Path) -> dict[str, float]:
+def parse_export_metrics(log_path: Path) -> dict[str, Any]:
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
         marker = next(line for line in reversed(lines) if line.startswith(EXPORT_TIMING_PREFIX))
@@ -228,7 +228,10 @@ def parse_export_timings(log_path: Path) -> dict[str, float]:
         timings = {phase: float(fields[phase]) for phase in EXPORT_PHASES}
         if any(not math.isfinite(value) or value < 0 for value in timings.values()):
             raise ValueError("phase timings must be finite and non-negative")
-        return timings
+        encoder = fields["encoder"]
+        if not encoder:
+            raise ValueError("encoder must not be empty")
+        return {"encoder": encoder, "phase_timings_ms": timings}
     except (OSError, KeyError, StopIteration, ValueError) as error:
         raise BenchmarkFailure(
             f"export did not report valid phase timings in {log_path}"
@@ -269,7 +272,7 @@ def validate_artifacts(
         artifact = artifact_dir / "benchmark.mp4"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise BenchmarkFailure(f"export did not produce a non-empty {artifact}")
-        return {"phase_timings_ms": parse_export_timings(artifact_dir / "command.log")}
+        return parse_export_metrics(artifact_dir / "command.log")
     return None
 
 
@@ -334,6 +337,7 @@ def main() -> int:
             peak_rss_values = []
             memory_scope = "unavailable"
             export_phase_samples = {phase: [] for phase in EXPORT_PHASES}
+            export_encoder = None
 
             for sample_index in range(warmups + samples):
                 is_warmup = sample_index < warmups
@@ -361,6 +365,13 @@ def main() -> int:
                 if is_warmup:
                     continue
                 if scenario == "export" and artifact_report is not None:
+                    sample_encoder = artifact_report["encoder"]
+                    if export_encoder is not None and sample_encoder != export_encoder:
+                        raise BenchmarkFailure(
+                            f"export encoder changed between samples: "
+                            f"{export_encoder} -> {sample_encoder}"
+                        )
+                    export_encoder = sample_encoder
                     for phase, value in artifact_report["phase_timings_ms"].items():
                         export_phase_samples[phase].append(float(value))
                 process_timings.append(elapsed_ms)
@@ -397,6 +408,7 @@ def main() -> int:
                 "budget": scenario_config["budget"],
             }
             if scenario == "export":
+                result["encoder"] = export_encoder
                 result["phases"] = {
                     phase: {
                         "timings_ms": [round(value, 3) for value in values],
@@ -414,10 +426,15 @@ def main() -> int:
                 if result["fps_at_p95"] is not None
                 else ""
             )
+            encoder = (
+                f" encoder={result['encoder']}"
+                if scenario == "export" and result.get("encoder")
+                else ""
+            )
             print(
                 f"{scenario}: p50={result['p50_ms']:.1f}ms "
                 f"p95={result['p95_ms']:.1f}ms "
-                f"RSS={result['peak_rss_mb'] or 0:.1f}MiB{throughput} "
+                f"RSS={result['peak_rss_mb'] or 0:.1f}MiB{throughput}{encoder} "
                 f"[{result['status']}]"
             )
     except (OSError, KeyError, TypeError, ValueError, BenchmarkFailure) as error:

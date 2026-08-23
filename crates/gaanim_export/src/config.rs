@@ -139,7 +139,7 @@ impl Default for ExportConfig {
             end_time: None,
             crf: 18,
             encoding_speed: EncodingSpeed::Balanced,
-            video_encoder: VideoEncoder::Libx264,
+            video_encoder: VideoEncoder::Auto,
             headless: false,
             audio_tracks: Vec::new(),
             telemetry: None,
@@ -222,10 +222,16 @@ mod tests {
     use crate::encoder::VideoEncoder;
 
     #[test]
-    fn presets_preserve_the_requested_software_encoder() {
-        let config = ExportConfig::default().apply_presets();
+    fn presets_preserve_automatic_and_explicit_encoder_selection() {
+        let automatic = ExportConfig::default().apply_presets();
+        let explicit = ExportConfig {
+            video_encoder: VideoEncoder::Libx264,
+            ..ExportConfig::default()
+        }
+        .apply_presets();
 
-        assert_eq!(config.video_encoder, VideoEncoder::Libx264);
+        assert_eq!(automatic.video_encoder, VideoEncoder::Auto);
+        assert_eq!(explicit.video_encoder, VideoEncoder::Libx264);
     }
 
     #[test]

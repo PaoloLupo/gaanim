@@ -683,9 +683,12 @@ gaanim export overlay.py --output overlay.webm --transparent
 
 `--quality` ajusta el FPS, la compresión y la velocidad de codificación; no
 modifica el ancho ni el alto. La exportación conserva siempre la resolución
-definida por la escena. `--transparent` conserva el canal alpha en WebM, WebP
-y secuencias PNG; MP4 y GIF lo rechazan. La escena debe usar un fondo con alpha,
-por ejemplo `background="#00000000"`.
+definida por la escena. MP4 prueba automáticamente NVENC, AMF y QSV; usa el
+primer encoder hardware que complete un probe real y cae a `libx264` solo si
+ninguno funciona. VAAPI requiere selección explícita desde la API Rust porque
+un driver defectuoso puede bloquear la GPU completa. `--transparent` conserva
+el canal alpha en WebM, WebP y secuencias PNG; MP4 y GIF lo rechazan. La escena
+debe usar un fondo con alpha, por ejemplo `background="#00000000"`.
 
 Run a script through the Gaanim application:
 
