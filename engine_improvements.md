@@ -22,9 +22,8 @@ La principal brecha ya no es la cantidad de objetos disponibles. Es la diferenci
   `ffmpeg`/`ffprobe`; los cinco formatos ya tienen smoke E2E en Ubuntu/Windows;
 - el wheel distribuible es deliberadamente una capa de autoría `py3-none-any`, sin
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
-- existe un harness reproducible e informativo para reload, seek, preview y exportación,
-  con p50/p95, throughput y RSS; falta calibrarlo y reemplazar el proxy frío de reload
-  por instrumentación persistente del editor;
+- existe un harness reproducible e informativo para reload persistente, seek, preview
+  y exportación, con p50/p95, throughput y RSS; falta calibrarlo en runners estables;
 - CI cubre Ubuntu y Windows, mientras el release instalable solo empaqueta Windows.
 
 La recomendación para 0.2 es un ciclo de **convergencia y hardening**. Añadir más
@@ -192,11 +191,11 @@ El timeline usa índices y snapshots, el video tiene decodificador secuencial y 
 retiene fragmentos. `tests/benchmark_runtime.py` ya produce evidencia comparable para
 cuatro escenarios y el workflow semanal la conserva sin bloquear. La primera medición
 smoke confirmó además que el seek disperso es sensiblemente más costoso que una secuencia
-densa. El escenario `reload` todavía mide arranque frío más `gaanim check`, no el ciclo
-persistente del watcher.
+densa. Para `reload`, Python y el mundo ECS se inicializan una vez y la muestra mide la
+siguiente carga y replay dentro del mismo proceso.
 
-**Mejora:** acumular historia del perfil estándar, calibrar sus límites por plataforma e
-instrumentar el hot reload real dentro del proceso. Separar después CPU, GPU y FFmpeg para
+**Mejora:** acumular historia del perfil estándar y calibrar sus límites por plataforma.
+Separar después CPU, GPU y FFmpeg para
 que una regresión señale su subsistema, no solo el tiempo end-to-end.
 
 **Criterio de salida:** presupuestos versionados y comparables; las regresiones se
@@ -312,5 +311,5 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 La oportunidad diferencial de Gaanim es ofrecer **autoría Python expresiva con un motor
 Rust/GPU determinista y seekable**. El baseline de contrato ya cubre autoría, ejecución,
 snapshots y exportación. La medición p50/p95 y RSS ya tiene una primera ruta reproducible;
-la siguiente prioridad es calibrarla en CI, medir el hot reload persistente, endurecer los
+la siguiente prioridad es calibrarla en CI, endurecer los
 releases nativos y hacer explícita la estabilidad de cada familia de API.

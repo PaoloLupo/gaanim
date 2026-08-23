@@ -20,6 +20,7 @@ use std::sync::mpsc;
 mod file_watcher;
 mod hot_reload;
 mod python_home;
+mod runtime_benchmark;
 mod script_runner;
 
 use hot_reload::{
@@ -28,6 +29,9 @@ use hot_reload::{
 };
 
 fn main() {
+    if runtime_benchmark::dispatch_reload_benchmark_mode() {
+        return;
+    }
     if dispatch_python_api_validation_mode() {
         return;
     }

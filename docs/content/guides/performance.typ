@@ -33,8 +33,9 @@ marcar la métrica como no disponible.
 
 = Escenarios
 
-- `reload` ejecuta actualmente un arranque frío más `gaanim check`; es un proxy
-  conservador hasta instrumentar el hot reload persistente dentro del editor.
+- `reload` inicializa una vez Python y el mundo ECS, y mide una segunda carga del
+  script más su replay sobre ese mismo proceso. El tiempo total del proceso queda
+  aparte como diagnóstico.
 - `seek` captura timestamps dispersos en orden determinista mediante el timeline,
   renderer GPU y readback PNG.
 - `preview` captura una secuencia densa a 1920x1080 y reporta frames por segundo.

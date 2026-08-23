@@ -161,7 +161,13 @@ def scenario_command(
     artifact_dir: Path,
 ) -> list[str]:
     if scenario == "reload":
-        return [str(executable), "check", str(scene)]
+        return [
+            str(executable),
+            "--benchmark-reload",
+            str(scene),
+            "--output",
+            str(artifact_dir / "reload.json"),
+        ]
     if scenario in {"seek", "preview"}:
         return [
             str(executable),
@@ -206,7 +212,23 @@ def budget_violations(result: dict[str, Any], budget: dict[str, float]) -> list[
     return violations
 
 
-def validate_artifacts(scenario: str, artifact_dir: Path, frames: int) -> None:
+def validate_artifacts(
+    scenario: str, artifact_dir: Path, frames: int
+) -> dict[str, Any] | None:
+    if scenario == "reload":
+        report_path = artifact_dir / "reload.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if report.get("schema_version") != 1:
+                raise ValueError("unsupported reload report schema")
+            for field in ("python_ms", "replay_ms", "total_ms"):
+                if not math.isfinite(float(report[field])) or report[field] < 0:
+                    raise ValueError(f"invalid {field}")
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise BenchmarkFailure(
+                f"reload did not produce a valid {report_path}"
+            ) from error
+        return report
     if scenario in {"seek", "preview"}:
         manifest_path = artifact_dir / "manifest.json"
         try:
@@ -224,6 +246,7 @@ def validate_artifacts(scenario: str, artifact_dir: Path, frames: int) -> None:
         artifact = artifact_dir / "benchmark.mp4"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise BenchmarkFailure(f"export did not produce a non-empty {artifact}")
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -283,6 +306,7 @@ def main() -> int:
             warmups = int(profile_config["warmups"])
             frames = int(scenario_config["frames"])
             timings = []
+            process_timings = []
             peak_rss_values = []
             memory_scope = "unavailable"
 
@@ -307,11 +331,16 @@ def main() -> int:
                     timeout_seconds=float(scenario_config["timeout_seconds"]),
                     log_path=artifact_dir / "command.log",
                 )
-                validate_artifacts(scenario, artifact_dir, frames)
+                artifact_report = validate_artifacts(scenario, artifact_dir, frames)
                 memory_scope = sampled_scope
                 if is_warmup:
                     continue
-                timings.append(elapsed_ms)
+                process_timings.append(elapsed_ms)
+                timings.append(
+                    float(artifact_report["total_ms"])
+                    if scenario == "reload" and artifact_report is not None
+                    else elapsed_ms
+                )
                 if peak_rss_mb is not None:
                     peak_rss_values.append(peak_rss_mb)
 
@@ -322,6 +351,9 @@ def main() -> int:
                 "warmups": warmups,
                 "frames_per_sample": frames if scenario != "reload" else None,
                 "timings_ms": [round(value, 3) for value in timings],
+                "process_timings_ms": [round(value, 3) for value in process_timings]
+                if scenario == "reload"
+                else None,
                 "p50_ms": round(p50_ms, 3),
                 "p95_ms": round(p95_ms, 3),
                 "peak_rss_mb": round(max(peak_rss_values), 3)

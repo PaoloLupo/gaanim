@@ -31,9 +31,8 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 
 - The executable is the runtime; never benchmark a plain Python import of the
   authoring wheel.
-- Treat `reload` as a cold-start proxy until the report and documentation say
-  persistent hot reload is instrumented. Treat `preview` as headless dense
-  capture, not window/vsync latency.
+- Treat `reload` as persistent scene loading plus ECS replay inside one native
+  process. Treat `preview` as headless dense capture, not window/vsync latency.
 - Budgets remain informational unless the user or CI explicitly requests
   `--enforce`. Do not tighten them from one laptop or one sample.
 - Use `--capture-only` for benchmark snapshots. Never bless or overwrite visual

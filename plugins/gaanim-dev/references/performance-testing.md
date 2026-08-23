@@ -15,14 +15,15 @@ generated artifacts remain under `target/performance/artifacts/`.
 
 | Scenario | Current observable operation |
 |---|---|
-| `reload` | Cold executable startup plus Python scene load and `gaanim check`; not yet persistent watcher reload |
+| `reload` | Second Python scene load plus ECS replay after warming the same interpreter and world |
 | `seek` | Deterministically dispersed exact seeks through timeline, GPU rendering, readback, and PNG capture |
 | `preview` | Dense 1920x1080 headless capture; excludes window presentation and vsync |
 | `export` | H.264 draft export; `standard` renders 300 frames at 1920x1080 |
 
-The report records p50/p95 command latency, FPS at those latency percentiles,
-and peak RSS when available. Linux samples the process tree, including FFmpeg;
-other platforms may report a narrower scope or no memory value.
+The report records p50/p95 scenario latency, FPS at those latency percentiles,
+and peak RSS when available. Reload latency excludes process startup; its raw
+process duration remains diagnostic. Linux samples the process tree, including
+FFmpeg; other platforms may report a narrower scope or no memory value.
 
 ## Budget policy
 
