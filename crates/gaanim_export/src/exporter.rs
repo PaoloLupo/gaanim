@@ -91,6 +91,20 @@ struct ExportPipeline {
     pub export_height: u32,
     pub resize_filter: image::imageops::FilterType,
     pub telemetry: Option<ExportTelemetry>,
+    pub result_tx: SyncSender<Result<()>>,
+    pub result_sent: bool,
+}
+
+fn publish_export_result(
+    result_tx: &SyncSender<Result<()>>,
+    result_sent: &mut bool,
+    result: Result<()>,
+) {
+    if *result_sent {
+        return;
+    }
+    let _ = result_tx.send(result);
+    *result_sent = true;
 }
 
 #[derive(Resource)]
@@ -125,7 +139,9 @@ fn export_pipeline_system(
         match rx.try_recv() {
             Ok(frame_data) => {
                 if let Err(e) = pipeline.encoder.push_frame(frame_data) {
+                    export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
                     bevy::prelude::error!("Encoder error: {}", e);
+                    publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
                     return;
                 }
@@ -156,6 +172,13 @@ fn export_pipeline_system(
                     if let Err(e) = pipeline.encoder.finalize() {
                         export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
                         bevy::prelude::error!("Encoder finalization error: {}", e);
+                        publish_export_result(
+                            &pipeline.result_tx,
+                            &mut pipeline.result_sent,
+                            Err(e),
+                        );
+                        exit.write(AppExit::Success);
+                        return;
                     }
 
                     let duration = pipeline.start_time.elapsed();
@@ -175,6 +198,7 @@ fn export_pipeline_system(
                         "------------------------------------------------------------",
                     );
 
+                    publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Ok(()));
                     exit.write(AppExit::Success);
                     return;
                 }
@@ -186,7 +210,10 @@ fn export_pipeline_system(
                 return;
             }
             Err(TryRecvError::Disconnected) => {
-                bevy::prelude::error!("GPU frame channel disconnected");
+                let error = ExportError::Capture("GPU frame channel disconnected".to_string());
+                export_log(&pipeline.telemetry, format!("  ERROR: {error}"));
+                bevy::prelude::error!("{error}");
+                publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(error));
                 exit.write(AppExit::Success);
                 return;
             }
@@ -413,6 +440,7 @@ where
 
     // Bounded channel: at most 4 pending GPU frames to prevent memory blow-up
     let (tx, rx) = sync_channel::<Vec<u8>>(4);
+    let (result_tx, result_rx) = sync_channel::<Result<()>>(1);
 
     app.insert_resource(ExportPipeline {
         encoder,
@@ -430,13 +458,20 @@ where
         export_height: config.height,
         resize_filter,
         telemetry,
+        result_tx,
+        result_sent: false,
     });
 
     app.add_systems(Update, export_pipeline_system);
 
     app.run();
 
-    Ok(())
+    match result_rx.try_recv() {
+        Ok(result) => result,
+        Err(_) => Err(ExportError::General(
+            "export pipeline exited without reporting a result".to_string(),
+        )),
+    }
 }
 
 /// Headless GPU-direct export: bypasses Bevy's render graph and winit entirely.
@@ -615,10 +650,10 @@ where
     pb.finish_with_message("Done!");
     export_log(&telemetry, "  Finalizing video file...");
 
-    if let Err(e) = encoder.finalize() {
+    encoder.finalize().inspect_err(|e| {
         export_log(&telemetry, format!("  ERROR: {e}"));
         bevy::prelude::error!("Encoder finalization error: {}", e);
-    }
+    })?;
 
     let duration = start_time.elapsed();
     export_log(
@@ -1050,6 +1085,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_result_channel_preserves_the_first_failure() {
+        let (result_tx, result_rx) = sync_channel(1);
+        let mut result_sent = false;
+
+        publish_export_result(
+            &result_tx,
+            &mut result_sent,
+            Err(ExportError::Capture("encoder failed".to_string())),
+        );
+        publish_export_result(&result_tx, &mut result_sent, Ok(()));
+
+        let error = result_rx.recv().unwrap().unwrap_err();
+        assert!(error.to_string().contains("encoder failed"));
+    }
 
     #[test]
     fn direct_capture_scales_a_canvas_down_to_a_thumbnail() {

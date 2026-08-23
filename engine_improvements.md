@@ -179,7 +179,9 @@ sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM. WebM, WebP
 también decodifican una escena transparente y verifican su canal alpha real. Los exports
 iniciados desde un proyecto corren fuera del proceso del editor para no alterar su viewport;
 cancelarlos termina el worker y su árbol de procesos. Un watchdog corta workers sin progreso
-y los probes de FFmpeg tienen un límite de tiempo acotado.
+y los probes de FFmpeg tienen un límite de tiempo acotado. Los fallos de captura, canal y
+finalización del encoder se propagan al editor y al código de salida del CLI, sin reportar
+éxito sobre un archivo incompleto.
 
 **Siguiente mejora:** mantener `libx264` como ruta estable por defecto y probar los
 encoders hardware solo como opt-in acotado, y cubrir por separado export GPU, CPU y 3D
