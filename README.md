@@ -171,6 +171,7 @@ ejecutable:
 
 ```powershell
 gaanim export . --output output.mp4 --quality standard
+gaanim export . --output output.mp4 --encoder nvenc
 gaanim export . --output overlay.webm --transparent
 ```
 
@@ -179,8 +180,11 @@ video requiere FFmpeg disponible en `PATH`; si no está instalado, use primero
 una secuencia PNG o instale FFmpeg según su plataforma.
 Para MP4, Gaanim prueba automáticamente NVENC, AMF y QSV y usa el primer encoder
 hardware funcional. `libx264` queda como fallback cuando ninguno pasa el probe
-real; el editor muestra el encoder efectivo durante la exportación. VAAPI se
-mantiene como selección explícita en la API Rust: no se prueba automáticamente
+real; el editor muestra el encoder efectivo durante la exportación. Para exigir
+una implementación concreta, use `--encoder libx264|nvenc|amf|qsv|vaapi` o el
+selector del editor. Una selección explícita nunca cae a otro encoder: si el
+hardware o driver no funciona, la exportación falla. `--encoder auto` conserva
+el probe y fallback anteriores. VAAPI es explícito y muestra una advertencia
 porque un fallo del driver puede bloquear la GPU completa, fuera del aislamiento
 que puede ofrecer Gaanim.
 `--transparent` está disponible para WebM, WebP y PNG; MP4 y GIF se rechazan

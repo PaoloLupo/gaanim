@@ -79,15 +79,15 @@ validate-python-api:
     cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
 
 # Export every supported format plus one isolated 3D MP4 and inspect their contracts.
-test-exports:
+test-exports encoder="libx264":
     cargo build -p gaanim_editor --bin gaanim-core
-    {{ system_python }} tests/validate_exports.py --output target/export-smoke
+    {{ system_python }} tests/validate_exports.py --output target/export-smoke --encoder {{ encoder }}
 
 # Measure runtime p50/p95, throughput, and peak memory using the native release executable.
 # Profiles: smoke (fast wiring check) or standard (300-frame export and stable sample counts).
-benchmark profile="smoke":
+benchmark profile="smoke" encoder="libx264":
     cargo build -p gaanim_editor --bin gaanim-core --release
-    {{ system_python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }}
+    {{ system_python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }}
 
 # ---- Run --------------------------------------------------------------------
 

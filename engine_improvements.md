@@ -172,7 +172,7 @@ programada y antes de release.
 **Criterio de salida:** cada subsistema de render tiene al menos una escena gated; la
 suite completa tiene dueño, frecuencia y tiempo máximo documentados.
 
-### 3. Exportación y media dependen del entorno — smoke cerrado, hardening pendiente
+### 3. Exportación y media dependen del entorno — contrato encoder cerrado
 
 FFmpeg, ffprobe, codecs, GPU y drivers varían por plataforma. La matriz CI ya produce y
 sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM. WebM, WebP y PNG
@@ -186,10 +186,13 @@ finalización del encoder se propagan al editor y al código de salida del CLI, 
 éxito sobre un archivo incompleto.
 
 MP4 selecciona y valida automáticamente NVENC, AMF o QSV, con `libx264` como
-fallback explícito cuando ningún probe real funciona. VAAPI permanece disponible
-solo mediante selección Rust explícita: probarlo automáticamente puede colgar el
-driver del kernel y no puede aislarse a nivel de proceso. El benchmark registra el
-encoder efectivo y separa render GPU, backpressure, trabajo activo y finalización.
+fallback cuando ningún probe real funciona. CLI, editor, worker aislado, smoke E2E
+y benchmark aceptan `auto|libx264|nvenc|amf|qsv|vaapi`. Una selección concreta es
+estricta y falla si no está disponible; el fallback solo pertenece a `auto`.
+VAAPI nunca participa en la selección automática: probarlo puede colgar el driver
+del kernel y no puede aislarse a nivel de proceso. El benchmark registra encoder
+solicitado y efectivo, además de render GPU, backpressure, trabajo activo y
+finalización.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.

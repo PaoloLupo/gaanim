@@ -44,6 +44,17 @@ class RuntimeBenchmarkTests(unittest.TestCase):
         self.assertIn("--capture-only", command)
         self.assertNotIn("--bless", command)
 
+    def test_export_scenario_forwards_the_requested_encoder(self) -> None:
+        command = benchmark_runtime.scenario_command(
+            "export",
+            executable=Path("gaanim-core"),
+            scene=Path("scene.py"),
+            artifact_dir=Path("target/performance/export"),
+            encoder="nvenc",
+        )
+
+        self.assertEqual(command[-2:], ["--encoder", "nvenc"])
+
     def test_capture_artifact_validation_requires_the_expected_frame_count(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             artifact_dir = Path(temporary)

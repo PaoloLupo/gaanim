@@ -12,6 +12,7 @@
 
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
+use gaanim_export::encoder::VideoEncoder;
 use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -136,6 +137,7 @@ fn dispatch_export_mode() -> bool {
     let mut script = None;
     let mut output = None;
     let mut quality = "standard".to_string();
+    let mut encoder = VideoEncoder::Auto;
     let mut transparent = false;
     let mut index = 1;
     while index < args.len() {
@@ -147,6 +149,19 @@ fn dispatch_export_mode() -> bool {
             "--quality" => {
                 index += 1;
                 quality = args.get(index).cloned().unwrap_or_default();
+            }
+            "--encoder" => {
+                index += 1;
+                encoder = args
+                    .get(index)
+                    .and_then(|value| VideoEncoder::parse_arg(value))
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "gaanim export: encoder must be {}",
+                            VideoEncoder::ARG_VALUES.join(", ")
+                        );
+                        std::process::exit(2);
+                    });
             }
             "--transparent" => transparent = true,
             value if value.starts_with('-') => {
@@ -164,7 +179,7 @@ fn dispatch_export_mode() -> bool {
     let script = script
         .and_then(|path| gaanim_project::resolve_entry(&path).ok())
         .unwrap_or_else(|| {
-            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--transparent]");
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]");
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {
@@ -188,11 +203,16 @@ fn dispatch_export_mode() -> bool {
         eprintln!("gaanim export: --transparent requires WebM, WebP, or PNG output");
         std::process::exit(2);
     }
+    if format != "mp4" && encoder != VideoEncoder::Auto {
+        eprintln!("gaanim export: --encoder requires MP4 output");
+        std::process::exit(2);
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
         quality,
         format,
+        encoder,
         transparent,
     }) {
         eprintln!("gaanim export: {error}");
@@ -225,13 +245,14 @@ struct ExportWorkerArgs {
     output: String,
     quality: String,
     format: String,
+    encoder: VideoEncoder,
     transparent: bool,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
-    if !(args.len() == 4 || args.len() == 5 && args[4] == "--transparent") {
+    if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png> [--transparent]"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]"
                 .to_string(),
         );
     }
@@ -241,12 +262,34 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     if !matches!(args[3].as_str(), "mp4" | "webm" | "webp" | "gif" | "png") {
         return Err(format!("unknown export format '{}'", args[3]));
     }
+    let mut encoder = VideoEncoder::Auto;
+    let mut transparent = false;
+    let mut index = 4;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--transparent" => transparent = true,
+            "--encoder" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--encoder requires a value".to_string())?;
+                encoder = VideoEncoder::parse_arg(value)
+                    .ok_or_else(|| format!("unknown export encoder '{value}'"))?;
+            }
+            value => return Err(format!("unknown export worker option '{value}'")),
+        }
+        index += 1;
+    }
+    if args[3] != "mp4" && encoder != VideoEncoder::Auto {
+        return Err("--encoder requires MP4 output".to_string());
+    }
     Ok(ExportWorkerArgs {
         script: PathBuf::from(&args[0]),
         output: args[1].clone(),
         quality: args[2].clone(),
         format: args[3].clone(),
-        transparent: args.len() == 5,
+        encoder,
+        transparent,
     })
 }
 
@@ -296,6 +339,7 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     config.height = canvas.height;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
+    config.video_encoder = worker.encoder;
     if worker.transparent {
         config.transparent = true;
     }
@@ -1053,7 +1097,7 @@ fn parse_args() -> LaunchArgs {
         eprintln!("  gaanim");
         eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
         eprintln!("  gaanim init <video|slides> [DIRECTORY] [--force]");
-        eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE>");
+        eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--encoder <ENCODER>]");
         eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
         std::process::exit(0);
@@ -1142,6 +1186,7 @@ mod tests {
                 output: "exports/output.mp4".to_string(),
                 quality: "standard".to_string(),
                 format: "mp4".to_string(),
+                encoder: VideoEncoder::Auto,
                 transparent: false,
             }
         );
@@ -1149,6 +1194,19 @@ mod tests {
         let transparent =
             ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);
         assert!(parse_export_worker_args(&transparent).unwrap().transparent);
+        let hardware = [
+            "scene.py",
+            "output.mp4",
+            "draft",
+            "mp4",
+            "--encoder",
+            "nvenc",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            parse_export_worker_args(&hardware).unwrap().encoder,
+            VideoEncoder::H264Nvenc
+        );
     }
 
     #[test]
@@ -1157,6 +1215,9 @@ mod tests {
         assert!(parse_export_worker_args(&quality).is_err());
         let format = ["scene.py", "out.avi", "draft", "avi"].map(str::to_string);
         assert!(parse_export_worker_args(&format).is_err());
+        let encoder =
+            ["scene.py", "out.mp4", "draft", "mp4", "--encoder", "magic"].map(str::to_string);
+        assert!(parse_export_worker_args(&encoder).is_err());
     }
 
     #[test]

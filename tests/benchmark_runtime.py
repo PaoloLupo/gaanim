@@ -21,6 +21,14 @@ from typing import Any
 
 
 SCENARIOS = ("reload", "seek", "preview", "export")
+ENCODERS = ("auto", "libx264", "nvenc", "amf", "qsv", "vaapi")
+EXPECTED_ENCODERS = {
+    "libx264": "libx264",
+    "nvenc": "h264_nvenc",
+    "amf": "h264_amf",
+    "qsv": "h264_qsv",
+    "vaapi": "h264_vaapi",
+}
 POLL_SECONDS = 0.025
 EXPORT_TIMING_PREFIX = "GAANIM_EXPORT_TIMINGS "
 EXPORT_PHASES = (
@@ -167,6 +175,7 @@ def scenario_command(
     executable: Path,
     scene: Path,
     artifact_dir: Path,
+    encoder: str = "libx264",
 ) -> list[str]:
     if scenario == "reload":
         return [
@@ -196,6 +205,8 @@ def scenario_command(
             str(artifact_dir / "benchmark.mp4"),
             "--quality",
             "draft",
+            "--encoder",
+            encoder,
         ]
     raise ValueError(f"unknown scenario: {scenario}")
 
@@ -288,6 +299,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("target/performance"))
     parser.add_argument("--profile", choices=("smoke", "standard"), default="smoke")
     parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=SCENARIOS)
+    parser.add_argument("--encoder", choices=ENCODERS, default="libx264")
     parser.add_argument("--enforce", action="store_true")
     return parser.parse_args()
 
@@ -352,6 +364,7 @@ def main() -> int:
                     executable=executable,
                     scene=scene,
                     artifact_dir=artifact_dir,
+                    encoder=args.encoder,
                 )
                 elapsed_ms, peak_rss_mb, sampled_scope = run_sample(
                     command,
@@ -361,6 +374,13 @@ def main() -> int:
                     log_path=artifact_dir / "command.log",
                 )
                 artifact_report = validate_artifacts(scenario, artifact_dir, frames)
+                if scenario == "export" and artifact_report is not None:
+                    actual_encoder = artifact_report["encoder"]
+                    expected_encoder = EXPECTED_ENCODERS.get(args.encoder)
+                    if expected_encoder is not None and actual_encoder != expected_encoder:
+                        raise BenchmarkFailure(
+                            f"export requested {args.encoder} but reported {actual_encoder}"
+                        )
                 memory_scope = sampled_scope
                 if is_warmup:
                     continue
@@ -408,6 +428,7 @@ def main() -> int:
                 "budget": scenario_config["budget"],
             }
             if scenario == "export":
+                result["requested_encoder"] = args.encoder
                 result["encoder"] = export_encoder
                 result["phases"] = {
                     phase: {
@@ -453,6 +474,7 @@ def main() -> int:
         },
         "executable": str(executable),
         "scene": str(scene),
+        "requested_encoder": args.encoder,
         "enforced": args.enforce,
         "scenarios": results,
     }

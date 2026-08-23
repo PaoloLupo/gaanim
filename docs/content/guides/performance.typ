@@ -26,6 +26,11 @@ medición comparable usada por el workflow programado:
 just benchmark standard
 ```
 
+Ambos usan `libx264` por defecto para mantener una referencia determinista. Para
+medir un encoder hardware concreto, páselo como segundo argumento, por ejemplo
+`just benchmark smoke nvenc`. La selección es estricta: si NVENC no está
+disponible, el benchmark falla en vez de cambiar silenciosamente a software.
+
 El reporte `target/performance/runtime-benchmark.json` registra muestras,
 p50/p95, throughput y RSS máxima. En Linux la memoria incluye el árbol del
 proceso —también FFmpeg—; otras plataformas pueden informar solo el proceso o
@@ -44,13 +49,13 @@ marcar la métrica como no disponible.
   tiempo end-to-end, separa render GPU, espera por backpressure, trabajo activo
   de encode y drenaje/finalización. Como render y encode corren en paralelo,
   estas fases sirven para diagnóstico y no deben sumarse entre sí. El reporte
-  guarda también el encoder efectivo para no comparar hardware y software como
-  si fueran la misma configuración.
+  guarda tanto el encoder solicitado como el efectivo para no comparar hardware
+  y software como si fueran la misma configuración.
 
 Se puede acotar una investigación sin cambiar el archivo versionado:
 
 ```powershell
-python tests/benchmark_runtime.py --profile standard --scenarios seek preview
+python tests/benchmark_runtime.py --profile standard --scenarios seek preview --encoder libx264
 ```
 
 = Presupuestos informativos
@@ -66,4 +71,4 @@ python tests/benchmark_runtime.py --profile standard --enforce
 ```
 
 No se deben estrechar presupuestos a partir de una sola laptop. Compara siempre
-el mismo perfil, escena, plataforma y tipo de build (`--release`).
+el mismo perfil, escena, plataforma, tipo de build (`--release`) y encoder.

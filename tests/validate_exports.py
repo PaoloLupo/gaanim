@@ -25,6 +25,14 @@ VIDEO_FORMATS = {
 }
 ALL_FORMATS = (*VIDEO_FORMATS, "png")
 ALPHA_FORMATS = {"webm", "webp", "png"}
+ENCODERS = ("auto", "libx264", "nvenc", "amf", "qsv", "vaapi")
+ENCODER_LABELS = {
+    "libx264": "CPU (libx264)",
+    "nvenc": "NVIDIA (NVENC)",
+    "amf": "AMD (AMF)",
+    "qsv": "Intel (QSV)",
+    "vaapi": "VAAPI (Linux)",
+}
 WIDTH = 320
 HEIGHT = 180
 MIN_DURATION = 0.45
@@ -34,6 +42,27 @@ COMMAND_TIMEOUT_SECONDS = 120
 
 class SmokeFailure(RuntimeError):
     """An exported artifact did not satisfy its public contract."""
+
+
+def reported_encoder(output: str, requested: str) -> str:
+    label = next(
+        (
+            line.split("Encoder:", 1)[1].strip()
+            for line in output.splitlines()
+            if "Encoder:" in line
+        ),
+        None,
+    )
+    if label is None:
+        raise SmokeFailure("MP4 export did not report its effective encoder")
+    if requested == "auto":
+        if label not in ENCODER_LABELS.values():
+            raise SmokeFailure(f"MP4 export reported unknown encoder: {label}")
+    elif label != ENCODER_LABELS[requested]:
+        raise SmokeFailure(
+            f"MP4 export requested {requested} but reported {label}"
+        )
+    return label
 
 
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
@@ -249,6 +278,7 @@ def export_format(
     output_dir: Path,
     format_name: str,
     audio_fixture: Path,
+    encoder: str,
     *,
     repo: Path,
 ) -> dict[str, Any]:
@@ -264,16 +294,19 @@ def export_format(
     else:
         environment.pop("GAANIM_EXPORT_SMOKE_AUDIO", None)
 
-    run(
-        [
-            str(executable),
-            "export",
-            str(scene),
-            "--output",
-            str(artifact),
-            "--quality",
-            "draft",
-        ],
+    command = [
+        str(executable),
+        "export",
+        str(scene),
+        "--output",
+        str(artifact),
+        "--quality",
+        "draft",
+    ]
+    if format_name == "mp4":
+        command.extend(("--encoder", encoder))
+    output = run(
+        command,
         cwd=repo,
         env=environment,
     )
@@ -296,18 +329,23 @@ def export_format(
     validate_duration(probe, artifact)
     if audio_codec := expected.get("audio"):
         require_stream(probe, "audio", audio_codec, artifact)
-    return {
+    report = {
         "format": format_name,
         "artifact": str(artifact),
         "bytes": artifact.stat().st_size,
         "probe": probe,
     }
+    if format_name == "mp4":
+        report["requested_encoder"] = encoder
+        report["encoder"] = reported_encoder(output, encoder)
+    return report
 
 
 def export_three_d_worker(
     executable: Path,
     scene: Path,
     output_dir: Path,
+    encoder: str,
     *,
     repo: Path,
 ) -> dict[str, Any]:
@@ -317,7 +355,7 @@ def export_three_d_worker(
     environment.pop("GAANIM_EXPORT_SMOKE_AUDIO", None)
     environment["GAANIM_EXPORT_WORKER"] = "1"
 
-    run(
+    output = run(
         [
             str(executable),
             "--export-worker",
@@ -325,6 +363,8 @@ def export_three_d_worker(
             str(artifact),
             "draft",
             "mp4",
+            "--encoder",
+            encoder,
         ],
         cwd=repo,
         env=environment,
@@ -337,6 +377,8 @@ def export_three_d_worker(
     validate_dimensions(video, artifact)
     return {
         "mode": "isolated-3d-worker",
+        "requested_encoder": encoder,
+        "encoder": reported_encoder(output, encoder),
         "artifact": str(artifact),
         "bytes": artifact.stat().st_size,
         "probe": probe,
@@ -355,6 +397,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--formats", nargs="+", choices=ALL_FORMATS, default=ALL_FORMATS)
+    parser.add_argument("--encoder", choices=ENCODERS, default="libx264")
     return parser.parse_args()
 
 
@@ -401,6 +444,7 @@ def main() -> int:
                 output_dir,
                 format_name,
                 audio_fixture,
+                args.encoder,
                 repo=repo,
             )
             for format_name in args.formats
@@ -421,6 +465,7 @@ def main() -> int:
                 executable,
                 three_d_scene,
                 output_dir,
+                args.encoder,
                 repo=repo,
             )
             if "mp4" in args.formats
@@ -433,7 +478,12 @@ def main() -> int:
     report_path = output_dir / "export-smoke-report.json"
     report_path.write_text(
         json.dumps(
-            {"formats": reports, "alpha": alpha_reports, "three_d": three_d_report},
+            {
+                "requested_encoder": args.encoder,
+                "formats": reports,
+                "alpha": alpha_reports,
+                "three_d": three_d_report,
+            },
             indent=2,
         ),
         encoding="utf-8",

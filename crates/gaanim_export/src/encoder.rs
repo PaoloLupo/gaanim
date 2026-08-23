@@ -54,6 +54,32 @@ pub enum VideoEncoder {
 }
 
 impl VideoEncoder {
+    pub const ARG_VALUES: &'static [&'static str] =
+        &["auto", "libx264", "nvenc", "amf", "qsv", "vaapi"];
+
+    pub fn arg_name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Libx264 => "libx264",
+            Self::H264Nvenc => "nvenc",
+            Self::H264Amf => "amf",
+            Self::H264Qsv => "qsv",
+            Self::H264Vaapi => "vaapi",
+        }
+    }
+
+    pub fn parse_arg(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(Self::Auto),
+            "libx264" => Some(Self::Libx264),
+            "nvenc" => Some(Self::H264Nvenc),
+            "amf" => Some(Self::H264Amf),
+            "qsv" => Some(Self::H264Qsv),
+            "vaapi" => Some(Self::H264Vaapi),
+            _ => None,
+        }
+    }
+
     pub fn ffmpeg_name(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -777,6 +803,23 @@ mod tests {
     use super::{
         ExportFormat, VideoEncoder, png_pixels, select_best_encoder, validate_transparency,
     };
+
+    #[test]
+    fn video_encoder_argument_names_round_trip() {
+        let encoders = [
+            VideoEncoder::Auto,
+            VideoEncoder::Libx264,
+            VideoEncoder::H264Nvenc,
+            VideoEncoder::H264Amf,
+            VideoEncoder::H264Qsv,
+            VideoEncoder::H264Vaapi,
+        ];
+
+        assert_eq!(VideoEncoder::ARG_VALUES.len(), encoders.len());
+        for encoder in encoders {
+            assert_eq!(VideoEncoder::parse_arg(encoder.arg_name()), Some(encoder));
+        }
+    }
 
     #[test]
     fn automatic_selection_uses_the_first_working_hardware_encoder_or_software() {

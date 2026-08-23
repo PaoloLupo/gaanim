@@ -678,6 +678,7 @@ without changing it:
 
 ```bash
 gaanim export my_animation.py --output output.webp --quality standard
+gaanim export my_animation.py --output output.mp4 --encoder nvenc
 gaanim export overlay.py --output overlay.webm --transparent
 ```
 
@@ -685,8 +686,10 @@ gaanim export overlay.py --output overlay.webm --transparent
 modifica el ancho ni el alto. La exportación conserva siempre la resolución
 definida por la escena. MP4 prueba automáticamente NVENC, AMF y QSV; usa el
 primer encoder hardware que complete un probe real y cae a `libx264` solo si
-ninguno funciona. VAAPI requiere selección explícita desde la API Rust porque
-un driver defectuoso puede bloquear la GPU completa. `--transparent` conserva
+ninguno funciona. `--encoder libx264|nvenc|amf|qsv|vaapi` exige una
+implementación concreta sin fallback; también está disponible en el editor.
+VAAPI es explícito porque un driver defectuoso puede bloquear la GPU completa.
+`--transparent` conserva
 el canal alpha en WebM, WebP y secuencias PNG; MP4 y GIF lo rechazan. La escena
 debe usar un fondo con alpha, por ejemplo `background="#00000000"`.
 

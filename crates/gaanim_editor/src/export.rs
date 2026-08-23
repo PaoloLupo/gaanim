@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_api::canvas::Canvas;
 use gaanim_api::export::export_canvas;
-use gaanim_export::encoder::{EncodingSpeed, ExportFormat};
+use gaanim_export::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use std::io::{BufRead, BufReader};
@@ -34,6 +34,7 @@ pub struct ExportState {
     pub dialog_open: bool,
     pub format: ExportFormat,
     pub quality: ExportQuality,
+    pub video_encoder: VideoEncoder,
     pub output_path: String,
     pub active: bool,
     pub show_complete: bool,
@@ -113,6 +114,7 @@ impl Default for ExportState {
             dialog_open: false,
             format: ExportFormat::Mp4,
             quality: ExportQuality::Standard,
+            video_encoder: VideoEncoder::Auto,
             output_path: "output.mp4".to_string(),
             active: false,
             show_complete: false,
@@ -340,6 +342,7 @@ pub fn export_dialog_system(
     // Collect all values BEFORE the button handlers (to avoid borrow issues)
     let mut current_format = state.format;
     let mut current_quality = state.quality;
+    let mut current_encoder = state.video_encoder;
     let mut current_output = state.output_path.clone();
     let has_replay = replay_stash.canvas.is_some();
     let scene_resolution = replay_stash
@@ -388,6 +391,35 @@ pub fn export_dialog_system(
                         );
                     });
             });
+            if current_format == ExportFormat::Mp4 {
+                ui.horizontal(|ui| {
+                    ui.label("Encoder:");
+                    egui::ComboBox::from_id_salt("export_encoder")
+                        .selected_text(current_encoder.display_name())
+                        .show_ui(ui, |ui| {
+                            for encoder in [
+                                VideoEncoder::Auto,
+                                VideoEncoder::Libx264,
+                                VideoEncoder::H264Nvenc,
+                                VideoEncoder::H264Amf,
+                                VideoEncoder::H264Qsv,
+                                VideoEncoder::H264Vaapi,
+                            ] {
+                                ui.selectable_value(
+                                    &mut current_encoder,
+                                    encoder,
+                                    encoder.display_name(),
+                                );
+                            }
+                        });
+                });
+                if current_encoder == VideoEncoder::H264Vaapi {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        "VAAPI is explicit-only: a driver failure can reset the GPU.",
+                    );
+                }
+            }
             ui.horizontal(|ui| {
                 ui.label("Output:");
                 ui.text_edit_singleline(&mut current_output);
@@ -413,6 +445,7 @@ pub fn export_dialog_system(
     // Apply state changes AFTER the egui closures (no borrow conflicts)
     state.format = current_format;
     state.quality = current_quality;
+    state.video_encoder = current_encoder;
     state.output_path = current_output;
 
     if trigger_cancel {
@@ -448,6 +481,11 @@ pub fn export_dialog_system(
             let out = out_path.to_string_lossy().into_owned();
             let fmt = state.format;
             let qual = state.quality;
+            let video_encoder = if fmt == ExportFormat::Mp4 {
+                state.video_encoder
+            } else {
+                VideoEncoder::Auto
+            };
             let progress = state.progress_shared.clone();
             let cancel_requested = state.cancel_requested.clone();
             let telemetry = ExportTelemetry::new();
@@ -482,7 +520,7 @@ pub fn export_dialog_system(
                         &project_dir,
                         &out,
                         qual,
-                        fmt,
+                        (fmt, video_encoder),
                         telemetry.clone(),
                         cancel_requested,
                     ),
@@ -499,6 +537,7 @@ pub fn export_dialog_system(
                         config.crf = qual.crf();
                         config.encoding_speed = qual.encoding_speed();
                         config.format = fmt;
+                        config.video_encoder = video_encoder;
                         config.headless = true;
                         config.telemetry = Some(telemetry.clone());
                         export_canvas(canvas, config).map_err(|error| error.to_string())
@@ -653,10 +692,11 @@ fn run_export_worker(
     project_dir: &std::path::Path,
     output_path: &str,
     quality: ExportQuality,
-    format: ExportFormat,
+    encoding: (ExportFormat, VideoEncoder),
     telemetry: ExportTelemetry,
     cancel_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
+    let (format, video_encoder) = encoding;
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the Gaanim executable: {error}"))?;
     let mut command = Command::new(executable);
@@ -666,6 +706,8 @@ fn run_export_worker(
         .arg(output_path)
         .arg(quality.arg())
         .arg(export_format_arg(format))
+        .arg("--encoder")
+        .arg(video_encoder.arg_name())
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
         .stdout(Stdio::piped())
