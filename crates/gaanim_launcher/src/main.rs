@@ -163,7 +163,9 @@ fn print_general_help() {
     println!("  gaanim");
     println!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
     println!("  gaanim init <video|slides> [DIRECTORY] [--force]");
-    println!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality <PRESET>]");
+    println!(
+        "  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality <PRESET>] [--transparent]"
+    );
     println!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
     println!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
 }

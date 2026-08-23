@@ -24,6 +24,7 @@ VIDEO_FORMATS = {
     "gif": {"video": "gif"},
 }
 ALL_FORMATS = (*VIDEO_FORMATS, "png")
+ALPHA_FORMATS = {"webm", "webp", "png"}
 WIDTH = 320
 HEIGHT = 180
 MIN_DURATION = 0.45
@@ -56,6 +57,29 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> 
         raise SmokeFailure(
             f"Command failed ({result.returncode}): {rendered}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return result.stdout
+
+
+def run_bytes(command: list[str], *, cwd: Path) -> bytes:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise SmokeFailure(
+            f"Command timed out after {COMMAND_TIMEOUT_SECONDS}s: "
+            f"{subprocess.list2cmdline(command)}"
+        ) from error
+    if result.returncode != 0:
+        raise SmokeFailure(
+            f"Command failed ({result.returncode}): "
+            f"{subprocess.list2cmdline(command)}\n"
+            f"stderr:\n{result.stderr.decode(errors='replace')}"
         )
     return result.stdout
 
@@ -148,6 +172,77 @@ def generate_audio_fixture(output: Path, *, cwd: Path) -> None:
     )
 
 
+def validate_alpha(artifact: Path, *, cwd: Path, format_name: str) -> None:
+    command = ["ffmpeg", "-v", "error"]
+    if format_name == "webm":
+        command.extend(["-c:v", "libvpx-vp9"])
+    command.extend(
+        [
+            "-i",
+            str(artifact),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1",
+        ]
+    )
+    rgba = run_bytes(command, cwd=cwd)
+    expected = WIDTH * HEIGHT * 4
+    if len(rgba) != expected:
+        raise SmokeFailure(
+            f"{artifact} decoded to {len(rgba)} RGBA bytes; expected {expected}"
+        )
+    corner_alpha = rgba[3]
+    center_alpha = rgba[((HEIGHT // 2) * WIDTH + WIDTH // 2) * 4 + 3]
+    if corner_alpha > 8:
+        raise SmokeFailure(
+            f"{artifact} lost transparency: corner alpha is {corner_alpha}, expected <= 8"
+        )
+    if center_alpha < 247:
+        raise SmokeFailure(
+            f"{artifact} lost opaque content: center alpha is {center_alpha}, expected >= 247"
+        )
+
+
+def export_alpha_format(
+    executable: Path,
+    scene: Path,
+    output_dir: Path,
+    format_name: str,
+    *,
+    repo: Path,
+) -> dict[str, Any]:
+    artifact = output_dir / f"alpha.{format_name}"
+    if format_name == "png":
+        for stale_frame in output_dir.glob("alpha_*.png"):
+            stale_frame.unlink()
+    else:
+        artifact.unlink(missing_ok=True)
+    run(
+        [
+            str(executable),
+            "export",
+            str(scene),
+            "--output",
+            str(artifact),
+            "--quality",
+            "draft",
+            "--transparent",
+        ],
+        cwd=repo,
+    )
+    if format_name == "png":
+        frames = sorted(output_dir.glob("alpha_*.png"))
+        if not frames:
+            raise SmokeFailure("Transparent PNG export produced no frames")
+        artifact = frames[0]
+    validate_alpha(artifact, cwd=repo, format_name=format_name)
+    return {"format": format_name, "artifact": str(artifact), "alpha": "verified"}
+
+
 def export_format(
     executable: Path,
     scene: Path,
@@ -213,6 +308,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path)
     parser.add_argument("--scene", type=Path, default=Path("examples/export_smoke.py"))
+    parser.add_argument(
+        "--alpha-scene", type=Path, default=Path("examples/export_alpha_smoke.py")
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--formats", nargs="+", choices=ALL_FORMATS, default=ALL_FORMATS)
     return parser.parse_args()
@@ -230,6 +328,11 @@ def main() -> int:
         / ("gaanim-core.exe" if os.name == "nt" else "gaanim-core")
     )
     scene = (repo / args.scene).resolve() if not args.scene.is_absolute() else args.scene
+    alpha_scene = (
+        (repo / args.alpha_scene).resolve()
+        if not args.alpha_scene.is_absolute()
+        else args.alpha_scene
+    )
     output_dir = args.output.resolve()
 
     if not executable.is_file():
@@ -255,12 +358,26 @@ def main() -> int:
             )
             for format_name in args.formats
         ]
+        alpha_reports = [
+            export_alpha_format(
+                executable,
+                alpha_scene,
+                output_dir,
+                format_name,
+                repo=repo,
+            )
+            for format_name in args.formats
+            if format_name in ALPHA_FORMATS
+        ]
     except (OSError, ValueError, json.JSONDecodeError, SmokeFailure) as error:
         print(f"Export smoke failed: {error}", file=sys.stderr)
         return 1
 
     report_path = output_dir / "export-smoke-report.json"
-    report_path.write_text(json.dumps(reports, indent=2), encoding="utf-8")
+    report_path.write_text(
+        json.dumps({"formats": reports, "alpha": alpha_reports}, indent=2),
+        encoding="utf-8",
+    )
     print(f"Export smoke passed for {', '.join(args.formats)}: {report_path}")
     return 0
 

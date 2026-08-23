@@ -678,11 +678,14 @@ without changing it:
 
 ```bash
 gaanim export my_animation.py --output output.webp --quality standard
+gaanim export overlay.py --output overlay.webm --transparent
 ```
 
 `--quality` ajusta el FPS, la compresión y la velocidad de codificación; no
 modifica el ancho ni el alto. La exportación conserva siempre la resolución
-definida por la escena.
+definida por la escena. `--transparent` conserva el canal alpha en WebM, WebP
+y secuencias PNG; MP4 y GIF lo rechazan. La escena debe usar un fondo con alpha,
+por ejemplo `background="#00000000"`.
 
 Run a script through the Gaanim application:
 

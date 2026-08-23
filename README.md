@@ -171,11 +171,14 @@ ejecutable:
 
 ```powershell
 gaanim export . --output output.mp4 --quality standard
+gaanim export . --output overlay.webm --transparent
 ```
 
 Se admiten MP4, WebM, WebP animado, GIF y secuencias PNG. La exportación de
 video requiere FFmpeg disponible en `PATH`; si no está instalado, use primero
 una secuencia PNG o instale FFmpeg según su plataforma.
+`--transparent` está disponible para WebM, WebP y PNG; MP4 y GIF se rechazan
+explícitamente porque no forman parte del contrato alpha de Gaanim.
 
 También puede colocar un MP4 dentro de la escena. El clip es un `Drawable`,
 responde al seek del editor y permite trim, loop, velocidad y audio embebido:

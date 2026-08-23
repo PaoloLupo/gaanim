@@ -274,8 +274,23 @@ fn png_pixels(
     Ok((rgb, image::ExtendedColorType::Rgb8))
 }
 
+fn validate_transparency(format: ExportFormat, transparent: bool) -> Result<()> {
+    if transparent
+        && !matches!(
+            format,
+            ExportFormat::Webm | ExportFormat::Webp | ExportFormat::PngSequence
+        )
+    {
+        return Err(ExportError::General(
+            "transparent export requires WebM, WebP, or PNG output".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl ParallelEncoder {
     pub fn new(config: EncoderConfig) -> Result<Self> {
+        validate_transparency(config.format, config.transparent)?;
         let depth = adaptive_buffer_depth(config.width, config.height);
         let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
 
@@ -457,7 +472,7 @@ impl ParallelEncoder {
             }
             _ => {
                 let mut cmd = Command::new("ffmpeg");
-                cmd.arg("-y");
+                cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-nostats"]);
 
                 if matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
                     cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
@@ -618,21 +633,40 @@ impl ParallelEncoder {
                     ExportError::FFmpeg("Failed to open stderr pipe to FFmpeg".to_string())
                 })?;
 
+                let mut write_error = None;
                 while let Ok(Some(frame)) = receiver.recv() {
-                    stdin.write_all(&frame)?;
+                    if let Err(error) = stdin.write_all(&frame) {
+                        write_error = Some(error);
+                        break;
+                    }
                 }
 
                 drop(stdin);
 
                 let status = child.wait()?;
-                if !status.success() {
-                    let mut stderr_content = String::new();
-                    use std::io::Read;
-                    let mut stderr_reader = std::io::BufReader::new(stderr);
-                    let _ = stderr_reader.read_to_string(&mut stderr_content);
+                let mut stderr_content = String::new();
+                use std::io::Read;
+                let mut stderr_reader = std::io::BufReader::new(stderr);
+                let _ = stderr_reader.read_to_string(&mut stderr_content);
+                let stderr_content = stderr_content.trim();
+                if let Some(error) = write_error {
                     return Err(ExportError::FFmpeg(format!(
-                        "FFmpeg exited with non-zero status. Stderr:\n{}",
-                        stderr_content
+                        "FFmpeg stopped accepting frames ({status}): {error}. Stderr:\n{}",
+                        if stderr_content.is_empty() {
+                            "(no stderr output)"
+                        } else {
+                            stderr_content
+                        }
+                    )));
+                }
+                if !status.success() {
+                    return Err(ExportError::FFmpeg(format!(
+                        "FFmpeg exited with {status}. Stderr:\n{}",
+                        if stderr_content.is_empty() {
+                            "(no stderr output)"
+                        } else {
+                            stderr_content
+                        }
                     )));
                 }
             }
@@ -644,7 +678,7 @@ impl ParallelEncoder {
 
 #[cfg(test)]
 mod tests {
-    use super::png_pixels;
+    use super::{ExportFormat, png_pixels, validate_transparency};
 
     #[test]
     fn opaque_png_frames_drop_alpha_before_rgb_encoding() {
@@ -668,5 +702,14 @@ mod tests {
     fn png_frames_reject_unexpected_buffer_lengths() {
         let error = png_pixels(vec![0; 3], 1, 1, false).unwrap_err();
         assert!(error.to_string().contains("expected 4 RGBA bytes"));
+    }
+
+    #[test]
+    fn transparent_export_rejects_formats_without_alpha_contract() {
+        assert!(validate_transparency(ExportFormat::Mp4, true).is_err());
+        assert!(validate_transparency(ExportFormat::Gif, true).is_err());
+        assert!(validate_transparency(ExportFormat::Webm, true).is_ok());
+        assert!(validate_transparency(ExportFormat::Webp, true).is_ok());
+        assert!(validate_transparency(ExportFormat::PngSequence, true).is_ok());
     }
 }

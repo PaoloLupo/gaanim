@@ -136,6 +136,7 @@ fn dispatch_export_mode() -> bool {
     let mut script = None;
     let mut output = None;
     let mut quality = "standard".to_string();
+    let mut transparent = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -147,6 +148,7 @@ fn dispatch_export_mode() -> bool {
                 index += 1;
                 quality = args.get(index).cloned().unwrap_or_default();
             }
+            "--transparent" => transparent = true,
             value if value.starts_with('-') => {
                 eprintln!("gaanim export: unknown option `{value}`");
                 std::process::exit(2);
@@ -162,7 +164,7 @@ fn dispatch_export_mode() -> bool {
     let script = script
         .and_then(|path| gaanim_project::resolve_entry(&path).ok())
         .unwrap_or_else(|| {
-            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production]");
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--transparent]");
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {
@@ -182,11 +184,16 @@ fn dispatch_export_mode() -> bool {
             eprintln!("gaanim export: output extension must be mp4, webm, webp, gif, or png");
             std::process::exit(2);
         });
+    if transparent && !matches!(format.as_str(), "webm" | "webp" | "png") {
+        eprintln!("gaanim export: --transparent requires WebM, WebP, or PNG output");
+        std::process::exit(2);
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
         quality,
         format,
+        transparent,
     }) {
         eprintln!("gaanim export: {error}");
         std::process::exit(1);
@@ -218,12 +225,13 @@ struct ExportWorkerArgs {
     output: String,
     quality: String,
     format: String,
+    transparent: bool,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
-    if args.len() != 4 {
+    if !(args.len() == 4 || args.len() == 5 && args[4] == "--transparent") {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png>"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png> [--transparent]"
                 .to_string(),
         );
     }
@@ -238,6 +246,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         output: args[1].clone(),
         quality: args[2].clone(),
         format: args[3].clone(),
+        transparent: args.len() == 5,
     })
 }
 
@@ -287,6 +296,9 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     config.height = canvas.height;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
+    if worker.transparent {
+        config.transparent = true;
+    }
     config.headless = true;
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
@@ -1130,8 +1142,13 @@ mod tests {
                 output: "exports/output.mp4".to_string(),
                 quality: "standard".to_string(),
                 format: "mp4".to_string(),
+                transparent: false,
             }
         );
+
+        let transparent =
+            ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);
+        assert!(parse_export_worker_args(&transparent).unwrap().transparent);
     }
 
     #[test]

@@ -175,11 +175,12 @@ suite completa tiene dueño, frecuencia y tiempo máximo documentados.
 ### 3. Exportación y media dependen del entorno — smoke cerrado, hardening pendiente
 
 FFmpeg, ffprobe, codecs, GPU y drivers varían por plataforma. La matriz CI ya produce y
-sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM.
+sondea los cinco formatos en Ubuntu/Windows, con audio para MP4/WebM. WebM, WebP y PNG
+también decodifican una escena transparente y verifican su canal alpha real.
 
 **Siguiente mejora:** mantener `libx264` como ruta estable por defecto y probar los
-encoders hardware solo como opt-in acotado. Añadir verificación de alpha y cubrir por
-separado export GPU, CPU y 3D aislado.
+encoders hardware solo como opt-in acotado. Mejorar diagnóstico/timeout de FFmpeg y
+cubrir por separado export GPU, CPU y 3D aislado.
 
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
