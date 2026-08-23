@@ -22,8 +22,9 @@ La principal brecha ya no es la cantidad de objetos disponibles. Es la diferenci
   `ffmpeg`/`ffprobe`; los cinco formatos ya tienen smoke E2E en Ubuntu/Windows;
 - el wheel distribuible es deliberadamente una capa de autoría `py3-none-any`, sin
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
-- no hay presupuestos ni benchmarks reproducibles para seek, hot reload, preview o
-  exportación;
+- existe un harness reproducible e informativo para reload, seek, preview y exportación,
+  con p50/p95, throughput y RSS; falta calibrarlo y reemplazar el proxy frío de reload
+  por instrumentación persistente del editor;
 - CI cubre Ubuntu y Windows, mientras el release instalable solo empaqueta Windows.
 
 La recomendación para 0.2 es un ciclo de **convergencia y hardening**. Añadir más
@@ -54,8 +55,8 @@ siguientes se obtuvieron de manifests, CI, código y fixtures, no del roadmap an
 | Workspace | 20 miembros: 19 crates `gaanim_*` y `docs` |
 | Versiones | Todos los crates y el paquete Python declaran `0.1.0` |
 | Código Rust | 128 archivos `.rs` bajo `crates/` |
-| Pruebas Rust | 540 atributos `#[test]`/`#[tokio::test]` encontrados |
-| Ejemplos Python | 107 archivos bajo `examples/` |
+| Pruebas Rust | 542 atributos `#[test]`/`#[tokio::test]` encontrados |
+| Ejemplos Python | 108 archivos bajo `examples/` |
 | Documentación Typst | 35 archivos bajo `docs/content/` |
 | Regresión visual | 73 manifests de baseline |
 | CI visual | 12 ejemplos representativos de 2D, texto, layout, datos, cámara, 3D/glTF y presentación |
@@ -185,13 +186,18 @@ separado export GPU, CPU y 3D aislado.
 **Criterio de salida:** todos los formatos se verifican en Ubuntu y Windows; los formatos
 audiovisuales confirman codec, duración y audio, no solo exit code.
 
-### 4. Rendimiento sin presupuesto — P1
+### 4. Presupuestos de rendimiento sin calibrar — P1
 
 El timeline usa índices y snapshots, el video tiene decodificador secuencial y el renderer
-retiene fragmentos, pero no existen números reproducibles que detecten regresión.
+retiene fragmentos. `tests/benchmark_runtime.py` ya produce evidencia comparable para
+cuatro escenarios y el workflow semanal la conserva sin bloquear. La primera medición
+smoke confirmó además que el seek disperso es sensiblemente más costoso que una secuencia
+densa. El escenario `reload` todavía mide arranque frío más `gaanim check`, no el ciclo
+persistente del watcher.
 
-**Mejora:** benchmarks de seek aleatorio, hot reload de una escena mediana, preview 1080p
-y export de 300 frames. Registrar p50/p95, memoria máxima y frames por segundo.
+**Mejora:** acumular historia del perfil estándar, calibrar sus límites por plataforma e
+instrumentar el hot reload real dentro del proceso. Separar después CPU, GPU y FFmpeg para
+que una regresión señale su subsistema, no solo el tiempo end-to-end.
 
 **Criterio de salida:** presupuestos versionados y comparables; las regresiones se
 reportan automáticamente, aunque inicialmente no bloqueen PRs.
@@ -221,7 +227,7 @@ reproducir, pausar, cambiar velocidad y hacer seek repetido.
 
 ### 7. Complejidad de API en expansión — P1
 
-107 ejemplos y una superficie extensa facilitan demos, pero aumentan duplicación,
+108 ejemplos y una superficie extensa facilitan demos, pero aumentan duplicación,
 compatibilidad y coste documental.
 
 **Mejora:** establecer niveles `stable`, `experimental` e `internal`; introducir pruebas
@@ -257,7 +263,7 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 1. Suite visual representativa por subsistema y ejecución completa programada.
 2. Hardening de export: alpha, errores FFmpeg y encoders hardware opt-in con timeout.
 3. Preview unificado para pistas de audio y video, con sync bajo seek.
-4. Benchmarks iniciales de seek, preview, reload y export.
+4. Calibración e instrumentación persistente de los benchmarks iniciales.
 5. Clasificación de estabilidad de API y política de deprecación.
 6. Matriz glTF con assets de distintos exporters y límites documentados.
 
@@ -284,12 +290,12 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 |---|---:|---:|
 | Auditoría objetiva | 0 errores | 0 errores |
 | Miembros workspace | 20 | Informativo; no maximizar |
-| Ejemplos Python | 107 | 100% clasificados y ejecutables |
+| Ejemplos Python | 108 | 100% clasificados y ejecutables |
 | Baselines visuales | 73 | 100% con frecuencia definida |
 | Baselines ejecutados en CI por PR | 12 | Al menos uno por subsistema crítico |
 | Formatos con smoke E2E multiplataforma | 5/5 configurados | 5/5 |
 | Plataformas de CI | Ubuntu, Windows | Igual a plataformas soportadas |
-| Benchmarks con presupuesto | 0 | Seek, reload, preview y export |
+| Benchmarks con presupuesto | 4 informativos; 0 enforced | Seek, reload, preview y export calibrados |
 | API pública cubierta por stubs/docs | <100% | 100% |
 
 ## Diferenciadores a preservar
@@ -305,5 +311,6 @@ reducen el p95 de reload sin alterar el resultado de un rebuild completo.
 
 La oportunidad diferencial de Gaanim es ofrecer **autoría Python expresiva con un motor
 Rust/GPU determinista y seekable**. El baseline de contrato ya cubre autoría, ejecución,
-snapshots y exportación. La siguiente prioridad es medir p50/p95 y memoria, endurecer los
+snapshots y exportación. La medición p50/p95 y RSS ya tiene una primera ruta reproducible;
+la siguiente prioridad es calibrarla en CI, medir el hot reload persistente, endurecer los
 releases nativos y hacer explícita la estabilidad de cada familia de API.

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "smoke": {
+      "warmups": 0,
+      "scenarios": {
+        "reload": {
+          "samples": 1,
+          "frames": 30,
+          "timeout_seconds": 60,
+          "budget": { "p95_ms": 10000, "peak_rss_mb": 2500 }
+        },
+        "seek": {
+          "samples": 1,
+          "frames": 30,
+          "timeout_seconds": 120,
+          "budget": { "p95_ms": 30000, "peak_rss_mb": 3000, "min_fps": 1.0 }
+        },
+        "preview": {
+          "samples": 1,
+          "frames": 30,
+          "timeout_seconds": 120,
+          "budget": { "p95_ms": 30000, "peak_rss_mb": 3000, "min_fps": 1.0 }
+        },
+        "export": {
+          "samples": 1,
+          "frames": 30,
+          "timeout_seconds": 120,
+          "budget": { "p95_ms": 60000, "peak_rss_mb": 3000, "min_fps": 0.5 }
+        }
+      }
+    },
+    "standard": {
+      "warmups": 1,
+      "scenarios": {
+        "reload": {
+          "samples": 10,
+          "frames": 300,
+          "timeout_seconds": 60,
+          "budget": { "p95_ms": 5000, "peak_rss_mb": 2000 }
+        },
+        "seek": {
+          "samples": 5,
+          "frames": 64,
+          "timeout_seconds": 180,
+          "budget": { "p95_ms": 30000, "peak_rss_mb": 3000, "min_fps": 2.0 }
+        },
+        "preview": {
+          "samples": 3,
+          "frames": 120,
+          "timeout_seconds": 240,
+          "budget": { "p95_ms": 60000, "peak_rss_mb": 3500, "min_fps": 2.0 }
+        },
+        "export": {
+          "samples": 3,
+          "frames": 300,
+          "timeout_seconds": 300,
+          "budget": { "p95_ms": 180000, "peak_rss_mb": 4000, "min_fps": 1.5 }
+        }
+      }
+    }
+  }
+}

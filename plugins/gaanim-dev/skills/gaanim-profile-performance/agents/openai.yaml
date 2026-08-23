@@ -1,0 +1,4 @@
+interface:
+  display_name: "Perfilar rendimiento de Gaanim"
+  short_description: "Mide p50/p95, FPS y memoria del runtime"
+  default_prompt: "Usa $gaanim-profile-performance para medir y analizar el rendimiento de Gaanim."

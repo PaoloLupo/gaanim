@@ -191,6 +191,7 @@ Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
 | Verificar entorno y aplicación | `just doctor` |
 | Compilar la aplicación | `just build` |
 | Ejecutar un ejemplo | `just run quickstart` |
+| Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
 
 La API pública de Python comienza en `Scene`; `Canvas(...)` es un constructor

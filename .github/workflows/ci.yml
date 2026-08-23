@@ -2,6 +2,9 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * 1"
 
 permissions:
   contents: read
@@ -10,10 +13,6 @@ jobs:
   quality:
     name: Quality (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    env:
-      # Typst, Bevy and Vello make a full workspace test build memory-intensive.
-      # Keep hosted Windows runners below their paging-file limit.
-      CARGO_BUILD_JOBS: 2
     strategy:
       fail-fast: false
       matrix:
@@ -49,9 +48,6 @@ jobs:
   visual-regression:
     name: Visual regression (Windows)
     runs-on: windows-latest
-    env:
-      CARGO_BUILD_JOBS: 2
-
     steps:
       - uses: actions/checkout@v4
 
@@ -114,8 +110,6 @@ jobs:
   export-smoke:
     name: Export smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    env:
-      CARGO_BUILD_JOBS: 2
     strategy:
       fail-fast: false
       matrix:
@@ -167,3 +161,32 @@ jobs:
 
       - name: Validate the embedded Python API stub
         run: cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
+
+  performance:
+    name: Runtime performance (Ubuntu, informational)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release runtime
+        run: cargo build -p gaanim_editor --bin gaanim-core --release
+
+      - name: Measure versioned runtime budgets
+        run: python tests/benchmark_runtime.py --profile standard
+
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-performance-${{ github.run_id }}
+          path: target/performance
+          if-no-files-found: warn
+          retention-days: 30

@@ -24,6 +24,7 @@ class Finding:
 
 REQUIRED_RECIPES = {
     "build",
+    "benchmark",
     "check",
     "clippy",
     "docs",
@@ -31,6 +32,14 @@ REQUIRED_RECIPES = {
     "python-develop",
     "test-exports",
     "validate-python-api",
+}
+
+PERFORMANCE_SCENARIOS = {"reload", "seek", "preview", "export"}
+PERFORMANCE_FILES = {
+    "examples/performance_benchmark.py",
+    "tests/benchmark_runtime.py",
+    "tests/performance/budgets.json",
+    "tests/test_benchmark_runtime.py",
 }
 
 REQUIRED_DOCS = {
@@ -130,6 +139,57 @@ def agent_guidance_drift(
             _warning(
                 "agents-doctor",
                 "AGENTS.md says doctor imports the extension, but the recipe only checks application binaries",
+            )
+        )
+    return findings
+
+
+def performance_contract_findings(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    missing = sorted(path for path in PERFORMANCE_FILES if not (repo / path).is_file())
+    if missing:
+        findings.append(
+            _error(
+                "performance-files",
+                f"Missing runtime performance contract files: {', '.join(missing)}",
+            )
+        )
+        return findings
+
+    budgets_path = repo / "tests" / "performance" / "budgets.json"
+    try:
+        budgets = json.loads(budgets_path.read_text(encoding="utf-8"))
+        profiles = budgets["profiles"]
+        if budgets.get("schema_version") != 1:
+            raise ValueError("schema_version must be 1")
+        for profile in ("smoke", "standard"):
+            scenarios = set(profiles[profile]["scenarios"])
+            if scenarios != PERFORMANCE_SCENARIOS:
+                raise ValueError(
+                    f"{profile} scenarios are {sorted(scenarios)}, expected {sorted(PERFORMANCE_SCENARIOS)}"
+                )
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        findings.append(
+            _error("performance-budgets", f"Invalid performance budget contract: {error}")
+        )
+
+    workflow_dir = repo / ".github" / "workflows"
+    workflow_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(workflow_dir.glob("*.yml"))
+    )
+    if "CARGO_BUILD_JOBS" in workflow_text:
+        findings.append(
+            _error(
+                "cargo-job-limit",
+                "CI fixes CARGO_BUILD_JOBS instead of using Cargo's default all-core parallelism",
+            )
+        )
+    if "benchmark_runtime.py --profile standard" not in workflow_text:
+        findings.append(
+            _error(
+                "performance-ci",
+                "CI does not run the standard runtime benchmark profile",
             )
         )
     return findings
@@ -237,6 +297,8 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
                 (repo / "README.md").is_file(),
             )
         )
+
+    findings.extend(performance_contract_findings(repo))
 
     try:
         paths = impact_tool.changed_files(repo, base)

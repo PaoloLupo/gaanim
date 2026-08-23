@@ -40,3 +40,6 @@ introduce a dependency cycle to match this simplified map.
   `crates/gaanim_python/gaanim/__init__.py`.
 - User documentation: `docs/content/**/*.typ`.
 - Executable examples: `examples/*.py` and `docs/content/examples/*.py`.
+- Performance contract: `tests/benchmark_runtime.py`,
+  `tests/performance/budgets.json`, `examples/performance_benchmark.py`, and the
+  scheduled informational CI job.

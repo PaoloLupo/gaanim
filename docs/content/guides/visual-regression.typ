@@ -51,6 +51,8 @@ gaanim --diff --example examples/visual_diff_demo.py --no-gui --pixel-threshold 
 
 - `--no-gui` — genera report sin abrir egui (para CI).
 - `--no-capture` — compara los PNG ya presentes en `current/`.
+- `--capture-only` — escribe `current/` (o `--current <DIR>`) y termina sin
+  comparar ni modificar un baseline; sirve para diagnóstico y benchmarks.
 - `--tests-root <DIR>` — cambia la carpeta global por defecto.
 - `--pixel-threshold` / `--max-changed-ratio` — tolerancias.
 
@@ -62,4 +64,4 @@ gaanim --diff --baseline tests/visual/a/baseline --current tests/visual/a/curren
 
 El reporte JSON incluye el seek, porcentaje de píxeles modificados, error medio, delta máximo y rectángulo del cambio. El visor alterna baseline/actual/diff con `1`, `2` y `3`.
 
-En CI (`windows-latest`) el workflow `visual-regression` construye el snapshot runner y compara `transform_demo`/`image_demo`/`svg_demo`/`camera_demo`.
+En CI (`windows-latest`) el workflow `visual-regression` construye el snapshot runner y compara una muestra de doce ejemplos que cubre transformaciones, assets, cámara, texto, layout, charts, 3D y presentaciones.

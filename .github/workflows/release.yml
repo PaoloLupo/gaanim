@@ -13,9 +13,6 @@ jobs:
   release-windows:
     name: Build gaanim.exe (Windows x64)
     runs-on: windows-latest
-    env:
-      CARGO_BUILD_JOBS: 2
-
     steps:
       - uses: actions/checkout@v4
 

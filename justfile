@@ -3,6 +3,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 python_dir := if os_family() == "windows" { "./.venv/Scripts" } else { "./.venv/bin" }
 python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
 system_python := if os_family() == "windows" { "py.exe" } else { "python" }
+release_runtime := if os_family() == "windows" { "./target/release/gaanim-core.exe" } else { "./target/release/gaanim-core" }
 
 default:
     @just --choose
@@ -81,6 +82,12 @@ validate-python-api:
 test-exports:
     cargo build -p gaanim_editor --bin gaanim-core
     {{ system_python }} tests/validate_exports.py --output target/export-smoke
+
+# Measure runtime p50/p95, throughput, and peak memory using the native release executable.
+# Profiles: smoke (fast wiring check) or standard (300-frame export and stable sample counts).
+benchmark profile="smoke":
+    cargo build -p gaanim_editor --bin gaanim-core --release
+    {{ system_python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }}
 
 # ---- Run --------------------------------------------------------------------
 

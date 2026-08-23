@@ -725,6 +725,7 @@ struct DiffModeArgs {
     open_gui: bool,
     example: Option<PathBuf>,
     capture: bool,
+    capture_only: bool,
     bless: bool,
 }
 
@@ -794,6 +795,11 @@ fn dispatch_diff_mode() -> bool {
         std::process::exit(0);
     }
 
+    if parsed.capture_only {
+        println!("Snapshots captured: {}", parsed.current.display());
+        std::process::exit(0);
+    }
+
     let report = match gaanim_diff::compare_directories(
         &parsed.baseline,
         &parsed.current,
@@ -842,6 +848,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     let mut options = gaanim_diff::CompareOptions::default();
     let mut open_gui = true;
     let mut capture = None;
+    let mut capture_only = false;
     let mut bless = false;
     let mut index = 0;
 
@@ -874,10 +881,18 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             }
             "--no-gui" => open_gui = false,
             "--no-capture" => capture = Some(false),
+            "--capture-only" => capture_only = true,
             "--bless" => bless = true,
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown option `{flag}`")),
         }
+    }
+
+    if capture_only && bless {
+        return Err("--capture-only cannot be combined with --bless".to_string());
+    }
+    if capture_only && capture == Some(false) {
+        return Err("--capture-only cannot be combined with --no-capture".to_string());
     }
 
     if let Some(example) = example {
@@ -890,12 +905,16 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             open_gui,
             example: Some(example),
             capture: capture.unwrap_or(true),
+            capture_only,
             bless,
         }));
     }
 
     if bless {
         return Err("--bless requires --example <SCRIPT_OR_PROJECT>".to_string());
+    }
+    if capture_only {
+        return Err("--capture-only requires --example <SCRIPT_OR_PROJECT>".to_string());
     }
 
     Ok(Some(DiffModeArgs {
@@ -910,6 +929,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
         open_gui,
         example: None,
         capture: false,
+        capture_only: false,
         bless: false,
     }))
 }
@@ -949,6 +969,7 @@ OPTIONS:
                                      Capture and compare one project automatically
         --tests-root <DIR>           Global snapshot root (default: tests/visual)
         --bless                      Capture this example as its baseline and exit
+        --capture-only               Capture into current/ (or --current) and exit
         --no-capture                 Reuse the example's existing current snapshots
     -b, --baseline <DIR>            Known-good snapshot directory
     -c, --current <DIR>             Candidate snapshot directory
@@ -1115,6 +1136,50 @@ mod tests {
         assert!(parse_export_worker_args(&quality).is_err());
         let format = ["scene.py", "out.avi", "draft", "avi"].map(str::to_string);
         assert!(parse_export_worker_args(&format).is_err());
+    }
+
+    #[test]
+    fn parses_capture_only_diff_without_requiring_a_baseline() {
+        let args = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--current",
+            "target/performance/seek",
+            "--capture-only",
+            "--no-gui",
+        ]
+        .map(str::to_string);
+        let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
+
+        assert!(parsed.capture);
+        assert!(parsed.capture_only);
+        assert!(!parsed.bless);
+        assert!(!parsed.open_gui);
+        assert_eq!(parsed.current, PathBuf::from("target/performance/seek"));
+    }
+
+    #[test]
+    fn capture_only_diff_rejects_non_capture_combinations() {
+        let no_example = ["--capture-only"].map(str::to_string);
+        assert!(parse_diff_mode_args(&no_example).is_err());
+
+        let no_capture = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--capture-only",
+            "--no-capture",
+        ]
+        .map(str::to_string);
+        assert!(parse_diff_mode_args(&no_capture).is_err());
+
+        let bless = [
+            "--example",
+            "examples/performance_benchmark.py",
+            "--capture-only",
+            "--bless",
+        ]
+        .map(str::to_string);
+        assert!(parse_diff_mode_args(&bless).is_err());
     }
 
     #[test]

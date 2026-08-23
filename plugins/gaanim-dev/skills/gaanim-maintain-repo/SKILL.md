@@ -27,6 +27,11 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 
 - Use `just` recipes for supported developer workflows. Use direct `cargo`
   commands only for focused crate tests or CI-parity flags absent from a recipe.
+- Let Cargo use its default all-core build parallelism. Do not add
+  `CARGO_BUILD_JOBS` or another fixed job cap unless the user explicitly asks
+  for a resource limit.
+- Keep the performance contract aligned across the `benchmark` recipe, runner,
+  budgets, scheduled CI evidence, and performance guide.
 - Do not run `just clean`, delete environments, overwrite baselines, or remove
   generated files unless the user explicitly requested the destructive scope.
 - Keep `Cargo.lock` and generated media handling consistent with `.gitignore`.

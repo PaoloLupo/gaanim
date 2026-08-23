@@ -1,6 +1,6 @@
 ---
 name: gaanim-test-change
-description: Select and run change-aware Gaanim verification profiles for Rust crates, the PyO3/Python API contract, Typst docs, examples, and visual regression. Use when testing a change, validating a fix or feature, checking CI parity, comparing snapshots, inspecting visual reports, or explicitly approving visual baselines.
+description: Select and run change-aware Gaanim verification profiles for Rust crates, the PyO3/Python API contract, Typst docs, examples, visual regression, and performance smoke. Use when testing a change, validating a fix or feature, checking CI parity, comparing snapshots, inspecting reports, or explicitly approving visual baselines.
 ---
 
 # Test a Gaanim change
@@ -15,7 +15,7 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 Read `../../references/verification-matrix.md`, then preview with:
 
 ```text
-python <PLUGIN_ROOT>/scripts/verify.py <fast|api|visual|full> --dry-run
+python <PLUGIN_ROOT>/scripts/verify.py <fast|api|visual|performance|full> --dry-run
 ```
 
 - Choose `fast` for local implementation feedback.
@@ -23,6 +23,8 @@ python <PLUGIN_ROOT>/scripts/verify.py <fast|api|visual|full> --dry-run
 - Choose `visual` for rendering, transforms, layout, text, scene, animation, or
   timeline behavior. Pass one or more `--example <name>` values when impact
   inference is too broad or empty.
+- Choose `performance` for runtime hot paths or harness changes. It uses the
+  smoke workload unless `--benchmark-profile standard` is passed.
 - Choose `full` for repository-wide, release-sensitive, or final CI-parity
   validation.
 
@@ -47,3 +49,7 @@ python <PLUGIN_ROOT>/scripts/verify.py visual --example camera_demo --bless --al
 
 Do not describe unavailable visual execution as passing. Finish with each
 command, pass/fail/skip status, report paths, and untested risk.
+
+Performance runs do not authorize visual baseline replacement. Read
+`../../references/performance-testing.md` before interpreting or changing a
+budget, and report whether the result was informational or enforced.
