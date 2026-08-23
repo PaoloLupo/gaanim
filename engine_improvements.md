@@ -24,7 +24,7 @@ La principal brecha ya no es la cantidad de objetos disponibles. Es la diferenci
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
 - existe un harness reproducible e informativo para reload persistente, seek, preview
   y exportación, con p50/p95, throughput y RSS; falta calibrarlo en runners estables;
-- CI cubre Ubuntu y Windows, mientras el release instalable solo empaqueta Windows.
+- CI y release instalable cubren Windows y Ubuntu x64; macOS permanece experimental.
 
 La recomendación para 0.2 es un ciclo de **convergencia y hardening**. Añadir más
 primitivas antes de cerrar el contrato Python, los exports, la instalación y los E2E
@@ -201,13 +201,14 @@ que una regresión señale su subsistema, no solo el tiempo end-to-end.
 **Criterio de salida:** presupuestos versionados y comparables; las regresiones se
 reportan automáticamente, aunque inicialmente no bloqueen PRs.
 
-### 5. Historia de instalación incompleta — P1
+### 5. Instalación nativa Windows/Linux — baseline cerrado
 
-El release crea un zip Windows, CI prueba Ubuntu y el README menciona Linux/macOS. No hay
-una matriz que distinga “compila”, “CI”, “paquete instalable” y “soportado”.
+El release crea un zip Windows y un tarball Ubuntu 24.04 x64. Ambos incluyen launcher,
+core y wheel de autoría; el README distingue CI, artefacto instalable y soporte. macOS
+permanece explícitamente experimental y sin garantía de release.
 
-**Mejora:** publicar esa tabla y distribuir la aplicación nativa por cada plataforma
-declarada. El wheel de autoría permanece universal y puro, y nunca sustituye al ejecutable.
+**Siguiente mejora:** probar el quickstart desde cada archivo publicado y añadir macOS
+solo cuando exista CI y un responsable de soporte. El wheel permanece universal y puro.
 
 **Criterio de salida:** un usuario nuevo instala, crea proyecto, previsualiza y exporta
 siguiendo un quickstart probado por release para cada plataforma declarada.

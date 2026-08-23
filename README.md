@@ -52,12 +52,17 @@ el archivo recarga la escena.
 | Plataforma | CI | Artefacto instalable | Estado declarado |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.1.x` |
-| Ubuntu x64 | Sí | No | Desarrollo desde fuente |
+| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core y wheel de autoría | Soportada en `0.1.x` |
 | macOS | No | No | Experimental, sin garantía de release |
 
 El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
 runtime. Esta tabla se refiere al ejecutable, que es lo necesario para abrir o
 exportar una escena.
+
+En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
+`gaanim` y `gaanim-core` juntos a una carpeta de `PATH`, por ejemplo
+`~/.local/bin`. Requiere Python 3.12 y las bibliotecas de sistema de Ubuntu
+24.04; FFmpeg sigue siendo opcional salvo para video y audio.
 
 El binario de usuario también administra proyectos. `gaanim` sin argumentos
 abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez

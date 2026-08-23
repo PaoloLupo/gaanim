@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Instalación",
-  description: "Instalación para usuario final (Windows + uv) y para desarrollo local",
+  description: "Instalación nativa para Windows y Ubuntu, y desarrollo local",
   route: "/getting-started/installation/",
   updated: datetime.today().display(),
   code-langs: (),
@@ -126,6 +126,24 @@ Cuando ejecutas `gaanim` desde cualquier terminal (activada o no), el launcher h
 Luego antepone `home` y `home\Scripts` al `PATH` del proceso hijo (`gaanim-core.exe`), que sí está linkeado a `python3.dll`/`python3xx.dll`. Por eso no necesitas ` $env:PATH = ...` manualmente.
 
 Tip: `gaanim --help` también funciona sin proyecto, usando el fallback del sistema.
+
+= Usuario final — Ubuntu 24.04 x64
+
+Descarga `gaanim-v0.1.0-linux-x64.tar.gz` desde GitHub Releases. El paquete
+contiene `gaanim`, `gaanim-core` y el mismo wheel universal de autoría que la
+distribución Windows.
+
+```bash
+tar -xzf gaanim-v0.1.0-linux-x64.tar.gz
+mkdir -p ~/.local/bin ~/.local/share/gaanim
+install -m 755 gaanim gaanim-core ~/.local/bin/
+install -m 644 gaanim-*-py3-none-any.whl ~/.local/share/gaanim/
+gaanim --help
+```
+
+Requiere Python 3.12 y las bibliotecas base de Ubuntu 24.04. Instala FFmpeg para
+exportar MP4/WebM o usar video embebido. Mantén ambos ejecutables en la misma
+carpeta: el launcher localiza `gaanim-core` junto a sí mismo.
 
 = Ejemplo completo — de cero a proyecto nuevo usando el PATH
 
