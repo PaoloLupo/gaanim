@@ -633,11 +633,11 @@ fn worker_stop_reason(
     }
 }
 
-fn configure_export_worker(command: &mut Command) {
+fn configure_export_worker(_command: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        _command.process_group(0);
     }
 }
 

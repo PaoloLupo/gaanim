@@ -125,7 +125,7 @@ impl CameraPose {
     ) -> Result<Self, CameraValidationError> {
         Camera::validate_look_at(eye, target, up)?;
         Camera::validate_perspective(fov_y, near, far)?;
-        let view = DMat4::look_at_rh(eye, target, up);
+        let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, target, up);
         let rotation = view.inverse().to_scale_rotation_translation().1;
         Ok(Self {
             position: eye,
