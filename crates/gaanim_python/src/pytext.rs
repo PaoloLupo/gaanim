@@ -743,6 +743,40 @@ impl PyText {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visual_effects_preserve_text_handle_and_typographic_placement() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let scene = module.getattr("Scene")?.call0()?;
+            let color = module.getattr("GOLD")?;
+
+            for (method, args) in [
+                ("glow", PyTuple::new(py, [&color])?),
+                ("blur", PyTuple::empty(py)),
+                ("shadow", PyTuple::new(py, [&color])?),
+                ("no_effects", PyTuple::empty(py)),
+            ] {
+                let text = scene.call_method1("text", ("Dinámica de estructuras",))?;
+                let styled = text.call_method(method, args, None)?;
+                let text_type = module.getattr("Text")?;
+                assert!(
+                    styled.is_instance(&text_type)?,
+                    "{method} must preserve the specialized Text handle"
+                );
+                styled.call_method1("at", (0.0, 0.0))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+}
+
 #[pymethods]
 impl PyText {
     /// Apply a fill while preserving the specialized Text handle.
@@ -763,6 +797,61 @@ impl PyText {
 
     fn no_stroke(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf.handle.clone().no_stroke();
+        slf
+    }
+
+    #[pyo3(signature = (color, radius=16.0, intensity=1.0))]
+    fn glow(
+        slf: PyRef<'_, Self>,
+        color: PyColor,
+        radius: f64,
+        intensity: f32,
+    ) -> PyResult<PyRef<'_, Self>> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err("radius must be finite and positive"));
+        }
+        if !intensity.is_finite() || intensity <= 0.0 {
+            return Err(PyValueError::new_err(
+                "intensity must be finite and positive",
+            ));
+        }
+        slf.handle.clone().glow(color.0, radius, intensity);
+        Ok(slf)
+    }
+
+    #[pyo3(signature = (sigma=4.0))]
+    fn blur(slf: PyRef<'_, Self>, sigma: f64) -> PyResult<PyRef<'_, Self>> {
+        if !sigma.is_finite() || sigma <= 0.0 {
+            return Err(PyValueError::new_err("sigma must be finite and positive"));
+        }
+        slf.handle.clone().blur(sigma);
+        Ok(slf)
+    }
+
+    #[pyo3(signature = (color, x=8.0, y=-8.0, blur=6.0))]
+    fn shadow(
+        slf: PyRef<'_, Self>,
+        color: PyColor,
+        x: f64,
+        y: f64,
+        blur: f64,
+    ) -> PyResult<PyRef<'_, Self>> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyValueError::new_err("shadow offset must be finite"));
+        }
+        if !blur.is_finite() || blur < 0.0 {
+            return Err(PyValueError::new_err(
+                "shadow blur must be finite and non-negative",
+            ));
+        }
+        slf.handle
+            .clone()
+            .shadow(color.0, gaanim_core::glam::DVec2::new(x, y), blur);
+        Ok(slf)
+    }
+
+    fn no_effects(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf.handle.clone().no_effects();
         slf
     }
 

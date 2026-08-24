@@ -1738,6 +1738,40 @@ class TextQuery:
 
 class Text(Drawable):
     """Structured, Layout-v2-measurable vector text and mathematics."""
+    def glow(self, color: Color, radius: float = 16.0, intensity: float = 1.0) -> Self:
+        """Apply glow while preserving Text chaining and typographic placement.
+
+        Example:
+            title.glow(BLUE).at(0.0, 0.0)
+        """
+        ...
+    def blur(self, sigma: float = 4.0) -> Self:
+        """Apply blur while preserving Text chaining and typographic placement.
+
+        Example:
+            label.blur(4.0).at(0.0, 0.0)
+        """
+        ...
+    def shadow(
+        self,
+        color: Color,
+        x: float = 8.0,
+        y: float = -8.0,
+        blur: float = 6.0,
+    ) -> Self:
+        """Apply shadow while preserving Text chaining and typographic placement.
+
+        Example:
+            title.shadow(BLACK).at(0.0, 0.0)
+        """
+        ...
+    def no_effects(self) -> Self:
+        """Remove visual effects while preserving the specialized Text handle.
+
+        Example:
+            title.no_effects().at(0.0, 0.0)
+        """
+        ...
     @overload
     def __getitem__(self, name: str) -> TextSelection: ...
     @overload

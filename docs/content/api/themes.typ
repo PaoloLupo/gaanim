@@ -437,7 +437,9 @@ card.shadow("#00000080", x=10, y=-10, blur=8)
 `glow`, `blur` y `shadow` se compilan como fragmentos vectoriales retenidos, por
 lo que los efectos sin cambios se reutilizan desde la caché. Funcionan sobre
 rellenos y trazos, incluidos los pinceles de gradiente. `no_effects()` elimina
-los tres sin cambiar el relleno ni el trazo del objeto.
+los tres sin cambiar el relleno ni el trazo del objeto. En `Text`, los cuatro
+conservan el handle especializado y el anclaje tipográfico de una llamada
+posterior a `at()`.
 
 == Constantes de color
 
