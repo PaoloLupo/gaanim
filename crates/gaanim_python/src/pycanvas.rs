@@ -918,6 +918,25 @@ impl PyCanvas {
         }
     }
 
+    /// Override the canvas-wide prose, math, and code font families.
+    ///
+    /// Supplied families take priority over theme typography. Omitted values
+    /// leave their existing override unchanged; object-level font options
+    /// retain the highest priority.
+    #[pyo3(signature = (*, font=None, math_font=None, code_font=None))]
+    fn set_fonts(
+        &self,
+        font: Option<String>,
+        math_font: Option<String>,
+        code_font: Option<String>,
+    ) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_fonts(font, math_font, code_font)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Resolve a semantic token from the active theme.
     fn color(&self, role: &str) -> PyResult<PyColor> {
         self.inner

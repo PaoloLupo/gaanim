@@ -12,6 +12,7 @@ use gaanim_core::peniko::{Brush, Color};
 use gaanim_expr::Expr;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
 use gaanim_objects::primitives3d;
+use gaanim_text::prelude::TextRole;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
@@ -538,6 +539,12 @@ pub struct Canvas {
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
     pub theme_style: Option<CanvasTheme>,
+    /// Direct prose-family override applied after the active theme.
+    pub(crate) font_family_override: Option<String>,
+    /// Direct math-family override applied after the active theme.
+    pub(crate) math_font_family_override: Option<String>,
+    /// Direct code-family override applied after the active theme.
+    pub(crate) code_font_family_override: Option<String>,
     pub margin: Margin,
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
@@ -561,6 +568,9 @@ impl Canvas {
             background_overridden: false,
             theme: None,
             theme_style: None,
+            font_family_override: None,
+            math_font_family_override: None,
+            code_font_family_override: None,
             units: CanvasUnits::Pixels,
             margin: Margin::default(),
             asset_root: None,
@@ -672,6 +682,39 @@ impl Canvas {
         self.theme_style = Some(theme);
     }
 
+    /// Override the canvas-wide prose, math, and code font families without
+    /// creating a theme.
+    ///
+    /// Each supplied family replaces the corresponding default or themed
+    /// family. Omitted families retain their current override, and explicit
+    /// per-text font options still have higher priority.
+    pub fn set_fonts(
+        &mut self,
+        font: Option<String>,
+        math_font: Option<String>,
+        code_font: Option<String>,
+    ) -> Result<(), String> {
+        for (name, family) in [
+            ("font", font.as_deref()),
+            ("math_font", math_font.as_deref()),
+            ("code_font", code_font.as_deref()),
+        ] {
+            if family.is_some_and(|family| family.trim().is_empty()) {
+                return Err(format!("{name} must not be empty"));
+            }
+        }
+        if let Some(font) = font {
+            self.font_family_override = Some(font);
+        }
+        if let Some(math_font) = math_font {
+            self.math_font_family_override = Some(math_font);
+        }
+        if let Some(code_font) = code_font {
+            self.code_font_family_override = Some(code_font);
+        }
+        Ok(())
+    }
+
     /// Resolve a semantic token from the active theme.
     pub fn theme_color(&self, role: &str) -> Result<Color, String> {
         self.theme_style
@@ -719,6 +762,25 @@ impl Canvas {
                     }
                 }
             }
+        }
+        if let Some(font) = &self.font_family_override {
+            for role in [
+                TextRole::Title,
+                TextRole::Subtitle,
+                TextRole::Kicker,
+                TextRole::Heading,
+                TextRole::Body,
+                TextRole::Caption,
+                TextRole::Label,
+            ] {
+                config.roles.get_mut(&role).unwrap().font_family = font.clone();
+            }
+        }
+        if let Some(math_font) = &self.math_font_family_override {
+            config.roles.get_mut(&TextRole::Math).unwrap().font_family = math_font.clone();
+        }
+        if let Some(code_font) = &self.code_font_family_override {
+            config.roles.get_mut(&TextRole::Code).unwrap().font_family = code_font.clone();
         }
         config
     }
@@ -5186,6 +5248,26 @@ mod tests {
         ] {
             assert_eq!(config.roles[&role].fill_color, Color::BLACK);
         }
+    }
+
+    #[test]
+    fn direct_font_overrides_win_over_themes() {
+        use gaanim_text::prelude::TextRole;
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas
+            .set_fonts(
+                Some("Inter".into()),
+                Some("STIX Two Math".into()),
+                Some("JetBrains Mono".into()),
+            )
+            .unwrap();
+        canvas.set_theme("paper").unwrap();
+
+        let config = canvas.themed_text_config();
+        assert_eq!(config.roles[&TextRole::Body].font_family, "Inter");
+        assert_eq!(config.roles[&TextRole::Math].font_family, "STIX Two Math");
+        assert_eq!(config.roles[&TextRole::Code].font_family, "JetBrains Mono");
     }
 
     #[test]

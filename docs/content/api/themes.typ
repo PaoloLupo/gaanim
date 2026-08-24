@@ -130,6 +130,33 @@ subtitle = scene.text("Frequency-domain representation", role="subtitle")
 equation = scene.text("$F(k) = integral f(x) e^(-i k x) dif x$")
 ```
 
+Para cambiar solo las familias tipográficas no hace falta crear un `Theme`.
+`set_fonts` acepta sobreescrituras independientes para texto, matemáticas y
+código; lo omitido conserva su valor anterior:
+
+#api-entry(
+  name: "Canvas.set_fonts",
+  signature: "set_fonts(*, font=None, math_font=None, code_font=None) -> None",
+  params: (
+    (name: "font", type: "str | None", default: "None", desc: [Familia para títulos, cuerpo, subtítulos, encabezados, pies y etiquetas.]),
+    (name: "math_font", type: "str | None", default: "None", desc: [Familia para ecuaciones y fragmentos matemáticos.]),
+    (name: "code_font", type: "str | None", default: "None", desc: [Familia para texto con rol `code`.]),
+  ),
+  returns: (type: "None", desc: [Configura el lienzo; no crea objetos.]),
+  desc: [Las familias suministradas tienen prioridad sobre el tema activo y siguen vigentes si el tema cambia después. Un `font` explícito en un objeto conserva mayor prioridad. Una familia vacía produce `ValueError`.],
+)[```python
+from gaanim import Scene
+
+scene = Scene(1280, 720)
+scene.canvas.set_fonts(
+    font="Inter",
+    math_font="New Computer Modern Math",
+    code_font="JetBrains Mono",
+)
+scene.text("Texto y $x^2$", role="body")
+scene.text("fn main() {}", role="code")
+```]
+
 Los nombres disponibles de los temas se enumeran a continuación.
 
 == Esquemas de color conocidos

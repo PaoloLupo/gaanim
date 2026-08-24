@@ -1997,6 +1997,27 @@ class Canvas:
     def set_theme(self, theme: str | Theme) -> None:
         """Apply a built-in color scheme or a custom Theme."""
         ...
+    def set_fonts(
+        self,
+        *,
+        font: Optional[str] = None,
+        math_font: Optional[str] = None,
+        code_font: Optional[str] = None,
+    ) -> None:
+        """Override canvas-wide prose, math, and code font families.
+
+        Supplied values override theme typography while object-level font
+        options still win. Omitted values keep their existing override, and
+        an empty family raises ``ValueError``.
+
+        Example:
+            scene.canvas.set_fonts(
+                font="Inter",
+                math_font="New Computer Modern Math",
+                code_font="JetBrains Mono",
+            )
+        """
+        ...
     def color(self, role: str) -> Color:
         """Resolve a semantic color from the active theme."""
         ...
