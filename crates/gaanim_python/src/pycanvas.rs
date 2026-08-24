@@ -12,7 +12,7 @@ use gaanim_api::canvas::{
     BooleanRule, CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay,
     CanvasTheme, CardSpec, ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle,
     DimensionOptions, EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant,
-    ImageCrop, ImageFit, ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec,
+    ImageCrop, ImageFit, ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PlayItem,
     PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec,
     SurroundingRectHandle, ThemeFont, VideoOptions,
 };
@@ -819,6 +819,26 @@ impl PyTheme {
 #[pyclass(name = "Canvas", module = "gaanim_core")]
 pub struct PyCanvas {
     inner: Arc<Mutex<ApiCanvas>>,
+}
+
+/// A validated audio declaration that starts only when passed to ``Scene.play``.
+#[pyclass(name = "Audio", module = "gaanim_core", frozen, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyAudio {
+    inner: gaanim_api::canvas::AudioClip,
+}
+
+/// A drawable video declaration that starts only when passed to ``Scene.play``.
+#[pyclass(name = "Video", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyVideo {
+    inner: gaanim_api::canvas::VideoClip,
+}
+
+impl PyVideo {
+    fn initializer(inner: gaanim_api::canvas::VideoClip) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(inner.drawable.clone())).add_subclass(Self { inner })
+    }
 }
 
 #[pymethods]
@@ -2022,12 +2042,10 @@ impl PyScene {
             .reload_assets();
     }
 
-    /// Play an audio file in preview and mix it into MP4/WebM exports. With no
-    /// explicit `start`, it begins at the current timeline cursor.
+    /// Declare an audio file for later activation with `Scene.play`.
     #[pyo3(signature = (
         path,
         *,
-        start=None,
         duration=None,
         volume=1.0,
         fade_in=0.0,
@@ -2036,16 +2054,16 @@ impl PyScene {
     fn audio(
         &self,
         path: &str,
-        start: Option<f64>,
         duration: Option<f64>,
         volume: f64,
         fade_in: f64,
         fade_out: f64,
-    ) -> PyResult<()> {
+    ) -> PyResult<PyAudio> {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .audio(path, start, duration, volume, fade_in, fade_out)
+            .audio(path, duration, volume, fade_in, fade_out)
+            .map(|inner| PyAudio { inner })
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
@@ -3613,7 +3631,6 @@ impl PyScene {
         fit="contain",
         crop=None,
         quality="medium",
-        start=None,
         offset=0.0,
         duration=None,
         r#loop=false,
@@ -3623,20 +3640,20 @@ impl PyScene {
     ))]
     fn video(
         &self,
+        py: Python<'_>,
         path: &str,
         width: Option<f64>,
         height: Option<f64>,
         fit: &str,
         crop: Option<(f64, f64, f64, f64)>,
         quality: &str,
-        start: Option<f64>,
         offset: f64,
         duration: Option<f64>,
         r#loop: bool,
         speed: f64,
         audio: bool,
         volume: f64,
-    ) -> PyResult<PyDrawable> {
+    ) -> PyResult<Py<PyVideo>> {
         let fit = match fit {
             "contain" => ImageFit::Contain,
             "cover" => ImageFit::Cover,
@@ -3660,7 +3677,6 @@ impl PyScene {
                 }),
                 quality: image_quality(quality)?,
             },
-            start,
             offset,
             duration,
             looping: r#loop,
@@ -3668,11 +3684,11 @@ impl PyScene {
             audio,
             volume,
         };
-        self.inner
+        let inner = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
             .video_with_options(path, options)
-            .map(PyDrawable)
             .map_err(|error| match error {
                 gaanim_api::canvas::VideoLoadError::Options(_)
                 | gaanim_api::canvas::VideoLoadError::InvalidNumber { .. }
@@ -3681,7 +3697,8 @@ impl PyScene {
                     pyo3::exceptions::PyValueError::new_err(error.to_string())
                 }
                 _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
-            })
+            })?;
+        Py::new(py, PyVideo::initializer(inner))
     }
 
     /// Load an SVG as an animatable group of vector paths.
@@ -4768,15 +4785,27 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    #[pyo3(signature = (anims, *, lag=None))]
-    fn play(&self, anims: Vec<PyCanvasAnim>, lag: Option<f64>) {
-        let anims = anims.into_iter().map(|anim| anim.inner).collect();
-        let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        if let Some(lag) = lag {
-            scene.play_with_lag(anims, lag);
-        } else {
-            scene.play(anims);
+    #[pyo3(signature = (items, *, lag=None))]
+    fn play(&self, items: &Bound<'_, PyAny>, lag: Option<f64>) -> PyResult<()> {
+        let mut play_items = Vec::new();
+        for item in items.try_iter()? {
+            let item = item?;
+            if let Ok(anim) = item.extract::<PyRef<'_, PyCanvasAnim>>() {
+                play_items.push(PlayItem::Animation(anim.inner.clone()));
+            } else if let Ok(audio) = item.extract::<PyRef<'_, PyAudio>>() {
+                play_items.push(PlayItem::Audio(audio.inner.clone()));
+            } else if let Ok(video) = item.extract::<PyRef<'_, PyVideo>>() {
+                play_items.push(PlayItem::Video(video.inner.clone()));
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "Scene.play items must be Anim, Audio, or Video values",
+                ));
+            }
         }
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        scene
+            .play_items(play_items, lag.unwrap_or(0.0))
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     fn fade_out_all(&self, duration: f64) {

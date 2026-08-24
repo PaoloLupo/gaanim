@@ -165,9 +165,9 @@ mod tests {
             std::env::temp_dir().join(format!("gaanim-preview-audio-{}.wav", std::process::id()));
         std::fs::write(&path, b"fixture").unwrap();
         let mut canvas = Canvas::new(640, 360);
-        canvas
-            .audio(&path, Some(1.5), Some(2.0), 0.5, 0.1, 0.2)
-            .unwrap();
+        canvas.wait(1.5);
+        let audio = canvas.audio(&path, Some(2.0), 0.5, 0.1, 0.2).unwrap();
+        canvas.play_items(vec![audio.into()], 0.0).unwrap();
 
         let mut world = World::new();
         world.insert_resource(Timeline::new());

@@ -359,7 +359,6 @@ pub struct ImageOptions {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VideoOptions {
     pub image: ImageOptions,
-    pub start: Option<f64>,
     pub offset: f64,
     /// Length of the selected source interval, in source seconds.
     pub duration: Option<f64>,
@@ -373,7 +372,6 @@ impl Default for VideoOptions {
     fn default() -> Self {
         Self {
             image: ImageOptions::default(),
-            start: None,
             offset: 0.0,
             duration: None,
             looping: false,

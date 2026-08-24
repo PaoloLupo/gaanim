@@ -40,11 +40,12 @@ pub use visualization::{
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
-    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, BooleanError,
-    CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle, Canvas,
-    DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle, DimensionOptions,
-    ForceVectorHandle, ImageLoadError, SceneObjectError, SupportHandle, SurroundingRectError,
-    SurroundingRectHandle, ThemeError, TypstAssetError, VideoLoadError,
+    AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
+    BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
+    Canvas, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle, DimensionOptions,
+    ForceVectorHandle, ImageLoadError, PlayError, PlayItem, SceneObjectError, SupportHandle,
+    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
+    VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
@@ -30,6 +31,71 @@ use crate::canvas::{
     SegmentSpec, SegmentStop,
 };
 use crate::export::{AudioTrack, AudioTrackError};
+
+/// A validated audio declaration that can be activated by [`Canvas::play_items`].
+#[derive(Debug, Clone)]
+pub struct AudioClip {
+    track: AudioTrack,
+    state: SharedCanvasState,
+}
+
+/// A timeline-synchronized video declaration activated by [`Canvas::play_items`].
+#[derive(Debug, Clone)]
+pub struct VideoClip {
+    pub drawable: DrawableHandle,
+    state: SharedCanvasState,
+    duration: Option<f64>,
+    audio: Option<AudioTrack>,
+    activated: Arc<AtomicBool>,
+}
+
+impl VideoClip {
+    fn belongs_to(&self, state: &SharedCanvasState) -> bool {
+        Arc::ptr_eq(&self.state, state)
+    }
+}
+
+impl AudioClip {
+    fn belongs_to(&self, state: &SharedCanvasState) -> bool {
+        Arc::ptr_eq(&self.state, state)
+    }
+}
+
+/// One value accepted by the mixed animation/audio playback API.
+#[derive(Debug, Clone)]
+pub enum PlayItem {
+    Animation(Anim),
+    Audio(AudioClip),
+    Video(VideoClip),
+}
+
+impl From<Anim> for PlayItem {
+    fn from(value: Anim) -> Self {
+        Self::Animation(value)
+    }
+}
+
+impl From<AudioClip> for PlayItem {
+    fn from(value: AudioClip) -> Self {
+        Self::Audio(value)
+    }
+}
+
+impl From<VideoClip> for PlayItem {
+    fn from(value: VideoClip) -> Self {
+        Self::Video(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PlayError {
+    #[error("audio declarations can only be played by their owning Scene")]
+    ForeignAudio,
+    #[error("video declarations can only be played by their owning Scene")]
+    ForeignVideo,
+    #[error("a video declaration can only be activated once")]
+    VideoAlreadyActivated,
+}
 
 /// Default length in scene units for the straight segments at either spring end.
 pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
@@ -800,34 +866,30 @@ impl Canvas {
         }
     }
 
-    /// Add an audio source at an absolute scene time, or at the current cursor
-    /// when `start_time` is omitted. Preview and export share the same timing.
+    /// Declare an audio source without scheduling it.
+    ///
+    /// Pass the returned clip to [`Self::play_items`] to activate it at that
+    /// play call's absolute timeline cursor.
     pub fn audio(
-        &mut self,
+        &self,
         path: impl AsRef<Path>,
-        start_time: Option<f64>,
         duration: Option<f64>,
         volume: f64,
         fade_in: f64,
         fade_out: f64,
-    ) -> Result<(), AudioTrackError> {
-        let start_time = start_time.unwrap_or_else(|| {
-            self.state
-                .lock()
-                .expect("canvas state poisoned")
-                .active()
-                .cursor
-        });
+    ) -> Result<AudioClip, AudioTrackError> {
         let track = AudioTrack::new(
             self.resolve_asset_path(path),
-            start_time,
+            0.0,
             duration,
             volume,
             fade_in,
             fade_out,
         )?;
-        self.audio_tracks.push(track);
-        Ok(())
+        Ok(AudioClip {
+            track,
+            state: self.state.clone(),
+        })
     }
 
     /// Resolve and validate assets before playback. Raster images are also
@@ -1796,20 +1858,20 @@ impl Canvas {
     }
 
     /// Load a timeline-synchronized MP4 as an animatable raster drawable.
-    pub fn video(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, VideoLoadError> {
+    pub fn video(&mut self, path: impl AsRef<Path>) -> Result<VideoClip, VideoLoadError> {
         self.video_with_options(path, VideoOptions::default())
     }
 
     /// Load a video with temporal, sizing, loop, and embedded-audio options.
     ///
-    /// Constructing the drawable does not advance the scene cursor. Before its
-    /// start it shows the first selected frame; a non-looping video freezes on
-    /// the last selected frame.
+    /// Constructing the drawable does not advance or schedule it. Playback is
+    /// activated by [`Self::play_items`]; a non-looping video then freezes on
+    /// its last selected frame.
     pub fn video_with_options(
         &mut self,
         path: impl AsRef<Path>,
         options: VideoOptions,
-    ) -> Result<DrawableHandle, VideoLoadError> {
+    ) -> Result<VideoClip, VideoLoadError> {
         for (name, value, positive) in [
             ("offset", options.offset, false),
             ("speed", options.speed, true),
@@ -1821,14 +1883,6 @@ impl Canvas {
                     requirement: if positive { "positive" } else { "non-negative" },
                 });
             }
-        }
-        if let Some(start) = options.start
-            && (!start.is_finite() || start < 0.0)
-        {
-            return Err(VideoLoadError::InvalidNumber {
-                name: "start",
-                requirement: "non-negative",
-            });
         }
         if let Some(duration) = options.duration
             && (!duration.is_finite() || duration <= 0.0)
@@ -1856,7 +1910,7 @@ impl Canvas {
         let playback = gaanim_media::VideoPlayback {
             path: path.canonicalize().unwrap_or(path),
             metadata,
-            scene_start: options.start.unwrap_or_else(|| self.current_time()),
+            scene_start: 0.0,
             source_offset: options.offset,
             source_duration,
             looping: options.looping,
@@ -1865,23 +1919,32 @@ impl Canvas {
             volume: options.volume,
             last_frame: None,
         };
-        if options.audio && has_audio {
-            let track = AudioTrack::from_media(
+        let audio = if options.audio && has_audio {
+            Some(AudioTrack::from_media(
                 playback.path.clone(),
-                playback.scene_start,
+                0.0,
                 playback.source_offset,
                 playback.source_duration,
                 playback.speed,
                 playback.looping,
                 playback.volume,
-            )?;
-            self.audio_tracks.push(track);
-        }
-        Ok(self.spawn(SpawnKind::Video {
+            )?)
+        } else {
+            None
+        };
+        let duration = (!playback.looping).then_some(playback.source_duration / playback.speed);
+        let drawable = self.spawn(SpawnKind::Video {
             poster,
             view,
             playback,
-        }))
+        });
+        Ok(VideoClip {
+            drawable,
+            state: self.state.clone(),
+            duration,
+            audio,
+            activated: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     /// Load an SVG as an animatable group of resolved vector paths.
@@ -2652,6 +2715,90 @@ impl Canvas {
             })
             .collect();
         self.play_builders(builders);
+    }
+
+    /// Activate animations and declared audio together at the current cursor.
+    ///
+    /// Audio with an explicit duration contributes to the play duration. An
+    /// open-ended clip starts with the batch but does not extend the timeline.
+    pub fn play_items(&mut self, items: Vec<PlayItem>, lag: f64) -> Result<(), PlayError> {
+        if items
+            .iter()
+            .any(|item| matches!(item, PlayItem::Audio(audio) if !audio.belongs_to(&self.state)))
+        {
+            return Err(PlayError::ForeignAudio);
+        }
+        if items
+            .iter()
+            .any(|item| matches!(item, PlayItem::Video(video) if !video.belongs_to(&self.state)))
+        {
+            return Err(PlayError::ForeignVideo);
+        }
+        let mut video_activations = HashSet::new();
+        if items.iter().any(|item| match item {
+            PlayItem::Video(video) => {
+                video.activated.load(Ordering::Acquire)
+                    || !video_activations.insert(Arc::as_ptr(&video.activated))
+            }
+            _ => false,
+        }) {
+            return Err(PlayError::VideoAlreadyActivated);
+        }
+
+        let lag = lag.max(0.0);
+        let play_start = self.current_time();
+        let mut builders = Vec::new();
+        let mut max_duration: f64 = 0.0;
+        let mut visual_duration: f64 = 0.0;
+        for (index, item) in items.into_iter().enumerate() {
+            let delay = index as f64 * lag;
+            match item {
+                PlayItem::Animation(anim) => {
+                    if anim.inner.anim_type.is_empty_properties() {
+                        continue;
+                    }
+                    anim.deactivate_auto_queue();
+                    let mut builder = anim.into_builder();
+                    builder.delay += delay;
+                    max_duration =
+                        max_duration.max(builder.delay.max(0.0) + builder.duration.max(0.0));
+                    visual_duration =
+                        visual_duration.max(builder.delay.max(0.0) + builder.duration.max(0.0));
+                    builders.push(builder);
+                }
+                PlayItem::Audio(audio) => {
+                    let mut track = audio.track;
+                    track.start_time = play_start + delay;
+                    max_duration = max_duration.max(delay + track.duration.unwrap_or(0.0));
+                    self.audio_tracks.push(track);
+                }
+                PlayItem::Video(video) => {
+                    video.activated.store(true, Ordering::Release);
+                    let start_time = play_start + delay;
+                    {
+                        let mut spec = video.drawable.spec.lock().expect("object spec poisoned");
+                        let SpawnKind::Video { playback, .. } = &mut spec.kind else {
+                            unreachable!("VideoClip must retain a video spawn kind");
+                        };
+                        playback.scene_start = start_time;
+                    }
+                    if let Some(mut track) = video.audio {
+                        track.start_time = start_time;
+                        self.audio_tracks.push(track);
+                    }
+                    max_duration = max_duration.max(delay + video.duration.unwrap_or(0.0));
+                }
+            }
+        }
+
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.active_mut().cursor += max_duration;
+        guard.active_mut().ops.push(Op::Play(builders));
+        let media_remainder = (max_duration - visual_duration).max(0.0);
+        if media_remainder > 0.0 {
+            guard.active_mut().ops.push(Op::Wait(media_remainder));
+        }
+        Ok(())
     }
 
     /// Low-level parallel playback for legacy `AnimationBuilder` values.
@@ -6755,6 +6902,124 @@ mod tests {
             .filter(|op| matches!(op, Op::Stop))
             .count();
         assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn declared_audio_starts_only_when_played_at_the_absolute_scene_cursor() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-declared-audio-{}.wav", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas.segment("intro", None).unwrap();
+        canvas.wait(2.0);
+        canvas.segment("audio", None).unwrap();
+        canvas.wait(1.0);
+        let audio = canvas.audio(&path, Some(2.0), 0.5, 0.1, 0.2).unwrap();
+
+        assert!(canvas.audio_tracks.is_empty(), "declaration must be inert");
+        canvas.play_items(vec![audio.into()], 0.0).unwrap();
+
+        assert_eq!(canvas.audio_tracks.len(), 1);
+        assert_eq!(canvas.audio_tracks[0].start_time, 3.0);
+        assert_eq!(canvas.current_time(), 5.0);
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        assert!(matches!(
+            state.active().ops[state.active().ops.len() - 2],
+            Op::Play(_)
+        ));
+        assert!(matches!(state.active().ops.last(), Some(Op::Wait(2.0))));
+        drop(state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn open_ended_audio_play_does_not_extend_the_timeline() {
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-background-audio-{}.wav",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"fixture").unwrap();
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas.wait(1.25);
+        let audio = canvas.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
+        canvas.play_items(vec![audio.into()], 0.0).unwrap();
+
+        assert_eq!(canvas.audio_tracks[0].start_time, 1.25);
+        assert_eq!(canvas.current_time(), 1.25);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn declared_video_activates_frames_and_embedded_audio_at_one_cursor() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-declared-video-{}.mp4", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+
+        let mut canvas = Canvas::new(1280, 720);
+        canvas.wait(1.5);
+        let playback = gaanim_media::VideoPlayback {
+            path: path.clone(),
+            metadata: gaanim_media::VideoMetadata {
+                width: 1,
+                height: 1,
+                duration: 4.0,
+                fps: 30.0,
+                has_audio: true,
+            },
+            scene_start: 0.0,
+            source_offset: 0.0,
+            source_duration: 4.0,
+            looping: false,
+            speed: 2.0,
+            audio: true,
+            volume: 0.75,
+            last_frame: None,
+        };
+        let poster = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::from(vec![0, 0, 0, 255]),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 1,
+            height: 1,
+        };
+        let view = ImageOptions::default().resolve(1, 1).unwrap();
+        let drawable = canvas.spawn(SpawnKind::Video {
+            poster,
+            view,
+            playback,
+        });
+        let video = VideoClip {
+            drawable: drawable.clone(),
+            state: canvas.state.clone(),
+            duration: Some(2.0),
+            audio: Some(AudioTrack::from_media(&path, 0.0, 0.0, 4.0, 2.0, false, 0.75).unwrap()),
+            activated: Arc::new(AtomicBool::new(false)),
+        };
+
+        assert_eq!(
+            canvas.play_items(vec![video.clone().into(), video.clone().into()], 0.0),
+            Err(PlayError::VideoAlreadyActivated)
+        );
+        assert_eq!(canvas.current_time(), 1.5);
+        assert!(canvas.audio_tracks.is_empty());
+        canvas.play_items(vec![video.clone().into()], 0.0).unwrap();
+
+        let spec = drawable.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Video { playback, .. } = &spec.kind else {
+            panic!("expected video spawn kind");
+        };
+        assert_eq!(playback.scene_start, 1.5);
+        drop(spec);
+        assert_eq!(canvas.audio_tracks[0].start_time, 1.5);
+        assert_eq!(canvas.current_time(), 3.5);
+        assert_eq!(
+            canvas.play_items(vec![video.into()], 0.0),
+            Err(PlayError::VideoAlreadyActivated)
+        );
+        assert_eq!(canvas.audio_tracks.len(), 1);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

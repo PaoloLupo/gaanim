@@ -480,6 +480,7 @@ class Anim:
         this targets the PBR material base color instead.
         """
         ...
+
     def color(self, color: ColorLike) -> Anim:
         """Target currently visible vector paints, including every text glyph.
 
@@ -642,6 +643,14 @@ class Anim:
             result = animation.about_point(1.0, 1.0)
         """
         ...
+
+class Audio:
+    """A validated audio declaration activated explicitly by ``Scene.play``.
+
+    Audio declarations are bound to their creating scene. A finite ``duration``
+    contributes to the enclosing play duration; an open-ended declaration
+    starts as background audio without extending the timeline.
+    """
 
 class Updater:
     """Preset updater — attach to a DrawableHandle via add_updater()."""
@@ -2914,6 +2923,13 @@ Cartesian2D: TypeAlias = CoordinateSpace
 Cartesian3D: TypeAlias = CoordinateSpace3D
 ComplexSpace: TypeAlias = CoordinateSpace
 
+class Video(Drawable):
+    """A transformable MP4 declaration activated explicitly by ``Scene.play``.
+
+    Its frames and optional embedded audio share the scene timeline. A video
+    declaration belongs to one scene and can be activated once.
+    """
+
 class Scene:
     def __init__(
         self,
@@ -3086,19 +3102,21 @@ class Scene:
         self,
         path: str,
         *,
-        start: Optional[float] = None,
         duration: Optional[float] = None,
         volume: float = 1.0,
         fade_in: float = 0.0,
         fade_out: float = 0.0,
-    ) -> None:
-        """Synchronize an audio file with preview and MP4/WebM export.
+    ) -> Audio:
+        """Declare a validated audio file for explicit playback.
 
-        Playback follows timeline pause, seek, and speed. With no ``start``,
-        the track begins at the current scene cursor.
+        The declaration is inert until passed to ``Scene.play``. Playback then
+        begins at that call's absolute timeline cursor and follows pause, seek,
+        and speed in preview and MP4/WebM export. Invalid paths or timing values
+        raise ``ValueError``.
 
         Example:
-            scene.audio("music.ogg", volume=0.5)
+            music = scene.audio("music.ogg", volume=0.5)
+            scene.play([music])
         """
         ...
     def circle(self, r: float) -> Drawable:
@@ -3682,22 +3700,22 @@ class Scene:
         fit: Literal["contain", "cover", "stretch"] = "contain",
         crop: Optional[tuple[float, float, float, float]] = None,
         quality: Literal["low", "medium", "high"] = "medium",
-        start: Optional[float] = None,
         offset: float = 0.0,
         duration: Optional[float] = None,
         loop: bool = False,
         speed: float = 1.0,
         audio: bool = True,
         volume: float = 1.0,
-    ) -> Drawable:
-        """Create a timeline-synchronized MP4 drawable without advancing the cursor.
+    ) -> Video:
+        """Declare a timeline-synchronized MP4 drawable for explicit playback.
 
-        ``start`` defaults to the current cursor. ``offset`` and ``duration``
-        select source seconds, ``loop`` repeats that interval, and ``speed``
-        preserves audio pitch. ``quality="high"`` keeps bicubic sampling for
-        every decoded frame. The first/last frame remains visible outside
-        non-looping playback. Requires ``ffmpeg`` and ``ffprobe`` in PATH and
-        raises ValueError for invalid ranges or RuntimeError for media failures.
+        The declaration is inert until included in ``Scene.play``; that call
+        fixes the absolute start of both frames and embedded audio. ``offset``
+        and ``duration`` select source seconds, ``loop`` repeats that interval,
+        and ``speed`` preserves audio pitch. Finite non-looping video contributes
+        its selected output duration to the play batch. Requires ``ffmpeg`` and
+        ``ffprobe`` and raises ValueError for invalid ranges or RuntimeError for
+        media failures.
         """
         ...
     def svg(self, path: str) -> Drawable:
@@ -4154,11 +4172,17 @@ class Scene:
         Export ignores stops and renders the timeline continuously.
         """
         ...
-    def play(self, anims: Sequence[Anim], lag: Optional[float] = None) -> None:
-        """Schedule play on the scene timeline.
+    def play(self, items: Sequence[Anim | Audio | Video], lag: Optional[float] = None) -> None:
+        """Activate animations and declared audio at the current cursor.
+
+        Items run in parallel, with optional ``lag`` added by sequence order.
+        Finite audio durations participate in the batch duration; open-ended
+        audio starts without extending the timeline. Video starts its frames
+        and embedded audio together and can be activated once. Media declared
+        by another scene raises ``ValueError``.
 
         Example:
-            scene.play([animation])
+            scene.play([animation, music])
         """
         ...
     def fade_out_all(self, d: float) -> None:

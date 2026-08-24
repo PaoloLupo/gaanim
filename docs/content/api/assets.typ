@@ -37,6 +37,7 @@ rotan; tiene un coste de GPU mayor que la calidad media.
 ```python
 hero = scene.image("cover.png", width=960, quality="high")
 clip = scene.video("intro.mp4", height=540, quality="high", audio=False)
+scene.play([clip])
 ```
 
 Los valores de calidad no válidos, las dimensiones no positivas y los crops
