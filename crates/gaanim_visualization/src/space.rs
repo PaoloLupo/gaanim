@@ -257,24 +257,32 @@ impl CartesianSpace {
 
         if self.labels {
             if let Some(label) = self.map.x.label_text() {
+                let position = self.map.x.label_position_value();
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(
-                        axis_title_coordinate(self.map.x.label_position_value(), frame.width),
-                        x_axis_y + self.map.x.style_value().tick_length * 0.5 + 12.0,
-                    ),
+                    position: if position == AxisLabelPosition::Center {
+                        Point::new(0.0, x_axis_y - self.map.x.style_value().tick_length - 12.0)
+                    } else {
+                        Point::new(axis_title_coordinate(position, frame.width), x_axis_y)
+                    },
                     rotation: 0.0,
                     color: self.map.x.style_value().label_color,
                 });
             }
             if let Some(label) = self.map.y.label_text() {
+                let position = self.map.y.label_position_value();
                 labels.push(LabelGeometry {
                     text: label.to_owned(),
-                    position: Point::new(
-                        y_axis_x + self.map.y.style_value().tick_length * 0.5 + 12.0,
-                        axis_title_coordinate(self.map.y.label_position_value(), frame.height),
-                    ),
-                    rotation: 0.0,
+                    position: if position == AxisLabelPosition::Center {
+                        Point::new(y_axis_x - self.map.y.style_value().tick_length - 12.0, 0.0)
+                    } else {
+                        Point::new(y_axis_x, axis_title_coordinate(position, frame.height))
+                    },
+                    rotation: if position == AxisLabelPosition::Center {
+                        std::f64::consts::FRAC_PI_2
+                    } else {
+                        0.0
+                    },
                     color: self.map.y.style_value().label_color,
                 });
             }

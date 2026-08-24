@@ -343,11 +343,11 @@ impl PyAxis {
     fn label(&self, text: String, position: &str) -> PyResult<Self> {
         let position = match position {
             "start" | "bottom" => AxisLabelPosition::Start,
-            "center" | "middle" => AxisLabelPosition::Center,
+            "center" | "middle" | "mid" => AxisLabelPosition::Center,
             "end" | "top" => AxisLabelPosition::End,
             _ => {
                 return Err(value_error(
-                    "label position must be start, center, end, top, or bottom",
+                    "label position must be start, center, mid, end, top, or bottom",
                 ));
             }
         };
@@ -3083,6 +3083,15 @@ mod tests {
     use super::*;
     use gaanim_scene::prelude::World;
     use gaanim_timeline::timeline::Timeline;
+
+    #[test]
+    fn axis_label_accepts_mid_as_center_alias() {
+        let axis = PyAxis(NativeAxis::linear(-1.0, 1.0).unwrap())
+            .label("value".to_owned(), "mid")
+            .unwrap();
+
+        assert_eq!(axis.0.label_position_value(), AxisLabelPosition::Center);
+    }
 
     #[test]
     fn readout_parts_share_default_and_explicit_font_sizes() {
