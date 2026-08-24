@@ -110,19 +110,16 @@ fn interactive_background_pixel_size(
     background: &CanvasBackground,
     camera: Option<&gaanim_math::ResolvedCamera>,
 ) -> (u32, u32) {
+    const MAX_SHADER_TEXTURE_DIMENSION: f64 = 8192.0;
     let scale = camera
         .map(|camera| camera.viewport.scale)
         .filter(|scale| scale.is_finite() && *scale > 0.0)
         .unwrap_or(1.0);
-    let scaled = |dimension: u32| {
-        (f64::from(dimension) * scale)
-            .round()
-            .clamp(1.0, f64::from(u32::MAX)) as u32
-    };
-    (
-        scaled(background.pixel_size.0),
-        scaled(background.pixel_size.1),
-    )
+    let width = f64::from(background.pixel_size.0) * scale;
+    let height = f64::from(background.pixel_size.1) * scale;
+    let limit_scale = (MAX_SHADER_TEXTURE_DIMENSION / width.max(height)).min(1.0);
+    let fit = |dimension: f64| (dimension * limit_scale).round().clamp(1.0, 8192.0) as u32;
+    (fit(width), fit(height))
 }
 
 /// Marker component identifying the single global Vello compositing entity.
@@ -1989,6 +1986,18 @@ mod tests {
         assert_eq!(
             interactive_background_pixel_size(&background, Some(&camera)),
             (640, 360)
+        );
+
+        let high_zoom_camera = gaanim_math::ResolvedCamera::new(
+            gaanim_math::Camera::ortho_2d(1280, 720),
+            gaanim_math::CameraViewport {
+                scale: 8.0,
+                offset_y: 0.0,
+            },
+        );
+        assert_eq!(
+            interactive_background_pixel_size(&background, Some(&high_zoom_camera)),
+            (8192, 4608)
         );
     }
 
