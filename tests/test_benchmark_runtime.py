@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("benchmark_runtime.py")
@@ -62,10 +63,24 @@ class RuntimeBenchmarkTests(unittest.TestCase):
                 json.dumps({"snapshots": [{"id": "a"}, {"id": "b"}]}),
                 encoding="utf-8",
             )
+            (artifact_dir / "command.log").write_text(
+                "GAANIM_CAPTURE_TIMINGS setup_ms=1 timeline_update_ms=2 "
+                "scene_compile_ms=3 render_readback_ms=4 capture_total_ms=10\n"
+                "GAANIM_PNG_TIMINGS png_encode_ms=5\n",
+                encoding="utf-8",
+            )
 
             benchmark_runtime.validate_artifacts("seek", artifact_dir, 2)
             with self.assertRaises(benchmark_runtime.BenchmarkFailure):
                 benchmark_runtime.validate_artifacts("preview", artifact_dir, 3)
+
+    def test_windows_child_path_contains_the_python_runtime(self) -> None:
+        with mock.patch.object(benchmark_runtime.os, "name", "nt"), mock.patch.object(
+            benchmark_runtime.sys, "base_prefix", r"C:\Python"
+        ), mock.patch.dict(benchmark_runtime.os.environ, {"PATH": r"C:\Tools"}, clear=True):
+            environment = benchmark_runtime.child_environment()
+
+        self.assertEqual(environment["PATH"].split(benchmark_runtime.os.pathsep)[0], r"C:\Python")
 
     def test_export_artifact_validation_reads_phase_timings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

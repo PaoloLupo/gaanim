@@ -730,6 +730,7 @@ pub fn capture_scene_direct<F>(
 where
     F: FnOnce(&mut World) + Send + Sync + 'static,
 {
+    let capture_started = Instant::now();
     if times.is_empty() {
         return Err(ExportError::Capture(
             "at least one snapshot timestamp is required".to_string(),
@@ -757,6 +758,7 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    let setup_ms = capture_started.elapsed().as_secs_f64() * 1000.0;
 
     let duration = app.world().resource::<Timeline>().cached_duration;
     if let Some(time) = times.iter().find(|time| **time > duration) {
@@ -766,10 +768,16 @@ where
     }
 
     let mut frames = Vec::with_capacity(times.len());
+    let mut timeline_update = Duration::ZERO;
+    let mut scene_compile = Duration::ZERO;
+    let mut render_readback = Duration::ZERO;
     for &time in times {
+        let phase_started = Instant::now();
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
         app.update();
+        timeline_update += phase_started.elapsed();
 
+        let phase_started = Instant::now();
         let resolved_camera = app
             .world()
             .get_resource::<gaanim_math::ResolvedCamera>()
@@ -797,6 +805,7 @@ where
             config.height,
         );
         scene.append(&raw_scene, Some(camera_to_vello));
+        scene_compile += phase_started.elapsed();
 
         let background = app
             .world()
@@ -812,13 +821,25 @@ where
             })
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
+        let phase_started = Instant::now();
         let rgba = gpu.render_frame(&scene, background)?;
+        render_readback += phase_started.elapsed();
         frames.push(CapturedFrame {
             time,
             width: config.width,
             height: config.height,
             rgba,
         });
+    }
+
+    if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
+        eprintln!(
+            "GAANIM_CAPTURE_TIMINGS setup_ms={setup_ms:.3} timeline_update_ms={:.3} scene_compile_ms={:.3} render_readback_ms={:.3} capture_total_ms={:.3}",
+            timeline_update.as_secs_f64() * 1000.0,
+            scene_compile.as_secs_f64() * 1000.0,
+            render_readback.as_secs_f64() * 1000.0,
+            capture_started.elapsed().as_secs_f64() * 1000.0,
+        );
     }
 
     Ok(frames)

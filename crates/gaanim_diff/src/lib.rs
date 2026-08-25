@@ -11,6 +11,7 @@ pub use model::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use gaanim_api::canvas::Canvas;
 use gaanim_export::prelude::{
@@ -85,6 +86,7 @@ pub fn capture_canvas(
         })?
     };
 
+    let png_started = Instant::now();
     let mut snapshots = Vec::with_capacity(frames.len());
     for (index, frame) in frames.into_iter().enumerate() {
         let id = format!("seek_{index:04}_t_{}", time_slug(frame.time));
@@ -114,6 +116,12 @@ pub fn capture_canvas(
         output_dir.join(MANIFEST_FILE),
         serde_json::to_vec_pretty(&manifest)?,
     )?;
+    if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
+        eprintln!(
+            "GAANIM_PNG_TIMINGS png_encode_ms={:.3}",
+            png_started.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
     Ok(manifest)
 }
 

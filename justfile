@@ -87,7 +87,7 @@ test-exports encoder="libx264":
 # Profiles: smoke (fast wiring check) or standard (300-frame export and stable sample counts).
 benchmark profile="smoke" encoder="libx264":
     cargo build -p gaanim_editor --bin gaanim-core --release
-    {{ system_python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }}
+    {{ python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }}
 
 # ---- Run --------------------------------------------------------------------
 

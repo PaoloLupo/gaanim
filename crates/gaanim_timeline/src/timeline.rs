@@ -1,8 +1,8 @@
 use bevy::animation::AnimationPlayer;
-use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Resource, World};
+use bevy::prelude::{BuildChildrenTransformExt, ChildOf, Entity, Or, Resource, With, World};
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::clip::{
     Clip, ClipId, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, Track, TrackId,
@@ -34,6 +34,38 @@ struct ReactiveEntityState {
     traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     traced_path_sample_times: Option<Vec<f64>>,
     translation: Option<gaanim_core::glam::DVec3>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum AbsoluteLensChannel {
+    Translation,
+    Rotation,
+    Scale,
+    Opacity,
+    FillColor,
+    StrokeColor,
+    StrokeWidth,
+    PathCompletion,
+    PathMorph,
+    FillDrawProgress,
+    FillLevel,
+}
+
+fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
+    Some(match lens {
+        PropertyLensSpec::Translation { .. } => AbsoluteLensChannel::Translation,
+        PropertyLensSpec::Rotation { .. } => AbsoluteLensChannel::Rotation,
+        PropertyLensSpec::Scale { .. } => AbsoluteLensChannel::Scale,
+        PropertyLensSpec::Opacity { .. } => AbsoluteLensChannel::Opacity,
+        PropertyLensSpec::FillColor { .. } => AbsoluteLensChannel::FillColor,
+        PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
+        PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
+        PropertyLensSpec::PathCompletion { .. } => AbsoluteLensChannel::PathCompletion,
+        PropertyLensSpec::PathMorph { .. } => AbsoluteLensChannel::PathMorph,
+        PropertyLensSpec::FillDrawProgress { .. } => AbsoluteLensChannel::FillDrawProgress,
+        PropertyLensSpec::FillLevel { .. } => AbsoluteLensChannel::FillLevel,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -155,9 +187,8 @@ pub struct Timeline {
     pub seek_request: Option<f64>,
     /// The keyframe time last used as a restore base.
     ///
-    /// When seeking forward within the same keyframe interval, the full snapshot
-    /// restore can be skipped because clip replay (which uses explicit `from`/`to`
-    /// values) produces the same deterministic result regardless of prior entity state.
+    /// Absolute 2D clip replay can reuse this restored base within the same
+    /// keyframe interval; stateful and dynamic timelines always restore again.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub last_restore_kf_time: Option<OrderedFloat<f64>>,
     /// Arena of scene metadata for multi-scene timelines.
@@ -612,15 +643,71 @@ impl Timeline {
         result
     }
 
+    fn can_replay_without_restore(
+        &self,
+        world: &mut World,
+        keyframe_time: OrderedFloat<f64>,
+        target_time: f64,
+    ) -> bool {
+        if self.last_restore_kf_time != Some(keyframe_time) || !self.scenes.is_empty() {
+            return false;
+        }
+
+        let mut reactive = world.query_filtered::<Entity, Or<(
+            With<gaanim_animation::Updater>,
+            With<gaanim_animation::SampledSeriesDriver>,
+            With<gaanim_animation::TracedPath>,
+            With<gaanim_animation::TracedPath3D>,
+            With<gaanim_animation::FloatSignal>,
+            With<gaanim_animation::SurroundingRect>,
+        )>>();
+        if reactive.iter(world).next().is_some() {
+            return false;
+        }
+
+        let upper = self.current_time.max(target_time);
+        let mut path_completion_targets = HashSet::new();
+        let mut path_morph_targets = HashSet::new();
+        for clip in self
+            .clips
+            .values()
+            .filter(|clip| clip.start <= upper && clip.end() >= keyframe_time.0)
+        {
+            match &clip.payload {
+                ClipPayload::Animation(animation) => {
+                    let Some(channel) = absolute_lens_channel(&animation.lens) else {
+                        return false;
+                    };
+                    match channel {
+                        AbsoluteLensChannel::PathCompletion => {
+                            path_completion_targets.insert(animation.target);
+                        }
+                        AbsoluteLensChannel::PathMorph => {
+                            path_morph_targets.insert(animation.target);
+                        }
+                        _ => {}
+                    }
+                }
+                ClipPayload::Wait
+                | ClipPayload::Audio { .. }
+                | ClipPayload::Marker(_)
+                | ClipPayload::Stop
+                | ClipPayload::SegmentStart(_) => {}
+                _ => return false,
+            }
+        }
+
+        path_completion_targets.is_disjoint(&path_morph_targets)
+    }
+
     /// Performs a random-access seek on the entire Bevy `World`, jumping instantly to `target_time`.
     ///
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
     /// animations in correct temporal order up to `target_time`.
     ///
-    /// Every seek restores the closest keyframe so transitions and reactive state remain
-    /// deterministic. Snapshot restoration is change-aware for renderer-invalidating geometry
-    /// and styles, avoiding false fragment-cache invalidation during playback of static content
-    /// such as repeated SVG paths. Local transforms and hierarchy are still fully reconciled.
+    /// Stateful timelines restore the closest keyframe on every seek. Timelines containing only
+    /// absolute 2D property clips may replay from an already-restored keyframe without repeating
+    /// the full world restore; every other payload keeps the deterministic restore path.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
         let max_time = self
             .loop_range
@@ -651,20 +738,21 @@ impl Timeline {
         };
 
         // 1. Locate the nearest recorded keyframe <= target_time
-        let keyframe = self
+        let keyframe_time = self
             .keyframes
             .range(..=OrderedFloat(clamped_target))
-            .next_back();
+            .next_back()
+            .map(|(&time, _)| time);
 
-        let kf_start_time = if let Some((&kf_time, snapshot)) = keyframe {
-            // Always restore the snapshot to guarantee correct entity state.
-            // Transitions (slide, crossfade, etc.) apply one-shot offsets that
-            // accumulate without a full restore, so skipping the restore on
-            // forward seeks produces incorrect results.
-            // Restoring is change-aware, so matching static components do not receive
-            // false `Changed` ticks or invalidate retained renderer fragments.
-            snapshot.restore(world);
-            self.last_restore_kf_time = Some(kf_time);
+        let mut restored_entity_map = None;
+        let mut replay_without_restore = false;
+        let kf_start_time = if let Some(kf_time) = keyframe_time {
+            replay_without_restore =
+                self.can_replay_without_restore(world, kf_time, clamped_target);
+            if !replay_without_restore {
+                restored_entity_map = Some(self.keyframes[&kf_time].restore_with_entity_map(world));
+                self.last_restore_kf_time = Some(kf_time);
+            }
             kf_time.0
         } else {
             self.last_restore_kf_time = None;
@@ -678,11 +766,14 @@ impl Timeline {
         let candidate_clips = self.clips_in_range(kf_start_time, self.current_time);
 
         // Map ObjectIds to current Bevy Entities dynamically
-        let mut entity_map = std::collections::HashMap::new();
-        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-        for (entity, mobj_id) in query.iter(world) {
-            entity_map.insert(mobj_id.0, entity);
-        }
+        let entity_map = restored_entity_map.unwrap_or_else(|| {
+            let mut entity_map = HashMap::new();
+            let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
+            for (entity, mobj_id) in query.iter(world) {
+                entity_map.insert(mobj_id.0, entity);
+            }
+            entity_map
+        });
 
         // A future animation still owns the property's state before its first
         // clip: it must remain at the lens' `from` value. Path2D objects are
@@ -699,15 +790,21 @@ impl Timeline {
             let ClipPayload::Animation(anim) = &clip.payload else {
                 continue;
             };
-            if !matches!(
-                anim.lens,
-                PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::FillLevel { .. }
-            ) {
-                continue;
-            }
+            let channel = if replay_without_restore {
+                absolute_lens_channel(&anim.lens)
+            } else {
+                match anim.lens {
+                    PropertyLensSpec::PathCompletion { .. } => {
+                        Some(AbsoluteLensChannel::PathCompletion)
+                    }
+                    PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
+                    _ => None,
+                }
+            };
+            let Some(channel) = channel else { continue };
             let initial_t = anim.rate_func.evaluate(0.0);
             future_property_initials
-                .entry(anim.target)
+                .entry((anim.target, channel))
                 .and_modify(|current: &mut (f64, PropertyLensSpec, f64)| {
                     if clip.start < current.0 {
                         *current = (clip.start, anim.lens.clone(), initial_t);
@@ -715,7 +812,7 @@ impl Timeline {
                 })
                 .or_insert_with(|| (clip.start, anim.lens.clone(), initial_t));
         }
-        for (target, (_, lens, initial_t)) in future_property_initials {
+        for ((target, _), (_, lens, initial_t)) in future_property_initials {
             if let Some(&target_entity) = entity_map.get(&target) {
                 apply_lens_spec(world, target_entity, &lens, initial_t, false);
             }
@@ -2004,11 +2101,8 @@ fn apply_lens_spec(
                 // Keep rotation consistent with look_at
                 let eye = camera.position;
                 let up = camera.up;
-                let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
-                    eye,
-                    camera.target,
-                    up,
-                );
+                let view =
+                    gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, camera.target, up);
                 let rot = view.inverse().to_scale_rotation_translation().1;
                 camera.rotation = rot;
             }
@@ -2290,6 +2384,119 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    fn absolute_seek_fixture() -> (World, Timeline, Entity) {
+        let object_id = ObjectId::from_raw(404);
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((100.0, 0.0));
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                MobjectId(object_id),
+                SpatialTransform::default(),
+                Opacity(1.0),
+                Path2D(Arc::new(path.clone())),
+                PathSource(Arc::new(path)),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("absolute", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            0.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        timeline.add_clip(
+            track,
+            0.5,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::Translation {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: gaanim_core::glam::DVec3::new(40.0, -20.0, 0.0),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        timeline.add_clip(
+            track,
+            1.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: object_id,
+                lens: PropertyLensSpec::Opacity {
+                    from: 1.0,
+                    to: 0.25,
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        (world, timeline, entity)
+    }
+
+    #[test]
+    fn absolute_replay_matches_forced_restore_for_random_access() {
+        let (mut optimized_world, mut optimized, optimized_entity) = absolute_seek_fixture();
+        let (mut reference_world, mut reference, reference_entity) = absolute_seek_fixture();
+
+        for target in [2.0, 0.25, 1.75, 0.0, 1.2] {
+            optimized.seek(&mut optimized_world, target);
+            reference.last_restore_kf_time = None;
+            reference.seek(&mut reference_world, target);
+
+            assert_eq!(
+                optimized_world.get::<SpatialTransform>(optimized_entity),
+                reference_world.get::<SpatialTransform>(reference_entity)
+            );
+            assert_eq!(
+                optimized_world.get::<Opacity>(optimized_entity),
+                reference_world.get::<Opacity>(reference_entity)
+            );
+            assert_eq!(
+                optimized_world.get::<Path2D>(optimized_entity),
+                reference_world.get::<Path2D>(reference_entity)
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_camera_clip_disables_restore_skipping() {
+        let (mut world, mut timeline, _) = absolute_seek_fixture();
+        timeline.seek(&mut world, 0.25);
+        let track = timeline.tracks.keys().next().unwrap();
+        timeline.add_clip(
+            track,
+            0.5,
+            0.5,
+            ClipPayload::Animation(AnimationSpec {
+                target: ObjectId::from_raw(404),
+                lens: PropertyLensSpec::CameraPosition {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: gaanim_core::glam::DVec3::X,
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        assert!(!timeline.can_replay_without_restore(&mut world, OrderedFloat(0.0), 0.75));
+    }
 
     #[test]
     fn captured_camera_state_restores_deterministically_across_seeks() {

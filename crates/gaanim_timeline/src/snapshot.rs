@@ -364,6 +364,13 @@ impl WorldSnapshot {
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
+        let _ = self.restore_with_entity_map(world);
+    }
+
+    /// Restore a snapshot and return the identity map built as part of the work.
+    /// Timeline replay consumes the same map immediately, so returning it avoids
+    /// querying every Mobject twice on full seeks.
+    pub(crate) fn restore_with_entity_map(&self, world: &mut World) -> HashMap<ObjectId, Entity> {
         if let Some(camera) = self.camera {
             if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
                 world.insert_resource(camera);
@@ -431,6 +438,8 @@ impl WorldSnapshot {
                 insert_snapshot_components(&mut entity_mut, snap);
             }
         }
+
+        entity_map
     }
 
     /// Computes the delta/diff between this snapshot and a target snapshot.

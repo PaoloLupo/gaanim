@@ -31,6 +31,8 @@ EXPECTED_ENCODERS = {
 }
 POLL_SECONDS = 0.025
 EXPORT_TIMING_PREFIX = "GAANIM_EXPORT_TIMINGS "
+CAPTURE_TIMING_PREFIX = "GAANIM_CAPTURE_TIMINGS "
+PNG_TIMING_PREFIX = "GAANIM_PNG_TIMINGS "
 EXPORT_PHASES = (
     "render_gpu_ms",
     "encoder_wait_ms",
@@ -38,10 +40,30 @@ EXPORT_PHASES = (
     "finalize_ms",
     "total_ms",
 )
+CAPTURE_PHASES = (
+    "setup_ms",
+    "timeline_update_ms",
+    "scene_compile_ms",
+    "render_readback_ms",
+    "capture_total_ms",
+    "png_encode_ms",
+)
 
 
 class BenchmarkFailure(RuntimeError):
     """A benchmark command or configuration was invalid."""
+
+
+def child_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    if os.name == "nt":
+        python_base = str(Path(sys.base_prefix))
+        entries = environment.get("PATH", "").split(os.pathsep)
+        if os.path.normcase(python_base) not in {
+            os.path.normcase(entry) for entry in entries if entry
+        }:
+            environment["PATH"] = os.pathsep.join([python_base, *entries])
+    return environment
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -249,6 +271,25 @@ def parse_export_metrics(log_path: Path) -> dict[str, Any]:
         ) from error
 
 
+def parse_capture_metrics(log_path: Path) -> dict[str, float]:
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        capture = next(
+            line for line in reversed(lines) if line.startswith(CAPTURE_TIMING_PREFIX)
+        )
+        png = next(line for line in reversed(lines) if line.startswith(PNG_TIMING_PREFIX))
+        fields = dict(part.split("=", 1) for part in capture.split()[1:])
+        fields.update(dict(part.split("=", 1) for part in png.split()[1:]))
+        timings = {phase: float(fields[phase]) for phase in CAPTURE_PHASES}
+        if any(not math.isfinite(value) or value < 0 for value in timings.values()):
+            raise ValueError("phase timings must be finite and non-negative")
+        return timings
+    except (OSError, KeyError, StopIteration, ValueError) as error:
+        raise BenchmarkFailure(
+            f"capture did not report valid phase timings in {log_path}"
+        ) from error
+
+
 def validate_artifacts(
     scenario: str, artifact_dir: Path, frames: int
 ) -> dict[str, Any] | None:
@@ -279,6 +320,7 @@ def validate_artifacts(
             raise BenchmarkFailure(
                 f"{scenario} produced {actual_frames} frames; expected {frames}"
             )
+        return {"phase_timings_ms": parse_capture_metrics(artifact_dir / "command.log")}
     elif scenario == "export":
         artifact = artifact_dir / "benchmark.mp4"
         if not artifact.is_file() or artifact.stat().st_size == 0:
@@ -349,6 +391,7 @@ def main() -> int:
             peak_rss_values = []
             memory_scope = "unavailable"
             export_phase_samples = {phase: [] for phase in EXPORT_PHASES}
+            capture_phase_samples = {phase: [] for phase in CAPTURE_PHASES}
             export_encoder = None
 
             for sample_index in range(warmups + samples):
@@ -356,9 +399,11 @@ def main() -> int:
                 run_index = sample_index if is_warmup else sample_index - warmups
                 run_kind = "warmup" if is_warmup else "sample"
                 artifact_dir = output_dir / "artifacts" / scenario / f"{run_kind}-{run_index:02}"
-                environment = os.environ.copy()
+                environment = child_environment()
                 environment["GAANIM_BENCHMARK_SCENARIO"] = scenario
                 environment["GAANIM_BENCHMARK_FRAMES"] = str(frames)
+                if scenario in {"seek", "preview"}:
+                    environment["GAANIM_CAPTURE_TELEMETRY"] = "1"
                 command = scenario_command(
                     scenario,
                     executable=executable,
@@ -394,6 +439,9 @@ def main() -> int:
                     export_encoder = sample_encoder
                     for phase, value in artifact_report["phase_timings_ms"].items():
                         export_phase_samples[phase].append(float(value))
+                if scenario in {"seek", "preview"} and artifact_report is not None:
+                    for phase, value in artifact_report["phase_timings_ms"].items():
+                        capture_phase_samples[phase].append(float(value))
                 process_timings.append(elapsed_ms)
                 timings.append(
                     float(artifact_report["total_ms"])
@@ -437,6 +485,15 @@ def main() -> int:
                         "p95_ms": round(percentile(values, 0.95), 3),
                     }
                     for phase, values in export_phase_samples.items()
+                }
+            elif scenario in {"seek", "preview"}:
+                result["phases"] = {
+                    phase: {
+                        "timings_ms": [round(value, 3) for value in values],
+                        "p50_ms": round(percentile(values, 0.50), 3),
+                        "p95_ms": round(percentile(values, 0.95), 3),
+                    }
+                    for phase, values in capture_phase_samples.items()
                 }
             result["violations"] = budget_violations(result, result["budget"])
             result["status"] = "warning" if result["violations"] else "pass"

@@ -35,7 +35,7 @@
     <g id="spark-bottom" transform="translate(106 50) scale(.38)">
       <use href="#spark" fill="#90be6d" stroke="#ffffff" stroke-width="7"/>
     </g>
-    <text id="svg-label" x="-18" y="60" font-family="Arial, sans-serif" font-size="18"
+    <text id="svg-label" x="-18" y="60" font-family="DejaVu Sans, sans-serif" font-size="18"
           font-weight="700" fill="#f8fafc">VECTOR SVG</text>
   </g>
 </svg>

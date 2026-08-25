@@ -9,6 +9,8 @@ use gaanim_core::peniko::{Brush, Color, Extend, Gradient};
 use gaanim_math::Bounds3D;
 use gaanim_scene::StrokeBrush;
 
+const DEJAVU_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/DejaVuSans-Bold.ttf");
+
 /// A fully resolved SVG path ready to spawn as an engine mobject.
 #[derive(Debug, Clone)]
 pub struct SvgPath {
@@ -107,6 +109,10 @@ fn svg_font_database() -> Arc<usvg::fontdb::Database> {
     static FONT_DATABASE: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     Arc::clone(FONT_DATABASE.get_or_init(|| {
         let mut database = usvg::fontdb::Database::new();
+        // SVG text must not change shape when a host has a different collection
+        // of system fonts. Register Gaanim's deterministic face first so an
+        // explicit `DejaVu Sans` request always resolves to these exact bytes.
+        database.load_font_data(DEJAVU_SANS_BOLD.to_vec());
         database.load_system_fonts();
         Arc::new(database)
     }))
@@ -496,9 +502,23 @@ fn scene_point((x, y): (f32, f32), width: f64, height: f64) -> Point {
 
 #[cfg(test)]
 mod tests {
-    use super::{SvgDocument, SvgLoadError, SvgNode};
+    use super::{SvgDocument, SvgLoadError, SvgNode, svg_font_database};
     use gaanim_core::kurbo::Shape;
     use gaanim_core::peniko::Brush;
+
+    #[test]
+    fn bundled_dejavu_bold_wins_over_system_fonts() {
+        let database = svg_font_database();
+        let id = database
+            .query(&usvg::fontdb::Query {
+                families: &[usvg::fontdb::Family::Name("DejaVu Sans")],
+                weight: usvg::fontdb::Weight::BOLD,
+                ..usvg::fontdb::Query::default()
+            })
+            .expect("bundled DejaVu Sans Bold should resolve");
+        let face = database.face(id).expect("resolved face should exist");
+        assert!(matches!(face.source, usvg::fontdb::Source::Binary(_)));
+    }
 
     #[test]
     fn imports_shapes_transforms_and_solid_styles() {
