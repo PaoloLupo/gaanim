@@ -3,6 +3,7 @@ use bevy::prelude::*;
 pub mod background;
 pub mod diagnostics;
 pub mod effects;
+pub mod lottie;
 pub mod pipeline;
 pub mod prelude;
 
@@ -20,6 +21,10 @@ pub struct GaanimDerivedGeometryPlugin;
 
 impl Plugin for GaanimDerivedGeometryPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            lottie::sample_lottie_system.in_set(gaanim_scene::SceneSet::Updaters),
+        );
         app.add_systems(
             Update,
             (

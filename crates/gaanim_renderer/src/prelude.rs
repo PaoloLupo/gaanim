@@ -7,6 +7,10 @@ pub use crate::effects::{
     BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
     VectorOutlineBinding,
 };
+pub use crate::lottie::{
+    LottieAsset, LottieError, LottiePlayback, LottiePlayer, clear_lottie_cache,
+    sample_lottie_system,
+};
 pub use crate::pipeline::{
     CanvasBackground, GaanimRenderCache, MainVelloScene, SegmentBackgroundPaint,
     gaanim_render_cache_sweep_system, gaanim_render_system, sync_canvas_background_clear_system,

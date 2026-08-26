@@ -53,6 +53,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pydrawable::PyAnchorPoint>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
     m.add_class::<pycanvas::PyVideo>()?;
+    m.add_class::<pycanvas::PyLottie>()?;
     m.add_class::<pycanvas::PyPointRef>()?;
     m.add_class::<pycanvas::PyDimension>()?;
     m.add_class::<pycanvas::PyAngleDimension>()?;

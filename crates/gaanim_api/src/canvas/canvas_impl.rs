@@ -24,7 +24,7 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{
     Anim, BooleanOperation, BooleanRule, CanvasUnits, FillLevelDirection, ImageOptions,
-    ImageOptionsError, LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, Margin,
+    ImageOptionsError, LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, LottieOptions, Margin,
     ReactiveReadoutLayoutSpec, SpawnKind, VideoOptions,
 };
 use crate::canvas::{
@@ -50,9 +50,45 @@ pub struct VideoClip {
     activated: Arc<AtomicBool>,
 }
 
+/// A timeline-synchronized Lottie declaration activated by [`Canvas::play_items`].
+#[derive(Debug, Clone)]
+pub struct LottieClip {
+    pub drawable: DrawableHandle,
+    state: SharedCanvasState,
+    duration: Option<f64>,
+    activated: Arc<AtomicBool>,
+    asset: Arc<gaanim_renderer::lottie::LottieAsset>,
+}
+
 impl VideoClip {
     fn belongs_to(&self, state: &SharedCanvasState) -> bool {
         Arc::ptr_eq(&self.state, state)
+    }
+}
+
+impl LottieClip {
+    fn belongs_to(&self, state: &SharedCanvasState) -> bool {
+        Arc::ptr_eq(&self.state, state)
+    }
+
+    pub fn source_width(&self) -> usize {
+        self.asset.width()
+    }
+
+    pub fn source_height(&self) -> usize {
+        self.asset.height()
+    }
+
+    pub fn frame_rate(&self) -> f64 {
+        self.asset.frame_rate()
+    }
+
+    pub fn source_duration(&self) -> f64 {
+        self.asset.duration()
+    }
+
+    pub fn warnings(&self) -> &[String] {
+        self.asset.warnings()
     }
 }
 
@@ -68,6 +104,7 @@ pub enum PlayItem {
     Animation(Anim),
     Audio(AudioClip),
     Video(VideoClip),
+    Lottie(LottieClip),
 }
 
 impl From<Anim> for PlayItem {
@@ -88,6 +125,12 @@ impl From<VideoClip> for PlayItem {
     }
 }
 
+impl From<LottieClip> for PlayItem {
+    fn from(value: LottieClip) -> Self {
+        Self::Lottie(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
     #[error("audio declarations can only be played by their owning Scene")]
@@ -96,6 +139,10 @@ pub enum PlayError {
     ForeignVideo,
     #[error("a video declaration can only be activated once")]
     VideoAlreadyActivated,
+    #[error("Lottie declarations can only be played by their owning Scene")]
+    ForeignLottie,
+    #[error("a Lottie declaration can only be activated once")]
+    LottieAlreadyActivated,
 }
 
 /// Default length in scene units for the straight segments at either spring end.
@@ -423,6 +470,32 @@ pub enum VideoLoadError {
     DurationOutOfRange,
 }
 
+/// Failures while loading or configuring a Lottie JSON composition.
+#[derive(Debug, thiserror::Error)]
+pub enum LottieLoadError {
+    #[error(transparent)]
+    Lottie(#[from] gaanim_renderer::lottie::LottieError),
+    #[error(transparent)]
+    Options(#[from] ImageOptionsError),
+    #[error("Lottie dimensions exceed the supported range")]
+    DimensionsOutOfRange,
+}
+
+impl LottieLoadError {
+    pub fn is_value_error(&self) -> bool {
+        matches!(
+            self,
+            Self::Options(_)
+                | Self::DimensionsOutOfRange
+                | Self::Lottie(
+                    gaanim_renderer::lottie::LottieError::InvalidOffset
+                        | gaanim_renderer::lottie::LottieError::InvalidDuration
+                        | gaanim_renderer::lottie::LottieError::InvalidSpeed
+                )
+        )
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AssetRootError {
     #[error("asset directory '{path}' does not exist or is not a directory")]
@@ -483,6 +556,12 @@ pub enum AssetPreloadError {
         path: PathBuf,
         #[source]
         source: GltfLoadError,
+    },
+    #[error("could not preload Lottie JSON '{path}': {source}")]
+    Lottie {
+        path: PathBuf,
+        #[source]
+        source: gaanim_renderer::lottie::LottieError,
     },
 }
 
@@ -901,7 +980,7 @@ impl Canvas {
         self
     }
 
-    /// Set the base directory used by relative image and SVG paths.
+    /// Set the base directory used by relative asset paths.
     pub fn set_asset_root(&mut self, path: impl AsRef<Path>) -> Result<(), AssetRootError> {
         let path = path.as_ref().to_path_buf();
         if !path.is_dir() {
@@ -954,8 +1033,8 @@ impl Canvas {
         })
     }
 
-    /// Resolve and validate assets before playback. Raster images are also
-    /// decoded into the process-local image cache used by [`Self::image`].
+    /// Resolve and validate assets before playback. Raster images and Lottie
+    /// compositions are also decoded into their process-local caches.
     pub fn preload(&self, paths: &[PathBuf]) -> Result<(), AssetPreloadError> {
         for path in paths {
             let resolved = self.resolve_asset_path(path);
@@ -963,7 +1042,14 @@ impl Canvas {
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .unwrap_or_default();
-            if extension.eq_ignore_ascii_case("svg") {
+            if extension.eq_ignore_ascii_case("json") {
+                gaanim_renderer::lottie::LottieAsset::load(&resolved).map_err(|source| {
+                    AssetPreloadError::Lottie {
+                        path: resolved.clone(),
+                        source,
+                    }
+                })?;
+            } else if extension.eq_ignore_ascii_case("svg") {
                 gaanim_objects::prelude::SvgDocument::load(&resolved).map_err(|source| {
                     AssetPreloadError::Svg {
                         path: resolved.clone(),
@@ -989,13 +1075,14 @@ impl Canvas {
         Ok(())
     }
 
-    /// Drop decoded raster assets so the next `image`/`preload` observes files
-    /// changed on disk. SVG documents are resolved anew for every drawable.
+    /// Drop cached raster, Lottie, and glTF assets so the next load observes
+    /// files changed on disk. SVG documents are resolved anew for every drawable.
     pub fn reload_assets(&mut self) {
         if let Some(cache) = IMAGE_CACHE.get() {
             cache.lock().expect("image cache poisoned").clear();
         }
         gaanim_objects::prelude::clear_gltf_cache();
+        gaanim_renderer::lottie::clear_lottie_cache();
     }
 
     pub(crate) fn safe_frame(&self) -> gaanim_math::Bounds3D {
@@ -1252,6 +1339,7 @@ impl Canvas {
                     | SpawnKind::Curve(_)
                     | SpawnKind::Image { .. }
                     | SpawnKind::Video { .. }
+                    | SpawnKind::Lottie { .. }
                     | SpawnKind::Primitive3D(_)
                     | SpawnKind::Polyline3D { .. }
                     | SpawnKind::LineSegments3D { .. }
@@ -2006,6 +2094,49 @@ impl Canvas {
             duration,
             audio,
             activated: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// Load a Lottie JSON composition as a timeline-synchronized vector drawable.
+    pub fn lottie(&mut self, path: impl AsRef<Path>) -> Result<LottieClip, LottieLoadError> {
+        self.lottie_with_options(path, LottieOptions::default())
+    }
+
+    /// Load a Lottie JSON composition with playback and destination sizing options.
+    pub fn lottie_with_options(
+        &mut self,
+        path: impl AsRef<Path>,
+        options: LottieOptions,
+    ) -> Result<LottieClip, LottieLoadError> {
+        let asset = gaanim_renderer::lottie::LottieAsset::load(self.resolve_asset_path(path))?;
+        let width =
+            u32::try_from(asset.width()).map_err(|_| LottieLoadError::DimensionsOutOfRange)?;
+        let height =
+            u32::try_from(asset.height()).map_err(|_| LottieLoadError::DimensionsOutOfRange)?;
+        let view = ImageOptions {
+            width: options.width,
+            height: options.height,
+            fit: options.fit,
+            crop: None,
+            quality: Default::default(),
+        }
+        .resolve(width, height)?;
+        let playback = gaanim_renderer::lottie::LottiePlayback::new(
+            asset.clone(),
+            view,
+            options.offset,
+            options.duration,
+            options.looping,
+            options.speed,
+        )?;
+        let duration = (!playback.looping).then_some(playback.source_duration / playback.speed);
+        let drawable = self.spawn(SpawnKind::Lottie { playback });
+        Ok(LottieClip {
+            drawable,
+            state: self.state.clone(),
+            duration,
+            activated: Arc::new(AtomicBool::new(false)),
+            asset,
         })
     }
 
@@ -2796,6 +2927,12 @@ impl Canvas {
         {
             return Err(PlayError::ForeignVideo);
         }
+        if items
+            .iter()
+            .any(|item| matches!(item, PlayItem::Lottie(lottie) if !lottie.belongs_to(&self.state)))
+        {
+            return Err(PlayError::ForeignLottie);
+        }
         let mut video_activations = HashSet::new();
         if items.iter().any(|item| match item {
             PlayItem::Video(video) => {
@@ -2805,6 +2942,16 @@ impl Canvas {
             _ => false,
         }) {
             return Err(PlayError::VideoAlreadyActivated);
+        }
+        let mut lottie_activations = HashSet::new();
+        if items.iter().any(|item| match item {
+            PlayItem::Lottie(lottie) => {
+                lottie.activated.load(Ordering::Acquire)
+                    || !lottie_activations.insert(Arc::as_ptr(&lottie.activated))
+            }
+            _ => false,
+        }) {
+            return Err(PlayError::LottieAlreadyActivated);
         }
 
         let lag = lag.max(0.0);
@@ -2849,6 +2996,19 @@ impl Canvas {
                         self.audio_tracks.push(track);
                     }
                     max_duration = max_duration.max(delay + video.duration.unwrap_or(0.0));
+                }
+                PlayItem::Lottie(lottie) => {
+                    lottie.activated.store(true, Ordering::Release);
+                    let start_time = play_start + delay;
+                    {
+                        let mut spec = lottie.drawable.spec.lock().expect("object spec poisoned");
+                        let SpawnKind::Lottie { playback } = &mut spec.kind else {
+                            unreachable!("LottieClip must retain a Lottie spawn kind");
+                        };
+                        playback.scene_start = start_time;
+                        playback.active = true;
+                    }
+                    max_duration = max_duration.max(delay + lottie.duration.unwrap_or(0.0));
                 }
             }
         }

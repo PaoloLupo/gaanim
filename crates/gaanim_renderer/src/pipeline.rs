@@ -3,6 +3,7 @@ use crate::effects::{
     BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
     VectorOutlineBinding,
 };
+use crate::lottie::LottiePlayer;
 use bevy::prelude::*;
 use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
 use gaanim_core::ObjectId;
@@ -900,6 +901,7 @@ pub fn compile_scene_from_world(
         Option<&FillBrush>,
         Option<&StrokeBrush>,
         Option<&RasterImage>,
+        Option<&LottiePlayer>,
         Option<&gaanim_scene::ObjectTag>,
     ), With<Visible>>();
 
@@ -928,6 +930,7 @@ pub fn compile_scene_from_world(
         fill_opt,
         stroke_opt,
         raster_image_opt,
+        lottie_opt,
         _tag,
     ) in query_mobjects.iter(world)
     {
@@ -986,6 +989,9 @@ pub fn compile_scene_from_world(
             .unwrap_or(1.0);
 
         let mut scene = vello::Scene::new();
+        if let Some(lottie) = lottie_opt {
+            scene.append(lottie.scene(), None);
+        }
         let empty_bez = kurbo::BezPath::new();
         let elem_path = if path_reveal_is_empty(tip_glow_opt) {
             &empty_bez
@@ -1282,6 +1288,7 @@ pub fn gaanim_render_system(
             Option<Ref<StrokeBrush>>,
             Option<Ref<RasterImage>>,
             Option<Ref<ReactiveReadout>>,
+            Option<Ref<LottiePlayer>>,
             Option<&gaanim_scene::ObjectTag>,
         ),
         With<Visible>,
@@ -1350,6 +1357,7 @@ pub fn gaanim_render_system(
         stroke_ref,
         raster_image_ref,
         reactive_readout_ref,
+        lottie_ref,
         _tag,
     ) in &query_mobjects
     {
@@ -1422,6 +1430,7 @@ pub fn gaanim_render_system(
             || reactive_readout_ref
                 .as_ref()
                 .is_some_and(|r| r.is_changed())
+            || lottie_ref.as_ref().is_some_and(|r| r.is_changed())
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -1451,6 +1460,10 @@ pub fn gaanim_render_system(
 
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let mut scene = vello::Scene::new();
+
+            if let Some(lottie) = lottie_ref.as_deref() {
+                scene.append(lottie.scene(), None);
+            }
 
             let empty_bez = kurbo::BezPath::new();
             let elem_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {

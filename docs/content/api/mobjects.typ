@@ -1029,6 +1029,26 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Scene.lottie",
+  kind: "factory",
+  signature: "lottie(path: str, *, width?, height?, fit=\"contain\", offset=0.0, duration?, loop=false, speed=1.0) -> Lottie",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo Lottie JSON local.]), (name: "fit", type: "str", default: "\"contain\"", desc: ["contain|cover|stretch"]), (name: "offset", type: "float", default: "0.0", desc: [Inicio dentro de la composición, en segundos.]), (name: "duration", type: "float", default: "hasta el final", desc: [Duración seleccionada de la fuente.]), (name: "loop", type: "bool", default: "false", desc: [Repite el intervalo seleccionado.]), (name: "speed", type: "float", default: "1.0", desc: [Velocidad positiva.]),),
+  returns: (type: "Lottie", desc: [Declaración transformable que se activa con `Scene.play`.]),
+  desc: [Renderiza Lottie JSON con Velato dentro de la misma escena Vello. Declarar no inicia la animación: `scene.play([clip])` fija su inicio en el timeline. Un clip finito aporta su duración al batch; un loop no lo alarga. `clip.warnings` enumera características detectadas que Velato omite o aproxima.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(480, 270, background="#0f172a")
+# Con un JSON local: clip = scene.lottie("assets/pulse.json", width=180); scene.play([clip])
+clip = scene.circle(70) # placeholder ejecutable para la documentación
+scene.play([clip.fade_in(0.4)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Scene.svg",
   kind: "factory",
   signature: "svg(path: str) -> Drawable",

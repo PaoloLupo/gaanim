@@ -382,6 +382,33 @@ impl Default for VideoOptions {
     }
 }
 
+/// Playback and destination sizing options for a Lottie JSON composition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LottieOptions {
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub fit: ImageFit,
+    pub offset: f64,
+    /// Length of the selected source interval, in source seconds.
+    pub duration: Option<f64>,
+    pub looping: bool,
+    pub speed: f64,
+}
+
+impl Default for LottieOptions {
+    fn default() -> Self {
+        Self {
+            width: None,
+            height: None,
+            fit: ImageFit::Contain,
+            offset: 0.0,
+            duration: None,
+            looping: false,
+            speed: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImageOptionsError {
     #[error("image width and height must be finite positive values")]
@@ -654,6 +681,10 @@ pub enum SpawnKind {
         poster: ImageData,
         view: ImageView,
         playback: gaanim_media::VideoPlayback,
+    },
+    /// Timeline-sampled vector composition rendered through Velato/Vello.
+    Lottie {
+        playback: gaanim_renderer::lottie::LottiePlayback,
     },
     /// One resolved vector path imported from an SVG document.
     SvgPath(Box<SvgPath>),

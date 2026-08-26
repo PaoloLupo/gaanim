@@ -2988,6 +2988,24 @@ class Video(Drawable):
     declaration belongs to one scene and can be activated once.
     """
 
+class Lottie(Drawable):
+    """A transformable Lottie JSON composition activated by ``Scene.play``.
+
+    Rendering stays vector-based through Velato/Vello and follows exact scene
+    seeks. Unsupported source features may be omitted and are listed in
+    ``warnings``. A declaration belongs to one scene and can be activated once.
+    """
+    @property
+    def source_width(self) -> int: ...
+    @property
+    def source_height(self) -> int: ...
+    @property
+    def frame_rate(self) -> float: ...
+    @property
+    def source_duration(self) -> float: ...
+    @property
+    def warnings(self) -> list[str]: ...
+
 class Scene:
     def __init__(
         self,
@@ -3893,6 +3911,27 @@ class Scene:
         media failures.
         """
         ...
+    def lottie(
+        self,
+        path: str,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Literal["contain", "cover", "stretch"] = "contain",
+        offset: float = 0.0,
+        duration: Optional[float] = None,
+        loop: bool = False,
+        speed: float = 1.0,
+    ) -> Lottie:
+        """Load a local Lottie JSON composition as a vector drawable.
+
+        ``offset`` and ``duration`` select source seconds; ``speed`` must be
+        positive. ``width`` and ``height`` use scene units and ``fit`` follows
+        image/video sizing. The first frame remains visible until the value is
+        passed once to ``Scene.play``. Invalid options raise ``ValueError``;
+        file and JSON failures raise ``RuntimeError``.
+        """
+        ...
     def svg(self, path: str) -> Drawable:
         """Create a svg drawable in the scene.
 
@@ -4347,7 +4386,7 @@ class Scene:
         Export ignores stops and renders the timeline continuously.
         """
         ...
-    def play(self, items: Sequence[Anim | Audio | Video], lag: Optional[float] = None) -> None:
+    def play(self, items: Sequence[Anim | Audio | Video | Lottie], lag: Optional[float] = None) -> None:
         """Activate animations and declared audio at the current cursor.
 
         Items run in parallel, with optional ``lag`` added by sequence order.

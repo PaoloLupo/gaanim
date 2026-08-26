@@ -16,8 +16,8 @@ pub use segment::{
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CanvasUnits, CurveControl,
     CurveElement, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError,
-    LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, Margin,
-    ObjectSpec, OptDuration, SpawnKind, VideoOptions,
+    LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin,
+    LottieOptions, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions,
 };
 mod drawable;
 pub use drawable::{
@@ -46,9 +46,9 @@ pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
     Canvas, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle, DimensionOptions,
-    ForceVectorHandle, ImageLoadError, PlayError, PlayItem, SceneObjectError, SupportHandle,
-    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
-    VideoLoadError,
+    ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError, PlayItem,
+    SceneObjectError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
+    TypstAssetError, VideoClip, VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

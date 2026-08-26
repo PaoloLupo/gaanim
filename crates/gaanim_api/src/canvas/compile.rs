@@ -6861,6 +6861,27 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Lottie { playback } => {
+                let w2 = playback.view.display_width * 0.5;
+                let h2 = playback.view.display_height * 0.5;
+                let placeholder = gaanim_objects::prelude::SvgPath {
+                    id: "Lottie".to_owned(),
+                    path: gaanim_core::kurbo::BezPath::new(),
+                    bounds: Bounds3D::new_2d(-w2, -h2, w2, h2),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&placeholder);
+                let mr = Self::finish_spawn_builder(b, spec);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_renderer::lottie::LottiePlayer::new(playback.clone()));
+                }
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::SvgPath(path) => {
                 let b = builder.svg_path(path);
                 let mr = Self::finish_spawn_builder(b, spec);

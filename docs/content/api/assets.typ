@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Recursos",
-  description: "Rutas portables de imágenes, SVG y glTF, manifiestos y precarga",
+  description: "Rutas portables de imágenes, SVG, Lottie y glTF, manifiestos y precarga",
   route: "/api/assets/",
   code-langs: (),
   updated: datetime.today().display(),
@@ -11,7 +11,7 @@
 = Recursos
 
 Define un directorio de recursos por escena para que las rutas relativas de
-imágenes, SVG y glTF sigan siendo portables al mover el proyecto o renderizarlo
+imágenes, SVG, Lottie JSON y glTF sigan siendo portables al mover el proyecto o renderizarlo
 desde otro directorio de trabajo.
 
 ```python
@@ -23,6 +23,7 @@ scene.assets_dir("assets")
 logo = scene.svg("logo.svg")
 cover = scene.image("cover.png")
 robot = scene.gltf("robot.glb")
+pulse = scene.lottie("pulse.json")
 ```
 
 Las rutas absolutas también funcionan y tienen prioridad sobre `assets_dir`.
@@ -86,12 +87,13 @@ acepta una ruta explícita al manifiesto.
 
 == Precarga
 
-Usa `preload` para validar archivos ráster, SVG y glTF antes de reproducir la
-escena. Las imágenes ráster se decodifican en la misma caché que usa
-`scene.image`.
+Usa `preload` para validar archivos ráster, SVG, Lottie JSON y glTF antes de
+reproducir la escena. Las imágenes ráster se decodifican en la misma caché que
+usa `scene.image`; las composiciones Lottie se analizan en la caché que usa
+`scene.lottie`.
 
 ```python
-scene.preload(["logo.svg", "cover.png", "diagram.webp"])
+scene.preload(["logo.svg", "cover.png", "pulse.json"])
 ```
 
 Los errores identifican el recurso que no pudo resolverse o decodificarse. La
@@ -101,12 +103,13 @@ exportación.
 
 == Actualización de archivos modificados
 
-Cuando un recurso ráster cambia en disco sin reiniciar el proceso, limpia la
-caché de imágenes decodificadas antes de reconstruir los objetos afectados:
+Cuando un recurso ráster o Lottie cambia en disco sin reiniciar el proceso,
+limpia las cachés antes de reconstruir los objetos afectados:
 
 ```python
 scene.reload_assets()
 cover = scene.image("cover.png")
+pulse = scene.lottie("pulse.json")
 ```
 
 Los archivos SVG vuelven a analizarse cada vez que `scene.svg(...)` crea un
@@ -115,6 +118,18 @@ objeto dibujable.
 Los metadatos glTF se guardan por ruta canónica y fecha de modificación.
 `reload_assets()` también limpia esta caché; el editor elimina la instancia
 nativa anterior y todos sus descendientes antes de reconstruirla.
+
+== Lottie JSON
+
+`Scene.lottie` acepta archivos Lottie en formato JSON y los compone directamente en
+Vello mediante Velato. Los parámetros `width`, `height` y `fit` siguen la misma
+semántica que en imágenes; `offset`, `duration`, `loop` y `speed` controlan el
+intervalo reproducido. Activa el clip con `scene.play([clip])`.
+
+El soporte inicial prioriza formas vectoriales, transformaciones, rellenos,
+trazos y máscaras. Texto, imágenes embebidas, efectos y algunas variantes de
+gradientes pueden omitirse o aproximarse. Consulta `clip.warnings` para detectar
+esas diferencias. El contenedor `.lottie` todavía no está soportado.
 
 == Modelos 3D glTF
 

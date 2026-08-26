@@ -18,9 +18,11 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
+serde_json = { workspace = true }
 
 # Graphics & GPU dependencies
 vello = { version = "0.9.0" }
+velato = { git = "https://github.com/PaoloLupo/velato", rev = "69d9647389f7e47ce7329ab52949d335eef4a41e", default-features = false, features = ["vello"] }
 naga = { version = "29.0.0", features = ["wgsl-in"] }
 pollster = "0.4"
 

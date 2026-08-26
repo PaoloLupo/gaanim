@@ -8,11 +8,12 @@ pub use crate::canvas::{
     CanvasUnits, CardSpec, Cartesian3DVisibility, CartesianVisibility, ChartHandle, ChipSpec,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, Direction, DrawableHandle,
     EditorialAlign, EditorialAppearance, EditorialError, EditorialStyle, EditorialVariant,
-    FlowParticleOptions, FlowParticlesHandle, ForceVectorHandle, LowerThirdSide, LowerThirdSpec,
-    NumberLineVisibility, ObjectSpec, Parameter, PointRef, PolarVisibility, QuoteCardSpec,
-    SectionHeaderSpec, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
-    SegmentStop, SpawnKind, StatCardSpec, StreamLinesHandle, StreamLinesStyle, SupportHandle,
-    TextAnchor, ThemePalette, VectorField2DHandle, VectorField3DHandle,
+    FlowParticleOptions, FlowParticlesHandle, ForceVectorHandle, LottieClip, LottieLoadError,
+    LottieOptions, LowerThirdSide, LowerThirdSpec, NumberLineVisibility, ObjectSpec, Parameter,
+    PointRef, PolarVisibility, QuoteCardSpec, SectionHeaderSpec, SegmentError, SegmentHandle,
+    SegmentId, SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, StatCardSpec,
+    StreamLinesHandle, StreamLinesStyle, SupportHandle, TextAnchor, ThemePalette,
+    VectorField2DHandle, VectorField3DHandle,
 };
 pub use crate::matrix::{
     MatrixError, MatrixIndex, MatrixOrder, MatrixShape, order_indices, validate_rows,

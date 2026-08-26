@@ -12,8 +12,8 @@ use gaanim_api::canvas::{
     BooleanRule, CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay,
     CanvasTheme, CardSpec, ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle,
     DimensionOptions, EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant,
-    ImageCrop, ImageFit, ImageOptions, LabelMode, LowerThirdSide, LowerThirdSpec, PlayItem,
-    PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec,
+    ImageCrop, ImageFit, ImageOptions, LabelMode, LottieOptions, LowerThirdSide, LowerThirdSpec,
+    PlayItem, PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec,
     SurroundingRectHandle, ThemeFont, VideoOptions,
 };
 
@@ -838,6 +838,47 @@ pub struct PyVideo {
 impl PyVideo {
     fn initializer(inner: gaanim_api::canvas::VideoClip) -> PyClassInitializer<Self> {
         PyClassInitializer::from(PyDrawable(inner.drawable.clone())).add_subclass(Self { inner })
+    }
+}
+
+/// A drawable Lottie declaration that starts only when passed to ``Scene.play``.
+#[pyclass(name = "Lottie", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyLottie {
+    inner: gaanim_api::canvas::LottieClip,
+}
+
+impl PyLottie {
+    fn initializer(inner: gaanim_api::canvas::LottieClip) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(inner.drawable.clone())).add_subclass(Self { inner })
+    }
+}
+
+#[pymethods]
+impl PyLottie {
+    #[getter]
+    fn source_width(&self) -> usize {
+        self.inner.source_width()
+    }
+
+    #[getter]
+    fn source_height(&self) -> usize {
+        self.inner.source_height()
+    }
+
+    #[getter]
+    fn frame_rate(&self) -> f64 {
+        self.inner.frame_rate()
+    }
+
+    #[getter]
+    fn source_duration(&self) -> f64 {
+        self.inner.source_duration()
+    }
+
+    #[getter]
+    fn warnings(&self) -> Vec<String> {
+        self.inner.warnings().to_vec()
     }
 }
 
@@ -3720,6 +3761,66 @@ impl PyScene {
         Py::new(py, PyVideo::initializer(inner))
     }
 
+    /// Load a Lottie JSON composition as a timeline-synchronized vector drawable.
+    #[pyo3(signature = (
+        path,
+        *,
+        width=None,
+        height=None,
+        fit="contain",
+        offset=0.0,
+        duration=None,
+        r#loop=false,
+        speed=1.0,
+    ))]
+    fn lottie(
+        &self,
+        py: Python<'_>,
+        path: &str,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        offset: f64,
+        duration: Option<f64>,
+        r#loop: bool,
+        speed: f64,
+    ) -> PyResult<Py<PyLottie>> {
+        let fit = match fit {
+            "contain" => ImageFit::Contain,
+            "cover" => ImageFit::Cover,
+            "stretch" => ImageFit::Stretch,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "fit must be 'contain', 'cover', or 'stretch'",
+                ));
+            }
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .lottie_with_options(
+                path,
+                LottieOptions {
+                    width,
+                    height,
+                    fit,
+                    offset,
+                    duration,
+                    looping: r#loop,
+                    speed,
+                },
+            )
+            .map_err(|error| {
+                if error.is_value_error() {
+                    pyo3::exceptions::PyValueError::new_err(error.to_string())
+                } else {
+                    pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                }
+            })?;
+        Py::new(py, PyLottie::initializer(inner))
+    }
+
     /// Load an SVG as an animatable group of vector paths.
     fn svg(&self, path: &str) -> PyResult<PyDrawable> {
         self.inner
@@ -4815,9 +4916,11 @@ impl PyScene {
                 play_items.push(PlayItem::Audio(audio.inner.clone()));
             } else if let Ok(video) = item.extract::<PyRef<'_, PyVideo>>() {
                 play_items.push(PlayItem::Video(video.inner.clone()));
+            } else if let Ok(lottie) = item.extract::<PyRef<'_, PyLottie>>() {
+                play_items.push(PlayItem::Lottie(lottie.inner.clone()));
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "Scene.play items must be Anim, Audio, or Video values",
+                    "Scene.play items must be Anim, Audio, Video, or Lottie values",
                 ));
             }
         }
