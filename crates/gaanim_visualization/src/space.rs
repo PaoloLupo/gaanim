@@ -108,6 +108,126 @@ pub enum SpaceLayer {
     Labels,
 }
 
+/// Resolved visibility of every semantic component in a 2D Cartesian space.
+///
+/// The Python and facade layers resolve global switches and per-axis overrides
+/// before constructing this value, so geometry generation only needs concrete
+/// booleans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CartesianVisibility {
+    pub x_axis: bool,
+    pub y_axis: bool,
+    pub x_grid: bool,
+    pub y_grid: bool,
+    pub x_ticks: bool,
+    pub y_ticks: bool,
+    pub x_numbers: bool,
+    pub y_numbers: bool,
+    pub x_labels: bool,
+    pub y_labels: bool,
+}
+
+impl Default for CartesianVisibility {
+    fn default() -> Self {
+        Self {
+            x_axis: true,
+            y_axis: true,
+            x_grid: true,
+            y_grid: true,
+            x_ticks: true,
+            y_ticks: true,
+            x_numbers: true,
+            y_numbers: true,
+            x_labels: true,
+            y_labels: true,
+        }
+    }
+}
+
+/// Resolved visibility of a typed 3D Cartesian space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cartesian3DVisibility {
+    pub x_axis: bool,
+    pub y_axis: bool,
+    pub z_axis: bool,
+    pub xy_grid: bool,
+    pub xz_grid: bool,
+    pub yz_grid: bool,
+    pub x_ticks: bool,
+    pub y_ticks: bool,
+    pub z_ticks: bool,
+    pub x_numbers: bool,
+    pub y_numbers: bool,
+    pub z_numbers: bool,
+    pub x_labels: bool,
+    pub y_labels: bool,
+    pub z_labels: bool,
+}
+
+impl Default for Cartesian3DVisibility {
+    fn default() -> Self {
+        Self {
+            x_axis: true,
+            y_axis: true,
+            z_axis: true,
+            xy_grid: true,
+            xz_grid: true,
+            yz_grid: true,
+            x_ticks: true,
+            y_ticks: true,
+            z_ticks: true,
+            x_numbers: true,
+            y_numbers: true,
+            z_numbers: true,
+            x_labels: true,
+            y_labels: true,
+            z_labels: true,
+        }
+    }
+}
+
+/// Resolved visibility of the semantic parts of a polar space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolarVisibility {
+    pub rings: bool,
+    pub spokes: bool,
+    pub axes: bool,
+    pub numbers: bool,
+    pub labels: bool,
+}
+
+/// Resolved visibility of a typed number line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NumberLineVisibility {
+    pub axis: bool,
+    pub ticks: bool,
+    pub numbers: bool,
+    pub labels: bool,
+}
+
+impl Default for NumberLineVisibility {
+    fn default() -> Self {
+        Self {
+            axis: true,
+            ticks: true,
+            numbers: true,
+            labels: true,
+        }
+    }
+}
+
+impl Default for PolarVisibility {
+    fn default() -> Self {
+        Self {
+            rings: true,
+            spokes: true,
+            axes: true,
+            numbers: true,
+            labels: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelGeometry {
     pub text: String,
@@ -142,9 +262,7 @@ impl SpaceGeometry2D {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CartesianSpace {
     pub map: CoordinateMap2D,
-    pub grid: bool,
-    pub numbers: bool,
-    pub labels: bool,
+    pub visibility: CartesianVisibility,
     pub grid_color: Color,
     pub minor_grid_color: Color,
 }
@@ -153,33 +271,52 @@ impl CartesianSpace {
     pub fn axes(x: Axis, y: Axis, frame: PlotFrame) -> Self {
         Self {
             map: CoordinateMap2D::new(x, y, frame),
-            grid: false,
-            numbers: true,
-            labels: true,
+            visibility: CartesianVisibility {
+                x_grid: false,
+                y_grid: false,
+                ..Default::default()
+            },
             grid_color: Color::from_rgb8(0xC0, 0xC0, 0xC0),
             minor_grid_color: Color::from_rgb8(0xE0, 0xE0, 0xE0),
         }
     }
 
     pub fn number_plane(x: Axis, y: Axis, frame: PlotFrame) -> Self {
-        Self {
-            grid: true,
-            ..Self::axes(x, y, frame)
-        }
+        Self::axes(x, y, frame).grid(true)
     }
 
     pub fn grid(mut self, enabled: bool) -> Self {
-        self.grid = enabled;
+        self.visibility.x_grid = enabled;
+        self.visibility.y_grid = enabled;
         self
     }
 
     pub fn numbers(mut self, enabled: bool) -> Self {
-        self.numbers = enabled;
+        self.visibility.x_numbers = enabled;
+        self.visibility.y_numbers = enabled;
         self
     }
 
     pub fn labels(mut self, enabled: bool) -> Self {
-        self.labels = enabled;
+        self.visibility.x_labels = enabled;
+        self.visibility.y_labels = enabled;
+        self
+    }
+
+    pub fn axes_visible(mut self, enabled: bool) -> Self {
+        self.visibility.x_axis = enabled;
+        self.visibility.y_axis = enabled;
+        self
+    }
+
+    pub fn ticks(mut self, enabled: bool) -> Self {
+        self.visibility.x_ticks = enabled;
+        self.visibility.y_ticks = enabled;
+        self
+    }
+
+    pub fn with_visibility(mut self, visibility: CartesianVisibility) -> Self {
+        self.visibility = visibility;
         self
     }
 
@@ -200,7 +337,7 @@ impl CartesianSpace {
 
         for tick in &x_ticks {
             let x = self.map.data_to_local(tick.value, y_cross)?.x;
-            if self.grid {
+            if self.visibility.x_grid {
                 let target = if tick.major {
                     &mut major_grid
                 } else {
@@ -212,10 +349,12 @@ impl CartesianSpace {
                 target.line_to(Point::new(x, -frame.height * 0.5));
             }
             let style = self.map.x.style_value();
-            let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
-            tick_path.move_to(Point::new(x, x_axis_y - half));
-            tick_path.line_to(Point::new(x, x_axis_y + half));
-            if self.numbers && tick.major && !tick.label.is_empty() {
+            if self.visibility.x_ticks {
+                let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
+                tick_path.move_to(Point::new(x, x_axis_y - half));
+                tick_path.line_to(Point::new(x, x_axis_y + half));
+            }
+            if self.visibility.x_numbers && tick.major && !tick.label.is_empty() {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
                     position: Point::new(x, x_axis_y - style.tick_length - 12.0),
@@ -227,7 +366,7 @@ impl CartesianSpace {
 
         for tick in &y_ticks {
             let y = self.map.data_to_local(x_cross, tick.value)?.y;
-            if self.grid {
+            if self.visibility.y_grid {
                 let target = if tick.major {
                     &mut major_grid
                 } else {
@@ -237,10 +376,16 @@ impl CartesianSpace {
                 target.line_to(Point::new(frame.width * 0.5, y));
             }
             let style = self.map.y.style_value();
-            let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
-            tick_path.move_to(Point::new(y_axis_x - half, y));
-            tick_path.line_to(Point::new(y_axis_x + half, y));
-            if self.numbers && tick.major && !tick.label.is_empty() && tick.value != x_cross {
+            if self.visibility.y_ticks {
+                let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
+                tick_path.move_to(Point::new(y_axis_x - half, y));
+                tick_path.line_to(Point::new(y_axis_x + half, y));
+            }
+            if self.visibility.y_numbers
+                && tick.major
+                && !tick.label.is_empty()
+                && tick.value != x_cross
+            {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
                     position: Point::new(y_axis_x - style.tick_length - 12.0, y),
@@ -250,42 +395,48 @@ impl CartesianSpace {
             }
         }
 
-        axes.move_to(Point::new(-frame.width * 0.5, x_axis_y));
-        axes.line_to(Point::new(frame.width * 0.5, x_axis_y));
-        axes.move_to(Point::new(y_axis_x, -frame.height * 0.5));
-        axes.line_to(Point::new(y_axis_x, frame.height * 0.5));
+        if self.visibility.x_axis {
+            axes.move_to(Point::new(-frame.width * 0.5, x_axis_y));
+            axes.line_to(Point::new(frame.width * 0.5, x_axis_y));
+        }
+        if self.visibility.y_axis {
+            axes.move_to(Point::new(y_axis_x, -frame.height * 0.5));
+            axes.line_to(Point::new(y_axis_x, frame.height * 0.5));
+        }
 
-        if self.labels {
-            if let Some(label) = self.map.x.label_text() {
-                let position = self.map.x.label_position_value();
-                labels.push(LabelGeometry {
-                    text: label.to_owned(),
-                    position: if position == AxisLabelPosition::Center {
-                        Point::new(0.0, x_axis_y - self.map.x.style_value().tick_length - 12.0)
-                    } else {
-                        Point::new(axis_title_coordinate(position, frame.width), x_axis_y)
-                    },
-                    rotation: 0.0,
-                    color: self.map.x.style_value().label_color,
-                });
-            }
-            if let Some(label) = self.map.y.label_text() {
-                let position = self.map.y.label_position_value();
-                labels.push(LabelGeometry {
-                    text: label.to_owned(),
-                    position: if position == AxisLabelPosition::Center {
-                        Point::new(y_axis_x - self.map.y.style_value().tick_length - 12.0, 0.0)
-                    } else {
-                        Point::new(y_axis_x, axis_title_coordinate(position, frame.height))
-                    },
-                    rotation: if position == AxisLabelPosition::Center {
-                        std::f64::consts::FRAC_PI_2
-                    } else {
-                        0.0
-                    },
-                    color: self.map.y.style_value().label_color,
-                });
-            }
+        if self.visibility.x_labels
+            && let Some(label) = self.map.x.label_text()
+        {
+            let position = self.map.x.label_position_value();
+            labels.push(LabelGeometry {
+                text: label.to_owned(),
+                position: if position == AxisLabelPosition::Center {
+                    Point::new(0.0, x_axis_y - self.map.x.style_value().tick_length - 12.0)
+                } else {
+                    Point::new(axis_title_coordinate(position, frame.width), x_axis_y)
+                },
+                rotation: 0.0,
+                color: self.map.x.style_value().label_color,
+            });
+        }
+        if self.visibility.y_labels
+            && let Some(label) = self.map.y.label_text()
+        {
+            let position = self.map.y.label_position_value();
+            labels.push(LabelGeometry {
+                text: label.to_owned(),
+                position: if position == AxisLabelPosition::Center {
+                    Point::new(y_axis_x - self.map.y.style_value().tick_length - 12.0, 0.0)
+                } else {
+                    Point::new(y_axis_x, axis_title_coordinate(position, frame.height))
+                },
+                rotation: if position == AxisLabelPosition::Center {
+                    std::f64::consts::FRAC_PI_2
+                } else {
+                    0.0
+                },
+                color: self.map.y.style_value().label_color,
+            });
         }
 
         Ok(SpaceGeometry2D {
@@ -422,5 +573,92 @@ mod tests {
         assert!(
             matches!(horizontal, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == -100.0 && end.x == 100.0)
         );
+    }
+
+    #[test]
+    fn cartesian_visibility_filters_each_axis_without_changing_the_map() {
+        use gaanim_core::kurbo::PathEl;
+
+        let x = Axis::linear(-2.0, 2.0)
+            .unwrap()
+            .ticks(1.0)
+            .unwrap()
+            .minor_ticks(2)
+            .label("x");
+        let y = Axis::linear(-1.0, 1.0)
+            .unwrap()
+            .ticks(0.5)
+            .unwrap()
+            .minor_ticks(2)
+            .label("y");
+        let space = CartesianSpace::number_plane(x, y, PlotFrame::new(400.0, 200.0).unwrap())
+            .with_visibility(CartesianVisibility {
+                x_axis: false,
+                y_axis: true,
+                x_grid: true,
+                y_grid: false,
+                x_ticks: false,
+                y_ticks: true,
+                x_numbers: false,
+                y_numbers: true,
+                x_labels: false,
+                y_labels: true,
+            });
+        let mapped = space.map.data_to_local(1.0, 0.5).unwrap();
+        let geometry = space.geometry().unwrap();
+
+        assert_eq!(mapped, Point::new(100.0, 50.0));
+        assert!(geometry.major_grid.elements().chunks_exact(2).all(|segment| {
+            matches!(segment, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == end.x)
+        }));
+        assert!(!geometry.minor_grid.is_empty());
+        assert!(matches!(
+            geometry.axes.elements(),
+            [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == end.x
+        ));
+        assert!(geometry.ticks.elements().chunks_exact(2).all(|segment| {
+            matches!(segment, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.y == end.y)
+        }));
+        assert!(!geometry.numbers.is_empty());
+        assert!(geometry.numbers.iter().all(|label| label.position.x < 0.0));
+        assert_eq!(
+            geometry
+                .labels
+                .iter()
+                .map(|label| label.text.as_str())
+                .collect::<Vec<_>>(),
+            ["y"]
+        );
+    }
+
+    #[test]
+    fn disabled_cartesian_components_produce_empty_semantic_geometry() {
+        let visibility = CartesianVisibility {
+            x_axis: false,
+            y_axis: false,
+            x_grid: false,
+            y_grid: false,
+            x_ticks: false,
+            y_ticks: false,
+            x_numbers: false,
+            y_numbers: false,
+            x_labels: false,
+            y_labels: false,
+        };
+        let geometry = CartesianSpace::number_plane(
+            Axis::linear(-1.0, 1.0).unwrap().label("x"),
+            Axis::linear(-1.0, 1.0).unwrap().label("y"),
+            PlotFrame::new(200.0, 100.0).unwrap(),
+        )
+        .with_visibility(visibility)
+        .geometry()
+        .unwrap();
+
+        assert!(geometry.major_grid.is_empty());
+        assert!(geometry.minor_grid.is_empty());
+        assert!(geometry.axes.is_empty());
+        assert!(geometry.ticks.is_empty());
+        assert!(geometry.numbers.is_empty());
+        assert!(geometry.labels.is_empty());
     }
 }

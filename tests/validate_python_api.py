@@ -215,6 +215,57 @@ def validate_visualization_contract(module: object) -> list[str]:
     y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y", position="top")
     space = scene.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
 
+    selective = scene.cartesian_2d(
+        x_axis,
+        y_axis,
+        width=520.0,
+        height=280.0,
+        grid=False,
+        axes=False,
+        ticks=False,
+        numbers=False,
+        labels=False,
+        x_grid=True,
+        y_axis=True,
+    )
+    for layer_name in ("grid", "minor_grid", "axes", "ticks", "numbers", "labels"):
+        if not isinstance(selective.layer(layer_name), module.Drawable):
+            failures.append(f"disabled Cartesian layer {layer_name!r} is not addressable")
+
+    complex_space = scene.complex(
+        grid=False,
+        axes=False,
+        ticks=False,
+        numbers=False,
+        labels=False,
+        x_labels=True,
+    )
+    if not isinstance(complex_space.layer("labels"), module.Drawable):
+        failures.append("ComplexSpace did not apply Cartesian visibility options")
+
+    polar = scene.polar(
+        module.Axis.linear(0.0, 4.0).ticks(1.0).label("r"),
+        grid=False,
+        rings=True,
+        axes=False,
+        numbers=False,
+        labels=False,
+    )
+    for layer_name in ("grid", "axes", "numbers", "labels"):
+        if not isinstance(polar.layer(layer_name), module.Drawable):
+            failures.append(f"disabled polar layer {layer_name!r} is not addressable")
+
+    line = scene.number_line(
+        module.Axis.linear(0.0, 4.0).ticks(1.0).label("t"),
+        axis_visible=False,
+        ticks=False,
+        numbers=False,
+        labels=False,
+    )
+    for layer_name in ("axis", "ticks", "numbers", "labels"):
+        if not isinstance(line.layer(layer_name), module.Drawable):
+            failures.append(f"disabled number-line layer {layer_name!r} is not addressable")
+
     amplitude = scene.parameter(1.0)
     from gaanim import math as gm
     space.function(lambda x: amplitude * gm.sin(x))
@@ -288,7 +339,17 @@ def validate_visualization_contract(module: object) -> list[str]:
         module.Axis.linear(-2.0, 2.0),
         module.Axis.linear(-2.0, 2.0),
         size=(4.0, 4.0, 4.0),
+        grid=False,
+        axes=False,
+        ticks=False,
+        numbers=False,
+        labels=False,
+        xy_grid=True,
+        z_axis=True,
     )
+    for layer_name in ("grid", "axes", "ticks", "numbers", "labels"):
+        if not isinstance(space_3d.layer(layer_name), module.Drawable):
+            failures.append(f"disabled 3D layer {layer_name!r} is not addressable")
     space_3d.surface(lambda px, py: px * px - py * py, resolution=(8, 8))
     space_3d.parametric(lambda t: (t, t * t, t * t * t), (-1.0, 1.0), samples=16)
     field_3d = space_3d.field(lambda px, py, pz: (-py, px, -pz))

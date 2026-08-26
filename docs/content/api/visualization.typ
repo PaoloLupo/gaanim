@@ -220,6 +220,94 @@ pierde el negro de los ejes en `paper`. Usa `color`, `tick_color`,
 ticks, los números y los títulos. Durante el trazado, las guías asociadas a X
 avanzan de arriba hacia abajo y las asociadas a Y de izquierda a derecha.
 
+=== Visibilidad de componentes
+
+Los constructores de espacios tipados aceptan switches globales para sus capas
+semánticas. En cartesianos, un override por eje distinto de `None` sustituye el
+switch global correspondiente. Por ejemplo, `grid=False, x_grid=True` conserva
+únicamente las guías verticales generadas por los ticks de X. En 3D las grillas
+se seleccionan geométricamente mediante `xy_grid`, `xz_grid` y `yz_grid`.
+
+`numbers` controla el texto de los ticks; `labels` controla exclusivamente los
+títulos definidos con `Axis.label(...)`. Ocultar una capa no altera dominios ni
+conversiones de coordenadas. `space.layer(...)` sigue devolviendo un `Drawable`
+vacío, de modo que el conjunto de capas permanece estable para composición y
+animación.
+
+#api-entry(
+  name: "Scene.cartesian_2d",
+  kind: "method",
+  signature: "cartesian_2d(x, y, *, width=None, height=None, grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, x_grid=None, y_grid=None, x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None, x_labels=None, y_labels=None) -> Cartesian2D",
+  params: (
+    (name: "grid / axes / ticks / numbers / labels", type: "bool", default: "True", desc: [Valores globales para las capas semánticas.]),
+    (name: "x_* / y_*", type: "bool | None", default: "None", desc: [Overrides por eje; `None` hereda el valor global.]),
+  ),
+  returns: (type: "Cartesian2D", desc: [Espacio tipado con todas sus capas direccionables, incluso cuando están vacías.]),
+  desc: [El ancho y alto conservan sus defaults actuales basados en `safe_frame`.],
+)[]
+
+#api-entry(
+  name: "Scene.cartesian_3d",
+  kind: "method",
+  signature: "cartesian_3d(x, y, z, *, size=(10.0, 8.0, 6.0), grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, z_axis=None, xy_grid=None, xz_grid=None, yz_grid=None, x_ticks=None, y_ticks=None, z_ticks=None, x_numbers=None, y_numbers=None, z_numbers=None, x_labels=None, y_labels=None, z_labels=None) -> Cartesian3D",
+  params: (
+    (name: "xy_grid / xz_grid / yz_grid", type: "bool | None", default: "None", desc: [Visibilidad de cada plano; `None` hereda `grid`.]),
+    (name: "x_* / y_* / z_*", type: "bool | None", default: "None", desc: [Overrides de ejes, ticks, números y títulos.]),
+  ),
+  returns: (type: "Cartesian3D", desc: [Espacio 3D con capas estables y escala consciente de los ejes.]),
+  desc: [Las grillas desactivadas no emiten segmentos ni duplican las aristas que pertenecen a los ejes.],
+)[]
+
+#api-entry(
+  name: "Scene.polar",
+  kind: "method",
+  signature: "polar(radial, *, radius=220.0, angle_divisions=12, grid=True, axes=True, numbers=True, labels=True, rings=None, spokes=None) -> PolarSpace",
+  params: (
+    (name: "rings / spokes", type: "bool | None", default: "None", desc: [Anillos y radios; `None` hereda `grid`.]),
+    (name: "labels", type: "bool", default: "True", desc: [Muestra el título del eje radial cuando existe.]),
+  ),
+  returns: (type: "PolarSpace", desc: [Espacio polar con capas `grid`, `axes`, `numbers` y `labels`.]),
+  desc: [`numbers` afecta sólo a los valores radiales y `labels` al título radial.],
+)[]
+
+#api-entry(
+  name: "Scene.number_line",
+  kind: "method",
+  signature: "number_line(axis, *, length=None, axis_visible=True, ticks=True, numbers=True, labels=True) -> NumberLine",
+  params: (
+    (name: "axis_visible / ticks / numbers / labels", type: "bool", default: "True", desc: [Visibilidad independiente de cada componente.]),
+  ),
+  returns: (type: "NumberLine", desc: [Recta tipada cuya transformación de datos permanece activa aunque no dibuje componentes.]),
+  desc: [`axis_visible` evita colisionar con el argumento existente `axis`.],
+)[]
+
+#api-entry(
+  name: "Scene.complex",
+  kind: "method",
+  signature: "complex(x=None, y=None, *, width=None, height=None, grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, x_grid=None, y_grid=None, x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None, x_labels=None, y_labels=None) -> ComplexSpace",
+  params: (
+    (name: "x / y", type: "Axis | None", default: "None", desc: [Ejes opcionales; al omitirse se crean los ejes `Re` e `Im`.]),
+    (name: "switches y overrides", type: "bool | None", default: "True / None", desc: [Misma precedencia que `cartesian_2d`.]),
+  ),
+  returns: (type: "ComplexSpace", desc: [Plano complejo con conversión y capas cartesianas tipadas.]),
+  desc: [Los títulos predeterminados pueden ocultarse mediante `labels=False` o los overrides X/Y.],
+)[]
+
+```python
+plane = scene.cartesian_2d(
+  Axis.linear(-4, 4).ticks(1).label("x"),
+  Axis.linear(-2, 2).ticks(1).label("y"),
+  grid=False, x_grid=True,
+  numbers=False, y_numbers=True,
+  labels=False, x_labels=True,
+)
+
+polar = scene.polar(
+  Axis.linear(0, 4).ticks(1).label("r"),
+  grid=False, rings=True, axes=False, numbers=False,
+)
+```
+
 ```python
 plane = scene.cartesian_2d(
   Axis.linear(-6, 6).label("x"),

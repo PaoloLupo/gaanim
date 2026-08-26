@@ -31,6 +31,9 @@ pub use editorial::{
     QuoteCardSpec, SectionHeaderSpec, StatCardSpec,
 };
 mod visualization;
+pub use gaanim_visualization::{
+    Cartesian3DVisibility, CartesianVisibility, NumberLineVisibility, PolarVisibility,
+};
 pub use visualization::{
     ArrowFieldOptions, ArrowVectorFieldHandle, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
     CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, Parameter,

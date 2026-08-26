@@ -4,10 +4,12 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use gaanim_api::canvas::{
-    ArrowFieldOptions, ArrowVectorFieldHandle, Canvas as ApiCanvas, ChartHandle, CoordinateRef,
-    CoordinateSpace3DHandle, CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle,
-    NumberLineHandle, Parameter as NativeParameter, PolarSpaceHandle, StreamLinesHandle,
-    StreamLinesStyle, VectorField2DHandle, VectorField3DHandle, DEFAULT_REACTIVE_TEXT_SIZE,
+    ArrowFieldOptions, ArrowVectorFieldHandle, Canvas as ApiCanvas, Cartesian3DVisibility,
+    CartesianVisibility, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
+    CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle,
+    NumberLineVisibility, Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility,
+    StreamLinesHandle, StreamLinesStyle, VectorField2DHandle, VectorField3DHandle,
+    DEFAULT_REACTIVE_TEXT_SIZE,
 };
 use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
@@ -2083,7 +2085,8 @@ impl PyPolarSpace {
             "grid" => SpaceLayer::MajorGrid,
             "axes" => SpaceLayer::Axes,
             "numbers" => SpaceLayer::Numbers,
-            _ => return Err(value_error("layer must be grid, axes, or numbers")),
+            "labels" => SpaceLayer::Labels,
+            _ => return Err(value_error("layer must be grid, axes, numbers, or labels")),
         };
         self.inner
             .layer(layer)
@@ -2975,7 +2978,14 @@ impl PyScene {
         Ok(PyChart::new(inner, self.inner.clone()))
     }
 
-    #[pyo3(signature = (x, y, *, width=None, height=None, grid=true))]
+    #[pyo3(signature = (
+        x, y, *, width=None, height=None,
+        grid=true, axes=true, ticks=true, numbers=true, labels=true,
+        x_axis=None, y_axis=None, x_grid=None, y_grid=None,
+        x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None,
+        x_labels=None, y_labels=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn cartesian_2d(
         &self,
         x: &PyAxis,
@@ -2983,17 +2993,52 @@ impl PyScene {
         width: Option<f64>,
         height: Option<f64>,
         grid: bool,
+        axes: bool,
+        ticks: bool,
+        numbers: bool,
+        labels: bool,
+        x_axis: Option<bool>,
+        y_axis: Option<bool>,
+        x_grid: Option<bool>,
+        y_grid: Option<bool>,
+        x_ticks: Option<bool>,
+        y_ticks: Option<bool>,
+        x_numbers: Option<bool>,
+        y_numbers: Option<bool>,
+        x_labels: Option<bool>,
+        y_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace> {
+        let visibility = CartesianVisibility {
+            x_axis: x_axis.unwrap_or(axes),
+            y_axis: y_axis.unwrap_or(axes),
+            x_grid: x_grid.unwrap_or(grid),
+            y_grid: y_grid.unwrap_or(grid),
+            x_ticks: x_ticks.unwrap_or(ticks),
+            y_ticks: y_ticks.unwrap_or(ticks),
+            x_numbers: x_numbers.unwrap_or(numbers),
+            y_numbers: y_numbers.unwrap_or(numbers),
+            x_labels: x_labels.unwrap_or(labels),
+            y_labels: y_labels.unwrap_or(labels),
+        };
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_axes(x.0.clone(), y.0.clone(), width, height, grid)
+            .coordinate_axes_with_visibility(x.0.clone(), y.0.clone(), width, height, visibility)
             .map_err(value_error)?;
         Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
     }
 
-    #[pyo3(signature = (x, y, z, *, size=(10.0, 8.0, 6.0), grid=true))]
+    #[pyo3(signature = (
+        x, y, z, *, size=(10.0, 8.0, 6.0),
+        grid=true, axes=true, ticks=true, numbers=true, labels=true,
+        x_axis=None, y_axis=None, z_axis=None,
+        xy_grid=None, xz_grid=None, yz_grid=None,
+        x_ticks=None, y_ticks=None, z_ticks=None,
+        x_numbers=None, y_numbers=None, z_numbers=None,
+        x_labels=None, y_labels=None, z_labels=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn cartesian_3d(
         &self,
         x: &PyAxis,
@@ -3001,34 +3046,91 @@ impl PyScene {
         z: &PyAxis,
         size: (f64, f64, f64),
         grid: bool,
+        axes: bool,
+        ticks: bool,
+        numbers: bool,
+        labels: bool,
+        x_axis: Option<bool>,
+        y_axis: Option<bool>,
+        z_axis: Option<bool>,
+        xy_grid: Option<bool>,
+        xz_grid: Option<bool>,
+        yz_grid: Option<bool>,
+        x_ticks: Option<bool>,
+        y_ticks: Option<bool>,
+        z_ticks: Option<bool>,
+        x_numbers: Option<bool>,
+        y_numbers: Option<bool>,
+        z_numbers: Option<bool>,
+        x_labels: Option<bool>,
+        y_labels: Option<bool>,
+        z_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace3D> {
+        let visibility = Cartesian3DVisibility {
+            x_axis: x_axis.unwrap_or(axes),
+            y_axis: y_axis.unwrap_or(axes),
+            z_axis: z_axis.unwrap_or(axes),
+            xy_grid: xy_grid.unwrap_or(grid),
+            xz_grid: xz_grid.unwrap_or(grid),
+            yz_grid: yz_grid.unwrap_or(grid),
+            x_ticks: x_ticks.unwrap_or(ticks),
+            y_ticks: y_ticks.unwrap_or(ticks),
+            z_ticks: z_ticks.unwrap_or(ticks),
+            x_numbers: x_numbers.unwrap_or(numbers),
+            y_numbers: y_numbers.unwrap_or(numbers),
+            z_numbers: z_numbers.unwrap_or(numbers),
+            x_labels: x_labels.unwrap_or(labels),
+            y_labels: y_labels.unwrap_or(labels),
+            z_labels: z_labels.unwrap_or(labels),
+        };
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_axes_3d(
+            .coordinate_axes_3d_with_visibility(
                 x.0.clone(),
                 y.0.clone(),
                 z.0.clone(),
                 [size.0, size.1, size.2],
-                grid,
+                visibility,
             )
             .map_err(value_error)?;
         Ok(PyCoordinateSpace3D::new(inner, self.inner.clone()))
     }
 
-    #[pyo3(signature = (radial, *, radius=220.0, angle_divisions=12))]
+    #[pyo3(signature = (
+        radial, *, radius=220.0, angle_divisions=12,
+        grid=true, axes=true, numbers=true, labels=true, rings=None, spokes=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn polar(
         &self,
         radial: &PyAxis,
         radius: f64,
         angle_divisions: usize,
+        grid: bool,
+        axes: bool,
+        numbers: bool,
+        labels: bool,
+        rings: Option<bool>,
+        spokes: Option<bool>,
     ) -> PyResult<PyPolarSpace> {
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_polar_plane(radial.0.clone(), radius, angle_divisions)
+            .coordinate_polar_plane_with_visibility(
+                radial.0.clone(),
+                radius,
+                angle_divisions,
+                PolarVisibility {
+                    rings: rings.unwrap_or(grid),
+                    spokes: spokes.unwrap_or(grid),
+                    axes,
+                    numbers,
+                    labels,
+                },
+            )
             .map_err(value_error)?;
         Ok(PyPolarSpace {
             inner,
@@ -3036,13 +3138,35 @@ impl PyScene {
         })
     }
 
-    #[pyo3(signature = (x=None, y=None, *, width=None, height=None))]
+    #[pyo3(signature = (
+        x=None, y=None, *, width=None, height=None,
+        grid=true, axes=true, ticks=true, numbers=true, labels=true,
+        x_axis=None, y_axis=None, x_grid=None, y_grid=None,
+        x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None,
+        x_labels=None, y_labels=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn complex(
         &self,
         x: Option<&PyAxis>,
         y: Option<&PyAxis>,
         width: Option<f64>,
         height: Option<f64>,
+        grid: bool,
+        axes: bool,
+        ticks: bool,
+        numbers: bool,
+        labels: bool,
+        x_axis: Option<bool>,
+        y_axis: Option<bool>,
+        x_grid: Option<bool>,
+        y_grid: Option<bool>,
+        x_ticks: Option<bool>,
+        y_ticks: Option<bool>,
+        x_numbers: Option<bool>,
+        y_numbers: Option<bool>,
+        x_labels: Option<bool>,
+        y_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace> {
         let x = x.map(|axis| axis.0.clone()).unwrap_or(
             NativeAxis::linear(-5.0, 5.0)
@@ -3058,18 +3182,55 @@ impl PyScene {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_axes(x, y, width, height, true)
+            .coordinate_axes_with_visibility(
+                x,
+                y,
+                width,
+                height,
+                CartesianVisibility {
+                    x_axis: x_axis.unwrap_or(axes),
+                    y_axis: y_axis.unwrap_or(axes),
+                    x_grid: x_grid.unwrap_or(grid),
+                    y_grid: y_grid.unwrap_or(grid),
+                    x_ticks: x_ticks.unwrap_or(ticks),
+                    y_ticks: y_ticks.unwrap_or(ticks),
+                    x_numbers: x_numbers.unwrap_or(numbers),
+                    y_numbers: y_numbers.unwrap_or(numbers),
+                    x_labels: x_labels.unwrap_or(labels),
+                    y_labels: y_labels.unwrap_or(labels),
+                },
+            )
             .map_err(value_error)?;
         Ok(PyCoordinateSpace::new(inner, self.inner.clone()))
     }
 
-    #[pyo3(signature = (axis, *, length=None))]
-    fn number_line(&self, axis: &PyAxis, length: Option<f64>) -> PyResult<PyNumberLine> {
+    #[pyo3(signature = (
+        axis, *, length=None, axis_visible=true, ticks=true, numbers=true, labels=true
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn number_line(
+        &self,
+        axis: &PyAxis,
+        length: Option<f64>,
+        axis_visible: bool,
+        ticks: bool,
+        numbers: bool,
+        labels: bool,
+    ) -> PyResult<PyNumberLine> {
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_number_line(axis.0.clone(), length)
+            .coordinate_number_line_with_visibility(
+                axis.0.clone(),
+                length,
+                NumberLineVisibility {
+                    axis: axis_visible,
+                    ticks,
+                    numbers,
+                    labels,
+                },
+            )
             .map_err(value_error)?;
         Ok(PyNumberLine {
             inner,

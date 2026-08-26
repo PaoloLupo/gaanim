@@ -8,9 +8,10 @@ use gaanim_core::{ColorMap, ObjectId};
 use gaanim_expr::{EvalContext, Expr};
 use gaanim_objects::prelude::SvgPath;
 use gaanim_visualization::{
-    Axis, AxisLabelPosition, CartesianSpace, Channel, ChartSpec, ConstantValue, CoordinateMap2D,
-    CoordinateMap3D, DataMarkKind, Encoding, MarkKind, MatchPolicy, NonFinitePolicy, NumberLine,
-    PlotFrame, PolarSpace, Sampling, Scale, SpaceGeometry2D, SpaceLayer, StreamlineOptions,
+    Axis, AxisLabelPosition, Cartesian3DVisibility, CartesianSpace, CartesianVisibility, Channel,
+    ChartSpec, ConstantValue, CoordinateMap2D, CoordinateMap3D, DataMarkKind, Encoding, MarkKind,
+    MatchPolicy, NonFinitePolicy, NumberLine, NumberLineVisibility, PlotFrame, PolarSpace,
+    PolarVisibility, Sampling, Scale, SpaceGeometry2D, SpaceLayer, StreamlineOptions,
     TransitionFallback, VectorField as FieldModel, area_path, bars, box_stats, error_bar_path,
     histogram, implicit_contours, line_path, sample_function, sample_parametric, sample_surface,
     scatter_points, step_path, violin_path,
@@ -1539,7 +1540,7 @@ impl Canvas {
             .ticks_values(7)
             .unwrap_or_default()
             .into_iter()
-            .filter(|tick| tick.major && !tick.label.is_empty())
+            .filter(|tick| space.visibility.x_numbers && tick.major && !tick.label.is_empty())
             .collect();
         let x_tick_height = x_tick_labels
             .iter()
@@ -1561,11 +1562,18 @@ impl Canvas {
             .ticks_values(7)
             .unwrap_or_default()
             .into_iter()
-            .filter(|tick| tick.major && !tick.label.is_empty() && tick.value != x_cross)
+            .filter(|tick| {
+                space.visibility.y_numbers
+                    && tick.major
+                    && !tick.label.is_empty()
+                    && tick.value != x_cross
+            })
             .map(|tick| self.axis_text_size(&tick.label, number_scale).0)
             .fold(0.0, f64::max);
         geometry.labels.clear();
-        if let Some(label) = space.map.x.label_text() {
+        if space.visibility.x_labels
+            && let Some(label) = space.map.x.label_text()
+        {
             let (_, height) = self.axis_text_size(label, label_scale);
             let position = space.map.x.label_position_value();
             let (x, y) = if position == AxisLabelPosition::Center {
@@ -1592,7 +1600,9 @@ impl Canvas {
                 color: space.map.x.style_value().label_color,
             });
         }
-        if let Some(label) = space.map.y.label_text() {
+        if space.visibility.y_labels
+            && let Some(label) = space.map.y.label_text()
+        {
             let (_, height) = self.axis_text_size(label, label_scale);
             let position = space.map.y.label_position_value();
             let (x, y, rotation) = if position == AxisLabelPosition::Center {
@@ -1682,6 +1692,29 @@ impl Canvas {
         size: [f64; 3],
         grid: bool,
     ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
+        self.coordinate_axes_3d_with_visibility(
+            x,
+            y,
+            z,
+            size,
+            Cartesian3DVisibility {
+                xy_grid: grid,
+                xz_grid: grid,
+                yz_grid: grid,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Build a typed 3D Cartesian coordinate space with resolved component visibility.
+    pub fn coordinate_axes_3d_with_visibility(
+        &mut self,
+        x: Axis,
+        y: Axis,
+        z: Axis,
+        size: [f64; 3],
+        visibility: Cartesian3DVisibility,
+    ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
         let x = self.themed_axis(x);
         let y = self.themed_axis(y);
         let z = self.themed_axis(z);
@@ -1695,9 +1728,15 @@ impl Canvas {
             axis_points.extend_from_slice(&[as_point(from), as_point(to)]);
             axis_colors.extend_from_slice(&[color, color]);
         };
-        push_axis(min, [max[0], min[1], min[2]], x.style_value().color);
-        push_axis(min, [min[0], max[1], min[2]], y.style_value().color);
-        push_axis(min, [min[0], min[1], max[2]], z.style_value().color);
+        if visibility.x_axis {
+            push_axis(min, [max[0], min[1], min[2]], x.style_value().color);
+        }
+        if visibility.y_axis {
+            push_axis(min, [min[0], max[1], min[2]], y.style_value().color);
+        }
+        if visibility.z_axis {
+            push_axis(min, [min[0], min[1], max[2]], z.style_value().color);
+        }
         let axes = self.line_segments_3d_with_colors(axis_points, axis_colors);
 
         let mut grid_points = Vec::new();
@@ -1721,6 +1760,12 @@ impl Canvas {
             .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
         let mut numbers = Vec::new();
+        let ticks_visible = [visibility.x_ticks, visibility.y_ticks, visibility.z_ticks];
+        let numbers_visible = [
+            visibility.x_numbers,
+            visibility.y_numbers,
+            visibility.z_numbers,
+        ];
         for (dimension, axis) in [x.clone(), y.clone(), z.clone()].into_iter().enumerate() {
             for tick in axis.ticks_values(7)? {
                 let normalized = axis.normalize(tick.value)?;
@@ -1731,21 +1776,52 @@ impl Canvas {
                 // duplicates those lines at exactly the same depth, causing
                 // nondeterministic z-fighting when another 3D drawable enters
                 // the transparent render phase.
-                if tick.major && grid && normalized > 1e-12 {
-                    let lines = match dimension {
-                        0 => [
-                            ([coordinate, min[1], min[2]], [coordinate, max[1], min[2]]),
-                            ([coordinate, min[1], min[2]], [coordinate, min[1], max[2]]),
-                        ],
-                        1 => [
-                            ([min[0], coordinate, min[2]], [max[0], coordinate, min[2]]),
-                            ([min[0], coordinate, min[2]], [min[0], coordinate, max[2]]),
-                        ],
-                        _ => [
-                            ([min[0], min[1], coordinate], [max[0], min[1], coordinate]),
-                            ([min[0], min[1], coordinate], [min[0], max[1], coordinate]),
-                        ],
-                    };
+                if tick.major && normalized > 1e-12 {
+                    let mut lines = Vec::with_capacity(2);
+                    match dimension {
+                        0 => {
+                            if visibility.xy_grid {
+                                lines.push((
+                                    [coordinate, min[1], min[2]],
+                                    [coordinate, max[1], min[2]],
+                                ));
+                            }
+                            if visibility.xz_grid {
+                                lines.push((
+                                    [coordinate, min[1], min[2]],
+                                    [coordinate, min[1], max[2]],
+                                ));
+                            }
+                        }
+                        1 => {
+                            if visibility.xy_grid {
+                                lines.push((
+                                    [min[0], coordinate, min[2]],
+                                    [max[0], coordinate, min[2]],
+                                ));
+                            }
+                            if visibility.yz_grid {
+                                lines.push((
+                                    [min[0], coordinate, min[2]],
+                                    [min[0], coordinate, max[2]],
+                                ));
+                            }
+                        }
+                        _ => {
+                            if visibility.xz_grid {
+                                lines.push((
+                                    [min[0], min[1], coordinate],
+                                    [max[0], min[1], coordinate],
+                                ));
+                            }
+                            if visibility.yz_grid {
+                                lines.push((
+                                    [min[0], min[1], coordinate],
+                                    [min[0], max[1], coordinate],
+                                ));
+                            }
+                        }
+                    }
                     for (from, to) in lines {
                         grid_points.extend_from_slice(&[as_point(from), as_point(to)]);
                         // Use the opaque sRGB equivalent of the previous
@@ -1773,9 +1849,11 @@ impl Canvas {
                         [min[0] - tick_half * 4.0, min[1], coordinate],
                     ),
                 };
-                tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
-                tick_colors.extend_from_slice(&[tick_color, tick_color]);
-                if tick.major && !tick.label.is_empty() {
+                if ticks_visible[dimension] {
+                    tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
+                    tick_colors.extend_from_slice(&[tick_color, tick_color]);
+                }
+                if numbers_visible[dimension] && tick.major && !tick.label.is_empty() {
                     numbers.push(
                         self.text(&tick.label)
                             .fill(axis.style_value().number_color)
@@ -1791,12 +1869,24 @@ impl Canvas {
         let number_refs: Vec<_> = numbers.iter().collect();
         let numbers = self.group_no_center(&number_refs);
         let mut labels = Vec::new();
-        for (axis, position) in [
-            (&x, [max[0] + tick_half * 5.0, min[1], min[2]]),
-            (&y, [min[0], max[1] + tick_half * 5.0, min[2]]),
-            (&z, [min[0], min[1], max[2] + tick_half * 5.0]),
+        for (axis, position, visible) in [
+            (
+                &x,
+                [max[0] + tick_half * 5.0, min[1], min[2]],
+                visibility.x_labels,
+            ),
+            (
+                &y,
+                [min[0], max[1] + tick_half * 5.0, min[2]],
+                visibility.y_labels,
+            ),
+            (
+                &z,
+                [min[0], min[1], max[2] + tick_half * 5.0],
+                visibility.z_labels,
+            ),
         ] {
-            if let Some(label) = axis.label_text() {
+            if visible && let Some(label) = axis.label_text() {
                 labels.push(
                     self.text(label)
                         .fill(axis.style_value().label_color)
@@ -1922,6 +2012,28 @@ impl Canvas {
         height: Option<f64>,
         grid: bool,
     ) -> Result<CoordinateSpaceHandle, VisualizationError> {
+        self.coordinate_axes_with_visibility(
+            x,
+            y,
+            width,
+            height,
+            CartesianVisibility {
+                x_grid: grid,
+                y_grid: grid,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Build Cartesian axes with resolved global and per-axis visibility.
+    pub fn coordinate_axes_with_visibility(
+        &mut self,
+        x: Axis,
+        y: Axis,
+        width: Option<f64>,
+        height: Option<f64>,
+        visibility: CartesianVisibility,
+    ) -> Result<CoordinateSpaceHandle, VisualizationError> {
         let x = self.themed_axis(x);
         let y = self.themed_axis(y);
         let themed_grid_color = self.theme_style.as_ref().map(|theme| {
@@ -1942,11 +2054,7 @@ impl Canvas {
             width.unwrap_or_else(|| safe.width()),
             height.unwrap_or_else(|| safe.height()),
         )?;
-        let mut space = if grid {
-            CartesianSpace::number_plane(x, y, frame)
-        } else {
-            CartesianSpace::axes(x, y, frame)
-        };
+        let mut space = CartesianSpace::axes(x, y, frame).with_visibility(visibility);
         if let Some(grid_color) = themed_grid_color {
             space.grid_color = grid_color;
             let rgba = grid_color.to_rgba8();
@@ -2035,7 +2143,7 @@ impl Canvas {
 
         let mut label_handles = Vec::with_capacity(geometry.labels.len());
         let mut label_index = 0;
-        if space.map.x.label_text().is_some() {
+        if space.visibility.x_labels && space.map.x.label_text().is_some() {
             let label = &geometry.labels[label_index];
             let handle = self.text(&label.text).fill(label.color).scaled(label_scale);
             let handle = match space.map.x.label_position_value() {
@@ -2050,7 +2158,7 @@ impl Canvas {
             label_handles.push(handle.rotated(label.rotation));
             label_index += 1;
         }
-        if space.map.y.label_text().is_some() {
+        if space.visibility.y_labels && space.map.y.label_text().is_some() {
             let label = &geometry.labels[label_index];
             let handle = self.text(&label.text).fill(label.color).scaled(label_scale);
             let handle = match space.map.y.label_position_value() {
@@ -2084,6 +2192,15 @@ impl Canvas {
         axis: Axis,
         length: Option<f64>,
     ) -> Result<NumberLineHandle, VisualizationError> {
+        self.coordinate_number_line_with_visibility(axis, length, NumberLineVisibility::default())
+    }
+
+    pub fn coordinate_number_line_with_visibility(
+        &mut self,
+        axis: Axis,
+        length: Option<f64>,
+        visibility: NumberLineVisibility,
+    ) -> Result<NumberLineHandle, VisualizationError> {
         let axis = self.themed_axis(axis);
         let length = length.unwrap_or_else(|| self.safe_frame().width());
         let line = NumberLine::new(axis.clone(), length)?;
@@ -2106,8 +2223,10 @@ impl Canvas {
             .map(|size| size / body_size)
             .unwrap_or(1.125);
         let mut axis_path = BezPath::new();
-        axis_path.move_to(Point::new(-length * 0.5, 0.0));
-        axis_path.line_to(Point::new(length * 0.5, 0.0));
+        if visibility.axis {
+            axis_path.move_to(Point::new(-length * 0.5, 0.0));
+            axis_path.line_to(Point::new(length * 0.5, 0.0));
+        }
         let bounds = gaanim_math::Bounds3D::new_2d(
             -length * 0.5,
             -style.tick_length - 56.0,
@@ -2126,9 +2245,11 @@ impl Canvas {
         for tick in axis.ticks_values(9)? {
             let x = line.data_to_local(tick.value)?;
             let half = style.tick_length * if tick.major { 0.5 } else { 0.3 };
-            tick_path.move_to(Point::new(x, -half));
-            tick_path.line_to(Point::new(x, half));
-            if tick.major && !tick.label.is_empty() {
+            if visibility.ticks {
+                tick_path.move_to(Point::new(x, -half));
+                tick_path.line_to(Point::new(x, half));
+            }
+            if visibility.numbers && tick.major && !tick.label.is_empty() {
                 number_handles.push(
                     self.text(&tick.label)
                         .fill(style.number_color)
@@ -2146,7 +2267,9 @@ impl Canvas {
         );
         let number_refs: Vec<&DrawableHandle> = number_handles.iter().collect();
         let numbers = self.group(&number_refs);
-        let labels = if let Some(label) = axis.label_text() {
+        let labels = if visibility.labels
+            && let Some(label) = axis.label_text()
+        {
             let label = self
                 .text(label)
                 .fill(style.label_color)
@@ -2174,6 +2297,21 @@ impl Canvas {
         radius: f64,
         angle_divisions: usize,
     ) -> Result<PolarSpaceHandle, VisualizationError> {
+        self.coordinate_polar_plane_with_visibility(
+            radial,
+            radius,
+            angle_divisions,
+            PolarVisibility::default(),
+        )
+    }
+
+    pub fn coordinate_polar_plane_with_visibility(
+        &mut self,
+        radial: Axis,
+        radius: f64,
+        angle_divisions: usize,
+        visibility: PolarVisibility,
+    ) -> Result<PolarSpaceHandle, VisualizationError> {
         if angle_divisions < 3 {
             return Err(VisualizationError::InvalidSize);
         }
@@ -2195,8 +2333,10 @@ impl Canvas {
         for tick in radial.ticks_values(7)? {
             let ring_radius = space.data_to_local(tick.value, 0.0)?.x.abs();
             if ring_radius > f64::EPSILON {
-                grid_path.extend(Circle::new(Point::ORIGIN, ring_radius).to_path(0.1));
-                if tick.major && !tick.label.is_empty() {
+                if visibility.rings {
+                    grid_path.extend(Circle::new(Point::ORIGIN, ring_radius).to_path(0.1));
+                }
+                if visibility.numbers && tick.major && !tick.label.is_empty() {
                     numbers_handles.push(
                         self.text(&tick.label)
                             .fill(style.number_color)
@@ -2206,10 +2346,12 @@ impl Canvas {
                 }
             }
         }
-        for index in 0..angle_divisions {
-            let angle = std::f64::consts::TAU * index as f64 / angle_divisions as f64;
-            grid_path.move_to(Point::ORIGIN);
-            grid_path.line_to(Point::new(radius * angle.cos(), radius * angle.sin()));
+        if visibility.spokes {
+            for index in 0..angle_divisions {
+                let angle = std::f64::consts::TAU * index as f64 / angle_divisions as f64;
+                grid_path.move_to(Point::ORIGIN);
+                grid_path.line_to(Point::new(radius * angle.cos(), radius * angle.sin()));
+            }
         }
         let grid_color = self
             .theme_style
@@ -2228,18 +2370,41 @@ impl Canvas {
             .unwrap_or(Color::from_rgb8(0xC0, 0xC0, 0xC0));
         let grid = self.themed_axis_path(grid_path, bounds, grid_color, 1.0, "PolarGrid");
         let mut axes_path = BezPath::new();
-        axes_path.move_to(Point::new(-radius, 0.0));
-        axes_path.line_to(Point::new(radius, 0.0));
-        axes_path.move_to(Point::new(0.0, -radius));
-        axes_path.line_to(Point::new(0.0, radius));
+        if visibility.axes {
+            axes_path.move_to(Point::new(-radius, 0.0));
+            axes_path.line_to(Point::new(radius, 0.0));
+            axes_path.move_to(Point::new(0.0, -radius));
+            axes_path.line_to(Point::new(0.0, radius));
+        }
         let axes = self.themed_axis_path(axes_path, bounds, style.color, style.width, "PolarAxes");
         let number_refs: Vec<&DrawableHandle> = numbers_handles.iter().collect();
         let numbers = self.group(&number_refs);
-        let root = self.group(&[&grid, &axes, &numbers]);
+        let label_scale = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/labels"))
+            .and_then(|style| style.text.as_ref())
+            .and_then(|style| style.size)
+            .map(|size| size / body_size)
+            .unwrap_or(1.125);
+        let labels = if visibility.labels
+            && let Some(label) = radial.label_text()
+        {
+            let label = self
+                .text(label)
+                .fill(style.label_color)
+                .scaled(label_scale)
+                .at_anchor(radius + 30.0, 0.0, Anchor::Left);
+            self.group(&[&label])
+        } else {
+            self.group(&[])
+        };
+        let root = self.group(&[&grid, &axes, &numbers, &labels]);
         let layers = HashMap::from([
             (SpaceLayer::MajorGrid, grid),
             (SpaceLayer::Axes, axes),
             (SpaceLayer::Numbers, numbers),
+            (SpaceLayer::Labels, labels),
         ]);
         Ok(PolarSpaceHandle {
             root,
@@ -3488,6 +3653,16 @@ impl Canvas {
 mod tests {
     use super::*;
 
+    fn layer_is_empty(handle: &DrawableHandle) -> bool {
+        let spec = handle.spec.lock().expect("layer spec poisoned");
+        match &spec.kind {
+            SpawnKind::SvgPath(path) => path.path.elements().is_empty(),
+            SpawnKind::LineSegments3D { points, .. } => points.is_empty(),
+            SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children.is_empty(),
+            other => panic!("unexpected semantic layer kind: {other:?}"),
+        }
+    }
+
     fn group_child_translations(canvas: &Canvas, group: &DrawableHandle) -> Vec<DVec3> {
         let group_spec = group.spec.lock().expect("group spec poisoned");
         let children = match &group_spec.kind {
@@ -3524,6 +3699,202 @@ mod tests {
                     .expect("label must have an authored translation")
             })
             .collect()
+    }
+
+    #[test]
+    fn cartesian_visibility_keeps_disabled_layers_available_and_mapping_stable() {
+        let mut canvas = Canvas::new(640, 360);
+        let x = Axis::linear(-2.0, 2.0)
+            .unwrap()
+            .ticks(1.0)
+            .unwrap()
+            .minor_ticks(2)
+            .label("x");
+        let y = Axis::linear(-1.0, 1.0)
+            .unwrap()
+            .ticks(0.5)
+            .unwrap()
+            .label("y");
+        let space = canvas
+            .coordinate_axes_with_visibility(
+                x,
+                y,
+                Some(400.0),
+                Some(200.0),
+                CartesianVisibility {
+                    x_grid: true,
+                    y_grid: false,
+                    x_axis: false,
+                    y_axis: false,
+                    x_ticks: false,
+                    y_ticks: false,
+                    x_numbers: false,
+                    y_numbers: false,
+                    x_labels: false,
+                    y_labels: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(space.data_to_local(1.0, 0.5).unwrap(), (100.0, 50.0));
+        assert!(!layer_is_empty(space.layer(SpaceLayer::MajorGrid).unwrap()));
+        assert!(!layer_is_empty(space.layer(SpaceLayer::MinorGrid).unwrap()));
+        for layer in [
+            SpaceLayer::Axes,
+            SpaceLayer::Ticks,
+            SpaceLayer::Numbers,
+            SpaceLayer::Labels,
+        ] {
+            assert!(layer_is_empty(space.layer(layer).unwrap()));
+        }
+    }
+
+    #[test]
+    fn three_dimensional_visibility_filters_grid_planes_and_annotations() {
+        let mut canvas = Canvas::new(640, 360);
+        let space = canvas
+            .coordinate_axes_3d_with_visibility(
+                Axis::linear(-2.0, 2.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("x"),
+                Axis::linear(-2.0, 2.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("y"),
+                Axis::linear(-2.0, 2.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("z"),
+                [4.0, 4.0, 4.0],
+                Cartesian3DVisibility {
+                    x_axis: false,
+                    y_axis: false,
+                    z_axis: false,
+                    xy_grid: true,
+                    xz_grid: false,
+                    yz_grid: false,
+                    x_ticks: false,
+                    y_ticks: false,
+                    z_ticks: false,
+                    x_numbers: false,
+                    y_numbers: false,
+                    z_numbers: false,
+                    x_labels: false,
+                    y_labels: false,
+                    z_labels: false,
+                },
+            )
+            .unwrap();
+
+        let grid = space.layer(SpaceLayer::MajorGrid).unwrap();
+        let spec = grid.spec.lock().expect("grid spec poisoned");
+        let SpawnKind::LineSegments3D { points, .. } = &spec.kind else {
+            panic!("expected a 3D grid layer")
+        };
+        assert!(!points.is_empty());
+        assert!(
+            points
+                .iter()
+                .all(|point| (point[2] + 2.0).abs() < f32::EPSILON)
+        );
+        drop(spec);
+        for layer in [
+            SpaceLayer::Axes,
+            SpaceLayer::Ticks,
+            SpaceLayer::Numbers,
+            SpaceLayer::Labels,
+        ] {
+            assert!(layer_is_empty(space.layer(layer).unwrap()));
+        }
+    }
+
+    #[test]
+    fn polar_and_number_line_visibility_keep_empty_layers_addressable() {
+        let mut canvas = Canvas::new(640, 360);
+        let polar = canvas
+            .coordinate_polar_plane_with_visibility(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("r"),
+                160.0,
+                8,
+                PolarVisibility {
+                    rings: false,
+                    spokes: false,
+                    axes: false,
+                    numbers: false,
+                    labels: false,
+                },
+            )
+            .unwrap();
+        for layer in [
+            SpaceLayer::MajorGrid,
+            SpaceLayer::Axes,
+            SpaceLayer::Numbers,
+            SpaceLayer::Labels,
+        ] {
+            assert!(layer_is_empty(polar.layer(layer).unwrap()));
+        }
+
+        let spokes_only = canvas
+            .coordinate_polar_plane_with_visibility(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("r"),
+                160.0,
+                8,
+                PolarVisibility {
+                    rings: false,
+                    spokes: true,
+                    axes: false,
+                    numbers: false,
+                    labels: true,
+                },
+            )
+            .unwrap();
+        let grid = spokes_only.layer(SpaceLayer::MajorGrid).unwrap();
+        let spec = grid.spec.lock().expect("polar grid spec poisoned");
+        let SpawnKind::SvgPath(path) = &spec.kind else {
+            panic!("expected a polar grid path")
+        };
+        assert_eq!(path.path.elements().len(), 16);
+        drop(spec);
+        assert!(!layer_is_empty(
+            spokes_only.layer(SpaceLayer::Labels).unwrap()
+        ));
+
+        let line = canvas
+            .coordinate_number_line_with_visibility(
+                Axis::linear(0.0, 4.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("t"),
+                Some(400.0),
+                NumberLineVisibility {
+                    axis: false,
+                    ticks: false,
+                    numbers: false,
+                    labels: false,
+                },
+            )
+            .unwrap();
+        for layer in [
+            SpaceLayer::Axes,
+            SpaceLayer::Ticks,
+            SpaceLayer::Numbers,
+            SpaceLayer::Labels,
+        ] {
+            assert!(layer_is_empty(line.layer(layer).unwrap()));
+        }
     }
 
     fn group_child_anchors(canvas: &Canvas, group: &DrawableHandle) -> Vec<Option<Anchor>> {

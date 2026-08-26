@@ -23,8 +23,9 @@ pub use sampling::{
     sample_expression, sample_function, sample_parametric, sample_surface, sample_vector_field,
 };
 pub use space::{
-    CartesianSpace, ComplexSpace, CoordinateMap2D, CoordinateMap3D, LabelGeometry, NumberLine,
-    PlotFrame, PolarSpace, SpaceGeometry2D, SpaceLayer,
+    Cartesian3DVisibility, CartesianSpace, CartesianVisibility, ComplexSpace, CoordinateMap2D,
+    CoordinateMap3D, LabelGeometry, NumberLine, NumberLineVisibility, PlotFrame, PolarSpace,
+    PolarVisibility, SpaceGeometry2D, SpaceLayer,
 };
 pub use statistics::{
     BoxStats, DataMarkKind, Histogram, MarkError, NonFinitePolicy, RectMark, area_path, bars,

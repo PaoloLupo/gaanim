@@ -2957,7 +2957,9 @@ class NumberLine:
 class PolarSpace:
     def drawable(self) -> Drawable: ...
     def coord(self, radius: float, angle: float) -> CoordinateRef: ...
-    def layer(self, name: Literal["grid", "axes", "numbers"]) -> Drawable: ...
+    def layer(self, name: Literal["grid", "axes", "numbers", "labels"]) -> Drawable:
+        """Return a stable polar layer; disabled layers are empty Drawables."""
+        ...
     def plot(self, function: Callable[[float], float], domain: tuple[float, float] = (0.0, 6.283185307179586), *, samples: int = 360) -> Drawable: ...
     def create(self, duration: Optional[float] = None) -> Anim: ...
 
@@ -3005,17 +3007,120 @@ class Scene:
     def chart(self, spec: ChartSpec) -> Chart:
         """Materialize an immutable declarative chart using batched semantic layers."""
         ...
-    def cartesian_2d(self, x: Axis, y: Axis, *, width: Optional[float] = None, height: Optional[float] = None, grid: bool = True) -> Cartesian2D:
-        """Create a typed 2D Cartesian space for scientific functions and geometry."""
+    def cartesian_2d(
+        self,
+        x: Axis,
+        y: Axis,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        x_grid: Optional[bool] = None,
+        y_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+    ) -> Cartesian2D:
+        """Create a typed 2D Cartesian space with configurable semantic layers.
+
+        Global switches default to ``True``. A non-``None`` per-axis switch
+        overrides its global value. ``numbers`` controls tick text while
+        ``labels`` controls titles authored with ``Axis.label``. Disabled
+        layers remain addressable as empty ``Drawable`` objects.
+        """
         ...
-    def cartesian_3d(self, x: Axis, y: Axis, z: Axis, *, size: tuple[float, float, float] = (10.0, 8.0, 6.0), grid: bool = True) -> Cartesian3D:
-        """Create a typed scale-aware 3D Cartesian space with independent layers."""
+    def cartesian_3d(
+        self,
+        x: Axis,
+        y: Axis,
+        z: Axis,
+        *,
+        size: tuple[float, float, float] = (10.0, 8.0, 6.0),
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        z_axis: Optional[bool] = None,
+        xy_grid: Optional[bool] = None,
+        xz_grid: Optional[bool] = None,
+        yz_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        z_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        z_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+        z_labels: Optional[bool] = None,
+    ) -> Cartesian3D:
+        """Create typed 3D axes with independently selectable planes and annotations.
+
+        ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
+        axis-specific ticks, numbers, and titles follow the same precedence.
+        Hidden layers remain available as empty ``Drawable`` objects.
+        """
         ...
-    def polar(self, radial: Axis, *, radius: float = 220.0, angle_divisions: int = 12) -> PolarSpace:
-        """Create a typed polar space for scientific functions and geometry."""
+    def polar(
+        self,
+        radial: Axis,
+        *,
+        radius: float = 220.0,
+        angle_divisions: int = 12,
+        grid: bool = True,
+        axes: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        rings: Optional[bool] = None,
+        spokes: Optional[bool] = None,
+    ) -> PolarSpace:
+        """Create a polar space with independently selectable rings and spokes.
+
+        ``rings`` and ``spokes`` inherit ``grid`` when omitted. ``labels``
+        controls the radial title from ``Axis.label``; ``numbers`` controls
+        radial tick text.
+        """
         ...
-    def complex(self, x: Optional[Axis] = None, y: Optional[Axis] = None, *, width: Optional[float] = None, height: Optional[float] = None) -> ComplexSpace:
-        """Create a Cartesian complex plane with real and imaginary axes."""
+    def complex(
+        self,
+        x: Optional[Axis] = None,
+        y: Optional[Axis] = None,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        x_grid: Optional[bool] = None,
+        y_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+    ) -> ComplexSpace:
+        """Create a configurable Cartesian complex plane.
+
+        Visibility switches and per-axis precedence match ``cartesian_2d``;
+        omitted axes retain the default ``Re`` and ``Im`` titles.
+        """
         ...
     def readout(self, source: _TracedScalar | Callable[[], _TracedScalar], *, label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "—") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
@@ -3033,8 +3138,22 @@ class Scene:
         ``color`` applies to every visible term, including the changing value.
         """
         ...
-    def number_line(self, axis: Axis, *, length: Optional[float] = None) -> NumberLine:
-        """Create a standalone typed number line using the axis scale and formatting."""
+    def number_line(
+        self,
+        axis: Axis,
+        *,
+        length: Optional[float] = None,
+        axis_visible: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+    ) -> NumberLine:
+        """Create a typed number line with independently visible components.
+
+        ``numbers`` controls tick text and ``labels`` controls the title from
+        ``Axis.label``. Disabled components remain addressable as empty layers.
+        ``axis_visible`` avoids colliding with the existing ``axis`` argument.
+        """
         ...
     @property
     def canvas(self) -> Canvas:
