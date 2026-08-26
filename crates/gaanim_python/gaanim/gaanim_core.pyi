@@ -3927,9 +3927,14 @@ class Scene:
 
         ``offset`` and ``duration`` select source seconds; ``speed`` must be
         positive. ``width`` and ``height`` use scene units and ``fit`` follows
-        image/video sizing. The first frame remains visible until the value is
-        passed once to ``Scene.play``. Invalid options raise ``ValueError``;
-        file and JSON failures raise ``RuntimeError``.
+        image/video sizing. Solid layers are rendered at the root and inside
+        precompositions; external image assets in both locations are resolved
+        relative to the JSON file. Linear and radial gradient fills/strokes
+        preserve static or animated color and opacity stops. The first frame
+        remains visible until the value is passed once to ``Scene.play``.
+        Invalid options raise ``ValueError``; file, JSON, image, and unsafe
+        importer failures raise ``RuntimeError`` rather than aborting the scene
+        load.
         """
         ...
     def svg(self, path: str) -> Drawable:

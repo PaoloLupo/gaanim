@@ -127,9 +127,20 @@ semántica que en imágenes; `offset`, `duration`, `loop` y `speed` controlan el
 intervalo reproducido. Activa el clip con `scene.play([clip])`.
 
 El soporte inicial prioriza formas vectoriales, transformaciones, rellenos,
-trazos y máscaras. Texto, imágenes embebidas, efectos y algunas variantes de
-gradientes pueden omitirse o aproximarse. Consulta `clip.warnings` para detectar
-esas diferencias. El contenedor `.lottie` todavía no está soportado.
+trazos y máscaras. Las capas sólidas se dibujan con su color y tamaño tanto en
+la composición principal como dentro de precomposiciones. Los assets de imagen
+externos exportados por Cavalry también funcionan en ambos niveles y se
+resuelven respecto al archivo JSON, incluido su subdirectorio `images/`.
+Sólidos e imágenes conservan el orden de capa, transformaciones, opacidad,
+tiempo local de la precomposición y máscaras simples.
+Los rellenos y trazos con gradientes lineales o radiales conservan sus color
+stops y opacity stops independientes, tanto estáticos como animados.
+Texto, imágenes embebidas y efectos todavía pueden omitirse o aproximarse.
+Consulta `clip.warnings` para detectar esas diferencias.
+Las posiciones separadas X/Y de una capa sí se reproducen; si Velato encuentra
+otra construcción que no puede convertir de forma segura, la carga devuelve un
+error en vez de abortar el proceso. El contenedor `.lottie` todavía no está
+soportado.
 
 == Modelos 3D glTF
 
