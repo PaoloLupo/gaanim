@@ -170,7 +170,8 @@ typed visualization API. Build immutable `Axis` specifications, create a
 `CoordinateSpace`, then call methods on that space:
 
 ```python
-from gaanim import Axis, BLUE, Expr
+import math
+from gaanim import Axis, BLUE
 
 space = scene.cartesian_2d(
     Axis.linear(-3, 3).ticks(1).label("x"),
@@ -178,8 +179,7 @@ space = scene.cartesian_2d(
     width=900,
     height=480,
 )
-x = Expr.var("x")
-curve = space.function(x.sin()).stroke(BLUE, 3)
+curve = space.function(lambda x: math.sin(x)).stroke(BLUE, 3)
 marker = scene.dot(6).at_coordinate(space.coord(1, 1))
 ```
 
@@ -550,7 +550,7 @@ raise `ValueError`.
 CSS-order four-side margins. With `dynamic=True`, it recomputes the union after
 updaters and layout in the same frame. `camera.pan_to`, `camera.follow`, and
 `camera.look_at` accept a `Drawable`, `AnchorPoint`, `PointRef`, or a 2D/3D
-tuple. Zoom and rotation also accept `Parameter`, `Variable`, and `_Expr`.
+tuple. Zoom and rotation also accept `Parameter`, `Variable`, and `Computed`.
 `camera.follow` supports world/local offsets and deterministic absolute-time
 lag. `camera.orthographic(...)` changes projection explicitly, while
 `camera.reset()` restores pose, target, up, and default orthographic projection.

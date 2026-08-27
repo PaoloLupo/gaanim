@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import Anchor, BLACK, BLUE, GOLD, GREEN, ORANGE, RED, TEAL, Axis, Brush, Scene, math as gm
+from gaanim import Anchor, BLACK, BLUE, GOLD, GREEN, ORANGE, RED, TEAL, Axis, Brush, Scene
 
 scene = Scene(1920, 1080)
 scene.canvas.set_theme("paper")
@@ -13,7 +13,7 @@ y_axis = Axis.linear(-3, 3).ticks(1).minor_ticks(2).label("$f (x)$").style(color
 plane = scene.cartesian_2d(x_axis, y_axis, width=1500, height=900).at(100,0)
 
 amplitude = scene.parameter(1.0)
-sine = plane.function(lambda x: amplitude * gm.sin(x)).stroke(BLUE, 4)
+sine = plane.function(lambda x, a: a * math.sin(x), inputs=[amplitude]).stroke(BLUE, 4)
 parabola = plane.function(lambda value: 0.12 * value * value - 1.2).no_fill().stroke(GREEN, 3)
 tangent = plane.tangent(lambda value: math.sin(value), 1.2, length=3.0).stroke(RED, 3)
 area = plane.area_under(lambda value: math.sin(value) , (0, math.pi), baseline=0).fill(TEAL).opacity(0.75)

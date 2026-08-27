@@ -170,11 +170,9 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gaanim_expr::Expr;
-
     fn scalar(value: f64) -> TrackingScalar {
         TrackingScalar {
-            expression: Expr::constant(value),
+            source: crate::reactive::ScalarSource::constant(value),
             parameters: Vec::new(),
         }
     }

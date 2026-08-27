@@ -28,7 +28,7 @@ use crate::pylayout::{
 use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextSelection, PyTextStyle};
 use crate::transition::PyTransitionType;
-use crate::visualization::{extract_expr, PyParameter, PyVariable};
+use crate::visualization::{extract_scalar_source, PyParameter, PyVariable};
 
 fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
@@ -1328,7 +1328,7 @@ impl PyCamera {
             }
         }
         let duration = require_duration(duration)?;
-        let zoom = extract_expr(zoom)?;
+        let zoom = extract_scalar_source(zoom, &self.inner)?;
         let inner = self
             .inner
             .lock()
@@ -1410,7 +1410,7 @@ impl PyCamera {
             require_finite(value, "angle")?;
         }
         let duration = require_duration(duration)?;
-        let angle = extract_expr(angle)?;
+        let angle = extract_scalar_source(angle, &self.inner)?;
         let inner = self
             .inner
             .lock()
@@ -1632,12 +1632,16 @@ impl PyCamera {
         enabled: bool,
     ) -> PyResult<PyCameraConstraint> {
         let center = center.as_ref().map(resolve_endpoint).transpose()?;
-        let zoom = zoom.map(extract_expr).transpose()?;
-        let rotation = rotation.map(extract_expr).transpose()?;
+        let zoom = zoom
+            .map(|value| extract_scalar_source(value, &self.inner))
+            .transpose()?;
+        let rotation = rotation
+            .map(|value| extract_scalar_source(value, &self.inner))
+            .transpose()?;
         let influence = influence
-            .map(extract_expr)
+            .map(|value| extract_scalar_source(value, &self.inner))
             .transpose()?
-            .unwrap_or_else(|| gaanim_expr::Expr::constant(1.0));
+            .unwrap_or_else(|| gaanim_animation::ScalarSource::constant(1.0));
         let handle = self
             .inner
             .lock()
@@ -1660,11 +1664,13 @@ impl PyCamera {
     ) -> PyResult<PyCameraConstraint> {
         let eye = eye.as_ref().map(resolve_endpoint_3d).transpose()?;
         let target = target.as_ref().map(resolve_endpoint_3d).transpose()?;
-        let fov_y = fov_y.map(extract_expr).transpose()?;
+        let fov_y = fov_y
+            .map(|value| extract_scalar_source(value, &self.inner))
+            .transpose()?;
         let influence = influence
-            .map(extract_expr)
+            .map(|value| extract_scalar_source(value, &self.inner))
             .transpose()?
-            .unwrap_or_else(|| gaanim_expr::Expr::constant(1.0));
+            .unwrap_or_else(|| gaanim_animation::ScalarSource::constant(1.0));
         let up = gaanim_core::glam::DVec3::new(up.0, up.1, up.2);
         let handle = self
             .inner
@@ -5144,11 +5150,13 @@ impl PyScene {
     }
 
     fn point_ref(&self, x: Bound<'_, PyAny>, y: Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        let x = extract_scalar_source(x, &self.inner)?;
+        let y = extract_scalar_source(y, &self.inner)?;
         let point = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .point_ref(extract_expr(x)?, extract_expr(y)?);
+            .point_ref(x, y);
         Ok(PyPointRef(point))
     }
 
@@ -5158,15 +5166,13 @@ impl PyScene {
         dx: Bound<'_, PyAny>,
         dy: Bound<'_, PyAny>,
     ) -> PyResult<PyPointRef> {
+        let dx = extract_scalar_source(dx, &self.inner)?;
+        let dy = extract_scalar_source(dy, &self.inner)?;
         let point = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .offset_point(
-                resolve_endpoint(&origin)?,
-                extract_expr(dx)?,
-                extract_expr(dy)?,
-            );
+            .offset_point(resolve_endpoint(&origin)?, dx, dy);
         Ok(PyPointRef(point))
     }
 
@@ -5202,15 +5208,13 @@ impl PyScene {
         radius: Bound<'_, PyAny>,
         angle: Bound<'_, PyAny>,
     ) -> PyResult<PyPointRef> {
+        let radius = extract_scalar_source(radius, &self.inner)?;
+        let angle = extract_scalar_source(angle, &self.inner)?;
         let point = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .polar_point(
-                resolve_endpoint(&origin)?,
-                extract_expr(radius)?,
-                extract_expr(angle)?,
-            );
+            .polar_point(resolve_endpoint(&origin)?, radius, angle);
         Ok(PyPointRef(point))
     }
 
@@ -5352,7 +5356,9 @@ impl PyScene {
         };
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
-        let value = value.map(extract_expr).transpose()?;
+        let value = value
+            .map(|value| extract_scalar_source(value, &self.inner))
+            .transpose()?;
         let handle = self
             .inner
             .lock()
@@ -5540,17 +5546,19 @@ impl PyScene {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
         validate_force_metrics(visual_scale, label_gap, font_size)?;
+        let magnitude = extract_scalar_source(magnitude, &self.inner)?;
+        let direction = direction
+            .map(|value| extract_scalar_source(value, &self.inner))
+            .transpose()?
+            .unwrap_or_else(|| gaanim_animation::ScalarSource::constant(0.0));
         let handle = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .force_at(
                 resolve_endpoint(&origin)?,
-                extract_expr(magnitude)?,
-                direction
-                    .map(extract_expr)
-                    .transpose()?
-                    .unwrap_or_else(|| gaanim_expr::Expr::constant(0.0)),
+                magnitude,
+                direction,
                 visual_scale,
                 label,
                 show_value,
@@ -5582,14 +5590,16 @@ impl PyScene {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
         validate_force_metrics(visual_scale, label_gap, font_size)?;
+        let fx = extract_scalar_source(fx, &self.inner)?;
+        let fy = extract_scalar_source(fy, &self.inner)?;
         let handle = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .force_from_components(
                 resolve_endpoint(&origin)?,
-                extract_expr(fx)?,
-                extract_expr(fy)?,
+                fx,
+                fy,
                 visual_scale,
                 label,
                 show_value,

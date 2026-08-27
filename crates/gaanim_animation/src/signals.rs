@@ -2,7 +2,6 @@ use bevy::prelude::{Changed, Commands, Component, Entity, Query, Res, World};
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
-use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::{Bounds3D, SpatialTransform};
 use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource, TextBaseline};
 use std::collections::HashMap;
@@ -36,7 +35,7 @@ pub type ColorSignal = Signal<Color>;
 /// all run the same visualizer-phase update.
 #[derive(Component, Debug, Clone)]
 pub struct ReactiveReadout {
-    pub expression: Expr,
+    pub source: crate::reactive::ScalarSource,
     pub parameters: Vec<(gaanim_core::ObjectId, Entity)>,
     pub format: String,
     pub prefix: String,
@@ -151,6 +150,7 @@ pub fn right_aligned_readout_baseline(bounds: Bounds3D) -> f64 {
 /// the formatted text changes.
 pub fn reactive_readout_update_system(
     registry: Res<gaanim_text::font::FontRegistry>,
+    playback: Option<Res<crate::updaters::PlaybackState>>,
     mut query: Query<(
         &mut ReactiveReadout,
         &mut Path2D,
@@ -166,13 +166,18 @@ pub fn reactive_readout_update_system(
             .map(|progress| progress.0)
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        let mut context = EvalContext::new();
-        for (id, entity) in &readout.parameters {
-            if let Ok(signal) = signals.get(*entity) {
-                context.set_parameter(*id, signal.value);
-            }
-        }
-        let value = readout.expression.eval(&context).unwrap_or(f64::NAN);
+        let time = playback.as_ref().map_or(0.0, |state| state.current_time);
+        let value = readout
+            .source
+            .evaluate(time, |logical| {
+                readout
+                    .parameters
+                    .iter()
+                    .find_map(|(id, entity)| (*id == logical).then_some(*entity))
+                    .and_then(|entity| signals.get(entity).ok())
+                    .map(|signal| signal.value)
+            })
+            .unwrap_or(f64::NAN);
         let text = format!(
             "{}{}{}",
             readout.prefix,
@@ -835,7 +840,7 @@ mod tests {
             .world_mut()
             .spawn((
                 ReactiveReadout {
-                    expression: Expr::parameter(parameter_id),
+                    source: crate::reactive::ScalarSource::signal(parameter_id),
                     parameters: vec![(parameter_id, signal)],
                     format: ".1f".to_owned(),
                     prefix: String::new(),
@@ -880,7 +885,7 @@ mod tests {
             .world_mut()
             .spawn((
                 ReactiveReadout {
-                    expression: Expr::parameter(parameter_id),
+                    source: crate::reactive::ScalarSource::signal(parameter_id),
                     parameters: vec![(parameter_id, signal)],
                     format: ".1f".to_owned(),
                     prefix: String::new(),
@@ -1094,6 +1099,38 @@ pub struct AlwaysRedrawRegen {
     pub regen: Arc<dyn Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync>,
 }
 
+/// Component that deterministically regenerates a 3D line list from the world snapshot.
+#[derive(Component)]
+pub struct ReactiveLineRegen {
+    pub regen: Arc<dyn Fn(&World) -> gaanim_scene::LineListData + Send + Sync>,
+}
+
+impl ReactiveLineRegen {
+    pub fn new(
+        regen: impl Fn(&World) -> gaanim_scene::LineListData + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            regen: Arc::new(regen),
+        }
+    }
+}
+
+/// Component that deterministically regenerates a 3D triangle mesh from the world snapshot.
+#[derive(Component)]
+pub struct ReactiveMeshRegen {
+    pub regen: Arc<dyn Fn(&World) -> gaanim_scene::TriangleMeshData + Send + Sync>,
+}
+
+impl ReactiveMeshRegen {
+    pub fn new(
+        regen: impl Fn(&World) -> gaanim_scene::TriangleMeshData + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            regen: Arc::new(regen),
+        }
+    }
+}
+
 impl AlwaysRedrawRegen {
     pub fn new(
         regen: impl Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync + 'static,
@@ -1153,6 +1190,34 @@ pub fn always_redraw_regen_system(world: &mut World) {
             if let Ok(mut em) = world.get_entity_mut(entity) {
                 em.insert(crate::writing::PathReveal(reveal));
             }
+        }
+    }
+}
+
+/// Regenerate reactive 3D raw geometry before renderer extraction.
+pub fn reactive_3d_regen_system(world: &mut World) {
+    let line_updates = {
+        let mut query = world.query::<(Entity, &ReactiveLineRegen)>();
+        query
+            .iter(world)
+            .map(|(entity, regen)| (entity, (regen.regen)(world)))
+            .collect::<Vec<_>>()
+    };
+    let mesh_updates = {
+        let mut query = world.query::<(Entity, &ReactiveMeshRegen)>();
+        query
+            .iter(world)
+            .map(|(entity, regen)| (entity, (regen.regen)(world)))
+            .collect::<Vec<_>>()
+    };
+    for (entity, data) in line_updates {
+        if let Some(mut current) = world.get_mut::<gaanim_scene::LineListData>(entity) {
+            *current = data;
+        }
+    }
+    for (entity, data) in mesh_updates {
+        if let Some(mut current) = world.get_mut::<gaanim_scene::TriangleMeshData>(entity) {
+            *current = data;
         }
     }
 }

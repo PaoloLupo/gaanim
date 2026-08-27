@@ -39,20 +39,21 @@ generan como `0`, `π`, `2π` y `3π`; no hay que colocar textos manualmente.
 perpendicular. Un valor de uno ocupa `normal_scale` unidades locales.
 
 ```python
-from gaanim import math as gm
+import math
+from gaanim import computed
 
 radius = 120
 theta = scene.parameter(0.0)
 sine_curve = timeline.function(
-  lambda value: gm.sin(value),
+  lambda value: math.sin(value),
   normal_scale=radius,
   reveal=theta,
 )
 sine_curve.stroke(PRIMARY, 3).no_fill()
 ```
 
-La lambda se ejecuta una sola vez para construir una expresión nativa. El
-muestreo y cualquier actualización reactiva posterior suceden en Rust.
+La función usa Python normal. Rust resuelve sus entradas y cachea cada snapshot
+numérico exacto para que reproducción y seek produzcan la misma geometría.
 
 == Compartir el ángulo
 
@@ -62,7 +63,7 @@ circle_dot = scene.dot(10).fill(ACCENT).follow(circle_ref)
 
 wave_ref = timeline.point_ref(
   theta,
-  normal_offset=radius * gm.sin(theta),
+  normal_offset=computed(lambda angle: radius * math.sin(angle), inputs=[theta]),
 )
 wave_dot = scene.dot(8).fill(ACCENT).follow(wave_ref)
 ```

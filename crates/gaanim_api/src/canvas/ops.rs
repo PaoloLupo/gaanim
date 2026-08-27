@@ -7,10 +7,10 @@ use gaanim_animation::{
     AngleArrowheads, AngleSweep, AxisMask, DimensionLabelOrientation, FollowOffsetSpace,
     SampledSeriesDriver, Updater,
 };
+use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
-use gaanim_expr::Expr;
 use gaanim_layout::LayoutConstraint;
 use gaanim_renderer::background::BackgroundPaint;
 use gaanim_timeline::transition::TransitionType;
@@ -41,7 +41,7 @@ pub(crate) struct CanvasState {
     /// Latest authoritative authoring snapshot for every Layout v2 root.
     /// Python layout handles and width-sensitive leaves share this registry.
     pub latest_layouts: HashMap<ObjectId, LayoutTreeSnapshot>,
-    /// Authoring-side mirrors for parameters embedded in native expressions.
+    /// Authoring-side mirrors used to materialize initial reactive snapshots.
     pub parameter_values: HashMap<ObjectId, Arc<Mutex<f64>>>,
 }
 
@@ -113,13 +113,13 @@ pub(crate) struct CameraBindingWindowSpec {
 pub(crate) enum CanvasCameraBindingKind {
     TwoD {
         center: Option<CanvasEndpoint>,
-        zoom: Option<Expr>,
-        rotation: Option<Expr>,
+        zoom: Option<ScalarSource>,
+        rotation: Option<ScalarSource>,
     },
     ThreeD {
         eye: Option<CanvasEndpoint>,
         target: Option<CanvasEndpoint>,
-        fov_y: Option<Expr>,
+        fov_y: Option<ScalarSource>,
         up: DVec3,
     },
 }
@@ -128,7 +128,7 @@ pub(crate) enum CanvasCameraBindingKind {
 pub(crate) struct CameraBindingSpec {
     pub order: u64,
     pub kind: CanvasCameraBindingKind,
-    pub influence: Expr,
+    pub influence: ScalarSource,
     pub windows: Vec<CameraBindingWindowSpec>,
 }
 
@@ -545,7 +545,7 @@ pub(crate) enum Op {
     AttachCustomUpdater { target: ObjectId, updater: Updater },
     AttachReactiveArrowField2D {
         target: ObjectId,
-        expressions: [Expr; 2],
+        function: ReactiveFunction,
         position: [f64; 2],
         map: gaanim_visualization::CoordinateMap2D,
         options: super::ArrowFieldOptions,
@@ -553,7 +553,7 @@ pub(crate) enum Op {
     },
     AttachReactiveArrowField3D {
         target: ObjectId,
-        expressions: [Expr; 3],
+        function: ReactiveFunction,
         resolution: [usize; 3],
         map: gaanim_visualization::CoordinateMap3D,
         options: super::ArrowFieldOptions,
@@ -561,7 +561,7 @@ pub(crate) enum Op {
     },
     AttachReactiveStreamLine2D {
         target: ObjectId,
-        expressions: [Expr; 2],
+        function: ReactiveFunction,
         seed: [f64; 2],
         map: gaanim_visualization::CoordinateMap2D,
         style: super::StreamLinesStyle,
@@ -569,7 +569,7 @@ pub(crate) enum Op {
     },
     AttachReactiveStreamLine3D {
         target: ObjectId,
-        expressions: [Expr; 3],
+        function: ReactiveFunction,
         seed: [f64; 3],
         map: gaanim_visualization::CoordinateMap3D,
         style: super::StreamLinesStyle,
@@ -603,20 +603,28 @@ pub enum CanvasEndpoint {
     Entity(ObjectId),
     /// A normalized anchor inside an entity's local bounds plus a local offset.
     Anchor(AnchorPoint),
-    /// Point evaluated from two native scalar expressions.
-    Expression { x: Expr, y: Expr },
-    /// Native expressions evaluated in an object's local coordinate frame.
+    /// Point evaluated from two deterministic scalar sources.
+    Expression { x: ScalarSource, y: ScalarSource },
+    /// Scalar sources evaluated in an object's local coordinate frame.
     LocalExpression {
         space: ObjectId,
-        x: Expr,
-        y: Expr,
-        z: Expr,
+        x: ScalarSource,
+        y: ScalarSource,
+        z: ScalarSource,
+    },
+    /// Scalar data value mapped through a number line at runtime.
+    LocalNumberLine {
+        space: ObjectId,
+        axis: gaanim_visualization::Axis,
+        length: f64,
+        value: ScalarSource,
+        normal_offset: ScalarSource,
     },
     /// Reactive scene-space displacement from another endpoint.
     Offset {
         origin: Box<CanvasEndpoint>,
-        dx: Expr,
-        dy: Expr,
+        dx: ScalarSource,
+        dy: ScalarSource,
     },
     /// Affine interpolation between endpoints plus a scene-space offset.
     Between {
@@ -628,8 +636,8 @@ pub enum CanvasEndpoint {
     /// Polar point around another endpoint.
     Polar {
         origin: Box<CanvasEndpoint>,
-        radius: Expr,
-        angle: Expr,
+        radius: ScalarSource,
+        angle: ScalarSource,
     },
 }
 

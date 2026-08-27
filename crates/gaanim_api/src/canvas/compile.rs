@@ -12,8 +12,8 @@ use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform};
 use gaanim_scene::{
     FillBrush, GlobalOpacity, GltfModelRoot, GltfNodeBinding, GltfNodeWrapper, GroupMarker,
-    LocalBounds, MobjectId, ObjectTag, Opacity, RenderLayer, RenderOrder, StrokeBrush, Visible,
-    WorldBounds,
+    LineListData, LocalBounds, MobjectId, ObjectTag, Opacity, RenderLayer, RenderOrder,
+    StrokeBrush, TriangleMeshData, Visible, WorldBounds,
 };
 use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, Timeline};
@@ -38,23 +38,28 @@ use gaanim_text::prelude::{
 use gaanim_animation::{
     AngleLabelPlacement, CurvatureOnCurve, DimensionLabelPlacement, EndpointAngle,
     EndpointDistance, EndpointFollow, NormalOnCurve, PointOnCurve, PositionBinding,
-    RotationBinding, RotationTranslationBinding, TangentOnCurve, TracedPath, TrackingAngle,
+    ReactiveFunction, ReactiveLineRegen, ReactiveMeshRegen, RotationBinding,
+    RotationTranslationBinding, ScalarSource, TangentOnCurve, TracedPath, TrackingAngle,
     TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
     TrackingVectorHead, Updater,
 };
 use gaanim_math::{RateFunc, SpatialTransform};
 
-fn sampled_expression_path(
+fn sampled_reactive_path(
     map: &gaanim_visualization::CoordinateMap2D,
-    expression: &gaanim_expr::Expr,
-    variable: &str,
+    function: &ReactiveFunction,
     domain: (f64, f64),
-    reveal: Option<&gaanim_expr::Expr>,
+    reveal: Option<&ScalarSource>,
     sampling: gaanim_visualization::Sampling,
-    context: &gaanim_expr::EvalContext,
+    time: f64,
+    values: &[(ObjectId, f64)],
 ) -> BezPath {
     let sampled_domain = if let Some(reveal) = reveal {
-        let Ok(end) = reveal.eval(context) else {
+        let Ok(end) = reveal.evaluate(time, |logical| {
+            values
+                .iter()
+                .find_map(|(id, value)| (*id == logical).then_some(*value))
+        }) else {
             return BezPath::new();
         };
         let end = end.clamp(domain.0, domain.1);
@@ -65,24 +70,162 @@ fn sampled_expression_path(
     } else {
         domain
     };
-    gaanim_visualization::sample_expression(
-        map,
-        expression,
-        variable,
-        sampled_domain,
-        sampling,
-        context,
-    )
+    gaanim_visualization::sample_function(map, sampled_domain, sampling, |coordinate| {
+        function
+            .evaluate(&[coordinate], time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()
+            .map(|value| value[0])
+    })
     .map(|sampled| sampled.to_bez_path())
     .unwrap_or_default()
 }
 
+fn reactive_values(
+    world: &World,
+    parameters: &[(ObjectId, Entity)],
+) -> (f64, Vec<(ObjectId, f64)>) {
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let values = parameters
+        .iter()
+        .filter_map(|(logical, entity)| {
+            world
+                .get::<gaanim_animation::FloatSignal>(*entity)
+                .map(|signal| (*logical, signal.value))
+        })
+        .collect();
+    (time, values)
+}
+
+fn sampled_reactive_parametric_2d(
+    map: &gaanim_visualization::CoordinateMap2D,
+    function: &ReactiveFunction,
+    domain: (f64, f64),
+    sampling: gaanim_visualization::Sampling,
+    time: f64,
+    values: &[(ObjectId, f64)],
+) -> BezPath {
+    gaanim_visualization::sample_parametric(map, domain, sampling, |coordinate| {
+        function
+            .evaluate(&[coordinate], time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()
+            .map(|output| (output[0], output[1]))
+    })
+    .map(|sampled| sampled.to_bez_path())
+    .unwrap_or_default()
+}
+
+fn sampled_reactive_parametric_3d(
+    map: &gaanim_visualization::CoordinateMap3D,
+    function: &ReactiveFunction,
+    domain: (f64, f64),
+    samples: usize,
+    time: f64,
+    values: &[(ObjectId, f64)],
+    color: PenikoColor,
+) -> LineListData {
+    let mut points = Vec::new();
+    let mut previous = None;
+    for index in 0..samples {
+        let progress = index as f64 / (samples - 1) as f64;
+        let coordinate = domain.0 + (domain.1 - domain.0) * progress;
+        let current = function
+            .evaluate(&[coordinate], time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()
+            .and_then(|output| map.data_to_local([output[0], output[1], output[2]]).ok())
+            .map(|point| [point[0] as f32, point[1] as f32, point[2] as f32]);
+        if let (Some(from), Some(to)) = (previous, current) {
+            points.extend_from_slice(&[from, to]);
+        }
+        previous = current;
+    }
+    LineListData {
+        points,
+        indices: None,
+        strip: false,
+        color,
+        colors: None,
+    }
+}
+
+fn sampled_reactive_surface_3d(
+    map: &gaanim_visualization::CoordinateMap3D,
+    function: &ReactiveFunction,
+    resolution: [usize; 2],
+    time: f64,
+    values: &[(ObjectId, f64)],
+) -> TriangleMeshData {
+    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| {
+        function
+            .evaluate(&[x, y], time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()
+            .map(|output| output[0])
+    })
+    .unwrap_or(gaanim_visualization::SurfaceMesh {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        values: Vec::new(),
+    });
+    let finite = mesh
+        .values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    let minimum = finite.iter().copied().reduce(f64::min).unwrap_or(0.0);
+    let maximum = finite.iter().copied().reduce(f64::max).unwrap_or(1.0);
+    let span = (maximum - minimum).max(f64::EPSILON);
+    let colors = mesh
+        .values
+        .iter()
+        .map(|value| {
+            let t = if value.is_finite() {
+                ((value - minimum) / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            [
+                (0x20 as f64 + t * 0xD0 as f64) as f32 / 255.0,
+                (0x60 as f64 + (1.0 - (2.0 * t - 1.0).abs()) * 0x90 as f64) as f32 / 255.0,
+                (0xD0 as f64 - t * 0x90 as f64) as f32 / 255.0,
+                if value.is_finite() { 1.0 } else { 0.0 },
+            ]
+        })
+        .collect();
+    TriangleMeshData {
+        vertices: mesh.vertices,
+        indices: mesh.indices,
+        normals: None,
+        uvs: None,
+        color: None,
+        colors: Some(colors),
+        material: None,
+    }
+}
+
 fn compile_tracking_scalar(
-    expression: &gaanim_expr::Expr,
+    source: &ScalarSource,
     id_map: &HashMap<ObjectId, ObjectId>,
     states: &MobjectStateMap,
 ) -> TrackingScalar {
-    let parameters = expression
+    let parameters = source
         .parameter_ids()
         .into_iter()
         .filter_map(|id| {
@@ -93,20 +236,17 @@ fn compile_tracking_scalar(
         })
         .collect();
     TrackingScalar {
-        expression: expression.clone(),
+        source: source.clone(),
         parameters,
     }
 }
 
-fn compile_field_parameters<const N: usize>(
-    expressions: &[gaanim_expr::Expr; N],
+fn compile_function_parameters(
+    function: &ReactiveFunction,
     id_map: &HashMap<ObjectId, ObjectId>,
     states: &MobjectStateMap,
 ) -> Vec<(ObjectId, Entity)> {
-    let mut ids = expressions
-        .iter()
-        .flat_map(gaanim_expr::Expr::parameter_ids)
-        .collect::<Vec<_>>();
+    let mut ids = function.parameter_ids();
     ids.sort_unstable();
     ids.dedup();
     ids.into_iter()
@@ -118,24 +258,24 @@ fn compile_field_parameters<const N: usize>(
 }
 
 fn runtime_field_2d(
-    expressions: &[gaanim_expr::Expr; 2],
+    function: &ReactiveFunction,
     parameters: &[(ObjectId, Entity)],
     world: &World,
     point: [f64; 2],
 ) -> Option<[f64; 2]> {
-    let mut context = gaanim_expr::EvalContext::new()
-        .with_variable("x", point[0])
-        .with_variable("y", point[1]);
-    for (logical, entity) in parameters {
-        context.set_parameter(
-            *logical,
-            world.get::<gaanim_animation::FloatSignal>(*entity)?.value,
-        );
-    }
-    Some([
-        expressions[0].eval(&context).ok()?,
-        expressions[1].eval(&context).ok()?,
-    ])
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let value = function
+        .evaluate(&point, time, |logical| {
+            parameters
+                .iter()
+                .find_map(|(id, entity)| (*id == logical).then_some(*entity))
+                .and_then(|entity| world.get::<gaanim_animation::FloatSignal>(entity))
+                .map(|signal| signal.value)
+        })
+        .ok()?;
+    Some([value[0], value[1]])
 }
 
 fn reactive_field_color(
@@ -194,7 +334,7 @@ fn reactive_arrow_path_2d(
 }
 
 fn runtime_model_2d(
-    expressions: [gaanim_expr::Expr; 2],
+    function: ReactiveFunction,
     parameters: &[(ObjectId, Entity)],
     world: &World,
 ) -> Option<gaanim_visualization::VectorField<2>> {
@@ -206,22 +346,23 @@ fn runtime_model_2d(
                 .map(|signal| (*logical, signal.value))
         })
         .collect::<Option<Vec<_>>>()?;
-    Some(gaanim_visualization::VectorField::new(move |[x, y]| {
-        let mut context = gaanim_expr::EvalContext::new()
-            .with_variable("x", x)
-            .with_variable("y", y);
-        for (logical, value) in &values {
-            context.set_parameter(*logical, *value);
-        }
-        Some([
-            expressions[0].eval(&context).ok()?,
-            expressions[1].eval(&context).ok()?,
-        ])
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    Some(gaanim_visualization::VectorField::new(move |point| {
+        let result = function
+            .evaluate(&point, time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()?;
+        Some([result[0], result[1]])
     }))
 }
 
 fn runtime_model_3d(
-    expressions: [gaanim_expr::Expr; 3],
+    function: ReactiveFunction,
     parameters: &[(ObjectId, Entity)],
     world: &World,
 ) -> Option<gaanim_visualization::VectorField<3>> {
@@ -233,19 +374,18 @@ fn runtime_model_3d(
                 .map(|signal| (*logical, signal.value))
         })
         .collect::<Option<Vec<_>>>()?;
-    Some(gaanim_visualization::VectorField::new(move |[x, y, z]| {
-        let mut context = gaanim_expr::EvalContext::new()
-            .with_variable("x", x)
-            .with_variable("y", y)
-            .with_variable("z", z);
-        for (logical, value) in &values {
-            context.set_parameter(*logical, *value);
-        }
-        Some([
-            expressions[0].eval(&context).ok()?,
-            expressions[1].eval(&context).ok()?,
-            expressions[2].eval(&context).ok()?,
-        ])
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    Some(gaanim_visualization::VectorField::new(move |point| {
+        let result = function
+            .evaluate(&point, time, |logical| {
+                values
+                    .iter()
+                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+            })
+            .ok()?;
+        Some([result[0], result[1], result[2]])
     }))
 }
 
@@ -355,6 +495,26 @@ fn compile_tracking_endpoint(
                 x: compile_tracking_scalar(x, id_map, states),
                 y: compile_tracking_scalar(y, id_map, states),
                 z: compile_tracking_scalar(z, id_map, states),
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
+        CanvasEndpoint::LocalNumberLine {
+            space,
+            axis,
+            length,
+            value,
+            normal_offset,
+        } => id_map
+            .get(space)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| {
+                let axis = axis.clone();
+                TrackingEndpoint::LocalNumberLine {
+                    space: state.entity,
+                    map: gaanim_animation::ScalarMap::new(move |value| axis.normalize(value).ok()),
+                    length: *length,
+                    value: compile_tracking_scalar(value, id_map, states),
+                    normal_offset: compile_tracking_scalar(normal_offset, id_map, states),
+                }
             })
             .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::Offset { origin, dx, dy } => TrackingEndpoint::Offset {
@@ -3787,9 +3947,8 @@ impl Canvas {
                     let to_eye = *eye;
                     let from_target = *camera_target;
                     let to_target = *target;
-                    let view_to = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
-                        to_eye, to_target, *up,
-                    );
+                    let view_to =
+                        gaanim_core::glam::dcamera::rh::view::look_at_mat4(to_eye, to_target, *up);
                     let to_rot = view_to.inverse().to_scale_rotation_translation().1;
                     builder.timeline.add_clip(
                         builder.default_track,
@@ -4668,30 +4827,39 @@ impl Canvas {
                 }
                 Op::AttachReactiveArrowField2D {
                     target,
-                    expressions,
+                    function,
                     position,
                     map,
                     options,
                     color_range,
                 } => {
-                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    let parameters = compile_function_parameters(function, id_map, &builder.states);
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
-                        let expressions = expressions.clone();
+                        let function = function.clone();
                         let position = *position;
                         let map = map.clone();
                         let options = options.clone();
                         let color_range = *color_range;
                         let updater = Updater::new(move |_dt, _elapsed, entity, world| {
-                            let Some(vector) =
-                                runtime_field_2d(&expressions, &parameters, world, position)
-                            else {
-                                return true;
-                            };
-                            let Some(path) =
-                                reactive_arrow_path_2d(&map, position, vector, &options)
-                            else {
+                            let path = runtime_field_2d(&function, &parameters, world, position)
+                                .and_then(|vector| {
+                                    reactive_arrow_path_2d(&map, position, vector, &options)
+                                        .map(|path| (vector, path))
+                                });
+                            let Some((vector, path)) = path else {
+                                let empty = Arc::new(BezPath::new());
+                                if let Some(mut visible) =
+                                    world.get_mut::<gaanim_scene::Path2D>(entity)
+                                {
+                                    visible.0 = empty.clone();
+                                }
+                                if let Some(mut source) =
+                                    world.get_mut::<gaanim_scene::PathSource>(entity)
+                                {
+                                    source.0 = empty;
+                                }
                                 return true;
                             };
                             let magnitude = (vector[0] * vector[0] + vector[1] * vector[1]).sqrt();
@@ -4723,36 +4891,39 @@ impl Canvas {
                 }
                 Op::AttachReactiveArrowField3D {
                     target,
-                    expressions,
+                    function,
                     resolution,
                     map,
                     options,
                     color_range,
                 } => {
-                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    let parameters = compile_function_parameters(function, id_map, &builder.states);
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
-                        let expressions = expressions.clone();
+                        let function = function.clone();
                         let resolution = *resolution;
                         let map = map.clone();
                         let options = options.clone();
                         let color_range = *color_range;
                         let updater = Updater::new(move |_dt, _elapsed, entity, world| {
-                            let Some(field) =
-                                runtime_model_3d(expressions.clone(), &parameters, world)
-                            else {
-                                return true;
-                            };
-                            let Some(lines) = reactive_arrow_lines_3d(
-                                &field,
-                                &map,
-                                resolution,
-                                &options,
-                                color_range,
-                            ) else {
-                                return true;
-                            };
+                            let lines = runtime_model_3d(function.clone(), &parameters, world)
+                                .and_then(|field| {
+                                    reactive_arrow_lines_3d(
+                                        &field,
+                                        &map,
+                                        resolution,
+                                        &options,
+                                        color_range,
+                                    )
+                                })
+                                .unwrap_or(gaanim_scene::LineListData {
+                                    points: Vec::new(),
+                                    indices: None,
+                                    strip: false,
+                                    color: PenikoColor::WHITE,
+                                    colors: None,
+                                });
                             if let Some(mut visible) =
                                 world.get_mut::<gaanim_scene::LineListData>(entity)
                             {
@@ -4771,30 +4942,52 @@ impl Canvas {
                 }
                 Op::AttachReactiveStreamLine2D {
                     target,
-                    expressions,
+                    function,
                     seed,
                     map,
                     style,
                     color_range,
                 } => {
-                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    let parameters = compile_function_parameters(function, id_map, &builder.states);
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
-                        let expressions = expressions.clone();
+                        let function = function.clone();
                         let seed = *seed;
                         let map = map.clone();
                         let style = style.clone();
                         let color_range = *color_range;
                         let updater = Updater::new(move |_dt, _elapsed, entity, world| {
                             let Some(field) =
-                                runtime_model_2d(expressions.clone(), &parameters, world)
+                                runtime_model_2d(function.clone(), &parameters, world)
                             else {
+                                let empty = Arc::new(BezPath::new());
+                                if let Some(mut visible) =
+                                    world.get_mut::<gaanim_scene::Path2D>(entity)
+                                {
+                                    visible.0 = empty.clone();
+                                }
+                                if let Some(mut source) =
+                                    world.get_mut::<gaanim_scene::PathSource>(entity)
+                                {
+                                    source.0 = empty;
+                                }
                                 return true;
                             };
                             let domains = [map.x.domain(), map.y.domain()];
                             let Some(line) = field.integrate(seed, domains, style.integration)
                             else {
+                                let empty = Arc::new(BezPath::new());
+                                if let Some(mut visible) =
+                                    world.get_mut::<gaanim_scene::Path2D>(entity)
+                                {
+                                    visible.0 = empty.clone();
+                                }
+                                if let Some(mut source) =
+                                    world.get_mut::<gaanim_scene::PathSource>(entity)
+                                {
+                                    source.0 = empty;
+                                }
                                 return true;
                             };
                             let mut path = BezPath::new();
@@ -4837,30 +5030,64 @@ impl Canvas {
                 }
                 Op::AttachReactiveStreamLine3D {
                     target,
-                    expressions,
+                    function,
                     seed,
                     map,
                     style,
                     color_range,
                 } => {
-                    let parameters = compile_field_parameters(expressions, id_map, &builder.states);
+                    let parameters = compile_function_parameters(function, id_map, &builder.states);
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
-                        let expressions = expressions.clone();
+                        let function = function.clone();
                         let seed = *seed;
                         let map = map.clone();
                         let style = style.clone();
                         let color_range = *color_range;
                         let updater = Updater::new(move |_dt, _elapsed, entity, world| {
                             let Some(field) =
-                                runtime_model_3d(expressions.clone(), &parameters, world)
+                                runtime_model_3d(function.clone(), &parameters, world)
                             else {
+                                let lines = gaanim_scene::LineListData {
+                                    points: Vec::new(),
+                                    indices: None,
+                                    strip: true,
+                                    color: PenikoColor::WHITE,
+                                    colors: None,
+                                };
+                                if let Some(mut visible) =
+                                    world.get_mut::<gaanim_scene::LineListData>(entity)
+                                {
+                                    *visible = lines.clone();
+                                }
+                                if let Some(mut source) =
+                                    world.get_mut::<gaanim_scene::LineListSource>(entity)
+                                {
+                                    source.0 = lines;
+                                }
                                 return true;
                             };
                             let domains = [map.x.domain(), map.y.domain(), map.z.domain()];
                             let Some(line) = field.integrate(seed, domains, style.integration)
                             else {
+                                let lines = gaanim_scene::LineListData {
+                                    points: Vec::new(),
+                                    indices: None,
+                                    strip: true,
+                                    color: PenikoColor::WHITE,
+                                    colors: None,
+                                };
+                                if let Some(mut visible) =
+                                    world.get_mut::<gaanim_scene::LineListData>(entity)
+                                {
+                                    *visible = lines.clone();
+                                }
+                                if let Some(mut source) =
+                                    world.get_mut::<gaanim_scene::LineListSource>(entity)
+                                {
+                                    source.0 = lines;
+                                }
                                 return true;
                             };
                             let points = line
@@ -5474,12 +5701,11 @@ impl Canvas {
                         up: *up,
                     },
                 );
-                let to_rotation = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
-                    *eye, *target, *up,
-                )
-                    .inverse()
-                    .to_scale_rotation_translation()
-                    .1;
+                let to_rotation =
+                    gaanim_core::glam::dcamera::rh::view::look_at_mat4(*eye, *target, *up)
+                        .inverse()
+                        .to_scale_rotation_translation()
+                        .1;
                 *camera_position = *eye;
                 *camera_target = *target;
                 *camera_up = *up;
@@ -5516,9 +5742,7 @@ impl Canvas {
                     gaanim_animation::TrackingEndpoint::Static(target),
                 ) = (compiled_eye, compiled_target)
                 {
-                    let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
-                        eye, target, *up,
-                    );
+                    let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, target, *up);
                     *camera_position = eye;
                     *camera_target = target;
                     *camera_rotation = view.inverse().to_scale_rotation_translation().1;
@@ -6298,15 +6522,14 @@ impl Canvas {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
-            SpawnKind::ExpressionPlot {
+            SpawnKind::ReactivePlot {
                 map,
-                expression,
-                variable,
+                function,
                 domain,
                 reveal,
                 sampling,
             } => {
-                let mut parameter_ids = expression.parameter_ids();
+                let mut parameter_ids = function.parameter_ids();
                 if let Some(reveal) = reveal {
                     parameter_ids.extend(reveal.parameter_ids());
                     parameter_ids.sort_unstable();
@@ -6321,22 +6544,25 @@ impl Canvas {
                             Some((logical, entity))
                         })
                         .collect();
-                let mut context = gaanim_expr::EvalContext::new();
-                for (logical, _) in &parameter_entities {
-                    if let Some(actual) = id_map.get(logical).copied()
-                        && let Some(value) = builder.float_signals.get(&actual).copied()
-                    {
-                        context.set_parameter(*logical, value);
-                    }
-                }
-                let path = sampled_expression_path(
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
+                let path = sampled_reactive_path(
                     map,
-                    expression,
-                    variable,
+                    function,
                     *domain,
                     reveal.as_ref(),
                     *sampling,
-                    &context,
+                    builder.current_time,
+                    &values,
                 );
                 let svg_path = gaanim_objects::prelude::SvgPath {
                     id: "ExpressionPlot".to_owned(),
@@ -6348,40 +6574,193 @@ impl Canvas {
                 let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
-                if !parameter_entities.is_empty()
-                    && let Some(state) = builder.states.get(mr.id)
-                {
+                let changes_over_time = !parameter_entities.is_empty()
+                    || function.depends_on_time()
+                    || reveal.as_ref().is_some_and(ScalarSource::depends_on_time);
+                if changes_over_time && let Some(state) = builder.states.get(mr.id) {
                     let map = map.clone();
-                    let expression = expression.clone();
-                    let variable = variable.clone();
+                    let function = function.clone();
                     let domain = *domain;
                     let reveal = reveal.clone();
                     let sampling = *sampling;
                     let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
-                        let mut context = gaanim_expr::EvalContext::new();
-                        for (logical, entity) in &parameter_entities {
-                            if let Some(signal) =
-                                world.get::<gaanim_animation::FloatSignal>(*entity)
-                            {
-                                context.set_parameter(*logical, signal.value);
-                            }
-                        }
-                        sampled_expression_path(
+                        let values = parameter_entities
+                            .iter()
+                            .filter_map(|(logical, entity)| {
+                                world
+                                    .get::<gaanim_animation::FloatSignal>(*entity)
+                                    .map(|signal| (*logical, signal.value))
+                            })
+                            .collect::<Vec<_>>();
+                        let time = world
+                            .get_resource::<gaanim_animation::PlaybackState>()
+                            .map_or(0.0, |state| state.current_time);
+                        sampled_reactive_path(
                             &map,
-                            &expression,
-                            &variable,
+                            &function,
                             domain,
                             reveal.as_ref(),
                             sampling,
-                            &context,
+                            time,
+                            &values,
                         )
                     });
                     builder.commands.entity(state.entity).insert(redraw);
                 }
                 mr
             }
-            SpawnKind::ExpressionReadout {
-                expression,
+            SpawnKind::ReactiveParametric2D {
+                map,
+                function,
+                domain,
+                sampling,
+            } => {
+                let parameter_entities =
+                    compile_function_parameters(function, id_map, &builder.states);
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
+                let path = sampled_reactive_parametric_2d(
+                    map,
+                    function,
+                    *domain,
+                    *sampling,
+                    builder.current_time,
+                    &values,
+                );
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "ReactiveParametric2D".to_owned(),
+                    path,
+                    bounds: map.frame.bounds(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if (!parameter_entities.is_empty() || function.depends_on_time())
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let map = map.clone();
+                    let function = function.clone();
+                    let domain = *domain;
+                    let sampling = *sampling;
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                        let (time, values) = reactive_values(world, &parameter_entities);
+                        sampled_reactive_parametric_2d(
+                            &map, &function, domain, sampling, time, &values,
+                        )
+                    });
+                    builder.commands.entity(state.entity).insert(redraw);
+                }
+                mr
+            }
+            SpawnKind::ReactiveParametric3D {
+                map,
+                function,
+                domain,
+                samples,
+            } => {
+                let color = spec
+                    .stroke
+                    .as_ref()
+                    .and_then(|(brush, _)| match brush {
+                        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                        _ => None,
+                    })
+                    .unwrap_or(PenikoColor::from_rgb8(20, 20, 20));
+                let parameter_entities =
+                    compile_function_parameters(function, id_map, &builder.states);
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
+                let data = sampled_reactive_parametric_3d(
+                    map,
+                    function,
+                    *domain,
+                    *samples,
+                    builder.current_time,
+                    &values,
+                    color,
+                );
+                let mr = builder.spawn_line_list(data.points, color);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                if (!parameter_entities.is_empty() || function.depends_on_time())
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let map = map.clone();
+                    let function = function.clone();
+                    let domain = *domain;
+                    let samples = *samples;
+                    let regen = ReactiveLineRegen::new(move |world| {
+                        let (time, values) = reactive_values(world, &parameter_entities);
+                        sampled_reactive_parametric_3d(
+                            &map, &function, domain, samples, time, &values, color,
+                        )
+                    });
+                    builder.commands.entity(state.entity).insert(regen);
+                }
+                mr
+            }
+            SpawnKind::ReactiveSurface3D {
+                map,
+                function,
+                resolution,
+            } => {
+                let parameter_entities =
+                    compile_function_parameters(function, id_map, &builder.states);
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
+                let data = sampled_reactive_surface_3d(
+                    map,
+                    function,
+                    *resolution,
+                    builder.current_time,
+                    &values,
+                );
+                let mr = builder.spawn_triangle_mesh_data(data);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                if (!parameter_entities.is_empty() || function.depends_on_time())
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let map = map.clone();
+                    let function = function.clone();
+                    let resolution = *resolution;
+                    let regen = ReactiveMeshRegen::new(move |world| {
+                        let (time, values) = reactive_values(world, &parameter_entities);
+                        sampled_reactive_surface_3d(&map, &function, resolution, time, &values)
+                    });
+                    builder.commands.entity(state.entity).insert(regen);
+                }
+                mr
+            }
+            SpawnKind::ReactiveReadout {
+                source,
                 format,
                 prefix,
                 suffix,
@@ -6389,7 +6768,7 @@ impl Canvas {
                 font_size,
             } => {
                 let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
-                    expression
+                    source
                         .parameter_ids()
                         .into_iter()
                         .filter_map(|logical| {
@@ -6397,21 +6776,30 @@ impl Canvas {
                             Some((logical, builder.states.get(actual)?.entity))
                         })
                         .collect();
-                let mut context = gaanim_expr::EvalContext::new();
-                for (logical, _) in &parameter_entities {
-                    if let Some(actual) = id_map.get(logical).copied()
-                        && let Some(value) = builder.float_signals.get(&actual).copied()
-                    {
-                        context.set_parameter(*logical, value);
-                    }
-                }
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let size = font_size.unwrap_or(body.size);
                 let text = format!(
                     "{}{}{}",
                     prefix,
                     gaanim_animation::format_reactive_number(
-                        expression.eval(&context).unwrap_or(f64::NAN),
+                        source
+                            .evaluate(builder.current_time, |logical| {
+                                values
+                                    .iter()
+                                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+                            })
+                            .unwrap_or(f64::NAN),
                         format,
                         invalid
                     ),
@@ -6442,7 +6830,7 @@ impl Canvas {
                         gaanim_scene::PathSource(source_path.clone()),
                         gaanim_scene::TextBaseline(baseline),
                         gaanim_animation::ReactiveReadout {
-                            expression: expression.clone(),
+                            source: source.clone(),
                             parameters: parameter_entities,
                             format: format.clone(),
                             prefix: prefix.clone(),
@@ -7667,37 +8055,105 @@ mod tests {
     }
 
     #[test]
-    fn expression_reveal_ends_at_exact_data_coordinate() {
+    fn reactive_reveal_ends_at_exact_data_coordinate() {
         let map = gaanim_visualization::CoordinateMap2D::new(
             gaanim_visualization::Axis::linear(0.0, 3.0 * std::f64::consts::PI).unwrap(),
             gaanim_visualization::Axis::linear(-1.0, 1.0).unwrap(),
             gaanim_visualization::PlotFrame::new(600.0, 240.0).unwrap(),
         );
-        let expression = gaanim_expr::Expr::variable("x").sin();
-        let reveal = gaanim_expr::Expr::constant(std::f64::consts::FRAC_PI_2);
-        let path = sampled_expression_path(
+        let function = ReactiveFunction::new(1, 1, vec![], |values| Ok(vec![values[0].sin()]));
+        let reveal = ScalarSource::constant(std::f64::consts::FRAC_PI_2);
+        let path = sampled_reactive_path(
             &map,
-            &expression,
-            "x",
+            &function,
             (0.0, 3.0 * std::f64::consts::PI),
             Some(&reveal),
             gaanim_visualization::Sampling::Fixed { samples: 65 },
-            &gaanim_expr::EvalContext::new(),
+            0.0,
+            &[],
         );
 
         assert!((path.bounding_box().x1 + 200.0).abs() < 1e-9);
         assert!(
-            sampled_expression_path(
+            sampled_reactive_path(
                 &map,
-                &expression,
-                "x",
+                &function,
                 (0.0, 3.0 * std::f64::consts::PI),
-                Some(&gaanim_expr::Expr::constant(0.0)),
+                Some(&ScalarSource::constant(0.0)),
                 gaanim_visualization::Sampling::Fixed { samples: 65 },
-                &gaanim_expr::EvalContext::new(),
+                0.0,
+                &[],
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn reactive_geometry_matches_across_direct_rewind_and_repeated_seeks() {
+        let mut canvas = Canvas::new(640, 360);
+        let amplitude = canvas.parameter(1.0).unwrap();
+        let amplitude_id = amplitude.drawable().id;
+        let space = canvas
+            .coordinate_axes(
+                gaanim_visualization::Axis::linear(-2.0, 2.0).unwrap(),
+                gaanim_visualization::Axis::linear(-3.0, 3.0).unwrap(),
+                Some(400.0),
+                Some(240.0),
+                false,
+            )
+            .unwrap();
+        canvas
+            .reactive_plot(
+                &space,
+                ReactiveFunction::new(
+                    1,
+                    1,
+                    vec![
+                        gaanim_animation::ReactiveInput::Signal(amplitude_id),
+                        gaanim_animation::ReactiveInput::Time,
+                    ],
+                    |values| Ok(vec![values[1] * (values[0] + values[2]).sin()]),
+                ),
+                (-2.0, 2.0),
+                gaanim_visualization::Sampling::Fixed { samples: 33 },
+            )
+            .unwrap();
+        canvas.play(vec![amplitude.animate_to(2.0).unwrap().duration(2.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        let plot = world
+            .query_filtered::<Entity, With<gaanim_animation::AlwaysRedrawRegen>>()
+            .single(&world)
+            .expect("one reactive plot");
+
+        let mut capture = |time| {
+            timeline.seek(&mut world, time);
+            gaanim_animation::always_redraw_regen_system(&mut world);
+            world
+                .get::<gaanim_scene::Path2D>(plot)
+                .expect("reactive path")
+                .0
+                .elements()
+                .to_vec()
+        };
+        let direct = capture(1.5);
+        let _earlier = capture(0.25);
+        let rewind = capture(1.5);
+        let _later = capture(1.9);
+        let repeated = capture(1.5);
+
+        assert_eq!(direct, rewind);
+        assert_eq!(direct, repeated);
     }
 
     trait UnifiedTextFixture {
@@ -8305,9 +8761,16 @@ mod tests {
     fn camera_capture_freezes_reactive_value_at_its_cursor() {
         let mut canvas = Canvas::new(960, 540);
         let parameter = canvas.parameter(0.0).unwrap();
+        let parameter_id = parameter.drawable().id;
         let point = canvas.point_ref(
-            parameter.expression() * 260.0 - 130.0,
-            gaanim_expr::Expr::constant(25.0),
+            ScalarSource::function(ReactiveFunction::new(
+                0,
+                1,
+                vec![gaanim_animation::ReactiveInput::Signal(parameter_id)],
+                |values| Ok(vec![values[0] * 260.0 - 130.0]),
+            ))
+            .unwrap(),
+            ScalarSource::constant(25.0),
         );
         let parameter_anim = parameter.animate_to(1.0).unwrap().duration(1.0);
         let camera_anim = canvas.camera_pan_to_endpoint(point.0, 1.0);
@@ -8962,9 +9425,9 @@ mod tests {
         let constraint = canvas
             .camera_bind_2d(
                 Some(CanvasEndpoint::Static(DVec3::new(120.0, -35.0, 0.0))),
-                Some(gaanim_expr::Expr::constant(1.4)),
+                Some(ScalarSource::constant(1.4)),
                 None,
-                gaanim_expr::Expr::constant(1.0),
+                ScalarSource::constant(1.0),
                 true,
             )
             .unwrap();
@@ -9000,16 +9463,17 @@ mod tests {
     fn compiled_camera_binding_resolves_point_ref_parameters() {
         let mut canvas = Canvas::new(960, 540);
         let parameter = canvas.parameter(0.0).unwrap();
-        let x = parameter.expression() * 260.0 - 130.0;
-        let point = canvas.point_ref(x, gaanim_expr::Expr::constant(25.0));
+        let parameter_id = parameter.drawable().id;
+        let x = ScalarSource::function(ReactiveFunction::new(
+            0,
+            1,
+            vec![gaanim_animation::ReactiveInput::Signal(parameter_id)],
+            |values| Ok(vec![values[0] * 260.0 - 130.0]),
+        ))
+        .unwrap();
+        let point = canvas.point_ref(x, ScalarSource::constant(25.0));
         let _constraint = canvas
-            .camera_bind_2d(
-                Some(point.0),
-                None,
-                None,
-                gaanim_expr::Expr::constant(1.0),
-                true,
-            )
+            .camera_bind_2d(Some(point.0), None, None, ScalarSource::constant(1.0), true)
             .unwrap();
 
         let mut world = World::new();

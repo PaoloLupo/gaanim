@@ -1,8 +1,12 @@
 pub use crate::GaanimAnimationPlugin;
 pub use crate::camera::{CameraBinding, CameraBindingKind, CameraBindingWindow};
+pub use crate::reactive::{
+    ReactiveError, ReactiveFunction, ReactiveInput, ResolvedScalarSource, ScalarMap, ScalarSource,
+};
 pub use crate::signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, FloatSignal, MobjectSpec,
-    PositionBinding, Signal, SignalBinding, SpecValue, Vec3Signal,
+    PositionBinding, ReactiveLineRegen, ReactiveMeshRegen, Signal, SignalBinding, SpecValue,
+    Vec3Signal,
 };
 pub use crate::tween::{
     AnimatableLens, CameraStateSource, DeltaTime, PropertyLens, Tween, TweenState,

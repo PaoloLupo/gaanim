@@ -1,7 +1,6 @@
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
-use gaanim_expr::Expr;
 use gaanim_layout::Anchor;
 use gaanim_math::RateFunc;
 
@@ -116,13 +115,13 @@ pub enum AnimationType {
         to: f64,
     },
     CameraZoomSource {
-        to: Expr,
+        to: gaanim_animation::ScalarSource,
     },
     CameraRotation {
         to: DQuat,
     },
     CameraRotationSource {
-        to: Expr,
+        to: gaanim_animation::ScalarSource,
     },
     CameraFrame {
         target: ObjectId,

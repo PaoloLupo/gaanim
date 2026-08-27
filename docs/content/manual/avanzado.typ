@@ -17,7 +17,8 @@ un sinónimo de «ejecutar Python en cada fotograma».
 Elige la herramienta más declarativa que pueda expresar la relación:
 
 1. Usa `Parameter` para una magnitud invisible y animable.
-2. Usa expresiones de `gaanim.math` para derivar otras magnitudes.
+2. Usa `computed()` con funciones Python puras e `inputs=` explícitos para
+   derivar otras magnitudes.
 3. Usa `PointRef`, `AnchorPoint` y fábricas como `bar_between` para geometría
    que depende de posiciones.
 4. Usa bindings cuando una propiedad de un objeto copie o transforme otra.
@@ -33,7 +34,7 @@ scene = Scene(1280, 720)
 theta = scene.parameter(0.0)
 tip = scene.polar_point((0, 0), 180, theta)
 radius = scene.bar_between((0, 0), tip).stroke(GOLD, 6)
-label = scene.readout(lambda: theta, label="$theta$", format=".2f")
+label = scene.readout(lambda value: value, inputs=[theta], label="$theta$", format=".2f")
 label.follow(tip, offset=(0, 28))
 
 scene.play([radius.create(0.5), label.fade_in(0.3)])
@@ -48,6 +49,37 @@ los 2.7 segundos anteriores.
 El ejemplo canónico es `examples/sine_curve_unit_circle.py`. Combina
 `Updater.orbit`, `tracking_line`, `bind_y_from` y `traced_path`, e incluye
 capturas deterministas para regresión visual.
+
+=== Migración desde expresiones simbólicas
+
+`gaanim_expr`, `_Expr` y `gaanim.math` fueron eliminados sin adaptadores. Usa
+estas equivalencias:
+
+- `gm.sin(parameter)` pasa a `computed(lambda value: math.sin(value), inputs=[parameter])`.
+- `lambda x: amplitude * gm.sin(x)` pasa a
+  `lambda x, amplitude: amplitude * math.sin(x)` con `inputs=[amplitude]`.
+- Un readout derivado declara sus entradas:
+  `scene.readout(lambda radius: math.pi * radius**2, inputs=[radius])`.
+- Endpoints, cámara y slots escalares aceptan `float`, `Parameter`, `Variable`
+  o `Computed`; pasar un parámetro directamente conserva la identidad.
+- `plot(function, derivative=2)` pasa a
+  `plot(function, derivative=second_derivative)`. La derivada debe tener la
+  misma firma y los mismos `inputs`; no existe diferenciación ni aproximación
+  numérica implícita.
+- El tiempo se declara con `inputs=[scene.time]`.
+
+El contrato determinista exige callbacks síncronos y puros. Con el mismo script,
+entradas y entorno Python, reproducción, rewind, seeks directos y exportación
+producen el mismo resultado. El reloj del sistema, I/O, azar global y estado
+mutable quedan fuera del contrato; deriva cualquier azar de una semilla
+explícita recibida por `inputs`. No se promete igualdad bit a bit entre
+plataformas distintas.
+
+Gaanim valida la aridad y pertenencia a la escena, resuelve un snapshot numérico
+en Rust y cachea por los bits exactos de las entradas. Excepciones, formas de
+salida incorrectas y valores no finitos no reutilizan el último valor válido:
+producen gaps geométricos, `invalid` en readouts o ausencia de binding en
+endpoints y cámara.
 
 === Cuándo necesitas un updater con estado
 

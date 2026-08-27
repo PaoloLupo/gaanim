@@ -3,7 +3,6 @@ use bevy::prelude::{Children, Component};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::{BezPath, Shape};
-use gaanim_expr::{EvalContext, Expr};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
 use gaanim_scene::{LocalBounds, Path2D, PathSource, WorldBounds};
@@ -795,6 +794,14 @@ pub enum TrackingEndpoint {
         y: TrackingScalar,
         z: TrackingScalar,
     },
+    /// Data value mapped through a number line in an entity's local frame.
+    LocalNumberLine {
+        space: Entity,
+        map: crate::reactive::ScalarMap,
+        length: f64,
+        value: TrackingScalar,
+        normal_offset: TrackingScalar,
+    },
     /// Reactive scene-space displacement from another endpoint.
     Offset {
         origin: Box<TrackingEndpoint>,
@@ -819,18 +826,17 @@ pub enum TrackingEndpoint {
 /// Scalar expression with its construction-time parameter ids resolved to ECS entities.
 #[derive(Debug, Clone)]
 pub struct TrackingScalar {
-    pub expression: Expr,
+    pub source: crate::reactive::ScalarSource,
     pub parameters: Vec<(ObjectId, Entity)>,
 }
 
 impl TrackingScalar {
     pub fn evaluate(&self, world: &World) -> Option<f64> {
-        let mut context = EvalContext::new();
-        for (id, entity) in &self.parameters {
-            let signal = world.get::<crate::signals::FloatSignal>(*entity)?;
-            context.set_parameter(*id, signal.value);
+        crate::reactive::ResolvedScalarSource {
+            source: self.source.clone(),
+            parameters: self.parameters.clone(),
         }
-        self.expression.eval(&context).ok()
+        .evaluate(world)
     }
 }
 
@@ -1305,6 +1311,17 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             let local = DVec3::new(x.evaluate(world)?, y.evaluate(world)?, z.evaluate(world)?);
             entity_world_matrix(*space, world).map(|matrix| matrix.transform_point3(local))
         }
+        TrackingEndpoint::LocalNumberLine {
+            space,
+            map,
+            length,
+            value,
+            normal_offset,
+        } => {
+            let local_x = (map.evaluate(value.evaluate(world)?)? - 0.5) * *length;
+            let local = DVec3::new(local_x, normal_offset.evaluate(world)?, 0.0);
+            entity_world_matrix(*space, world).map(|matrix| matrix.transform_point3(local))
+        }
         TrackingEndpoint::Offset { origin, dx, dy } => {
             let origin = resolve_tracking_endpoint(origin, world)?;
             Some(origin + DVec3::new(dx.evaluate(world)?, dy.evaluate(world)?, 0.0))
@@ -1368,7 +1385,8 @@ fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
         TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
             entity_world_matrix(*entity, world).unwrap_or(DMat4::IDENTITY)
         }
-        TrackingEndpoint::LocalExpression { space, .. } => {
+        TrackingEndpoint::LocalExpression { space, .. }
+        | TrackingEndpoint::LocalNumberLine { space, .. } => {
             entity_world_matrix(*space, world).unwrap_or(DMat4::IDENTITY)
         }
         TrackingEndpoint::Offset { origin, .. } | TrackingEndpoint::Polar { origin, .. } => {
@@ -2456,13 +2474,13 @@ mod tests {
             ))
             .id();
         let scalar = TrackingScalar {
-            expression: Expr::parameter(parameter_id),
+            source: crate::reactive::ScalarSource::signal(parameter_id),
             parameters: vec![(parameter_id, parameter)],
         };
         let polar = TrackingEndpoint::Polar {
             origin: Box::new(TrackingEndpoint::Static(DVec3::new(10.0, 20.0, 0.0))),
             radius: TrackingScalar {
-                expression: Expr::constant(5.0),
+                source: crate::reactive::ScalarSource::constant(5.0),
                 parameters: Vec::new(),
             },
             angle: scalar,
@@ -2482,11 +2500,11 @@ mod tests {
         let offset = TrackingEndpoint::Offset {
             origin: Box::new(TrackingEndpoint::Static(DVec3::new(-2.0, 8.0, 0.0))),
             dx: TrackingScalar {
-                expression: Expr::constant(4.0),
+                source: crate::reactive::ScalarSource::constant(4.0),
                 parameters: Vec::new(),
             },
             dy: TrackingScalar {
-                expression: Expr::parameter(parameter_id),
+                source: crate::reactive::ScalarSource::signal(parameter_id),
                 parameters: vec![(parameter_id, parameter)],
             },
         };
@@ -2553,7 +2571,7 @@ mod tests {
             )
             .id();
         let scalar = |value| TrackingScalar {
-            expression: Expr::constant(value),
+            source: crate::reactive::ScalarSource::constant(value),
             parameters: Vec::new(),
         };
         let endpoint = TrackingEndpoint::LocalExpression {

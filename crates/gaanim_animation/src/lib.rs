@@ -1,19 +1,24 @@
 pub mod camera;
 pub mod prelude;
+pub mod reactive;
 pub mod signals;
 pub mod tween;
 pub mod updaters;
 pub mod writing;
 
 pub use camera::{CameraBinding, CameraBindingKind, CameraBindingWindow, apply_camera_bindings};
+pub use reactive::{
+    ReactiveError, ReactiveFunction, ReactiveInput, ResolvedScalarSource, ScalarMap, ScalarSource,
+};
 pub use signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, CurvatureOnCurve, FloatSignal,
-    MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, ReactiveReadout,
-    ReactiveReadoutLayout, Signal, SignalBinding, SpecValue, TangentOnCurve, Vec3Signal,
-    always_redraw_regen_system, curvature_on_curve_system, format_reactive_number,
-    normal_on_curve_system, point_on_curve_system, position_binding_system,
-    reactive_readout_layout_system, reactive_readout_update_system, right_align_readout_path,
-    right_aligned_readout_baseline, signal_binding_system, tangent_on_curve_system,
+    MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, ReactiveLineRegen,
+    ReactiveMeshRegen, ReactiveReadout, ReactiveReadoutLayout, Signal, SignalBinding, SpecValue,
+    TangentOnCurve, Vec3Signal, always_redraw_regen_system, curvature_on_curve_system,
+    format_reactive_number, normal_on_curve_system, point_on_curve_system, position_binding_system,
+    reactive_3d_regen_system, reactive_readout_layout_system, reactive_readout_update_system,
+    right_align_readout_path, right_aligned_readout_baseline, signal_binding_system,
+    tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
@@ -100,7 +105,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 mechanism_binding_system.after(position_binding_system),
                 endpoint_follow_system.after(mechanism_binding_system),
                 always_redraw_regen_system.after(endpoint_follow_system),
-                tracking_line_system.after(always_redraw_regen_system),
+                reactive_3d_regen_system.after(always_redraw_regen_system),
+                tracking_line_system.after(reactive_3d_regen_system),
                 tracking_angle_system.after(tracking_line_system),
                 tracking_vector_head_system.after(tracking_angle_system),
                 endpoint_distance_system.after(tracking_vector_head_system),

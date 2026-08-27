@@ -652,7 +652,7 @@ scene.wait(4.0)
 ```
 
 `Parameter.drive_from_samples(times, values, *, ...)` drives a parameter's
-float signal the same way, so traced expressions, readouts, and reactive plots
+float signal the same way, so computed values, readouts, and reactive plots
 that reference the parameter follow the measured series for free.
 ]
 

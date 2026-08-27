@@ -9,7 +9,6 @@ description = "Tween systems, interpolation lenses, keyframes, and reactive sign
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
-gaanim_expr = { path = "../gaanim_expr" }
 gaanim_text = { path = "../gaanim_text" }
 
 # Re-use workspace dependencies

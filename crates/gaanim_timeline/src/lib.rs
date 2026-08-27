@@ -433,7 +433,7 @@ mod tests {
 
     fn scalar(value: f64) -> gaanim_animation::TrackingScalar {
         gaanim_animation::TrackingScalar {
-            expression: gaanim_expr::Expr::constant(value),
+            source: gaanim_animation::ScalarSource::constant(value),
             parameters: Vec::new(),
         }
     }

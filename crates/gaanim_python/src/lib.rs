@@ -86,7 +86,9 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyGuide>()?;
     m.add_class::<visualization::PyChartSpec>()?;
     m.add_class::<visualization::PyChart>()?;
-    m.add_class::<visualization::PyExpr>()?;
+    m.add_class::<visualization::PyComputed>()?;
+    m.add_class::<visualization::PyTimeInput>()?;
+    m.add_function(wrap_pyfunction!(visualization::computed, m)?)?;
     m.add_class::<visualization::PyParameter>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;

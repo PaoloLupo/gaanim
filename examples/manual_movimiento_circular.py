@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import Anchor, BLUE, WHITE, YELLOW, Axis, Color, Scene, math as gm
+from gaanim import Anchor, BLUE, WHITE, YELLOW, Axis, Color, Scene, computed
 
 # Paleta semántica.
 BACKGROUND = Color(15, 23, 42)
@@ -52,7 +52,7 @@ timeline.drawable().at(*line_center)
 
 # La función se traza una vez y se muestrea de forma nativa. ±1 ocupa ±radius.
 sine_curve = timeline.function(
-    lambda value: gm.sin(value),
+    lambda value: math.sin(value),
     normal_scale=radius_value,
     reveal=theta,
 )
@@ -61,7 +61,10 @@ sine_curve.stroke(PRIMARY, 3).no_fill()
 # El mismo theta determina la coordenada sobre la recta y su altura normal.
 wave_ref = timeline.point_ref(
     theta,
-    normal_offset=radius_value * gm.sin(theta),
+    normal_offset=computed(
+        lambda angle: radius_value * math.sin(angle),
+        inputs=[theta],
+    ),
 )
 wave_dot = scene.dot(8).fill(ACCENT).follow(wave_ref)
 projection_line = scene.tracking_line(circle_ref, wave_ref)

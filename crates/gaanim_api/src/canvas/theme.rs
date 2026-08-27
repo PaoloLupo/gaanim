@@ -915,11 +915,12 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::TracedPathLine
         | SpawnKind::TrackingLine
         | SpawnKind::SurroundingRect => "line",
-        SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ExpressionReadout { .. } => {
-            "text"
-        }
+        SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ReactiveReadout { .. } => "text",
         SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => "axes",
-        SpawnKind::ExpressionPlot { .. }
+        SpawnKind::ReactivePlot { .. }
+        | SpawnKind::ReactiveParametric2D { .. }
+        | SpawnKind::ReactiveParametric3D { .. }
+        | SpawnKind::ReactiveSurface3D { .. }
         | SpawnKind::DataMark { .. }
         | SpawnKind::Polyline3D { .. }
         | SpawnKind::LineSegments3D { .. }
@@ -959,8 +960,11 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Polyline(_) => "polyline",
         SpawnKind::Bezier { .. } => "bezier",
         SpawnKind::Curve(_) => "curve",
-        SpawnKind::ExpressionPlot { .. } => "expression_plot",
-        SpawnKind::ExpressionReadout { .. } => "expression_readout",
+        SpawnKind::ReactivePlot { .. } => "expression_plot",
+        SpawnKind::ReactiveParametric2D { .. } => "parametric_plot",
+        SpawnKind::ReactiveParametric3D { .. } => "parametric_plot_3d",
+        SpawnKind::ReactiveSurface3D { .. } => "surface",
+        SpawnKind::ReactiveReadout { .. } => "expression_readout",
         SpawnKind::DataMark { .. } => "data_mark",
         SpawnKind::Axes { .. } => "axes",
         SpawnKind::Axes3D { .. } => "axes_3d",

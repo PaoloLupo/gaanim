@@ -155,7 +155,6 @@ fn run_script_thread(
 
 const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__init__.py");
 const GAANIM_COLORS: &str = include_str!("../../gaanim_python/gaanim/colors.py");
-const GAANIM_MATH: &str = include_str!("../../gaanim_python/gaanim/math.py");
 const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
 const GAANIM_COMPOSITION: &str = include_str!("../../gaanim_python/gaanim/composition.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
@@ -184,12 +183,6 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let colors_name = std::ffi::CString::new("gaanim.colors").unwrap();
     let colors = PyModule::from_code(py, &colors_source, &colors_file, &colors_name)?;
     modules.set_item("gaanim.colors", &colors)?;
-
-    let math_source = std::ffi::CString::new(GAANIM_MATH).unwrap();
-    let math_file = std::ffi::CString::new("gaanim/math.py").unwrap();
-    let math_name = std::ffi::CString::new("gaanim.math").unwrap();
-    let math = PyModule::from_code(py, &math_source, &math_file, &math_name)?;
-    modules.set_item("gaanim.math", &math)?;
 
     let templates_source = std::ffi::CString::new(GAANIM_TEMPLATES).unwrap();
     let templates_file = std::ffi::CString::new("gaanim/templates.py").unwrap();

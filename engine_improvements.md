@@ -51,7 +51,7 @@ siguientes se obtuvieron de manifests, CI, código y fixtures, no del roadmap an
 
 | Señal | Resultado |
 |---|---|
-| Workspace | 20 miembros: 19 crates `gaanim_*` y `docs` |
+| Workspace | 19 miembros: 18 crates `gaanim_*` y `docs` |
 | Versiones | Todos los crates y el paquete Python declaran `0.1.0` |
 | Código Rust | 128 archivos `.rs` bajo `crates/` |
 | Pruebas Rust | 542 atributos `#[test]`/`#[tokio::test]` encontrados |
@@ -68,7 +68,7 @@ siguientes se obtuvieron de manifests, CI, código y fixtures, no del roadmap an
 
 | Capa | Crates | Estado |
 |---|---|---:|
-| Tipos y matemáticas | `gaanim_core`, `gaanim_expr`, `gaanim_math` | Sólida |
+| Tipos y matemáticas | `gaanim_core`, `gaanim_math` | Sólida |
 | ECS y jerarquía | `gaanim_scene` | Sólida; orden centralizado en `SceneSet` |
 | Animación y timeline | `gaanim_animation`, `gaanim_timeline` | Funcional; falta perf cuantificada |
 | Media | `gaanim_media` | Video + audio embebido sincronizados; depende de FFmpeg |

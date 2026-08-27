@@ -121,9 +121,15 @@ impl Plugin for GaanimScenePlugin {
         );
         app.add_systems(
             Update,
-            crate::systems::update_3d_line_meshes_system
+            crate::systems::update_3d_triangle_meshes_system
                 .in_set(SceneSet::Bounds)
                 .after(crate::systems::build_3d_meshes_system),
+        );
+        app.add_systems(
+            Update,
+            crate::systems::update_3d_line_meshes_system
+                .in_set(SceneSet::Bounds)
+                .after(crate::systems::update_3d_triangle_meshes_system),
         );
         app.add_systems(
             Update,

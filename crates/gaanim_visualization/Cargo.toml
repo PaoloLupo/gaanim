@@ -6,7 +6,6 @@ description = "Coordinate spaces, sampling, data tables, and statistical geometr
 
 [dependencies]
 gaanim_core = { path = "../gaanim_core" }
-gaanim_expr = { path = "../gaanim_expr" }
 gaanim_math = { path = "../gaanim_math" }
 glam = { workspace = true }
 kurbo = { workspace = true }

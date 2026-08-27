@@ -868,7 +868,7 @@ pub fn build_3d_meshes_system(
                 .unwrap_or_else(|| vec![[0.0, 0.0]; mesh.count_vertices()]),
         );
         mesh.insert_indices(Indices::U32(indices));
-        if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) {
+        if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) && mesh.count_vertices() >= 3 {
             mesh.compute_smooth_normals();
         }
         let mesh_handle = meshes.add(mesh);
@@ -1109,6 +1109,96 @@ pub fn update_3d_line_meshes_system(
                     let v = gaanim_core::glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
                     min = min.min(v);
                     max = max.max(v);
+                }
+                bounds.0 = gaanim_math::Bounds3D::new(min, max);
+            }
+        }
+    }
+}
+
+/// Update an existing 3D triangle mesh when reactive surface data changes.
+pub fn update_3d_triangle_meshes_system(
+    meshes: Option<bevy::prelude::ResMut<bevy::asset::Assets<bevy::mesh::Mesh>>>,
+    materials: Option<bevy::prelude::ResMut<bevy::asset::Assets<bevy::pbr::StandardMaterial>>>,
+    mut query: bevy::prelude::Query<
+        (
+            &TriangleMeshData,
+            &bevy::prelude::Mesh3d,
+            &bevy::prelude::MeshMaterial3d<bevy::pbr::StandardMaterial>,
+            Option<&mut LocalBounds>,
+        ),
+        bevy::prelude::Changed<TriangleMeshData>,
+    >,
+) {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else {
+        return;
+    };
+    for (data, mesh_handle, material_handle, bounds) in &mut query {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.vertices.clone());
+        if let Some(normals) = &data.normals
+            && normals.len() == mesh.count_vertices()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
+        }
+        let has_vertex_colors = data
+            .colors
+            .as_ref()
+            .is_some_and(|colors| colors.len() == mesh.count_vertices());
+        if let Some(colors) = &data.colors
+            && colors.len() == mesh.count_vertices()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors.clone());
+        }
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            data.uvs
+                .clone()
+                .filter(|uvs| uvs.len() == mesh.count_vertices())
+                .unwrap_or_else(|| vec![[0.0, 0.0]; mesh.count_vertices()]),
+        );
+        mesh.insert_indices(Indices::U32(data.indices.clone()));
+        if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) && mesh.count_vertices() >= 3 {
+            mesh.compute_smooth_normals();
+        }
+        if let Some(mut existing) = meshes.get_mut(&mesh_handle.0) {
+            *existing = mesh;
+        }
+        if let Some(mut material) = materials.get_mut(&material_handle.0) {
+            material.base_color = if has_vertex_colors {
+                bevy::color::Color::WHITE
+            } else {
+                bevy_color(data.color.unwrap_or(gaanim_core::peniko::Color::WHITE))
+            };
+            material.alpha_mode = if data
+                .colors
+                .as_ref()
+                .is_some_and(|colors| colors.iter().any(|color| color[3] < 0.999))
+            {
+                bevy::material::AlphaMode::Blend
+            } else {
+                bevy::material::AlphaMode::Opaque
+            };
+        }
+        if let Some(mut bounds) = bounds {
+            if data.vertices.is_empty() {
+                bounds.0 = gaanim_math::Bounds3D::default();
+            } else {
+                let mut min = gaanim_core::glam::DVec3::splat(f64::INFINITY);
+                let mut max = gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY);
+                for point in &data.vertices {
+                    let point = gaanim_core::glam::DVec3::new(
+                        point[0] as f64,
+                        point[1] as f64,
+                        point[2] as f64,
+                    );
+                    min = min.min(point);
+                    max = max.max(point);
                 }
                 bounds.0 = gaanim_math::Bounds3D::new(min, max);
             }

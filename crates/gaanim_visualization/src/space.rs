@@ -1,7 +1,6 @@
 use crate::{Axis, AxisError, AxisLabelPosition};
 use gaanim_core::kurbo::{BezPath, Point};
 use gaanim_core::peniko::Color;
-use gaanim_expr::Expr;
 use gaanim_math::Bounds3D;
 
 fn axis_title_coordinate(position: AxisLabelPosition, extent: f64) -> f64 {
@@ -468,11 +467,6 @@ impl NumberLine {
     pub fn data_to_local(&self, value: f64) -> Result<f64, AxisError> {
         Ok((self.axis.normalize(value)? - 0.5) * self.length)
     }
-
-    /// Map a native scalar expression into this line's local X coordinate.
-    pub fn data_to_local_expr(&self, value: Expr) -> Result<Expr, AxisError> {
-        Ok((self.axis.normalize_expr(value)? - 0.5) * self.length)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -521,20 +515,6 @@ mod tests {
         let data = map.local_to_data(local).unwrap();
         assert!((data.0 - 1.5).abs() < 1e-10);
         assert!((data.1 - 7.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn number_line_expression_mapping_matches_static_mapping() {
-        use gaanim_expr::EvalContext;
-
-        let line = NumberLine::new(Axis::linear(0.0, 3.0).unwrap(), 600.0).unwrap();
-        let expression = line.data_to_local_expr(Expr::variable("value")).unwrap();
-        for value in [0.0, 0.5, 1.5, 3.0] {
-            let reactive = expression
-                .eval(&EvalContext::new().with_variable("value", value))
-                .unwrap();
-            assert!((reactive - line.data_to_local(value).unwrap()).abs() < 1e-10);
-        }
     }
 
     #[test]

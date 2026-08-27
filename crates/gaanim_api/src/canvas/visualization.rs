@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_core::{ColorMap, ObjectId};
-use gaanim_expr::{EvalContext, Expr};
 use gaanim_objects::prelude::SvgPath;
 use gaanim_visualization::{
     Axis, AxisLabelPosition, Cartesian3DVisibility, CartesianSpace, CartesianVisibility, Channel,
@@ -61,7 +61,7 @@ pub struct CoordinateRef {
     pub local: DVec3,
 }
 
-/// Animatable scalar that can be embedded directly in a native expression.
+/// Animatable scalar exposed to Python reactive callables as an explicit input.
 #[derive(Debug, Clone)]
 pub struct Parameter {
     handle: DrawableHandle,
@@ -73,11 +73,10 @@ impl Parameter {
         &self.handle
     }
 
-    /// Internal expression representation used by the language bindings.
-    /// Public callers compose parameters directly rather than depending on
-    /// the expression AST.
-    pub fn expression(&self) -> Expr {
-        Expr::parameter(self.handle.id)
+    /// Internal scalar source used by the Python binding.
+    #[doc(hidden)]
+    pub fn source(&self) -> ScalarSource {
+        ScalarSource::signal(self.handle.id)
     }
 
     pub fn current(&self) -> f64 {
@@ -130,14 +129,14 @@ pub struct CoordinateSpace3DHandle {
 pub struct VectorField2DHandle {
     pub(crate) space: CoordinateSpaceHandle,
     pub(crate) field: FieldModel<2>,
-    pub(crate) expressions: Option<[Expr; 2]>,
+    pub(crate) function: Option<ReactiveFunction>,
 }
 
 #[derive(Clone)]
 pub struct VectorField3DHandle {
     pub(crate) space: CoordinateSpace3DHandle,
     pub(crate) field: FieldModel<3>,
-    pub(crate) expressions: Option<[Expr; 3]>,
+    pub(crate) function: Option<ReactiveFunction>,
 }
 
 #[derive(Debug, Clone)]
@@ -584,10 +583,8 @@ fn halton(mut index: usize, base: usize) -> f64 {
     result
 }
 
-fn expressions_have_parameters<const N: usize>(expressions: &[Expr; N]) -> bool {
-    expressions
-        .iter()
-        .any(|expression| !expression.parameter_ids().is_empty())
+fn function_is_reactive(function: &ReactiveFunction) -> bool {
+    !function.inputs().is_empty()
 }
 
 fn normalized_local(position: [f64; 3], size: [f64; 3]) -> [f32; 3] {
@@ -687,14 +684,15 @@ impl NumberLineHandle {
     /// Create a non-rendered reactive point in the line's local frame.
     pub fn point_ref(
         &self,
-        value: Expr,
-        normal_offset: Expr,
+        value: ScalarSource,
+        normal_offset: ScalarSource,
     ) -> Result<PointRef, VisualizationError> {
-        Ok(PointRef(CanvasEndpoint::LocalExpression {
+        Ok(PointRef(CanvasEndpoint::LocalNumberLine {
             space: self.root.id,
-            x: self.line.data_to_local_expr(value)?,
-            y: normal_offset,
-            z: Expr::constant(0.0),
+            axis: self.line.axis.clone(),
+            length: self.line.length,
+            value,
+            normal_offset,
         }))
     }
 
@@ -891,7 +889,7 @@ impl Canvas {
         Ok(Parameter { handle, value })
     }
 
-    /// Resolve the live mirrors required by a traced expression evaluator.
+    /// Resolve the live mirrors required by a reactive callback evaluator.
     #[doc(hidden)]
     pub fn expression_parameter_values(
         &self,
@@ -2471,25 +2469,23 @@ impl Canvas {
         Ok(handle)
     }
 
-    pub fn expression_plot(
+    #[doc(hidden)]
+    pub fn reactive_plot(
         &mut self,
         space: &CoordinateSpaceHandle,
-        expression: Expr,
-        variable: impl Into<String>,
+        function: ReactiveFunction,
         domain: (f64, f64),
         sampling: Sampling,
     ) -> Result<DrawableHandle, VisualizationError> {
         if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
-        let variable = variable.into();
-        if variable.trim().is_empty() {
+        if function.coordinate_arity() != 1 || function.output_arity() != 1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
-        let handle = self.spawn(SpawnKind::ExpressionPlot {
+        let handle = self.spawn(SpawnKind::ReactivePlot {
             map: space.map.clone(),
-            expression,
-            variable,
+            function,
             domain,
             reveal: None,
             sampling,
@@ -2498,16 +2494,86 @@ impl Canvas {
         Ok(handle)
     }
 
+    #[doc(hidden)]
+    pub fn reactive_parametric_plot(
+        &mut self,
+        space: &CoordinateSpaceHandle,
+        function: ReactiveFunction,
+        domain: (f64, f64),
+        sampling: Sampling,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if function.coordinate_arity() != 1 || function.output_arity() != 2 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        let handle = self.spawn(SpawnKind::ReactiveParametric2D {
+            map: space.map.clone(),
+            function,
+            domain,
+            sampling,
+        });
+        self.attach_to_space(space, &handle);
+        Ok(handle)
+    }
+
+    #[doc(hidden)]
+    pub fn reactive_parametric_plot_3d(
+        &mut self,
+        space: &CoordinateSpace3DHandle,
+        function: ReactiveFunction,
+        domain: (f64, f64),
+        samples: usize,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        if samples < 2 || !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if function.coordinate_arity() != 1 || function.output_arity() != 3 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        let handle = self.spawn(SpawnKind::ReactiveParametric3D {
+            map: space.map.clone(),
+            function,
+            domain,
+            samples,
+        });
+        self.attach_to_space_3d(space, &handle);
+        Ok(handle)
+    }
+
+    #[doc(hidden)]
+    pub fn reactive_surface_plot(
+        &mut self,
+        space: &CoordinateSpace3DHandle,
+        function: ReactiveFunction,
+        resolution: [usize; 2],
+    ) -> Result<DrawableHandle, VisualizationError> {
+        if resolution[0] < 2 || resolution[1] < 2 {
+            return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
+        }
+        if function.coordinate_arity() != 2 || function.output_arity() != 1 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        let handle = self.spawn(SpawnKind::ReactiveSurface3D {
+            map: space.map.clone(),
+            function,
+            resolution,
+        });
+        self.attach_to_space_3d(space, &handle);
+        Ok(handle)
+    }
+
     /// Plot a dimensionless scalar function perpendicular to a number line.
     /// Values `-1` and `1` map to `-normal_scale` and `normal_scale` local units.
-    pub fn number_line_expression_plot(
+    #[doc(hidden)]
+    pub fn number_line_reactive_plot(
         &mut self,
         line: &NumberLineHandle,
-        expression: Expr,
-        variable: impl Into<String>,
+        function: ReactiveFunction,
         domain: (f64, f64),
         normal_scale: f64,
-        reveal: Option<Expr>,
+        reveal: Option<ScalarSource>,
         sampling: Sampling,
     ) -> Result<DrawableHandle, VisualizationError> {
         if !normal_scale.is_finite() || normal_scale <= 0.0 {
@@ -2518,17 +2584,15 @@ impl Canvas {
             Axis::linear(-1.0, 1.0)?,
             PlotFrame::new(line.line.length, normal_scale * 2.0)?,
         );
-        let variable = variable.into();
-        if variable.trim().is_empty() {
+        if function.coordinate_arity() != 1 || function.output_arity() != 1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
         if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
-        let handle = self.spawn(SpawnKind::ExpressionPlot {
+        let handle = self.spawn(SpawnKind::ReactivePlot {
             map,
-            expression,
-            variable,
+            function,
             domain,
             reveal,
             sampling,
@@ -2537,20 +2601,19 @@ impl Canvas {
         Ok(handle)
     }
 
-    /// Create a numeric glyph path sourced from a native expression. The
-    /// compiler resolves parameter entities and installs the visualizer-phase
-    /// update system, so Python is only involved while constructing the scene.
-    pub fn expression_readout(
+    /// Create numeric glyphs sourced from a deterministic scalar callable.
+    #[doc(hidden)]
+    pub fn reactive_readout(
         &mut self,
-        expression: Expr,
+        source: ScalarSource,
         format: impl Into<String>,
         prefix: impl Into<String>,
         suffix: impl Into<String>,
         invalid: impl Into<String>,
         font_size: Option<f64>,
     ) -> DrawableHandle {
-        self.spawn(SpawnKind::ExpressionReadout {
-            expression,
+        self.spawn(SpawnKind::ReactiveReadout {
+            source,
             format: format.into(),
             prefix: prefix.into(),
             suffix: suffix.into(),
@@ -2674,40 +2737,41 @@ impl Canvas {
         VectorField2DHandle {
             space: space.clone(),
             field: FieldModel::new(evaluator),
-            expressions: None,
+            function: None,
         }
     }
 
-    pub fn vector_field_2d_expression(
+    #[doc(hidden)]
+    pub fn vector_field_2d_reactive(
         &self,
         space: &CoordinateSpaceHandle,
-        expressions: [Expr; 2],
+        function: ReactiveFunction,
     ) -> Result<VectorField2DHandle, VisualizationError> {
-        let mut ids = expressions
-            .iter()
-            .flat_map(Expr::parameter_ids)
-            .collect::<Vec<_>>();
+        if function.coordinate_arity() != 2 || function.output_arity() != 2 {
+            return Err(VisualizationError::InvalidParameter);
+        }
+        let mut ids = function.parameter_ids();
         ids.sort_unstable();
         ids.dedup();
         let mirrors = self
             .expression_parameter_values(&ids)
             .ok_or(VisualizationError::InvalidParameter)?;
-        let evaluator_expressions = expressions.clone();
+        let evaluator_function = function.clone();
+        let time = self.current_time();
         Ok(VectorField2DHandle {
             space: space.clone(),
             field: FieldModel::new(move |[x, y]| {
-                let mut context = EvalContext::new()
-                    .with_variable("x", x)
-                    .with_variable("y", y);
-                for (id, value) in &mirrors {
-                    context.set_parameter(*id, *value.lock().expect("parameter poisoned"));
-                }
-                Some([
-                    evaluator_expressions[0].eval(&context).ok()?,
-                    evaluator_expressions[1].eval(&context).ok()?,
-                ])
+                let values = evaluator_function
+                    .evaluate(&[x, y], time, |logical| {
+                        mirrors
+                            .iter()
+                            .find_map(|(id, value)| (*id == logical).then_some(value))
+                            .map(|value| *value.lock().expect("parameter poisoned"))
+                    })
+                    .ok()?;
+                Some([values[0], values[1]])
             }),
-            expressions: Some(expressions),
+            function: Some(function),
         })
     }
 
@@ -2719,42 +2783,41 @@ impl Canvas {
         VectorField3DHandle {
             space: space.clone(),
             field: FieldModel::new(evaluator),
-            expressions: None,
+            function: None,
         }
     }
 
-    pub fn vector_field_3d_expression(
+    #[doc(hidden)]
+    pub fn vector_field_3d_reactive(
         &self,
         space: &CoordinateSpace3DHandle,
-        expressions: [Expr; 3],
+        function: ReactiveFunction,
     ) -> Result<VectorField3DHandle, VisualizationError> {
-        let mut ids = expressions
-            .iter()
-            .flat_map(Expr::parameter_ids)
-            .collect::<Vec<_>>();
+        if function.coordinate_arity() != 3 || function.output_arity() != 3 {
+            return Err(VisualizationError::InvalidParameter);
+        }
+        let mut ids = function.parameter_ids();
         ids.sort_unstable();
         ids.dedup();
         let mirrors = self
             .expression_parameter_values(&ids)
             .ok_or(VisualizationError::InvalidParameter)?;
-        let evaluator_expressions = expressions.clone();
+        let evaluator_function = function.clone();
+        let time = self.current_time();
         Ok(VectorField3DHandle {
             space: space.clone(),
             field: FieldModel::new(move |[x, y, z]| {
-                let mut context = EvalContext::new()
-                    .with_variable("x", x)
-                    .with_variable("y", y)
-                    .with_variable("z", z);
-                for (id, value) in &mirrors {
-                    context.set_parameter(*id, *value.lock().expect("parameter poisoned"));
-                }
-                Some([
-                    evaluator_expressions[0].eval(&context).ok()?,
-                    evaluator_expressions[1].eval(&context).ok()?,
-                    evaluator_expressions[2].eval(&context).ok()?,
-                ])
+                let values = evaluator_function
+                    .evaluate(&[x, y, z], time, |logical| {
+                        mirrors
+                            .iter()
+                            .find_map(|(id, value)| (*id == logical).then_some(value))
+                            .map(|value| *value.lock().expect("parameter poisoned"))
+                    })
+                    .ok()?;
+                Some([values[0], values[1], values[2]])
             }),
-            expressions: Some(expressions),
+            function: Some(function),
         })
     }
 
@@ -2829,8 +2892,8 @@ impl Canvas {
                     "ArrowVectorFieldGlyph",
                 )
                 .stroke(color, options.width);
-            if let Some(expressions) = &field.expressions
-                && expressions_have_parameters(expressions)
+            if let Some(function) = &field.function
+                && function_is_reactive(function)
             {
                 self.state
                     .lock()
@@ -2839,7 +2902,7 @@ impl Canvas {
                     .ops
                     .push(Op::AttachReactiveArrowField2D {
                         target: glyph.id,
-                        expressions: expressions.clone(),
+                        function: function.clone(),
                         position: sample.position,
                         map: field.space.map.clone(),
                         options: options.clone(),
@@ -2927,8 +2990,8 @@ impl Canvas {
             return Err(gaanim_visualization::VectorFieldError::Empty.into());
         }
         let drawable = self.line_segments_3d_with_colors(points, colors);
-        if let Some(expressions) = &field.expressions
-            && expressions_have_parameters(expressions)
+        if let Some(function) = &field.function
+            && function_is_reactive(function)
         {
             self.state
                 .lock()
@@ -2937,7 +3000,7 @@ impl Canvas {
                 .ops
                 .push(Op::AttachReactiveArrowField3D {
                     target: drawable.id,
-                    expressions: expressions.clone(),
+                    function: function.clone(),
                     resolution,
                     map: field.space.map.clone(),
                     options: options.clone(),
@@ -3013,8 +3076,8 @@ impl Canvas {
                 )
                 .stroke(highlight, style.width * 1.6)
                 .opacity(0.0);
-            if let Some(expressions) = &field.expressions
-                && expressions_have_parameters(expressions)
+            if let Some(function) = &field.function
+                && function_is_reactive(function)
             {
                 let flow_style = flow_highlight_style(&style);
                 let mut state = self.state.lock().expect("canvas state poisoned");
@@ -3023,7 +3086,7 @@ impl Canvas {
                 {
                     state.active_mut().ops.push(Op::AttachReactiveStreamLine2D {
                         target,
-                        expressions: expressions.clone(),
+                        function: function.clone(),
                         seed,
                         map: field.space.map.clone(),
                         style: target_style,
@@ -3102,8 +3165,8 @@ impl Canvas {
             let flow_handle = self
                 .polyline_3d_with_colors(points, flow_colors)
                 .opacity(0.0);
-            if let Some(expressions) = &field.expressions
-                && expressions_have_parameters(expressions)
+            if let Some(function) = &field.function
+                && function_is_reactive(function)
             {
                 let flow_style = flow_highlight_style(&style);
                 let mut state = self.state.lock().expect("canvas state poisoned");
@@ -3112,7 +3175,7 @@ impl Canvas {
                 {
                     state.active_mut().ops.push(Op::AttachReactiveStreamLine3D {
                         target,
-                        expressions: expressions.clone(),
+                        function: function.clone(),
                         seed,
                         map: field.space.map.clone(),
                         style: target_style,
@@ -4207,17 +4270,27 @@ mod tests {
             )
             .unwrap();
         let point = line
-            .point_ref(Expr::constant(std::f64::consts::PI), Expr::constant(42.0))
+            .point_ref(
+                ScalarSource::constant(std::f64::consts::PI),
+                ScalarSource::constant(42.0),
+            )
             .unwrap();
 
-        let CanvasEndpoint::LocalExpression { space, x, y, z } = point.0 else {
+        let CanvasEndpoint::LocalNumberLine {
+            space,
+            axis,
+            length,
+            value,
+            normal_offset,
+        } = point.0
+        else {
             panic!("number-line points must stay in the line's local frame");
         };
         assert_eq!(space, line.drawable().id);
-        let context = gaanim_expr::EvalContext::new();
-        assert!(x.eval(&context).unwrap().abs() < 1e-10);
-        assert!((y.eval(&context).unwrap() - 42.0).abs() < 1e-10);
-        assert!(z.eval(&context).unwrap().abs() < 1e-10);
+        assert_eq!(axis.domain(), (0.0, std::f64::consts::TAU));
+        assert_eq!(length, 600.0);
+        assert_eq!(value.evaluate(0.0, |_| None).unwrap(), std::f64::consts::PI);
+        assert_eq!(normal_offset.evaluate(0.0, |_| None).unwrap(), 42.0);
     }
 
     #[test]
@@ -4253,17 +4326,23 @@ mod tests {
     }
 
     #[test]
-    fn number_line_function_uses_one_native_reactive_path() {
+    fn number_line_function_uses_one_reactive_path() {
         let mut canvas = Canvas::new(640, 360);
         let amplitude = canvas.parameter(1.0).unwrap();
         let line = canvas
             .coordinate_number_line(Axis::linear(0.0, 6.0).unwrap(), Some(480.0))
             .unwrap();
         canvas
-            .number_line_expression_plot(
+            .number_line_reactive_plot(
                 &line,
-                amplitude.expression() * Expr::variable("x").sin(),
-                "x",
+                ReactiveFunction::new(
+                    1,
+                    1,
+                    vec![gaanim_animation::ReactiveInput::Signal(
+                        amplitude.drawable().id,
+                    )],
+                    |values| Ok(vec![values[1] * values[0].sin()]),
+                ),
                 (0.0, 6.0),
                 80.0,
                 None,
@@ -4335,14 +4414,19 @@ mod tests {
     }
 
     #[test]
-    fn parameter_drives_native_expression_and_animation() {
+    fn parameter_drives_scalar_source_and_animation() {
         let mut canvas = Canvas::new(640, 360);
         let parameter = canvas.parameter(1.5).unwrap();
         parameter.set(2.25).unwrap();
 
-        let context = gaanim_expr::EvalContext::new()
-            .with_parameter(parameter.drawable().id, parameter.current());
-        assert_eq!(parameter.expression().eval(&context).unwrap(), 2.25);
+        assert_eq!(
+            parameter
+                .source()
+                .evaluate(0.0, |id| (id == parameter.drawable().id)
+                    .then_some(parameter.current()))
+                .unwrap(),
+            2.25
+        );
 
         let animation = parameter.animate_to(4.0).unwrap();
         assert_eq!(animation.inner.target, parameter.drawable().id);
@@ -5039,7 +5123,7 @@ mod tests {
     }
 
     #[test]
-    fn traced_parameter_fields_compile_native_geometry_regenerators() {
+    fn parameter_fields_compile_geometry_regenerators() {
         let mut canvas = Canvas::new(640, 360);
         let parameter = canvas.parameter(1.0).unwrap();
         let space = canvas
@@ -5051,11 +5135,18 @@ mod tests {
                 false,
             )
             .unwrap();
-        let x = Expr::variable("x");
-        let y = Expr::variable("y");
-        let gain = parameter.expression();
         let field = canvas
-            .vector_field_2d_expression(&space, [-y * gain.clone(), x * gain])
+            .vector_field_2d_reactive(
+                &space,
+                ReactiveFunction::new(
+                    2,
+                    2,
+                    vec![gaanim_animation::ReactiveInput::Signal(
+                        parameter.drawable().id,
+                    )],
+                    |values| Ok(vec![-values[1] * values[2], values[0] * values[2]]),
+                ),
+            )
             .unwrap();
         canvas
             .arrow_vector_field_2d(&field, [3, 3], ArrowFieldOptions::default())
@@ -5082,12 +5173,24 @@ mod tests {
                 false,
             )
             .unwrap();
-        let x = Expr::variable("x");
-        let y = Expr::variable("y");
-        let z = Expr::variable("z");
-        let gain = parameter.expression();
         let field_3d = canvas
-            .vector_field_3d_expression(&space_3d, [-y * gain.clone(), x * gain.clone(), -z * gain])
+            .vector_field_3d_reactive(
+                &space_3d,
+                ReactiveFunction::new(
+                    3,
+                    3,
+                    vec![gaanim_animation::ReactiveInput::Signal(
+                        parameter.drawable().id,
+                    )],
+                    |values| {
+                        Ok(vec![
+                            -values[1] * values[3],
+                            values[0] * values[3],
+                            -values[2] * values[3],
+                        ])
+                    },
+                ),
+            )
             .unwrap();
         canvas
             .arrow_vector_field_3d(&field_3d, [2, 2, 2], ArrowFieldOptions::default())
@@ -5106,7 +5209,92 @@ mod tests {
             .count();
         assert!(
             regenerators > 1,
-            "every traced field representation should remain native and reactive"
+            "every field representation should remain reactive"
+        );
+    }
+
+    #[test]
+    fn reactive_parametric_curves_and_surfaces_compile_regenerators() {
+        let mut canvas = Canvas::new(640, 360);
+        let parameter = canvas.parameter(1.0).unwrap();
+        let input = vec![gaanim_animation::ReactiveInput::Signal(
+            parameter.drawable().id,
+        )];
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Axis::linear(-2.0, 2.0).unwrap(),
+                Some(400.0),
+                Some(300.0),
+                false,
+            )
+            .unwrap();
+        canvas
+            .reactive_parametric_plot(
+                &space,
+                ReactiveFunction::new(1, 2, input.clone(), |values| {
+                    Ok(vec![values[0], values[0] * values[1]])
+                }),
+                (-1.0, 1.0),
+                Sampling::Fixed { samples: 16 },
+            )
+            .unwrap();
+        let space_3d = canvas
+            .coordinate_axes_3d(
+                Axis::linear(-1.0, 1.0).unwrap(),
+                Axis::linear(-1.0, 1.0).unwrap(),
+                Axis::linear(-1.0, 1.0).unwrap(),
+                [2.0, 2.0, 2.0],
+                false,
+            )
+            .unwrap();
+        canvas
+            .reactive_parametric_plot_3d(
+                &space_3d,
+                ReactiveFunction::new(1, 3, input.clone(), |values| {
+                    Ok(vec![values[0], values[0] * values[1], 0.0])
+                }),
+                (-1.0, 1.0),
+                16,
+            )
+            .unwrap();
+        canvas
+            .reactive_surface_plot(
+                &space_3d,
+                ReactiveFunction::new(2, 1, input, |values| {
+                    Ok(vec![values[2] * values[0] * values[1]])
+                }),
+                [4, 4],
+            )
+            .unwrap();
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::AlwaysRedrawRegen>()
+                .iter(&world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::ReactiveLineRegen>()
+                .iter(&world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query::<&gaanim_animation::ReactiveMeshRegen>()
+                .iter(&world)
+                .count(),
+            1
         );
     }
 }

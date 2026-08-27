@@ -6,10 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::*;
+use gaanim_animation::ScalarSource;
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::{Cap, Shape, Stroke};
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_expr::Expr;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
 use gaanim_objects::primitives3d;
 use gaanim_text::prelude::TextRole;
@@ -395,7 +395,7 @@ pub struct DimensionOptions {
     pub show_value: bool,
     /// Optional semantic value shown by the readout. When present it implies
     /// `show_value` and takes precedence over measured distance and `scale`.
-    pub value: Option<Expr>,
+    pub value: Option<ScalarSource>,
     pub format: String,
     pub unit: Option<String>,
     pub scale: f64,
@@ -1111,6 +1111,12 @@ impl Canvas {
             .expect("canvas state poisoned")
             .segments
             .len()
+    }
+
+    /// Return whether an authored handle belongs to this canvas.
+    #[doc(hidden)]
+    pub fn owns(&self, handle: &DrawableHandle) -> bool {
+        Arc::ptr_eq(&self.state, &handle.state)
     }
 
     pub(crate) fn spawn(&mut self, kind: SpawnKind) -> DrawableHandle {
@@ -2634,7 +2640,7 @@ impl Canvas {
     }
 
     /// Animate orthographic zoom toward a native scalar source.
-    pub fn camera_zoom_to_source(&mut self, to: Expr, duration: f64) -> Anim {
+    pub fn camera_zoom_to_source(&mut self, to: ScalarSource, duration: f64) -> Anim {
         self.camera_anim(AnimationType::CameraZoomSource { to }, duration)
     }
 
@@ -2668,7 +2674,7 @@ impl Canvas {
     }
 
     /// Rotate the 2D camera toward a reactive angle in radians.
-    pub fn camera_rotate_to_source(&mut self, to: Expr, duration: f64) -> Anim {
+    pub fn camera_rotate_to_source(&mut self, to: ScalarSource, duration: f64) -> Anim {
         self.camera_anim(AnimationType::CameraRotationSource { to }, duration)
     }
 
@@ -2780,7 +2786,7 @@ impl Canvas {
     fn camera_binding(
         &mut self,
         kind: CanvasCameraBindingKind,
-        influence: Expr,
+        influence: ScalarSource,
         enabled: bool,
     ) -> CameraConstraintHandle {
         let mut state = self.state.lock().expect("canvas state poisoned");
@@ -2810,9 +2816,9 @@ impl Canvas {
     pub fn camera_bind_2d(
         &mut self,
         center: Option<CanvasEndpoint>,
-        zoom: Option<Expr>,
-        rotation: Option<Expr>,
-        influence: Expr,
+        zoom: Option<ScalarSource>,
+        rotation: Option<ScalarSource>,
+        influence: ScalarSource,
         enabled: bool,
     ) -> Result<CameraConstraintHandle, CameraBindingError> {
         if center.is_none() && zoom.is_none() && rotation.is_none() {
@@ -2822,10 +2828,16 @@ impl Canvas {
         {
             return Err(CameraBindingError::InvalidDimension);
         }
-        if matches!(&zoom, Some(Expr::Constant(value)) if !value.is_finite() || *value <= 0.0) {
+        if zoom
+            .as_ref()
+            .and_then(ScalarSource::constant_value)
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
             return Err(CameraBindingError::InvalidZoom);
         }
-        if matches!(&influence, Expr::Constant(value) if !value.is_finite() || !(0.0..=1.0).contains(value))
+        if influence
+            .constant_value()
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
         {
             return Err(CameraBindingError::InvalidInfluence);
         }
@@ -2845,9 +2857,9 @@ impl Canvas {
         &mut self,
         eye: Option<CanvasEndpoint>,
         target: Option<CanvasEndpoint>,
-        fov_y: Option<Expr>,
+        fov_y: Option<ScalarSource>,
         up: DVec3,
-        influence: Expr,
+        influence: ScalarSource,
         enabled: bool,
     ) -> Result<CameraConstraintHandle, CameraBindingError> {
         if eye.is_none() && target.is_none() && fov_y.is_none() {
@@ -2856,11 +2868,18 @@ impl Canvas {
         if !up.is_finite() || up.length_squared() <= f64::EPSILON {
             return Err(CameraBindingError::InvalidUp);
         }
-        if matches!(&fov_y, Some(Expr::Constant(value)) if !value.is_finite() || !(0.0..std::f64::consts::PI).contains(value) || *value == 0.0)
+        if fov_y
+            .as_ref()
+            .and_then(ScalarSource::constant_value)
+            .is_some_and(|value| {
+                !value.is_finite() || !(0.0..std::f64::consts::PI).contains(&value) || value == 0.0
+            })
         {
             return Err(CameraBindingError::InvalidFov);
         }
-        if matches!(&influence, Expr::Constant(value) if !value.is_finite() || !(0.0..=1.0).contains(value))
+        if influence
+            .constant_value()
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
         {
             return Err(CameraBindingError::InvalidInfluence);
         }
@@ -3529,12 +3548,17 @@ impl Canvas {
     }
 
     /// Create a non-rendered point from two native scalar expressions.
-    pub fn point_ref(&self, x: Expr, y: Expr) -> PointRef {
+    pub fn point_ref(&self, x: ScalarSource, y: ScalarSource) -> PointRef {
         PointRef(CanvasEndpoint::Expression { x, y })
     }
 
     /// Create a non-rendered point displaced from an endpoint by reactive scene-space components.
-    pub fn offset_point(&self, origin: CanvasEndpoint, dx: Expr, dy: Expr) -> PointRef {
+    pub fn offset_point(
+        &self,
+        origin: CanvasEndpoint,
+        dx: ScalarSource,
+        dy: ScalarSource,
+    ) -> PointRef {
         PointRef(CanvasEndpoint::Offset {
             origin: Box::new(origin),
             dx,
@@ -3559,7 +3583,12 @@ impl Canvas {
     }
 
     /// Create a non-rendered polar point around another endpoint.
-    pub fn polar_point(&self, origin: CanvasEndpoint, radius: Expr, angle: Expr) -> PointRef {
+    pub fn polar_point(
+        &self,
+        origin: CanvasEndpoint,
+        radius: ScalarSource,
+        angle: ScalarSource,
+    ) -> PointRef {
         PointRef(CanvasEndpoint::Polar {
             origin: Box::new(origin),
             radius,
@@ -3678,8 +3707,8 @@ impl Canvas {
                     scale,
                 });
             let number_handle = self
-                .expression_readout(
-                    Expr::Parameter(tracker.id),
+                .reactive_readout(
+                    ScalarSource::signal(tracker.id),
                     options.format.clone(),
                     "",
                     "",
@@ -3796,7 +3825,14 @@ impl Canvas {
                     scale,
                 });
             let number = self
-                .expression_readout(Expr::Parameter(tracker.id), format, "", "", "—", font_size)
+                .reactive_readout(
+                    ScalarSource::signal(tracker.id),
+                    format,
+                    "",
+                    "",
+                    "—",
+                    font_size,
+                )
                 .fill(color);
             let equals = label
                 .as_ref()
@@ -3885,8 +3921,8 @@ impl Canvas {
     pub fn force_at(
         &mut self,
         origin: CanvasEndpoint,
-        magnitude: Expr,
-        direction: Expr,
+        magnitude: ScalarSource,
+        direction: ScalarSource,
         visual_scale: f64,
         label_text: Option<String>,
         show_value: bool,
@@ -3898,7 +3934,7 @@ impl Canvas {
     ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
         let tip = CanvasEndpoint::Polar {
             origin: Box::new(origin.clone()),
-            radius: magnitude * visual_scale,
+            radius: magnitude.scaled(visual_scale),
             angle: direction,
         };
         self.vector_between_with_parts(
@@ -3920,8 +3956,8 @@ impl Canvas {
     pub fn force_from_components(
         &mut self,
         origin: CanvasEndpoint,
-        fx: Expr,
-        fy: Expr,
+        fx: ScalarSource,
+        fy: ScalarSource,
         visual_scale: f64,
         label_text: Option<String>,
         show_value: bool,
@@ -3933,8 +3969,8 @@ impl Canvas {
     ) -> Result<ForceVectorHandle, gaanim_text::prelude::TextSpecError> {
         let tip = CanvasEndpoint::Offset {
             origin: Box::new(origin.clone()),
-            dx: fx * visual_scale,
-            dy: fy * visual_scale,
+            dx: fx.scaled(visual_scale),
+            dy: fy.scaled(visual_scale),
         };
         self.vector_between_with_parts(
             origin,
@@ -4699,9 +4735,9 @@ impl Canvas {
                         to: to.clone(),
                         scale: options.scale,
                     });
-                Expr::Parameter(tracker.id)
+                ScalarSource::signal(tracker.id)
             };
-            let mut number_handle = self.expression_readout(
+            let mut number_handle = self.reactive_readout(
                 value_expr,
                 options.format.clone(),
                 "",
@@ -5515,8 +5551,8 @@ mod tests {
         let force = canvas
             .force_at(
                 pivot,
-                Expr::Constant(981.0),
-                Expr::Constant(-std::f64::consts::FRAC_PI_2),
+                ScalarSource::constant(981.0),
+                ScalarSource::constant(-std::f64::consts::FRAC_PI_2),
                 0.1,
                 Some("$P$".to_owned()),
                 true,
@@ -5649,8 +5685,8 @@ mod tests {
         let force = canvas
             .force_at(
                 CanvasEndpoint::Static(DVec3::ZERO),
-                Expr::Constant(45.0),
-                Expr::Constant(0.4),
+                ScalarSource::constant(45.0),
+                ScalarSource::constant(0.4),
                 2.0,
                 Some("$F$".to_owned()),
                 true,
@@ -6999,7 +7035,7 @@ mod tests {
                 CanvasEndpoint::Static(DVec3::new(80.0, 0.0, 0.0)),
                 35.0,
                 DimensionOptions {
-                    value: Some(value.expression()),
+                    value: Some(value.source()),
                     format: ".1f".to_owned(),
                     unit: Some("m".to_owned()),
                     scale: 99.0,
@@ -7059,8 +7095,8 @@ mod tests {
         let force = canvas
             .force_from_components(
                 CanvasEndpoint::Static(DVec3::new(20.0, -10.0, 0.0)),
-                fx.expression(),
-                fy.expression(),
+                fx.source(),
+                fy.source(),
                 10.0,
                 Some("$F$".to_owned()),
                 true,

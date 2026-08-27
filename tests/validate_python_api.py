@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import math
 from pathlib import Path
 import sys
 
@@ -267,21 +268,50 @@ def validate_visualization_contract(module: object) -> list[str]:
             failures.append(f"disabled number-line layer {layer_name!r} is not addressable")
 
     amplitude = scene.parameter(1.0)
-    from gaanim import math as gm
-    space.function(lambda x: amplitude * gm.sin(x))
-    readout = scene.readout(lambda: amplitude * 2.0, label="$a$")
+    space.function(lambda x, value: value * math.sin(x), inputs=[amplitude])
+    space.plot(
+        lambda x, value: value * math.sin(x),
+        derivative=lambda x, value: value * math.cos(x),
+        inputs=[amplitude],
+    )
+    readout = scene.readout(lambda value: value * 2.0, inputs=[amplitude], label="$a$")
     variable = scene.variable(1.0, label="$k$")
     if not isinstance(readout, module.Drawable) or not isinstance(variable, module.Drawable):
         failures.append("reactive readouts must be Drawable instances")
-    if hasattr(module, "Expr") or hasattr(module, "ValueTracker"):
+    if hasattr(module, "Expr") or hasattr(module, "_Expr") or hasattr(module, "ValueTracker"):
         failures.append("legacy reactive classes remain public")
-    space.parametric(lambda t: (t, t * t), (-1.0, 1.0), samples=32)
+    if not isinstance(module.computed(lambda value: value, inputs=[amplitude]), module.Computed):
+        failures.append("computed() did not return Computed")
+    try:
+        module.computed(lambda: 1.0, inputs=[amplitude])
+        failures.append("computed() accepted a callback with the wrong arity")
+    except TypeError:
+        pass
+    async def asynchronous(value: float) -> float:
+        return value
+    try:
+        module.computed(asynchronous, inputs=[amplitude])
+        failures.append("computed() accepted an asynchronous callback")
+    except TypeError:
+        pass
+    foreign = module.Scene().parameter(2.0)
+    try:
+        scene.readout(lambda value: value, inputs=[foreign])
+        failures.append("readout accepted a Parameter from another Scene")
+    except ValueError:
+        pass
+    space.parametric(
+        lambda t, scale: (t, scale * t * t),
+        (-1.0, 1.0),
+        samples=32,
+        inputs=[amplitude],
+    )
     space.implicit(lambda px, py: px * px + py * py - 1.0, resolution=(16, 16))
     field = space.field(lambda px, py: (-py, px))
     arrows = field.arrows(resolution=(4, 4), colormap="viridis")
     streams = field.streamlines(seeds=(4, 3), max_time=0.4)
-    if field.dimensions != 2 or field.evaluation != "native":
-        failures.append("2D VectorField did not retain its native traced evaluator")
+    if field.dimensions != 2 or field.evaluation != "python":
+        failures.append("2D VectorField did not retain its Python callback evaluator")
     if not isinstance(arrows.drawable(), module.Drawable):
         failures.append("ArrowVectorField did not materialize a Drawable")
     if not streams.flow(0.5):
@@ -350,8 +380,17 @@ def validate_visualization_contract(module: object) -> list[str]:
     for layer_name in ("grid", "axes", "ticks", "numbers", "labels"):
         if not isinstance(space_3d.layer(layer_name), module.Drawable):
             failures.append(f"disabled 3D layer {layer_name!r} is not addressable")
-    space_3d.surface(lambda px, py: px * px - py * py, resolution=(8, 8))
-    space_3d.parametric(lambda t: (t, t * t, t * t * t), (-1.0, 1.0), samples=16)
+    space_3d.surface(
+        lambda px, py, scale: scale * (px * px - py * py),
+        resolution=(8, 8),
+        inputs=[amplitude],
+    )
+    space_3d.parametric(
+        lambda t, scale: (t, scale * t * t, t * t * t),
+        (-1.0, 1.0),
+        samples=16,
+        inputs=[amplitude],
+    )
     field_3d = space_3d.field(lambda px, py, pz: (-py, px, -pz))
     field_3d.arrows(resolution=(2, 2, 2), colormap="batlow")
     field_3d.streamlines(seeds=(2, 2, 2), max_time=0.25)
@@ -705,7 +744,10 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     scene = module.Scene(640, 360)
     marker = scene.dot(5.0)
     parameter = scene.parameter(1.0)
-    point = scene.point_ref(parameter * 20.0, 10.0)
+    point = scene.point_ref(
+        module.computed(lambda value: value * 20.0, inputs=[parameter]),
+        10.0,
+    )
 
     state_2d = scene.camera.state_2d(center=(12.0, -8.0), zoom=1.25, rotation=0.1)
     state_3d = scene.camera.state_3d((4.0, 3.0, 8.0), (0.0, 0.0, 0.0), fov_y=0.8)
@@ -727,7 +769,10 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     animations = (
         scene.camera.pan_to(point, duration=0.0),
         scene.camera.zoom_to(parameter, duration=0.0),
-        scene.camera.rotate_to(parameter * 0.1, duration=0.0),
+        scene.camera.rotate_to(
+            module.computed(lambda value: value * 0.1, inputs=[parameter]),
+            duration=0.0,
+        ),
         scene.camera.frame_to([marker], margin=(10.0, 20.0), dynamic=True, duration=0.0),
         scene.camera.follow(point, offset=(2.0, 3.0), lag=0.2, duration=0.1),
         scene.camera.look_at((4.0, 3.0, 8.0), point, duration=0.0),

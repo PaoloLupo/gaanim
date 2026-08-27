@@ -187,12 +187,13 @@ trabajas siempre en coordenadas científicas. Al mover o escalar el espacio,
 curvas, puntos, etiquetas y construcciones de cálculo permanecen unidos.
 
 ```python
-from gaanim import Axis, Scene, math as gm
+import math
+from gaanim import Axis, Scene
 
 scene = Scene()
 plane = scene.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
 a = scene.parameter(1.0)
-curve = plane.function(lambda x: a * gm.sin(x))
+curve = plane.function(lambda x, amplitude: amplitude * math.sin(x), inputs=[a])
 
 world = scene.cartesian_3d(
   Axis.log(0.1, 1000),
@@ -208,6 +209,14 @@ surface = world.surface(lambda x, y: x * y)
 `numbers` y etiquetas billboard conocen la escala y pueden estilizarse por
 separado. `scene.polar(...)`, `scene.complex(...)` y
 `scene.number_line(...)` cubren los demás espacios tipados.
+
+`Cartesian2D.plot(function, ..., derivative=None, inputs=())` y su alias
+`function` reciben primero la coordenada y después los valores declarados. Si
+se solicita una derivada, `derivative` debe ser otro callable con la misma firma;
+no hay diferenciación simbólica ni aproximación numérica implícita.
+`Cartesian2D.parametric(..., inputs=())`, `Cartesian3D.parametric(...,
+inputs=())` y `Cartesian3D.surface(..., inputs=())` usan el mismo orden y se
+regeneran cuando cambia el snapshot.
 
 Todos esos espacios heredan por defecto los colores semánticos
 `axes/axis`, `axes/ticks`, `axes/grid`, `axes/numbers` y `axes/labels` del tema
@@ -316,20 +325,18 @@ plane = scene.cartesian_2d(
 scene.play(plane.write(1.2))
 ```
 
-`Expr` y `Parameter` forman la ruta reactiva por fotograma. Las lambdas de
-Python para funciones escalares trazadas se ejecutan una sola vez; el muestreo
-y la evaluación reactiva permanecen en Rust.
+`Parameter`, `Variable`, `Computed` y `scene.time` forman la ruta reactiva. Rust
+resuelve sus valores en un snapshot estable y llama la función Python con las
+coordenadas primero y los valores de `inputs=` después.
 
 == Campos vectoriales y líneas de corriente
 
-`space.field(function)` separa la función matemática de sus representaciones.
+`space.field(function, inputs=())` separa la función matemática de sus representaciones.
 El mismo `VectorField` puede producir flechas y líneas de corriente sin volver
-a definir el campo. Gaanim intenta capturar primero una expresión nativa; si la
-lambda usa operaciones de Python que no pueden trazarse, conserva un callback
-como ruta secundaria. `field.evaluation` permite inspeccionar cuál se eligió.
-Cuando la expresión nativa contiene un `Parameter`, las flechas y las líneas se
-regeneran en Rust con el valor actual del timeline; la ruta Python se muestrea
-al materializar la geometría y no instala callbacks por fotograma.
+a definir el campo. La función puede usar `math`, helpers y control de flujo, y
+recibe las coordenadas antes de las entradas explícitas. Las flechas y líneas se
+regeneran desde el snapshot resuelto por el timeline; `field.evaluation` vale
+`"python"` para esta ruta.
 
 ```python
 from gaanim import Axis, Scene
@@ -352,12 +359,13 @@ scene.play(streams.flow(3.0, time_width=0.12))
 #api-entry(
   name: "Cartesian2D.field / Cartesian3D.field",
   kind: "method",
-  signature: "field(function) -> VectorField",
+  signature: "field(function, *, inputs=()) -> VectorField",
   params: (
-    (name: "function", type: "Callable", default: none, desc: [Devuelve dos componentes en 2D o tres en 3D. Las expresiones compatibles con `gaanim.math` se trazan una sola vez.]),
+    (name: "function", type: "Callable", default: none, desc: [Devuelve dos componentes en 2D o tres en 3D; recibe coordenadas y luego valores de `inputs`.]),
+    (name: "inputs", type: "Sequence[Parameter | Variable | TimeInput]", default: "()", desc: [Entradas reactivas explícitas en orden.]),
   ),
   returns: (type: "VectorField", desc: [Evaluador reutilizable asociado al dominio y la transformación del espacio.]),
-  desc: [No dibuja por sí solo. Usa `arrows`, `streamlines` o las operaciones de advección del campo. La propiedad `evaluation` vale `"native"` o `"python"`.],
+  desc: [No dibuja por sí solo. Usa `arrows`, `streamlines` o las operaciones de advección del campo. La propiedad `evaluation` vale `"python"`.],
 )[]
 
 #api-entry(
@@ -489,8 +497,8 @@ que dos animaciones aparentemente equivalentes acumulen desfase.
   kind: "method",
   signature: "point_ref(value, *, normal_offset=None) -> PointRef",
   params: (
-    (name: "value", type: "float | Parameter | Expr", default: none, desc: [Valor convertido mediante la escala continua de la recta.]),
-    (name: "normal_offset", type: "float | Parameter | Expr | None", default: "None", desc: [Desplazamiento perpendicular en unidades locales; `None` equivale a cero.]),
+    (name: "value", type: "float | Parameter | Variable | Computed", default: none, desc: [Valor convertido mediante la escala continua de la recta.]),
+    (name: "normal_offset", type: "float | Parameter | Variable | Computed | None", default: "None", desc: [Desplazamiento perpendicular en unidades locales; `None` equivale a cero.]),
   ),
   returns: (type: "PointRef", desc: [Extremo reactivo no renderizado que sigue las transformaciones de la recta.]),
   desc: [El punto permanece unido cuando la recta se mueve, rota o escala. Las escalas categóricas rechazan valores escalares reactivos con `ValueError`.],
@@ -499,12 +507,12 @@ que dos animaciones aparentemente equivalentes acumulen desfase.
 #api-entry(
   name: "NumberLine.function",
   kind: "method",
-  signature: "function(function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75) -> Drawable",
+  signature: "function(function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75, inputs=()) -> Drawable",
   params: (
-    (name: "function", type: "Callable[[float], scalar]", default: none, desc: [Callable trazado una sola vez mediante `gaanim.math`.]),
+    (name: "function", type: "Callable[..., float]", default: none, desc: [Recibe la coordenada y después los valores declarados en `inputs`.]),
     (name: "domain", type: "(float, float) | None", default: "None", desc: [Intervalo de muestreo; usa el dominio del eje si se omite.]),
     (name: "normal_scale", type: "float", default: "120.0", desc: [Distancia local positiva asignada a una salida de función igual a uno.]),
-    (name: "reveal", type: "float | Parameter | Expr | None", default: "None", desc: [Extremo exacto de la curva visible, expresado en coordenadas de datos.]),
+    (name: "reveal", type: "float | Parameter | Variable | Computed | None", default: "None", desc: [Extremo exacto de la curva visible, expresado en coordenadas de datos.]),
     (name: "samples", type: "int | None", default: "None", desc: [Cantidad fija de muestras; al omitirse se usa muestreo adaptativo.]),
     (name: "tolerance", type: "float", default: "0.75", desc: [Tolerancia positiva del error adaptativo en unidades locales.]),
   ),
@@ -513,7 +521,7 @@ que dos animaciones aparentemente equivalentes acumulen desfase.
 )[
 ```python
 import math
-from gaanim import Axis, Scene, math as gm
+from gaanim import Axis, Scene, computed
 
 scene = Scene()
 theta = scene.parameter(0.0)
@@ -521,9 +529,9 @@ line = scene.number_line(
   Axis.linear(0, 3 * math.pi).ticks(math.pi).numbers("pi", denominator=1),
   length=760,
 )
-curve = line.function(lambda t: gm.sin(t), normal_scale=120, reveal=theta)
+curve = line.function(lambda t: math.sin(t), normal_scale=120, reveal=theta)
 point = scene.dot(8).follow(
-  line.point_ref(theta, normal_offset=120 * gm.sin(theta))
+  line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
 )
 scene.play([line.create(), curve.fade_in(duration=0.01), point.fade_in()])
 scene.play([theta.animate_to(3 * math.pi, duration=4)])

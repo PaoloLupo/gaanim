@@ -7,7 +7,6 @@ description = "Premium fluent script API and animation builder for gaanim v2"
 [dependencies]
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
-gaanim_expr = { path = "../gaanim_expr" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_animation = { path = "../gaanim_animation" }

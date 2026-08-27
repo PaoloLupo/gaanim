@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
   "crates/gaanim_core",
-  "crates/gaanim_expr",
   "crates/gaanim_math",
   "crates/gaanim_scene",
   "crates/gaanim_animation",

@@ -14,8 +14,8 @@ plane = scene.cartesian_2d(
     height=600,
 )
 
-# This tuple is traced once into native expressions. A normal Python callback
-# is retained automatically when an expression cannot be traced.
+# The callback receives coordinates directly and is evaluated from a stable
+# numeric snapshot whenever an explicit input changes.
 vortex = plane.field(lambda x, y: (-y - 0.12 * x, x - 0.12 * y))
 
 arrows = vortex.arrows(

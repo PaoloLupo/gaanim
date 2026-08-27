@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use gaanim_animation::{ReactiveFunction, ReactiveInput, ScalarSource};
 use gaanim_api::canvas::{
     ArrowFieldOptions, ArrowVectorFieldHandle, Canvas as ApiCanvas, Cartesian3DVisibility,
     CartesianVisibility, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
@@ -11,7 +12,6 @@ use gaanim_api::canvas::{
     StreamLinesHandle, StreamLinesStyle, VectorField2DHandle, VectorField3DHandle,
     DEFAULT_REACTIVE_TEXT_SIZE,
 };
-use gaanim_expr::{EvalContext, Expr as NativeExpr};
 use gaanim_visualization::{
     Axis as NativeAxis, AxisLabelPosition, AxisStylePatch, Channel, ChartSpec as NativeChartSpec,
     Column, ConstantValue, Crossing, DataMarkKind, DataSource as NativeDataSource,
@@ -43,140 +43,248 @@ fn parse_non_finite_policy(value: &str) -> PyResult<NonFinitePolicy> {
     }
 }
 
-fn trace_readout_source(source: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
-    if source.is_callable() {
-        let result = source.call0().map_err(|_| {
-            PyTypeError::new_err(
-                "readout lambda must be a no-argument scalar expression traced with gaanim.math",
-            )
-        })?;
-        extract_expr(result).map_err(|_| {
-            PyTypeError::new_err(
-                "readout lambda must return a number, Parameter, Variable, or traced scalar",
-            )
-        })
-    } else {
-        extract_expr(source)
-    }
+#[derive(Clone)]
+enum ReactiveOwner {
+    Drawable(gaanim_api::canvas::DrawableHandle),
+    Time(Arc<Mutex<ApiCanvas>>),
 }
 
-fn trace_scalar_function(
-    function: Bound<'_, PyAny>,
-    variable: &str,
-    owner: &str,
-) -> PyResult<NativeExpr> {
-    if let Ok(expr) = function.extract::<PyRef<'_, PyExpr>>() {
-        return Ok(expr.0.clone());
+#[pyclass(name = "TimeInput", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyTimeInput {
+    canvas: Arc<Mutex<ApiCanvas>>,
+}
+
+#[pyclass(name = "Computed", module = "gaanim_core", from_py_object)]
+#[derive(Clone)]
+pub struct PyComputed {
+    source: ScalarSource,
+    owners: Vec<ReactiveOwner>,
+}
+
+fn validate_owners(owners: &[ReactiveOwner], canvas: &Arc<Mutex<ApiCanvas>>) -> PyResult<()> {
+    let locked = canvas.lock().expect("scene canvas poisoned");
+    for owner in owners {
+        let valid = match owner {
+            ReactiveOwner::Drawable(handle) => locked.owns(handle),
+            ReactiveOwner::Time(source) => Arc::ptr_eq(source, canvas),
+        };
+        if !valid {
+            return Err(PyValueError::new_err(
+                "reactive inputs cannot reference Parameter, Variable, or time from another Scene",
+            ));
+        }
     }
-    if !function.is_callable() {
-        return Err(PyTypeError::new_err("function must be callable"));
+    Ok(())
+}
+
+fn parse_inputs(
+    py: Python<'_>,
+    inputs: Vec<Py<PyAny>>,
+) -> PyResult<(Vec<ReactiveInput>, Vec<ReactiveOwner>)> {
+    let mut native = Vec::with_capacity(inputs.len());
+    let mut owners = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        let value = input.bind(py);
+        if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+            native.push(ReactiveInput::Signal(parameter.inner.drawable().id));
+            owners.push(ReactiveOwner::Drawable(parameter.inner.drawable().clone()));
+        } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
+            native.push(ReactiveInput::Signal(
+                variable.parameter.inner.drawable().id,
+            ));
+            owners.push(ReactiveOwner::Drawable(
+                variable.parameter.inner.drawable().clone(),
+            ));
+        } else if let Ok(time) = value.extract::<PyRef<'_, PyTimeInput>>() {
+            native.push(ReactiveInput::Time);
+            owners.push(ReactiveOwner::Time(time.canvas.clone()));
+        } else {
+            return Err(PyTypeError::new_err(
+                "inputs must contain only Parameter, Variable, or scene.time values",
+            ));
+        }
     }
-    // Invoke Python once with a symbolic probe. Sampling and reactive updates
-    // remain native after the expression tree has been captured.
-    let probe = Py::new(function.py(), PyExpr(NativeExpr::variable(variable)))?;
-    let result = function.call1((probe,)).map_err(|_| {
-        PyTypeError::new_err(format!(
-            "{owner} lambda must return a scalar traced with gaanim.math; Python math/control flow cannot be traced"
-        ))
-    })?;
-    extract_expr(result).map_err(|_| {
-        PyTypeError::new_err(format!(
-            "{owner} lambda must return a scalar traced with gaanim.math"
-        ))
+    Ok((native, owners))
+}
+
+fn python_function(
+    callback: Py<PyAny>,
+    coordinate_arity: usize,
+    output_arity: usize,
+    inputs: Vec<ReactiveInput>,
+) -> ReactiveFunction {
+    ReactiveFunction::new(coordinate_arity, output_arity, inputs, move |arguments| {
+        Python::attach(|py| {
+            let tuple = PyTuple::new(py, arguments).map_err(|error| error.to_string())?;
+            let result = callback
+                .bind(py)
+                .call1(tuple)
+                .map_err(|error| error.to_string())?;
+            if output_arity == 1 {
+                result
+                    .extract::<f64>()
+                    .map(|value| vec![value])
+                    .map_err(|error| error.to_string())
+            } else {
+                result
+                    .extract::<Vec<f64>>()
+                    .map_err(|error| error.to_string())
+            }
+        })
     })
 }
 
-fn traced_vector_items<const N: usize>(result: Bound<'_, PyAny>) -> PyResult<[NativeExpr; N]> {
-    let tuple = result.cast::<PyTuple>().map_err(|_| {
+fn validate_callback(py: Python<'_>, callback: &Bound<'_, PyAny>, arity: usize) -> PyResult<()> {
+    if !callback.is_callable() {
+        return Err(PyTypeError::new_err("callback must be callable"));
+    }
+    let inspect = py.import("inspect")?;
+    if inspect
+        .getattr("iscoroutinefunction")?
+        .call1((callback,))?
+        .extract::<bool>()?
+    {
+        return Err(PyTypeError::new_err("callback must be synchronous"));
+    }
+    let signature = inspect
+        .getattr("signature")?
+        .call1((callback,))
+        .map_err(|_| {
+            PyTypeError::new_err("callback must expose an inspectable synchronous signature")
+        })?;
+    let arguments = PyTuple::new(py, vec![0.0; arity])?;
+    signature.call_method1("bind", arguments).map_err(|_| {
         PyTypeError::new_err(format!(
-            "vector field function must return a {N}-element tuple"
+            "callback must accept {arity} positional argument{}",
+            if arity == 1 { "" } else { "s" }
         ))
     })?;
-    if tuple.len() != N {
-        return Err(PyTypeError::new_err(format!(
-            "vector field function must return exactly {N} components"
-        )));
+    Ok(())
+}
+
+fn callable_source(
+    py: Python<'_>,
+    callback: Py<PyAny>,
+    inputs: Vec<Py<PyAny>>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+) -> PyResult<ScalarSource> {
+    validate_callback(py, callback.bind(py), inputs.len())?;
+    let (inputs, owners) = parse_inputs(py, inputs)?;
+    validate_owners(&owners, canvas)?;
+    ScalarSource::function(python_function(callback, 0, 1, inputs)).map_err(value_error)
+}
+
+fn checked_python_function(
+    py: Python<'_>,
+    callback: Py<PyAny>,
+    coordinate_arity: usize,
+    output_arity: usize,
+    inputs: Vec<Py<PyAny>>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+) -> PyResult<ReactiveFunction> {
+    validate_callback(py, callback.bind(py), coordinate_arity + inputs.len())?;
+    let (inputs, owners) = parse_inputs(py, inputs)?;
+    validate_owners(&owners, canvas)?;
+    Ok(python_function(
+        callback,
+        coordinate_arity,
+        output_arity,
+        inputs,
+    ))
+}
+
+pub(crate) fn extract_scalar_source(
+    value: Bound<'_, PyAny>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+) -> PyResult<ScalarSource> {
+    if let Ok(computed) = value.extract::<PyRef<'_, PyComputed>>() {
+        validate_owners(&computed.owners, canvas)?;
+        Ok(computed.source.clone())
+    } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+        validate_owners(
+            &[ReactiveOwner::Drawable(parameter.inner.drawable().clone())],
+            canvas,
+        )?;
+        Ok(parameter.inner.source())
+    } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
+        validate_owners(
+            &[ReactiveOwner::Drawable(
+                variable.parameter.inner.drawable().clone(),
+            )],
+            canvas,
+        )?;
+        Ok(variable.parameter.inner.source())
+    } else if let Ok(time) = value.extract::<PyRef<'_, PyTimeInput>>() {
+        validate_owners(&[ReactiveOwner::Time(time.canvas.clone())], canvas)?;
+        Ok(ScalarSource::Time)
+    } else if let Ok(number) = value.extract::<f64>() {
+        if number.is_finite() {
+            Ok(ScalarSource::constant(number))
+        } else {
+            Err(PyValueError::new_err("reactive scalars must be finite"))
+        }
+    } else {
+        Err(PyTypeError::new_err(
+            "expected float, Parameter, Variable, Computed, or scene.time",
+        ))
     }
-    tuple
-        .iter()
-        .map(extract_expr)
-        .collect::<PyResult<Vec<_>>>()?
-        .try_into()
-        .map_err(|_| PyTypeError::new_err("invalid vector field result"))
 }
 
-fn trace_vector_function_2d(function: &Bound<'_, PyAny>) -> PyResult<[NativeExpr; 2]> {
-    let x = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
-    let y = Py::new(function.py(), PyExpr(NativeExpr::variable("y")))?;
-    traced_vector_items(function.call1((x, y))?)
-}
-
-fn trace_vector_function_3d(function: &Bound<'_, PyAny>) -> PyResult<[NativeExpr; 3]> {
-    let x = Py::new(function.py(), PyExpr(NativeExpr::variable("x")))?;
-    let y = Py::new(function.py(), PyExpr(NativeExpr::variable("y")))?;
-    let z = Py::new(function.py(), PyExpr(NativeExpr::variable("z")))?;
-    traced_vector_items(function.call1((x, y, z))?)
+#[pyfunction(signature = (callback, *, inputs=Vec::new()))]
+pub fn computed(
+    py: Python<'_>,
+    callback: Py<PyAny>,
+    inputs: Vec<Py<PyAny>>,
+) -> PyResult<PyComputed> {
+    validate_callback(py, callback.bind(py), inputs.len())?;
+    let (native, owners) = parse_inputs(py, inputs)?;
+    let source =
+        ScalarSource::function(python_function(callback, 0, 1, native)).map_err(value_error)?;
+    Ok(PyComputed { source, owners })
 }
 
 fn field_evaluator_2d(
-    function: Bound<'_, PyAny>,
-    canvas: &ApiCanvas,
+    py: Python<'_>,
+    function: Py<PyAny>,
+    inputs: Vec<Py<PyAny>>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
     space: &CoordinateSpaceHandle,
 ) -> PyResult<(VectorField2DHandle, &'static str)> {
-    if !function.is_callable() {
-        return Err(PyTypeError::new_err("function must be callable"));
-    }
-    if let Ok(expressions) = trace_vector_function_2d(&function) {
-        let field = canvas
-            .vector_field_2d_expression(space, expressions)
-            .map_err(value_error)?;
-        return Ok((field, "native"));
-    }
-    let callback = function.unbind();
-    let field = canvas.vector_field_2d(space, move |[x, y]| {
-        Python::attach(|py| {
-            callback
-                .bind(py)
-                .call1((x, y))
-                .and_then(|value| value.extract::<(f64, f64)>())
-                .map(|(vx, vy)| [vx, vy])
-                .ok()
-        })
-    });
+    validate_callback(py, function.bind(py), 2 + inputs.len())?;
+    let (inputs, owners) = parse_inputs(py, inputs)?;
+    validate_owners(&owners, canvas)?;
+    let function = python_function(function, 2, 2, inputs);
+    let field = canvas
+        .lock()
+        .expect("scene canvas poisoned")
+        .vector_field_2d_reactive(space, function)
+        .map_err(value_error)?;
     Ok((field, "python"))
 }
 
 fn field_evaluator_3d(
-    function: Bound<'_, PyAny>,
-    canvas: &ApiCanvas,
+    py: Python<'_>,
+    function: Py<PyAny>,
+    inputs: Vec<Py<PyAny>>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
     space: &CoordinateSpace3DHandle,
 ) -> PyResult<(VectorField3DHandle, &'static str)> {
-    if !function.is_callable() {
-        return Err(PyTypeError::new_err("function must be callable"));
-    }
-    if let Ok(expressions) = trace_vector_function_3d(&function) {
-        let field = canvas
-            .vector_field_3d_expression(space, expressions)
-            .map_err(value_error)?;
-        return Ok((field, "native"));
-    }
-    let callback = function.unbind();
-    let field = canvas.vector_field_3d(space, move |[x, y, z]| {
-        Python::attach(|py| {
-            callback
-                .bind(py)
-                .call1((x, y, z))
-                .and_then(|value| value.extract::<(f64, f64, f64)>())
-                .map(|(vx, vy, vz)| [vx, vy, vz])
-                .ok()
-        })
-    });
+    validate_callback(py, function.bind(py), 3 + inputs.len())?;
+    let (inputs, owners) = parse_inputs(py, inputs)?;
+    validate_owners(&owners, canvas)?;
+    let function = python_function(function, 3, 3, inputs);
+    let field = canvas
+        .lock()
+        .expect("scene canvas poisoned")
+        .vector_field_3d_reactive(space, function)
+        .map_err(value_error)?;
     Ok((field, "python"))
 }
 
 fn build_readout_parts(
     canvas: &mut ApiCanvas,
-    expression: NativeExpr,
+    source: ScalarSource,
     label: Option<String>,
     format: String,
     prefix: String,
@@ -194,7 +302,7 @@ fn build_readout_parts(
 ) {
     let font_size = font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
     let mut number =
-        canvas.expression_readout(expression, format, prefix, suffix, invalid, Some(font_size));
+        canvas.reactive_readout(source, format, prefix, suffix, invalid, Some(font_size));
     if let Some(color) = color.clone() {
         number = number.fill(color.0);
     }
@@ -688,186 +796,7 @@ impl PyChartSpec {
     }
 }
 
-/// Private native expression tree used while tracing public Python lambdas.
-///
-/// This is intentionally registered as `_Expr`: applications construct
-/// expressions by using `Parameter`/`Variable` values and `gaanim.math`, not
-/// by depending on the AST implementation.
-#[pyclass(name = "_Expr", module = "gaanim_core", from_py_object)]
-#[derive(Clone)]
-pub struct PyExpr(pub NativeExpr);
-
-pub(crate) fn extract_expr(value: Bound<'_, PyAny>) -> PyResult<NativeExpr> {
-    if let Ok(expr) = value.extract::<PyRef<'_, PyExpr>>() {
-        Ok(expr.0.clone())
-    } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
-        Ok(parameter.inner.expression())
-    } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
-        Ok(variable.parameter.inner.expression())
-    } else if let Ok(number) = value.extract::<f64>() {
-        Ok(NativeExpr::constant(number))
-    } else {
-        Err(PyTypeError::new_err(
-            "expected a traced scalar (Parameter, Variable, or number)",
-        ))
-    }
-}
-
-#[pymethods]
-impl PyExpr {
-    #[new]
-    fn new(value: f64) -> Self {
-        Self(NativeExpr::constant(value))
-    }
-
-    #[staticmethod]
-    fn var(name: String) -> PyResult<Self> {
-        if name.trim().is_empty() {
-            return Err(value_error("variable name cannot be empty"));
-        }
-        Ok(Self(NativeExpr::variable(name)))
-    }
-
-    #[staticmethod]
-    fn constant(value: f64) -> PyResult<Self> {
-        if !value.is_finite() {
-            return Err(value_error("constant must be finite"));
-        }
-        Ok(Self(NativeExpr::constant(value)))
-    }
-
-    fn derivative(&self, variable: &str) -> Self {
-        Self(self.0.derivative(variable))
-    }
-
-    fn sin(&self) -> Self {
-        Self(self.0.clone().sin())
-    }
-
-    fn cos(&self) -> Self {
-        Self(self.0.clone().cos())
-    }
-
-    fn tan(&self) -> Self {
-        Self(self.0.clone().tan())
-    }
-
-    fn exp(&self) -> Self {
-        Self(self.0.clone().exp())
-    }
-
-    fn log(&self) -> Self {
-        Self(self.0.clone().ln())
-    }
-
-    fn sqrt(&self) -> Self {
-        Self(self.0.clone().sqrt())
-    }
-
-    fn abs(&self) -> Self {
-        Self(self.0.clone().abs())
-    }
-
-    fn pow(&self, exponent: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone().pow(extract_expr(exponent)?)))
-    }
-
-    fn min(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone().min(extract_expr(other)?)))
-    }
-
-    fn max(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone().max(extract_expr(other)?)))
-    }
-
-    fn clamp(&self, minimum: Bound<'_, PyAny>, maximum: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(
-            self.0
-                .clone()
-                .clamp(extract_expr(minimum)?, extract_expr(maximum)?),
-        ))
-    }
-
-    fn if_positive(
-        &self,
-        when_true: Bound<'_, PyAny>,
-        when_false: Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
-        Ok(Self(self.0.clone().if_positive(
-            extract_expr(when_true)?,
-            extract_expr(when_false)?,
-        )))
-    }
-
-    #[pyo3(signature = (**variables))]
-    fn eval(&self, variables: Option<&Bound<'_, PyDict>>) -> PyResult<f64> {
-        let mut context = EvalContext::new();
-        if let Some(variables) = variables {
-            for (name, value) in variables.iter() {
-                context.set_variable(name.extract::<String>()?, value.extract::<f64>()?);
-            }
-        }
-        self.0.eval(&context).map_err(value_error)
-    }
-
-    fn __neg__(&self) -> Self {
-        Self(-self.0.clone())
-    }
-
-    fn __add__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone() + extract_expr(other)?))
-    }
-
-    fn __radd__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(extract_expr(other)? + self.0.clone()))
-    }
-
-    fn __sub__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone() - extract_expr(other)?))
-    }
-
-    fn __rsub__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(extract_expr(other)? - self.0.clone()))
-    }
-
-    fn __mul__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone() * extract_expr(other)?))
-    }
-
-    fn __rmul__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(extract_expr(other)? * self.0.clone()))
-    }
-
-    fn __truediv__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(self.0.clone() / extract_expr(other)?))
-    }
-
-    fn __rtruediv__(&self, other: Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self(extract_expr(other)? / self.0.clone()))
-    }
-
-    fn __pow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
-        self.pow(other)
-    }
-
-    fn __rpow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
-        Ok(Self(extract_expr(other)?.pow(self.0.clone())))
-    }
-
-    fn __abs__(&self) -> Self {
-        Self(self.0.clone().abs())
-    }
-}
-
-/// Animatable scalar referenced from an [`Expr`].
+/// Animatable scalar that may be declared as an explicit callback input.
 #[pyclass(name = "Parameter", module = "gaanim_core", from_py_object)]
 #[derive(Clone)]
 pub struct PyParameter {
@@ -993,7 +922,7 @@ impl PyParameter {
     /// Python callbacks, exact under seeks and paused scrubbing.
     ///
     /// The value becomes `offset + scale * sample` (absolute, clamped outside
-    /// the series), so traced expressions, readouts, and reactive plots that
+    /// the series), so computed values, readouts, and reactive plots that
     /// reference this parameter follow the series for free.
     #[pyo3(signature = (times, values, *, interpolation = "linear", scale = 1.0, offset = 0.0))]
     fn drive_from_samples(
@@ -1023,66 +952,9 @@ impl PyParameter {
                 )
             })
     }
-
-    fn __neg__(&self) -> PyExpr {
-        PyExpr(-self.inner.expression())
-    }
-
-    fn __add__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(self.inner.expression() + extract_expr(other)?))
-    }
-
-    fn __radd__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(extract_expr(other)? + self.inner.expression()))
-    }
-
-    fn __sub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(self.inner.expression() - extract_expr(other)?))
-    }
-
-    fn __rsub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(extract_expr(other)? - self.inner.expression()))
-    }
-
-    fn __mul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(self.inner.expression() * extract_expr(other)?))
-    }
-
-    fn __rmul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(extract_expr(other)? * self.inner.expression()))
-    }
-
-    fn __truediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(self.inner.expression() / extract_expr(other)?))
-    }
-
-    fn __rtruediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(extract_expr(other)? / self.inner.expression()))
-    }
-
-    fn __pow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<PyExpr> {
-        Ok(PyExpr(self.inner.expression().pow(extract_expr(other)?)))
-    }
-
-    fn __rpow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<PyExpr> {
-        Ok(PyExpr(extract_expr(other)?.pow(self.inner.expression())))
-    }
-
-    fn __abs__(&self) -> PyExpr {
-        PyExpr(self.inner.expression().abs())
-    }
 }
 
-/// A visible parameter.  Its drawable base owns the stable readout group;
-/// scalar operations still produce private traced expressions.
+/// A visible parameter whose value may be used as an explicit callback input.
 #[pyclass(name = "Variable", module = "gaanim_core", extends = PyDrawable, from_py_object)]
 #[derive(Clone)]
 pub struct PyVariable {
@@ -1165,71 +1037,6 @@ impl PyVariable {
     #[getter]
     fn unit(&self) -> Option<PyDrawable> {
         self.unit_part.clone()
-    }
-
-    fn __neg__(&self) -> PyExpr {
-        PyExpr(-self.parameter.inner.expression())
-    }
-    fn __add__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            self.parameter.inner.expression() + extract_expr(other)?,
-        ))
-    }
-    fn __radd__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            extract_expr(other)? + self.parameter.inner.expression(),
-        ))
-    }
-    fn __sub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            self.parameter.inner.expression() - extract_expr(other)?,
-        ))
-    }
-    fn __rsub__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            extract_expr(other)? - self.parameter.inner.expression(),
-        ))
-    }
-    fn __mul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            self.parameter.inner.expression() * extract_expr(other)?,
-        ))
-    }
-    fn __rmul__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            extract_expr(other)? * self.parameter.inner.expression(),
-        ))
-    }
-    fn __truediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            self.parameter.inner.expression() / extract_expr(other)?,
-        ))
-    }
-    fn __rtruediv__(&self, other: Bound<'_, PyAny>) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            extract_expr(other)? / self.parameter.inner.expression(),
-        ))
-    }
-    fn __pow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            self.parameter.inner.expression().pow(extract_expr(other)?),
-        ))
-    }
-    fn __rpow__(
-        &self,
-        other: Bound<'_, PyAny>,
-        _modulo: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<PyExpr> {
-        Ok(PyExpr(
-            extract_expr(other)?.pow(self.parameter.inner.expression()),
-        ))
-    }
-    fn __abs__(&self) -> PyExpr {
-        PyExpr(self.parameter.inner.expression().abs())
     }
 }
 
@@ -1991,36 +1798,39 @@ impl PyNumberLine {
         value: Bound<'_, PyAny>,
         normal_offset: Option<Bound<'_, PyAny>>,
     ) -> PyResult<PyPointRef> {
-        let value = extract_expr(value)?;
+        let value = extract_scalar_source(value, &self.canvas)?;
         let normal_offset = normal_offset
-            .map(extract_expr)
+            .map(|value| extract_scalar_source(value, &self.canvas))
             .transpose()?
-            .unwrap_or_else(|| NativeExpr::constant(0.0));
+            .unwrap_or_else(|| ScalarSource::constant(0.0));
         self.inner
             .point_ref(value, normal_offset)
             .map(PyPointRef)
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75))]
+    #[pyo3(signature = (function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75, inputs=Vec::new()))]
     fn function(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         domain: Option<(f64, f64)>,
         normal_scale: f64,
         reveal: Option<Bound<'_, PyAny>>,
         samples: Option<usize>,
         tolerance: f64,
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
-        let expression = trace_scalar_function(function, "x", "number-line function")?;
-        let reveal = reveal.map(extract_expr).transpose()?;
+        let function = checked_python_function(py, function, 1, 1, inputs, &self.canvas)?;
+        let reveal = reveal
+            .map(|value| extract_scalar_source(value, &self.canvas))
+            .transpose()?;
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
-            .number_line_expression_plot(
+            .number_line_reactive_plot(
                 &self.inner,
-                expression,
-                "x",
+                function,
                 domain.unwrap_or_else(|| self.inner.domain()),
                 normal_scale,
                 reveal,
@@ -2201,56 +2011,50 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(64, 48)))]
+    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new()))]
     fn surface(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         resolution: (usize, usize),
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
-        if !function.is_callable() {
-            return Err(PyTypeError::new_err("function must be callable"));
-        }
+        let function = checked_python_function(py, function, 2, 1, inputs, &self.canvas)?;
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
-            .surface_plot(&self.inner, [resolution.0, resolution.1], |x, y| {
-                function
-                    .call1((x, y))
-                    .and_then(|value| value.extract::<f64>())
-                    .ok()
-            })
+            .reactive_surface_plot(&self.inner, function, [resolution.0, resolution.1])
             .map(PyDrawable)
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, domain, *, samples=320))]
+    #[pyo3(signature = (function, domain, *, samples=320, inputs=Vec::new()))]
     fn parametric(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         domain: (f64, f64),
         samples: usize,
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
-        if !function.is_callable() {
-            return Err(PyTypeError::new_err("function must be callable"));
-        }
+        let function = checked_python_function(py, function, 1, 3, inputs, &self.canvas)?;
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
-            .parametric_plot_3d(&self.inner, domain, samples, |t| {
-                function
-                    .call1((t,))
-                    .and_then(|value| value.extract::<(f64, f64, f64)>())
-                    .map(|point| [point.0, point.1, point.2])
-                    .ok()
-            })
+            .reactive_parametric_plot_3d(&self.inner, function, domain, samples)
             .map(PyDrawable)
             .map_err(value_error)
     }
 
-    fn field(&self, function: Bound<'_, PyAny>) -> PyResult<PyVectorField> {
-        let canvas = self.canvas.lock().expect("scene canvas poisoned");
-        let (inner, evaluation) = field_evaluator_3d(function, &canvas, &self.inner)?;
-        drop(canvas);
+    #[pyo3(signature = (function, *, inputs=Vec::new()))]
+    fn field(
+        &self,
+        py: Python<'_>,
+        function: Py<PyAny>,
+        inputs: Vec<Py<PyAny>>,
+    ) -> PyResult<PyVectorField> {
+        let (inner, evaluation) =
+            field_evaluator_3d(py, function, inputs, &self.canvas, &self.inner)?;
         Ok(PyVectorField {
             inner: PyVectorFieldInner::Three(inner),
             canvas: self.canvas.clone(),
@@ -2365,58 +2169,57 @@ impl PyCoordinateSpace {
             .ok_or_else(|| value_error("layer is not available on this space"))
     }
 
-    #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=0))]
+    #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=None, inputs=Vec::new()))]
     fn plot(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         domain: Option<(f64, f64)>,
         samples: Option<usize>,
         tolerance: f64,
-        derivative: usize,
+        derivative: Option<Py<PyAny>>,
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
         let domain = domain.unwrap_or_else(|| self.inner.map().x.domain());
         let sampling = sampling(samples, tolerance)?;
-        let expression = trace_scalar_function(function, "x", "plot")?;
-        let expression = (0..derivative).fold(expression, |value, _| value.derivative("x"));
+        let callback = derivative.unwrap_or(function);
+        let function = checked_python_function(py, callback, 1, 1, inputs, &self.canvas)?;
         let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
         canvas
-            .expression_plot(&self.inner, expression, "x", domain, sampling)
+            .reactive_plot(&self.inner, function, domain, sampling)
             .map(PyDrawable)
             .map_err(value_error)
     }
 
-    #[pyo3(name = "function", signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=0))]
+    #[pyo3(name = "function", signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=None, inputs=Vec::new()))]
     fn function_plot(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         domain: Option<(f64, f64)>,
         samples: Option<usize>,
         tolerance: f64,
-        derivative: usize,
+        derivative: Option<Py<PyAny>>,
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
-        self.plot(function, domain, samples, tolerance, derivative)
+        self.plot(py, function, domain, samples, tolerance, derivative, inputs)
     }
 
-    #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75))]
+    #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75, inputs=Vec::new()))]
     fn parametric(
         &self,
-        function: Bound<'_, PyAny>,
+        py: Python<'_>,
+        function: Py<PyAny>,
         domain: (f64, f64),
         samples: Option<usize>,
         tolerance: f64,
+        inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
-        if !function.is_callable() {
-            return Err(PyTypeError::new_err("function must be callable"));
-        }
+        let function = checked_python_function(py, function, 1, 2, inputs, &self.canvas)?;
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
-            .parametric_plot(&self.inner, domain, sampling(samples, tolerance)?, |t| {
-                function
-                    .call1((t,))
-                    .and_then(|value| value.extract::<(f64, f64)>())
-                    .ok()
-            })
+            .reactive_parametric_plot(&self.inner, function, domain, sampling(samples, tolerance)?)
             .map(PyDrawable)
             .map_err(value_error)
     }
@@ -2471,10 +2274,15 @@ impl PyCoordinateSpace {
             .map_err(value_error)
     }
 
-    fn field(&self, function: Bound<'_, PyAny>) -> PyResult<PyVectorField> {
-        let canvas = self.canvas.lock().expect("scene canvas poisoned");
-        let (inner, evaluation) = field_evaluator_2d(function, &canvas, &self.inner)?;
-        drop(canvas);
+    #[pyo3(signature = (function, *, inputs=Vec::new()))]
+    fn field(
+        &self,
+        py: Python<'_>,
+        function: Py<PyAny>,
+        inputs: Vec<Py<PyAny>>,
+    ) -> PyResult<PyVectorField> {
+        let (inner, evaluation) =
+            field_evaluator_2d(py, function, inputs, &self.canvas, &self.inner)?;
         Ok(PyVectorField {
             inner: PyVectorFieldInner::Two(inner),
             canvas: self.canvas.clone(),
@@ -2880,6 +2688,13 @@ impl PyDrawable {
 
 #[pymethods]
 impl PyScene {
+    #[getter]
+    fn time(&self) -> PyTimeInput {
+        PyTimeInput {
+            canvas: self.inner.clone(),
+        }
+    }
+
     fn parameter(&self, initial: f64) -> PyResult<PyParameter> {
         let inner = self
             .inner
@@ -2890,12 +2705,13 @@ impl PyScene {
         Ok(PyParameter { inner })
     }
 
-    #[pyo3(signature = (source, *, label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="—"))]
+    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid"))]
     #[allow(clippy::too_many_arguments)]
     fn readout<'py>(
         &self,
         py: Python<'py>,
         source: Bound<'py, PyAny>,
+        inputs: Vec<Py<PyAny>>,
         label: Option<String>,
         format: &str,
         prefix: &str,
@@ -2905,10 +2721,19 @@ impl PyScene {
         color: Option<PyColor>,
         invalid: &str,
     ) -> PyResult<Py<PyReadout>> {
-        let expression = trace_readout_source(source)?;
+        let source = if source.is_callable() {
+            callable_source(py, source.unbind(), inputs, &self.inner)?
+        } else {
+            if !inputs.is_empty() {
+                return Err(PyValueError::new_err(
+                    "inputs may only be supplied when source is callable",
+                ));
+            }
+            extract_scalar_source(source, &self.inner)?
+        };
         let (group, label_part, equals_part, number_part, unit_part) = build_readout_parts(
             &mut self.inner.lock().expect("scene canvas poisoned"),
-            expression,
+            source,
             label,
             format.to_owned(),
             prefix.to_owned(),
@@ -2924,7 +2749,7 @@ impl PyScene {
         )
     }
 
-    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="—"))]
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid"))]
     #[allow(clippy::too_many_arguments)]
     fn variable<'py>(
         &self,
@@ -2945,7 +2770,7 @@ impl PyScene {
         };
         let (group, label_part, equals_part, number_part, unit_part) = build_readout_parts(
             &mut canvas,
-            parameter.inner.expression(),
+            parameter.inner.source(),
             Some(label),
             format.to_owned(),
             prefix.to_owned(),
@@ -3260,7 +3085,7 @@ mod tests {
             let mut canvas = ApiCanvas::new(1920, 1080);
             let (_, label, equals, _, unit) = build_readout_parts(
                 &mut canvas,
-                NativeExpr::constant(12.0),
+                ScalarSource::constant(12.0),
                 Some("$x$".to_owned()),
                 ".1f".to_owned(),
                 String::new(),

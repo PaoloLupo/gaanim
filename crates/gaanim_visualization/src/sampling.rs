@@ -1,6 +1,5 @@
 use crate::{AxisError, CoordinateMap2D, CoordinateMap3D};
 use gaanim_core::kurbo::{BezPath, Point};
-use gaanim_expr::{EvalContext, Expr};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Sampling {
@@ -245,21 +244,6 @@ pub fn sample_function(
         output.segments.push(current);
     }
     Ok(output)
-}
-
-pub fn sample_expression(
-    map: &CoordinateMap2D,
-    expression: &Expr,
-    variable: &str,
-    domain: (f64, f64),
-    sampling: Sampling,
-    context: &EvalContext,
-) -> Result<SampledPath, SamplingError> {
-    let mut local_context = context.clone();
-    sample_function(map, domain, sampling, |value| {
-        local_context.set_variable(variable, value);
-        expression.eval(&local_context).ok()
-    })
 }
 
 pub fn sample_parametric(

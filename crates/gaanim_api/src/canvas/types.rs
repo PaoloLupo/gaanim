@@ -592,19 +592,38 @@ pub enum SpawnKind {
     },
     /// A native path with Typst-style cursor commands.
     Curve(Vec<CurveElement>),
-    /// A natively evaluated expression sampled in a coordinate space.
-    ExpressionPlot {
+    /// A deterministic callable sampled in a coordinate space.
+    ReactivePlot {
         map: gaanim_visualization::CoordinateMap2D,
-        expression: gaanim_expr::Expr,
-        variable: String,
+        function: gaanim_animation::ReactiveFunction,
         domain: (f64, f64),
         /// Optional data-space end value used to reveal the path exactly.
-        reveal: Option<gaanim_expr::Expr>,
+        reveal: Option<gaanim_animation::ScalarSource>,
         sampling: gaanim_visualization::Sampling,
     },
-    /// Numeric text evaluated from a native expression without Python callbacks.
-    ExpressionReadout {
-        expression: gaanim_expr::Expr,
+    /// A deterministic 2D parametric callback sampled in a coordinate space.
+    ReactiveParametric2D {
+        map: gaanim_visualization::CoordinateMap2D,
+        function: gaanim_animation::ReactiveFunction,
+        domain: (f64, f64),
+        sampling: gaanim_visualization::Sampling,
+    },
+    /// A deterministic 3D parametric callback sampled into line segments.
+    ReactiveParametric3D {
+        map: gaanim_visualization::CoordinateMap3D,
+        function: gaanim_animation::ReactiveFunction,
+        domain: (f64, f64),
+        samples: usize,
+    },
+    /// A deterministic height callback sampled into a 3D surface mesh.
+    ReactiveSurface3D {
+        map: gaanim_visualization::CoordinateMap3D,
+        function: gaanim_animation::ReactiveFunction,
+        resolution: [usize; 2],
+    },
+    /// Numeric text evaluated from a deterministic scalar source.
+    ReactiveReadout {
+        source: gaanim_animation::ScalarSource,
         format: String,
         prefix: String,
         suffix: String,
