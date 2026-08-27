@@ -37,7 +37,7 @@ La línea estática del capítulo anterior ya no sirve: su extremo se quedaría 
 la posición inicial. Sustituye su creación por:
 
 ```python
-radius = scene.tracking_line((-320, 0), point)
+radius = scene.geometry.tracking_line((-320, 0), point)
 radius.stroke(MUTED, 2).no_fill()
 ```
 

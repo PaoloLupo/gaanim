@@ -1,4 +1,4 @@
-//! Compile — replay Canvas ops into SceneBuilder/Bevy.
+//! Compile — replay SceneModel ops into SceneBuilder/Bevy.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -22,7 +22,7 @@ use crate::anim::{AnimationBuilder, AnimationType};
 use crate::builder::{
     EquationTransitionMode, MobjectRef, MobjectState, MobjectStateMap, SceneBuilder,
 };
-use crate::canvas::canvas_impl::Canvas;
+use crate::canvas::canvas_impl::SceneModel;
 use crate::canvas::ops::{
     CanvasCameraBindingKind, CanvasEndpoint, CanvasRay, FragmentRevealStyle, Op, Segment,
 };
@@ -1346,7 +1346,7 @@ fn outermost_layout_source(
     current
 }
 
-impl Canvas {
+impl SceneModel {
     fn axis_path(
         builder: &mut SceneBuilder<'_, '_, '_>,
         path: gaanim_core::kurbo::BezPath,
@@ -7665,7 +7665,7 @@ impl Canvas {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(&point.object).copied() else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: anchor point object {:?} was not spawned before {:?}",
+                            "SceneModel layout skipped: anchor point object {:?} was not spawned before {:?}",
                             point.object,
                             spec.id
                         );
@@ -7673,7 +7673,7 @@ impl Canvas {
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: missing state for anchor point object {:?}",
+                            "SceneModel layout skipped: missing state for anchor point object {:?}",
                             reference_id
                         );
                         continue;
@@ -7706,7 +7706,7 @@ impl Canvas {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
+                            "SceneModel layout skipped: reference object {:?} was not spawned before {:?}",
                             reference,
                             spec.id
                         );
@@ -7714,7 +7714,7 @@ impl Canvas {
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: missing state for reference object {:?}",
+                            "SceneModel layout skipped: missing state for reference object {:?}",
                             reference_id
                         );
                         continue;
@@ -7739,7 +7739,7 @@ impl Canvas {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: reference object {:?} was not spawned before {:?}",
+                            "SceneModel layout skipped: reference object {:?} was not spawned before {:?}",
                             reference,
                             spec.id
                         );
@@ -7747,7 +7747,7 @@ impl Canvas {
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
                         bevy::prelude::warn!(
-                            "Canvas layout skipped: missing state for reference object {:?}",
+                            "SceneModel layout skipped: missing state for reference object {:?}",
                             reference_id
                         );
                         continue;
@@ -7857,7 +7857,7 @@ mod tests {
     use gaanim_scene::{LocalBounds, TextBaseline};
     use gaanim_timeline::snapshot::WorldSnapshot;
 
-    fn compile_canvas_for_layout(canvas: Canvas) -> World {
+    fn compile_canvas_for_layout(canvas: SceneModel) -> World {
         let world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
@@ -7902,7 +7902,7 @@ mod tests {
 
     #[test]
     fn at_anchor_point_places_center_on_transformed_reference_anchor() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let reference = canvas
             .rect(100.0, 40.0)
             .at(30.0, -10.0)
@@ -7943,7 +7943,7 @@ mod tests {
     #[test]
     fn default_single_line_text_keeps_its_baseline_center_after_transform_layout() {
         for source in ["HAPPY", "gyp", "$frac(x_1^2, y_2) = 1$"] {
-            let mut canvas = Canvas::new(640, 360);
+            let mut canvas = SceneModel::new(640, 360);
             canvas
                 .text(source)
                 .at_text_default(73.0, -41.0)
@@ -7971,7 +7971,7 @@ mod tests {
             (TextAnchor::BaselineCenter, fn_x_center),
             (TextAnchor::BaselineRight, fn_x_max),
         ] {
-            let mut canvas = Canvas::new(640, 360);
+            let mut canvas = SceneModel::new(640, 360);
             canvas.text("gyp").at_text_anchor(17.0, 29.0, anchor);
 
             let mut world = compile_canvas_for_layout(canvas);
@@ -7996,7 +7996,7 @@ mod tests {
 
     #[test]
     fn multiline_default_is_visual_center_but_explicit_anchor_uses_first_baseline() {
-        let mut default_canvas = Canvas::new(640, 360);
+        let mut default_canvas = SceneModel::new(640, 360);
         default_canvas
             .text("First line\nsecond line")
             .at_text_default(-35.0, 61.0);
@@ -8007,7 +8007,7 @@ mod tests {
             DVec3::new(-35.0, 61.0, 0.0),
         );
 
-        let mut explicit_canvas = Canvas::new(640, 360);
+        let mut explicit_canvas = SceneModel::new(640, 360);
         explicit_canvas
             .text("First line\nsecond line")
             .at_text_anchor(-35.0, 61.0, TextAnchor::BaselineLeft);
@@ -8031,7 +8031,7 @@ mod tests {
     fn geometric_top_left_places_the_corner_without_promising_a_baseline() {
         let mut baselines = Vec::new();
         for source in ["HAPPY", "gyp"] {
-            let mut canvas = Canvas::new(640, 360);
+            let mut canvas = SceneModel::new(640, 360);
             canvas.text(source).at_anchor(12.0, 34.0, Anchor::TopLeft);
             let mut world = compile_canvas_for_layout(canvas);
             let (bounds, baseline, transform) = only_text_root(&mut world);
@@ -8090,7 +8090,7 @@ mod tests {
 
     #[test]
     fn reactive_geometry_matches_across_direct_rewind_and_repeated_seeks() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let amplitude = canvas.parameter(1.0).unwrap();
         let amplitude_id = amplitude.drawable().id;
         let space = canvas
@@ -8168,7 +8168,7 @@ mod tests {
         ) -> DrawableHandle;
     }
 
-    impl UnifiedTextFixture for Canvas {
+    impl UnifiedTextFixture for SceneModel {
         fn math_text(&mut self, source: &str) -> DrawableHandle {
             self.text(&format!("${source}$"))
         }
@@ -8411,7 +8411,7 @@ mod tests {
             )
             .expect("valid structured equation")
         };
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.text_spec(equation(false));
         canvas.text_spec(equation(true));
 
@@ -8504,7 +8504,7 @@ mod tests {
             "local color must not replace Typst parser spacing: {colored_source}"
         );
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.text_spec(equation(false));
         canvas.text_spec(equation(true));
         let world = World::new();
@@ -8576,7 +8576,7 @@ mod tests {
         );
         assert!(!source.contains("#h("), "{source}");
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.text_spec(equation);
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -8631,7 +8631,7 @@ mod tests {
         )
         .expect("valid structured equation");
         assert_eq!(structured_typst_content(&equation, 32.0), "$m g$");
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.text_spec(equation);
 
         let world = World::new();
@@ -8656,7 +8656,7 @@ mod tests {
 
     #[test]
     fn camera_and_drawable_play_compile_at_the_same_start_time() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let marker = canvas.circle(20.0);
         let marker_anim = marker.fade_in(2.0);
         let camera_anim = canvas.camera_orbit(0.4, 0.1, 2.0);
@@ -8688,7 +8688,7 @@ mod tests {
         assert!((timeline.cached_duration - 2.0).abs() < 1e-9);
     }
 
-    fn compile_camera_timeline(canvas: Canvas) -> (World, Timeline) {
+    fn compile_camera_timeline(canvas: SceneModel) -> (World, Timeline) {
         let mut world = World::new();
         world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
         let mut queue = CommandQueue::default();
@@ -8705,7 +8705,7 @@ mod tests {
 
     #[test]
     fn named_camera_state_restores_complete_authored_pose() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let _marker = canvas.circle(1.0);
         canvas.camera_pan_to(120.0, -30.0, 1.0);
         let saved = canvas.camera_save("detail").unwrap();
@@ -8730,8 +8730,8 @@ mod tests {
 
     #[test]
     fn camera_state_handles_validate_names_ownership_and_projection() {
-        let first = Canvas::new(960, 540);
-        let second = Canvas::new(960, 540);
+        let first = SceneModel::new(960, 540);
+        let second = SceneModel::new(960, 540);
         let state = first
             .camera_state_3d(
                 DVec3::new(7.0, 5.0, 6.0),
@@ -8759,7 +8759,7 @@ mod tests {
 
     #[test]
     fn camera_capture_freezes_reactive_value_at_its_cursor() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let parameter = canvas.parameter(0.0).unwrap();
         let parameter_id = parameter.drawable().id;
         let point = canvas.point_ref(
@@ -8787,7 +8787,7 @@ mod tests {
 
     #[test]
     fn camera_state_transitions_between_2d_and_3d() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let _marker = canvas.circle(1.0);
         let perspective = canvas
             .camera_state_3d(
@@ -8823,7 +8823,7 @@ mod tests {
 
     #[test]
     fn animated_look_at_starts_from_a_valid_perspective_pose() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let _marker = canvas.circle(1.0);
         let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
@@ -8851,7 +8851,7 @@ mod tests {
         let eye = DVec3::new(10.0, 7.0, 13.0);
         let target = DVec3::new(0.0, -0.5, 0.0);
         let radius = (eye - target).length();
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let _marker = canvas.circle(1.0);
         let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
@@ -8884,7 +8884,7 @@ mod tests {
 
     #[test]
     fn object_declared_after_wait_stays_hidden_until_its_declaration_time() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.wait(1.0);
         canvas.circle(20.0);
 
@@ -8922,7 +8922,7 @@ mod tests {
 
     #[test]
     fn visual_effects_are_attached_to_compiled_drawables() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas
             .circle(60.0)
             .glow(PenikoColor::WHITE, 18.0, 1.2)
@@ -8969,7 +8969,7 @@ mod tests {
 
     #[test]
     fn clip_mask_uses_another_drawables_world_geometry() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let target = canvas.rect(300.0, 160.0).at(80.0, 0.0);
         let mask = canvas.circle(55.0).at(80.0, 0.0);
         target.clip(&mask, gaanim_core::peniko::Fill::NonZero);
@@ -9000,7 +9000,7 @@ mod tests {
     fn segments_show_only_the_active_segment_on_seek() {
         let red = PenikoColor::from_rgb8(255, 0, 0);
         let blue = PenikoColor::from_rgb8(0, 0, 255);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.segment("first", None).unwrap();
         canvas.text("First segment").fill(red);
         canvas.wait(1.0);
@@ -9045,7 +9045,7 @@ mod tests {
     fn terminal_stop_holds_the_completed_segment_at_a_shared_boundary() {
         let red = PenikoColor::from_rgb8(255, 0, 0);
         let blue = PenikoColor::from_rgb8(0, 0, 255);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.segment("first", None).unwrap();
         canvas.text("First segment").fill(red);
         canvas.wait(1.0);
@@ -9093,7 +9093,7 @@ mod tests {
 
     #[test]
     fn justified_paragraph_compiles_to_vector_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.configured_text(
             "Este párrafo debe ocupar varias líneas y conservar glifos vectoriales.",
             gaanim_text::prelude::TextStyle {
@@ -9160,7 +9160,7 @@ mod tests {
     #[test]
     fn equation_fragment_fill_overrides_matching_vector_glyphs() {
         let highlight = gaanim_core::peniko::Color::from_rgb8(255, 180, 0);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.math_text("E = m c^2").color_by("m", highlight);
 
         let world = World::new();
@@ -9186,7 +9186,7 @@ mod tests {
     #[test]
     fn text_fragment_fill_overrides_matching_vector_glyphs() {
         let highlight = gaanim_core::peniko::Color::from_rgb8(64, 180, 255);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas
             .text("Energy depends on mass")
             .color_by("mass", highlight);
@@ -9216,7 +9216,7 @@ mod tests {
         let fill_target = PenikoColor::from_rgb8(32, 96, 224);
         let stroke_target = PenikoColor::from_rgb8(255, 180, 0);
         let fragment_start = PenikoColor::from_rgb8(220, 32, 64);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let text = canvas
             .text("Color")
             .stroke(PenikoColor::WHITE, 2.0)
@@ -9283,7 +9283,7 @@ mod tests {
 
     #[test]
     fn paper_theme_applies_role_fills_to_text_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas
             .set_theme("paper")
             .expect("paper is a built-in theme");
@@ -9318,7 +9318,7 @@ mod tests {
 
     #[test]
     fn theme_selected_after_authoring_is_materialized_during_compile() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.circle(40.0);
         canvas.circle(20.0).fill(PenikoColor::BLACK).at(100.0, 0.0);
         let mut theme = crate::canvas::CanvasTheme::builtin("paper").unwrap();
@@ -9349,7 +9349,7 @@ mod tests {
 
     #[test]
     fn dynamic_camera_frame_keeps_all_compiled_targets_and_bounds() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let left = canvas.circle(85.0).at(-260.0, -10.0);
         let right = canvas.rect(180.0, 110.0).at(250.0, -10.0);
         let frame = canvas.camera_frame_many(
@@ -9421,7 +9421,7 @@ mod tests {
 
     #[test]
     fn compiled_camera_binding_is_active_during_its_authored_window() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let constraint = canvas
             .camera_bind_2d(
                 Some(CanvasEndpoint::Static(DVec3::new(120.0, -35.0, 0.0))),
@@ -9461,7 +9461,7 @@ mod tests {
 
     #[test]
     fn compiled_camera_binding_resolves_point_ref_parameters() {
-        let mut canvas = Canvas::new(960, 540);
+        let mut canvas = SceneModel::new(960, 540);
         let parameter = canvas.parameter(0.0).unwrap();
         let parameter_id = parameter.drawable().id;
         let x = ScalarSource::function(ReactiveFunction::new(
@@ -9492,13 +9492,13 @@ mod tests {
 
     #[test]
     fn fragment_transform_moves_selected_vector_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas.math_text("E = m c^2");
         let target = canvas.math_text("p = m v");
         let morph = source
             .select("m")
             .morph_to(&target.select("m"), 0.8)
-            .expect("selections share a Canvas");
+            .expect("selections share a SceneModel");
         canvas.play(vec![morph]);
 
         let world = World::new();
@@ -9525,7 +9525,7 @@ mod tests {
     #[test]
     fn named_fragment_tag_resolves_to_a_vector_selection() {
         let highlight = gaanim_core::peniko::Color::from_rgb8(64, 180, 255);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let formula = canvas.math_text("E = m c^2").define_tag("mass", "m", None);
         formula
             .tag("mass")
@@ -9555,7 +9555,7 @@ mod tests {
     #[test]
     fn cancel_term_places_a_diagonal_strike_over_the_selected_glyphs() {
         let strike_color = PenikoColor::WHITE;
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let formula = canvas
             .math_text("x + 3 = 7")
             .define_tag("constant", "3", None);
@@ -9605,7 +9605,7 @@ mod tests {
 
     #[test]
     fn cancel_mark_fades_when_text_step_replaces_its_source() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas.text_spec(
             StructuredTextSpec::new(
                 vec![
@@ -9703,7 +9703,7 @@ mod tests {
 
     #[test]
     fn tagged_equation_transform_moves_shared_tags() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas
             .math_text("E = m c^2")
             .define_tag("mass", "m", None)
@@ -9716,7 +9716,7 @@ mod tests {
             .tag("mass")
             .unwrap()
             .copy_to(&target.tag("mass").unwrap(), 0.8)
-            .expect("selections share a Canvas");
+            .expect("selections share a SceneModel");
         canvas.play(vec![copy]);
 
         let world = World::new();
@@ -9742,7 +9742,7 @@ mod tests {
 
     #[test]
     fn equation_expansion_morphs_semantic_terms_without_cross_fading_pairs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas.math_text("E = m c^2").define_tag("mass", "m", None);
         let target =
             canvas
@@ -9819,7 +9819,7 @@ mod tests {
 
     #[test]
     fn equation_step_prioritizes_semantic_tags_then_matches_common_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas
             .math_text("x + 3 = 7")
             .define_tag("result", "7", None);
@@ -9907,7 +9907,7 @@ mod tests {
 
     #[test]
     fn equation_step_handoff_is_exact_and_target_remains_animatable() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let equation = |middle: &str, result: &str| {
             StructuredTextSpec::new(
                 vec![
@@ -10037,7 +10037,7 @@ mod tests {
             )
             .expect("valid structured equation")
         };
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas.text_spec(equation("x"));
         let target = canvas.text_spec(equation("theta''"));
         assert!(target.fill_text_part(&["term".to_owned()], red));
@@ -10105,7 +10105,7 @@ mod tests {
 
     #[test]
     fn text_step_does_not_mutate_unrelated_written_text() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let title = canvas
             .text_spec(
                 StructuredTextSpec::new(
@@ -10205,7 +10205,7 @@ mod tests {
 
     #[test]
     fn tagged_equation_copy_keeps_opacity_changes_instantaneous() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas
             .math_text("E = m c^2")
             .define_tag("mass", "m", None)
@@ -10218,7 +10218,7 @@ mod tests {
             .tag("mass")
             .unwrap()
             .copy_to(&target.tag("mass").unwrap(), 0.8)
-            .expect("selections share a Canvas");
+            .expect("selections share a SceneModel");
         canvas.play(vec![copy]);
 
         let world = World::new();
@@ -10256,7 +10256,7 @@ mod tests {
 
     #[test]
     fn tagged_equation_copy_preserves_both_visible_equations_after_seek() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let title = canvas.text("One variable");
         let source = canvas
             .math_text("E = m c^2")
@@ -10276,7 +10276,7 @@ mod tests {
             .tag("mass")
             .unwrap()
             .copy_to(&target.tag("mass").unwrap(), 0.9)
-            .expect("selections share a Canvas");
+            .expect("selections share a SceneModel");
         canvas.play(vec![copy]);
         canvas.wait(0.25);
 
@@ -10318,7 +10318,7 @@ mod tests {
 
     #[test]
     fn fade_in_from_down_schedules_opacity_and_upward_translation() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let label = canvas.text("Aparece desde abajo");
         label.fade_in_from(crate::canvas::Direction::Down, 72.0, 0.8);
 
@@ -10356,7 +10356,7 @@ mod tests {
 
     #[test]
     fn text_with_inline_math_compiles_to_vector_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.text("Energia $E = m c^2$ es famosa");
         canvas.text("Valor $1/2$ y $sqrt(2)$");
         canvas.text("Angulo $alpha + beta$");
@@ -10397,7 +10397,7 @@ mod tests {
 
     #[test]
     fn paragraph_with_inline_math_compiles_to_vector_glyphs() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.configured_text(
             "La energia $E = m c^2$ relaciona masa y energia en $x^2 + y^2 = z^2$.",
             gaanim_text::prelude::TextStyle {
@@ -10540,7 +10540,7 @@ mod tests {
 
     #[test]
     fn nested_layout_materializes_paragraph_at_the_outer_assigned_width() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let paragraph = canvas.text(
             "Nested responsive paragraphs must use the card width instead of the safe frame width.",
         );
@@ -10628,7 +10628,7 @@ mod tests {
 
     #[test]
     fn root_layout_preserves_authored_at_translation() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.rect(160.0, 60.0);
         let second = canvas.rect(120.0, 40.0);
         let root = canvas.group(&[&first, &second]);
@@ -10674,7 +10674,7 @@ mod tests {
 
     #[test]
     fn root_layout_replays_anchor_scale_and_rotation_against_resolved_bounds() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.rect(160.0, 60.0);
         let second = canvas.rect(120.0, 40.0);
         let root = canvas.group(&[&first, &second]);
@@ -10771,7 +10771,7 @@ mod tests {
 
     #[test]
     fn layout_reflow_animates_displaced_members_and_fades_the_insertion() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let first = canvas.rect(80.0, 30.0);
         let second = canvas.rect(80.0, 30.0);
         let container = canvas.group(&[&first]);
@@ -10847,7 +10847,7 @@ mod tests {
     fn sampled_series_op_compiles_to_driver_component() {
         use gaanim_animation::{SampledInterpolation, SampledProperty};
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.dot(8.0);
         canvas.wait(1.5);
         dot.drive_from_samples(

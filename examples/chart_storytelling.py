@@ -30,7 +30,7 @@ base = (
 )
 target = base.encode(z="z").axes(z=Axis.symlog(-3, 3).ticks(1).label("z"))
 
-chart = scene.chart(base).inspect(("id", "group", "x", "y", "z"), format="{id}: {group}")
+chart = scene.viz.chart(base).inspect(("id", "group", "x", "y", "z"), format="{id}: {group}")
 title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
 
 scene.play([chart.create(0.9), title.write(0.6)])

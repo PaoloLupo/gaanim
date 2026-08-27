@@ -7,13 +7,13 @@ from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 scene = Scene(800, 420, background=WHITE)
 
-anchor = scene.dot(9).fill(BLACK).at(-260, 0)
-mass = scene.rect(72, 62).fill(GOLD).stroke(BLACK, 3).at(-20, 0)
-spring = scene.spring_between(anchor, mass, coils=10, amplitude=15, crossing=1.0).no_fill().stroke(BLUE, 3)
-measurement = scene.dimension_between(anchor, mass, -78).no_fill().stroke(GRAY, 2)
+anchor = scene.geometry.dot(9).fill(BLACK).at(-260, 0)
+mass = scene.geometry.rect(72, 62).fill(GOLD).stroke(BLACK, 3).at(-20, 0)
+spring = scene.mechanics.spring_between(anchor, mass, coils=10, amplitude=15, crossing=1.0).no_fill().stroke(BLUE, 3)
+measurement = scene.mechanics.dimension_between(anchor, mass, -78).no_fill().stroke(GRAY, 2)
 mass_label = scene.text("m").fill(BLACK)
 mass_label.follow_to(mass, offset=(0, 54))
-rail = scene.line(-285, -48, 245, -48).stroke(GRAY, 4)
+rail = scene.geometry.line(-285, -48, 245, -48).stroke(GRAY, 4)
 label = scene.text("reactive helical spring").fill(GRAY).at(0, 120, anchor=Anchor.CENTER)
 
 scene.play([

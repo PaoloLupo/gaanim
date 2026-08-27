@@ -4,8 +4,8 @@ import os
 from gaanim import BLUE, GOLD, Scene
 
 scene = Scene(1280, 720, background="#0f172a", margin=36)
-formula = scene.column(
-    [scene.text("Fit modes", role="title").fill(GOLD), scene.item(scene.circle(110).fill(BLUE), fit="contain", grow=1)],
+formula = scene.layout.column(
+    [scene.text("Fit modes", role="title").fill(GOLD), scene.layout.item(scene.geometry.circle(110).fill(BLUE), fit="contain", grow=1)],
     within="safe", width="fill", height="fill", padding=32, gap=28, align="center",
 )
 scene.play([formula.fade_in().duration(0.5)])

@@ -21,14 +21,14 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
 scene = Scene(1280, 720, background=BLACK)
 scene.segment("shapes")
-circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-180, 0)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).at(-180, 0)
 scene.play([circle.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
 headline = scene.text("A stable transform", role="title").fill(GOLD)
 scene.play([circle.replacement_transform(headline).duration(1.4).spring()])
 
-formula = scene.equation("E = m c^2").fill(GREEN).at(0, -150)
+formula = scene.text.equation("E = m c^2").fill(GREEN).at(0, -150)
 scene.play([headline.transform(formula).duration(1.4).smooth()])
 # Ejecuta este archivo con: gaanim transforms.py
 ```
@@ -39,10 +39,10 @@ scene.play([headline.transform(formula).duration(1.4).smooth()])
 from gaanim import BLACK, BLUE, GREEN, RED, Scene
 
 scene = Scene(1280, 720, background=BLACK)
-left = scene.circle(40).fill(BLUE).at(-80, 0)
-middle = scene.circle(40).fill(RED).at(0, 0)
-right = scene.circle(40).fill(GREEN).at(80, 0)
-group = scene.group([left, middle, right])
+left = scene.geometry.circle(40).fill(BLUE).at(-80, 0)
+middle = scene.geometry.circle(40).fill(RED).at(0, 0)
+right = scene.geometry.circle(40).fill(GREEN).at(80, 0)
+group = scene.geometry.group([left, middle, right])
 
 scene.play([group.grow_from_center().duration(1.0).spring()])
 scene.play([group.move(0, 120).duration(1.0), group.rotate(3.14159).duration(1.0)])
@@ -55,9 +55,9 @@ scene.play([group.move(0, 120).duration(1.0), group.rotate(3.14159).duration(1.0
 from gaanim import BLACK, Color, Scene, Updater
 
 scene = Scene(1280, 720, background=BLACK)
-dot = scene.dot(10).fill(Color(255, 180, 70)).at(200, 0)
+dot = scene.geometry.dot(10).fill(Color(255, 180, 70)).at(200, 0)
 dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
-trail = scene.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
+trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
 
 scene.play([dot.fade_in().duration(0.3), trail.fade_in().duration(0.3)])
 scene.wait(4.0)
@@ -74,8 +74,8 @@ solo glifos parecidos.
 from gaanim import GOLD, Scene, part
 
 scene = Scene(1280, 720, background="#0f172a")
-before = scene.equation("E =", part("mass", "m"), "c^2")
-after = scene.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
+before = scene.text.equation("E =", part("mass", "m"), "c^2")
+after = scene.text.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
 before["mass"].fill(GOLD)
 after["mass"].fill(GOLD)
 
@@ -101,15 +101,15 @@ spec = (
 )
 
 scene = Scene(1280, 720, theme="technical")
-heading = scene.section_header(
+heading = scene.slides.section_header(
     "Tiempo de renderizado",
     kicker="PERFIL",
     subtitle="Menor es mejor",
     align="center",
     variant="accent",
 )
-chart = scene.chart(spec)
-page = scene.column([heading, scene.item(chart, grow=1)], within="safe", gap=24)
+chart = scene.viz.chart(spec)
+page = scene.layout.column([heading, scene.layout.item(chart, grow=1)], within="safe", gap=24)
 scene.play([page.fade_in(0.7), chart.layer("marks").grow_from_center(0.8)])
 scene.render()
 ```
@@ -125,19 +125,19 @@ from gaanim import BLUE, Scene
 scene = Scene(1080, 1920, theme="presentation")
 scene.canvas.set_preset("vertical")
 
-header = scene.section_header(
+header = scene.slides.section_header(
     "Tres ideas clave",
     subtitle="La composición responde al formato",
     align="center",
 )
-body = scene.bullets([
+body = scene.slides.bullets([
     "Los objetos conocen su medida",
     "Layout distribuye el espacio",
     "El tema mantiene la identidad visual",
 ])
 footer = scene.text("gaanim · explicación visual", role="caption")
-page = scene.column(
-    [header, scene.item(body, grow=1), footer],
+page = scene.layout.column(
+    [header, scene.layout.item(body, grow=1), footer],
     within="safe",
     width="fill",
     height="fill",
@@ -157,13 +157,13 @@ from gaanim import GOLD, WHITE, Scene
 from math import cos, pi, sin
 
 scene = Scene(1280, 720, background="#0f172a")
-t = scene.parameter(0.0)
-curve = scene.polyline([
+t = scene.viz.parameter(0.0)
+curve = scene.geometry.polyline([
     (260 * cos(u), 150 * sin(2 * u))
     for u in (2 * pi * i / 240 for i in range(241))
 ]).no_fill().stroke(WHITE, 3)
-point = scene.point_on_curve(curve, t).fill(GOLD)
-tangent = scene.tangent_on_curve(curve, t, length=110).stroke(GOLD, 4)
+point = scene.geometry.point_on_curve(curve, t).fill(GOLD)
+tangent = scene.geometry.tangent_on_curve(curve, t, length=110).stroke(GOLD, 4)
 
 scene.play([curve.create(0.7), point.fade_in(0.2), tangent.fade_in(0.2)])
 scene.play([t.animate_to(1.0, duration=4.0)])
@@ -179,9 +179,9 @@ composición ya sea legible.
 from gaanim import BLUE, GOLD, Material3D, Scene
 
 scene = Scene(1280, 720)
-scene.lighting_3d("studio", intensity=1.0, shadows=True)
-cube = scene.cube(2.0, material=Material3D.matte(BLUE)).at_3d(-1.8, 0, 0)
-sphere = scene.sphere(
+scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+cube = scene.geometry.cube(2.0, material=Material3D.matte(BLUE)).at_3d(-1.8, 0, 0)
+sphere = scene.geometry.sphere(
     1.1,
     material=Material3D.metal(GOLD),
 ).at_3d(1.8, 0, 0)
@@ -200,7 +200,7 @@ tema; no hace falta reconstruir una portada con textos sueltos.
 from gaanim import BLUE, Scene
 
 scene = Scene(1920, 1080, theme="presentation")
-opening = scene.title_card(
+opening = scene.slides.title_card(
     "El movimiento cuenta una idea",
     "Una presentación construida con Gaanim",
     accent=BLUE,

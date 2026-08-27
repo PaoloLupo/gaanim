@@ -8,7 +8,7 @@ from gaanim import BLACK, GOLD, GRAY, WHITE, Scene, parts
 scene = Scene(1280, 720, background=BLACK)
 
 title = scene.text("Partes semánticas compactas", role="title").fill(WHITE).at(0, 250)
-equation = scene.equation(
+equation = scene.text.equation(
     "-",
     parts(
         mass_left="m",

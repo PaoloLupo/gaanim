@@ -9,13 +9,13 @@ from gaanim import Anchor, BLACK, CYAN, GOLD, GREEN, Scene
 scene = Scene(1280, 720, background=BLACK, margin=52, theme="technical")
 title = scene.text("Fuerzas dinámicas reactivas", role="title").at(0, 285, anchor=Anchor.CENTER)
 
-body = scene.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).at(-120, -20)
+body = scene.geometry.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).at(-120, -20)
 force_origin = body.anchor_point(Anchor.TOP_RIGHT)
 resultant_origin = body.anchor_point(Anchor.BOTTOM_RIGHT)
 
-magnitude = scene.parameter(45.0)
-direction = scene.parameter(pi / 7)
-force = scene.force_at(
+magnitude = scene.viz.parameter(45.0)
+direction = scene.viz.parameter(pi / 7)
+force = scene.mechanics.force_at(
     force_origin,
     magnitude,
     direction=direction,
@@ -28,9 +28,9 @@ force = scene.force_at(
     color=GREEN,
 )
 
-fx = scene.parameter(-35.0)
-fy = scene.parameter(25.0)
-resultant = scene.force_from_components(
+fx = scene.viz.parameter(-35.0)
+fy = scene.viz.parameter(25.0)
+resultant = scene.mechanics.force_from_components(
     resultant_origin,
     fx,
     fy,

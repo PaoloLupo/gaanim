@@ -12,7 +12,7 @@
 = Texto
 
 `scene.text()` es la fábrica general de prosa, títulos, párrafos, matemáticas y
-contenido mixto. `scene.equation()` es su atajo para matemáticas en bloque.
+contenido mixto. `scene.text.equation()` es su atajo para matemáticas en bloque.
 Ambas devuelven el mismo `Text` especializado: un `Drawable` vectorial que
 conserva la estructura semántica, es medido intrínsecamente por Layout v2 y
 expone selecciones locales y animaciones específicas de texto.
@@ -34,8 +34,8 @@ scene.play([copy.write(1.2, by="part", stagger=0.06)])
 scene.play([copy["formula"]["mass"].indicate(0.6)])
 ```
 
-Usa un rol para la prosa y `scene.equation()` para una ecuación independiente.
-`scene.typst()` permite crear documentos Typst arbitrarios, pero no ofrece la
+Usa un rol para la prosa y `scene.text.equation()` para una ecuación independiente.
+`scene.text.typst()` permite crear documentos Typst arbitrarios, pero no ofrece la
 API de selección estructurada de `Text` descrita aquí.
 
 == Responsabilidades
@@ -83,10 +83,10 @@ scene.render()
 ```
 ]
 
-== Scene.equation
+== Typography.equation
 
 #api-entry(
-  name: "Scene.equation",
+  name: "Typography.equation",
   kind: "factory",
   signature: "equation(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None) -> Text",
   params: (
@@ -100,7 +100,7 @@ scene.render()
 # show-code: true
 from gaanim import GOLD, Scene, part, parts
 scene = Scene(640, 360, background="#0f172a")
-equation = scene.equation(
+equation = scene.text.equation(
     part("sum_force", "sum F_t"),
     "=",
     parts(mass="m", acceleration="a_t"),
@@ -144,7 +144,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 == Medición sin spawn
 
 #api-entry(
-  name: "Scene.measure_text",
+  name: "Typography.measure",
   kind: "method",
   signature: "measure_text(content, *, role=None, size=None, font=None, color=None, wrap=None) -> tuple[float, float]",
   params: (
@@ -157,8 +157,8 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
   desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
 )[
 ```python
-width, height = scene.measure_text("PGA = 0.35 g", role="label")
-box = scene.rounded_rect(width + 56, height + 32, 14).at(0, -414)
+width, height = scene.text.measure("PGA = 0.35 g", role="label")
+box = scene.geometry.rounded_rect(width + 56, height + 32, 14).at(0, -414)
 ```
 ]
 
@@ -210,14 +210,14 @@ scene.render()
   params: (
     (name: "content", type: "keyword str entries", default: none, desc: [Ordered semantic names and their plain text.]),
   ),
-  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.equation()`, `Text.become()`, and `part()`.]),
+  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.text.equation()`, `Text.become()`, and `part()`.]),
   desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, empty names, or wholly empty content raise `ValueError`; non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
 )[
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, parts
 scene = Scene(640, 360, background="#0f172a")
-equation = scene.equation(
+equation = scene.text.equation(
     "-",
     parts(mass_left="m", gravity="g sin(theta)"),
     "=",
@@ -266,7 +266,7 @@ scene.render()
 === Delimitadores matemáticos
 
 - `$...$` switches the unified Typst compositor into mathematics.
-- `scene.equation(*content)` supplies `$ ... $` for a standalone equation;
+- `scene.text.equation(*content)` supplies `$ ... $` for a standalone equation;
   omit those delimiters from its content.
 - `$$...$$` currently uses the same vector math compositor; it does not create
   a separate public display-math object.
@@ -358,7 +358,7 @@ body = scene.text(
     role="body",
     flow=TextFlow(wrap="auto", align="justify", line_spacing=1.25),
 )
-page = scene.column(
+page = scene.layout.column(
     [scene.text("Texto responsive", role="heading").fill(GOLD), body],
     within="safe", width="fill", height="fill", padding=28, gap=18,
 )
@@ -386,7 +386,7 @@ uses the same duration for text and reflow. Transient `indicate`, `pulse`,
 
 Layout owns translation. Once managed, a `Text` rejects manual placement such
 as `at`, `move`, `next_to`, and positional animations; configure its
-`scene.item(...)` or Layout owner instead. Cross-scene or incompatible-owner
+`scene.layout.item(...)` or Layout owner instead. Cross-scene or incompatible-owner
 transition targets raise `LayoutOwnershipError`.
 
 == Consultas y selecciones
@@ -587,7 +587,7 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 from gaanim import Anchor, Scene, TextAnchor
 scene = Scene(640, 360)
 scene.text("baseline left").at(-220, 60, TextAnchor.BASELINE_LEFT)
-scene.equation("frac(x_1^2, y_2) = 1").at(0, 0)
+scene.text.equation("frac(x_1^2, y_2) = 1").at(0, 0)
 scene.text("geometric corner").at(-220, -100, Anchor.TOP_LEFT)
 ```
 ]
@@ -606,7 +606,7 @@ text.billboard().hud()
 ```
 
 For single-line text, `text.at(x, y)` places the visual horizontal center on
-`x` and the typographic baseline on `y`. `scene.equation(...)` returns the same
+`x` and the typographic baseline on `y`. `scene.text.equation(...)` returns the same
 `Text` type and follows the same rule, so words and equations with different
 ascenders, descenders, fractions, scripts, or authored sizes can share a
 stable baseline:
@@ -616,7 +616,7 @@ from gaanim import Scene, TextAnchor
 
 scene = Scene(960, 540)
 word = scene.text("Typography").at(0, 80)
-equation = scene.equation("frac(x_1^2, y_2) = 1").at(
+equation = scene.text.equation("frac(x_1^2, y_2) = 1").at(
     0, -40, TextAnchor.BASELINE_CENTER
 )
 left = scene.text("left aligned").at(

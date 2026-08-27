@@ -5,11 +5,11 @@ from gaanim import BLACK, BLUE, WHITE, Scene
 scene = Scene(1920, 1080, background=BLACK)
 
 # 1. Creación de objetos
-circle = scene.circle(100.0).stroke(BLUE, 4.0).no_fill().at(0, 0)
-dot = scene.dot(8.0).fill(WHITE).at(0, 0)
-dot2 = scene.dot(8.0).fill(WHITE).at(100, 0)
+circle = scene.geometry.circle(100.0).stroke(BLUE, 4.0).no_fill().at(0, 0)
+dot = scene.geometry.dot(8.0).fill(WHITE).at(0, 0)
+dot2 = scene.geometry.dot(8.0).fill(WHITE).at(100, 0)
 
-line = scene.line(300, 0, 500, 0).stroke(WHITE, 3.0)
+line = scene.geometry.line(300, 0, 500, 0).stroke(WHITE, 3.0)
 
 # 2. Animaciones
 # GrowFromCenter(circle)

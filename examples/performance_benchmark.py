@@ -18,7 +18,7 @@ for row in range(6):
         x = -630 + column * 180
         y = 330 - row * 132
         shape = (
-            scene.circle(28 + (row + column) % 3 * 4)
+            scene.geometry.circle(28 + (row + column) % 3 * 4)
             .fill(colors[(row + column) % len(colors)])
             .stroke(WHITE, 2)
             .at(x, y)

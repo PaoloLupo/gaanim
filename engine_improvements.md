@@ -18,7 +18,7 @@ La principal brecha ya no es la cantidad de objetos disponibles. Es la diferenci
 - el contrato Python distingue símbolos nativos de helpers puros y la auditoría objetiva
   pasa sin errores;
 - hay 73 juegos de baselines visuales y CI compara una muestra de 12 subsistemas;
-- video embebido y pistas `scene.audio(...)` comparten reloj de preview, seek, pausa y
+- video embebido y pistas `scene.media.audio(...)` comparten reloj de preview, seek, pausa y
   velocidad; la ruta depende de `ffmpeg`/`ffprobe`;
 - el wheel distribuible es deliberadamente una capa de autoría `py3-none-any`, sin
   extensión nativa ni renderer: ejecutar escenas requiere la aplicación;
@@ -137,8 +137,8 @@ ejecuta en CI.
 ### Multimedia y exportación
 
 - MP4/H.264, WebM/VP9, WebP animado, GIF y secuencia PNG;
-- preview y mezcla MP4/WebM de pistas declaradas con `scene.audio(...)`;
-- `scene.video(...)` como drawable sincronizado, con trim, loop, velocidad, volumen,
+- preview y mezcla MP4/WebM de pistas declaradas con `scene.media.audio(...)`;
+- `scene.media.video(...)` como drawable sincronizado, con trim, loop, velocidad, volumen,
   seek visual y audio embebido audible en preview;
 - decodificación secuencial durante playback y solicitudes coalescidas durante scrub;
 - proceso aislado para exportaciones 3D iniciadas desde el editor.
@@ -227,7 +227,7 @@ siguiendo un quickstart probado por release para cada plataforma declarada.
 
 ### 6. Audio unificado en preview — baseline cerrado
 
-El video embebido y `scene.audio(...)` se reproducen mediante el mismo sincronizador,
+El video embebido y `scene.media.audio(...)` se reproducen mediante el mismo sincronizador,
 incluyendo pausa, seek, velocidad, volumen y fades de pistas independientes.
 
 **Siguiente mejora:** añadir waveform cacheada y marcadores sin reconstruir

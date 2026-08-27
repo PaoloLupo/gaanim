@@ -17,7 +17,7 @@ circle_center = (-360.0, -20.0)
 radius_value = 120.0
 line_center = (180.0, -20.0)
 line_length = 600.0
-theta = scene.parameter(0.0)
+theta = scene.viz.parameter(0.0)
 
 title = scene.text("Movimiento circular y curva seno", role="title")
 title.fill(WHITE).at(0, 265, anchor=Anchor.CENTER)
@@ -25,14 +25,14 @@ caption = scene.text("Un solo ángulo gobierna ambas representaciones", role="su
 caption.fill(MUTED).at(0, 220, anchor=Anchor.CENTER)
 
 orbit = (
-    scene.circle(radius_value)
+    scene.geometry.circle(radius_value)
     .stroke(PRIMARY, 4)
     .no_fill()
     .at(*circle_center)
 )
-circle_ref = scene.polar_point(circle_center, radius_value, theta)
-circle_dot = scene.dot(10).fill(ACCENT).follow(circle_ref)
-radius = scene.tracking_line(circle_center, circle_ref).stroke(MUTED, 2).no_fill()
+circle_ref = scene.geometry.polar_point(circle_center, radius_value, theta)
+circle_dot = scene.geometry.dot(10).fill(ACCENT).follow(circle_ref)
+radius = scene.geometry.tracking_line(circle_center, circle_ref).stroke(MUTED, 2).no_fill()
 
 # Recta tipada: el cero está en el inicio y las etiquetas nacen de Axis.
 axis = (
@@ -47,7 +47,7 @@ axis = (
         label_color=MUTED,
     )
 )
-timeline = scene.number_line(axis, length=line_length)
+timeline = scene.viz.number_line(axis, length=line_length)
 timeline.drawable().at(*line_center)
 
 # La función se traza una vez y se muestrea de forma nativa. ±1 ocupa ±radius.
@@ -66,12 +66,12 @@ wave_ref = timeline.point_ref(
         inputs=[theta],
     ),
 )
-wave_dot = scene.dot(8).fill(ACCENT).follow(wave_ref)
-projection_line = scene.tracking_line(circle_ref, wave_ref)
+wave_dot = scene.geometry.dot(8).fill(ACCENT).follow(wave_ref)
+projection_line = scene.geometry.tracking_line(circle_ref, wave_ref)
 projection_line.stroke(ACCENT, 2).no_fill()
 
 formula = (
-    scene.equation("y(theta) = r sin(theta)", role="subtitle")
+    scene.text.equation("y(theta) = r sin(theta)", role="subtitle")
     .fill(WHITE)
     .at(0, -215, anchor=Anchor.CENTER)
 )

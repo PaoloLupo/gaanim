@@ -660,7 +660,10 @@ struct PreflightReport {
     warnings: Vec<String>,
 }
 
-fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> PreflightReport {
+fn presentation_preflight(
+    canvas: &gaanim_api::canvas::SceneModel,
+    source: &str,
+) -> PreflightReport {
     let manifest = canvas.segment_manifest();
     let mut report = PreflightReport {
         segment_count: manifest.segments.len(),
@@ -729,7 +732,7 @@ fn presentation_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> 
     report
 }
 
-fn scene_preflight(canvas: &gaanim_api::canvas::Canvas, source: &str) -> PreflightReport {
+fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> PreflightReport {
     let mut report = PreflightReport {
         duration: canvas.current_time(),
         ..default()
@@ -1338,7 +1341,7 @@ mod tests {
 
     #[test]
     fn segment_preflight_finds_expected_risks() {
-        let mut canvas = gaanim_api::canvas::Canvas::new(1920, 1080);
+        let mut canvas = gaanim_api::canvas::SceneModel::new(1920, 1080);
         canvas
             .segment_with(
                 "Opening",

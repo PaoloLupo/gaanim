@@ -30,12 +30,12 @@ subtitle = (
 title.write().duration(1.0).smooth()
 subtitle.write().duration(1.0).smooth()
 
-circle = c.circle(95.0).fill(BLUE).stroke(WHITE, 4.0).at(-260.0, -20.0)
+circle = c.geometry.circle(95.0).fill(BLUE).stroke(WHITE, 4.0).at(-260.0, -20.0)
 circle.create().duration(0.9).smooth()
 c.wait(0.3)
 
 diamond = (
-    c.rect(180.0, 180.0).fill(RED).stroke(WHITE, 4.0).at(260.0, 20.0).rotated(0.785398)
+    c.geometry.rect(180.0, 180.0).fill(RED).stroke(WHITE, 4.0).at(260.0, 20.0).rotated(0.785398)
 )
 circle.transform(diamond).duration(2.0).spring()
 c.wait(0.8)

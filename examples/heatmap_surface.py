@@ -30,7 +30,7 @@ surface = (
     .guides(color=Guide.colorbar(title="sin(x) cos(y)"))
 )
 
-chart = scene.chart(heatmap)
+chart = scene.viz.chart(heatmap)
 scene.play([chart.create(0.8)])
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
 scene.play([

@@ -29,8 +29,8 @@ CSS o un objeto `Color`.
 
 ```python
 title = scene.text("Movimiento circular", role="title").fill(WHITE).at(0, 250)
-orbit = scene.circle(140).stroke(BLUE, 4).no_fill()
-point = scene.dot(12).fill(YELLOW).at(140, 0)
+orbit = scene.geometry.circle(140).stroke(BLUE, 4).no_fill()
+point = scene.geometry.dot(12).fill(YELLOW).at(140, 0)
 ```
 
 Cada fábrica devuelve un objeto fluido. `fill`, `stroke`, `no_fill` y `at`

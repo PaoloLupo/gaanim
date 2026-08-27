@@ -22,10 +22,10 @@ scene = Scene(1280, 720, background="#0f172a", margin=48)
 title = scene.text("Movimiento circular", role="title")
 title.fill(WHITE).at(0, 260)
 
-orbit = scene.circle(120)
+orbit = scene.geometry.circle(120)
 orbit.stroke(BLUE, 4).no_fill().at(-320, 0)
 
-point = scene.dot(10)
+point = scene.geometry.dot(10)
 point.fill(YELLOW).at(-200, 0)
 
 scene.render()
@@ -51,7 +51,7 @@ los que seguimos describiendo un objeto registrado en `scene`.
 Separamos algunas llamadas en dos líneas para ver la intención:
 
 ```python
-orbit = scene.circle(120)
+orbit = scene.geometry.circle(120)
 orbit.stroke(BLUE, 4).no_fill().at(-320, 0)
 ```
 
@@ -73,7 +73,7 @@ será importante cuando el punto empiece a girar.
 Podemos hacer visible el radio:
 
 ```python
-radius = scene.line(-320, 0, -200, 0).stroke(WHITE, 2)
+radius = scene.geometry.line(-320, 0, -200, 0).stroke(WHITE, 2)
 ```
 
 Añade esa línea antes de `scene.render()`.

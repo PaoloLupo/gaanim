@@ -10,11 +10,11 @@ scene = Scene(1280, 720, background=BLACK)
 title = scene.text("Descomponer una masa", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
 
 compact = (
-    scene.equation("E =", part("mass", "m"), "c^2")
+    scene.text.equation("E =", part("mass", "m"), "c^2")
     .at(0, 20, anchor=Anchor.CENTER)
 )
 expanded = (
-    scene.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
+    scene.text.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
     .at(0, 20, anchor=Anchor.CENTER)
 )
 caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").at(0, -170, anchor=Anchor.CENTER)

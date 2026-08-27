@@ -9,7 +9,7 @@ scene = Scene(1280, 720, background=WHITE, margin=56)
 
 title = scene.text("Typst-native layouts", role="title").fill(GREEN).at(0, 260, anchor=Anchor.CENTER)
 caption = scene.text("Document table and mathematical matrix", role="subtitle").fill(GRAY).at(0, 205, anchor=Anchor.CENTER)
-table = scene.typst('''
+table = scene.text.typst('''
     #import "@preview/simple-plot:1.0.0": plot
 
 
@@ -28,7 +28,7 @@ table = scene.typst('''
       (fn: x => calc.cos(x), stroke: red + 1.2pt, samples: 200, label: $cos(x)$, label-pos: 1.0, label-side: "above-left"),
     )
 ''').scaled(2).at(-220, -35)
-matrix = scene.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).at(285, -35, anchor=Anchor.CENTER)
+matrix = scene.text.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).at(285, -35, anchor=Anchor.CENTER)
 
 scene.play([
     title.write().duration(0.55),

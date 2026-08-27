@@ -7,9 +7,9 @@ Makie original:
     record 1:120 (50 pasos/frame) + azimuth = 1.7π + 0.3*sin(2π*frame/120)
 
 Gaanim ahora (genérico, no Lorenz-específico):
-    - scene.polyline_3d(points, colormap="inferno") → per-vertex gradient en un draw call
+    - scene.geometry.polyline_3d(points, colormap="inferno") → per-vertex gradient en un draw call
     - dot.add_updater_fn(callback) → callback(pos, dt, elapsed) -> (x,y,z) genérico
-    - scene.traced_path_3d(dot, colormap="inferno", max_points=6000) → trail reactivo 3D
+    - scene.geometry.traced_path_3d(dot, colormap="inferno", max_points=6000) → trail reactivo 3D
 
 Ejecuta:
     .venv/Scripts/Activate.ps1; cargo run -p gaanim_launcher -- examples/lorenz_3d_demo.py
@@ -24,7 +24,7 @@ from gaanim import Axis, Scene, Color, WHITE, GOLD, CYAN
 # ---------------------------------------------------------------------------
 scene = Scene(1920, 1080, background=Color(10, 10, 14))
 
-axes = scene.cartesian_3d(
+axes = scene.viz.cartesian_3d(
     Axis.linear(-30, 30).ticks(10).label("x").style(color=WHITE),
     Axis.linear(-30, 30).ticks(10).label("y").style(color=WHITE),
     Axis.linear(0, 50).ticks(10).label("z").style(color=WHITE),
@@ -61,18 +61,18 @@ for _ in range(120):
 # Ahora con la nueva API: un solo polyline con gradiente inferno por vértice
 # (antes había que partir en 60 segmentos manuales)
 # Fondo estático inicialmente oculto para que se vea la generación progresiva
-static_trail = scene.polyline_3d(points, colormap="inferno")
+static_trail = scene.geometry.polyline_3d(points, colormap="inferno")
 static_trail.opacity(0.0)  # aparece al final como referencia tenue
 
 # También funciona con lista explícita de colores:
 # colors = [Color(255,0,0) if i%2==0 else Color(0,255,0) for i in range(len(points))]
-# scene.polyline_3d(points, colors=colors)
+# scene.geometry.polyline_3d(points, colors=colors)
 
 # ---------------------------------------------------------------------------
 # 3. Opción B: Dinámico reactivo (fiel a Makie `record` + `push!(points, step!)`)
 #    Dot que integra Lorenz vía updater genérico + trail 3D que crece solo.
 # ---------------------------------------------------------------------------
-dot = scene.dot(7).fill(WHITE).at_3d(1, 1, 1).billboard()
+dot = scene.geometry.dot(7).fill(WHITE).at_3d(1, 1, 1).billboard()
 
 def reset_lorenz():
     # El estado está en la posición del dot, que Gaanim restaura automáticamente.
@@ -97,11 +97,11 @@ dot.add_updater_fn(lorenz_step, reset=reset_lorenz, fixed_dt=1.0/600.0)
 # Trail reactivo 3D con colormap inferno por tiempo (como Makie `color=colors`)
 # max_points ~6000, min_distance filtra puntos muy cercanos para performance
 # Este es el que GENERA progresivamente el Lorenz a medida que el dot avanza
-trail = scene.traced_path_3d(dot, colormap="inferno", max_points=6000, min_distance=0.35)
+trail = scene.geometry.traced_path_3d(dot, colormap="inferno", max_points=6000, min_distance=0.35)
 
 # Marcadores
 origin_tag = scene.text("origen").fill(Color(120,200,120)).at_3d(0,0,2).billboard().scaled(0.45)
-head_glow = scene.dot(10).fill(Color(255,255,220)).at_3d(1,1,1).billboard()
+head_glow = scene.geometry.dot(10).fill(Color(255,255,220)).at_3d(1,1,1).billboard()
 head_glow.bind_position_from(dot, "xyz")  # sigue al dot en XYZ (perspectiva)
 head_glow.opacity(0.35)
 

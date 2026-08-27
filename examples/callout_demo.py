@@ -8,10 +8,10 @@ from gaanim import BLACK, BLUE, NAVY, WHITE, Scene
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
 title = scene.text("Reactive callouts", role="title").fill(WHITE).at(0, 250)
-rail = scene.line(-420, -90, 420, -90).stroke(WHITE, 4)
-mass = scene.dot(28).fill(BLUE).stroke(WHITE, 3).at(-300, -90)
+rail = scene.geometry.line(-420, -90, 420, -90).stroke(WHITE, 4)
+mass = scene.geometry.dot(28).fill(BLUE).stroke(WHITE, 3).at(-300, -90)
 
-callout = scene.callout(
+callout = scene.slides.callout(
     "Moving mass",
     mass,
     offset=(170, 118),

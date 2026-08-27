@@ -1,13 +1,13 @@
 //! Canonical export helpers for `gaanim_api` scenes.
 //!
-//! Language bindings should construct a [`Canvas`](crate::canvas::Canvas) and
+//! Language bindings should construct a [`SceneModel`](crate::canvas::SceneModel) and
 //! call these helpers instead of duplicating Bevy/world setup.
 
 use std::collections::HashSet;
 
 use gaanim_export::prelude::{ExportError, export_scene, export_scene_direct};
 
-use crate::canvas::Canvas;
+use crate::canvas::SceneModel;
 use crate::runtime::replay_canvas_into;
 
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
@@ -33,8 +33,8 @@ pub enum SegmentExportError {
     Export(#[from] ExportError),
 }
 
-/// Export a Canvas using the supplied `gaanim_export::ExportConfig`.
-pub fn export_canvas(canvas: Canvas, mut config: ExportConfig) -> Result<(), ExportError> {
+/// Export a SceneModel using the supplied `gaanim_export::ExportConfig`.
+pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(), ExportError> {
     config.audio_tracks.extend(canvas.audio_tracks.clone());
     if config.headless && !canvas.has_native_3d_content() {
         export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
@@ -45,7 +45,7 @@ pub fn export_canvas(canvas: Canvas, mut config: ExportConfig) -> Result<(), Exp
 
 /// Export one segment while preserving all other export settings.
 pub fn export_canvas_segment(
-    canvas: Canvas,
+    canvas: SceneModel,
     segment_name: &str,
     mut config: ExportConfig,
 ) -> Result<(), SegmentExportError> {
@@ -73,7 +73,7 @@ pub fn export_canvas_segment(
 /// `{segment}` expands to a filesystem-safe segment name and `{index}` to a
 /// one-based, zero-padded index.
 pub fn export_canvas_segments(
-    canvas: Canvas,
+    canvas: SceneModel,
     output_template: &str,
     config: ExportConfig,
 ) -> Result<Vec<String>, SegmentExportError> {
@@ -164,7 +164,7 @@ fn safe_segment_filename(name: &str) -> String {
 
 /// Convenience helper for the common headless export path.
 pub fn export_canvas_to_path(
-    canvas: Canvas,
+    canvas: SceneModel,
     output_path: &str,
     fps: Option<u32>,
     transparent: Option<bool>,
@@ -189,7 +189,7 @@ mod tests {
         ExportConfig, SegmentExportError, apply_segment_range, export_canvas_segment,
         export_canvas_segments, safe_segment_filename, segment_output_path,
     };
-    use crate::canvas::Canvas;
+    use crate::canvas::SceneModel;
 
     #[test]
     fn segment_names_become_portable_filenames() {
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn segment_export_validation_happens_before_rendering() {
-        let canvas = Canvas::new(640, 360);
+        let canvas = SceneModel::new(640, 360);
         assert!(matches!(
             export_canvas_segment(
                 canvas.clone(),
@@ -228,7 +228,7 @@ mod tests {
             Err(SegmentExportError::MissingPathPlaceholder)
         ));
 
-        let mut colliding = Canvas::new(640, 360);
+        let mut colliding = SceneModel::new(640, 360);
         colliding.segment("A+B", None).unwrap();
         colliding.wait(0.1);
         colliding.segment("A B", None).unwrap();
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn explicit_stops_do_not_change_segment_export_ranges() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.segment("intro", None).unwrap();
         canvas.wait(1.0);
         canvas.stop(Some("ready".to_string())).unwrap();

@@ -1,4 +1,4 @@
-//! Canvas — the top-level facade for building Gaanim animations.
+//! SceneModel — the top-level facade for building Gaanim animations.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -33,14 +33,14 @@ use crate::canvas::{
 };
 use crate::export::{AudioTrack, AudioTrackError};
 
-/// A validated audio declaration that can be activated by [`Canvas::play_items`].
+/// A validated audio declaration that can be activated by [`SceneModel::play_items`].
 #[derive(Debug, Clone)]
 pub struct AudioClip {
     track: AudioTrack,
     state: SharedCanvasState,
 }
 
-/// A timeline-synchronized video declaration activated by [`Canvas::play_items`].
+/// A timeline-synchronized video declaration activated by [`SceneModel::play_items`].
 #[derive(Debug, Clone)]
 pub struct VideoClip {
     pub drawable: DrawableHandle,
@@ -50,7 +50,7 @@ pub struct VideoClip {
     activated: Arc<AtomicBool>,
 }
 
-/// A timeline-synchronized Lottie declaration activated by [`Canvas::play_items`].
+/// A timeline-synchronized Lottie declaration activated by [`SceneModel::play_items`].
 #[derive(Debug, Clone)]
 pub struct LottieClip {
     pub drawable: DrawableHandle,
@@ -388,7 +388,7 @@ pub enum CameraBindingError {
     InvalidDimension,
 }
 
-/// Optional annotation behavior for [`Canvas::dimension_between_with_options`].
+/// Optional annotation behavior for [`SceneModel::dimension_between_with_options`].
 #[derive(Debug, Clone)]
 pub struct DimensionOptions {
     pub label: Option<String>,
@@ -437,7 +437,7 @@ pub struct ThemeError {
     pub name: String,
 }
 
-/// Failures while decoding a raster image requested by `Canvas::image`.
+/// Failures while decoding a raster image requested by `SceneModel::image`.
 #[derive(Debug, thiserror::Error)]
 pub enum ImageLoadError {
     #[error("could not load image '{path}': {source}")]
@@ -450,7 +450,7 @@ pub enum ImageLoadError {
     Options(#[from] ImageOptionsError),
 }
 
-/// Failures while validating or opening a video requested by `Canvas::video`.
+/// Failures while validating or opening a video requested by `SceneModel::video`.
 #[derive(Debug, thiserror::Error)]
 pub enum VideoLoadError {
     #[error(transparent)]
@@ -605,7 +605,7 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
 
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
-pub struct Canvas {
+pub struct SceneModel {
     pub width: u32,
     pub height: u32,
     pub background: Option<Color>,
@@ -637,7 +637,7 @@ pub struct Canvas {
     pub(crate) state: SharedCanvasState,
 }
 
-impl Canvas {
+impl SceneModel {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
@@ -743,7 +743,7 @@ impl Canvas {
     /// components. `presentation` adds a warmer, higher-contrast hierarchy for
     /// projected slides. `paper` provides a light documentation canvas.
     /// Calling this method also selects the theme background; callers can
-    /// still override [`Canvas::background`] afterwards.
+    /// still override [`SceneModel::background`] afterwards.
     pub fn set_theme(&mut self, name: &str) -> Result<(), ThemeError> {
         self.apply_theme(CanvasTheme::builtin(name)?);
         Ok(())
@@ -1825,7 +1825,7 @@ impl Canvas {
             gaanim_text::prelude::TextStyle::default(),
             gaanim_text::prelude::TextFlow::default(),
         )
-        .expect("Canvas::text received invalid text; public bindings validate input first");
+        .expect("SceneModel::text received invalid text; public bindings validate input first");
         self.text_spec(spec)
     }
 
@@ -3321,7 +3321,7 @@ impl Canvas {
     }
 
     /// Spawn a hidden dot that follows `curve` at the normalized value of
-    /// `tracker`; reveal it with an entry animation in `Canvas::play`.
+    /// `tracker`; reveal it with an entry animation in `SceneModel::play`.
     ///
     /// The tracker is clamped to `[0, 1]` and sampled by native arc length, so
     /// `0` is the first polyline point and `1` is the last one.
@@ -3455,7 +3455,7 @@ impl Canvas {
 
     /// Spawn a hidden traced path that accumulates the trajectory of `source`
     /// as a continuous line. The returned drawable's Path2D is regenerated
-    /// every frame and revealed by an entry animation in `Canvas::play`.
+    /// every frame and revealed by an entry animation in `SceneModel::play`.
     pub fn traced_path(&mut self, source: &DrawableHandle) -> DrawableHandle {
         self.traced_path_with_options(source, None, None, 1.0)
     }
@@ -4007,17 +4007,18 @@ impl Canvas {
         let ground_y = -s * 0.82;
         let transform =
             |xy: DVec2| Self::transform_symbol_point(xy, DVec2::ZERO, direction.truncate());
-        let line_from_points = |canvas: &mut Canvas, points: &[DVec2], width: f64, color: Color| {
-            let points = points
-                .iter()
-                .map(|point| {
-                    let p = transform(*point);
-                    (p.x, p.y)
-                })
-                .collect::<Vec<_>>();
-            canvas.polyline(&points).no_fill().stroke(color, width)
-        };
-        let polygon_from_points = |canvas: &mut Canvas, points: &[DVec2]| {
+        let line_from_points =
+            |canvas: &mut SceneModel, points: &[DVec2], width: f64, color: Color| {
+                let points = points
+                    .iter()
+                    .map(|point| {
+                        let p = transform(*point);
+                        (p.x, p.y)
+                    })
+                    .collect::<Vec<_>>();
+                canvas.polyline(&points).no_fill().stroke(color, width)
+            };
+        let polygon_from_points = |canvas: &mut SceneModel, points: &[DVec2]| {
             let points = points
                 .iter()
                 .map(|point| {
@@ -4217,7 +4218,7 @@ impl Canvas {
             _ => {}
         }
 
-        let empty_group = |canvas: &mut Canvas| canvas.group_no_center(&[]);
+        let empty_group = |canvas: &mut SceneModel| canvas.group_no_center(&[]);
         let body_refs = body_parts.iter().collect::<Vec<_>>();
         let ground_refs = ground_parts.iter().collect::<Vec<_>>();
         let roller_refs = roller_parts.iter().collect::<Vec<_>>();
@@ -4503,7 +4504,7 @@ impl Canvas {
 
     /// Spawn a hidden tracking line — a reactive line whose endpoints follow
     /// entities or remain at fixed positions. Updated every frame and revealed
-    /// by an entry animation in `Canvas::play`.
+    /// by an entry animation in `SceneModel::play`.
     ///
     /// Endpoints can be `DrawableHandle` references (their `.id` is used) or
     /// static `(f64, f64)` positions passed as tuples.
@@ -4699,7 +4700,7 @@ impl Canvas {
             });
         }
 
-        let text_part = |canvas: &mut Canvas, text: &str| {
+        let text_part = |canvas: &mut SceneModel, text: &str| {
             let mut style = gaanim_text::prelude::TextStyle::default();
             style.size = Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
             style.color = options.color;
@@ -4827,7 +4828,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("title.typ"), "= Asset-backed Typst").unwrap();
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.set_asset_root(&root).unwrap();
         let handle = canvas.typst_asset("title.typ").unwrap();
         let spec = handle.spec.lock().unwrap();
@@ -4839,7 +4840,7 @@ mod tests {
 
     #[test]
     fn surrounding_rect_validates_geometry_and_tracks_retarget_cursor() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let left = canvas.circle(20.0);
         let right = canvas.rect(80.0, 30.0);
         assert!(matches!(
@@ -4870,7 +4871,7 @@ mod tests {
         fn test_title(&mut self, source: &str) -> DrawableHandle;
     }
 
-    impl UnifiedTextFixture for Canvas {
+    impl UnifiedTextFixture for SceneModel {
         fn math_text(&mut self, source: &str) -> DrawableHandle {
             self.text(&format!("${source}$"))
         }
@@ -4887,7 +4888,7 @@ mod tests {
         }
     }
 
-    fn compile_updater_count(canvas: &Canvas) -> usize {
+    fn compile_updater_count(canvas: &SceneModel) -> usize {
         let mut world = World::new();
         world.insert_resource(Timeline::new());
         world.insert_resource(gaanim_text::font::FontRegistry::new());
@@ -4902,7 +4903,7 @@ mod tests {
 
     #[test]
     fn step_equation_preserves_explicit_tag_mapping_and_occurrence() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let source = canvas
             .math_text("x + x = 2x")
             .define_tag("right_x", "x", Some(1));
@@ -4939,7 +4940,7 @@ mod tests {
 
     #[test]
     fn text_selection_compound_properties_seek_only_selected_glyphs() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let text = canvas.text("ABC");
         let selection = text.select("B");
         let red = Color::from_rgb8(255, 0, 0);
@@ -5004,7 +5005,7 @@ mod tests {
 
     #[test]
     fn custom_updater_survives_preview_and_export_recompilation() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let dot = canvas.dot(8.0);
         dot.add_custom_updater(gaanim_animation::Updater::new(
             |_dt, _elapsed, _entity, _world| true,
@@ -5016,7 +5017,7 @@ mod tests {
 
     #[test]
     fn reactive_objects_do_not_run_before_their_authored_cursor() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         canvas.wait(2.0);
         let dot = canvas.dot(8.0);
         dot.add_custom_updater(gaanim_animation::Updater::new(
@@ -5057,7 +5058,7 @@ mod tests {
 
     #[test]
     fn traced_path_requires_an_explicit_entry_animation() {
-        let mut hidden_canvas = Canvas::new(320, 180);
+        let mut hidden_canvas = SceneModel::new(320, 180);
         let hidden_dot = hidden_canvas.dot(8.0);
         let _hidden_trail = hidden_canvas.traced_path(&hidden_dot);
         hidden_canvas.wait(1.0);
@@ -5076,7 +5077,7 @@ mod tests {
             .unwrap();
         assert_eq!(hidden_opacity.0, 0.0);
 
-        let mut animated_canvas = Canvas::new(320, 180);
+        let mut animated_canvas = SceneModel::new(320, 180);
         let animated_dot = animated_canvas.dot(8.0);
         let animated_trail = animated_canvas.traced_path(&animated_dot);
         animated_canvas.play(vec![animated_trail.fade_in(1.0)]);
@@ -5103,7 +5104,7 @@ mod tests {
 
     #[test]
     fn reactive_visuals_require_their_own_play_entry() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let anchor = canvas.dot(8.0).at(-60.0, 0.0);
         let mass = canvas.dot(8.0).at(60.0, 0.0);
         let spring = canvas.spring_between_with_crossing(
@@ -5135,7 +5136,7 @@ mod tests {
         world.flush();
 
         let opacity_for = |world: &mut World, id: gaanim_core::ObjectId| {
-            // SceneBuilder's id counter starts at zero while Canvas ids start
+            // SceneBuilder's id counter starts at zero while SceneModel ids start
             // at one; the test resolves the corresponding compiled root.
             let compiled_id = gaanim_core::ObjectId::from_raw(id.as_raw() - 1);
             let mut query = world.query::<(&gaanim_scene::MobjectId, &Opacity)>();
@@ -5166,7 +5167,7 @@ mod tests {
 
     #[test]
     fn line_between_accepts_static_and_anchor_endpoints() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let reference = canvas.rect(100.0, 40.0).at(30.0, 40.0);
         let anchor = reference.anchor_point(Anchor::TopRight, DVec3::ZERO);
         canvas.line_between(
@@ -5201,7 +5202,7 @@ mod tests {
 
     #[test]
     fn deferred_group_fade_in_reveals_deferred_children() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let anchor = canvas.dot(8.0).at(-60.0, 0.0);
         let child = canvas.dot(8.0);
         child.follow_to(&anchor, 0.0, 24.0);
@@ -5240,7 +5241,7 @@ mod tests {
 
     #[test]
     fn moving_a_group_does_not_reveal_unentered_deferred_children() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let anchor = canvas.dot(8.0).at(-60.0, 0.0);
         let mass = canvas.dot(8.0).at(60.0, 0.0);
         let spring = canvas.spring_between(
@@ -5297,7 +5298,7 @@ mod tests {
 
     #[test]
     fn moving_a_group_to_a_target_carries_a_fixed_support_and_ordinary_member_together() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let support = canvas.support_at(
             CanvasEndpoint::Static(DVec3::new(-60.0, 40.0, 0.0)),
             "fixed",
@@ -5366,7 +5367,7 @@ mod tests {
     #[test]
     fn writing_or_creating_a_group_keeps_updater_coordinates_and_reveals_deferred_members() {
         for use_write in [true, false] {
-            let mut canvas = Canvas::new(320, 180);
+            let mut canvas = SceneModel::new(320, 180);
             let mass = canvas.dot(8.0).at(60.0, -40.0);
             mass.add_custom_updater(gaanim_animation::Updater::new(
                 |_dt, _elapsed, entity, world| {
@@ -5426,7 +5427,7 @@ mod tests {
     fn paper_theme_uses_dark_text_fills() {
         use gaanim_text::prelude::TextRole;
 
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas
             .set_theme("paper")
             .expect("paper is a built-in theme");
@@ -5450,7 +5451,7 @@ mod tests {
     fn direct_font_overrides_win_over_themes() {
         use gaanim_text::prelude::TextRole;
 
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas
             .set_fonts(
                 Some("Inter".into()),
@@ -5468,7 +5469,7 @@ mod tests {
 
     #[test]
     fn reactive_annotations_share_one_default_text_size() {
-        let mut canvas = Canvas::new(1920, 1080);
+        let mut canvas = SceneModel::new(1920, 1080);
         let origin = CanvasEndpoint::Static(DVec3::ZERO);
         let tip = CanvasEndpoint::Static(DVec3::new(120.0, 0.0, 0.0));
         let angle = canvas
@@ -5533,7 +5534,7 @@ mod tests {
 
     #[test]
     fn mechanism_create_and_write_start_with_every_reactive_path_hidden() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let pivot = CanvasEndpoint::Static(DVec3::new(-120.0, 80.0, 0.0));
         let support = canvas.support_at(pivot.clone(), "fixed", DVec3::NEG_Y, 48.0, 72.0, None);
         let angle = canvas
@@ -5609,7 +5610,7 @@ mod tests {
 
     #[test]
     fn angle_color_applies_to_the_reactive_numeric_value() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let gold = Color::from_rgb8(255, 200, 0);
         let angle = canvas
             .angle_between_with_options(
@@ -5677,7 +5678,7 @@ mod tests {
 
     #[test]
     fn force_color_applies_to_the_reactive_numeric_value_after_fade_and_seek() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas
             .set_theme("technical")
             .expect("technical is a built-in theme");
@@ -5738,7 +5739,7 @@ mod tests {
     fn presentation_theme_uses_projector_contrast() {
         use gaanim_text::prelude::TextRole;
 
-        let mut canvas = Canvas::new(1920, 1080);
+        let mut canvas = SceneModel::new(1920, 1080);
         canvas
             .set_theme("presentation")
             .expect("presentation is a built-in theme");
@@ -5759,7 +5760,7 @@ mod tests {
     fn known_color_scheme_drives_text_and_components_from_one_palette() {
         use gaanim_text::prelude::TextRole;
 
-        let mut canvas = Canvas::new(1920, 1080);
+        let mut canvas = SceneModel::new(1920, 1080);
         canvas.set_theme("dracula").expect("dracula is built in");
         let theme = canvas.theme_style.as_ref().unwrap();
 
@@ -5778,7 +5779,7 @@ mod tests {
     #[test]
     fn explicit_background_survives_later_theme_changes() {
         let explicit = Color::from_rgb8(0x12, 0x34, 0x56);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.set_background(Some(explicit));
         canvas.set_theme("paper").unwrap();
         assert_eq!(canvas.background, Some(explicit));
@@ -5790,8 +5791,8 @@ mod tests {
         let blue = Color::from_rgb8(0x25, 0x63, 0xEB);
         let gradient = gaanim_core::peniko::Gradient::new_linear((-320.0, 0.0), (320.0, 0.0))
             .with_stops([(0.0, navy), (1.0, blue)]);
-        let mut canvas =
-            Canvas::new(640, 360).background_brush(gaanim_core::peniko::Brush::Gradient(gradient));
+        let mut canvas = SceneModel::new(640, 360)
+            .background_brush(gaanim_core::peniko::Brush::Gradient(gradient));
 
         assert_eq!(canvas.background, Some(navy));
         assert!(matches!(
@@ -5807,7 +5808,7 @@ mod tests {
 
     #[test]
     fn theme_classes_propagate_through_nested_groups() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let first = canvas.circle(20.0);
         let second = canvas.square(30.0);
         let inner = canvas.group(&[&first, &second]);
@@ -5903,7 +5904,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let svg = canvas.svg(&temp).unwrap();
         std::fs::remove_file(temp).unwrap();
 
@@ -5956,7 +5957,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         canvas.svg(&temp).unwrap().scaled(2.0);
         std::fs::remove_file(temp).unwrap();
 
@@ -6006,7 +6007,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let svg = canvas.svg(&temp).unwrap();
         canvas.play(vec![svg.create(1.0)]);
         std::fs::remove_file(temp).unwrap();
@@ -6038,7 +6039,7 @@ mod tests {
 
     #[test]
     fn play_with_lag_offsets_delays_and_cursor() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.circle(20.0);
         let second = canvas.circle(20.0);
 
@@ -6058,7 +6059,7 @@ mod tests {
 
     #[test]
     fn compound_property_animation_queues_once_and_regroups_as_one_anim() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let shape = canvas.circle(20.0).fill(Color::WHITE);
 
         let pending = shape.animate().duration(2.0);
@@ -6102,7 +6103,7 @@ mod tests {
 
     #[test]
     fn move_to_anchor_places_the_requested_anchor_at_the_target() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let rect = canvas.rect(100.0, 60.0).at(-120.0, 0.0);
         canvas.play(vec![
             rect.move_to_anchor(80.0, 40.0, Anchor::TopRight)
@@ -6136,7 +6137,7 @@ mod tests {
 
     #[test]
     fn move_to_anchor_point_animates_center_to_reference_anchor() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let reference = canvas.rect(100.0, 40.0).at(50.0, 20.0);
         let moving = canvas.rect(10.0, 6.0).at(-100.0, -80.0);
         let point = reference.anchor_point(
@@ -6184,7 +6185,7 @@ mod tests {
 
     #[test]
     fn primitive_3d_color_property_preserves_other_material_channels() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let original = gaanim_scene::Material3D::metal(Color::WHITE);
         let cube = canvas.cube(2.0, original).expect("valid cube");
         let target_color = Color::from_rgb8(32, 96, 224);
@@ -6211,7 +6212,7 @@ mod tests {
 
     #[test]
     fn camera_animation_can_be_regrouped_with_drawables() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let marker = canvas.circle(20.0);
         let marker_anim = marker.fade_in(2.0);
         let camera_anim = canvas.camera_orbit(0.5, 0.1, 2.0).linear().delay(0.25);
@@ -6235,7 +6236,7 @@ mod tests {
 
     #[test]
     fn play_builders_counts_existing_delays_in_cursor() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.circle(20.0);
         let second = canvas.circle(20.0);
 
@@ -6251,7 +6252,7 @@ mod tests {
 
     #[test]
     fn scene_object_commands_deduplicate_and_reject_foreign_drawables() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let title = canvas.test_title("Persistent title");
         canvas.segment("next", None).unwrap();
         canvas
@@ -6278,7 +6279,7 @@ mod tests {
         );
         drop(guard);
 
-        let mut other = Canvas::new(1280, 720);
+        let mut other = SceneModel::new(1280, 720);
         let foreign = other.circle(20.0);
         assert!(matches!(
             canvas.persist(&foreign),
@@ -6288,7 +6289,7 @@ mod tests {
 
     #[test]
     fn reuse_persist_and_release_schedule_reversible_scene_membership() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let title = canvas.test_title("Shared title");
         canvas.wait(1.0);
 
@@ -6418,7 +6419,7 @@ mod tests {
 
     #[test]
     fn reuse_from_a_nonadjacent_segment_enters_with_the_destination() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let marker = canvas.circle(24.0);
         canvas.wait(0.5);
         canvas.segment("middle", Some(TransitionType::Cut)).unwrap();
@@ -6471,7 +6472,7 @@ mod tests {
 
     #[test]
     fn persistent_object_stays_fixed_for_the_entire_slide_transition() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let title = canvas.test_title("KEEP");
         canvas.wait(1.0);
         canvas.persist(&title).unwrap();
@@ -6530,7 +6531,7 @@ mod tests {
 
     #[test]
     fn late_reuse_changes_membership_at_the_current_cursor() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let marker = canvas.circle(24.0);
         canvas.wait(1.0);
         canvas
@@ -6607,7 +6608,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let left = canvas.circle(20.0);
         let right = canvas.square(40.0);
         let group = canvas.group(&[&left, &right]);
@@ -6640,7 +6641,7 @@ mod tests {
 
     #[test]
     fn persistent_transform_does_not_localize_its_source() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let source = canvas.test_title("Source");
         canvas.persist(&source).unwrap();
         canvas.wait(0.5);
@@ -6669,7 +6670,7 @@ mod tests {
 
     #[test]
     fn cross_segment_transform_does_not_retag_source_in_initial_snapshot() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas.segment("first", None).unwrap();
         let circle = canvas.circle(40.0);
         let diamond = canvas.rect(80.0, 80.0);
@@ -6714,7 +6715,7 @@ mod tests {
 
     #[test]
     fn tracker_arc_compiles_with_signal_and_regenerator() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let tracker = canvas.value_tracker(0.4);
         let _arrow = canvas.always_redraw_arc(&tracker, 0.0, 0.0, 120.0, 0.0, 0.4, 1.0, 0.0);
         canvas.play(vec![tracker.animate_value_to(1.2).duration(1.0)]);
@@ -6767,7 +6768,7 @@ mod tests {
 
     #[test]
     fn group_pivot_is_preserved_in_the_compiled_transform() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let rail = canvas.line(40.0, 0.0, 140.0, 0.0);
         let _mechanism = canvas.group(&[&rail]).with_pivot(100.0, -18.0);
 
@@ -6795,7 +6796,7 @@ mod tests {
 
     #[test]
     fn axes_compile_grid_lines_and_ticks_with_independent_styles() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let axis_color = Color::from_rgb8(0x11, 0x22, 0x33);
         let grid_color = Color::from_rgb8(0x44, 0x55, 0x66);
         let tick_color = Color::from_rgb8(0x77, 0x88, 0x99);
@@ -6836,7 +6837,7 @@ mod tests {
 
     #[test]
     fn reactive_spring_regenerates_a_helical_path() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let _spring = canvas.spring_between_with_crossing(
             crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(-80.0, 0.0, 0.0)),
             crate::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(80.0, 0.0, 0.0)),
@@ -6869,7 +6870,7 @@ mod tests {
 
     #[test]
     fn spring_support_uses_local_geometry_instead_of_a_tracking_spring() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let _support = canvas.support_at(
             CanvasEndpoint::Static(DVec3::new(80.0, 45.0, 0.0)),
             "spring",
@@ -6892,7 +6893,7 @@ mod tests {
 
     #[test]
     fn fixed_support_uses_connection_plate_without_a_stem() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let support = canvas.support_at(
             CanvasEndpoint::Static(DVec3::ZERO),
             "fixed",
@@ -6918,7 +6919,7 @@ mod tests {
 
     #[test]
     fn anchored_bar_and_labeled_dimension_compile_the_reactive_contract() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let frame = canvas.rect(180.0, 80.0).at(20.0, 0.0);
         let left = frame.anchor_point(Anchor::TopLeft, DVec3::ZERO);
         let right = frame.anchor_point(Anchor::TopRight, DVec3::ZERO);
@@ -7027,7 +7028,7 @@ mod tests {
 
     #[test]
     fn explicit_dimension_value_uses_parameter_without_driving_geometry() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let value = canvas.parameter(12.0).unwrap();
         let dimension = canvas
             .dimension_between_with_options(
@@ -7089,7 +7090,7 @@ mod tests {
 
     #[test]
     fn component_force_keeps_physical_readout_separate_from_visual_scale() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let fx = canvas.parameter(3.0).unwrap();
         let fy = canvas.parameter(4.0).unwrap();
         let force = canvas
@@ -7147,7 +7148,7 @@ mod tests {
 
     #[test]
     fn segments_use_absolute_ranges_and_only_explicit_stops_pause() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let intro = canvas
             .segment_with("intro", None, Some("Opening".to_string()), None)
             .unwrap();
@@ -7188,7 +7189,7 @@ mod tests {
             std::env::temp_dir().join(format!("gaanim-declared-audio-{}.wav", std::process::id()));
         std::fs::write(&path, b"fixture").unwrap();
 
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas.segment("intro", None).unwrap();
         canvas.wait(2.0);
         canvas.segment("audio", None).unwrap();
@@ -7219,7 +7220,7 @@ mod tests {
         ));
         std::fs::write(&path, b"fixture").unwrap();
 
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas.wait(1.25);
         let audio = canvas.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
         canvas.play_items(vec![audio.into()], 0.0).unwrap();
@@ -7235,7 +7236,7 @@ mod tests {
             std::env::temp_dir().join(format!("gaanim-declared-video-{}.mp4", std::process::id()));
         std::fs::write(&path, b"fixture").unwrap();
 
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas.wait(1.5);
         let playback = gaanim_media::VideoPlayback {
             path: path.clone(),
@@ -7302,7 +7303,7 @@ mod tests {
 
     #[test]
     fn segments_validate_names_links_and_duplicate_stops() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         assert!(matches!(
             canvas.segment("  ", None),
             Err(SegmentError::EmptyName)
@@ -7326,14 +7327,14 @@ mod tests {
                 .is_ok()
         );
 
-        let mut foreign_canvas = Canvas::new(1280, 720);
+        let mut foreign_canvas = SceneModel::new(1280, 720);
         let foreign = foreign_canvas.segment("foreign", None).unwrap();
         assert!(matches!(
             canvas.link(&foreign, &second, TransitionType::Cut),
             Err(SegmentError::ForeignSegment)
         ));
 
-        let mut unicode_canvas = Canvas::new(1280, 720);
+        let mut unicode_canvas = SceneModel::new(1280, 720);
         unicode_canvas.segment("ÁREA", None).unwrap();
         assert!(matches!(
             unicode_canvas.segment("área", None),
@@ -7343,7 +7344,7 @@ mod tests {
 
     #[test]
     fn segment_template_metadata_is_preserved() {
-        let mut canvas = Canvas::new(1000, 600);
+        let mut canvas = SceneModel::new(1000, 600);
         canvas
             .segment_with("content", None, None, Some("lecture".to_string()))
             .unwrap();
@@ -7355,7 +7356,7 @@ mod tests {
     fn segment_backgrounds_compile_with_scene_fallback_and_terminal_stop_hold() {
         let scene_color = Color::from_rgb8(10, 20, 30);
         let segment_color = Color::from_rgb8(40, 50, 60);
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.set_background(Some(scene_color));
         canvas
             .segment_with_background(
@@ -7390,7 +7391,7 @@ mod tests {
 
     #[test]
     fn segment_layout_aliases_and_branding_are_reusable() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         canvas.set_branding(PresentationBrand {
             footer: Some("Slides · Research Lab".to_owned()),
             show_on_cover: false,
@@ -7434,7 +7435,7 @@ mod tests {
 
     #[test]
     fn required_constraint_conflicts_fail_during_authoring() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let object = canvas.circle(10.0);
         let left = gaanim_layout::LayoutExpression::variable(
             gaanim_layout::LayoutId(object.id.as_raw()),
@@ -7457,7 +7458,7 @@ mod tests {
 
     #[test]
     fn weak_constraint_diagnostics_are_available_before_compile() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let object = canvas.circle(10.0);
         let left = gaanim_layout::LayoutExpression::variable(
             gaanim_layout::LayoutId(object.id.as_raw()),
@@ -7477,14 +7478,14 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].contains("residual 10.000000"));
 
-        let mut foreign = Canvas::new(320, 180);
+        let mut foreign = SceneModel::new(320, 180);
         let foreign_object = foreign.circle(10.0);
         assert!(!canvas.owns_drawable(&foreign_object));
     }
 
     #[test]
     fn layout_ownership_rejects_positioning_but_allows_visual_transforms() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         let owner = canvas.group(&[]);
         let positioned = canvas.circle(10.0).at(12.0, 0.0);
         assert_eq!(
@@ -7504,7 +7505,7 @@ mod tests {
         let _ = visual.rotate(0.25);
         assert!(visual.claim_layout(&owner).is_ok());
 
-        let mut foreign_canvas = Canvas::new(320, 180);
+        let mut foreign_canvas = SceneModel::new(320, 180);
         let foreign = foreign_canvas.circle(10.0);
         assert_eq!(
             foreign.claim_layout(&owner),
@@ -7514,7 +7515,7 @@ mod tests {
 
     #[test]
     fn headless_derived_geometry_resolves_fill_level_and_outline() {
-        let mut canvas = Canvas::new(320, 180);
+        let mut canvas = SceneModel::new(320, 180);
         canvas.text("Vector fill level");
         let mask = canvas
             .circle(40.0)

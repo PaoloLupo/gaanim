@@ -4,14 +4,14 @@ pub use crate::builder::{MobjectRef, MobjectSpawnBuilder, SceneBuilder};
 pub use crate::canvas::{
     Anchor, AnchorPoint, AngleDimensionHandle, AngleDimensionOptions, Anim, ArrowFieldOptions,
     ArrowVectorFieldHandle, BadgeSpec, BannerPosition, BannerSpec, CameraConstraintHandle,
-    CameraStateError, CameraStateHandle, Canvas, CanvasEndpoint, CanvasRay, CanvasTheme,
-    CanvasUnits, CardSpec, Cartesian3DVisibility, CartesianVisibility, ChartHandle, ChipSpec,
+    CameraStateError, CameraStateHandle, CanvasEndpoint, CanvasRay, CanvasTheme, CanvasUnits,
+    CardSpec, Cartesian3DVisibility, CartesianVisibility, ChartHandle, ChipSpec,
     DimensionExtensionStyle, DimensionHandle, DimensionOptions, Direction, DrawableHandle,
     EditorialAlign, EditorialAppearance, EditorialError, EditorialStyle, EditorialVariant,
     FlowParticleOptions, FlowParticlesHandle, ForceVectorHandle, LottieClip, LottieLoadError,
     LottieOptions, LowerThirdSide, LowerThirdSpec, NumberLineVisibility, ObjectSpec, Parameter,
-    PointRef, PolarVisibility, QuoteCardSpec, SectionHeaderSpec, SegmentError, SegmentHandle,
-    SegmentId, SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, StatCardSpec,
+    PointRef, PolarVisibility, QuoteCardSpec, SceneModel, SectionHeaderSpec, SegmentError,
+    SegmentHandle, SegmentId, SegmentManifest, SegmentSpec, SegmentStop, SpawnKind, StatCardSpec,
     StreamLinesHandle, StreamLinesStyle, SupportHandle, TextAnchor, ThemePalette,
     VectorField2DHandle, VectorField3DHandle,
 };

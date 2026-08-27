@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use gaanim_animation::{ReactiveFunction, ReactiveInput, ScalarSource};
 use gaanim_api::canvas::{
-    ArrowFieldOptions, ArrowVectorFieldHandle, Canvas as ApiCanvas, Cartesian3DVisibility,
-    CartesianVisibility, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
-    CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle,
-    NumberLineVisibility, Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility,
+    ArrowFieldOptions, ArrowVectorFieldHandle, Cartesian3DVisibility, CartesianVisibility,
+    ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
+    FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, NumberLineVisibility,
+    Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility, SceneModel as ApiCanvas,
     StreamLinesHandle, StreamLinesStyle, VectorField2DHandle, VectorField3DHandle,
     DEFAULT_REACTIVE_TEXT_SIZE,
 };
@@ -25,7 +25,7 @@ use pyo3::pyclass_init::PyClassInitializer;
 use pyo3::types::{PyAny, PyDict, PyTuple};
 
 use crate::color::{PyColor, PyColorMapArg};
-use crate::pycanvas::{PyPointRef, PyScene};
+use crate::pycanvas::{PyPointRef, PyVisualization};
 use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 
 fn value_error(error: impl ToString) -> PyErr {
@@ -2191,20 +2191,6 @@ impl PyCoordinateSpace {
             .map_err(value_error)
     }
 
-    #[pyo3(name = "function", signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=None, inputs=Vec::new()))]
-    fn function_plot(
-        &self,
-        py: Python<'_>,
-        function: Py<PyAny>,
-        domain: Option<(f64, f64)>,
-        samples: Option<usize>,
-        tolerance: f64,
-        derivative: Option<Py<PyAny>>,
-        inputs: Vec<Py<PyAny>>,
-    ) -> PyResult<PyDrawable> {
-        self.plot(py, function, domain, samples, tolerance, derivative, inputs)
-    }
-
     #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75, inputs=Vec::new()))]
     fn parametric(
         &self,
@@ -2687,7 +2673,7 @@ impl PyDrawable {
 }
 
 #[pymethods]
-impl PyScene {
+impl PyVisualization {
     #[getter]
     fn time(&self) -> PyTimeInput {
         PyTimeInput {

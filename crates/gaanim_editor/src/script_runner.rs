@@ -253,7 +253,7 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
 /// Used by non-interactive CLI tooling such as `gaanim check`. Export and
 /// snapshot environment switches are removed so validation can never start a
 /// render job as a side effect.
-pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Canvas, String> {
+pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::SceneModel, String> {
     let (sender, receiver) = crossbeam_channel::bounded::<ReloadPayload>(1);
     host::set_host_sender(Some(sender));
 

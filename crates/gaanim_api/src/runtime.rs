@@ -6,14 +6,14 @@ use gaanim_renderer::pipeline::{GaanimFullWindowClearCamera, GaanimPbrCamera};
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
-use crate::canvas::Canvas;
+use crate::canvas::SceneModel;
 
-/// Replay a [`Canvas`] into a Bevy world.
+/// Replay a [`SceneModel`] into a Bevy world.
 ///
 /// This is the canonical runtime bridge used by the editor/hot-reload host and
 /// by future scripting language bindings. Bindings should not duplicate replay
-/// logic; they should construct `Canvas` and call into this module indirectly.
-pub fn replay_canvas_into(world: &mut World, canvas: Canvas) {
+/// logic; they should construct `SceneModel` and call into this module indirectly.
+pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
     let width = canvas.width;
     let height = canvas.height;
 
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn replay_applies_the_paper_text_theme() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas
             .set_theme("paper")
             .expect("paper is a built-in theme");
@@ -164,7 +164,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("gaanim-preview-audio-{}.wav", std::process::id()));
         std::fs::write(&path, b"fixture").unwrap();
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.wait(1.5);
         let audio = canvas.audio(&path, Some(2.0), 0.5, 0.1, 0.2).unwrap();
         canvas.play_items(vec![audio.into()], 0.0).unwrap();
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn invalid_typst_math_in_layout_does_not_remove_runtime_resources() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let equation = canvas.text("$integral alpha dt + 2 = 0$");
         let column = canvas.group(&[&equation]);
         equation.claim_layout(&column).unwrap();
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn hybrid_camera_stack_clears_full_target_before_pbr_and_vello() {
-        let canvas = Canvas::new(640, 360);
+        let canvas = SceneModel::new(640, 360);
         let mut world = World::new();
         world.insert_resource(Timeline::new());
         world.insert_resource(gaanim_text::font::FontRegistry::new());

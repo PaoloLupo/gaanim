@@ -8,7 +8,7 @@ from gaanim import Scene, WHITE
 scene = Scene(960, 540, background="#0f172a")
 source = os.environ.get("GAANIM_VIDEO", "assets/clip.mp4")
 
-video = scene.video(
+video = scene.media.video(
     source,
     width=720,
     height=405,

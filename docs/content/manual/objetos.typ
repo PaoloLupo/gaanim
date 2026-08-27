@@ -15,10 +15,10 @@ Las primitivas, el texto, las imágenes y los grupos comparten operaciones de
 tema y animaciones.
 
 ```python
-orbit = scene.circle(140).stroke(BLUE, 4).no_fill()
-point = scene.dot(12).fill(YELLOW).at(140, 0)
+orbit = scene.geometry.circle(140).stroke(BLUE, 4).no_fill()
+point = scene.geometry.dot(12).fill(YELLOW).at(140, 0)
 label = scene.text("r", role="body").fill(WHITE).at(70, 24)
-system = scene.group([orbit, point, label])
+system = scene.geometry.group([orbit, point, label])
 ```
 
 Un grupo permite transformar varias piezas como una unidad sin perder sus
@@ -46,7 +46,7 @@ identidad visual y la geometría para poder adaptar la escena a otro formato.
 == Recursos externos
 
 Coloca imágenes, SVG, fuentes y modelos dentro de `assets/` y carga el
-manifiesto con `scene.load_project("gaanim.toml")`. Así las rutas no dependen
+manifiesto con `scene.assets.load_project("gaanim.toml")`. Así las rutas no dependen
 del directorio desde el que ejecutaste Gaanim.
 
 == Siguiente paso

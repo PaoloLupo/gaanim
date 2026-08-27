@@ -8,7 +8,7 @@ import os
 from gaanim import BLUE, GOLD, WHITE, Scene
 
 scene = Scene(960, 540)
-circle = scene.circle(72).fill(BLUE).stroke(WHITE, 4).at(-220, 0)
+circle = scene.geometry.circle(72).fill(BLUE).stroke(WHITE, 4).at(-220, 0)
 
 scene.play([circle.create(1.0).smooth()])
 scene.play([circle.move(440, 0).duration(1.5).smooth()])

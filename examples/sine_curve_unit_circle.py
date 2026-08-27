@@ -17,14 +17,14 @@ Tabla de equivalencias
 ----------------------
 Manim                              | Gaanim (esta escena)
 -----------------------------------|---------------------------------------------
-`Line(x_start, x_end)`             | `scene.line(x1, y1, x2, y2).stroke(...)`
-`Circle(radius=1).move_to(origin)` | `scene.circle(r).at(cx, cy)`
-`MathTex(r"\\pi").next_to(...)`    | `scene.equation("pi").at(x, y)`
-`Dot().move_to(orbit.point_…)`     | `scene.dot(r).at(x, y)`
+`Line(x_start, x_end)`             | `scene.geometry.line(x1, y1, x2, y2).stroke(...)`
+`Circle(radius=1).move_to(origin)` | `scene.geometry.circle(r).at(cx, cy)`
+`MathTex(r"\\pi").next_to(...)`    | `scene.text.equation("pi").at(x, y)`
+`Dot().move_to(orbit.point_…)`     | `scene.geometry.dot(r).at(x, y)`
 `dot.add_updater(go_around_circle)`| `dot.add_updater(Updater.orbit(cx,cy,r,speed))`
-`always_redraw(get_line_to_circle)`| `scene.tracking_line((cx,cy), dot)`
-`always_redraw(get_line_to_curve)` | `scene.tracking_line(dot, proj_dot)`
-`always_redraw(get_curve)` +       | `scene.traced_path(proj_dot)`  (acumula
+`always_redraw(get_line_to_circle)`| `scene.geometry.tracking_line((cx,cy), dot)`
+`always_redraw(get_line_to_curve)` | `scene.geometry.tracking_line(dot, proj_dot)`
+`always_redraw(get_curve)` +       | `scene.geometry.traced_path(proj_dot)`  (acumula
   `VGroup` incremental de `Line`   |  `BezPath` en Rust cada frame)
 `proj = dot.y; proj.x += dt*4`     | `proj_dot.bind_y_from(dot)` +
                                    | `proj_dot.add_updater(Updater.advance_x(speed))`
@@ -74,15 +74,15 @@ def show_axis():
     #   y_start = np.array([-4,-2,0]); y_end = np.array([-4,2,0])
     #   x_axis = Line(x_start, x_end)
     #   y_axis = Line(y_start, y_end)
-    x_axis = scene.line(-400, 0, 300, 0).stroke(WHITE, 2.0)
-    y_axis = scene.line(-400, -200, -400, 200).stroke(WHITE, 2.0)
+    x_axis = scene.geometry.line(-400, 0, 300, 0).stroke(WHITE, 2.0)
+    y_axis = scene.geometry.line(-400, -200, -400, 200).stroke(WHITE, 2.0)
 
     # Manim: self.add_x_labels()  →  MathTex(r"\pi")… next_to(DOWN)
-    # Gaanim: scene.equation("pi") — Typst math; .at() en píxeles
+    # Gaanim: scene.text.equation("pi") — Typst math; .at() en píxeles
     for i, label in enumerate([r"pi", r"2 pi", r"3 pi", r"4 pi"]):
         # Manim: next_to(np.array([-1+2*i, 0, 0]), DOWN)
         # Gaanim píxeles: separación ~120 px, y=-35 bajo el eje
-        scene.equation(label).at(-200 + 120 * i, -35).fill(WHITE).scaled(0.55)
+        scene.text.equation(label).at(-200 + 120 * i, -35).fill(WHITE).scaled(0.55)
 
     # Manim:
     #   self.origin_point = np.array([-4,0,0])
@@ -108,7 +108,7 @@ def show_circle(origin):
     #   circle.move_to(self.origin_point)
     ox, oy = origin
     circle_radius = 100.0
-    circle = scene.circle(circle_radius).at(ox, oy).stroke(WHITE, 2.0).no_fill()
+    circle = scene.geometry.circle(circle_radius).at(ox, oy).stroke(WHITE, 2.0).no_fill()
     return circle, circle_radius
 
 
@@ -132,7 +132,7 @@ def move_dot_and_draw_curve():
     #
     # Gaanim: Updater.orbit hace exactamente lo mismo en Rust cada frame:
     #   angle = elapsed * speed; x = cx + r·cos(angle); y = cy + r·sin(angle)
-    dot = scene.dot(8).fill(YELLOW_DOT).at(origin_x + circle_radius, origin_y)
+    dot = scene.geometry.dot(8).fill(YELLOW_DOT).at(origin_x + circle_radius, origin_y)
     dot.add_updater(
         Updater.orbit(cx=origin_x, cy=origin_y, radius=circle_radius, speed=1.5)
     )
@@ -150,7 +150,7 @@ def move_dot_and_draw_curve():
     # Gaanim: se descompone en dos primitivas reactivas
     #   1) bind_y_from → copia Y cada frame
     #   2) Updater.advance_x → x = x0 + speed·elapsed
-    proj_dot = scene.dot(5).fill(YELLOW_A).at(curve_start_x, origin_y)
+    proj_dot = scene.geometry.dot(5).fill(YELLOW_A).at(curve_start_x, origin_y)
     proj_dot.bind_y_from(dot)
     proj_dot.add_updater(Updater.advance_x(speed=55.0))
 
@@ -161,16 +161,16 @@ def move_dot_and_draw_curve():
     # Gaanim:
     #   tracking_line regenera un BezPath recta cada frame resolviendo
     #   SpatialTransform de cada endpoint
-    radius_line = scene.tracking_line((origin_x, origin_y), dot)
+    radius_line = scene.geometry.tracking_line((origin_x, origin_y), dot)
     radius_line.stroke(BLUE_LINE, 2.0).no_fill()
 
-    proj_line = scene.tracking_line(dot, proj_dot)
+    proj_line = scene.geometry.tracking_line(dot, proj_dot)
     proj_line.stroke(YELLOW_A, 2.0).no_fill()
 
     # -- Curva seno (traced_path) -------------------------------------------
     # Manim: VGroup incremental de Lines → crece linealmente en memoria
     # Gaanim: TracedPath acumula Vec<DVec3> en Rust y regenera BezPath
-    sine_curve = scene.traced_path(proj_dot)
+    sine_curve = scene.geometry.traced_path(proj_dot)
     sine_curve.stroke(YELLOW_D, 3.0).no_fill()
 
     return dot, proj_dot, radius_line, proj_line, sine_curve

@@ -7,7 +7,7 @@ c = Scene(1920, 1080, background=BLACK)
 c.segment("intro")
 
 # Single leaf: should reveal the trimmed path without a first-frame flash.
-circle = c.circle(80).stroke(RED, 4).no_fill().at(-420, 120)
+circle = c.geometry.circle(80).stroke(RED, 4).no_fill().at(-420, 120)
 circle.write(2.0).linear()
 
 # Create should now grow fill + outline together, one glyph at a time.
@@ -19,7 +19,7 @@ create_title.create(2.8).linear()
 # Write should keep the border-first split, but stagger glyphs with a
 # typewriter cadence. The lag_ratio override makes the difference obvious.
 write_label = c.text("Write").fill(GOLD).at(0, -20)
-write_formula = c.equation("x^2 + y^2 = z^2").at(0, -140)
+write_formula = c.text.equation("x^2 + y^2 = z^2").at(0, -140)
 write_label.write(0.8).linear()
 write_formula.write(3.0).lag_ratio(0.12)
 

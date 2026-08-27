@@ -23,9 +23,9 @@ state = {
     "omega": initial_omega,
 }
 
-hinge = scene.dot(8).fill(WHITE).at(px, py)
+hinge = scene.geometry.dot(8).fill(WHITE).at(px, py)
 bob = (
-    scene.circle(20)
+    scene.geometry.circle(20)
     .fill(GOLD)
     .stroke(WHITE, 3)
     .at(
@@ -34,10 +34,10 @@ bob = (
     )
 )
 
-rod = scene.tracking_line(hinge, bob).no_fill().stroke(WHITE, 4)
-length = scene.dimension_between(hinge, bob, 25).stroke(RED, 2)
+rod = scene.geometry.tracking_line(hinge, bob).no_fill().stroke(WHITE, 4)
+length = scene.mechanics.dimension_between(hinge, bob, 25).stroke(RED, 2)
 trail = (
-    scene.traced_path(bob, dissipating_time=2.0)
+    scene.geometry.traced_path(bob, dissipating_time=2.0)
     .no_fill()
     .stroke(RED, 2)
 )
@@ -190,24 +190,24 @@ def second_bob_position(_pos, _dt, _elapsed):
     return double_positions()[1]
 
 
-double_hinge = scene.dot(8).fill(WHITE).at(double_px, double_py)
+double_hinge = scene.geometry.dot(8).fill(WHITE).at(double_px, double_py)
 double_bob1 = (
-    scene.circle(21)
+    scene.geometry.circle(21)
     .fill(GOLD)
     .stroke(WHITE, 3)
     .at(*double_positions()[0][:2])
 )
 double_bob2 = (
-    scene.circle(27)
+    scene.geometry.circle(27)
     .fill(RED)
     .stroke(WHITE, 3)
     .at(*double_positions()[1][:2])
 )
 
-double_rod1 = scene.tracking_line(double_hinge, double_bob1).no_fill().stroke(WHITE, 4)
-double_rod2 = scene.tracking_line(double_bob1, double_bob2).no_fill().stroke(WHITE, 4)
+double_rod1 = scene.geometry.tracking_line(double_hinge, double_bob1).no_fill().stroke(WHITE, 4)
+double_rod2 = scene.geometry.tracking_line(double_bob1, double_bob2).no_fill().stroke(WHITE, 4)
 double_trail = (
-    scene.traced_path(double_bob2, dissipating_time=3.0)
+    scene.geometry.traced_path(double_bob2, dissipating_time=3.0)
     .no_fill()
     .stroke(RED, 2)
 )

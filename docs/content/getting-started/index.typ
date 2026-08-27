@@ -46,7 +46,7 @@ from gaanim import BLACK, BLUE, GOLD, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 
-circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.text("Hello World", role="title")
 
 scene.play([

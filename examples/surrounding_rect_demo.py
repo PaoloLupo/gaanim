@@ -7,18 +7,18 @@ from gaanim import GOLD, WHITE, Scene, part
 
 scene = Scene(720, 405, background="#0f172a")
 
-energy = scene.equation(
+energy = scene.text.equation(
     "E =",
     part("mass", "m"),
     part("light", "c^2"),
 ).fill(WHITE).at(0, 70)
-momentum = scene.equation(
+momentum = scene.text.equation(
     "p =",
     part("mass", "m"),
     part("velocity", "v"),
 ).fill(WHITE).at(0, -80)
 
-frame = scene.surrounding_rect(energy["mass"]).stroke(GOLD, 4)
+frame = scene.geometry.surrounding_rect(energy["mass"]).stroke(GOLD, 4)
 
 scene.play([energy.fade_in(), momentum.fade_in(), frame.create()])
 scene.play([frame.retarget(energy["light"], duration=0.8).smooth()])

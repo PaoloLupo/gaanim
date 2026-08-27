@@ -6,14 +6,14 @@ from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
 
 
 scene = Scene(960, 540, background=BLACK)
-scene.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
 scene.text("Reactive camera rig", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
-marker = scene.dot(18).fill(GOLD)
-scene.circle(150).no_fill().stroke(BLUE, 3)
-cube = scene.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-1.8, -0.5, 0)
-sphere = scene.sphere(1.25, material=Material3D.metal(CYAN)).at_3d(1.8, -0.5, 0)
-theta = scene.parameter(0.0)
-focus = scene.point_ref(theta * 260 - 130, (theta * 3.14159).sin() * 90)
+marker = scene.geometry.dot(18).fill(GOLD)
+scene.geometry.circle(150).no_fill().stroke(BLUE, 3)
+cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-1.8, -0.5, 0)
+sphere = scene.geometry.sphere(1.25, material=Material3D.metal(CYAN)).at_3d(1.8, -0.5, 0)
+theta = scene.viz.parameter(0.0)
+focus = scene.geometry.point_ref(theta * 260 - 130, (theta * 3.14159).sin() * 90)
 marker.follow(focus)
 
 rig_2d = scene.camera.bind_2d(
@@ -24,8 +24,8 @@ rig_2d = scene.camera.bind_2d(
 scene.play([theta.animate_to(1.0, duration=2.0), marker.fade_in(duration=0.3)])
 rig_2d.disable()
 
-target_x = scene.parameter(0.0)
-focus_3d = scene.point_ref((target_x - 0.5) * 3.0, -0.5)
+target_x = scene.viz.parameter(0.0)
+focus_3d = scene.geometry.point_ref((target_x - 0.5) * 3.0, -0.5)
 rig_3d = scene.camera.bind_3d(
     eye=(7.0, 4.5, 10.0), target=focus_3d, fov_y=0.72,
 )

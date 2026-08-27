@@ -200,7 +200,7 @@ fn reload_target_time(saved_time: f64, timeline: &Timeline) -> f64 {
 
 /// Rebuild the scene in `world` from a fresh set of ops, then schedule the
 /// t=0 keyframe capture for the next frame (after deferred Commands flush).
-pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::Canvas) {
+pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::SceneModel) {
     clear_scene_entities(world);
     let revision = world
         .get_resource::<StashedReplay>()
@@ -320,7 +320,7 @@ mod tests {
         world.insert_resource(gaanim_text::font::FontRegistry::new());
         world.insert_resource(gaanim_text::prelude::TextConfig::default());
 
-        let mut canvas = gaanim_api::canvas::Canvas::new(320, 180);
+        let mut canvas = gaanim_api::canvas::SceneModel::new(320, 180);
         let source = canvas.dot(8.0);
         let _trail = canvas.traced_path(&source);
         canvas.wait(1.0);
@@ -348,7 +348,7 @@ mod tests {
         world.insert_resource(gaanim_text::font::FontRegistry::new());
         world.insert_resource(gaanim_text::prelude::TextConfig::default());
 
-        let mut canvas = gaanim_api::canvas::Canvas::new(320, 180);
+        let mut canvas = gaanim_api::canvas::SceneModel::new(320, 180);
         let later = canvas.text("Later explanation");
         canvas.wait(1.0);
         canvas.play(vec![later.fade_in(0.5)]);

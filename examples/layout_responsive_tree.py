@@ -12,8 +12,8 @@ scene = Scene(720, 1280, background="#0b1020", margin=48) if vertical else Scene
 
 
 def card(heading: str, copy: str):
-    panel = scene.rounded_rect(340, 220, 18).fill("#17233d")
-    content = scene.column(
+    panel = scene.geometry.rounded_rect(340, 220, 18).fill("#17233d")
+    content = scene.layout.column(
         [
             scene.text(heading, role="subtitle").fill(GOLD),
             scene.text(copy).fill(WHITE),
@@ -25,15 +25,15 @@ def card(heading: str, copy: str):
         align="stretch",
         justify="center",
     )
-    return scene.stack(
-        [scene.item(panel, fit="stretch"), content],
+    return scene.layout.stack(
+        [scene.layout.item(panel, fit="stretch"), content],
         width=340,
         height=220,
         align="stretch",
     )
 
 
-cards = scene.row(
+cards = scene.layout.row(
     [
         card("Measure", "Text rewraps using the width offered by its card."),
         card("Place", "The same row wraps when the vertical viewport is narrower."),
@@ -45,10 +45,10 @@ cards = scene.row(
     justify="center",
 )
 
-page = scene.column(
+page = scene.layout.column(
     [
         scene.text("Responsive layout", role="title").fill(GOLD),
-        scene.item(cards, grow=1, align="stretch"),
+        scene.layout.item(cards, grow=1, align="stretch"),
         scene.text("Set GAANIM_VERTICAL=1 for 9:16").fill(BLUE),
     ],
     within="safe",

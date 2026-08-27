@@ -21,8 +21,8 @@ coordenadas. Para relaciones espaciales entre bloques usa Layout.
 == Primera columna
 
 ```python
-page = scene.column(
-    [title, scene.item(content, grow=1), footer],
+page = scene.layout.column(
+    [title, scene.layout.item(content, grow=1), footer],
     within="safe",
     width="fill",
     height="fill",
@@ -38,8 +38,8 @@ intrínseco, `fill` consume el espacio ofrecido y un número fija la dimensión.
 
 == Filas, grids y capas
 
-Usa `scene.row` para distribuir elementos horizontalmente, `scene.grid` para
-tracks bidimensionales y `scene.stack` para overlays. Los layouts anidados
+Usa `scene.layout.row` para distribuir elementos horizontalmente, `scene.layout.grid` para
+tracks bidimensionales y `scene.layout.stack` para overlays. Los layouts anidados
 reciben el espacio que ofrece su padre.
 
 == Posición y constraints
@@ -48,7 +48,7 @@ El layout controla la traslación de sus hijos. Usa `offset` para ajustes
 editoriales pequeños y constraints para relaciones entre ramas:
 
 ```python
-scene.constrain(
+scene.layout.constrain(
     label.left == chart.right + 24,
     label.center_y == chart.center_y,
     (label.width <= page.width * 0.3).weak(),

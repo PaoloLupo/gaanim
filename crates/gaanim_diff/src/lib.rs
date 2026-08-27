@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use gaanim_api::canvas::Canvas;
+use gaanim_api::canvas::SceneModel;
 use gaanim_export::prelude::{
     AspectRatioPreset, ExportConfig, ExportError, capture_scene_direct, capture_scene_hybrid,
 };
@@ -55,7 +55,7 @@ impl Default for CompareOptions {
 
 /// Capture exact timeline timestamps into PNG files plus a stable manifest.
 pub fn capture_canvas(
-    canvas: Canvas,
+    canvas: SceneModel,
     output_dir: impl AsRef<Path>,
     times: &[f64],
 ) -> Result<SnapshotManifest> {
@@ -563,7 +563,7 @@ mod tests {
             "gaanim-capture-test-{}-{nonce}",
             std::process::id()
         ));
-        let mut canvas = Canvas::new(64, 64);
+        let mut canvas = SceneModel::new(64, 64);
         canvas.circle(12.0);
         canvas.wait(0.1);
 

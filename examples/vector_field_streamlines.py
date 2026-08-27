@@ -7,7 +7,7 @@ from gaanim import Axis, ColorMap, Scene
 
 scene = Scene(1280, 720)
 scene.canvas.set_theme("technical")
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
     Axis.linear(-4.5, 4.5).ticks(1).label("x", position="top"),
     Axis.linear(-2.8, 2.8).ticks(1).label("y", position="top"),
     width=1040,

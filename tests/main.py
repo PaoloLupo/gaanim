@@ -10,7 +10,7 @@ from gaanim import BLACK, GOLD, RED, WHITE, Direction, Scene, Transition
 
 ROOT = Path(__file__).resolve().parent
 scene = Scene(1920, 1080, background=BLACK, margin=72)
-scene.load_project(str(ROOT / "gaanim.toml"))
+scene.assets.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("paper")
 
 
@@ -150,42 +150,42 @@ def make_visual(
 ):
     """Create a color-coded diagram whose rods and labels follow the physics."""
     initial_pos1, initial_pos2 = system.positions()
-    hinge = scene.dot(10 * scale).fill(WHITE).at(system.px, system.py)
-    support = scene.fixed_support(
+    hinge = scene.geometry.dot(10 * scale).fill(WHITE).at(system.px, system.py)
+    support = scene.mechanics.fixed_support(
         hinge,
         direction=Direction.DOWN,
         size=42 * scale,
         ground_length=68 * scale,
     )
     bob1 = (
-        scene.circle(28 * scale)
+        scene.geometry.circle(28 * scale)
         .fill(bob1_color)
         .stroke(WHITE, 4 * scale)
         .at(*initial_pos1[:2])
     )
     bob2 = (
-        scene.circle(34 * scale)
+        scene.geometry.circle(34 * scale)
         .fill(bob2_color)
         .stroke(WHITE, 4 * scale)
         .at(*initial_pos2[:2])
     )
-    rod1 = scene.tracking_line(hinge, bob1).no_fill().stroke(bob1_color, 6 * scale)
-    rod2 = scene.tracking_line(bob1, bob2).no_fill().stroke(bob2_color, 6 * scale)
-    length1 = scene.dimension_between(
+    rod1 = scene.geometry.tracking_line(hinge, bob1).no_fill().stroke(bob1_color, 6 * scale)
+    rod2 = scene.geometry.tracking_line(bob1, bob2).no_fill().stroke(bob2_color, 6 * scale)
+    length1 = scene.mechanics.dimension_between(
         hinge,
         bob1,
         34 * scale,
         label="$L_1$",
         label_gap=30 * scale,
     ).fill(bob1_color)
-    length2 = scene.dimension_between(
+    length2 = scene.mechanics.dimension_between(
         bob1,
         bob2,
         38 * scale,
         label="$L_2$",
         label_gap=30 * scale,
     ).fill(bob2_color)
-    angle1 = scene.angle_between(
+    angle1 = scene.mechanics.angle_between(
         hinge,
         Direction.DOWN,
         bob1,
@@ -195,7 +195,7 @@ def make_visual(
         show_extensions=False,
         color=bob1_color,
     )
-    angle2 = scene.angle_between(
+    angle2 = scene.mechanics.angle_between(
         bob1,
         Direction.DOWN,
         bob2,
@@ -206,7 +206,7 @@ def make_visual(
         color=bob2_color,
     )
     trail = (
-        scene.traced_path(bob2, dissipating_time=3.5)
+        scene.geometry.traced_path(bob2, dissipating_time=3.5)
         .no_fill()
         .stroke(trail_color, 3 * scale)
     )
@@ -276,11 +276,11 @@ def deactivate_visual(visual):
 
 def make_panel(title_text, lines, accent):
     background = (
-        scene.rounded_rect(520, 475, 26)
+        scene.geometry.rounded_rect(520, 475, 26)
         .fill("#121A2B")
         .stroke("#344563", 2)
     )
-    content = scene.column(
+    content = scene.layout.column(
         [
             scene.text(title_text, role="subtitle").fill(accent),
             *[scene.text(line, role="subtitle").fill(WHITE) for line in lines],
@@ -292,14 +292,14 @@ def make_panel(title_text, lines, accent):
         align="center",
         justify="center",
     )
-    panel = scene.stack(
-        [scene.item(background, fit="stretch"), content],
+    panel = scene.layout.stack(
+        [scene.layout.item(background, fit="stretch"), content],
         width=520,
         height=475,
         align="stretch",
     )
-    return scene.stack(
-        [scene.item(panel, absolute=True, offset=(625, -35))],
+    return scene.layout.stack(
+        [scene.layout.item(panel, absolute=True, offset=(625, -35))],
         within="safe",
         width="fill",
         height="fill",
@@ -315,7 +315,7 @@ subtitle = scene.text(
     "Un ejemplo de las capacidades",
     role="subtitle",
 ).fill("#A9B1D6").scaled(0.78)
-header = scene.column(
+header = scene.layout.column(
     [title, subtitle],
     width=1200,
     height="hug",
@@ -323,8 +323,8 @@ header = scene.column(
     align="center",
     justify="center",
 )
-header_layer = scene.stack(
-    [scene.item(header, absolute=True, offset=(0, 420))],
+header_layer = scene.layout.stack(
+    [scene.layout.item(header, absolute=True, offset=(0, 420))],
     within="safe",
     width="fill",
     height="fill",
@@ -350,8 +350,8 @@ scene.segment(
 )
 model_system = DoublePendulum(-245.0, 185.0, L1=270.0, L2=260.0)
 model_visual = make_visual(model_system, bob2_color=RED, trail_color="#F7768E")
-guide = scene.line(-245.0, 200.0, -245.0, -330.0).stroke("#3A4864", 3)
-angle1 = scene.arc(
+guide = scene.geometry.line(-245.0, 200.0, -245.0, -330.0).stroke("#3A4864", 3)
+angle1 = scene.geometry.arc(
     -245.0,
     185.0,
     86.0,
@@ -359,7 +359,7 @@ angle1 = scene.arc(
     -math.pi / 2.0 + model_system.theta1_0,
 ).no_fill().stroke(GOLD, 3)
 angle1_label = scene.text("$theta_1$").fill(GOLD).at(-165.0, 140.0)
-angle2 = scene.arc(
+angle2 = scene.geometry.arc(
     *model_system.positions()[0][:2],
     76.0,
     -math.pi / 2.0,
@@ -446,11 +446,11 @@ comparison_title = scene.text(
     role="subtitle",
 ).fill(GOLD).at(0.0, 310.0).scaled(0.72)
 comparison_background = (
-    scene.rounded_rect(520, 420, 26)
+    scene.geometry.rounded_rect(520, 420, 26)
     .fill("#121A2B")
     .stroke("#344563", 2)
 )
-comparison_content = scene.column(
+comparison_content = scene.layout.column(
     [
         scene.text("DOS SISTEMAS", role="subtitle").fill(WHITE),
         scene.text("$theta_2^A(0) = -1.150$", role="subtitle").fill("#7DCFFF"),
@@ -465,14 +465,14 @@ comparison_content = scene.column(
     align="center",
     justify="center",
 )
-comparison_panel = scene.stack(
-    [scene.item(comparison_background, fit="stretch"), comparison_content],
+comparison_panel = scene.layout.stack(
+    [scene.layout.item(comparison_background, fit="stretch"), comparison_content],
     width=520,
     height=420,
     align="stretch",
 )
-comparison_panel_layer = scene.stack(
-    [scene.item(comparison_panel, absolute=True, offset=(625.0, -20.0))],
+comparison_panel_layer = scene.layout.stack(
+    [scene.layout.item(comparison_panel, absolute=True, offset=(625.0, -20.0))],
     within="safe",
     width="fill",
     height="fill",
@@ -524,14 +524,14 @@ visual_b = make_visual(
     label_offset=(44.0, 0.0),
 )
 separation_line = (
-    scene.tracking_line(visual_a.bob2, visual_b.bob2)
+    scene.geometry.tracking_line(visual_a.bob2, visual_b.bob2)
     .no_fill()
     .stroke(WHITE, 4)
     .z_index(3)
 )
 separation_label = scene.text("$Delta x(t)$", role="subtitle").fill(WHITE).at(-245.0, 80.0)
 separation_label.follow(
-    scene.point_between(visual_a.bob2, visual_b.bob2),
+    scene.geometry.point_between(visual_a.bob2, visual_b.bob2),
     offset=(0.0, 34.0),
 )
 
@@ -584,7 +584,7 @@ closing_footer = scene.text(
     "El péndulo doble convierte la sensibilidad en una experiencia visible.",
     role="subtitle",
 ).fill("#A9B1D6").scaled(0.72)
-closing = scene.column(
+closing = scene.layout.column(
     [closing_title, closing_body, closing_formula, closing_footer],
     width=1250,
     height="hug",
@@ -592,8 +592,8 @@ closing = scene.column(
     align="center",
     justify="center",
 )
-closing_layer = scene.stack(
-    [scene.item(closing, absolute=True, offset=(0, 35))],
+closing_layer = scene.layout.stack(
+    [scene.layout.item(closing, absolute=True, offset=(0, 35))],
     within="safe",
     width="fill",
     height="fill",

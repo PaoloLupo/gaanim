@@ -36,7 +36,7 @@ Podríamos asignar una coordenada distinta a cada texto, pero perderíamos la
 relación entre ellos. Una columna expresa que forman un panel:
 
 ```python
-panel = scene.column(
+panel = scene.layout.column(
     [formula, explanation],
     gap=18,
     align="start",
@@ -55,7 +55,7 @@ grupo como una unidad. Para una página completa se puede usar `within="safe"`,
 `width="fill"` y `height="fill"`:
 
 ```python
-page = scene.stack(
+page = scene.layout.stack(
     [content],
     within="safe",
     width="fill",

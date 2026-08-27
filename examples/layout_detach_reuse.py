@@ -10,9 +10,9 @@ scene.segment("cover")
 
 title = scene.text("Reusable layout title", role="title").fill(GOLD)
 subtitle = scene.text("Initially positioned by a responsive column").fill(WHITE)
-marker = scene.circle(32).fill(BLUE)
+marker = scene.geometry.circle(32).fill(BLUE)
 
-page = scene.column(
+page = scene.layout.column(
     [title, subtitle, marker],
     within="safe",
     width="fill",

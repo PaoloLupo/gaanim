@@ -32,7 +32,7 @@ La guía supone Python básico: imports, variables, funciones, listas y bloques
 `if`. No necesitas conocer Rust, Bevy, Vello ni programación de GPU.
 
 Gaanim usa una API fluida. Una expresión como
-`scene.circle(100).stroke(WHITE, 3).at(-350, 0)` se lee de izquierda a derecha:
+`scene.geometry.circle(100).stroke(WHITE, 3).at(-350, 0)` se lee de izquierda a derecha:
 crea un círculo, define su trazo y lo coloca en la escena.
 
 == Instalar Gaanim en Windows
@@ -82,7 +82,7 @@ Una escena tiene tres tiempos distintos:
 2. Timeline: `play` y `wait` ordenan lo que ocurrirá.
 3. Salida: `render`, `export` o `snapshots` decide qué producir.
 
-No confundas crear un objeto con animarlo. `scene.circle(...)` registra un
+No confundas crear un objeto con animarlo. `scene.geometry.circle(...)` registra un
 objeto. `circle.create()` devuelve una animación. `scene.play([...])` coloca esa
 animación en el tiempo.
 

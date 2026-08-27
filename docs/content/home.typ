@@ -23,7 +23,7 @@
 
 *GPU sin dolor.* Vello (compute) + Bevy ECS + PyO3. Python fluido por fuera, Rust rápido por dentro.
 
-*API que encadena.* `scene.circle(80).fill(BLUE).at(0, 100).play([circle.create().spring()])` — sin boilerplate, sin `.animate()`.
+*API que encadena.* `scene.geometry.circle(80).fill(BLUE).at(0, 100).play([circle.create().spring()])` — sin boilerplate, sin `.animate()`.
 
 *Tipografía de verdad.* Texto y ecuaciones como vectores via Typst. Selección por glifo, `write` animado, `color_by` y tags semánticos.
 
@@ -35,8 +35,8 @@
 from gaanim import BLUE, GOLD, Scene
 
 scene = Scene(1280, 720)
-circle = scene.circle(80).fill(BLUE).at(-160, 0)
-rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
+circle = scene.geometry.circle(80).fill(BLUE).at(-160, 0)
+rect = scene.geometry.rect(180, 100).fill(GOLD).at(160, 0)
 
 scene.play([
     circle.create().duration(1.0).spring(),

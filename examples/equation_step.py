@@ -7,10 +7,10 @@ from gaanim import Anchor, BLACK, GOLD, RED, WHITE, Scene, part
 
 scene = Scene(1920, 1080, background=BLACK)
 title = scene.text("Resolver paso a paso", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
-before = scene.equation(
+before = scene.text.equation(
     part("variable", "x"), "dot 5 =", part("factor", "25")
 ).at(0, 0, anchor=Anchor.CENTER).scaled(2)
-after = scene.equation(
+after = scene.text.equation(
     part("variable", "x"), "=", part("result", "5")
 ).at(0, 0, anchor=Anchor.CENTER).scaled(2)
 before["factor"].fill(RED)

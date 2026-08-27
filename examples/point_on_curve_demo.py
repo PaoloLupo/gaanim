@@ -6,15 +6,15 @@ from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(720, 480, background=WHITE)
 curve = (
-    scene.polyline([
+    scene.geometry.polyline([
         (210 * math.cos(t), 120 * math.sin(2 * t))
         for t in (2 * math.pi * index / 240 for index in range(241))
     ])
     .no_fill()
     .stroke(BLUE, 4)
 )
-tracker = scene.parameter(0.0)
-dot = scene.point_on_curve(curve, tracker).fill(GOLD)
+tracker = scene.viz.parameter(0.0)
+dot = scene.geometry.point_on_curve(curve, tracker).fill(GOLD)
 title = scene.text("point on curve").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
 scene.play([curve.create().duration(0.7), dot.create().duration(0.3), title.write().duration(0.4)])
 scene.play([tracker.animate_to(1.0).duration(2.0)])

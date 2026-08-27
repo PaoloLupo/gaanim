@@ -3,8 +3,8 @@ import os
 from gaanim import GOLD, Scene
 
 scene = Scene(960, 540, background="#0f172a", margin=48)
-a = scene.matrix([[1, 2], [3, 4]], delimiters="parentheses").at(-220, 70)
-b = scene.matrix([[2, 0], [1, 2]], delimiters="parentheses").at(40, 70)
+a = scene.viz.matrix([[1, 2], [3, 4]], delimiters="parentheses").at(-220, 70)
+b = scene.viz.matrix([[2, 0], [1, 2]], delimiters="parentheses").at(40, 70)
 
 product = a.matmul(b)
 product.result.at(260, 70)

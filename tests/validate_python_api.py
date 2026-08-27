@@ -110,12 +110,12 @@ def documented_text_api_failures(tree: ast.Module) -> list[str]:
                 ):
                     continue
                 callables.append((f"{node.name}.{child.name}", child))
-        elif isinstance(node, ast.ClassDef) and node.name == "Scene":
+        elif isinstance(node, ast.ClassDef) and node.name == "Typography":
             callables.extend(
-                (f"Scene.{child.name}", child)
+                (f"Typography.{child.name}", child)
                 for child in node.body
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and child.name in {"text", "equation"}
+                and child.name in {"__call__", "equation"}
             )
 
         for name, callable_node in callables:
@@ -130,27 +130,27 @@ def documented_text_api_failures(tree: ast.Module) -> list[str]:
 def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
     """Require user-facing stub docs and examples for every editorial factory."""
     failures: list[str] = []
-    scene = next(
-        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Scene"),
+    slide_kit = next(
+        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SlideKit"),
         None,
     )
-    if scene is None:
-        return ["Scene is missing from the Python stub"]
+    if slide_kit is None:
+        return ["SlideKit is missing from the Python stub"]
     methods = {
         child.name: child
-        for child in scene.body
+        for child in slide_kit.body
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     for name in EDITORIAL_SCENE_MEMBERS:
         method = methods.get(name)
         if method is None:
-            failures.append(f"Scene.{name} is missing from the stub")
+            failures.append(f"SlideKit.{name} is missing from the stub")
             continue
         doc = ast.get_docstring(method, clean=False)
         if not doc:
-            failures.append(f"Scene.{name} is missing a docstring")
+            failures.append(f"SlideKit.{name} is missing a docstring")
         elif "Example:" not in doc:
-            failures.append(f"Scene.{name} is missing an Example: block")
+            failures.append(f"SlideKit.{name} is missing an Example: block")
     return failures
 
 
@@ -158,18 +158,18 @@ def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
     scene = module.Scene(1280, 720, margin=48)
-    signature = inspect.signature(module.Scene.section_header)
+    signature = inspect.signature(module.SlideKit.section_header)
     if signature.parameters["rule"].default is not False:
         failures.append("Scene.section_header must hide its rule by default")
     components = (
-        scene.badge("Ready", variant="success"),
-        scene.chip("Live", variant="danger", appearance="solid"),
-        scene.card("Result", "The solver converged.", "12 ms"),
-        scene.banner("Simulation complete", position="bottom"),
-        scene.lower_third("Ada Lovelace", "Mathematician", kicker="Speaker"),
-        scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success"),
-        scene.quote_card("Clarity matters.", "Gaanim"),
-        scene.section_header("Method", kicker="02", align="center"),
+        scene.slides.badge("Ready", variant="success"),
+        scene.slides.chip("Live", variant="danger", appearance="solid"),
+        scene.slides.card("Result", "The solver converged.", "12 ms"),
+        scene.slides.banner("Simulation complete", position="bottom"),
+        scene.slides.lower_third("Ada Lovelace", "Mathematician", kicker="Speaker"),
+        scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="success"),
+        scene.slides.quote_card("Clarity matters.", "Gaanim"),
+        scene.slides.section_header("Method", kicker="02", align="center"),
     )
     if not all(isinstance(component, module.Drawable) for component in components):
         failures.append("one or more editorial factories did not return Drawable")
@@ -180,15 +180,15 @@ def validate_editorial_contract(module: object) -> list[str]:
         scene.play(animations)
 
     invalid_calls = (
-        lambda: scene.badge(""),
-        lambda: scene.badge("x", variant="unknown"),
-        lambda: scene.chip("x", appearance="glass"),
-        lambda: scene.card("x", width=20.0, padding=(12.0, 4.0)),
-        lambda: scene.banner("x", position="center"),
-        lambda: scene.lower_third("x", side="center"),
-        lambda: scene.stat_card("", "label"),
-        lambda: scene.quote_card("x", width=float("nan")),
-        lambda: scene.section_header("x", align="justify"),
+        lambda: scene.slides.badge(""),
+        lambda: scene.slides.badge("x", variant="unknown"),
+        lambda: scene.slides.chip("x", appearance="glass"),
+        lambda: scene.slides.card("x", width=20.0, padding=(12.0, 4.0)),
+        lambda: scene.slides.banner("x", position="center"),
+        lambda: scene.slides.lower_third("x", side="center"),
+        lambda: scene.slides.stat_card("", "label"),
+        lambda: scene.slides.quote_card("x", width=float("nan")),
+        lambda: scene.slides.section_header("x", align="justify"),
     )
     for call in invalid_calls:
         try:
@@ -200,7 +200,7 @@ def validate_editorial_contract(module: object) -> list[str]:
     if hasattr(module.Scene, "caption"):
         failures.append("removed Scene.caption remains public")
     try:
-        scene.badge("legacy", 0.0, 0.0)
+        scene.slides.badge("legacy", 0.0, 0.0)
     except TypeError:
         pass
     else:
@@ -214,9 +214,9 @@ def validate_visualization_contract(module: object) -> list[str]:
     scene = module.Scene(640, 360)
     x_axis = module.Axis.linear(-4.0, 4.0).ticks(1.0).label("x")
     y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y", position="top")
-    space = scene.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
+    space = scene.viz.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
 
-    selective = scene.cartesian_2d(
+    selective = scene.viz.cartesian_2d(
         x_axis,
         y_axis,
         width=520.0,
@@ -233,7 +233,7 @@ def validate_visualization_contract(module: object) -> list[str]:
         if not isinstance(selective.layer(layer_name), module.Drawable):
             failures.append(f"disabled Cartesian layer {layer_name!r} is not addressable")
 
-    complex_space = scene.complex(
+    complex_space = scene.viz.complex(
         grid=False,
         axes=False,
         ticks=False,
@@ -244,7 +244,7 @@ def validate_visualization_contract(module: object) -> list[str]:
     if not isinstance(complex_space.layer("labels"), module.Drawable):
         failures.append("ComplexSpace did not apply Cartesian visibility options")
 
-    polar = scene.polar(
+    polar = scene.viz.polar(
         module.Axis.linear(0.0, 4.0).ticks(1.0).label("r"),
         grid=False,
         rings=True,
@@ -256,7 +256,7 @@ def validate_visualization_contract(module: object) -> list[str]:
         if not isinstance(polar.layer(layer_name), module.Drawable):
             failures.append(f"disabled polar layer {layer_name!r} is not addressable")
 
-    line = scene.number_line(
+    line = scene.viz.number_line(
         module.Axis.linear(0.0, 4.0).ticks(1.0).label("t"),
         axis_visible=False,
         ticks=False,
@@ -267,15 +267,15 @@ def validate_visualization_contract(module: object) -> list[str]:
         if not isinstance(line.layer(layer_name), module.Drawable):
             failures.append(f"disabled number-line layer {layer_name!r} is not addressable")
 
-    amplitude = scene.parameter(1.0)
-    space.function(lambda x, value: value * math.sin(x), inputs=[amplitude])
+    amplitude = scene.viz.parameter(1.0)
+    space.plot(lambda x, value: value * math.sin(x), inputs=[amplitude])
     space.plot(
         lambda x, value: value * math.sin(x),
         derivative=lambda x, value: value * math.cos(x),
         inputs=[amplitude],
     )
-    readout = scene.readout(lambda value: value * 2.0, inputs=[amplitude], label="$a$")
-    variable = scene.variable(1.0, label="$k$")
+    readout = scene.viz.readout(lambda value: value * 2.0, inputs=[amplitude], label="$a$")
+    variable = scene.viz.variable(1.0, label="$k$")
     if not isinstance(readout, module.Drawable) or not isinstance(variable, module.Drawable):
         failures.append("reactive readouts must be Drawable instances")
     if hasattr(module, "Expr") or hasattr(module, "_Expr") or hasattr(module, "ValueTracker"):
@@ -294,9 +294,9 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("computed() accepted an asynchronous callback")
     except TypeError:
         pass
-    foreign = module.Scene().parameter(2.0)
+    foreign = module.Scene().viz.parameter(2.0)
     try:
-        scene.readout(lambda value: value, inputs=[foreign])
+        scene.viz.readout(lambda value: value, inputs=[foreign])
         failures.append("readout accepted a Parameter from another Scene")
     except ValueError:
         pass
@@ -316,7 +316,7 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("ArrowVectorField did not materialize a Drawable")
     if not streams.flow(0.5):
         failures.append("StreamLines.flow did not produce finite animations")
-    field.advect(scene.dot(2.0), (1.0, 0.0), duration=0.5, max_time=0.4)
+    field.advect(scene.geometry.dot(2.0), (1.0, 0.0), duration=0.5, max_time=0.4)
     particles = field.particles(3, duration=0.5, max_time=0.3)
     if not particles.flow() or not isinstance(particles.drawable(), module.Drawable):
         failures.append("FlowParticles did not expose drawable and flow handles")
@@ -346,25 +346,25 @@ def validate_visualization_contract(module: object) -> list[str]:
     chart_spec = module.ChartSpec(
         {"id": ["a", "b"], "x": [0.0, 1.0], "y": [1.0, 2.0]}, key="id"
     ).mark("line").encode(x="x", y="y")
-    chart = scene.chart(chart_spec)
+    chart = scene.viz.chart(chart_spec)
     if not isinstance(chart.drawable(), module.Drawable):
         failures.append("Scene.chart did not materialize a Drawable hierarchy")
 
     coordinate = space.coord(1.0, 2.0)
-    coordinate.place(scene.dot(3.0))
+    coordinate.place(scene.geometry.dot(3.0))
     local = space.data_to_local(1.0, 2.0)
     round_trip = space.local_to_data(*local)
     if abs(round_trip[0] - 1.0) > 1e-9 or abs(round_trip[1] - 2.0) > 1e-9:
         failures.append("CoordinateSpace data/local round trip failed")
 
-    linear_space = scene.cartesian_2d(
+    linear_space = scene.viz.cartesian_2d(
         module.Axis.linear(-4.0, 4.0),
         module.Axis.linear(-3.0, 3.0),
     )
     if len(linear_space.animate_view((-2.0, 2.0), (-1.5, 1.5))) != 2:
         failures.append("CoordinateSpace.animate_view did not return pan/zoom animations")
 
-    space_3d = scene.cartesian_3d(
+    space_3d = scene.viz.cartesian_3d(
         module.Axis.linear(-2.0, 2.0),
         module.Axis.linear(-2.0, 2.0),
         module.Axis.linear(-2.0, 2.0),
@@ -402,10 +402,37 @@ def validate_visualization_contract(module: object) -> list[str]:
     for removed in ("line", "step", "area", "scatter", "bars", "histogram", "box_plot", "violin", "error_bars", "heatmap"):
         if hasattr(module.CoordinateSpace, removed):
             failures.append(f"tabular CoordinateSpace.{removed} remains public")
+    if hasattr(module.CoordinateSpace, "function"):
+        failures.append("legacy CoordinateSpace.function alias remains public")
 
     for removed in ("plot", "get_graph", "function_graph", "parametric_curve", "bar_chart"):
         if hasattr(module.Scene, removed):
             failures.append(f"legacy Scene.{removed} remains public")
+    removed_visualization_compat = {
+        module.Geometry: (
+            "_legacy_function_graph",
+            "_legacy_parametric_curve",
+            "_legacy_axes",
+            "_legacy_axes_3d",
+            "_legacy_plot",
+            "_legacy_get_graph",
+            "_legacy_plot_parametric_curve",
+        ),
+        module.Visualization: ("_legacy_bar_chart",),
+        module.Drawable: (
+            "_legacy_coords_to_point",
+            "_legacy_point_to_coords",
+            "_legacy_get_x_axis",
+            "_legacy_get_y_axis",
+            "_legacy_get_axes",
+            "_legacy_add_coordinates",
+            "_legacy_get_graph",
+        ),
+    }
+    for owner, names in removed_visualization_compat.items():
+        for removed in names:
+            if hasattr(owner, removed):
+                failures.append(f"legacy {owner.__name__}.{removed} remains public")
     for removed in REMOVED_TEXT_SCENE_MEMBERS:
         if hasattr(module.Scene, removed):
             failures.append(f"removed Scene.{removed} remains public")
@@ -441,7 +468,7 @@ def validate_visualization_contract(module: object) -> list[str]:
         if name not in compact_text.parts:
             failures.append(f"Text.become did not install TextParts entry {name!r}")
 
-    equation = scene.equation(
+    equation = scene.text.equation(
         module.part("sum_force", "sum F_t"),
         "=",
         module.parts(mass="m", acceleration="a_t"),
@@ -456,7 +483,7 @@ def validate_visualization_contract(module: object) -> list[str]:
             failures.append(f"Scene.equation part {name!r} was not selectable")
     if not isinstance(equation.write(0.5, by="part"), module.Anim):
         failures.append("Scene.equation did not preserve Text animations")
-    codex_equation = scene.equation(
+    codex_equation = scene.text.equation(
         module.parts(gravity="g sin(theta)", acceleration="theta''")
     )
     codex_animations = (
@@ -468,7 +495,7 @@ def validate_visualization_contract(module: object) -> list[str]:
     else:
         scene.play(list(codex_animations))
     try:
-        scene.equation()
+        scene.text.equation()
     except ValueError:
         pass
     else:
@@ -549,38 +576,38 @@ def validate_visualization_contract(module: object) -> list[str]:
     baseline_text = scene.text("Baseline").at(
         0.0, 0.0, anchor=module.TextAnchor.BASELINE_LEFT
     )
-    baseline_equation = scene.equation("x_1 = 2").at_anchor(
+    baseline_equation = scene.text.equation("x_1 = 2").at_anchor(
         0.0, 0.0, module.TextAnchor.BASELINE_RIGHT
     )
     if not all(isinstance(value, module.Text) for value in (baseline_text, baseline_equation)):
         failures.append("TextAnchor positioning did not preserve Text/Equation handles")
-    anchored_drawable = scene.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
+    anchored_drawable = scene.geometry.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
     if not isinstance(anchored_drawable, module.Drawable):
         failures.append("Drawable.at with an anchor did not return Drawable")
-    reference_drawable = scene.dot(6.0).at(-25.0, 15.0)
-    centered_drawable = scene.rect(40.0, 20.0).at(reference_drawable)
+    reference_drawable = scene.geometry.dot(6.0).at(-25.0, 15.0)
+    centered_drawable = scene.geometry.rect(40.0, 20.0).at(reference_drawable)
     if not isinstance(centered_drawable, module.Drawable):
         failures.append("Drawable.at with a reference did not return Drawable")
     centered_text = scene.text("Centered").at(reference_drawable)
     if not isinstance(centered_text, module.Text):
         failures.append("Text.at with a reference erased the Text subtype")
-    centered_primitive = scene.cube().at(reference_drawable)
+    centered_primitive = scene.geometry.cube().at(reference_drawable)
     if not isinstance(centered_primitive, module.Primitive3D):
         failures.append("Primitive3D.at with a reference erased the Primitive3D subtype")
     try:
-        scene.rect(40.0, 20.0).at(reference_drawable, anchor=module.Anchor.TOP)
+        scene.geometry.rect(40.0, 20.0).at(reference_drawable, anchor=module.Anchor.TOP)
     except TypeError:
         pass
     else:
         failures.append("Drawable.at accepted an anchor with a reference")
     try:
-        scene.rect(40.0, 20.0).at(10.0)
+        scene.geometry.rect(40.0, 20.0).at(10.0)
     except TypeError:
         pass
     else:
         failures.append("Drawable.at accepted a numeric x without y")
     try:
-        scene.rect(40.0, 20.0).at(
+        scene.geometry.rect(40.0, 20.0).at(
             0.0, 0.0, anchor=module.TextAnchor.BASELINE_CENTER
         )
     except TypeError:
@@ -624,7 +651,7 @@ def validate_layout_detach_contract(module: object) -> list[str]:
     scene.segment("cover", background=module.BLUE)
     title = scene.text("Reusable title", role="title")
     body = scene.text("Body")
-    page = scene.column([title, body], width="fill", align="center")
+    page = scene.layout.column([title, body], width="fill", align="center")
     scene.segment("detail", module.Transition.cross_fade(0.2))
     scene.reuse(title)
     page.detach(title)
@@ -642,25 +669,25 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     """Exercise anchored endpoints, bars, springs, and rich dimensions."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    frame = scene.rect(240.0, 120.0)
+    frame = scene.geometry.rect(240.0, 120.0)
     corner = frame.anchor_point(module.Anchor.TOP_RIGHT, offset=(5.0, -3.0))
     if not isinstance(corner, module.AnchorPoint):
         failures.append("Drawable.anchor_point did not return AnchorPoint")
 
-    bar = scene.bar_between((-180.0, 120.0), corner, width=9.0)
-    spring = scene.spring_between(
+    bar = scene.mechanics.bar_between((-180.0, 120.0), corner, width=9.0)
+    spring = scene.mechanics.spring_between(
         frame, corner, coils=6, amplitude=10.0, start_straight=8.0, end_straight=14.0
     )
     if not isinstance(bar, module.Drawable) or not isinstance(spring, module.Drawable):
         failures.append("reactive bar or spring did not return Drawable")
     try:
-        scene.spring_between((0.0, 0.0), (100.0, 0.0), start_straight=-1.0)
+        scene.mechanics.spring_between((0.0, 0.0), (100.0, 0.0), start_straight=-1.0)
     except ValueError:
         pass
     else:
         failures.append("Scene.spring_between accepted a negative start_straight")
 
-    dimension = scene.dimension_between(
+    dimension = scene.mechanics.dimension_between(
         frame.anchor_point(module.Anchor.LEFT),
         frame.anchor_point(module.Anchor.RIGHT),
         45.0,
@@ -690,8 +717,8 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     ):
         failures.append("Dimension did not expose its line/label/number/unit parts")
 
-    physical_width = scene.parameter(2.5)
-    semantic_dimension = scene.dimension_between(
+    physical_width = scene.viz.parameter(2.5)
+    semantic_dimension = scene.mechanics.dimension_between(
         frame.anchor_point(module.Anchor.LEFT),
         frame.anchor_point(module.Anchor.RIGHT),
         65.0,
@@ -710,7 +737,7 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
         scene.play([value_animation])
 
     try:
-        scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, value="invalid")
+        scene.mechanics.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, value="invalid")
     except TypeError:
         pass
     else:
@@ -723,14 +750,14 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
         {"gap_length": float("nan")},
     ):
         try:
-            scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, **invalid)
+            scene.mechanics.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, **invalid)
         except ValueError:
             pass
         else:
             failures.append(f"Scene.dimension_between accepted invalid options: {invalid}")
 
     try:
-        scene.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, scale=0.0)
+        scene.mechanics.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, scale=0.0)
     except ValueError:
         pass
     else:
@@ -742,9 +769,9 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     """Exercise the semantic camera facade and removed compatibility surface."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    marker = scene.dot(5.0)
-    parameter = scene.parameter(1.0)
-    point = scene.point_ref(
+    marker = scene.geometry.dot(5.0)
+    parameter = scene.viz.parameter(1.0)
+    point = scene.geometry.point_ref(
         module.computed(lambda value: value * 20.0, inputs=[parameter]),
         10.0,
     )
@@ -818,7 +845,7 @@ def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    matrix = scene.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
+    matrix = scene.viz.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
     if matrix.shape != (2, 3):
         failures.append("Scene.matrix returned the wrong shape")
     if not isinstance(matrix[0, 0], module.Drawable):
@@ -838,7 +865,7 @@ def validate_matrix_contract(module: object) -> list[str]:
     if not isinstance(replacement, module.Drawable):
         failures.append("Matrix.set did not return the replacement Drawable")
     try:
-        scene.matrix([[1, 2], [3]])
+        scene.viz.matrix([[1, 2], [3]])
     except ValueError:
         pass
     else:
@@ -874,19 +901,19 @@ def validate_vector_geometry_contract(module) -> list[str]:
     """Exercise the public varargs, clipping, and fill-level contracts."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    left = scene.circle(60).at(-25, 0)
-    right = scene.circle(60).at(25, 0)
+    left = scene.geometry.circle(60).at(-25, 0)
+    right = scene.geometry.circle(60).at(25, 0)
 
     for name, result in (
-        ("union", scene.union(left, right)),
-        ("intersection", scene.intersection(left, right)),
-        ("difference", scene.difference(left, right)),
-        ("xor", scene.xor(left, right)),
+        ("union", scene.geometry.union(left, right)),
+        ("intersection", scene.geometry.intersection(left, right)),
+        ("difference", scene.geometry.difference(left, right)),
+        ("xor", scene.geometry.xor(left, right)),
     ):
         if not isinstance(result, module.Drawable):
             failures.append(f"Scene.{name} did not return Drawable")
 
-    live = scene.union(left, right, live=True)
+    live = scene.geometry.union(left, right, live=True)
     try:
         live.at(0, 0)
     except ValueError:
@@ -894,19 +921,19 @@ def validate_vector_geometry_contract(module) -> list[str]:
     else:
         failures.append("live boolean accepted an independent position")
 
-    clipped = scene.rect(100, 80).clip(left, invert=True)
+    clipped = scene.geometry.rect(100, 80).clip(left, invert=True)
     if not isinstance(clipped, module.Drawable):
         failures.append("Drawable.clip(invert=True) did not return Drawable")
 
-    level = scene.fill_level(left.opacity(0), module.BLUE, 0.25, keep_outline=True)
+    level = scene.geometry.fill_level(left.opacity(0), module.BLUE, 0.25, keep_outline=True)
     if not isinstance(level.set_fill_level(0.5), module.Drawable):
         failures.append("Drawable.set_fill_level did not return Drawable")
     if not isinstance(level.animate().fill_level(0.75), module.Anim):
         failures.append("Anim.fill_level did not return Anim")
 
     for call in (
-        lambda: scene.union(left),
-        lambda: scene.fill_level(left, module.BLUE, -0.1),
+        lambda: scene.geometry.union(left),
+        lambda: scene.geometry.fill_level(left, module.BLUE, -0.1),
         lambda: level.animate().fill_level(1.1),
     ):
         try:
@@ -915,6 +942,38 @@ def validate_vector_geometry_contract(module) -> list[str]:
             pass
         else:
             failures.append("vector geometry API accepted invalid input")
+    return failures
+
+
+def validate_scene_capability_surface(module) -> list[str]:
+    """Keep Scene limited to orchestration and scene-owned capabilities."""
+    expected = {
+        "assets", "camera", "canvas", "geometry", "layout", "mechanics",
+        "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
+        "play", "release", "render", "reuse", "segment", "snapshots", "stop",
+        "wait",
+    }
+    actual = {name for name in dir(module.Scene) if not name.startswith("_")}
+    failures = []
+    if actual != expected:
+        failures.append(
+            f"Scene public surface differs: missing={sorted(expected - actual)}, "
+            f"unexpected={sorted(actual - expected)}"
+        )
+
+    scene = module.Scene(640, 360)
+    first = scene.geometry.circle(20)
+    second = scene.geometry.circle(20).at(10, 0)
+    if not isinstance(scene.geometry.union(first, second), module.Drawable):
+        failures.append("repeated geometry capability access did not share the Scene model")
+
+    foreign = module.Scene(640, 360).geometry.circle(20)
+    try:
+        scene.geometry.union(first, foreign)
+    except ValueError:
+        pass
+    else:
+        failures.append("a capability accepted a drawable owned by another Scene")
     return failures
 
 
@@ -954,6 +1013,7 @@ def main() -> int:
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
+    missing.extend(validate_scene_capability_surface(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

@@ -1,10 +1,10 @@
-//! Canvas demo: intro with fade_in, move, fade_out.
+//! SceneModel demo: intro with fade_in, move, fade_out.
 //! Run: `cargo run --example fluent_demo -p gaanim_api`
 
 use bevy::prelude::*;
 use gaanim_animation::{DeltaTime, GaanimAnimationPlugin};
 use gaanim_api::GaanimApiPlugin;
-use gaanim_api::canvas::Canvas;
+use gaanim_api::canvas::SceneModel;
 use gaanim_core::peniko::Color;
 use gaanim_math::Camera;
 use gaanim_renderer::prelude::*;
@@ -17,7 +17,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Gaanim Canvas Demo".into(),
+                title: "Gaanim SceneModel Demo".into(),
                 resolution: (1280, 720).into(),
                 ..default()
             }),
@@ -43,7 +43,7 @@ fn setup_scene(
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
-    let mut canvas = Canvas::new(1280, 720).background(Color::from_rgb8(0x0f, 0x0f, 0x1a));
+    let mut canvas = SceneModel::new(1280, 720).background(Color::from_rgb8(0x0f, 0x0f, 0x1a));
 
     let logo = canvas
         .circle(80.0)
@@ -70,7 +70,7 @@ fn setup_scene(
     canvas.fade_out_all(1.0);
     canvas.wait(0.5);
 
-    info!("Canvas: {:.1}s total", canvas.current_time());
+    info!("SceneModel: {:.1}s total", canvas.current_time());
     canvas.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
     timeline.loop_range = Some((0.0, timeline.cached_duration + 0.5));
 }

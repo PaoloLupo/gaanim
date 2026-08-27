@@ -514,9 +514,7 @@ impl Camera {
             }
             Projection::Perspective { fov_y, near, far } => {
                 let aspect = (self.viewport_width as f64) / (self.viewport_height as f64);
-                gaanim_core::glam::dcamera::rh::proj::directx::perspective(
-                    fov_y, aspect, near, far,
-                )
+                gaanim_core::glam::dcamera::rh::proj::directx::perspective(fov_y, aspect, near, far)
             }
         }
     }

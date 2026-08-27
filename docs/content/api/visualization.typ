@@ -54,7 +54,7 @@ spec = (
   )
   .guides(color=Guide.legend(title="Grupo"))
 )
-chart = scene.chart(spec)
+chart = scene.viz.chart(spec)
 scene.play(chart.create())
 ```
 
@@ -150,7 +150,7 @@ guide = Guide.colorbar(title="temperature")
 
 == Gráfico materializado y transiciones
 
-`scene.chart(spec)` materializa la receta y devuelve un `Chart`. Sus capas
+`scene.viz.chart(spec)` materializa la receta y devuelve un `Chart`. Sus capas
 estables son `marks`, `axes`, `grid`, `guides` y la opcional `labels`; cada una
 se comporta como un objeto dibujable normal. Las marcas se agrupan por estilo
 resuelto (por ejemplo, un lote por color de barra repetido), en lugar de crear
@@ -191,11 +191,11 @@ import math
 from gaanim import Axis, Scene
 
 scene = Scene()
-plane = scene.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
-a = scene.parameter(1.0)
-curve = plane.function(lambda x, amplitude: amplitude * math.sin(x), inputs=[a])
+plane = scene.viz.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
+a = scene.viz.parameter(1.0)
+curve = plane.plot(lambda x, amplitude: amplitude * math.sin(x), inputs=[a])
 
-world = scene.cartesian_3d(
+world = scene.viz.cartesian_3d(
   Axis.log(0.1, 1000),
   Axis.symlog(-100, 100),
   Axis.power(0, 16, 0.5),
@@ -203,15 +203,15 @@ world = scene.cartesian_3d(
 surface = world.surface(lambda x, y: x * y)
 ```
 
-`Cartesian2D` ofrece `function`, `parametric`, `implicit`, `contour` y
+`Cartesian2D` ofrece `plot`, `parametric`, `implicit`, `contour` y
 `field`, además de construcciones de cálculo. `Cartesian3D` ofrece
 `surface`, `parametric` y `field`. Sus capas `grid`, `axes`, `ticks`,
 `numbers` y etiquetas billboard conocen la escala y pueden estilizarse por
-separado. `scene.polar(...)`, `scene.complex(...)` y
-`scene.number_line(...)` cubren los demás espacios tipados.
+separado. `scene.viz.polar(...)`, `scene.viz.complex(...)` y
+`scene.viz.number_line(...)` cubren los demás espacios tipados.
 
-`Cartesian2D.plot(function, ..., derivative=None, inputs=())` y su alias
-`function` reciben primero la coordenada y después los valores declarados. Si
+`Cartesian2D.plot(function, ..., derivative=None, inputs=())` recibe primero
+la coordenada y después los valores declarados. Si
 se solicita una derivada, `derivative` debe ser otro callable con la misma firma;
 no hay diferenciación simbólica ni aproximación numérica implícita.
 `Cartesian2D.parametric(..., inputs=())`, `Cartesian3D.parametric(...,
@@ -244,7 +244,7 @@ vacío, de modo que el conjunto de capas permanece estable para composición y
 animación.
 
 #api-entry(
-  name: "Scene.cartesian_2d",
+  name: "Visualization.cartesian_2d",
   kind: "method",
   signature: "cartesian_2d(x, y, *, width=None, height=None, grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, x_grid=None, y_grid=None, x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None, x_labels=None, y_labels=None) -> Cartesian2D",
   params: (
@@ -256,7 +256,7 @@ animación.
 )[]
 
 #api-entry(
-  name: "Scene.cartesian_3d",
+  name: "Visualization.cartesian_3d",
   kind: "method",
   signature: "cartesian_3d(x, y, z, *, size=(10.0, 8.0, 6.0), grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, z_axis=None, xy_grid=None, xz_grid=None, yz_grid=None, x_ticks=None, y_ticks=None, z_ticks=None, x_numbers=None, y_numbers=None, z_numbers=None, x_labels=None, y_labels=None, z_labels=None) -> Cartesian3D",
   params: (
@@ -268,7 +268,7 @@ animación.
 )[]
 
 #api-entry(
-  name: "Scene.polar",
+  name: "Visualization.polar",
   kind: "method",
   signature: "polar(radial, *, radius=220.0, angle_divisions=12, grid=True, axes=True, numbers=True, labels=True, rings=None, spokes=None) -> PolarSpace",
   params: (
@@ -280,7 +280,7 @@ animación.
 )[]
 
 #api-entry(
-  name: "Scene.number_line",
+  name: "Visualization.number_line",
   kind: "method",
   signature: "number_line(axis, *, length=None, axis_visible=True, ticks=True, numbers=True, labels=True) -> NumberLine",
   params: (
@@ -291,7 +291,7 @@ animación.
 )[]
 
 #api-entry(
-  name: "Scene.complex",
+  name: "Visualization.complex",
   kind: "method",
   signature: "complex(x=None, y=None, *, width=None, height=None, grid=True, axes=True, ticks=True, numbers=True, labels=True, x_axis=None, y_axis=None, x_grid=None, y_grid=None, x_ticks=None, y_ticks=None, x_numbers=None, y_numbers=None, x_labels=None, y_labels=None) -> ComplexSpace",
   params: (
@@ -303,7 +303,7 @@ animación.
 )[]
 
 ```python
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
   Axis.linear(-4, 4).ticks(1).label("x"),
   Axis.linear(-2, 2).ticks(1).label("y"),
   grid=False, x_grid=True,
@@ -311,21 +311,21 @@ plane = scene.cartesian_2d(
   labels=False, x_labels=True,
 )
 
-polar = scene.polar(
+polar = scene.viz.polar(
   Axis.linear(0, 4).ticks(1).label("r"),
   grid=False, rings=True, axes=False, numbers=False,
 )
 ```
 
 ```python
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
   Axis.linear(-6, 6).label("x"),
   Axis.linear(-3, 3).label("y"),
 )
 scene.play(plane.write(1.2))
 ```
 
-`Parameter`, `Variable`, `Computed` y `scene.time` forman la ruta reactiva. Rust
+`Parameter`, `Variable`, `Computed` y `scene.viz.time` forman la ruta reactiva. Rust
 resuelve sus valores en un snapshot estable y llama la función Python con las
 coordenadas primero y los valores de `inputs=` después.
 
@@ -342,7 +342,7 @@ regeneran desde el snapshot resuelto por el timeline; `field.evaluation` vale
 from gaanim import Axis, Scene
 
 scene = Scene()
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
   Axis.linear(-4, 4).ticks(1),
   Axis.linear(-3, 3).ticks(1),
 )
@@ -455,7 +455,7 @@ manual entre datos y píxeles que pueda desincronizarse.
 from gaanim import CYAN, Axis, Scene
 
 scene = Scene()
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
   Axis.linear(0, 30).ticks(5).label("tiempo (s)"),
   Axis.linear(-0.4, 0.4).ticks(0.2).label("aceleración (g)"),
   width=1460,
@@ -524,13 +524,13 @@ import math
 from gaanim import Axis, Scene, computed
 
 scene = Scene()
-theta = scene.parameter(0.0)
-line = scene.number_line(
+theta = scene.viz.parameter(0.0)
+line = scene.viz.number_line(
   Axis.linear(0, 3 * math.pi).ticks(math.pi).numbers("pi", denominator=1),
   length=760,
 )
 curve = line.function(lambda t: math.sin(t), normal_scale=120, reveal=theta)
-point = scene.dot(8).follow(
+point = scene.geometry.dot(8).follow(
   line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
 )
 scene.play([line.create(), curve.fade_in(duration=0.01), point.fade_in()])

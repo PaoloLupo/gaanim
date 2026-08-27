@@ -21,7 +21,7 @@ linear = Brush.linear(
     start=(-230, 0),
     end=(230, 0),
 )
-scene.rounded_rect(460, 185, 28).fill(linear).no_stroke().at(-315, 55)
+scene.geometry.rounded_rect(460, 185, 28).fill(linear).no_stroke().at(-315, 55)
 scene.text("Linear").fill("white").at(-315, 55, anchor=Anchor.CENTER)
 
 radial = Brush.radial(
@@ -29,14 +29,14 @@ radial = Brush.radial(
     center=(-25, 30),
     radius=125,
 )
-scene.circle(100).fill(radial).no_stroke().at(300, 55)
+scene.geometry.circle(100).fill(radial).no_stroke().at(300, 55)
 scene.text("Radial").fill("#1A1B26").at(300, 55, anchor=Anchor.CENTER)
 
 sweep = Brush.sweep(
     ["#7DCFFF", "#9ECE6A", "#E0AF68", "#F7768E", "#7DCFFF"],
     center=(0, 0),
 )
-scene.circle(105).fill("#1A1B26").stroke(sweep, 22).at(-230, -190)
+scene.geometry.circle(105).fill("#1A1B26").stroke(sweep, 22).at(-230, -190)
 scene.text("Sweep stroke").at(-230, -190, anchor=Anchor.CENTER)
 
 repeat = Brush.linear(
@@ -45,7 +45,7 @@ repeat = Brush.linear(
     end=(40, 0),
     extend="reflect",
 )
-scene.rounded_rect(460, 145, 24).fill(repeat).stroke(
+scene.geometry.rounded_rect(460, 145, 24).fill(repeat).stroke(
     scene.canvas.color("rule"), 2
 ).at(315, -190)
 scene.text("Reflect").at(315, -190, anchor=Anchor.CENTER)

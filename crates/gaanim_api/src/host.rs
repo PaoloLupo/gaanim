@@ -1,7 +1,7 @@
 //! Language-agnostic host bridge for script frontends.
 //!
 //! Scripting bindings should build canonical `gaanim_api` values (currently
-//! [`Canvas`](crate::canvas::Canvas)) and submit them here. The editor/hot-reload
+//! [`SceneModel`](crate::canvas::SceneModel)) and submit them here. The editor/hot-reload
 //! host listens for these payloads and replays them into Bevy.
 
 use std::sync::{Arc, Mutex, OnceLock};
@@ -9,19 +9,19 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
 
-use crate::canvas::Canvas;
+use crate::canvas::SceneModel;
 
 /// A complete, self-contained animation description ready to replay into Bevy.
 #[derive(Debug, Clone)]
 pub struct ReloadPayload {
-    pub canvas: Canvas,
+    pub canvas: SceneModel,
     /// Time spent executing the Python script before it submitted the scene.
     pub compile_duration: Duration,
 }
 
 static HOST_TX: OnceLock<Mutex<Option<Sender<ReloadPayload>>>> = OnceLock::new();
 static HOST_COMPILE_STARTED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-type SnapshotHandler = dyn Fn(Canvas, &str, &[f64]) -> Result<usize, String> + Send + Sync;
+type SnapshotHandler = dyn Fn(SceneModel, &str, &[f64]) -> Result<usize, String> + Send + Sync;
 static SNAPSHOT_HANDLER: OnceLock<Mutex<Option<Arc<SnapshotHandler>>>> = OnceLock::new();
 
 fn tx_slot() -> &'static Mutex<Option<Sender<ReloadPayload>>> {
@@ -52,7 +52,11 @@ pub fn set_snapshot_handler(handler: Option<Arc<SnapshotHandler>>) {
 ///
 /// Script frontends only declare the requested times. The host remains
 /// responsible for validating the destination and producing image files.
-pub fn request_snapshots(canvas: Canvas, directory: &str, times: &[f64]) -> Result<usize, String> {
+pub fn request_snapshots(
+    canvas: SceneModel,
+    directory: &str,
+    times: &[f64],
+) -> Result<usize, String> {
     let handler = snapshot_handler_slot()
         .lock()
         .expect("snapshot handler poisoned")
@@ -73,7 +77,7 @@ pub fn set_compile_started_at(started_at: Option<Instant>) {
 
 /// Submit a canvas to the embedded host. Returns `false` when no host is
 /// attached, e.g. when a script is run directly with plain Python.
-pub fn send_to_host(canvas: Canvas) -> bool {
+pub fn send_to_host(canvas: SceneModel) -> bool {
     let guard = tx_slot().lock().expect("host tx poisoned");
     let compile_duration = compile_started_at_slot()
         .lock()
@@ -103,9 +107,9 @@ mod tests {
             assert_eq!(times, [0.0, 1.5]);
             Ok(times.len())
         })));
-        let result = request_snapshots(Canvas::new(320, 180), "owned-by-host", &[0.0, 1.5]);
+        let result = request_snapshots(SceneModel::new(320, 180), "owned-by-host", &[0.0, 1.5]);
         set_snapshot_handler(None);
         assert_eq!(result, Ok(2));
-        assert!(request_snapshots(Canvas::new(1, 1), "x", &[]).is_err());
+        assert!(request_snapshots(SceneModel::new(1, 1), "x", &[]).is_err());
     }
 }

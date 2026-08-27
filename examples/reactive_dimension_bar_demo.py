@@ -7,23 +7,23 @@ from gaanim import BLACK, GRAY, RED, WHITE, Anchor, Scene
 scene = Scene(1280, 720, background=WHITE)
 
 # A nested frame proves that anchors use local bounds plus the full hierarchy.
-outer = scene.rect(720, 190).no_fill().stroke(BLACK, 7)
-inner = scene.rect(660, 130).fill(WHITE).stroke(BLACK, 4)
-frame = scene.group([outer, inner]).at(0, 0)
+outer = scene.geometry.rect(720, 190).no_fill().stroke(BLACK, 7)
+inner = scene.geometry.rect(660, 130).fill(WHITE).stroke(BLACK, 4)
+frame = scene.geometry.group([outer, inner]).at(0, 0)
 
 left_support = (-420.0, 245.0)
 right_support = (420.0, 245.0)
 left_corner = frame.anchor_point(Anchor.TOP_LEFT)
 right_corner = frame.anchor_point(Anchor.TOP_RIGHT)
 
-left_bar = scene.bar_between(left_support, left_corner, width=10)
-right_bar = scene.bar_between(right_support, right_corner, width=10)
-left_pin = scene.dot(9).fill(WHITE).stroke(BLACK, 5).at(*left_support)
-right_pin = scene.dot(9).fill(WHITE).stroke(BLACK, 5).at(*right_support)
+left_bar = scene.mechanics.bar_between(left_support, left_corner, width=10)
+right_bar = scene.mechanics.bar_between(right_support, right_corner, width=10)
+left_pin = scene.geometry.dot(9).fill(WHITE).stroke(BLACK, 5).at(*left_support)
+right_pin = scene.geometry.dot(9).fill(WHITE).stroke(BLACK, 5).at(*right_support)
 
-mass = scene.rect(105, 105).fill(RED).stroke(BLACK, 5).at(-80, 0)
+mass = scene.geometry.rect(105, 105).fill(RED).stroke(BLACK, 5).at(-80, 0)
 left_spring = (
-    scene.spring_between(
+    scene.mechanics.spring_between(
         frame.anchor_point(Anchor.LEFT, offset=(32, 0)),
         mass.anchor_point(Anchor.LEFT),
         coils=9,
@@ -34,7 +34,7 @@ left_spring = (
     .stroke(BLACK, 4)
 )
 right_spring = (
-    scene.spring_between(
+    scene.mechanics.spring_between(
         mass.anchor_point(Anchor.RIGHT),
         frame.anchor_point(Anchor.RIGHT, offset=(-32, 0)),
         coils=9,
@@ -45,14 +45,14 @@ right_spring = (
     .stroke(BLACK, 4)
 )
 
-bob = scene.circle(27).fill(BLACK).at(-145, -240)
-pendulum = scene.bar_between(
+bob = scene.geometry.circle(27).fill(BLACK).at(-145, -240)
+pendulum = scene.mechanics.bar_between(
     mass.anchor_point(Anchor.CENTER),
     bob.anchor_point(Anchor.CENTER),
     width=9,
 )
 
-width_dimension = scene.dimension_between(
+width_dimension = scene.mechanics.dimension_between(
     left_corner,
     right_corner,
     105,
@@ -67,8 +67,8 @@ width_dimension = scene.dimension_between(
     dash_length=12,
     gap_length=8,
 )
-displayed_x = scene.parameter(2.5)
-mass_dimension = scene.dimension_between(
+displayed_x = scene.viz.parameter(2.5)
+mass_dimension = scene.mechanics.dimension_between(
     mass.anchor_point(Anchor.TOP_LEFT),
     mass.anchor_point(Anchor.TOP_RIGHT),
     50,
@@ -80,7 +80,7 @@ mass_dimension = scene.dimension_between(
     color=BLACK,
 )
 
-centerline = scene.dashed_line(-470, 0, 470, 0, dash_length=14, gap_length=10).stroke(GRAY, 2)
+centerline = scene.geometry.dashed_line(-470, 0, 470, 0, dash_length=14, gap_length=10).stroke(GRAY, 2)
 
 scene.play(
     [

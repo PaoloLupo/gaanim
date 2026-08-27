@@ -3,7 +3,7 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
 scene = Scene(1280, 720, background=BLACK)
 scene.segment("shapes")
-circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-180, 0)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).at(-180, 0)
 scene.play([circle.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
@@ -18,10 +18,10 @@ scene.render()
 from gaanim import BLACK, BLUE, GREEN, RED, Scene
 
 scene = Scene(1280, 720, background=BLACK)
-left = scene.circle(40).fill(BLUE).at(-80, 0)
-middle = scene.circle(40).fill(RED).at(0, 0)
-right = scene.circle(40).fill(GREEN).at(80, 0)
-group = scene.group([left, middle, right])
+left = scene.geometry.circle(40).fill(BLUE).at(-80, 0)
+middle = scene.geometry.circle(40).fill(RED).at(0, 0)
+right = scene.geometry.circle(40).fill(GREEN).at(80, 0)
+group = scene.geometry.group([left, middle, right])
 
 scene.play([group.grow_from_center().duration(1.0).spring()])
 scene.play([group.move(0, 120).duration(1.0), group.rotate(3.14159).duration(1.0)])
@@ -31,9 +31,9 @@ scene.render()
 from gaanim import BLACK, Color, Scene, Updater
 
 scene = Scene(1280, 720, background=BLACK)
-dot = scene.dot(10).fill(Color(255, 180, 70)).at(200, 0)
+dot = scene.geometry.dot(10).fill(Color(255, 180, 70)).at(200, 0)
 dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
-trail = scene.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
+trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
 
 scene.play([dot.fade_in().duration(0.3), trail.fade_in().duration(0.3)])
 scene.wait(4.0)

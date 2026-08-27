@@ -7,7 +7,7 @@ from gaanim import BLACK, Scene, Theme, Transition
 
 paper = Theme("paper", colors={"background": "#fffbe6"})
 scene = Scene(1920, 1080)
-scene.assets_dir("examples/assets")
+scene.assets.assets_dir("examples/assets")
 scene.canvas.set_theme(paper)
 
 scene.segment("Introduction")
@@ -21,7 +21,7 @@ scene.play([title.move_to(-250, 400)])
 
 # The model is declared after the title move. It must not leak into the first
 # second of this segment while the camera is still orthographic.
-fox = scene.gltf("Fox.glb").at_3d(2.0, -1.0, 0.0).scaled_3d(0.04, 0.04, 0.04)
+fox = scene.media.gltf("Fox.glb").at_3d(2.0, -1.0, 0.0).scaled_3d(0.04, 0.04, 0.04)
 scene.play(
     [
         scene.camera.perspective(fov_y=1.0, near=0.1, far=500.0, duration=0.0),

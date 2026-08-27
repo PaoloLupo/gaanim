@@ -5,10 +5,10 @@ from gaanim import BLACK, BLUE, CYAN, GOLD, PURPLE, WHITE, Scene
 
 def main():
     scene = Scene(1280, 720, background=BLACK)
-    square = scene.rect(150, 150).stroke(PURPLE, 6).no_fill().at(300, -20)
-    circle = scene.circle(75).fill(CYAN).at(-300, -20)
+    square = scene.geometry.rect(150, 150).stroke(PURPLE, 6).no_fill().at(300, -20)
+    circle = scene.geometry.circle(75).fill(CYAN).at(-300, -20)
     title = scene.text("Advanced Animations", role="title").fill(WHITE).at(0, 180)
-    equation = scene.equation("f(x) = x^2 - 2x + 1").fill(GOLD).at(0, -20)
+    equation = scene.text.equation("f(x) = x^2 - 2x + 1").fill(GOLD).at(0, -20)
 
     scene.play([
         square.create().duration(2.0).smooth(),

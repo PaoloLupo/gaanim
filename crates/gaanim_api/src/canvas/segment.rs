@@ -72,7 +72,7 @@ impl SegmentManifest {
     }
 }
 
-/// Stable handle returned by [`Canvas::segment`](super::Canvas::segment).
+/// Stable handle returned by [`SceneModel::segment`](super::SceneModel::segment).
 #[derive(Clone)]
 pub struct SegmentHandle {
     pub(crate) id: SegmentId,

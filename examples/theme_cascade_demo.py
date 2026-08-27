@@ -39,13 +39,13 @@ scene.text(
     role="body",
 ).at(0, 215)
 
-scene.circle(62).at(-450, 70)
-scene.square(118).style_class("warning").at(-260, 70)
-scene.line(-510, -30, -190, -30)
+scene.geometry.circle(62).at(-450, 70)
+scene.geometry.square(118).style_class("warning").at(-260, 70)
+scene.geometry.line(-510, -30, -190, -30)
 
 x = Axis.linear(-3, 3).ticks(1).label("x")
 y = Axis.linear(-2, 2).ticks(1).label("y")
-scene.cartesian_2d(x, y, width=560, height=330).at(260, -70)
+scene.viz.cartesian_2d(x, y, width=560, height=330).at(260, -70)
 
 scene.wait(1.0)
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

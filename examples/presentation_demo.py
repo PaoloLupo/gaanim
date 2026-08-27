@@ -36,7 +36,7 @@ scene.stop("pipeline")
 scene.wait(0.35)
 scene.stop("same-timeline")
 
-benefits = scene.column([
+benefits = scene.layout.column([
     scene.text("Named slides").fill(WHITE),
     scene.text("Speaker notes").fill(WHITE),
     scene.text("Direct navigation").fill(WHITE),

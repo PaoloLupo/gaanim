@@ -7,7 +7,7 @@ from gaanim import Anchor, Axis, BLACK, CYAN, GOLD, GREEN, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 
-plane = scene.cartesian_2d(
+plane = scene.viz.cartesian_2d(
     Axis.linear(-4, 4).ticks(1).minor_ticks(2).label("x").style(color=WHITE),
     Axis.linear(-2, 2).ticks(1).label("y").style(color=WHITE),
     width=480,
@@ -19,9 +19,9 @@ plane = scene.cartesian_2d(
     labels=False,
     x_labels=True,
 ).at(-330, 120)
-curve = plane.function(lambda x: 0.12 * x * x - 1).stroke(CYAN, 3)
+curve = plane.plot(lambda x: 0.12 * x * x - 1).stroke(CYAN, 3)
 
-polar = scene.polar(
+polar = scene.viz.polar(
     Axis.linear(0, 4).ticks(1).label("r").style(color=WHITE),
     radius=125,
     angle_divisions=10,
@@ -31,7 +31,7 @@ polar = scene.polar(
     numbers=False,
 ).drawable().at(330, 120)
 
-line = scene.number_line(
+line = scene.viz.number_line(
     Axis.linear(0, 6).ticks(1).label("t").style(color=WHITE),
     length=620,
     ticks=False,
@@ -52,7 +52,7 @@ scene.play([
     title.fade_out(0.4),
 ])
 
-space_3d = scene.cartesian_3d(
+space_3d = scene.viz.cartesian_3d(
     Axis.linear(-3, 3).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-2, 2).ticks(1).label("y").style(color=WHITE),
     Axis.linear(-2, 2).ticks(1).label("z").style(color=WHITE),

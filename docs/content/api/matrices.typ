@@ -16,7 +16,7 @@ celda, fila, columna, diagonal o bloque puede recibir estilo y animación sin
 desarmar el layout.
 
 #api-entry(
-  name: "Scene.matrix",
+  name: "Visualization.matrix",
   kind: "factory",
   signature: "matrix(data, *, row_gap=24, column_gap=24, delimiter_gap=12, delimiters=\"brackets\", delimiter_size=None, delimiter_weight=300, row_labels=None, column_labels=None, label_mode=\"math\", cell_mode=\"math\", entry_style=None, label_style=None, cell_factory=None, numeric_format=\"g\") -> Matrix",
   params: (
@@ -37,7 +37,7 @@ desarmar el layout.
 # show-code: true
 from gaanim import GOLD, Scene
 scene = Scene(640, 360)
-m = scene.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
+m = scene.viz.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
 m[0, :].fill(GOLD)
 scene.play(m.entries.write(0.4, order="spiral_in", stagger=0.05))
 ```
@@ -70,8 +70,8 @@ aproximan silenciosamente; usa `exact=False, precision=N` de forma explícita.
 # show-code: true
 from gaanim import Scene
 scene = Scene(640, 360)
-a = scene.matrix([[1, 2], [3, 4]])
-b = scene.matrix([[2, 0], [1, 2]])
+a = scene.viz.matrix([[1, 2], [3, 4]])
+b = scene.viz.matrix([[2, 0], [1, 2]])
 derivation = a.matmul(b)
 derivation.result.at(180, 0)
 scene.play(derivation.animate())

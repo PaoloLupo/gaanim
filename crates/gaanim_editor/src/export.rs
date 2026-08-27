@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
-use gaanim_api::canvas::Canvas;
+use gaanim_api::canvas::SceneModel;
 use gaanim_api::export::export_canvas;
 use gaanim_export::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
 use gaanim_export::prelude::*;
@@ -24,7 +24,7 @@ pub struct ProjectPaths {
 
 #[derive(Resource, Clone, Default)]
 pub struct StashedReplay {
-    pub canvas: Option<Canvas>,
+    pub canvas: Option<SceneModel>,
     /// Changes on every replay, even when segment names and timings stay equal.
     pub revision: u64,
 }

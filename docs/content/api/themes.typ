@@ -25,7 +25,7 @@ incluidas siguen de forma predeterminada este lenguaje más sobrio.
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK)
-circle = scene.circle(80).fill(BLUE).stroke(GOLD, 4)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
 
@@ -248,9 +248,9 @@ theme = Theme(
     },
 )
 scene = Scene(theme=theme)
-ordinary = scene.circle(60)
-warning = scene.square(100).style_class("danger")
-explicit = scene.circle(40).fill("gold")
+ordinary = scene.geometry.circle(60)
+warning = scene.geometry.square(100).style_class("danger")
+explicit = scene.geometry.circle(40).fill("gold")
 ```
 
 La precedencia es: tema base, familia, tipo exacto o parte semántica, clases del
@@ -378,14 +378,14 @@ Los objetos vectoriales manuales pueden consumir los mismos tokens semánticos
 que los componentes:
 
 ```python
-scene.rounded_rect(420, 180, 24) \
+scene.geometry.rounded_rect(420, 180, 24) \
     .fill(scene.canvas.color("panel")) \
     .stroke(scene.canvas.color("accent"), 3)
 
-divider = scene.line(-400, 0, 400, 0) \
+divider = scene.geometry.line(-400, 0, 400, 0) \
     .stroke(theme.color("rule"), 2)
 
-page = scene.column(
+page = scene.layout.column(
     [title, body],
     padding=scene.canvas.layout_token("page_padding"),
     gap=scene.canvas.layout_token("space_lg"),
@@ -421,14 +421,14 @@ gradient = Brush.linear(
     end=(240, 0),
 )
 
-card = scene.rounded_rect(480, 220, 28).fill(gradient)
+card = scene.geometry.rounded_rect(480, 220, 28).fill(gradient)
 ```
 
 Los gradientes radiales y angulares usan la misma convención de lista de colores.
 Los colores se distribuyen uniformemente y se requieren dos paradas como mínimo:
 
 ```python
-orb = scene.circle(120).fill(
+orb = scene.geometry.circle(120).fill(
     Brush.radial(
         ["white", scene.canvas.color("accent"), "#0000"],
         center=(-30, 35),
@@ -436,7 +436,7 @@ orb = scene.circle(120).fill(
     )
 )
 
-ring = scene.circle(110).no_fill().stroke(
+ring = scene.geometry.circle(110).no_fill().stroke(
     Brush.sweep(
         ["#7DCFFF", "#9ECE6A", "#E0AF68", "#F7768E", "#7DCFFF"],
         center=(0, 0),
@@ -498,5 +498,5 @@ posterior a `at()`.
 from gaanim import Color
 
 custom = Color(128, 51, 204, 255)
-circle = scene.circle(80).fill(custom)
+circle = scene.geometry.circle(80).fill(custom)
 ```

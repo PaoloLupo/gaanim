@@ -7,9 +7,9 @@ from gaanim import BLUE, GOLD, RED, Axis, Scene, computed
 
 
 scene = Scene(1280, 720)
-amplitude = scene.parameter(1.0)
-phase = scene.parameter(0.0)
-plane = scene.cartesian_2d(
+amplitude = scene.viz.parameter(1.0)
+phase = scene.viz.parameter(0.0)
+plane = scene.viz.cartesian_2d(
     Axis.linear(-math.pi, math.pi).ticks(math.pi / 2),
     Axis.linear(-3.0, 3.0).ticks(1.0),
     width=960,
@@ -23,11 +23,11 @@ curve = plane.plot(
 
 pulse = computed(
     lambda scale, t: 42.0 + 8.0 * scale * math.sin(t),
-    inputs=[amplitude, scene.time],
+    inputs=[amplitude, scene.viz.time],
 )
-angle = computed(lambda offset, t: offset + 0.35 * t, inputs=[phase, scene.time])
-marker = scene.dot(9).fill(GOLD).follow(scene.polar_point((0.0, 0.0), pulse, angle))
-value = scene.readout(
+angle = computed(lambda offset, t: offset + 0.35 * t, inputs=[phase, scene.viz.time])
+marker = scene.geometry.dot(9).fill(GOLD).follow(scene.geometry.polar_point((0.0, 0.0), pulse, angle))
+value = scene.viz.readout(
     lambda scale, offset: scale**2 + offset if scale >= 0 else float("nan"),
     inputs=[amplitude, phase],
     label="$q$",

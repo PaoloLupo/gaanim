@@ -9,7 +9,7 @@ scene = Scene(1280, 720, background=BLACK, margin=56)
 
 title = scene.text("Solver comparison", role="title").fill(WHITE).at(0, 250, anchor=Anchor.CENTER)
 subtitle = scene.text("Residual after 200 iterations", role="subtitle").fill(GRAY).at(0, 195, anchor=Anchor.CENTER)
-results = scene.table(
+results = scene.slides.table(
     ["Method", "Residual", "Elapsed"],
     [
         ["Baseline", "1.8e-1", "48 ms"],

@@ -94,7 +94,7 @@ output_dir = "exports"
 
 `entry` debe ser una ruta relativa que permanezca dentro del proyecto. `kind`
 solo acepta `video` o `slides`. La CLI usa `entry`; la escena carga `assets_dir`
-mediante `scene.load_project(...)`. `output_dir` es la carpeta convencional para
+mediante `scene.assets.load_project(...)`. `output_dir` es la carpeta convencional para
 artefactos.
 
 En `main.py`:
@@ -103,7 +103,7 @@ En `main.py`:
 from gaanim import Scene
 
 scene = Scene(1920, 1080)
-scene.load_project("gaanim.toml")  # resuelve assets relativo al proyecto
+scene.assets.load_project("gaanim.toml")  # resuelve assets relativo al proyecto
 # ... contenido ...
 scene.render()
 ```
@@ -117,5 +117,5 @@ gaanim examples/mi_escena.py
 ```
 
 Para organizarlo como proyecto, crea la estructura descrita arriba, mueve el
-script a `main.py`, añade `scene.load_project(...)` después de construir `Scene`
+script a `main.py`, añade `scene.assets.load_project(...)` después de construir `Scene`
 y coloca los recursos en `assets/`.

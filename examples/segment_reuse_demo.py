@@ -17,9 +17,9 @@ scene.segment("pendulum", Transition.cross_fade(0.5))
 scene.reuse(title)
 scene.play([title.move_to(0, 260).duration(0.4)])
 
-support = scene.line(-120, 170, 120, 170).stroke(WHITE, 5)
-rod = scene.line(0, 170, 0, -90).stroke(WHITE, 4)
-bob = scene.circle(34).fill(BLUE).stroke(WHITE, 3).at(0, -125)
+support = scene.geometry.line(-120, 170, 120, 170).stroke(WHITE, 5)
+rod = scene.geometry.line(0, 170, 0, -90).stroke(WHITE, 4)
+bob = scene.geometry.circle(34).fill(BLUE).stroke(WHITE, 3).at(0, -125)
 scene.play([support.create().duration(0.4), rod.create().duration(0.7)])
 scene.play([bob.grow_from_center().duration(0.4)])
 

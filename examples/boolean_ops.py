@@ -11,12 +11,12 @@ from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 def main():
     scene = Scene(1280, 720, background=BLACK)
     title = scene.text("Overlapping shapes", role="title").fill(WHITE).at(0, 230)
-    circle_a = scene.circle(80).fill(BLUE).opacity(0.7).at(-60, 60)
-    circle_b = scene.circle(80).fill(RED).opacity(0.7).at(60, 60)
-    rect_a = scene.rect(120, 120).fill(GREEN).opacity(0.7).at(-80, -150)
-    rect_b = scene.rect(120, 120).fill(GOLD).opacity(0.7).at(0, -150)
-    union = scene.union(circle_a, circle_b).fill(WHITE).opacity(0.25)
-    difference = scene.difference(rect_a, rect_b).fill(WHITE).opacity(0.35)
+    circle_a = scene.geometry.circle(80).fill(BLUE).opacity(0.7).at(-60, 60)
+    circle_b = scene.geometry.circle(80).fill(RED).opacity(0.7).at(60, 60)
+    rect_a = scene.geometry.rect(120, 120).fill(GREEN).opacity(0.7).at(-80, -150)
+    rect_b = scene.geometry.rect(120, 120).fill(GOLD).opacity(0.7).at(0, -150)
+    union = scene.geometry.union(circle_a, circle_b).fill(WHITE).opacity(0.25)
+    difference = scene.geometry.difference(rect_a, rect_b).fill(WHITE).opacity(0.35)
 
     scene.play([
         title.write().duration(0.8),

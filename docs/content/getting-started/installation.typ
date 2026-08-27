@@ -17,7 +17,7 @@ Gaanim `0.1.0` se distribuye como un zip de GitHub Releases. No necesitas `just`
 - *Windows 10/11 x64*
 - *Python >=3.12* — 3.12 es el mínimo, 3.13 y 3.14 también funcionan. Instala desde #link("https://www.python.org/downloads/")[python.org] o `winget install Python.Python.3.12` / `winget install Python.Python.3.14`.
 - *uv recomendado* — #link("https://docs.astral.sh/uv/")[docs.astral.sh/uv] para crear entornos. También funciona `python -m venv`.
-- *FFmpeg opcional* — necesario para exportar `mp4`/`webm` y para usar `scene.video()`. Si no está, exporta `png` y evita videos embebidos.
+- *FFmpeg opcional* — necesario para exportar `mp4`/`webm` y para usar `scene.media.video()`. Si no está, exporta `png` y evita videos embebidos.
 
 El binario es `gaanim.exe` (launcher, 300KB) + `gaanim-core.exe` (motor, ~140MB). El launcher no depende de `python3.dll`, por eso puede arrancar sin tener Python en `PATH` antes de ejecutarlo: detecta el venv, añade su directorio al `PATH` y luego lanza el core.
 
@@ -108,8 +108,8 @@ Dentro de `main.py` la forma canónica es:
 from gaanim import Scene, BLACK
 
 scene = Scene(1920, 1080, background=BLACK)
-scene.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proyecto
-circle = scene.circle(80).fill(BLUE)
+scene.assets.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proyecto
+circle = scene.geometry.circle(80).fill(BLUE)
 scene.play([circle.create().duration(1).spring()])
 scene.render()  # para preview
 # luego: gaanim export . --output exports/demo.mp4
@@ -251,6 +251,6 @@ El workflow `.github/workflows/release.yml` hace lo mismo en `windows-latest` al
 == Solución de problemas
 
 - `exit -1073741515 / python3.dll not found`: el launcher no encontró Python. Verifica `py --version` o crea `.venv` con `uv venv --python 3.12`. El core solo (`gaanim-core.exe`) siempre fallará sin launcher si `PATH` no contiene Python.
-- `gaanim check: could not load project`: revisa `gaanim.toml` `entry` sea relativo y exista, y que `assets/` exista si `scene.load_project` lo usa.
+- `gaanim check: could not load project`: revisa `gaanim.toml` `entry` sea relativo y exista, y que `assets/` exista si `scene.assets.load_project` lo usa.
 - `FFmpeg not found` al exportar `mp4`: instala FFmpeg y añádelo a `PATH`, o exporta `png`/`webp`.
 - `just bootstrap` crea `.venv` con 3.14 pero el zip release exige >=3.12: es compatible, no necesitas recrear el venv.

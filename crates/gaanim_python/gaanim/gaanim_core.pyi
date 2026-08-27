@@ -1315,56 +1315,6 @@ class Drawable:
         """
         ...
     # manim Axes compatibility — coords mapping and graph helpers (only valid when self is an axes)
-    def _legacy_coords_to_point(self, x: float, y: float) -> tuple[float, float]:
-        """Use coords to point on this Drawable or create the requested value.
-
-        Example:
-            result = axes.coords_to_point(1.0, 1.0)
-        """
-        ...
-    def _legacy_point_to_coords(self, point: tuple[float, float]) -> tuple[float, float]:
-        """Use point to coords on this Drawable or create the requested value.
-
-        Example:
-            result = axes.point_to_coords((0.0, 0.0))
-        """
-        ...
-    def _legacy_get_x_axis(self) -> Drawable:
-        """Apply get x axis to this drawable and return the result.
-
-        Example:
-            result = axes.get_x_axis()
-        """
-        ...
-    def _legacy_get_y_axis(self) -> Drawable:
-        """Apply get y axis to this drawable and return the result.
-
-        Example:
-            result = axes.get_y_axis()
-        """
-        ...
-    def _legacy_get_axes(self) -> Drawable:
-        """Apply get axes to this drawable and return the result.
-
-        Example:
-            result = axes.get_axes()
-        """
-        ...
-    def _legacy_add_coordinates(self) -> Drawable:
-        """Apply add coordinates to this drawable and return the result.
-
-        Example:
-            result = axes.add_coordinates()
-        """
-        ...
-
-TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", "caption", "label", "code", "math"]
-TextWrap: TypeAlias = Literal["auto", False] | float
-TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
-TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
-TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
-TextGrouping: TypeAlias = Literal["grapheme", "word", "line", "part"]
-
 class Dimension(Drawable):
     """Reactive technical dimension with independently styleable parts."""
     @property
@@ -2805,18 +2755,6 @@ class CoordinateSpace:
         derivative: Optional[Callable[..., float]] = None,
         inputs: Sequence[Parameter | Variable | TimeInput] = (),
     ) -> Drawable: ...
-    def function(
-        self,
-        function: Callable[..., float],
-        domain: Optional[tuple[float, float]] = None,
-        *,
-        samples: Optional[int] = None,
-        tolerance: float = 0.75,
-        derivative: Optional[Callable[..., float]] = None,
-        inputs: Sequence[Parameter | Variable | TimeInput] = (),
-    ) -> Drawable:
-        """Sample a Python function using coordinates first, then explicit inputs."""
-        ...
     def parametric(self, function: Callable[..., tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.75, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
     def implicit(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def contour(self, function: Callable[[float, float], float], levels: Sequence[float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
@@ -2966,314 +2904,8 @@ class Lottie(Drawable):
     @property
     def warnings(self) -> list[str]: ...
 
-class Scene:
-    def __init__(
-        self,
-        width: int = 1280,
-        height: int = 720,
-        background: Optional[BackgroundLike] = None,
-        margin: Optional[float] = None,
-        theme: Optional[str | Theme] = None,
-    ) -> None:
-        """Create a scene and optionally install its centralized theme.
-
-        An explicit color, Brush, or Background wins over the theme background.
-        Invalid WGSL and unknown theme names raise ``ValueError``.
-        """
-        ...
-    @property
-    def time(self) -> TimeInput: ...
-    def parameter(self, initial: float) -> Parameter: ...
-    def chart(self, spec: ChartSpec) -> Chart:
-        """Materialize an immutable declarative chart using batched semantic layers."""
-        ...
-    def cartesian_2d(
-        self,
-        x: Axis,
-        y: Axis,
-        *,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        grid: bool = True,
-        axes: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        x_axis: Optional[bool] = None,
-        y_axis: Optional[bool] = None,
-        x_grid: Optional[bool] = None,
-        y_grid: Optional[bool] = None,
-        x_ticks: Optional[bool] = None,
-        y_ticks: Optional[bool] = None,
-        x_numbers: Optional[bool] = None,
-        y_numbers: Optional[bool] = None,
-        x_labels: Optional[bool] = None,
-        y_labels: Optional[bool] = None,
-    ) -> Cartesian2D:
-        """Create a typed 2D Cartesian space with configurable semantic layers.
-
-        Global switches default to ``True``. A non-``None`` per-axis switch
-        overrides its global value. ``numbers`` controls tick text while
-        ``labels`` controls titles authored with ``Axis.label``. Disabled
-        layers remain addressable as empty ``Drawable`` objects.
-        """
-        ...
-    def cartesian_3d(
-        self,
-        x: Axis,
-        y: Axis,
-        z: Axis,
-        *,
-        size: tuple[float, float, float] = (10.0, 8.0, 6.0),
-        grid: bool = True,
-        axes: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        x_axis: Optional[bool] = None,
-        y_axis: Optional[bool] = None,
-        z_axis: Optional[bool] = None,
-        xy_grid: Optional[bool] = None,
-        xz_grid: Optional[bool] = None,
-        yz_grid: Optional[bool] = None,
-        x_ticks: Optional[bool] = None,
-        y_ticks: Optional[bool] = None,
-        z_ticks: Optional[bool] = None,
-        x_numbers: Optional[bool] = None,
-        y_numbers: Optional[bool] = None,
-        z_numbers: Optional[bool] = None,
-        x_labels: Optional[bool] = None,
-        y_labels: Optional[bool] = None,
-        z_labels: Optional[bool] = None,
-    ) -> Cartesian3D:
-        """Create typed 3D axes with independently selectable planes and annotations.
-
-        ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
-        axis-specific ticks, numbers, and titles follow the same precedence.
-        Hidden layers remain available as empty ``Drawable`` objects.
-        """
-        ...
-    def polar(
-        self,
-        radial: Axis,
-        *,
-        radius: float = 220.0,
-        angle_divisions: int = 12,
-        grid: bool = True,
-        axes: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        rings: Optional[bool] = None,
-        spokes: Optional[bool] = None,
-    ) -> PolarSpace:
-        """Create a polar space with independently selectable rings and spokes.
-
-        ``rings`` and ``spokes`` inherit ``grid`` when omitted. ``labels``
-        controls the radial title from ``Axis.label``; ``numbers`` controls
-        radial tick text.
-        """
-        ...
-    def complex(
-        self,
-        x: Optional[Axis] = None,
-        y: Optional[Axis] = None,
-        *,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        grid: bool = True,
-        axes: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        x_axis: Optional[bool] = None,
-        y_axis: Optional[bool] = None,
-        x_grid: Optional[bool] = None,
-        y_grid: Optional[bool] = None,
-        x_ticks: Optional[bool] = None,
-        y_ticks: Optional[bool] = None,
-        x_numbers: Optional[bool] = None,
-        y_numbers: Optional[bool] = None,
-        x_labels: Optional[bool] = None,
-        y_labels: Optional[bool] = None,
-    ) -> ComplexSpace:
-        """Create a configurable Cartesian complex plane.
-
-        Visibility switches and per-axis precedence match ``cartesian_2d``;
-        omitted axes retain the default ``Re`` and ``Im`` titles.
-        """
-        ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Readout:
-        """Create a native numeric display with equally spaced, baseline-aligned terms.
-
-        The label, equality sign, number, and unit all use ``font_size``;
-        omitting it selects the shared 48-unit reactive annotation size.
-        ``color`` applies to the label, reactive value, and unit and remains in
-        effect when the number changes or the timeline seeks.
-        """
-        ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Variable:
-        """Create an animatable scalar displayed as an aligned equation row.
-
-        Every visible term uses ``font_size``, or 48 units when omitted.
-        ``color`` applies to every visible term, including the changing value.
-        """
-        ...
-    def number_line(
-        self,
-        axis: Axis,
-        *,
-        length: Optional[float] = None,
-        axis_visible: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-    ) -> NumberLine:
-        """Create a typed number line with independently visible components.
-
-        ``numbers`` controls tick text and ``labels`` controls the title from
-        ``Axis.label``. Disabled components remain addressable as empty layers.
-        ``axis_visible`` avoids colliding with the existing ``axis`` argument.
-        """
-        ...
-    @property
-    def canvas(self) -> Canvas:
-        """Read the canvas value from this Scene.
-
-        Example:
-            value = scene.canvas
-        """
-        ...
-    @property
-    def camera(self) -> Camera:
-        """Read the camera value from this Scene.
-
-        Example:
-            value = scene.camera
-        """
-        ...
-    def brand(
-        self,
-        *,
-        logo: Optional[str] = None,
-        footer: Optional[str] = None,
-        slide_numbers: bool = True,
-        rule: bool = True,
-        show_on_cover: bool = False,
-        logo_scale: float = 1.0,
-    ) -> None:
-        """Use brand on this Scene or create the requested value.
-
-        Example:
-            scene.brand()
-        """
-        ...
-    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a horizontal Layout v2 container in canvas units.
-
-        ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
-        Responsive text keeps the width offered by its final row allocation,
-        so tight glyph bounds do not trigger a second, narrower composition.
-        Ownership errors are raised before render as ``LayoutOwnershipError``.
-        """
-        ...
-    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a vertical Layout v2 container with optional wrapping.
-
-        Responsive text is composed at the width offered by the column, even
-        when its visible glyph bounds are narrower.
-        """
-        ...
-    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a grid with fixed, ``"auto"``, or ``"<weight>fr"`` tracks.
-
-        Explicit rows/columns and spans are reserved before deterministic
-        auto-placement. Responsive text uses its final track allocation.
-        Invalid tracks, collisions, or overflow raise errors.
-        """
-        ...
-    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create an overlay Layout; use item anchors and offsets for placement.
-
-        Responsive text retains the width offered by the overlay container.
-        """
-        ...
-    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem:
-        """Return per-child layout metadata without creating another Drawable.
-
-        ``fit="cover"`` clips media to its allocated box; ``absolute=True``
-        removes the item from normal flow. Negative grow/shrink values error.
-        """
-        ...
-    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet:
-        """Register prioritized linear relations and return their count.
-
-        Conflicting required relations or cross-scene references raise
-        ``ValueError`` immediately; ``animate`` is a transition duration.
-        """
-        ...
-    def check_layout(self) -> list[str]:
-        """Return current constraint and intrinsic-composition diagnostics.
-
-        Invalid responsive text or Typst math is reported here without
-        terminating editor hot reload.
-        """
-        ...
-    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout:
-        """Instantiate a signature-checked Python template and return its root Layout."""
-        ...
-    def assets_dir(self, path: str) -> None:
-        """Use assets dir on this Scene or create the requested value.
-
-        Example:
-            scene.assets_dir("example")
-        """
-        ...
-    def preload(self, paths: Sequence[str]) -> None:
-        """Use preload on this Scene or create the requested value.
-
-        Example:
-            scene.preload(["assets/example.svg"])
-        """
-        ...
-    def load_project(self, path: str | None = None) -> None:
-        """Load a project manifest and set its asset directory.
-
-        With no path, reads ``gaanim.toml`` beside the calling Python script.
-        An explicit path is used as provided; assets are resolved relative to
-        the selected manifest. Raises RuntimeError if it cannot be read.
-
-        Example:
-            scene.load_project()
-        """
-        ...
-    def reload_assets(self) -> None:
-        """Use reload assets on this Scene or create the requested value.
-
-        Example:
-            scene.reload_assets()
-        """
-        ...
-    def audio(
-        self,
-        path: str,
-        *,
-        duration: Optional[float] = None,
-        volume: float = 1.0,
-        fade_in: float = 0.0,
-        fade_out: float = 0.0,
-    ) -> Audio:
-        """Declare a validated audio file for explicit playback.
-
-        The declaration is inert until passed to ``Scene.play``. Playback then
-        begins at that call's absolute timeline cursor and follows pause, seek,
-        and speed in preview and MP4/WebM export. Invalid paths or timing values
-        raise ``ValueError``.
-
-        Example:
-            music = scene.audio("music.ogg", volume=0.5)
-            scene.play([music])
-        """
-        ...
+class Geometry:
+    """Scene-owned factory for vector, path, boolean, 3D, and reactive geometry."""
     def circle(self, r: float) -> Drawable:
         """Create a circle drawable in the scene.
 
@@ -3475,13 +3107,6 @@ class Scene:
             result = scene.curved_arrow_arc(1.0, 1.0, 40.0, 1.0, 1.0)
         """
         ...
-    def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable:
-        """Create a dimension drawable in the scene.
-
-        Example:
-            result = scene.dimension(1.0, 1.0, 1.0, 1.0, 1.0)
-        """
-        ...
     @overload
     def path(self, definition: Sequence[CurvePoint]) -> Drawable:
         """Create a path drawable in the scene.
@@ -3541,147 +3166,170 @@ class Scene:
         Use ``close`` or ``close_smooth`` with an empty argument sequence.
         """
         ...
-    def _legacy_function_graph(self, function: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable:
-        """Create a function graph drawable in the scene.
+    def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
+        """Configure or query the scene with transform matching shapes.
 
         Example:
-            result = scene.function_graph(lambda x: x, (0.0, 0.0))
+            scene.transform_matching_shapes(source, target)
         """
         ...
-    def _legacy_parametric_curve(self, function: Callable[[float], tuple[float, float]], t: tuple[float, float], samples: int = 240) -> Drawable:
-        """Create a parametric curve drawable in the scene.
+    def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
+        """Configure or query the scene with transform matching.
 
         Example:
-            result = scene.parametric_curve(lambda t: (t, t), (0.0, 0.0))
+            scene.transform_matching(source, target)
         """
         ...
-    def _legacy_axes(
+    def group(self, members: Sequence[Drawable]) -> Drawable:
+        """Create a group drawable in the scene.
+
+        Grouping preserves each member's authored local coordinates, including
+        coordinates returned by ``add_updater_fn``. Existing visible members do
+        not become hidden merely because the group also contains a deferred
+        force or trace; ``write()`` and ``create()`` on the group explicitly
+        reveal those deferred descendants.
+
+        Example:
+            result = scene.group([drawable])
+        """
+        ...
+    def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the union of at least two vector drawables.
+
+        Sources remain available. With ``live=True`` the result follows source
+        path and transform changes; invalid scenes, operands, rules, or
+        tolerances raise ``ValueError``.
+        """
+        ...
+    def intersection(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the shared vector area of at least two drawables."""
+        ...
+    def difference(self, subject: Drawable, *clips: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Subtract each clip from the subject in deterministic left-to-right order."""
+        ...
+    def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+        """Return the symmetric difference of at least two vector drawables."""
+        ...
+    def fill_level(self, mask: Drawable, paint: Paint, level: float = 0.0, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
+        """Create a dynamic vector fill clipped to ``mask``. The source mask remains visible as the outline when requested."""
+        ...
+    def point_on_curve(self, curve: Drawable, tracker: Parameter) -> Drawable:
+        """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
+
+        Example:
+            result = scene.point_on_curve(curve, None)
+        """
+        ...
+    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
+        """Create a hidden tangent drawable; reveal it in ``scene.play``.
+
+        Example:
+            result = scene.tangent_on_curve(curve, None)
+        """
+        ...
+    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
+        """Create a hidden normal drawable; reveal it in ``scene.play``.
+
+        Example:
+            result = scene.normal_on_curve(curve, None)
+        """
+        ...
+    def curvature_on_curve(self, curve: Drawable, tracker: Parameter, window: float = 0.02) -> Drawable:
+        """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
+
+        Example:
+            result = scene.curvature_on_curve(curve, None)
+        """
+        ...
+    def always_redraw_arc(
         self,
-        x: tuple[float, float, float] | tuple[float, float] | None = None,
-        y: tuple[float, float, float] | tuple[float, float] | None = None,
+        tracker: Parameter,
+        cx: float,
+        cy: float,
+        radius: float,
+        start_angle: float,
+        sweep_scale: float = 1.0,
+        sweep_offset: float = 0.0,
+    ) -> Drawable:
+        """Create a hidden always-redrawn arc; reveal it in ``scene.play``.
+
+        Example:
+            result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
+        """
+        ...
+    def traced_path(
+        self,
+        source: Drawable,
         *,
-        x_range: tuple[float, float] | tuple[float, float, float] | Sequence[float] | None = None,
-        y_range: tuple[float, float] | tuple[float, float, float] | Sequence[float] | None = None,
-        x_length: float | None = None,
-        y_length: float | None = None,
-        tips: bool = True,
-        auto_fit: bool = True,
-        axis_config: dict | None = None,
-        x_axis_config: dict | None = None,
-        y_axis_config: dict | None = None,
-        grid: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        x_axis: bool = True,
-        y_axis: bool = True,
-        x_grid: Optional[bool] = None,
-        y_grid: Optional[bool] = None,
-        x_ticks: Optional[bool] = None,
-        y_ticks: Optional[bool] = None,
-        x_numbers: Optional[bool] = None,
-        y_numbers: Optional[bool] = None,
-        x_label: Optional[str] = None,
-        y_label: Optional[str] = None,
-        axis_color: Optional[Color] = None,
-        grid_color: Optional[Color] = None,
-        tick_color: Optional[Color] = None,
-        number_color: Optional[Color] = None,
-        label_color: Optional[Color] = None,
-        axis_width: float = 3.0,
-        grid_width: float = 1.0,
-        tick_width: float = 2.0,
-        tick_length: float = 8.0,
+        dissipating_time: Optional[float] = None,
+        max_points: Optional[int] = None,
+        min_distance: float = 1.0,
     ) -> Drawable:
-        """Create a axes drawable in the scene.
+        """Trace a moving drawable's position; reveal the trail in ``scene.play``.
+
+        ``dissipating_time`` makes samples expire after the given number of
+        seconds. ``max_points`` caps retained samples and ``min_distance``
+        filters nearby samples. The trail remains hidden until a ``fade_in``
+        animation is included in ``scene.play(...)``.
 
         Example:
-            result = scene.axes()
+            result = scene.traced_path(source, dissipating_time=2.0)
         """
         ...
-    def _legacy_axes_3d(
+    def traced_path_3d(
         self,
-        x: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        y: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        z: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        x_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        y_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        z_range: tuple[float, float, float] | tuple[float, float] | Sequence[float] | None = None,
-        grid: bool = True,
-        ticks: bool = True,
-        numbers: bool = True,
-        labels: bool = True,
-        x_axis: bool = True,
-        y_axis: bool = True,
-        z_axis: bool = True,
-        xy_grid: Optional[bool] = None,
-        xz_grid: Optional[bool] = None,
-        yz_grid: Optional[bool] = None,
-        x_ticks: Optional[bool] = None,
-        y_ticks: Optional[bool] = None,
-        z_ticks: Optional[bool] = None,
-        x_numbers: Optional[bool] = None,
-        y_numbers: Optional[bool] = None,
-        z_numbers: Optional[bool] = None,
-        x_label: Optional[str] = None,
-        y_label: Optional[str] = None,
-        z_label: Optional[str] = None,
-        label_mode: Literal["billboard", "hud"] = "billboard",
-        axis_color: Optional[Color] = None,
-        grid_color: Optional[Color] = None,
-        tick_color: Optional[Color] = None,
-        number_color: Optional[Color] = None,
-        label_color: Optional[Color] = None,
-        axis_width: float = 3.0,
-        grid_width: float = 1.0,
-        tick_width: float = 2.0,
-        tick_length: float = 8.0,
-        auto_fit: bool = True,
-        x_length: Optional[float] = None,
-        y_length: Optional[float] = None,
-        z_length: Optional[float] = None,
-        tips: bool = True,
+        source: Drawable,
+        *,
+        colormap: Optional[str] = None,
+        dissipating_time: Optional[float] = None,
+        max_points: Optional[int] = None,
+        min_distance: float = 0.1,
     ) -> Drawable:
-        """Create 3D Cartesian axes and optional grid planes.
+        """Trace a moving drawable's 3D world-space position; reveal it in ``scene.play``.
 
-        ``x``, ``y`` and ``z`` accept ``(min, max)`` or
-        ``(min, max, step)``. The ``*_range`` names are equivalent aliases.
-        Use ``label_mode="billboard"`` for camera-facing labels or
-        ``label_mode="hud"`` for fixed screen-space labels.
+        ``dissipating_time`` makes samples expire after the given number of
+        seconds. ``max_points`` limits retained samples. ``min_distance`` ignores
+        samples that are closer than the given world-space distance. Supported
+        colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
 
         Example:
-            axes = scene.axes_3d(
-                x_range=(-5, 5, 1),
-                y_range=(-5, 5, 1),
-                z_range=(-3, 3, 1),
-                x_label="x", y_label="y", z_label="z",
+            dot = scene.dot(7).at_3d(1, 0, 0)
+            dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
+            trail = scene.traced_path_3d(
+                dot, colormap="viridis", max_points=600
             )
-
-        Ranges must be finite with ``min < max`` and a positive step.
         """
-        ...
-    def _legacy_plot(self, axes: Drawable, func: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable:
-        """Create a plot drawable in the scene.
+    def tracking_line(
+        self,
+        from_: Endpoint,
+        to: Endpoint,
+    ) -> Drawable:
+        """Create a hidden line whose endpoints react in the same frame.
 
-        Example:
-            result = scene.plot(None, lambda x: x, (0.0, 0.0))
-        """
-        ...
-    def _legacy_plot_parametric_curve(self, axes: Drawable, func: Callable[[float], tuple[float, float]], t: tuple[float, float], samples: int = 160) -> Drawable:
-        """Create a plot parametric curve drawable in the scene.
+        Endpoints may be fixed tuples, drawable origins, or ``AnchorPoint``
+        references inside transformed hierarchies. Reveal the line in
+        ``scene.play``.
 
         Example:
-            result = scene.plot_parametric_curve(None, lambda t: (t, t), (0.0, 0.0))
+            result = scene.tracking_line(drawable, drawable)
         """
         ...
-    def _legacy_get_graph(self, axes: Drawable, func: Callable[[float], float], x: tuple[float, float], samples: int = 160) -> Drawable:
-        """Create a get graph drawable in the scene.
+    def point_ref(self, x: _ReactiveScalar, y: _ReactiveScalar) -> PointRef:
+        """Create a non-rendered point whose coordinates react to scalar sources."""
+        ...
+    def offset_point(self, origin: Endpoint, dx: _ReactiveScalar, dy: _ReactiveScalar) -> PointRef:
+        """Create a point offset from a moving origin by reactive scene-space components."""
+        ...
+    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: float = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
+        """Create an affine point between endpoints plus a world-space offset."""
+        ...
+    def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
+        """Create a reactive polar point; angle is measured in radians."""
+        ...
 
-        Example:
-            result = scene.get_graph(None, lambda x: x, (0.0, 0.0))
-        """
-        ...
-    def text(
+class Typography:
+    """Callable scene-owned typography API for structured text, equations, Typst, measurement, and code."""
+    def __call__(
         self,
         *content: TextContent,
         role: Optional[TextRole] = None,
@@ -3767,38 +3415,6 @@ class Scene:
             scene.play([equation.write(1.0, by="part")])
         """
         ...
-    def matrix(
-        self,
-        data: Any,
-        *,
-        row_gap: float = 24.0,
-        column_gap: float = 24.0,
-        delimiter_gap: float = 12.0,
-        delimiters: Literal["brackets", "parentheses", "braces", "bars", "double_bars", "none"] = "brackets",
-        delimiter_size: float | None = None,
-        delimiter_weight: int = 300,
-        row_labels: Sequence[Any] | None = None,
-        column_labels: Sequence[Any] | None = None,
-        label_mode: Literal["math", "text"] = "math",
-        cell_mode: Literal["math", "text"] = "math",
-        entry_style: Any | None = None,
-        label_style: Any | None = None,
-        cell_factory: Callable[[Any, int, int], Drawable] | None = None,
-        numeric_format: str = "g",
-    ) -> Matrix:
-        """Create a selectable Layout-backed matrix.
-
-        ``data`` must be a non-empty rectangular sequence or a SymPy matrix.
-        Entries remain individual drawables; rows, columns, blocks and
-        diagonals can therefore be animated independently. Invalid dimensions,
-        ``row_gap`` and ``column_gap`` control automatic tracks. Delimiters
-        accept a size and CSS-like weight from 100 through 900. Labels default
-        to Typst math; ``cell_mode``/``label_mode`` may select plain text.
-        ``cell_factory(value, row, column)`` can return a custom Drawable.
-        Invalid dimensions, labels, modes, weights, delimiters, or factories
-        raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
-        """
-        ...
     def typst(self, source: str | os.PathLike[str], *, width: Optional[str | float | int] = None) -> Drawable:
         """Create a Typst drawable from inline markup or a Typst asset.
 
@@ -3812,18 +3428,125 @@ class Scene:
             result = scene.typst(Path("assets/title.typ"))
         """
         ...
-    def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching shapes.
+    def measure(
+        self,
+        content: str,
+        *,
+        role: Optional[TextRole] = None,
+        size: Optional[float] = None,
+        font: Optional[str] = None,
+        color: Optional[Color] = None,
+        wrap: Optional[float] = None,
+    ) -> tuple[float, float]:
+        """Measure laid-out text without spawning it.
+
+        Uses the same pipeline that renders ``scene.text`` (role defaults from
+        the active theme and Typst shaping) and returns ``(width, height)`` in
+        scene units. ``wrap`` composes at a fixed line width; ``None``
+        measures a single unwrapped block.
 
         Example:
-            scene.transform_matching_shapes(source, target)
+            width, height = scene.measure_text("PGA = 0.35 g", role="label")
+            box = scene.rounded_rect(width + 56, height + 32, 14)
         """
         ...
-    def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching.
+    def code(
+        self,
+        source: str,
+        *,
+        language: str = "text",
+        width: float = 760.0,
+        height: float = 300.0,
+        font_size: float = 20.0,
+        background: Optional[Color] = None,
+        color: Optional[Color] = None,
+        accent: Optional[Color] = None,
+    ) -> Drawable:
+        """Create a code drawable in the scene.
 
         Example:
-            scene.transform_matching(source, target)
+            result = scene.code("example")
+        """
+        ...
+
+class LayoutBuilder:
+    """Scene-owned factory for responsive layouts, items, constraints, and templates."""
+    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a horizontal Layout v2 container in canvas units.
+
+        ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
+        Responsive text keeps the width offered by its final row allocation,
+        so tight glyph bounds do not trigger a second, narrower composition.
+        Ownership errors are raised before render as ``LayoutOwnershipError``.
+        """
+        ...
+    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a vertical Layout v2 container with optional wrapping.
+
+        Responsive text is composed at the width offered by the column, even
+        when its visible glyph bounds are narrower.
+        """
+        ...
+    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create a grid with fixed, ``"auto"``, or ``"<weight>fr"`` tracks.
+
+        Explicit rows/columns and spans are reserved before deterministic
+        auto-placement. Responsive text uses its final track allocation.
+        Invalid tracks, collisions, or overflow raise errors.
+        """
+        ...
+    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+        """Create an overlay Layout; use item anchors and offsets for placement.
+
+        Responsive text retains the width offered by the overlay container.
+        """
+        ...
+    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem:
+        """Return per-child layout metadata without creating another Drawable.
+
+        ``fit="cover"`` clips media to its allocated box; ``absolute=True``
+        removes the item from normal flow. Negative grow/shrink values error.
+        """
+        ...
+    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet:
+        """Register prioritized linear relations and return their count.
+
+        Conflicting required relations or cross-scene references raise
+        ``ValueError`` immediately; ``animate`` is a transition duration.
+        """
+        ...
+    def check_layout(self) -> list[str]:
+        """Return current constraint and intrinsic-composition diagnostics.
+
+        Invalid responsive text or Typst math is reported here without
+        terminating editor hot reload.
+        """
+        ...
+    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout:
+        """Instantiate a signature-checked Python template and return its root Layout."""
+        ...
+
+class MediaLibrary:
+    """Scene-owned loader for image, SVG, glTF, video, Lottie, and audio assets."""
+    def audio(
+        self,
+        path: str,
+        *,
+        duration: Optional[float] = None,
+        volume: float = 1.0,
+        fade_in: float = 0.0,
+        fade_out: float = 0.0,
+    ) -> Audio:
+        """Declare a validated audio file for explicit playback.
+
+        The declaration is inert until passed to ``Scene.play``. Playback then
+        begins at that call's absolute timeline cursor and follows pause, seek,
+        and speed in preview and MP4/WebM export. Invalid paths or timing values
+        raise ``ValueError``.
+
+        Example:
+            music = scene.audio("music.ogg", volume=0.5)
+            scene.play([music])
         """
         ...
     def image(
@@ -3909,59 +3632,212 @@ class Scene:
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
         """Import a local glTF 2.0 ``.gltf`` or ``.glb`` model."""
         ...
-    def group(self, members: Sequence[Drawable]) -> Drawable:
-        """Create a group drawable in the scene.
 
-        Grouping preserves each member's authored local coordinates, including
-        coordinates returned by ``add_updater_fn``. Existing visible members do
-        not become hidden merely because the group also contains a deferred
-        force or trace; ``write()`` and ``create()`` on the group explicitly
-        reveal those deferred descendants.
-
-        Example:
-            result = scene.group([drawable])
-        """
+class Visualization:
+    """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
+    @property
+    def time(self) -> TimeInput: ...
+    def parameter(self, initial: float) -> Parameter: ...
+    def chart(self, spec: ChartSpec) -> Chart:
+        """Materialize an immutable declarative chart using batched semantic layers."""
         ...
-    def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
-        """Return the union of at least two vector drawables.
-
-        Sources remain available. With ``live=True`` the result follows source
-        path and transform changes; invalid scenes, operands, rules, or
-        tolerances raise ``ValueError``.
-        """
-        ...
-    def intersection(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
-        """Return the shared vector area of at least two drawables."""
-        ...
-    def difference(self, subject: Drawable, *clips: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
-        """Subtract each clip from the subject in deterministic left-to-right order."""
-        ...
-    def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
-        """Return the symmetric difference of at least two vector drawables."""
-        ...
-    def fill_level(self, mask: Drawable, paint: Paint, level: float = 0.0, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
-        """Create a dynamic vector fill clipped to ``mask``. The source mask remains visible as the outline when requested."""
-        ...
-    def measure_text(
+    def cartesian_2d(
         self,
-        content: str,
+        x: Axis,
+        y: Axis,
         *,
-        role: Optional[TextRole] = None,
-        size: Optional[float] = None,
-        font: Optional[str] = None,
-        color: Optional[Color] = None,
-        wrap: Optional[float] = None,
-    ) -> tuple[float, float]:
-        """Measure laid-out text without spawning it.
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        x_grid: Optional[bool] = None,
+        y_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+    ) -> Cartesian2D:
+        """Create a typed 2D Cartesian space with configurable semantic layers.
 
-        Uses the same pipeline that renders ``scene.text`` (role defaults from
-        the active theme and Typst shaping) and returns ``(width, height)`` in
-        scene units. ``wrap`` composes at a fixed line width; ``None``
-        measures a single unwrapped block.
+        Global switches default to ``True``. A non-``None`` per-axis switch
+        overrides its global value. ``numbers`` controls tick text while
+        ``labels`` controls titles authored with ``Axis.label``. Disabled
+        layers remain addressable as empty ``Drawable`` objects.
+        """
+        ...
+    def cartesian_3d(
+        self,
+        x: Axis,
+        y: Axis,
+        z: Axis,
+        *,
+        size: tuple[float, float, float] = (10.0, 8.0, 6.0),
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        z_axis: Optional[bool] = None,
+        xy_grid: Optional[bool] = None,
+        xz_grid: Optional[bool] = None,
+        yz_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        z_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        z_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+        z_labels: Optional[bool] = None,
+    ) -> Cartesian3D:
+        """Create typed 3D axes with independently selectable planes and annotations.
+
+        ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
+        axis-specific ticks, numbers, and titles follow the same precedence.
+        Hidden layers remain available as empty ``Drawable`` objects.
+        """
+        ...
+    def polar(
+        self,
+        radial: Axis,
+        *,
+        radius: float = 220.0,
+        angle_divisions: int = 12,
+        grid: bool = True,
+        axes: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        rings: Optional[bool] = None,
+        spokes: Optional[bool] = None,
+    ) -> PolarSpace:
+        """Create a polar space with independently selectable rings and spokes.
+
+        ``rings`` and ``spokes`` inherit ``grid`` when omitted. ``labels``
+        controls the radial title from ``Axis.label``; ``numbers`` controls
+        radial tick text.
+        """
+        ...
+    def complex(
+        self,
+        x: Optional[Axis] = None,
+        y: Optional[Axis] = None,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        grid: bool = True,
+        axes: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+        x_axis: Optional[bool] = None,
+        y_axis: Optional[bool] = None,
+        x_grid: Optional[bool] = None,
+        y_grid: Optional[bool] = None,
+        x_ticks: Optional[bool] = None,
+        y_ticks: Optional[bool] = None,
+        x_numbers: Optional[bool] = None,
+        y_numbers: Optional[bool] = None,
+        x_labels: Optional[bool] = None,
+        y_labels: Optional[bool] = None,
+    ) -> ComplexSpace:
+        """Create a configurable Cartesian complex plane.
+
+        Visibility switches and per-axis precedence match ``cartesian_2d``;
+        omitted axes retain the default ``Re`` and ``Im`` titles.
+        """
+        ...
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Readout:
+        """Create a native numeric display with equally spaced, baseline-aligned terms.
+
+        The label, equality sign, number, and unit all use ``font_size``;
+        omitting it selects the shared 48-unit reactive annotation size.
+        ``color`` applies to the label, reactive value, and unit and remains in
+        effect when the number changes or the timeline seeks.
+        """
+        ...
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Variable:
+        """Create an animatable scalar displayed as an aligned equation row.
+
+        Every visible term uses ``font_size``, or 48 units when omitted.
+        ``color`` applies to every visible term, including the changing value.
+        """
+        ...
+    def number_line(
+        self,
+        axis: Axis,
+        *,
+        length: Optional[float] = None,
+        axis_visible: bool = True,
+        ticks: bool = True,
+        numbers: bool = True,
+        labels: bool = True,
+    ) -> NumberLine:
+        """Create a typed number line with independently visible components.
+
+        ``numbers`` controls tick text and ``labels`` controls the title from
+        ``Axis.label``. Disabled components remain addressable as empty layers.
+        ``axis_visible`` avoids colliding with the existing ``axis`` argument.
+        """
+        ...
+    def matrix(
+        self,
+        data: Any,
+        *,
+        row_gap: float = 24.0,
+        column_gap: float = 24.0,
+        delimiter_gap: float = 12.0,
+        delimiters: Literal["brackets", "parentheses", "braces", "bars", "double_bars", "none"] = "brackets",
+        delimiter_size: float | None = None,
+        delimiter_weight: int = 300,
+        row_labels: Sequence[Any] | None = None,
+        column_labels: Sequence[Any] | None = None,
+        label_mode: Literal["math", "text"] = "math",
+        cell_mode: Literal["math", "text"] = "math",
+        entry_style: Any | None = None,
+        label_style: Any | None = None,
+        cell_factory: Callable[[Any, int, int], Drawable] | None = None,
+        numeric_format: str = "g",
+    ) -> Matrix:
+        """Create a selectable Layout-backed matrix.
+
+        ``data`` must be a non-empty rectangular sequence or a SymPy matrix.
+        Entries remain individual drawables; rows, columns, blocks and
+        diagonals can therefore be animated independently. Invalid dimensions,
+        ``row_gap`` and ``column_gap`` control automatic tracks. Delimiters
+        accept a size and CSS-like weight from 100 through 900. Labels default
+        to Typst math; ``cell_mode``/``label_mode`` may select plain text.
+        ``cell_factory(value, row, column)`` can return a custom Drawable.
+        Invalid dimensions, labels, modes, weights, delimiters, or factories
+        raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
+        """
+        ...
+
+class SlideKit:
+    """Scene-owned editorial component and presentation-branding toolkit."""
+    def brand(
+        self,
+        *,
+        logo: Optional[str] = None,
+        footer: Optional[str] = None,
+        slide_numbers: bool = True,
+        rule: bool = True,
+        show_on_cover: bool = False,
+        logo_scale: float = 1.0,
+    ) -> None:
+        """Use brand on this Scene or create the requested value.
 
         Example:
-            width, height = scene.measure_text("PGA = 0.35 g", role="label")
-            box = scene.rounded_rect(width + 56, height + 32, 14)
+            scene.brand()
         """
         ...
     def badge(
@@ -4223,22 +4099,6 @@ class Scene:
             result = scene.bullets(["Example"])
         """
         ...
-    def _legacy_bar_chart(
-        self,
-        values: Sequence[float],
-        *,
-        labels: Optional[Sequence[str]] = None,
-        width: float = 640.0,
-        height: float = 320.0,
-        gap: float = 20.0,
-        color: Optional[Color] = None,
-    ) -> Drawable:
-        """Create a bar chart drawable in the scene.
-
-        Example:
-            result = scene.bar_chart([1.0, 2.0])
-        """
-        ...
     def table(
         self,
         headers: Sequence[str],
@@ -4256,251 +4116,15 @@ class Scene:
             result = scene.table(["Example"], [["Example"]])
         """
         ...
-    def code(
-        self,
-        source: str,
-        *,
-        language: str = "text",
-        width: float = 760.0,
-        height: float = 300.0,
-        font_size: float = 20.0,
-        background: Optional[Color] = None,
-        color: Optional[Color] = None,
-        accent: Optional[Color] = None,
-    ) -> Drawable:
-        """Create a code drawable in the scene.
+
+class Mechanics:
+    """Scene-owned technical drawing and mechanism toolkit."""
+    def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable:
+        """Create a dimension drawable in the scene.
 
         Example:
-            result = scene.code("example")
+            result = scene.dimension(1.0, 1.0, 1.0, 1.0, 1.0)
         """
-        ...
-    def segment(
-        self,
-        name: str,
-        transition: Optional[Transition] = None,
-        *,
-        notes: Optional[str] = None,
-        template: Optional[Callable[..., Layout]] = None,
-        background: Optional[BackgroundLike] = None,
-    ) -> Segment:
-        """Create and activate a named structural segment.
-
-        ``background`` accepts the same color, brush, or shader background as
-        ``Scene`` and only applies while this segment is active. When omitted,
-        the segment uses the scene background. Empty or duplicate names, and a
-        transition on the first segment, raise ``ValueError``.
-
-        Example:
-            result = scene.segment("example", background="#0f172a")
-        """
-        ...
-    def link(self, from_: Segment, to: Segment, transition: Transition) -> None:
-        """Schedule link on the scene timeline.
-
-        Example:
-            scene.link(intro, details, Transition.cut())
-        """
-        ...
-    def reuse(self, object: Drawable, *others: Drawable) -> None:
-        """Adopt drawables into the active segment at the current timeline cursor.
-
-        At a segment boundary, a drawable visible in the preceding segment stays
-        fixed while the automatic transition runs, then becomes content of the
-        active segment. Calling this after ``play()`` or ``wait()`` takes effect
-        at that instant. Reusing a persistent drawable keeps it persistent while
-        registering it as active segment content.
-
-        Raises:
-            ValueError: If any drawable belongs to another ``Scene``.
-        """
-        ...
-    def persist(self, object: Drawable, *others: Drawable) -> None:
-        """Keep drawables global, visible, and animatable across future segments.
-
-        Persistence begins at the current cursor and is not retroactive. Global
-        drawables are excluded from automatic ``cross_fade``, ``slide``, and
-        other segment transitions. An invisible drawable remains invisible until
-        an explicit entry animation changes its opacity.
-
-        Raises:
-            ValueError: If any drawable belongs to another ``Scene``.
-        """
-        ...
-    def release(self, object: Drawable, *others: Drawable) -> None:
-        """End persistence and attach drawables to the active segment.
-
-        When called at the beginning of a segment, a persistent drawable stays
-        fixed during its incoming transition and becomes local when that
-        transition finishes. ``release`` never hides or removes the drawable;
-        its next segment transition treats it as ordinary outgoing content.
-
-        Raises:
-            ValueError: If any drawable belongs to another ``Scene``.
-        """
-        ...
-    def wait(self, d: float) -> None:
-        """Schedule wait on the scene timeline.
-
-        Example:
-            scene.wait(1.0)
-        """
-        ...
-    def stop(self, name: Optional[str] = None) -> None:
-        """Pause interactive playback at the current timeline position.
-
-        At a segment boundary, the completed outgoing segment remains visible
-        until playback advances; no trailing ``wait`` is required.
-        Export ignores stops and renders the timeline continuously.
-        """
-        ...
-    def play(self, items: Sequence[Anim | Audio | Video | Lottie], lag: Optional[float] = None) -> None:
-        """Activate animations and declared audio at the current cursor.
-
-        Items run in parallel, with optional ``lag`` added by sequence order.
-        Finite audio durations participate in the batch duration; open-ended
-        audio starts without extending the timeline. Video starts its frames
-        and embedded audio together and can be activated once. Media declared
-        by another scene raises ``ValueError``.
-
-        Example:
-            scene.play([animation, music])
-        """
-        ...
-    def fade_out_all(self, d: float) -> None:
-        """Configure or query the scene with fade out all.
-
-        Example:
-            scene.fade_out_all(1.0)
-        """
-        ...
-    def render(self) -> None:
-        """Render the scene output.
-
-        Example:
-            scene.render()
-        """
-        ...
-    def snapshots(self, directory: str, times: Sequence[float]) -> int:
-        """Ask the attached Gaanim diff host to capture exact timeline seeks.
-
-        ``directory`` must be the path supplied in ``GAANIM_SNAPSHOTS`` by
-        ``gaanim --diff``. Returns the number of captured frames and raises
-        ``RuntimeError`` when no snapshot host is attached or the path differs.
-        """
-        ...
-    # Reactive geometry helpers
-    def point_on_curve(self, curve: Drawable, tracker: Parameter) -> Drawable:
-        """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
-
-        Example:
-            result = scene.point_on_curve(curve, None)
-        """
-        ...
-    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
-        """Create a hidden tangent drawable; reveal it in ``scene.play``.
-
-        Example:
-            result = scene.tangent_on_curve(curve, None)
-        """
-        ...
-    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
-        """Create a hidden normal drawable; reveal it in ``scene.play``.
-
-        Example:
-            result = scene.normal_on_curve(curve, None)
-        """
-        ...
-    def curvature_on_curve(self, curve: Drawable, tracker: Parameter, window: float = 0.02) -> Drawable:
-        """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
-
-        Example:
-            result = scene.curvature_on_curve(curve, None)
-        """
-        ...
-    def always_redraw_arc(
-        self,
-        tracker: Parameter,
-        cx: float,
-        cy: float,
-        radius: float,
-        start_angle: float,
-        sweep_scale: float = 1.0,
-        sweep_offset: float = 0.0,
-    ) -> Drawable:
-        """Create a hidden always-redrawn arc; reveal it in ``scene.play``.
-
-        Example:
-            result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
-        """
-        ...
-    def traced_path(
-        self,
-        source: Drawable,
-        *,
-        dissipating_time: Optional[float] = None,
-        max_points: Optional[int] = None,
-        min_distance: float = 1.0,
-    ) -> Drawable:
-        """Trace a moving drawable's position; reveal the trail in ``scene.play``.
-
-        ``dissipating_time`` makes samples expire after the given number of
-        seconds. ``max_points`` caps retained samples and ``min_distance``
-        filters nearby samples. The trail remains hidden until a ``fade_in``
-        animation is included in ``scene.play(...)``.
-
-        Example:
-            result = scene.traced_path(source, dissipating_time=2.0)
-        """
-        ...
-    def traced_path_3d(
-        self,
-        source: Drawable,
-        *,
-        colormap: Optional[str] = None,
-        dissipating_time: Optional[float] = None,
-        max_points: Optional[int] = None,
-        min_distance: float = 0.1,
-    ) -> Drawable:
-        """Trace a moving drawable's 3D world-space position; reveal it in ``scene.play``.
-
-        ``dissipating_time`` makes samples expire after the given number of
-        seconds. ``max_points`` limits retained samples. ``min_distance`` ignores
-        samples that are closer than the given world-space distance. Supported
-        colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
-
-        Example:
-            dot = scene.dot(7).at_3d(1, 0, 0)
-            dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
-            trail = scene.traced_path_3d(
-                dot, colormap="viridis", max_points=600
-            )
-        """
-    def tracking_line(
-        self,
-        from_: Endpoint,
-        to: Endpoint,
-    ) -> Drawable:
-        """Create a hidden line whose endpoints react in the same frame.
-
-        Endpoints may be fixed tuples, drawable origins, or ``AnchorPoint``
-        references inside transformed hierarchies. Reveal the line in
-        ``scene.play``.
-
-        Example:
-            result = scene.tracking_line(drawable, drawable)
-        """
-        ...
-    def point_ref(self, x: _ReactiveScalar, y: _ReactiveScalar) -> PointRef:
-        """Create a non-rendered point whose coordinates react to scalar sources."""
-        ...
-    def offset_point(self, origin: Endpoint, dx: _ReactiveScalar, dy: _ReactiveScalar) -> PointRef:
-        """Create a point offset from a moving origin by reactive scene-space components."""
-        ...
-    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: float = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
-        """Create an affine point between endpoints plus a world-space offset."""
-        ...
-    def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
-        """Create a reactive polar point; angle is measured in radians."""
         ...
     def bar_between(
         self,
@@ -4690,3 +4314,225 @@ GRAY: Color
 CYAN: Color
 NAVY: Color
 TEAL: Color
+
+class AssetManager:
+    """Scene-owned project asset resolution, preload, and reload controller."""
+    def assets_dir(self, path: str) -> None:
+        """Use assets dir on this Scene or create the requested value.
+
+        Example:
+            scene.assets_dir("example")
+        """
+        ...
+    def preload(self, paths: Sequence[str]) -> None:
+        """Use preload on this Scene or create the requested value.
+
+        Example:
+            scene.preload(["assets/example.svg"])
+        """
+        ...
+    def load_project(self, path: str | None = None) -> None:
+        """Load a project manifest and set its asset directory.
+
+        With no path, reads ``gaanim.toml`` beside the calling Python script.
+        An explicit path is used as provided; assets are resolved relative to
+        the selected manifest. Raises RuntimeError if it cannot be read.
+
+        Example:
+            scene.load_project()
+        """
+        ...
+    def reload_assets(self) -> None:
+        """Use reload assets on this Scene or create the requested value.
+
+        Example:
+            scene.reload_assets()
+        """
+        ...
+
+class Scene:
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        background: Optional[BackgroundLike] = None,
+        margin: Optional[float] = None,
+        theme: Optional[str | Theme] = None,
+    ) -> None:
+        """Create a scene and optionally install its centralized theme.
+
+        An explicit color, Brush, or Background wins over the theme background.
+        Invalid WGSL and unknown theme names raise ``ValueError``.
+        """
+        ...
+    @property
+    def canvas(self) -> Canvas:
+        """Read the canvas value from this Scene.
+
+        Example:
+            value = scene.canvas
+        """
+        ...
+    @property
+    def camera(self) -> Camera:
+        """Read the camera value from this Scene.
+
+        Example:
+            value = scene.camera
+        """
+        ...
+    def segment(
+        self,
+        name: str,
+        transition: Optional[Transition] = None,
+        *,
+        notes: Optional[str] = None,
+        template: Optional[Callable[..., Layout]] = None,
+        background: Optional[BackgroundLike] = None,
+    ) -> Segment:
+        """Create and activate a named structural segment.
+
+        ``background`` accepts the same color, brush, or shader background as
+        ``Scene`` and only applies while this segment is active. When omitted,
+        the segment uses the scene background. Empty or duplicate names, and a
+        transition on the first segment, raise ``ValueError``.
+
+        Example:
+            result = scene.segment("example", background="#0f172a")
+        """
+        ...
+    def link(self, from_: Segment, to: Segment, transition: Transition) -> None:
+        """Schedule link on the scene timeline.
+
+        Example:
+            scene.link(intro, details, Transition.cut())
+        """
+        ...
+    def reuse(self, object: Drawable, *others: Drawable) -> None:
+        """Adopt drawables into the active segment at the current timeline cursor.
+
+        At a segment boundary, a drawable visible in the preceding segment stays
+        fixed while the automatic transition runs, then becomes content of the
+        active segment. Calling this after ``play()`` or ``wait()`` takes effect
+        at that instant. Reusing a persistent drawable keeps it persistent while
+        registering it as active segment content.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def persist(self, object: Drawable, *others: Drawable) -> None:
+        """Keep drawables global, visible, and animatable across future segments.
+
+        Persistence begins at the current cursor and is not retroactive. Global
+        drawables are excluded from automatic ``cross_fade``, ``slide``, and
+        other segment transitions. An invisible drawable remains invisible until
+        an explicit entry animation changes its opacity.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def release(self, object: Drawable, *others: Drawable) -> None:
+        """End persistence and attach drawables to the active segment.
+
+        When called at the beginning of a segment, a persistent drawable stays
+        fixed during its incoming transition and becomes local when that
+        transition finishes. ``release`` never hides or removes the drawable;
+        its next segment transition treats it as ordinary outgoing content.
+
+        Raises:
+            ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def wait(self, d: float) -> None:
+        """Schedule wait on the scene timeline.
+
+        Example:
+            scene.wait(1.0)
+        """
+        ...
+    def stop(self, name: Optional[str] = None) -> None:
+        """Pause interactive playback at the current timeline position.
+
+        At a segment boundary, the completed outgoing segment remains visible
+        until playback advances; no trailing ``wait`` is required.
+        Export ignores stops and renders the timeline continuously.
+        """
+        ...
+    def play(self, items: Sequence[Anim | Audio | Video | Lottie], lag: Optional[float] = None) -> None:
+        """Activate animations and declared audio at the current cursor.
+
+        Items run in parallel, with optional ``lag`` added by sequence order.
+        Finite audio durations participate in the batch duration; open-ended
+        audio starts without extending the timeline. Video starts its frames
+        and embedded audio together and can be activated once. Media declared
+        by another scene raises ``ValueError``.
+
+        Example:
+            scene.play([animation, music])
+        """
+        ...
+    def fade_out_all(self, d: float) -> None:
+        """Configure or query the scene with fade out all.
+
+        Example:
+            scene.fade_out_all(1.0)
+        """
+        ...
+    def render(self) -> None:
+        """Render the scene output.
+
+        Example:
+            scene.render()
+        """
+        ...
+    def snapshots(self, directory: str, times: Sequence[float]) -> int:
+        """Ask the attached Gaanim diff host to capture exact timeline seeks.
+
+        ``directory`` must be the path supplied in ``GAANIM_SNAPSHOTS`` by
+        ``gaanim --diff``. Returns the number of captured frames and raises
+        ``RuntimeError`` when no snapshot host is attached or the path differs.
+        """
+        ...
+    # Reactive geometry helpers
+    @property
+    def geometry(self) -> Geometry:
+        """Return the scene-owned geometry capability."""
+        ...
+
+    @property
+    def text(self) -> Typography:
+        """Return the scene-owned text capability."""
+        ...
+
+    @property
+    def layout(self) -> LayoutBuilder:
+        """Return the scene-owned layout capability."""
+        ...
+
+    @property
+    def media(self) -> MediaLibrary:
+        """Return the scene-owned media capability."""
+        ...
+
+    @property
+    def viz(self) -> Visualization:
+        """Return the scene-owned viz capability."""
+        ...
+
+    @property
+    def slides(self) -> SlideKit:
+        """Return the scene-owned slides capability."""
+        ...
+
+    @property
+    def mechanics(self) -> Mechanics:
+        """Return the scene-owned mechanics capability."""
+        ...
+
+    @property
+    def assets(self) -> AssetManager:
+        """Return the scene-owned assets capability."""
+        ...
+

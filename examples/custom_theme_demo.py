@@ -32,9 +32,9 @@ assert not scene.canvas.validate_theme()
 
 scene.text("A theme is a visual system", role="title").at(0, 265, anchor=Anchor.CENTER)
 scene.text("Nord, customized for a research presentation", role="subtitle").at(0, 205, anchor=Anchor.CENTER)
-scene.line(-460, 165, 460, 165).stroke(scene.canvas.color("rule"), 2)
+scene.geometry.line(-460, 165, 460, 165).stroke(scene.canvas.color("rule"), 2)
 
-scene.bullets(
+scene.slides.bullets(
     [
         "Semantic colors stay consistent",
         "Typography changes by role",
@@ -53,10 +53,10 @@ chart_spec = (
         y=Axis.linear(0, 100).ticks(25),
     )
 )
-chart = scene.chart(chart_spec).scaled(0.64).at(330, -35)
+chart = scene.viz.chart(chart_spec).scaled(0.64).at(330, -35)
 chart.layer("marks").fill(scene.canvas.color("accent"))
 
-scene.banner(
+scene.slides.banner(
     "Theme(...) derives any built-in scheme.",
     width=1080,
     margin=20,

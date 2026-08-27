@@ -7,9 +7,9 @@ from gaanim import Anchor, BLACK, BLUE, CORAL, GOLD, WHITE, Scene, Updater
 
 scene = Scene(960, 540, background=BLACK)
 scene.text("Camera controls", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
-left = scene.circle(85).fill(BLUE).at(-260, -10)
-right = scene.rect(180, 110).fill(GOLD).at(250, -10)
-guide = scene.dot(18).fill(CORAL).at(180, 0)
+left = scene.geometry.circle(85).fill(BLUE).at(-260, -10)
+right = scene.geometry.rect(180, 110).fill(GOLD).at(250, -10)
+guide = scene.geometry.dot(18).fill(CORAL).at(180, 0)
 guide.add_updater(Updater.orbit(0, 0, 180, 1.6))
 
 scene.wait(0.3)

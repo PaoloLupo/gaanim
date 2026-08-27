@@ -20,7 +20,7 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
-/// An ergonomic handle to a mobject on a Canvas.
+/// An ergonomic handle to a mobject on a SceneModel.
 ///
 /// - Instant setters return `Self` (fluent): `obj.fill(RED).at(0,0)`.
 /// - Animation methods return `Anim` and auto-enqueue the animation on the
@@ -439,7 +439,7 @@ impl DrawableHandle {
     }
 
     /// Keep a generated reactive visual hidden until it is included in a
-    /// `Canvas::play` animation.
+    /// `SceneModel::play` animation.
     pub(crate) fn defer_visibility_until_play(&self) {
         self.spec
             .lock()
@@ -1482,7 +1482,7 @@ impl DrawableHandle {
     }
 
     /// Keep this drawable centered on `source` each frame. The drawable is
-    /// deferred until an entry animation is included in `Canvas::play`.
+    /// deferred until an entry animation is included in `SceneModel::play`.
     ///
     /// This is an exact XY position binding. It is useful for labels, markers,
     /// and accents that should travel with an independently animated object.
@@ -1492,7 +1492,7 @@ impl DrawableHandle {
 
     /// Follow `source` while preserving a scene-space `(x, y)` offset. The
     /// drawable is deferred until an entry animation is included in
-    /// `Canvas::play`.
+    /// `SceneModel::play`.
     pub fn follow_to(&self, source: &DrawableHandle, offset_x: f64, offset_y: f64) {
         self.defer_visibility_until_play();
         self.state

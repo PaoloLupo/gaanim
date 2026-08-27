@@ -5,7 +5,7 @@ import os
 from gaanim import Anchor, Axis, BLACK, GOLD, RED, Scene
 
 scene = Scene(1280, 720, background=BLACK)
-space = scene.cartesian_3d(
+space = scene.viz.cartesian_3d(
     Axis.log(0.1, 1000, base=10).ticks(10).label("log x"),
     Axis.symlog(-100, 100, base=10, threshold=1).ticks(10).label("symlog y"),
     Axis.power(0, 16, 0.5).ticks(2).label("sqrt z"),

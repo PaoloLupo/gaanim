@@ -29,7 +29,7 @@ from gaanim import Scene, lecture, title_slide
 
 scene = Scene(1920, 1080, margin=72)
 scene.canvas.set_theme("presentation")
-scene.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
+scene.slides.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
 
 cover = scene.segment("Portada", template=title_slide, notes="Presenta el tema.")
 cover.bind(
@@ -49,7 +49,7 @@ scene.stop("mensaje")
 scene.render()
 ```
 
-`scene.brand(...)` configura logo, footer, numeración y regla para todo el deck.
+`scene.slides.brand(...)` configura logo, footer, numeración y regla para todo el deck.
 Las plantillas `title_slide`, `lecture`, `comparison` y `credits` devuelven un
 `Layout` raíz responsive y pueden reemplazarse por funciones Python propias.
 

@@ -3,7 +3,7 @@ import os
 from gaanim import BLUE, GOLD, Scene
 
 scene = Scene(1920, 1080, background="#0f172a", margin=48)
-matrix = scene.matrix(
+matrix = scene.viz.matrix(
     [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
     delimiters="brackets",
     row_labels=["r_1", "r_2", "r_3"],

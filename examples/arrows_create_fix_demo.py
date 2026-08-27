@@ -14,15 +14,15 @@ scene = Scene(1280, 720, background=BLACK, margin=60)
 title = scene.text("Arrows create – fill must stay inside", role="title").fill(WHITE).at(0, 280)
 
 # 1. double_arrow horizontal
-da = scene.double_arrow(-500, 120, -120, 120).fill(BLUE).stroke(WHITE, 2.5)
+da = scene.geometry.double_arrow(-500, 120, -120, 120).fill(BLUE).stroke(WHITE, 2.5)
 
 # 2. curved_arrow con deflexion angular (semicircular)
-ca = scene.curved_arrow(-80, 120, 260, 120, 0.9).fill(GOLD).stroke(WHITE, 2.5)
+ca = scene.geometry.curved_arrow(-80, 120, 260, 120, 0.9).fill(GOLD).stroke(WHITE, 2.5)
 
 # 3. curved_arrow_arc circular explícito
-caa = scene.curved_arrow_arc(0, -140, 110, 0.2, 2.0).fill(WHITE).stroke(WHITE, 2.5)
+caa = scene.geometry.curved_arrow_arc(0, -140, 110, 0.2, 2.0).fill(WHITE).stroke(WHITE, 2.5)
 # referencia: circulo guia punteado para ver que la punta stay on radius
-guide = scene.circle(110).stroke(WHITE, 1).at(0, -140).opacity(0.15)
+guide = scene.geometry.circle(110).stroke(WHITE, 1).at(0, -140).opacity(0.15)
 
 scene.play([
     title.write().duration(0.5),

@@ -15,7 +15,7 @@ for index, kind in enumerate(kinds):
     x = -450 + column * 300
     y = 150 - row * 270
     point = (x, y)
-    support = scene.support_at(point, kind=kind, direction=Direction.UP, size=54)
+    support = scene.mechanics.support_at(point, kind=kind, direction=Direction.UP, size=54)
     label = scene.text(kind, role="caption").fill(WHITE).follow(point, offset=(0, -118))
     scene.play([support.fade_in().duration(0.2), label.write().duration(0.2)])
 

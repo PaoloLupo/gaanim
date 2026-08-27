@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex, Weak};
 
 use gaanim_api::canvas::{
-    Anchor, Canvas as ApiCanvas, Direction, DrawableHandle, LayoutMemberSpec, LayoutSpec,
-    LayoutWithin,
+    Anchor, Direction, DrawableHandle, LayoutMemberSpec, LayoutSpec, LayoutWithin,
+    SceneModel as ApiCanvas,
 };
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_layout::{

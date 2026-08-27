@@ -9,19 +9,19 @@ from gaanim import BLACK, BLUE, CYAN, Direction, GOLD, GREEN, WHITE, Scene
 scene = Scene(1280, 720, background=BLACK, margin=48, theme="technical")
 title = scene.text("Toolkit reactivo de mecanismos", role="title").to_edge(Direction.UP)
 
-theta = scene.parameter(-0.35)
+theta = scene.viz.parameter(-0.35)
 pivot = (-360.0, 45.0)
-crank_tip = scene.polar_point(pivot, 135.0, theta)
-slider = scene.rounded_rect(105, 62, 10).fill(BLACK).stroke(CYAN, 4).at(80, -90)
+crank_tip = scene.geometry.polar_point(pivot, 135.0, theta)
+slider = scene.geometry.rounded_rect(105, 62, 10).fill(BLACK).stroke(CYAN, 4).at(80, -90)
 slider_point = slider.anchor_point()
 
-support = scene.fixed_support(pivot, direction=Direction.DOWN, size=52)
-crank = scene.bar_between(pivot, crank_tip, width=11).stroke(GOLD, 11)
-coupler = scene.bar_between(crank_tip, slider_point, width=9).stroke(BLUE, 9)
-crank_joint = scene.joint_at(crank_tip, color=GOLD)
-slider_joint = scene.joint_at(slider_point, kind="prismatic", axis=Direction.RIGHT, color=CYAN)
+support = scene.mechanics.fixed_support(pivot, direction=Direction.DOWN, size=52)
+crank = scene.mechanics.bar_between(pivot, crank_tip, width=11).stroke(GOLD, 11)
+coupler = scene.mechanics.bar_between(crank_tip, slider_point, width=9).stroke(BLUE, 9)
+crank_joint = scene.mechanics.joint_at(crank_tip, color=GOLD)
+slider_joint = scene.mechanics.joint_at(slider_point, kind="prismatic", axis=Direction.RIGHT, color=CYAN)
 
-angle = scene.angle_between(
+angle = scene.mechanics.angle_between(
     pivot,
     Direction.RIGHT,
     crank_tip,
@@ -34,9 +34,9 @@ angle = scene.angle_between(
     label_gap=22,
     color=GOLD,
 )
-force = scene.vector_between(
+force = scene.mechanics.vector_between(
     slider_point,
-    scene.offset_point(slider_point, 0, -115),
+    scene.geometry.offset_point(slider_point, 0, -115),
     label="$F$",
     color=GREEN,
 )

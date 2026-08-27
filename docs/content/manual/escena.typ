@@ -25,12 +25,12 @@ segura que puede usar Layout; no desplaza manualmente cada objeto.
 
 == Construcción
 
-Las fábricas `scene.circle`, `scene.text`, `scene.arrow` y similares registran
+Las fábricas `scene.geometry.circle`, `scene.text`, `scene.geometry.arrow` y similares registran
 objetos en la escena. Guarda sus handles con nombres que expresen su función:
 
 ```python
-orbit = scene.circle(140)
-moving_point = scene.dot(12)
+orbit = scene.geometry.circle(140)
+moving_point = scene.geometry.dot(12)
 explanation = scene.text("Radio constante", role="body")
 ```
 

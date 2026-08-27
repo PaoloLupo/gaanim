@@ -8,13 +8,13 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PySequence, PyTuple};
 
 use gaanim_api::canvas::{
-    AngleDimensionOptions, Axes3DConfig, AxesConfig, BadgeSpec, BannerPosition, BannerSpec,
-    BooleanRule, CameraConstraintHandle, Canvas as ApiCanvas, CanvasEndpoint, CanvasRay,
-    CanvasTheme, CardSpec, ChipSpec, CurveControl, CurveElement, DimensionExtensionStyle,
-    DimensionOptions, EditorialAlign, EditorialAppearance, EditorialStyle, EditorialVariant,
-    ImageCrop, ImageFit, ImageOptions, LabelMode, LottieOptions, LowerThirdSide, LowerThirdSpec,
-    PlayItem, PresentationBrand, QuoteCardSpec, SectionHeaderSpec, SegmentHandle, StatCardSpec,
-    SurroundingRectHandle, ThemeFont, VideoOptions,
+    AngleDimensionOptions, BadgeSpec, BannerPosition, BannerSpec, BooleanRule,
+    CameraConstraintHandle, CanvasEndpoint, CanvasRay, CanvasTheme, CardSpec, ChipSpec,
+    CurveControl, CurveElement, DimensionExtensionStyle, DimensionOptions, EditorialAlign,
+    EditorialAppearance, EditorialStyle, EditorialVariant, ImageCrop, ImageFit, ImageOptions,
+    LottieOptions, LowerThirdSide, LowerThirdSpec, PlayItem, PresentationBrand, QuoteCardSpec,
+    SceneModel as ApiCanvas, SectionHeaderSpec, SegmentHandle, StatCardSpec, SurroundingRectHandle,
+    ThemeFont, VideoOptions,
 };
 
 use crate::brush::PyPaint;
@@ -538,9 +538,7 @@ fn escape_typst_string(value: &str) -> String {
 #[derive(Clone, Copy)]
 struct ComponentPalette {
     foreground: gaanim_core::peniko::Color,
-    muted: gaanim_core::peniko::Color,
     accent: gaanim_core::peniko::Color,
-    chart: gaanim_core::peniko::Color,
     panel: gaanim_core::peniko::Color,
     header: gaanim_core::peniko::Color,
     rule: gaanim_core::peniko::Color,
@@ -552,9 +550,7 @@ fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
     if let Some(theme) = &scene.theme_style {
         ComponentPalette {
             foreground: theme.palette.foreground,
-            muted: theme.palette.muted,
             accent: theme.palette.accent,
-            chart: theme.palette.chart,
             panel: theme.palette.panel,
             header: theme.palette.header,
             rule: theme.palette.rule,
@@ -562,9 +558,7 @@ fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
     } else {
         ComponentPalette {
             foreground: Color::from_rgb8(0xE6, 0xED, 0xF5),
-            muted: Color::from_rgb8(0x94, 0xA3, 0xB8),
             accent: Color::from_rgb8(0x5B, 0x8F, 0xC9),
-            chart: Color::from_rgb8(0x4C, 0x78, 0xA8),
             panel: Color::from_rgb8(0x10, 0x16, 0x20),
             header: Color::from_rgb8(0x16, 0x2B, 0x46),
             rule: Color::from_rgb8(0x5B, 0x70, 0x88),
@@ -1074,6 +1068,34 @@ pub struct PyScene {
     pub(crate) inner: Arc<Mutex<ApiCanvas>>,
 }
 
+macro_rules! scene_capability {
+    ($rust:ident, $python:literal) => {
+        #[pyclass(name = $python, module = "gaanim_core", skip_from_py_object)]
+        pub struct $rust {
+            pub(crate) inner: Arc<Mutex<ApiCanvas>>,
+        }
+    };
+}
+
+macro_rules! contextual_scene_capability {
+    ($rust:ident, $python:literal) => {
+        #[pyclass(name = $python, module = "gaanim_core", skip_from_py_object)]
+        pub struct $rust {
+            pub(crate) inner: Arc<Mutex<ApiCanvas>>,
+            pub(crate) scene: Py<PyScene>,
+        }
+    };
+}
+
+scene_capability!(PyGeometry, "Geometry");
+scene_capability!(PyTypography, "Typography");
+scene_capability!(PyMediaLibrary, "MediaLibrary");
+scene_capability!(PySlideKit, "SlideKit");
+scene_capability!(PyMechanics, "Mechanics");
+scene_capability!(PyAssetManager, "AssetManager");
+contextual_scene_capability!(PyLayoutBuilder, "LayoutBuilder");
+contextual_scene_capability!(PyVisualization, "Visualization");
+
 /// Semantic camera controller exposed as ``scene.camera``.
 #[pyclass(name = "Camera", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1128,7 +1150,7 @@ fn require_duration(duration: f64) -> PyResult<f64> {
     }
 }
 
-impl PyScene {
+impl PyGeometry {
     fn boolean_py_tuple(
         &self,
         operands: &Bound<'_, PyTuple>,
@@ -1766,6 +1788,63 @@ impl PyScene {
         }
     }
 
+    #[getter]
+    fn geometry(slf: &Bound<'_, Self>) -> PyGeometry {
+        let inner = slf.borrow().inner.clone();
+        PyGeometry { inner }
+    }
+
+    #[getter]
+    fn text(slf: &Bound<'_, Self>) -> PyTypography {
+        let inner = slf.borrow().inner.clone();
+        PyTypography { inner }
+    }
+
+    #[getter]
+    fn layout(slf: &Bound<'_, Self>) -> PyLayoutBuilder {
+        let inner = slf.borrow().inner.clone();
+        PyLayoutBuilder {
+            inner,
+            scene: slf.clone().unbind(),
+        }
+    }
+
+    #[getter]
+    fn media(slf: &Bound<'_, Self>) -> PyMediaLibrary {
+        let inner = slf.borrow().inner.clone();
+        PyMediaLibrary { inner }
+    }
+
+    #[getter]
+    fn viz(slf: &Bound<'_, Self>) -> PyVisualization {
+        let inner = slf.borrow().inner.clone();
+        PyVisualization {
+            inner,
+            scene: slf.clone().unbind(),
+        }
+    }
+
+    #[getter]
+    fn slides(slf: &Bound<'_, Self>) -> PySlideKit {
+        let inner = slf.borrow().inner.clone();
+        PySlideKit { inner }
+    }
+
+    #[getter]
+    fn mechanics(slf: &Bound<'_, Self>) -> PyMechanics {
+        let inner = slf.borrow().inner.clone();
+        PyMechanics { inner }
+    }
+
+    #[getter]
+    fn assets(slf: &Bound<'_, Self>) -> PyAssetManager {
+        let inner = slf.borrow().inner.clone();
+        PyAssetManager { inner }
+    }
+}
+
+#[pymethods]
+impl PySlideKit {
     /// Configure a reusable logo, footer, rule, and slide numbering treatment.
     #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, rule=true, show_on_cover=false, logo_scale=1.0))]
     fn brand(
@@ -1795,7 +1874,10 @@ impl PyScene {
             });
         Ok(())
     }
+}
 
+#[pymethods]
+impl PyLayoutBuilder {
     /// Horizontal Layout v2 container.
     #[pyo3(signature = (children, *, gap=24.0, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
     #[allow(clippy::too_many_arguments)]
@@ -2019,11 +2101,12 @@ impl PyScene {
     /// Instantiate a typed Python layout template with this scene.
     #[pyo3(signature = (template, **slots))]
     fn template<'py>(
-        slf: &Bound<'py, Self>,
+        &self,
+        py: Python<'py>,
         template: &Bound<'py, PyAny>,
         slots: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Py<PyLayout>> {
-        let result = template.call((slf,), slots)?;
+        let result = template.call((self.scene.bind(py),), slots)?;
         if !result.is_instance_of::<PyLayout>() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "a layout template must return Layout",
@@ -2031,7 +2114,10 @@ impl PyScene {
         }
         Ok(result.extract::<Py<PyLayout>>()?)
     }
+}
 
+#[pymethods]
+impl PyAssetManager {
     /// Sets the directory used to resolve relative image and SVG paths.
     fn assets_dir(&self, path: &str) -> PyResult<()> {
         self.inner
@@ -2107,7 +2193,10 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .reload_assets();
     }
+}
 
+#[pymethods]
+impl PyMediaLibrary {
     /// Declare an audio file for later activation with `Scene.play`.
     #[pyo3(signature = (
         path,
@@ -2132,7 +2221,10 @@ impl PyScene {
             .map(|inner| PyAudio { inner })
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
+}
 
+#[pymethods]
+impl PyGeometry {
     fn circle(&self, r: f64) -> PyDrawable {
         PyDrawable(self.inner.lock().expect("scene canvas poisoned").circle(r))
     }
@@ -2471,6 +2563,10 @@ impl PyScene {
                 .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
         )
     }
+}
+
+#[pymethods]
+impl PyMechanics {
     fn dimension(&self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> PyDrawable {
         PyDrawable(
             self.inner
@@ -2479,7 +2575,10 @@ impl PyScene {
                 .dimension(x1, y1, x2, y2, offset),
         )
     }
+}
 
+#[pymethods]
+impl PyGeometry {
     /// Create an open polyline from points or a composed path from cursor commands.
     ///
     /// This is the primary path entry point. `polyline()` and `curve()` remain
@@ -2558,574 +2657,13 @@ impl PyScene {
                 .curve(elements),
         ))
     }
+}
 
-    #[pyo3(name = "_legacy_function_graph", signature = (function, x, samples=160))]
-    fn legacy_function_graph(
-        &self,
-        function: Bound<'_, PyAny>,
-        x: (f64, f64),
-        samples: usize,
-    ) -> PyResult<PyDrawable> {
-        if samples < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "samples must be at least 2",
-            ));
-        }
-        let mut points = Vec::with_capacity(samples);
-        for index in 0..samples {
-            let t = index as f64 / (samples - 1) as f64;
-            let x_value = x.0 + (x.1 - x.0) * t;
-            let y_value: f64 = function.call1((x_value,))?.extract()?;
-            points.push((x_value, y_value));
-        }
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .polyline(&points),
-        ))
-    }
-
-    #[pyo3(name = "_legacy_parametric_curve", signature = (function, t, samples=240))]
-    fn legacy_parametric_curve(
-        &self,
-        function: Bound<'_, PyAny>,
-        t: (f64, f64),
-        samples: usize,
-    ) -> PyResult<PyDrawable> {
-        if samples < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "samples must be at least 2",
-            ));
-        }
-        let mut points = Vec::with_capacity(samples);
-        for index in 0..samples {
-            let progress = index as f64 / (samples - 1) as f64;
-            let parameter = t.0 + (t.1 - t.0) * progress;
-            let point: (f64, f64) = function.call1((parameter,))?.extract()?;
-            points.push(point);
-        }
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .polyline(&points),
-        ))
-    }
-    #[pyo3(name = "_legacy_axes", signature = (
-        x=None, y=None, *,
-        x_range=None, y_range=None,
-        grid=true, ticks=true, numbers=true, labels=true,
-        x_axis=true, y_axis=true,
-        x_grid=None, y_grid=None,
-        x_ticks=None, y_ticks=None,
-        x_numbers=None, y_numbers=None,
-        x_label=None, y_label=None,
-        axis_color=None, grid_color=None, tick_color=None,
-        number_color=None, label_color=None,
-        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
-        auto_fit=true, x_length=None, y_length=None, tips=true,
-        axis_config=None, x_axis_config=None, y_axis_config=None
-    ))]
-    fn legacy_axes(
-        &self,
-        x: Option<Bound<'_, PyAny>>,
-        y: Option<Bound<'_, PyAny>>,
-        x_range: Option<Bound<'_, PyAny>>,
-        y_range: Option<Bound<'_, PyAny>>,
-        grid: bool,
-        ticks: bool,
-        numbers: bool,
-        labels: bool,
-        x_axis: bool,
-        y_axis: bool,
-        x_grid: Option<bool>,
-        y_grid: Option<bool>,
-        x_ticks: Option<bool>,
-        y_ticks: Option<bool>,
-        x_numbers: Option<bool>,
-        y_numbers: Option<bool>,
-        x_label: Option<String>,
-        y_label: Option<String>,
-        axis_color: Option<PyColor>,
-        grid_color: Option<PyColor>,
-        tick_color: Option<PyColor>,
-        number_color: Option<PyColor>,
-        label_color: Option<PyColor>,
-        axis_width: f64,
-        grid_width: f64,
-        tick_width: f64,
-        tick_length: f64,
-        auto_fit: bool,
-        x_length: Option<f64>,
-        y_length: Option<f64>,
-        tips: bool,
-        axis_config: Option<Bound<'_, PyAny>>,
-        x_axis_config: Option<Bound<'_, PyAny>>,
-        y_axis_config: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<PyDrawable> {
-        // manim compat: x/y can be (min,max) or (min,max,step), and x_range/y_range aliases
-        let parse_range =
-            |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
-                if let Some(b) = opt {
-                    if let Ok(v) = b.extract::<(f64, f64, f64)>() {
-                        Ok(v)
-                    } else if let Ok(v) = b.extract::<(f64, f64)>() {
-                        Ok((v.0, v.1, 1.0))
-                    } else if let Ok(v) = b.extract::<Vec<f64>>() {
-                        if v.len() == 2 {
-                            Ok((v[0], v[1], 1.0))
-                        } else if v.len() == 3 {
-                            Ok((v[0], v[1], v[2]))
-                        } else {
-                            Err(pyo3::exceptions::PyValueError::new_err(
-                                "x_range/y_range must be (min, max) or (min, max, step)",
-                            ))
-                        }
-                    } else {
-                        Err(pyo3::exceptions::PyValueError::new_err(
-                            "x_range/y_range must be (min, max) or (min, max, step)",
-                        ))
-                    }
-                } else {
-                    Ok(default)
-                }
-            };
-        // x takes precedence over x_range if both provided (x is the gaanim name, x_range is manim)
-        let x = parse_range(x.or(x_range), (-7.11, 7.11, 1.0))?;
-        let y = parse_range(y.or(y_range), (-4.0, 4.0, 1.0))?;
-        if !x.0.is_finite()
-            || !x.1.is_finite()
-            || !x.2.is_finite()
-            || !y.0.is_finite()
-            || !y.1.is_finite()
-            || !y.2.is_finite()
-            || x.0 >= x.1
-            || y.0 >= y.1
-            || x.2 <= 0.0
-            || y.2 <= 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "axis ranges must be finite (min, max, step) tuples with min < max and step > 0",
-            ));
-        }
-        if [axis_width, grid_width, tick_width, tick_length]
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "axis, grid, and tick dimensions must be finite and non-negative",
-            ));
-        }
-        if let Some(v) = x_length {
-            if !v.is_finite() || v <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "x_length must be finite and positive",
-                ));
-            }
-        }
-        if let Some(v) = y_length {
-            if !v.is_finite() || v <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "y_length must be finite and positive",
-                ));
-            }
-        }
-        // axis_config dicts kept for manim compat (currently no-op, reserved for NumberLine overrides)
-        let _ = (&axis_config, &x_axis_config, &y_axis_config);
-        let defaults = AxesConfig::default();
-        let axis_color = axis_color
-            .map(|color| color.0)
-            .unwrap_or(defaults.axis_color);
-        let config = AxesConfig {
-            grid,
-            ticks,
-            numbers,
-            labels,
-            x_axis,
-            y_axis,
-            x_grid: x_grid.unwrap_or(grid),
-            y_grid: y_grid.unwrap_or(grid),
-            x_ticks: x_ticks.unwrap_or(ticks),
-            y_ticks: y_ticks.unwrap_or(ticks),
-            x_numbers: x_numbers.unwrap_or(numbers),
-            y_numbers: y_numbers.unwrap_or(numbers),
-            x_label,
-            y_label,
-            axis_color,
-            grid_color: grid_color
-                .map(|color| color.0)
-                .unwrap_or(defaults.grid_color),
-            tick_color: tick_color.map(|color| color.0).unwrap_or(axis_color),
-            number_color: number_color.map(|color| color.0).unwrap_or(axis_color),
-            label_color: label_color.map(|color| color.0).unwrap_or(axis_color),
-            number_size: None,
-            label_size: None,
-            axis_width,
-            grid_width,
-            tick_width,
-            tick_length,
-            auto_fit,
-            x_length,
-            y_length,
-            tips,
-        };
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .axes(x, y, config),
-        ))
-    }
-
-    #[pyo3(name = "_legacy_axes_3d", signature = (
-        x=None, y=None, z=None,
-        x_range=None, y_range=None, z_range=None,
-        grid=true, ticks=true, numbers=true, labels=true,
-        x_axis=true, y_axis=true, z_axis=true,
-        xy_grid=None, xz_grid=None, yz_grid=None,
-        x_ticks=None, y_ticks=None, z_ticks=None,
-        x_numbers=None, y_numbers=None, z_numbers=None,
-        x_label=None, y_label=None, z_label=None,
-        label_mode="billboard",
-        axis_color=None, grid_color=None, tick_color=None,
-        number_color=None, label_color=None,
-        axis_width=3.0, grid_width=1.0, tick_width=2.0, tick_length=8.0,
-        auto_fit=true, x_length=None, y_length=None, z_length=None, tips=true
-    ))]
-    fn legacy_axes_3d(
-        &self,
-        x: Option<Bound<'_, PyAny>>,
-        y: Option<Bound<'_, PyAny>>,
-        z: Option<Bound<'_, PyAny>>,
-        x_range: Option<Bound<'_, PyAny>>,
-        y_range: Option<Bound<'_, PyAny>>,
-        z_range: Option<Bound<'_, PyAny>>,
-        grid: bool,
-        ticks: bool,
-        numbers: bool,
-        labels: bool,
-        x_axis: bool,
-        y_axis: bool,
-        z_axis: bool,
-        xy_grid: Option<bool>,
-        xz_grid: Option<bool>,
-        yz_grid: Option<bool>,
-        x_ticks: Option<bool>,
-        y_ticks: Option<bool>,
-        z_ticks: Option<bool>,
-        x_numbers: Option<bool>,
-        y_numbers: Option<bool>,
-        z_numbers: Option<bool>,
-        x_label: Option<String>,
-        y_label: Option<String>,
-        z_label: Option<String>,
-        label_mode: &str,
-        axis_color: Option<PyColor>,
-        grid_color: Option<PyColor>,
-        tick_color: Option<PyColor>,
-        number_color: Option<PyColor>,
-        label_color: Option<PyColor>,
-        axis_width: f64,
-        grid_width: f64,
-        tick_width: f64,
-        tick_length: f64,
-        auto_fit: bool,
-        x_length: Option<f64>,
-        y_length: Option<f64>,
-        z_length: Option<f64>,
-        tips: bool,
-    ) -> PyResult<PyDrawable> {
-        let parse_range =
-            |opt: Option<Bound<PyAny>>, default: (f64, f64, f64)| -> PyResult<(f64, f64, f64)> {
-                if let Some(b) = opt {
-                    if let Ok(v) = b.extract::<(f64, f64, f64)>() {
-                        Ok(v)
-                    } else if let Ok(v) = b.extract::<(f64, f64)>() {
-                        Ok((v.0, v.1, 1.0))
-                    } else if let Ok(v) = b.extract::<Vec<f64>>() {
-                        if v.len() == 2 {
-                            Ok((v[0], v[1], 1.0))
-                        } else if v.len() == 3 {
-                            Ok((v[0], v[1], v[2]))
-                        } else {
-                            Err(pyo3::exceptions::PyValueError::new_err(
-                                "range must be (min, max) or (min, max, step)",
-                            ))
-                        }
-                    } else {
-                        Err(pyo3::exceptions::PyValueError::new_err(
-                            "range must be (min, max) or (min, max, step)",
-                        ))
-                    }
-                } else {
-                    Ok(default)
-                }
-            };
-        let xr = parse_range(x.or(x_range), (-5.0, 5.0, 1.0))?;
-        let yr = parse_range(y.or(y_range), (-5.0, 5.0, 1.0))?;
-        let zr = parse_range(z.or(z_range), (-3.0, 3.0, 1.0))?;
-        if ![xr.0, xr.1, xr.2, yr.0, yr.1, yr.2, zr.0, zr.1, zr.2]
-            .iter()
-            .all(|v| v.is_finite())
-            || xr.0 >= xr.1
-            || yr.0 >= yr.1
-            || zr.0 >= zr.1
-            || xr.2 <= 0.0
-            || yr.2 <= 0.0
-            || zr.2 <= 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "axis ranges must be finite (min, max, step) with min < max and step > 0",
-            ));
-        }
-        if [axis_width, grid_width, tick_width, tick_length]
-            .iter()
-            .any(|v| !v.is_finite() || *v < 0.0)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "axis, grid, and tick dimensions must be finite and non-negative",
-            ));
-        }
-        for v in [x_length, y_length, z_length].into_iter().flatten() {
-            if !v.is_finite() || v <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "length must be finite and positive",
-                ));
-            }
-        }
-        let label_mode_parsed = match label_mode.to_lowercase().as_str() {
-            "billboard" => LabelMode::Billboard,
-            "hud" => LabelMode::Hud,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "label_mode must be 'billboard' or 'hud'",
-                ));
-            }
-        };
-        let defaults = Axes3DConfig::default();
-        let axis_color = axis_color.map(|c| c.0).unwrap_or(defaults.axis_color);
-        let config = Axes3DConfig {
-            grid,
-            ticks,
-            numbers,
-            labels,
-            x_axis,
-            y_axis,
-            z_axis,
-            xy_grid: xy_grid.unwrap_or(grid),
-            xz_grid: xz_grid.unwrap_or(grid),
-            yz_grid: yz_grid.unwrap_or(grid),
-            x_ticks: x_ticks.unwrap_or(ticks),
-            y_ticks: y_ticks.unwrap_or(ticks),
-            z_ticks: z_ticks.unwrap_or(ticks),
-            x_numbers: x_numbers.unwrap_or(numbers),
-            y_numbers: y_numbers.unwrap_or(numbers),
-            z_numbers: z_numbers.unwrap_or(numbers),
-            x_label,
-            y_label,
-            z_label,
-            label_mode: label_mode_parsed,
-            axis_color,
-            grid_color: grid_color.map(|c| c.0).unwrap_or(defaults.grid_color),
-            tick_color: tick_color.map(|c| c.0).unwrap_or(axis_color),
-            number_color: number_color.map(|c| c.0).unwrap_or(axis_color),
-            label_color: label_color.map(|c| c.0).unwrap_or(axis_color),
-            axis_width,
-            grid_width,
-            tick_width,
-            tick_length,
-            auto_fit,
-            x_length,
-            y_length,
-            z_length,
-            tips,
-        };
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .axes_3d(xr, yr, zr, config),
-        ))
-    }
-
-    #[pyo3(name = "_legacy_plot", signature = (axes, function, x, samples=160))]
-    fn legacy_plot(
-        &self,
-        axes: &PyDrawable,
-        function: Bound<'_, PyAny>,
-        x: (f64, f64),
-        samples: usize,
-    ) -> PyResult<PyDrawable> {
-        let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = axes.0.axes_info() else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "plot() first argument must be an axes drawable",
-            ));
-        };
-        if samples < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "samples must be at least 2",
-            ));
-        }
-        if !x.0.is_finite() || !x.1.is_finite() || x.0 >= x.1 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "x range must be finite with min < max",
-            ));
-        }
-        // Compute same scale as in compile.rs styled_axes (manim x_length/y_length or auto_fit)
-        let canvas = self.inner.lock().expect("scene canvas poisoned");
-        let avail_w = if canvas.width == 0 {
-            800.0
-        } else {
-            canvas.width as f64 - canvas.margin.left - canvas.margin.right
-        };
-        let avail_h = if canvas.height == 0 {
-            480.0
-        } else {
-            canvas.height as f64 - canvas.margin.top - canvas.margin.bottom
-        };
-        drop(canvas);
-        let data_w = (x_max - x_min).max(1e-9);
-        let data_h = (y_max - y_min).max(1e-9);
-        let manim_frame_w: f64 = 14.222222222222221;
-        let manim_frame_h: f64 = 8.0;
-        let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (
-                xl * avail_w / manim_frame_w / data_w,
-                yl * avail_h / manim_frame_h / data_h,
-            ),
-            (Some(xl), None) => {
-                let s = xl * avail_w / manim_frame_w / data_w;
-                (s, s)
-            }
-            (None, Some(yl)) => {
-                let s = yl * avail_h / manim_frame_h / data_h;
-                (s, s)
-            }
-            (None, None) if config.auto_fit => {
-                let s = (avail_w / data_w).min(avail_h / data_h);
-                (s, s)
-            }
-            (None, None) => (1.0, 1.0),
-        };
-        let x_center = (x_min + x_max) * 0.5;
-        let y_center = (y_min + y_max) * 0.5;
-        let mut points = Vec::with_capacity(samples);
-        for i in 0..samples {
-            let t = i as f64 / (samples - 1) as f64;
-            let xv = x.0 + (x.1 - x.0) * t;
-            let yv: f64 = function.call1((xv,))?.extract()?;
-            let sx = (xv - x_center) * scale_x;
-            let sy = (yv - y_center) * scale_y;
-            // When neither auto_fit nor explicit length, keep raw data coords (manim-like no scaling)
-            let (sx, sy) =
-                if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
-                    (sx, sy)
-                } else {
-                    (xv, yv)
-                };
-            points.push((sx, sy));
-        }
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .polyline(&points),
-        ))
-    }
-
-    /// manim `get_graph` — alias to `plot`
-    #[pyo3(name = "_legacy_get_graph", signature = (axes, function, x, samples=160))]
-    fn legacy_get_graph(
-        &self,
-        axes: &PyDrawable,
-        function: Bound<'_, PyAny>,
-        x: (f64, f64),
-        samples: usize,
-    ) -> PyResult<PyDrawable> {
-        self.legacy_plot(axes, function, x, samples)
-    }
-
-    /// manim `plot_parametric_curve` — (t -> (x,y)) with t_range, respects auto_fit/x_length
-    #[pyo3(name = "_legacy_plot_parametric_curve", signature = (axes, function, t, samples=160))]
-    fn legacy_plot_parametric_curve(
-        &self,
-        axes: &PyDrawable,
-        function: Bound<'_, PyAny>,
-        t: (f64, f64),
-        samples: usize,
-    ) -> PyResult<PyDrawable> {
-        let Some(((x_min, x_max, _), (y_min, y_max, _), config)) = axes.0.axes_info() else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "plot_parametric_curve() first argument must be an axes drawable",
-            ));
-        };
-        if samples < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "samples must be at least 2",
-            ));
-        }
-        let canvas = self.inner.lock().expect("scene canvas poisoned");
-        let avail_w = if canvas.width == 0 {
-            800.0
-        } else {
-            canvas.width as f64 - canvas.margin.left - canvas.margin.right
-        };
-        let avail_h = if canvas.height == 0 {
-            480.0
-        } else {
-            canvas.height as f64 - canvas.margin.top - canvas.margin.bottom
-        };
-        drop(canvas);
-        let data_w = (x_max - x_min).max(1e-9);
-        let data_h = (y_max - y_min).max(1e-9);
-        let manim_frame_w: f64 = 14.222222222222221;
-        let manim_frame_h: f64 = 8.0;
-        let (scale_x, scale_y) = match (config.x_length, config.y_length) {
-            (Some(xl), Some(yl)) => (
-                xl * avail_w / manim_frame_w / data_w,
-                yl * avail_h / manim_frame_h / data_h,
-            ),
-            (Some(xl), None) => {
-                let s = xl * avail_w / manim_frame_w / data_w;
-                (s, s)
-            }
-            (None, Some(yl)) => {
-                let s = yl * avail_h / manim_frame_h / data_h;
-                (s, s)
-            }
-            (None, None) if config.auto_fit => {
-                let s = (avail_w / data_w).min(avail_h / data_h);
-                (s, s)
-            }
-            _ => (1.0, 1.0),
-        };
-        let x_center = (x_min + x_max) * 0.5;
-        let y_center = (y_min + y_max) * 0.5;
-        let mut points = Vec::with_capacity(samples);
-        for i in 0..samples {
-            let tt = i as f64 / (samples - 1) as f64;
-            let tv = t.0 + (t.1 - t.0) * tt;
-            let (xv, yv): (f64, f64) = function.call1((tv,))?.extract()?;
-            let (sx, sy) =
-                if config.auto_fit || config.x_length.is_some() || config.y_length.is_some() {
-                    ((xv - x_center) * scale_x, (yv - y_center) * scale_y)
-                } else {
-                    (xv, yv)
-                };
-            points.push((sx, sy));
-        }
-        Ok(PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .polyline(&points),
-        ))
-    }
-
+#[pymethods]
+impl PyTypography {
     #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
     #[allow(clippy::too_many_arguments)]
-    fn text<'py>(
+    fn __call__<'py>(
         &self,
         py: Python<'py>,
         content: &Bound<'py, PyTuple>,
@@ -3240,11 +2778,14 @@ impl PyScene {
             .text_spec(spec.clone());
         Py::new(py, PyText::initializer(handle, spec))
     }
+}
 
+#[pymethods]
+impl PyVisualization {
     /// Create a selectable matrix composed from individual drawables.
     #[pyo3(signature = (data, **options))]
     fn matrix<'py>(
-        slf: &Bound<'py, Self>,
+        &self,
         py: Python<'py>,
         data: &Bound<'py, PyAny>,
         options: Option<&Bound<'py, PyDict>>,
@@ -3252,10 +2793,13 @@ impl PyScene {
         let module = py.import("gaanim.matrix")?;
         Ok(module
             .getattr("_build_matrix")?
-            .call((slf, data), options)?
+            .call((self.scene.bind(py), data), options)?
             .unbind())
     }
+}
 
+#[pymethods]
+impl PyGeometry {
     #[pyo3(signature = (size=2.0, *, material=None))]
     fn cube<'py>(
         &self,
@@ -3518,7 +3062,10 @@ impl PyScene {
         // If both per-vertex and uniform color provided, we respect per-vertex.
         Ok(PyDrawable(handle))
     }
+}
 
+#[pymethods]
+impl PyTypography {
     /// Compile full Typst markup into a vector drawable with optional custom page width (e.g. `width="16cm"` or `width=800`).
     #[pyo3(signature = (source, *, width=None))]
     fn typst(
@@ -3588,6 +3135,10 @@ impl PyScene {
 
         Ok(PyDrawable(handle))
     }
+}
+
+#[pymethods]
+impl PyGeometry {
     /// Auto-match by shape geometry — improved TransformMatchingShapes.
     ///
     /// Matches submobjects between `source` and `target` using Hungarian algorithm,
@@ -3640,7 +3191,10 @@ impl PyScene {
             .transform_matching(&source.0, &target.0, mode, duration);
         Ok(())
     }
-    /// Dim an equation except for the requested semantic tags, then pulse them.
+}
+
+#[pymethods]
+impl PyMediaLibrary {
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, crop, and sampling quality.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
     #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None, quality="medium"))]
@@ -3861,7 +3415,10 @@ impl PyScene {
             .map(PyDrawable)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
+}
 
+#[pymethods]
+impl PyGeometry {
     fn group(&self, members: Vec<PyDrawable>) -> PyDrawable {
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();
         PyDrawable(
@@ -3967,7 +3524,10 @@ impl PyScene {
             .map(PyDrawable)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
+}
 
+#[pymethods]
+impl PyTypography {
     /// Measure laid-out text without spawning it, through the same pipeline
     /// that renders ``scene.text`` (role defaults from the active theme and
     /// Typst shaping). Returns ``(width, height)`` in scene units.
@@ -3977,7 +3537,7 @@ impl PyScene {
     /// box = scene.rounded_rect(w + 56, h + 32, 14)
     /// ```
     #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None))]
-    #[pyo3(name = "measure_text")]
+    #[pyo3(name = "measure")]
     fn measure_text_py(
         &self,
         content: &str,
@@ -4006,7 +3566,10 @@ impl PyScene {
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
+}
 
+#[pymethods]
+impl PySlideKit {
     /// Create an auto-sized editorial badge.
     #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(18.0, 10.0), radius=None, font_size=None, min_width=None, color=None, background=None, border=None))]
     #[pyo3(name = "badge")]
@@ -4525,104 +4088,6 @@ impl PyScene {
     }
 
     /// Create a labeled bar chart for finite non-negative values.
-    #[pyo3(name = "_legacy_bar_chart", signature = (values, *, labels=None, width=640.0, height=320.0, gap=20.0, color=None))]
-    fn legacy_bar_chart(
-        &self,
-        values: Vec<f64>,
-        labels: Option<Vec<String>>,
-        width: f64,
-        height: f64,
-        gap: f64,
-        color: Option<PyColor>,
-    ) -> PyResult<PyDrawable> {
-        if values.is_empty()
-            || values
-                .iter()
-                .any(|value| !value.is_finite() || *value < 0.0)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "values must contain finite non-negative numbers",
-            ));
-        }
-        if !width.is_finite()
-            || !height.is_finite()
-            || !gap.is_finite()
-            || width <= 0.0
-            || height <= 0.0
-            || gap < 0.0
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "width and height must be finite positive numbers and gap must be non-negative",
-            ));
-        }
-        let labels =
-            labels.unwrap_or_else(|| (1..=values.len()).map(|index| index.to_string()).collect());
-        if labels.len() != values.len() || labels.iter().any(|label| label.trim().is_empty()) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "labels must contain one non-empty label per value",
-            ));
-        }
-        let available_width = width - gap * (values.len() as f64 + 1.0);
-        if available_width <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "width is too small for the requested number of bars and gap",
-            ));
-        }
-        let max_value = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
-        let bar_width = available_width / values.len() as f64;
-        // Reserve room above the bars for value labels and below for category
-        // labels, keeping both inside the requested chart bounds.
-        let chart_height = height - 92.0;
-        if chart_height <= 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "height must be greater than 92",
-            ));
-        }
-        let palette = {
-            let scene = self.inner.lock().expect("scene canvas poisoned");
-            component_palette(&scene)
-        };
-        let bar_color = color.map(|color| color.0).unwrap_or(palette.chart);
-        let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let baseline_y = -height * 0.5 + 28.0;
-        let mut members = Vec::with_capacity(values.len() * 3 + 1);
-        members.push(
-            scene
-                .line(-width * 0.5, baseline_y, width * 0.5, baseline_y)
-                .stroke(palette.rule, 2.0),
-        );
-        for (index, (value, label)) in values.iter().zip(labels.iter()).enumerate() {
-            let bar_height = chart_height * (*value / max_value);
-            let x = -width * 0.5 + gap + bar_width * (index as f64 + 0.5) + gap * index as f64;
-            members.push(
-                scene
-                    .rounded_rect(bar_width, bar_height.max(1.0), 6.0)
-                    .fill(bar_color)
-                    .stroke(palette.rule, 1.5)
-                    .at(x, baseline_y + bar_height * 0.5),
-            );
-            let value_label = if value.fract().abs() < 1e-9 {
-                format!("{value:.0}")
-            } else {
-                format!("{value:.1}")
-            };
-            members.push(
-                scene
-                    .text(&value_label)
-                    .fill(palette.foreground)
-                    .at(x, baseline_y + bar_height + 24.0),
-            );
-            members.push(
-                scene
-                    .text(label)
-                    .fill(palette.muted)
-                    .at(x, baseline_y - 28.0),
-            );
-        }
-        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
-        Ok(PyDrawable(scene.group(&refs)))
-    }
-
     /// Create a compact technical table with a muted header and construction rules.
     #[pyo3(signature = (
         headers,
@@ -4721,7 +4186,10 @@ impl PyScene {
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
     }
+}
 
+#[pymethods]
+impl PyTypography {
     /// Create a restrained monospaced code block backed by Typst vector text.
     #[pyo3(signature = (
         source,
@@ -4809,7 +4277,10 @@ impl PyScene {
             .at(-width * 0.25, -18.0);
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
+}
 
+#[pymethods]
+impl PyScene {
     #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None))]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
@@ -4964,7 +4435,10 @@ impl PyScene {
         gaanim_api::host::request_snapshots(scene, directory, &times)
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
+}
 
+#[pymethods]
+impl PyGeometry {
     // -- Reactive objects --
 
     /// Create a dot positioned at the normalized arc-length of a sampled curve.
@@ -5217,7 +4691,10 @@ impl PyScene {
             .polar_point(resolve_endpoint(&origin)?, radius, angle);
         Ok(PyPointRef(point))
     }
+}
 
+#[pymethods]
+impl PyMechanics {
     #[pyo3(signature = (from, to, *, width=8.0))]
     fn bar_between(
         &self,

@@ -9,6 +9,23 @@
   updated: datetime.today().display(),
 )
 
+= Capacidades de Scene
+
+`Scene` orquesta tiempo, segmentos y salida. Las fábricas viven en handles que
+pertenecen a la misma escena y comparten su modelo diferido:
+
+```python
+shape = scene.geometry.circle(64)
+title = scene.text("Resultado")
+page = scene.layout.column([title, shape])
+value = scene.viz.parameter(0.0)
+```
+
+Las demás capacidades son `media`, `slides`, `mechanics` y `assets`.
+Pasar un drawable de otra escena conserva los mismos errores de propiedad. La
+tabla completa para actualizar código 0.1 está en
+#link("/guides/migration-0-2/", "Migrar de 0.1 a 0.2").
+
 = Scene
 
 `Scene` es el punto de entrada público de una animación. Es propietaria de los
@@ -59,7 +76,7 @@ plataforma requiera márgenes internos personalizados.
 
 == Iluminación 3D y cámara del editor
 
-`scene.lighting_3d(preset="studio", intensity=1.0, shadows=True)` installs one
+`scene.geometry.lighting_3d(preset="studio", intensity=1.0, shadows=True)` installs one
 friendly ambient/key/fill rig for native PBR primitives and glTF content. Use
 `preset="none"` for emissive-only or externally lit work. The rig is scene
 level, so several models never create duplicate automatic lights.
@@ -99,7 +116,7 @@ alfa/luminancia ráster.
 El `Text` unificado usa de forma predeterminada la familia científica New
 Computer Modern incluida; los fragmentos `$...$` usan su pareja New Computer
 Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
-`scene.equation("a + b = 2")` para una ecuación independiente compilada como
+`scene.text.equation("a + b = 2")` para una ecuación independiente compilada como
 `$ a + b = 2 $`.
 
 ```python
@@ -107,33 +124,33 @@ from gaanim import Axis, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720)
 
-circle = scene.circle(80).fill(BLUE).stroke(WHITE, 4).at(-160, 0)
-rect = scene.rect(180, 100).fill(GOLD).at(160, 0)
-triangle = scene.polygon([(0, 100), (-90, -70), (90, -70)])
-star = scene.star(5, 90, 42)
-hexagon = scene.regular_polygon(6, 84)
-slice = scene.sector(0, 0, 100, 0.0, 1.8)
-ring = scene.annulus(100, 56)
-underbrace = scene.brace(-120, -100, 120, -100, 36)
-approved = scene.checkmark(32).fill(GREEN)
-rejected = scene.cross(32).stroke(WHITE, 4)
-corner = scene.right_angle(40)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).at(-160, 0)
+rect = scene.geometry.rect(180, 100).fill(GOLD).at(160, 0)
+triangle = scene.geometry.polygon([(0, 100), (-90, -70), (90, -70)])
+star = scene.geometry.star(5, 90, 42)
+hexagon = scene.geometry.regular_polygon(6, 84)
+slice = scene.geometry.sector(0, 0, 100, 0.0, 1.8)
+ring = scene.geometry.annulus(100, 56)
+underbrace = scene.geometry.brace(-120, -100, 120, -100, 36)
+approved = scene.geometry.checkmark(32).fill(GREEN)
+rejected = scene.geometry.cross(32).stroke(WHITE, 4)
+corner = scene.geometry.right_angle(40)
 label = scene.text("Gaanim", role="title").at(0, 220)
 formula = scene.text("$E = m c^2$").at(0, -180)
-arrow = scene.arrow(-80, 0, 80, 0)
-angle = scene.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
-rotation = scene.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
-rotation_arc = scene.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
-guide = scene.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
-measure_arrow = scene.double_arrow(-140, -160, 140, -160)
-measure = scene.dimension(-80, 80, 80, 80, 24)
-spring = scene.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
-axes = scene.cartesian_2d(
+arrow = scene.geometry.arrow(-80, 0, 80, 0)
+angle = scene.geometry.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
+rotation = scene.geometry.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
+rotation_arc = scene.geometry.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
+guide = scene.geometry.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
+measure_arrow = scene.geometry.double_arrow(-140, -160, 140, -160)
+measure = scene.mechanics.dimension(-80, 80, 80, 80, 24)
+spring = scene.geometry.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
+axes = scene.viz.cartesian_2d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
 )
-logo = scene.image("assets/logo.webp").scaled(0.25).at(360, 180)
-icon = scene.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
+logo = scene.media.image("assets/logo.webp").scaled(0.25).at(360, 180)
+icon = scene.media.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
@@ -150,7 +167,7 @@ texture for the process.
 and source groups. Named groups and paths are available through `part(id)`:
 
 ```python
-robot = scene.svg("assets/robot.svg")
+robot = scene.media.svg("assets/robot.svg")
 arm = robot.part("left-arm")
 joint = robot.part("elbow")
 
@@ -173,14 +190,14 @@ typed visualization API. Build immutable `Axis` specifications, create a
 import math
 from gaanim import Axis, BLUE
 
-space = scene.cartesian_2d(
+space = scene.viz.cartesian_2d(
     Axis.linear(-3, 3).ticks(1).label("x"),
     Axis.linear(-2, 2).ticks(1).label("f(x)"),
     width=900,
     height=480,
 )
-curve = space.function(lambda x: math.sin(x)).stroke(BLUE, 3)
-marker = scene.dot(6).at_coordinate(space.coord(1, 1))
+curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 3)
+marker = scene.geometry.dot(6).at_coordinate(space.coord(1, 1))
 ```
 
 Consulta #link("/api/visualization/", "la API de visualización") para conocer
@@ -192,7 +209,7 @@ control point or a cubic Bézier with two. It remains a real Bézier path, so it
 can drive the reactive curve bindings directly.
 
 ```python
-curve = scene.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
+curve = scene.geometry.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
 ```
 
 `path(definition)` is the compact entry point for custom technical geometry.
@@ -201,8 +218,8 @@ a composed path. The explicit `polyline` and `curve` factories remain available
 for code that benefits from stating the exact path kind.
 
 ```python
-rail = scene.path([(-180, 0), (0, 80), (180, 0)])
-profile = scene.path([
+rail = scene.geometry.path([(-180, 0), (0, 80), (180, 0)])
+profile = scene.geometry.path([
     ("move", [(-180, -40)]),
     ("cubic", [(-80, 100), (80, -100), (180, 40)]),
 ])
@@ -224,8 +241,8 @@ Reactive visual helpers are hidden when declared. Add their entry animation to
 `Parameter` es una señal no visual y no necesita una animación de entrada.
 
 ```python
-theta = scene.parameter(0.2)
-rotation = scene.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
+theta = scene.viz.parameter(0.2)
+rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
 scene.play([
     rotation.fade_in().duration(0.3),
     theta.animate_to(4.5).duration(2.0),
@@ -248,7 +265,7 @@ Groups and drawables can rotate or scale around a scene-space point through
 with a physical hinge:
 
 ```python
-mechanism = scene.group([rail, spring, mass]).with_pivot(0, 0)
+mechanism = scene.geometry.group([rail, spring, mass]).with_pivot(0, 0)
 scene.play([mechanism.rotate(PI / 3).duration(1.0)])
 ```
 
@@ -264,8 +281,8 @@ natively. It returns a regular `Drawable` group, so it can be animated like any
 other mobject.
 
 ```python
-mass = scene.dot(20).fill(GOLD)
-note = scene.callout("Moving mass", mass, offset=(180, 100))
+mass = scene.geometry.dot(20).fill(GOLD)
+note = scene.slides.callout("Moving mass", mass, offset=(180, 100))
 scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
 ```
 
@@ -273,14 +290,14 @@ The themed factories `badge`, `chip`, `card`, `banner`, `lower_third`,
 `stat_card`, `quote_card`, and `section_header` are documented together under
 #link("/api/mobjects/", [Mobjects — Composición editorial]). `banner` replaces
 the removed `caption` helper, while `badge` is positioned through the regular
-Drawable API (`scene.badge("READY").at(x, y)`).
+Drawable API (`scene.slides.badge("READY").at(x, y)`).
 
 `title_card(title, subtitle=None)` returns a restrained, centered opening with
 title, optional subtitle, and an accent rule. Its elements remain a single
 animatable drawable. Pass `panel=True` for a framed version.
 
 ```python
-opening = scene.title_card("Vector motion", "A short technical explanation")
+opening = scene.slides.title_card("Vector motion", "A short technical explanation")
 scene.play([opening.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
 ```
 
@@ -289,7 +306,7 @@ default gap and colors are suitable for a technical presentation; tune
 `width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
 
 ```python
-agenda = scene.bullets(["Setup", "Motion", "Export"], gap=72)
+agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=72)
 scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
 ```
 
@@ -302,7 +319,7 @@ from gaanim import Axis, ChartSpec
 spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
   .mark("bar").encode(x="x", y="value") \
   .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
-chart = scene.chart(spec)
+chart = scene.viz.chart(spec)
 scene.play([chart.layer("axes").create(), chart.layer("marks").grow_from_center().duration(0.6)])
 ```
 
@@ -310,7 +327,7 @@ scene.play([chart.layer("axes").create(), chart.layer("marks").grow_from_center(
 thin construction rules. Each row must have exactly one non-empty cell per header.
 
 ```python
-results = scene.table(
+results = scene.slides.table(
     ["Method", "Error", "Time"],
     [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
 )
@@ -324,11 +341,11 @@ embedded world resolves `@preview/...` imports through the standard Typst
 Universe cache; the first use downloads the requested package.
 
 A string is inline markup. Pass a `pathlib.Path` to load a `.typ` asset instead;
-relative paths use `scene.assets_dir(...)`, and a missing or unreadable asset
+relative paths use `scene.assets.assets_dir(...)`, and a missing or unreadable asset
 raises `RuntimeError` before the drawable is created.
 
 ```python
-comparison = scene.typst('''
+comparison = scene.text.typst('''
 #table(
   columns: 2,
   [*Method*], [*Error*],
@@ -338,7 +355,7 @@ comparison = scene.typst('''
 ''')
 
 from pathlib import Path
-title = scene.typst(Path("assets/title.typ"))
+title = scene.text.typst(Path("assets/title.typ"))
 ```
 
 `code(source, language=...)` creates a monospaced vector code block with a
@@ -346,7 +363,7 @@ quiet technical frame. It is suitable for code reveals and can be animated as
 one drawable; token-level highlighting and diffs are planned separately.
 
 ```python
-snippet = scene.code("result = mass * acceleration", language="python")
+snippet = scene.text.code("result = mass * acceleration", language="python")
 scene.play([snippet.fade_in().duration(0.4)])
 ```
 
@@ -356,12 +373,12 @@ path. The value is clamped to
 `[0, 1]` and measured by arc length, with no Python callback during playback.
 
 ```python
-t = scene.parameter(0.0)
-curve = scene.polyline([
+t = scene.viz.parameter(0.0)
+curve = scene.geometry.polyline([
   (180 * cos(u), 100 * sin(2 * u))
   for u in (2 * PI * index / 240 for index in range(241))
 ])
-dot = scene.point_on_curve(curve, t).fill(GOLD)
+dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(2.0)])
 ```
 
@@ -462,7 +479,7 @@ scene.play([title.write().duration(0.5)])
 
 scene.segment("content", Transition.cross_fade(0.35))
 scene.reuse(title)
-dot = scene.dot(18).fill(BLUE).at(0, -30)
+dot = scene.geometry.dot(18).fill(BLUE).at(0, -30)
 scene.play([dot.grow_from_center().duration(0.4)])
 scene.persist(title)
 
@@ -480,7 +497,7 @@ Configure the deck identity once before declaring presentation segments:
 
 ```python
 scene.canvas.set_theme("presentation")
-scene.brand(
+scene.slides.brand(
     logo="assets/university.svg",
     footer="UNIVERSITY · MASTER THESIS · 2026",
     slide_numbers=True,
@@ -572,8 +589,8 @@ constraint owns only declared channels. Influence is a scalar source in
 framing runs after bindings, and shake is always an additive final modifier.
 
 ```python
-theta = scene.parameter(0.0)
-focus = scene.point_ref(theta * 180, (theta * 2).sin() * 80)
+theta = scene.viz.parameter(0.0)
+focus = scene.geometry.point_ref(theta * 180, (theta * 2).sin() * 80)
 rig2d = scene.camera.bind_2d(center=focus, zoom=1 + theta * 0.3)
 scene.play([theta.animate_to(1.0, duration=2.0)])
 rig2d.disable()
@@ -631,7 +648,7 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
   desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
 )[
 ```python
-marker = scene.dot(6)
+marker = scene.geometry.dot(6)
 scene.play([
     marker.fade_in(1.0),
     scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.0),
@@ -659,7 +676,7 @@ group. The mask keeps its own visibility; make it transparent when it should
 only constrain content:
 
 ```python
-mask = scene.rounded_rect(420, 220, 28).no_fill().no_stroke()
+mask = scene.geometry.rounded_rect(420, 220, 28).no_fill().no_stroke()
 chart_group.clip(mask)
 ```
 

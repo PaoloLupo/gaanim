@@ -35,7 +35,7 @@ El ejemplo ejecutado es [`examples/quickstart.py`](examples/quickstart.py):
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=48)
-circle = scene.circle(96).fill(BLUE).stroke(WHITE, 4)
+circle = scene.geometry.circle(96).fill(BLUE).stroke(WHITE, 4)
 title = scene.text("Hola, Gaanim", role="title").fill(GOLD).at(0, 180)
 
 scene.play([circle.create().duration(0.8), title.write().duration(0.6)])
@@ -51,8 +51,8 @@ el archivo recarga la escena.
 
 | Plataforma | CI | Artefacto instalable | Estado declarado |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.1.x` |
-| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core y wheel de autoría | Soportada en `0.1.x` |
+| Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.2.x` |
+| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core y wheel de autoría | Soportada en `0.2.x` |
 | macOS | No | No | Experimental, sin garantía de release |
 
 El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
@@ -124,7 +124,7 @@ abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.
 
 Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas PBR
 animables, con `Material3D.matte`, `Material3D.metal` y
-`Material3D.emissive`. `scene.lighting_3d("studio")` proporciona un único rig
+`Material3D.emissive`. `scene.geometry.lighting_3d("studio")` proporciona un único rig
 de estudio. Consulta `examples/primitives_3d_demo.py` para una escena completa.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
@@ -194,7 +194,7 @@ También puede colocar un MP4 dentro de la escena. El clip es un `Drawable`,
 responde al seek del editor y permite trim, loop, velocidad y audio embebido:
 
 ```python
-clip = scene.video("assets/clip.mp4", width=720, loop=True, volume=0.8)
+clip = scene.media.video("assets/clip.mp4", width=720, loop=True, volume=0.8)
 scene.wait(8)
 ```
 
@@ -212,13 +212,16 @@ Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
 | Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
 
-La API pública de Python comienza en `Scene`; `Canvas(...)` es un constructor
-de compatibilidad deprecado. Consulte la documentación del sitio en
-[`docs/`](docs/) y las escenas de referencia en [`examples/`](examples/).
+La API pública de Python comienza en `Scene`, que conserva la orquestación y
+expone las capacidades `geometry`, `text`, `layout`, `media`, `viz`, `slides`,
+`mechanics` y `assets`; `Canvas(...)` es un constructor de compatibilidad
+deprecado. La migración desde la superficie plana 0.1 está documentada en
+[`docs/content/guides/migration-0-2.typ`](docs/content/guides/migration-0-2.typ).
+Consulte también las escenas de referencia en [`examples/`](examples/).
 
 ## Estado
 
-Gaanim está en fase alfa (`0.1.0`). La base de render, timeline, texto y
+Gaanim está en fase alfa (`0.2.0`). La base de render, timeline, texto y
 ecuaciones es funcional; la cobertura de API, pruebas de exportación y
 capacidades multimedia continúan en desarrollo. El plan de evolución se
 encuentra en [`engine_improvements.md`](engine_improvements.md).

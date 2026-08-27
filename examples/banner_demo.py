@@ -8,8 +8,8 @@ from gaanim import BLACK, BLUE, WHITE, Scene
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
 title = scene.text("Banners and safe areas", role="title").fill(WHITE).at(0, 140)
-accent = scene.circle(86).fill(BLUE).at(0, -40)
-banner = scene.banner(
+accent = scene.geometry.circle(86).fill(BLUE).at(0, -40)
+banner = scene.slides.banner(
     "This banner stays inside the safe area and grows with wrapped text.",
     position="bottom",
     width=760,

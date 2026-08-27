@@ -6,7 +6,7 @@ from gaanim import Scene, comparison, lecture, title_slide
 
 scene = Scene(1280, 720, margin=48)
 scene.canvas.set_theme("presentation")
-scene.brand(
+scene.slides.brand(
     logo="tests/assets/slides_brand.svg",
     footer="RESEARCH STUDIO · 2026",
     slide_numbers=True,
@@ -34,12 +34,12 @@ content.bind(
 )
 scene.wait(0.4)
 
-manual = scene.stack([
-    scene.rounded_rect(310, 120, 18).fill(scene.canvas.color("panel")),
+manual = scene.layout.stack([
+    scene.geometry.rounded_rect(310, 120, 18).fill(scene.canvas.color("panel")),
     scene.text("Manual"),
 ], width=310, height=120)
-semantic = scene.stack([
-    scene.rounded_rect(310, 120, 18).fill(scene.canvas.color("header")),
+semantic = scene.layout.stack([
+    scene.geometry.rounded_rect(310, 120, 18).fill(scene.canvas.color("header")),
     scene.text("Semantic"),
 ], width=310, height=120)
 compare = scene.segment("Comparison", template=comparison, notes="Compare both workflows.")

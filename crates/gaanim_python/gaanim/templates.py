@@ -55,7 +55,7 @@ def _token(scene: Any, name: str) -> float:
 
 @layout_template
 def title_slide(scene: Any, *, title: Any, subtitle: Any = None, footer: Any = None) -> Any:
-    return scene.column(
+    return scene.layout.column(
         _present(title, subtitle, footer),
         within="safe",
         width="fill",
@@ -69,8 +69,8 @@ def title_slide(scene: Any, *, title: Any, subtitle: Any = None, footer: Any = N
 
 @layout_template
 def lecture(scene: Any, *, title: Any, body: Any, footer: Any = None) -> Any:
-    return scene.column(
-        _present(title, scene.item(body, grow=1, align="stretch"), footer),
+    return scene.layout.column(
+        _present(title, scene.layout.item(body, grow=1, align="stretch"), footer),
         within="safe",
         width="fill",
         height="fill",
@@ -90,15 +90,15 @@ def comparison(
     right: Any,
     footer: Any = None,
 ) -> Any:
-    columns = scene.row(
-        [scene.item(left, grow=1, fit="contain"), scene.item(right, grow=1, fit="contain")],
+    columns = scene.layout.row(
+        [scene.layout.item(left, grow=1, fit="contain"), scene.layout.item(right, grow=1, fit="contain")],
         width="fill",
         height="fill",
         gap=_token(scene, "column_gap"),
         align="stretch",
     )
-    return scene.column(
-        _present(title, scene.item(columns, grow=1, align="stretch"), footer),
+    return scene.layout.column(
+        _present(title, scene.layout.item(columns, grow=1, align="stretch"), footer),
         within="safe",
         width="fill",
         height="fill",
@@ -110,8 +110,8 @@ def comparison(
 
 @layout_template
 def vertical_short(scene: Any, *, title: Any, body: Any, caption: Any = None) -> Any:
-    return scene.column(
-        _present(title, scene.item(body, grow=1, fit="contain"), caption),
+    return scene.layout.column(
+        _present(title, scene.layout.item(body, grow=1, fit="contain"), caption),
         within="safe",
         width="fill",
         height="fill",
@@ -124,8 +124,8 @@ def vertical_short(scene: Any, *, title: Any, body: Any, caption: Any = None) ->
 
 @layout_template
 def minimal(scene: Any, *, content: Any) -> Any:
-    return scene.stack(
-        [scene.item(content, fit="contain")],
+    return scene.layout.stack(
+        [scene.layout.item(content, fit="contain")],
         within="safe",
         width="fill",
         height="fill",
@@ -136,11 +136,11 @@ def minimal(scene: Any, *, content: Any) -> Any:
 
 @layout_template
 def lower_third(scene: Any, *, title: Any, subtitle: Any = None, background: Any = None) -> Any:
-    copy = scene.column(_present(title, subtitle), gap=_token(scene, "space_xs"), align="start")
-    return scene.stack(
+    copy = scene.layout.column(_present(title, subtitle), gap=_token(scene, "space_xs"), align="start")
+    return scene.layout.stack(
         _present(
-            scene.item(background, absolute=True, fit="stretch") if background is not None else None,
-            scene.item(
+            scene.layout.item(background, absolute=True, fit="stretch") if background is not None else None,
+            scene.layout.item(
                 copy,
                 anchor=None,
                 offset=(0, -_token(scene, "lower_third_offset")),
@@ -155,8 +155,8 @@ def lower_third(scene: Any, *, title: Any, subtitle: Any = None, background: Any
 
 @layout_template
 def credits(scene: Any, *, title: Any = None, entries: Any, footer: Any = None) -> Any:
-    return scene.column(
-        _present(title, scene.item(entries, grow=1, align="center"), footer),
+    return scene.layout.column(
+        _present(title, scene.layout.item(entries, grow=1, align="center"), footer),
         within="safe",
         width="fill",
         height="fill",

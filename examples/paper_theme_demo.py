@@ -11,8 +11,8 @@ scene.canvas.set_theme("paper")
 title = scene.text("Technical documentation", role="title").at(0, 170, anchor=Anchor.CENTER)
 subtitle = scene.text("White paper theme with restrained contrast", role="subtitle").at(0, 105, anchor=Anchor.CENTER)
 body = scene.text("Unfilled text follows the theme foreground.").at(0, -10, anchor=Anchor.CENTER)
-equation = scene.equation("F(k) = integral f(x) e^(-i k x) dif x").at(0, -135, anchor=Anchor.CENTER)
-marker = scene.circle(34).fill(BLUE).at(-360, -8)
+equation = scene.text.equation("F(k) = integral f(x) e^(-i k x) dif x").at(0, -135, anchor=Anchor.CENTER)
+marker = scene.geometry.circle(34).fill(BLUE).at(-360, -8)
 
 scene.play([
     title.write().duration(0.5),

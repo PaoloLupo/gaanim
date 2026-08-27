@@ -97,6 +97,14 @@ from .gaanim_core import (
     PolarSpace,
     DataTable,
     DataSource,
+    Geometry,
+    Typography,
+    LayoutBuilder,
+    MediaLibrary,
+    Visualization,
+    SlideKit,
+    Mechanics,
+    AssetManager,
     Scene,
     Segment,
 )
@@ -140,6 +148,14 @@ def Canvas(*args, **kwargs):
 
 __all__ = [
     "Scene",
+    "Geometry",
+    "Typography",
+    "LayoutBuilder",
+    "MediaLibrary",
+    "Visualization",
+    "SlideKit",
+    "Mechanics",
+    "AssetManager",
     "Segment",
     "Canvas",
     "AnimationGroup",
@@ -251,4 +267,4 @@ __all__ = [
     "TEAL",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

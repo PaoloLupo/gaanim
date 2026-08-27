@@ -18,7 +18,7 @@ use gaanim_visualization::{
 };
 
 use super::ops::Op;
-use super::{Anchor, Canvas, CanvasEndpoint, DrawableHandle, PointRef, SpawnKind};
+use super::{Anchor, CanvasEndpoint, DrawableHandle, PointRef, SceneModel, SpawnKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum VisualizationError {
@@ -480,7 +480,7 @@ fn chart_option_field(spec: &ChartSpec, name: &str) -> Result<String, Visualizat
     }
 }
 
-fn chart_series_color(canvas: &Canvas) -> Color {
+fn chart_series_color(canvas: &SceneModel) -> Color {
     canvas
         .theme_style
         .as_ref()
@@ -873,7 +873,7 @@ impl DrawableHandle {
     }
 }
 
-impl Canvas {
+impl SceneModel {
     /// Create an animatable native scalar for reactive expressions.
     pub fn parameter(&mut self, initial: f64) -> Result<Parameter, VisualizationError> {
         if !initial.is_finite() {
@@ -3726,7 +3726,7 @@ mod tests {
         }
     }
 
-    fn group_child_translations(canvas: &Canvas, group: &DrawableHandle) -> Vec<DVec3> {
+    fn group_child_translations(canvas: &SceneModel, group: &DrawableHandle) -> Vec<DVec3> {
         let group_spec = group.spec.lock().expect("group spec poisoned");
         let children = match &group_spec.kind {
             SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children,
@@ -3766,7 +3766,7 @@ mod tests {
 
     #[test]
     fn cartesian_visibility_keeps_disabled_layers_available_and_mapping_stable() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let x = Axis::linear(-2.0, 2.0)
             .unwrap()
             .ticks(1.0)
@@ -3814,7 +3814,7 @@ mod tests {
 
     #[test]
     fn three_dimensional_visibility_filters_grid_planes_and_annotations() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes_3d_with_visibility(
                 Axis::linear(-2.0, 2.0)
@@ -3877,7 +3877,7 @@ mod tests {
 
     #[test]
     fn polar_and_number_line_visibility_keep_empty_layers_addressable() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let polar = canvas
             .coordinate_polar_plane_with_visibility(
                 Axis::linear(0.0, 4.0)
@@ -3960,7 +3960,7 @@ mod tests {
         }
     }
 
-    fn group_child_anchors(canvas: &Canvas, group: &DrawableHandle) -> Vec<Option<Anchor>> {
+    fn group_child_anchors(canvas: &SceneModel, group: &DrawableHandle) -> Vec<Option<Anchor>> {
         let group_spec = group.spec.lock().expect("group spec poisoned");
         let children = match &group_spec.kind {
             SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children.clone(),
@@ -3995,7 +3995,7 @@ mod tests {
             .collect()
     }
 
-    fn group_child_rotations(canvas: &Canvas, group: &DrawableHandle) -> Vec<f64> {
+    fn group_child_rotations(canvas: &SceneModel, group: &DrawableHandle) -> Vec<f64> {
         let group_spec = group.spec.lock().expect("group spec poisoned");
         let children = match &group_spec.kind {
             SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children,
@@ -4034,7 +4034,7 @@ mod tests {
 
     #[test]
     fn cartesian_axis_titles_default_beyond_positive_ends_and_support_multiline_text() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes(
                 Axis::category(["Ladrillo\no bloque".into(), "Piedra\ncon barro".into()])
@@ -4086,7 +4086,7 @@ mod tests {
 
     #[test]
     fn multiline_category_ticks_align_their_first_line_with_single_line_ticks() {
-        let mut canvas = Canvas::new(400, 200);
+        let mut canvas = SceneModel::new(400, 200);
         let space = canvas
             .coordinate_axes(
                 Axis::category(["Una línea".into(), "Dos\nlíneas".into()]).unwrap(),
@@ -4111,7 +4111,7 @@ mod tests {
 
     #[test]
     fn centered_axis_titles_use_conventional_outer_sides() {
-        let mut canvas = Canvas::new(400, 200);
+        let mut canvas = SceneModel::new(400, 200);
         let space = canvas
             .coordinate_axes(
                 Axis::category(["Una línea".into(), "Dos\nlíneas".into()])
@@ -4157,7 +4157,7 @@ mod tests {
 
     #[test]
     fn cartesian_axis_titles_can_move_to_the_axis_end() {
-        let mut canvas = Canvas::new(400, 200);
+        let mut canvas = SceneModel::new(400, 200);
         let space = canvas
             .coordinate_axes(
                 Axis::linear(0.0, 4.0)
@@ -4206,7 +4206,7 @@ mod tests {
 
     #[test]
     fn paper_theme_colors_number_line_parts_unless_authored() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.set_theme("paper").unwrap();
         let themed = canvas
             .coordinate_number_line(Axis::linear(0.0, 4.0).unwrap(), Some(400.0))
@@ -4262,7 +4262,7 @@ mod tests {
 
     #[test]
     fn number_line_point_ref_uses_reactive_local_coordinates() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let line = canvas
             .coordinate_number_line(
                 Axis::linear(0.0, std::f64::consts::TAU).unwrap(),
@@ -4295,7 +4295,7 @@ mod tests {
 
     #[test]
     fn number_line_default_placement_keeps_its_authored_axis_origin() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let line = canvas
             .coordinate_number_line(
                 Axis::linear(0.0, std::f64::consts::TAU)
@@ -4327,7 +4327,7 @@ mod tests {
 
     #[test]
     fn number_line_function_uses_one_reactive_path() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let amplitude = canvas.parameter(1.0).unwrap();
         let line = canvas
             .coordinate_number_line(Axis::linear(0.0, 6.0).unwrap(), Some(480.0))
@@ -4369,7 +4369,7 @@ mod tests {
 
     #[test]
     fn animated_view_targets_internal_view_and_preserves_layout_root() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes(
                 Axis::linear(-4.0, 4.0).unwrap(),
@@ -4396,7 +4396,7 @@ mod tests {
 
     #[test]
     fn animated_view_rejects_non_affine_scales() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes(
                 Axis::log(0.1, 10.0, 10.0).unwrap(),
@@ -4415,7 +4415,7 @@ mod tests {
 
     #[test]
     fn parameter_drives_scalar_source_and_animation() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let parameter = canvas.parameter(1.5).unwrap();
         parameter.set(2.25).unwrap();
 
@@ -4439,7 +4439,7 @@ mod tests {
 
     #[test]
     fn three_dimensional_lines_honor_stroke_color() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let expected = Color::from_rgb8(0xE7, 0x4C, 0x3C);
         canvas
             .polyline_3d(vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
@@ -4462,7 +4462,7 @@ mod tests {
 
     #[test]
     fn three_dimensional_grid_does_not_duplicate_axis_edges() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let _space = canvas
             .coordinate_axes_3d(
                 Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
@@ -4510,7 +4510,7 @@ mod tests {
 
     #[test]
     fn native_three_dimensional_spawns_select_hybrid_rendering() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         assert!(!canvas.has_native_3d_content());
 
         canvas.polyline_3d(vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]);
@@ -4520,7 +4520,7 @@ mod tests {
 
     #[test]
     fn surfaces_include_a_batched_colored_wireframe_fallback() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes_3d(
                 Axis::linear(-2.0, 2.0).unwrap(),
@@ -4560,7 +4560,7 @@ mod tests {
 
     #[test]
     fn declarative_scatter_keeps_one_reactive_batch_for_ten_thousand_rows() {
-        let mut canvas = Canvas::new(1920, 1080);
+        let mut canvas = SceneModel::new(1920, 1080);
         let table = gaanim_visualization::DataTable::numeric([
             (
                 "x".to_owned(),
@@ -4605,7 +4605,7 @@ mod tests {
 
     #[test]
     fn three_dimensional_axes_accept_nonlinear_scales_and_expose_layers() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let space = canvas
             .coordinate_axes_3d(
                 Axis::log(0.1, 1_000.0, 10.0).unwrap(),
@@ -4647,7 +4647,7 @@ mod tests {
             .encode(Channel::Y, Encoding::field("y"))
             .unwrap();
 
-        let mut point_canvas = Canvas::new(640, 360);
+        let mut point_canvas = SceneModel::new(640, 360);
         let points = point_canvas.chart(base.clone()).unwrap();
         assert!(
             points
@@ -4660,7 +4660,7 @@ mod tests {
             "point marks without a color encoding must still be visible",
         );
 
-        let mut line_canvas = Canvas::new(640, 360);
+        let mut line_canvas = SceneModel::new(640, 360);
         let line = line_canvas
             .chart(base.mark(MarkKind::Line, BTreeMap::new()))
             .unwrap();
@@ -4690,7 +4690,7 @@ mod tests {
             .encode(Channel::Y, Encoding::field("y"))
             .unwrap();
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let chart = canvas.chart(spec).unwrap();
         let mark_z = chart
             .marks
@@ -4762,7 +4762,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let chart = canvas.chart(spec).unwrap();
         assert!(chart.layer("labels").is_some());
         let mark_spec = chart.marks.spec.lock().expect("bar mark spec poisoned");
@@ -4796,7 +4796,7 @@ mod tests {
             .axis(Channel::Y, Axis::linear(-20.0, 50.0).unwrap())
             .unwrap();
 
-        let mut outside_canvas = Canvas::new(640, 360);
+        let mut outside_canvas = SceneModel::new(640, 360);
         let outside = outside_canvas
             .chart(base.clone().mark(
                 MarkKind::Bar,
@@ -4808,7 +4808,7 @@ mod tests {
             outside.layer("labels").expect("labels should materialize"),
         );
 
-        let mut inside_canvas = Canvas::new(640, 360);
+        let mut inside_canvas = SceneModel::new(640, 360);
         let inside = inside_canvas
             .chart(base.mark(
                 MarkKind::Bar,
@@ -4873,7 +4873,7 @@ mod tests {
             .encode(Channel::Z, Encoding::field("value"))
             .unwrap();
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let source = canvas.chart(heatmap).unwrap();
         let target = canvas.chart(surface).unwrap();
         let animation = source
@@ -4887,7 +4887,7 @@ mod tests {
 
     #[test]
     fn coordinate_space_write_reveals_semantic_layers_in_parallel() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes(
                 Axis::linear(-2.0, 2.0).unwrap(),
@@ -4908,7 +4908,7 @@ mod tests {
 
     #[test]
     fn composed_vector_field_materializes_arrows_streams_and_particles() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes(
                 Axis::linear(-2.0, 2.0).unwrap(),
@@ -5024,7 +5024,7 @@ mod tests {
             (authored_stroke, resolved_stroke)
         }
 
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         canvas.set_theme("technical").unwrap();
         let theme = canvas.theme_style.clone().unwrap();
         let space = canvas
@@ -5089,7 +5089,7 @@ mod tests {
 
     #[test]
     fn three_dimensional_advection_uses_native_polyline_lens() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let space = canvas
             .coordinate_axes_3d(
                 Axis::linear(-2.0, 2.0).unwrap(),
@@ -5124,7 +5124,7 @@ mod tests {
 
     #[test]
     fn parameter_fields_compile_geometry_regenerators() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let parameter = canvas.parameter(1.0).unwrap();
         let space = canvas
             .coordinate_axes(
@@ -5215,7 +5215,7 @@ mod tests {
 
     #[test]
     fn reactive_parametric_curves_and_surfaces_compile_regenerators() {
-        let mut canvas = Canvas::new(640, 360);
+        let mut canvas = SceneModel::new(640, 360);
         let parameter = canvas.parameter(1.0).unwrap();
         let input = vec![gaanim_animation::ReactiveInput::Signal(
             parameter.drawable().id,

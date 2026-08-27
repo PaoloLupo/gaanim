@@ -32,6 +32,7 @@
 #include "guides/slides.typ"
 #include "guides/visual-regression.typ"
 #include "guides/performance.typ"
+#include "guides/migration-0-2.typ"
 
 #book-part("IV", "Referencia de la API", description: "Apéndice de firmas, parámetros y contratos de la superficie pública actual")
 #include "api/index.typ"

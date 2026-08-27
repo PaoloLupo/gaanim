@@ -1,7 +1,7 @@
 use gaanim_core::peniko::Color;
 use gaanim_text::prelude::{TextAlign, TextFlow, TextRole, TextSpec, TextStyle, TextWrap};
 
-use super::{Anchor, Canvas, Direction, DrawableHandle};
+use super::{Anchor, Direction, DrawableHandle, SceneModel};
 
 const SUCCESS: Color = Color::from_rgb8(0x22, 0xC5, 0x5E);
 const WARNING: Color = Color::from_rgb8(0xF5, 0x9E, 0x0B);
@@ -448,7 +448,7 @@ struct TextBlock {
     align: EditorialAlign,
 }
 
-impl Canvas {
+impl SceneModel {
     pub fn badge(&mut self, spec: BadgeSpec) -> Result<DrawableHandle, EditorialError> {
         validate_text("text", &spec.text)?;
         validate_padding(spec.padding)?;
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn semantic_tokens_and_explicit_overrides_resolve() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         let mut theme = CanvasTheme::builtin("paper").unwrap();
         let custom_success = Color::from_rgb8(0x01, 0xA2, 0xB3);
         theme
@@ -1146,7 +1146,7 @@ mod tests {
         assert_eq!(contrasting_text(Color::WHITE), Color::BLACK);
         assert_eq!(contrasting_text(Color::BLACK), Color::WHITE);
 
-        let canvas = Canvas::new(1280, 720);
+        let canvas = SceneModel::new(1280, 720);
         let resolved = canvas.resolve_editorial_style(
             EditorialStyle::default()
                 .variant(EditorialVariant::Success)
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn specs_reject_empty_text_and_invalid_geometry() {
-        let mut canvas = Canvas::new(1280, 720);
+        let mut canvas = SceneModel::new(1280, 720);
         assert!(!SectionHeaderSpec::new("Title").rule);
         assert_eq!(
             canvas.badge(BadgeSpec::new("  ")).unwrap_err(),
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[test]
     fn all_editorial_factories_return_group_drawables() {
-        let mut canvas = Canvas::new(1280, 720).margin_all(48.0);
+        let mut canvas = SceneModel::new(1280, 720).margin_all(48.0);
         let banner = canvas.banner(BannerSpec::new("Banner")).unwrap();
         let lower_third = canvas.lower_third(LowerThirdSpec::new("Speaker")).unwrap();
         assert!(

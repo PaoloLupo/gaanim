@@ -40,9 +40,9 @@ una trayectoria, así que no necesita relleno. El punto necesita contraste y el
 radio debe ser secundario:
 
 ```python
-orbit = scene.circle(120).stroke(PRIMARY, 4).no_fill().at(-320, 0)
-point = scene.dot(10).fill(ACCENT).at(-200, 0)
-radius = scene.line(-320, 0, -200, 0).stroke(MUTED, 2)
+orbit = scene.geometry.circle(120).stroke(PRIMARY, 4).no_fill().at(-320, 0)
+point = scene.geometry.dot(10).fill(ACCENT).at(-200, 0)
+radius = scene.geometry.line(-320, 0, -200, 0).stroke(MUTED, 2)
 ```
 
 El orden de creación también influye en la lectura cuando los objetos se
@@ -67,7 +67,7 @@ caption.fill(MUTED).at(0, 215)
 Agrupa la geometría del círculo:
 
 ```python
-system = scene.group([orbit, radius, point])
+system = scene.geometry.group([orbit, radius, point])
 ```
 
 `system` permite animar las tres piezas juntas. Los handles originales siguen
@@ -86,10 +86,10 @@ Hasta aquí, la parte central de `main.py` se lee así:
 title = scene.text("Movimiento circular", role="title").fill(WHITE).at(0, 260)
 caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).at(0, 215)
 
-orbit = scene.circle(120).stroke(PRIMARY, 4).no_fill().at(-320, 0)
-radius = scene.line(-320, 0, -200, 0).stroke(MUTED, 2)
-point = scene.dot(10).fill(ACCENT).at(-200, 0)
-system = scene.group([orbit, radius, point])
+orbit = scene.geometry.circle(120).stroke(PRIMARY, 4).no_fill().at(-320, 0)
+radius = scene.geometry.line(-320, 0, -200, 0).stroke(MUTED, 2)
+point = scene.geometry.dot(10).fill(ACCENT).at(-200, 0)
+system = scene.geometry.group([orbit, radius, point])
 
 scene.render()
 ```

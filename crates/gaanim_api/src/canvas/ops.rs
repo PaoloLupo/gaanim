@@ -1,4 +1,4 @@
-//! Deferred operations and segment tracking for the Canvas API.
+//! Deferred operations and segment tracking for the SceneModel API.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,7 +23,7 @@ use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 // Shared state
 // -----------------------------------------------------------------------
 
-/// Mutable state shared by a [`Canvas`](super::Canvas) and the handles it
+/// Mutable state shared by a [`SceneModel`](super::SceneModel) and the handles it
 /// creates. This lets fluent object setters and auto-queued animations update
 /// the same deferred operation stream that will later be compiled.
 #[derive(Debug)]
@@ -136,7 +136,7 @@ pub(crate) struct CameraBindingSpec {
 // Op
 // -----------------------------------------------------------------------
 
-/// A deferred operation accumulated by [`Canvas`](super::Canvas) and replayed
+/// A deferred operation accumulated by [`SceneModel`](super::SceneModel) and replayed
 /// into a [`SceneBuilder`](crate::builder::SceneBuilder) on compile.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -150,7 +150,7 @@ pub(crate) enum Op {
     /// Capture the authored camera pose at the current timeline cursor.
     CaptureCameraState { id: u64 },
     /// Play a single animation sequentially (auto-queued). `active=false`
-    /// means the animation was later regrouped by `Canvas::play(...)`.
+    /// means the animation was later regrouped by `SceneModel::play(...)`.
     Animate {
         anim: AnimationBuilder,
         active: bool,
@@ -594,12 +594,12 @@ pub enum FragmentRevealStyle {
     FromBelow,
 }
 
-/// A tracking endpoint at the Canvas level (before entity resolution).
+/// A tracking endpoint at the SceneModel level (before entity resolution).
 #[derive(Debug, Clone)]
 pub enum CanvasEndpoint {
     /// Fixed position in space.
     Static(DVec3),
-    /// Position follows an entity (referenced by Canvas ObjectId).
+    /// Position follows an entity (referenced by SceneModel ObjectId).
     Entity(ObjectId),
     /// A normalized anchor inside an entity's local bounds plus a local offset.
     Anchor(AnchorPoint),
@@ -672,7 +672,7 @@ impl From<AnchorPoint> for CanvasEndpoint {
     }
 }
 
-/// Preset updater types that can be attached to entities via the Canvas API.
+/// Preset updater types that can be attached to entities via the SceneModel API.
 #[derive(Debug, Clone)]
 pub enum UpdaterPreset {
     /// Orbit around a center point at a given radius and angular speed.
@@ -732,7 +732,7 @@ pub(crate) struct LocalSegmentStop {
     pub time: f64,
 }
 
-/// A named segment (≈ scene) within a [`Canvas`](super::Canvas).
+/// A named segment (≈ scene) within a [`SceneModel`](super::SceneModel).
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub id: SegmentId,

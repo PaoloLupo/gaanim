@@ -47,9 +47,9 @@ c.segment("shapes", Transition.cross_fade(0.8))
 heading = c.text("Formas Geometricas").fill(GOLD).at(0.0, 250.0)
 heading.write().duration(1.0).linear()
 
-circle = c.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).at(-300.0, 0.0)
-rect = c.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).at(0.0, 0.0)
-square = c.square(100.0).fill(GREEN).stroke(WHITE, 3.0).at(300.0, 0.0)
+circle = c.geometry.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).at(-300.0, 0.0)
+rect = c.geometry.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).at(0.0, 0.0)
+square = c.geometry.square(100.0).fill(GREEN).stroke(WHITE, 3.0).at(300.0, 0.0)
 
 circle.grow_from_center().duration(0.8).ease("ease_out_elastic")
 rect.grow_from_center().duration(0.8).delay(0.3).ease("ease_out_elastic")
@@ -81,7 +81,7 @@ label.write().duration(1.0).linear()
 hello = c.text("Hola Mundo!").fill(WHITE).at(-200.0, 0.0)
 hello.draw_border_then_fill().duration(1.5).stroke_width(2.0)
 
-arrow = c.arrow(-50.0, 0.0, 150.0, 0.0).stroke(ORANGE, 4.0)
+arrow = c.geometry.arrow(-50.0, 0.0, 150.0, 0.0).stroke(ORANGE, 4.0)
 arrow.create().duration(0.8).delay(1.0).linear()
 
 world = c.text("Gaanim").fill(PURPLE).at(300.0, 0.0)
@@ -111,7 +111,7 @@ for i, color in enumerate(colors):
     angle = i * (2.0 * math.pi / len(colors))
     dx = 200.0 * math.cos(angle)
     dy = 200.0 * math.sin(angle)
-    dot = c.dot(15.0).fill(color).at(dx, dy)
+    dot = c.geometry.dot(15.0).fill(color).at(dx, dy)
     dot.grow_from_center().duration(0.5).delay(0.8 + i * 0.1).ease("ease_out_back")
     dots.append(dot)
 

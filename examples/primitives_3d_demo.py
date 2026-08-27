@@ -6,18 +6,18 @@ from gaanim import BLUE, CORAL, CYAN, GOLD, NAVY, WHITE, Material3D, Scene
 
 
 scene = Scene(1280, 720, background=NAVY)
-scene.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
 
-floor = scene.plane(
+floor = scene.geometry.plane(
     14,
     10,
     subdivisions=(8, 6),
     material=Material3D.matte(NAVY),
 ).at_3d(0, -2.2, 0)
-cube = scene.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-4.2, -1.0, 0)
-sphere = scene.sphere(1.35, material=Material3D.metal(GOLD)).at_3d(-1.4, -0.85, 0)
-cylinder = scene.cylinder(1.1, 2.8, material=Material3D.matte(CYAN)).at_3d(1.5, -0.8, 0)
-cone = scene.cone(1.25, 3.0, material=Material3D.matte(CORAL)).at_3d(4.2, -0.7, 0)
+cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-4.2, -1.0, 0)
+sphere = scene.geometry.sphere(1.35, material=Material3D.metal(GOLD)).at_3d(-1.4, -0.85, 0)
+cylinder = scene.geometry.cylinder(1.1, 2.8, material=Material3D.matte(CYAN)).at_3d(1.5, -0.8, 0)
+cone = scene.geometry.cone(1.25, 3.0, material=Material3D.matte(CORAL)).at_3d(4.2, -0.7, 0)
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
 scene.camera.look_at(eye=(10, 7, 13), target=(0, -0.5, 0), duration=0.0)

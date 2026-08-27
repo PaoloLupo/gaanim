@@ -14,7 +14,7 @@ title = (
 )
 
 baseline_y = 65
-guide = scene.line(-555, baseline_y, 555, baseline_y).stroke(GRAY, 2)
+guide = scene.geometry.line(-555, baseline_y, 555, baseline_y).stroke(GRAY, 2)
 guide_label = (
     scene.text("typographic baseline", size=22)
     .fill(GRAY)
@@ -27,15 +27,15 @@ fade_to = scene.text("gyp", size=54).fill(GOLD).at(-390, baseline_y)
 morph_from = scene.text("Baseline", size=64).fill(WHITE).at(0, baseline_y)
 morph_to = scene.text("descenders", size=52).fill(TEAL).at(0, baseline_y)
 
-equation_from = scene.equation(
+equation_from = scene.text.equation(
     part("left", "frac(x_1^2, y_2)"), "=", part("right", "4"), size=64
 ).fill(WHITE).at(390, baseline_y)
-equation_to = scene.equation(
+equation_to = scene.text.equation(
     part("left", "x_1"), "=", part("right", "2"), size=52
 ).fill(GOLD).at(390, baseline_y)
 
 multiline_y = -165
-multiline_guide = scene.line(-555, multiline_y, -85, multiline_y).stroke(GRAY, 2)
+multiline_guide = scene.geometry.line(-555, multiline_y, -85, multiline_y).stroke(GRAY, 2)
 multiline = (
     scene.text("first baseline\nsecond visual line", size=38)
     .fill(WHITE)

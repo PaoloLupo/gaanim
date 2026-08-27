@@ -316,18 +316,18 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
         for column, value in enumerate(source_row):
             stored, cell = _make_cell(scene, value, row, column, options)
             values[row][column] = stored; cell_row.append(cell)
-            items.append(scene.item(cell, row=row + row_offset, column=column + entry_column_offset, align="center"))
+            items.append(scene.layout.item(cell, row=row + row_offset, column=column + entry_column_offset, align="center"))
         cells.append(cell_row)
     if row_labels is not None:
         for row, value in enumerate(row_labels):
             _, label = _make_cell(scene, value, row, -1, {**options, "cell_mode": options.get("label_mode", "math"), "entry_style": options.get("label_style")})
             row_label_cells.append(label)
-            items.append(scene.item(label, row=row + row_offset, column=0, align="center"))
+            items.append(scene.layout.item(label, row=row + row_offset, column=0, align="center"))
     if column_labels is not None:
         for column, value in enumerate(column_labels):
             _, label = _make_cell(scene, value, -1, column, {**options, "cell_mode": options.get("label_mode", "math"), "entry_style": options.get("label_style")})
             column_label_cells.append(label)
-            items.append(scene.item(label, row=0, column=column + entry_column_offset, align="center"))
+            items.append(scene.layout.item(label, row=0, column=column + entry_column_offset, align="center"))
     delimiter_cells = []
     requested_size = options.get("delimiter_size")
     size = float(requested_size) if requested_size is not None else max(72.0, 60.0 * len(values))
@@ -338,10 +338,10 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
         right = scene.text(pair[delimiter][1], size=size, weight=weight)
         delimiter_cells.extend((left, right))
         delimiter_offset = max(0.0, column_gap - delimiter_gap) * 0.5
-        items.append(scene.item(left, row=row_offset, column=label_columns, row_span=len(values), align="center", offset=(delimiter_offset, 0.0)))
-        items.append(scene.item(right, row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align="center", offset=(-delimiter_offset, 0.0)))
+        items.append(scene.layout.item(left, row=row_offset, column=label_columns, row_span=len(values), align="center", offset=(delimiter_offset, 0.0)))
+        items.append(scene.layout.item(right, row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align="center", offset=(-delimiter_offset, 0.0)))
     column_count = entry_column_offset + len(values[0]) + delimiter_columns
-    grid = scene.grid(items, rows=["auto"] * (len(values) + row_offset), columns=["auto"] * column_count,
+    grid = scene.layout.grid(items, rows=["auto"] * (len(values) + row_offset), columns=["auto"] * column_count,
                       row_gap=row_gap, column_gap=column_gap, align="center")
     root = grid
     stored_options = dict(options)
@@ -360,7 +360,7 @@ def _make_cell(scene: Any, value: Any, row: int, column: int, options: Mapping[s
     style = entry.style or options.get("entry_style")
     kwargs = {"style": style} if style is not None else {}
     if options.get("cell_mode", "math") == "text": return entry, scene.text(str(entry.value), **kwargs)
-    return entry, scene.equation(_typst_expr(entry.value, options.get("numeric_format", "g")), **kwargs)
+    return entry, scene.text.equation(_typst_expr(entry.value, options.get("numeric_format", "g")), **kwargs)
 
 
 def _matrix_rows(data: Any) -> list[list[Any]]:
@@ -504,7 +504,7 @@ def _derive_unary(source: Matrix, operation: str, *, exact: bool = True, precisi
         visual = (_result_matrix(source, eigenvalues), _result_matrix(source, eigenvectors))
         steps = [MatrixStep("characteristic_polynomial", expression=_typst_expr(matrix.charpoly().as_expr())), MatrixStep("eigenspaces")]
     else:
-        text = source._scene.equation(f"{result} = {_typst_expr(value)}")
+        text = source._scene.text.equation(f"{result} = {_typst_expr(value)}")
         visual = text; steps = [MatrixStep(operation, expression=_typst_expr(value))]
     return MatrixDerivation(value, visual, steps)
 

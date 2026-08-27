@@ -10,9 +10,9 @@ def main():
     scene.canvas.set_theme("technical")
     title = scene.text("Technical visual language", role="title").at(0, 220, anchor=Anchor.CENTER)
     subtitle = scene.text("A reusable scientific theme", role="subtitle").at(0, 155, anchor=Anchor.CENTER)
-    circle = scene.circle(75).fill(GREEN).at(-250, -10)
-    square = scene.rect(150, 150).stroke(GOLD, 6).no_fill().at(250, -10)
-    equation = scene.equation("H psi = E psi").at(0, -180, anchor=Anchor.CENTER)
+    circle = scene.geometry.circle(75).fill(GREEN).at(-250, -10)
+    square = scene.geometry.rect(150, 150).stroke(GOLD, 6).no_fill().at(250, -10)
+    equation = scene.text.equation("H psi = E psi").at(0, -180, anchor=Anchor.CENTER)
 
     scene.play([
         circle.grow_from_center().duration(1.2).spring(),

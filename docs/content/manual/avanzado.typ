@@ -31,10 +31,10 @@ from math import pi
 from gaanim import GOLD, Scene
 
 scene = Scene(1280, 720)
-theta = scene.parameter(0.0)
-tip = scene.polar_point((0, 0), 180, theta)
-radius = scene.bar_between((0, 0), tip).stroke(GOLD, 6)
-label = scene.readout(lambda value: value, inputs=[theta], label="$theta$", format=".2f")
+theta = scene.viz.parameter(0.0)
+tip = scene.geometry.polar_point((0, 0), 180, theta)
+radius = scene.mechanics.bar_between((0, 0), tip).stroke(GOLD, 6)
+label = scene.viz.readout(lambda value: value, inputs=[theta], label="$theta$", format=".2f")
 label.follow(tip, offset=(0, 28))
 
 scene.play([radius.create(0.5), label.fade_in(0.3)])
@@ -59,14 +59,14 @@ estas equivalencias:
 - `lambda x: amplitude * gm.sin(x)` pasa a
   `lambda x, amplitude: amplitude * math.sin(x)` con `inputs=[amplitude]`.
 - Un readout derivado declara sus entradas:
-  `scene.readout(lambda radius: math.pi * radius**2, inputs=[radius])`.
+  `scene.viz.readout(lambda radius: math.pi * radius**2, inputs=[radius])`.
 - Endpoints, cámara y slots escalares aceptan `float`, `Parameter`, `Variable`
   o `Computed`; pasar un parámetro directamente conserva la identidad.
 - `plot(function, derivative=2)` pasa a
   `plot(function, derivative=second_derivative)`. La derivada debe tener la
   misma firma y los mismos `inputs`; no existe diferenciación ni aproximación
   numérica implícita.
-- El tiempo se declara con `inputs=[scene.time]`.
+- El tiempo se declara con `inputs=[scene.viz.time]`.
 
 El contrato determinista exige callbacks síncronos y puros. Con el mismo script,
 entradas y entorno Python, reproducción, rewind, seeks directos y exportación

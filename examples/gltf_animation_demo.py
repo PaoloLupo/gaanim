@@ -5,9 +5,9 @@ import os
 from gaanim import BLACK, CYAN, GOLD, GRAY, WHITE, Scene
 
 scene = Scene(1920, 1080, background=BLACK)
-scene.assets_dir("examples/assets")
+scene.assets.assets_dir("examples/assets")
 
-fox = scene.gltf("Fox.glb").at_3d(2.0, -1.0, 0.0).scaled_3d(0.040, 0.040, 0.04)
+fox = scene.media.gltf("Fox.glb").at_3d(2.0, -1.0, 0.0).scaled_3d(0.040, 0.040, 0.04)
 
 # Keep the example honest if the downloaded asset is ever replaced.
 expected_actions = {"Survey", "Walk", "Run"}

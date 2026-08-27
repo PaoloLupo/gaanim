@@ -2008,7 +2008,7 @@ mod tests {
         let (_sender, receiver) = crossbeam_channel::bounded(1);
         cache.receiver = Some(receiver);
         let stash = crate::export::StashedReplay {
-            canvas: Some(gaanim_api::canvas::Canvas::new(1920, 1080)),
+            canvas: Some(gaanim_api::canvas::SceneModel::new(1920, 1080)),
             revision: 2,
         };
         let mut timeline = Timeline::new();

@@ -1,11 +1,11 @@
-//! Canvas multi-segment demo with transitions between segments.
+//! SceneModel multi-segment demo with transitions between segments.
 //!
 //! Run: `cargo run --example math_demo -p gaanim_api`
 
 use bevy::prelude::*;
 use gaanim_animation::{DeltaTime, GaanimAnimationPlugin};
 use gaanim_api::GaanimApiPlugin;
-use gaanim_api::canvas::Canvas;
+use gaanim_api::canvas::SceneModel;
 use gaanim_core::peniko::Color;
 use gaanim_math::Camera;
 use gaanim_renderer::prelude::*;
@@ -44,7 +44,7 @@ fn setup_scene(
     commands.insert_resource(Camera::ortho_2d(1280, 720));
     commands.spawn((Camera2d, VelloView));
 
-    let mut canvas = Canvas::new(1280, 720);
+    let mut canvas = SceneModel::new(1280, 720);
 
     // Segment 1: Intro
     let _s1 = canvas.segment("intro", None).expect("intro segment");
@@ -101,7 +101,7 @@ fn setup_scene(
     canvas.wait(2.0);
 
     info!(
-        "Canvas: {} segments, {:.1}s total",
+        "SceneModel: {} segments, {:.1}s total",
         canvas.segment_count(),
         canvas.current_time()
     );

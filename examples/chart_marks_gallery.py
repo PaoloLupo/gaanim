@@ -51,9 +51,9 @@ for index, (name, spec) in enumerate(specs):
     if name == "surface":
         # The perspective camera uses world units while the 2D panels use
         # canvas pixels. At eye.z=18 this conversion aligns the hybrid cells.
-        chart = scene.chart(spec).scaled(0.2).at_3d(x / 60, y / 60, 0)
+        chart = scene.viz.chart(spec).scaled(0.2).at_3d(x / 60, y / 60, 0)
     else:
-        chart = scene.chart(spec).scaled(0.17).at(x, y)
+        chart = scene.viz.chart(spec).scaled(0.17).at(x, y)
     label = scene.text(name).hud().scaled(0.55).at(x, y + 150, anchor=Anchor.CENTER)
     charts.extend([chart.drawable(), label])
 

@@ -6,7 +6,7 @@ from gaanim import GOLD, Scene
 
 scene = Scene(background="#0b1020")
 title = scene.text("Lottie + Velato", role="title").fill(GOLD).at(0, 230)
-composition = scene.lottie(
+composition = scene.media.lottie(
     "examples/assets/lottie_balls.json",
     width=1000,
     fit="contain",

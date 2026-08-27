@@ -116,7 +116,7 @@ raises `TypeError` with guidance to use `create()`.
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
-circle = scene.circle(40).fill(BLUE).at(-80, 0)
+circle = scene.geometry.circle(40).fill(BLUE).at(-80, 0)
 scene.play([circle.move(160, 0).duration(1.0).spring()])
 # output: preview.webp
 scene.render()
@@ -135,7 +135,7 @@ scene.render()
 # show-code: true
 from gaanim import Anchor, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-rect = scene.rect(100, 60).fill(BLUE).stroke(WHITE, 2).at(-120, 0)
+rect = scene.geometry.rect(100, 60).fill(BLUE).stroke(WHITE, 2).at(-120, 0)
 scene.play([rect.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).smooth()])
 # output: preview.webp
 scene.render()
@@ -186,7 +186,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-icon = scene.circle(36).fill(BLUE).stroke(WHITE, 2).at(0, 0)
+icon = scene.geometry.circle(36).fill(BLUE).stroke(WHITE, 2).at(0, 0)
 scene.play([icon.scale(1.8).duration(0.7).spring()])
 # output: preview.webp
 scene.render()
@@ -206,7 +206,7 @@ scene.render()
 from gaanim import BLUE, Scene
 from math import pi
 scene = Scene(480, 270, background="#0f172a")
-arm = scene.rect(80, 14).fill(BLUE).at(40, 0).with_pivot(0, 0)
+arm = scene.geometry.rect(80, 14).fill(BLUE).at(40, 0).with_pivot(0, 0)
 scene.play([arm.rotate(pi/2).duration(0.9)])
 # output: preview.webp
 scene.render()
@@ -225,8 +225,8 @@ scene.render()
 # show-code: true
 from gaanim import BLACK, BLUE, WHITE, Scene
 scene = Scene(480, 270, background=BLACK)
-circle = scene.circle(60).stroke(BLUE, 3).no_fill().at(0, 0)
-dot = scene.dot(8).fill(WHITE).at(60, 0)
+circle = scene.geometry.circle(60).stroke(BLUE, 3).no_fill().at(0, 0)
+dot = scene.geometry.dot(8).fill(WHITE).at(60, 0)
 scene.play([dot.move_along_path(circle).duration(2.0).linear()])
 # output: preview.webp
 scene.render()
@@ -245,7 +245,7 @@ scene.render()
 import math
 from gaanim import BLACK, WHITE, Scene
 scene = Scene(480, 270, background=BLACK)
-dot = scene.dot(10).fill(WHITE).at(60, 0)
+dot = scene.geometry.dot(10).fill(WHITE).at(60, 0)
 scene.play([dot.pivot(0, 0).rotate(math.tau).duration(1.5).linear()])
 # output: preview.webp
 scene.render()
@@ -267,7 +267,7 @@ scene.render()
 from gaanim import BLUE, GOLD, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 title = scene.text("Fade").fill(WHITE).at(0, 40)
-box = scene.rect(120, 50).fill(BLUE).at(0, -40)
+box = scene.geometry.rect(120, 50).fill(BLUE).at(0, -40)
 scene.play([title.fade_in().duration(0.5)])
 scene.play([box.fade_to(0.35).duration(0.6)])
 scene.play([title.fade_out().duration(0.4)])
@@ -349,7 +349,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-circle = scene.circle(50).no_fill().stroke(BLUE, 4).at(0, 0)
+circle = scene.geometry.circle(50).no_fill().stroke(BLUE, 4).at(0, 0)
 scene.play([circle.create().duration(1.0).smooth()])
 scene.play([circle.uncreate().duration(0.6)])
 # output: preview.webp
@@ -375,7 +375,7 @@ scene = Scene(480, 270, background="#0f172a")
 spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
   .mark("bar").encode(x="x", y="value") \
   .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
-chart = scene.chart(spec)
+chart = scene.viz.chart(spec)
 scene.play([chart.layer("marks").grow_from_center().duration(0.7).spring()])
 scene.play([chart.layer("marks").shrink_to_center().duration(0.5)])
 # output: preview.webp
@@ -395,7 +395,7 @@ scene.render()
 # show-code: true
 from gaanim import GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
-star = scene.star(5, 55, 26).fill(GOLD).at(0, 0)
+star = scene.geometry.star(5, 55, 26).fill(GOLD).at(0, 0)
 scene.play([star.spin_in_from_nothing().duration(0.9).spring()])
 # output: preview.webp
 scene.render()
@@ -414,7 +414,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-rect = scene.rect(140, 80).fill(BLUE).stroke(WHITE, 3).at(0, 0)
+rect = scene.geometry.rect(140, 80).fill(BLUE).stroke(WHITE, 3).at(0, 0)
 scene.play([rect.draw_border_then_fill().duration(1.3)])
 # output: preview.webp
 scene.render()
@@ -433,8 +433,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-key = scene.circle(32).fill(BLUE).stroke(WHITE, 2).at(-50, 0)
-wrong = scene.cross(28).stroke(WHITE, 3).at(60, 0)
+key = scene.geometry.circle(32).fill(BLUE).stroke(WHITE, 2).at(-50, 0)
+wrong = scene.geometry.cross(28).stroke(WHITE, 3).at(60, 0)
 scene.play([key.indicate().duration(0.7)])
 scene.play([wrong.wiggle().duration(0.5)])
 # output: preview.webp
@@ -540,8 +540,8 @@ scene.play([energy["mass"].copy_to(momentum["mass"], duration=0.8)])
 # show-code: true
 from gaanim import BLUE, GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
-circle = scene.circle(42).fill(BLUE).at(-90, 0)
-target = scene.rect(90, 60).fill(GOLD).at(80, 0)
+circle = scene.geometry.circle(42).fill(BLUE).at(-90, 0)
+target = scene.geometry.rect(90, 60).fill(GOLD).at(80, 0)
 scene.play([circle.create().duration(0.6)])
 scene.play([circle.transform(target).duration(1.0).spring()])
 # output: preview.webp
@@ -550,15 +550,15 @@ scene.render()
 ]
 
 #api-entry(
-  name: "Scene.transform_matching_shapes / Text.morph_to",
+  name: "Geometry.transform_matching_shapes / Text.morph_to",
   kind: "method",
-  signature: "scene.transform_matching_shapes(source, target, duration=1.0) / source_text.morph_to(target_text, match=\"auto\", duration=1.0)",
+  signature: "scene.geometry.transform_matching_shapes(source, target, duration=1.0) / source_text.morph_to(target_text, match=\"auto\", duration=1.0)",
   params: (
     (name: "source", type: "Drawable", default: none, desc: [Source object/group containing elements to match.]),
     (name: "target", type: "Drawable", default: none, desc: [Target object/group containing elements to match.]),
     (name: "duration", type: "float", default: "1.0", desc: [Duration of the transition in seconds.]),
   ),
-  returns: (type: "None | Anim", desc: [`Scene.transform_matching_shapes` queues directly; `Text.morph_to` returns an animation accepted by `scene.play()`.]),
+  returns: (type: "None | Anim", desc: [`Geometry.transform_matching_shapes` queues directly; `Text.morph_to` returns an animation accepted by `scene.play()`.]),
   desc: [`transform_matching_shapes` matches arbitrary sub-elements by geometry, position, and color. `Text.morph_to` first matches semantic part paths, then ordered equal graphemes and shape similarity, with deterministic entry/exit for unmatched glyphs.],
 )[
 ```python
@@ -589,7 +589,7 @@ scene.play([e1.morph_to(e2, duration=1.6)])
 from gaanim import BLACK, GOLD, Scene
 
 scene = Scene(480, 270, background=BLACK)
-ball = scene.dot(12).fill(GOLD).at(0, 90)
+ball = scene.geometry.dot(12).fill(GOLD).at(0, 90)
 state = {"velocity": 0.0}
 
 def reset():
@@ -619,7 +619,7 @@ Their endpoints may continue moving during the reveal because regeneration
 updates the full path source and reapplies the current draw progress:
 
 ```python
-rod = scene.tracking_line(anchor, mass).no_fill().stroke(WHITE, 4)
+rod = scene.geometry.tracking_line(anchor, mass).no_fill().stroke(WHITE, 4)
 scene.play([rod.create(0.8), mass.move(120, 0).duration(0.8)])
 scene.play([rod.write(0.8), mass.move(-80, 40).duration(0.8)])
 ```
@@ -644,7 +644,7 @@ from gaanim import CYAN, Scene
 
 scene = Scene()
 times = [i * 0.02 for i in range(len(accel))]
-building = scene.rounded_rect(160, 360, 10).fill(CYAN).at(-200, -120)
+building = scene.geometry.rounded_rect(160, 360, 10).fill(CYAN).at(-200, -120)
 # El edificio oscila con el registro medido; el seek es determinista.
 building.drive_from_samples(times, accel, "x", scale=520.0)
 scene.play(building.grow_from_center())
@@ -713,7 +713,7 @@ scene.play([a.fade_in(), b.fade_in(), c.fade_in()], lag=0.1)
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-g = scene.group([scene.circle(18).fill(BLUE).at(-50,0), scene.circle(18).fill(BLUE).at(0,0), scene.circle(18).fill(BLUE).at(50,0)])
+g = scene.geometry.group([scene.geometry.circle(18).fill(BLUE).at(-50,0), scene.geometry.circle(18).fill(BLUE).at(0,0), scene.geometry.circle(18).fill(BLUE).at(50,0)])
 scene.play([g.create().duration(1.0).lag_ratio(0.25)])
 # output: preview.webp
 scene.render()
@@ -732,7 +732,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
-dot = scene.dot(10).fill(BLUE).at(-110, 0)
+dot = scene.geometry.dot(10).fill(BLUE).at(-110, 0)
 scene.play([dot.move(220, 0).duration(0.9).spring()])
 scene.play([dot.move(-220, 0).duration(0.9).smooth()])
 # output: preview.webp
@@ -752,7 +752,7 @@ scene.render()
 # show-code: true
 from gaanim import WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
-path = scene.path([(-120, 0), (0, 40), (120, 0)]).no_fill().stroke(WHITE, 3)
+path = scene.geometry.path([(-120, 0), (0, 40), (120, 0)]).no_fill().stroke(WHITE, 3)
 scene.play([path.write().with_pen_tip().duration(1.4)])
 # output: preview.webp
 scene.render()

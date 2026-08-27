@@ -18,26 +18,26 @@ desde otro directorio de trabajo.
 from gaanim import Scene
 
 scene = Scene()
-scene.assets_dir("assets")
+scene.assets.assets_dir("assets")
 
-logo = scene.svg("logo.svg")
-cover = scene.image("cover.png")
-robot = scene.gltf("robot.glb")
-pulse = scene.lottie("pulse.json")
+logo = scene.media.svg("logo.svg")
+cover = scene.media.image("cover.png")
+robot = scene.media.gltf("robot.glb")
+pulse = scene.media.lottie("pulse.json")
 ```
 
 Las rutas absolutas también funcionan y tienen prioridad sobre `assets_dir`.
 
 == Calidad de imágenes y vídeo
 
-`scene.image` y `scene.video` aceptan `quality="low"`, `"medium"` (el valor
+`scene.media.image` y `scene.media.video` aceptan `quality="low"`, `"medium"` (el valor
 predeterminado) o `"high"`. La calidad alta solicita muestreo bicúbico de
 Vello 0.9, especialmente útil para fotos, capturas y vídeo que se escalan o
 rotan; tiene un coste de GPU mayor que la calidad media.
 
 ```python
-hero = scene.image("cover.png", width=960, quality="high")
-clip = scene.video("intro.mp4", height=540, quality="high", audio=False)
+hero = scene.media.image("cover.png", width=960, quality="high")
+clip = scene.media.video("intro.mp4", height=540, quality="high", audio=False)
 scene.play([clip])
 ```
 
@@ -75,7 +75,7 @@ Después, cárgalo antes de crear objetos dibujables:
 
 ```python
 scene = Scene()
-scene.load_project()  # lee gaanim.toml junto a este script de Python
+scene.assets.load_project()  # lee gaanim.toml junto a este script de Python
 ```
 
 La CLI acepta el script de entrada o el directorio del proyecto (`gaanim my-deck`,
@@ -89,11 +89,11 @@ acepta una ruta explícita al manifiesto.
 
 Usa `preload` para validar archivos ráster, SVG, Lottie JSON y glTF antes de
 reproducir la escena. Las imágenes ráster se decodifican en la misma caché que
-usa `scene.image`; las composiciones Lottie se analizan en la caché que usa
-`scene.lottie`.
+usa `scene.media.image`; las composiciones Lottie se analizan en la caché que usa
+`scene.media.lottie`.
 
 ```python
-scene.preload(["logo.svg", "cover.png", "pulse.json"])
+scene.assets.preload(["logo.svg", "cover.png", "pulse.json"])
 ```
 
 Los errores identifican el recurso que no pudo resolverse o decodificarse. La
@@ -107,12 +107,12 @@ Cuando un recurso ráster o Lottie cambia en disco sin reiniciar el proceso,
 limpia las cachés antes de reconstruir los objetos afectados:
 
 ```python
-scene.reload_assets()
-cover = scene.image("cover.png")
-pulse = scene.lottie("pulse.json")
+scene.assets.reload_assets()
+cover = scene.media.image("cover.png")
+pulse = scene.media.lottie("pulse.json")
 ```
 
-Los archivos SVG vuelven a analizarse cada vez que `scene.svg(...)` crea un
+Los archivos SVG vuelven a analizarse cada vez que `scene.media.svg(...)` crea un
 objeto dibujable.
 
 Los metadatos glTF se guardan por ruta canónica y fecha de modificación.
@@ -121,7 +121,7 @@ nativa anterior y todos sus descendientes antes de reconstruirla.
 
 == Lottie JSON
 
-`Scene.lottie` acepta archivos Lottie en formato JSON y los compone directamente en
+`MediaLibrary.lottie` acepta archivos Lottie en formato JSON y los compone directamente en
 Vello mediante Velato. Los parámetros `width`, `height` y `fit` siguen la misma
 semántica que en imágenes; `offset`, `duration`, `loop` y `speed` controlan el
 intervalo reproducido. Activa el clip con `scene.play([clip])`.
@@ -144,12 +144,12 @@ soportado.
 
 == Modelos 3D glTF
 
-`Scene.gltf(path, *, scene=None) -> Drawable` importa archivos locales glTF 2.0
+`MediaLibrary.gltf(path, *, scene=None) -> Drawable` importa archivos locales glTF 2.0
 con extensión `.gltf` o `.glb`. `scene` acepta el nombre de una escena, un índice
 basado en cero o `None` para usar la escena predeterminada del archivo.
 
 ```python
-model = scene.gltf("robot.glb", scene="Presentation")
+model = scene.media.gltf("robot.glb", scene="Presentation")
 arm = model.part("Robot/Rig/Arm")
 
 print(model.parts())       # tupla de selectores estables
@@ -177,7 +177,7 @@ animación de opacidad no pueda modificar otra importación del mismo archivo.
 
 == SVG avanzado
 
-`scene.svg(...)` conserva el documento como geometría vectorial. El importador
+`scene.media.svg(...)` conserva el documento como geometría vectorial. El importador
 resuelve:
 
 - grupos anidados, CSS, transformaciones, `viewBox` y `<use>`;
@@ -191,7 +191,7 @@ resuelve:
 Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python
-diagram = scene.svg("architecture.svg")
+diagram = scene.media.svg("architecture.svg")
 diagram.part("database").indicate(0.6)
 diagram.part("caption").fade_to(0.5)
 ```

@@ -5,9 +5,9 @@ from gaanim import Anchor, BLACK, BLUE, CORAL, GOLD, WHITE, Scene
 
 scene = Scene(960, 540, background=BLACK)
 scene.text("Camera states", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
-scene.circle(90).fill(BLUE).at(-260, -20)
-scene.rect(190, 120).fill(GOLD).at(240, -20)
-scene.dot(20).fill(CORAL).at(0, 20)
+scene.geometry.circle(90).fill(BLUE).at(-260, -20)
+scene.geometry.rect(190, 120).fill(GOLD).at(240, -20)
+scene.geometry.dot(20).fill(CORAL).at(0, 20)
 
 # Concrete states are reusable values. Captures freeze the authored camera at
 # this exact point of the timeline, even when earlier motion was reactive.

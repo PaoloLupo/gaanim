@@ -26,7 +26,7 @@ axis = (
   .ticks(math.pi)
   .numbers("pi", denominator=1)
 )
-timeline = scene.number_line(axis, length=600)
+timeline = scene.viz.number_line(axis, length=600)
 timeline.drawable().at(180, -20)
 ```
 
@@ -43,7 +43,7 @@ import math
 from gaanim import computed
 
 radius = 120
-theta = scene.parameter(0.0)
+theta = scene.viz.parameter(0.0)
 sine_curve = timeline.function(
   lambda value: math.sin(value),
   normal_scale=radius,
@@ -58,14 +58,14 @@ numérico exacto para que reproducción y seek produzcan la misma geometría.
 == Compartir el ángulo
 
 ```python
-circle_ref = scene.polar_point(circle_center, radius, theta)
-circle_dot = scene.dot(10).fill(ACCENT).follow(circle_ref)
+circle_ref = scene.geometry.polar_point(circle_center, radius, theta)
+circle_dot = scene.geometry.dot(10).fill(ACCENT).follow(circle_ref)
 
 wave_ref = timeline.point_ref(
   theta,
   normal_offset=computed(lambda angle: radius * math.sin(angle), inputs=[theta]),
 )
-wave_dot = scene.dot(8).fill(ACCENT).follow(wave_ref)
+wave_dot = scene.geometry.dot(8).fill(ACCENT).follow(wave_ref)
 ```
 
 `point_ref` devuelve un punto lógico, no una entidad visible adicional. Sus
@@ -75,8 +75,8 @@ rota o escala, el punto y la curva la acompañan.
 == Mostrar la correspondencia
 
 ```python
-radius_line = scene.tracking_line(circle_center, circle_ref)
-projection = scene.tracking_line(circle_ref, wave_ref)
+radius_line = scene.geometry.tracking_line(circle_center, circle_ref)
+projection = scene.geometry.tracking_line(circle_ref, wave_ref)
 
 scene.play([
   timeline.create().duration(0.8),

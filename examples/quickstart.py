@@ -4,7 +4,7 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=48)
 
-circle = scene.circle(96).fill(BLUE).stroke(WHITE, 4)
+circle = scene.geometry.circle(96).fill(BLUE).stroke(WHITE, 4)
 title = scene.text("Hola, Gaanim", role="title").fill(GOLD).at(0, 180)
 
 scene.play([

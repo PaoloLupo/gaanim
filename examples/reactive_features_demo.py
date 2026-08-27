@@ -6,17 +6,17 @@ from gaanim import BLACK, BLUE, CORAL, CYAN, GOLD, GREEN, ORANGE, WHITE, Scene, 
 def main():
     scene = Scene(1280, 720, background=BLACK)
     title = scene.text("Gaanim Reactive Engine", role="title").fill(WHITE).at(0, 240)
-    orbiting_dot = scene.dot(15).fill(ORANGE).at(150, 0)
+    orbiting_dot = scene.geometry.dot(15).fill(ORANGE).at(150, 0)
     orbiting_dot.add_updater(Updater.orbit(0, 0, 150, 2.0))
-    trail = scene.traced_path(orbiting_dot).stroke(CYAN, 4).no_fill()
-    radius = scene.tracking_line((0, 0), orbiting_dot).stroke(BLUE, 2).no_fill()
+    trail = scene.geometry.traced_path(orbiting_dot).stroke(CYAN, 4).no_fill()
+    radius = scene.geometry.tracking_line((0, 0), orbiting_dot).stroke(BLUE, 2).no_fill()
 
-    bobbing_dot = scene.dot(14).fill(GOLD).at(300, 0)
+    bobbing_dot = scene.geometry.dot(14).fill(GOLD).at(300, 0)
     bobbing_dot.add_updater(Updater.bob(50, 0.5))
-    pulsing_square = scene.square(60).fill(CORAL).at(-300, -110)
+    pulsing_square = scene.geometry.square(60).fill(CORAL).at(-300, -110)
     pulsing_square.add_updater(Updater.pulse(0.7, 1.3, 1.0))
     pulsing_square.add_updater(Updater.rotate(1.5))
-    follower = scene.dot(10).fill(GREEN).at(-180, -110)
+    follower = scene.geometry.dot(10).fill(GREEN).at(-180, -110)
     follower.add_updater(Updater.advance_x(45))
 
     scene.play([

@@ -21,7 +21,7 @@ spec = (
         ),
     )
 )
-chart = scene.chart(spec).at(0, -35)
+chart = scene.viz.chart(spec).at(0, -35)
 
 title = scene.text("Convergence benchmark", role="title").fill(WHITE).at(0, 400, anchor=Anchor.CENTER)
 subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).at(0, 350, anchor=Anchor.CENTER)

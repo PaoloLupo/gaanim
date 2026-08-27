@@ -18,7 +18,7 @@ reglas particulares de un hijo.
 El modelo mental tiene tres niveles:
 
 1. El contenedor decide el flujo, el tamaño exterior, el espacio y la alineación.
-2. `scene.item(...)` explica cómo un hijo consume la caja que recibe.
+2. `scene.layout.item(...)` explica cómo un hijo consume la caja que recibe.
 3. El contenido se mide dentro de esa caja; el texto puede recomponer líneas y
    los medios pueden ajustar su geometría.
 
@@ -27,12 +27,12 @@ posición. Mezclar `at()` o `move()` con Layout introduce dos autoridades sobre
 la misma coordenada y Gaanim lo rechaza explícitamente.
 
 ```python
-page = scene.column(
+page = scene.layout.column(
     [
         scene.text("Resultado", role="title"),
-        scene.row([
-            scene.item(copy, grow=2),
-            scene.item(diagram, grow=3, fit="contain"),
+        scene.layout.row([
+            scene.layout.item(copy, grow=2),
+            scene.layout.item(diagram, grow=3, fit="contain"),
         ], gap=40, align="center"),
         footer,
     ],
@@ -54,14 +54,14 @@ también admite `between`, `around` y `evenly`.
 Los constructores públicos son:
 
 ```python
-scene.row(children, *, gap=24, padding=0, width="hug", height="hug",
+scene.layout.row(children, *, gap=24, padding=0, width="hug", height="hug",
           align="center", justify="start", wrap=False, within=None)
-scene.column(children, *, gap=24, padding=0, width="hug", height="hug",
+scene.layout.column(children, *, gap=24, padding=0, width="hug", height="hug",
              align="start", justify="start", wrap=False, within=None)
-scene.grid(children, *, rows=1, columns=1, gap=0, row_gap=None,
+scene.layout.grid(children, *, rows=1, columns=1, gap=0, row_gap=None,
            column_gap=None, padding=0, width="hug", height="hug",
            align="stretch", justify="start", auto_flow="row", within=None)
-scene.stack(children, *, padding=0, width="hug", height="hug",
+scene.layout.stack(children, *, padding=0, width="hug", height="hug",
             align="center", within=None)
 ```
 
@@ -82,7 +82,7 @@ opcional pertenece al espacio local de la referencia.
 ```python
 from gaanim import Anchor
 
-card = scene.rect(240, 120).at(80, 20).rotated(0.15)
+card = scene.geometry.rect(240, 120).at(80, 20).rotated(0.15)
 label = scene.text("Detalle").at(
     card.anchor_point(Anchor.TOP_RIGHT, offset=(-12, -12))
 )
@@ -111,20 +111,20 @@ ellos y el árbol resultante aún puede recibir restricciones y animarse.
   columns: (1.05fr, 1.15fr, 2.4fr),
   inset: 7pt,
   [*Objetivo*], [*API*], [*Qué controla*],
-  [Flujo horizontal], [`scene.row(...)`], [El eje principal avanza de izquierda a derecha y puede continuar en filas nuevas.],
-  [Flujo vertical], [`scene.column(...)`], [El eje principal avanza de arriba abajo y puede continuar en columnas nuevas.],
-  [Distribución por tracks], [`scene.grid(...)`], [Filas y columnas fijas, intrínsecas `auto` o ponderadas `fr`, spans y colocación automática.],
-  [Superposición], [`scene.stack(...)`], [Una caja compartida para fondos, medios, captions, badges e hijos absolutos.],
+  [Flujo horizontal], [`scene.layout.row(...)`], [El eje principal avanza de izquierda a derecha y puede continuar en filas nuevas.],
+  [Flujo vertical], [`scene.layout.column(...)`], [El eje principal avanza de arriba abajo y puede continuar en columnas nuevas.],
+  [Distribución por tracks], [`scene.layout.grid(...)`], [Filas y columnas fijas, intrínsecas `auto` o ponderadas `fr`, spans y colocación automática.],
+  [Superposición], [`scene.layout.stack(...)`], [Una caja compartida para fondos, medios, captions, badges e hijos absolutos.],
   [Tamaño exterior], [`width` / `height`], [Un número fijo en unidades del lienzo, el tamaño intrínseco `"hug"` o el espacio disponible `"fill"`.],
-  [Hijos flexibles], [`scene.item(...)`], [`grow`, `shrink`, alineación individual, coordenadas de grid, spans, offsets, anchors y ajuste.],
+  [Hijos flexibles], [`scene.layout.item(...)`], [`grow`, `shrink`, alineación individual, coordenadas de grid, spans, offsets, anchors y ajuste.],
   [Espaciado], [`padding`, `gap`], [Inset único, vertical/horizontal o por los cuatro lados, y separaciones independientes de filas y columnas.],
   [Alineación], [`align`, `justify`], [Colocación en el eje transversal y distribución en el eje principal.],
   [Límites de la raíz], [`within="safe"` / `"frame"`], [Uso del área segura que respeta márgenes o del viewport completo.],
   [Contenido adaptable], [`TextFlow(wrap="auto")`], [Vuelve a medir el texto con el ancho ofrecido por su caja final.],
   [Ajuste de medios], [`fit=...`], [`none`, `contain`, `cover`, `stretch` o `scale_down`; `cover` también recorta.],
-  [Relaciones], [`scene.constrain(...)`], [Ecuaciones e inecuaciones lineales entre geometría de ramas distintas.],
+  [Relaciones], [`scene.layout.constrain(...)`], [Ecuaciones e inecuaciones lineales entre geometría de ramas distintas.],
   [Estructura viva], [`add` / `remove` / `detach` / `replace` / `configure`], [Crea una instantánea determinista del reflow, inmediata o animada.],
-  [Páginas reutilizables], [`scene.template(...)` / `segment.bind(...)`], [Slots tipados, patrones de presentación y tokens de espaciado del tema.],
+  [Páginas reutilizables], [`scene.layout.template(...)` / `segment.bind(...)`], [Slots tipados, patrones de presentación y tokens de espaciado del tema.],
 )
 
 === Escena completa sin coordenadas
@@ -145,10 +145,10 @@ copy = scene.text(
     flow=TextFlow(wrap="auto", line_spacing=1.2),
 )
 
-card = scene.stack(
+card = scene.layout.stack(
     [
-        scene.item(scene.rounded_rect(360, 220, 18).fill(BLUE), fit="stretch"),
-        scene.column(
+        scene.layout.item(scene.geometry.rounded_rect(360, 220, 18).fill(BLUE), fit="stretch"),
+        scene.layout.column(
             [
                 scene.text("Contenido medido", role="heading", color=GOLD),
                 copy,
@@ -166,20 +166,20 @@ card = scene.stack(
     align="stretch",
 )
 
-body = scene.row(
+body = scene.layout.row(
     [
-        scene.item(card, grow=2),
-        scene.item(scene.circle(96).fill(GOLD), grow=1, align="center"),
+        scene.layout.item(card, grow=2),
+        scene.layout.item(scene.geometry.circle(96).fill(GOLD), grow=1, align="center"),
     ],
     width="fill",
     gap=40,
     align="center",
 )
 
-page = scene.column(
+page = scene.layout.column(
     [
         scene.text("Atlas de Layout v2", role="title", color=GOLD),
-        scene.item(body, grow=1, align="stretch"),
+        scene.layout.item(body, grow=1, align="stretch"),
         scene.text("Sin coordenadas manuales", role="caption", color=WHITE),
     ],
     within="safe",
@@ -209,13 +209,13 @@ sobrante entre hermanos. Demasiados `fill` anidados suelen indicar que no está
 claro qué contenedor debe controlar el tamaño.
 
 ```python
-badge = scene.row([icon, label], width="hug", padding=(8, 14), gap=8)
+badge = scene.layout.row([icon, label], width="hug", padding=(8, 14), gap=8)
 
-workspace = scene.row(
+workspace = scene.layout.row(
     [
-        scene.item(sidebar, grow=0, shrink=0),
-        scene.item(content, grow=3, shrink=1, align="stretch"),
-        scene.item(inspector, grow=1, shrink=1),
+        scene.layout.item(sidebar, grow=0, shrink=0),
+        scene.layout.item(content, grow=3, shrink=1, align="stretch"),
+        scene.layout.item(inspector, grow=1, shrink=1),
     ],
     width="fill",
     height="fill",
@@ -241,7 +241,7 @@ los grids pueden sustituirlo mediante `row_gap` y `column_gap`.
 `align` controla el eje transversal y acepta `start`, `center`, `end` o
 `stretch`. `justify` controla el eje principal y acepta `start`, `center`,
 `end`, `between`, `around` o `evenly`. Un hijo puede sustituir la alineación
-transversal mediante `scene.item(..., align=...)`.
+transversal mediante `scene.layout.item(..., align=...)`.
 
 En una `row`, el eje principal es horizontal y `align` actúa verticalmente. En
 una `column`, el eje principal es vertical y `align` actúa horizontalmente.
@@ -249,21 +249,21 @@ Esta distinción resuelve la mayoría de dudas sobre cuál de las dos propiedade
 usar.
 
 ```python
-toolbar = scene.row(
-    [back, scene.item(search, grow=1, align="stretch"), actions],
+toolbar = scene.layout.row(
+    [back, scene.layout.item(search, grow=1, align="stretch"), actions],
     width="fill",
     align="center",
     justify="between",
 )
 
-steps = scene.column(
+steps = scene.layout.column(
     [intro, explanation, result],
     height="fill",
     align="stretch",
     justify="evenly",
 )
 
-chips = scene.row(tags, width=620, gap=12, wrap=True, align="center")
+chips = scene.layout.row(tags, width=620, gap=12, wrap=True, align="center")
 ```
 
 Con `wrap=True`, una fila comienza otra fila cuando el siguiente hijo supera el
@@ -311,15 +311,15 @@ sucio y la medición adaptable se propagan automáticamente hasta el propietario
 exterior.
 
 ```python
-background = scene.stack(
-    [scene.item(photo, fit="cover")],
+background = scene.layout.stack(
+    [scene.layout.item(photo, fit="cover")],
     within="frame",
     width="fill",
     height="fill",
     align="stretch",
 )
 
-content = scene.column(
+content = scene.layout.column(
     [title, scene.text(copy, flow=TextFlow(wrap="auto")), footer],
     within="safe",
     width="fill",
@@ -328,7 +328,7 @@ content = scene.column(
     justify="between",
 )
 
-page = scene.stack([background, content], within="frame", width="fill", height="fill")
+page = scene.layout.stack([background, content], within="frame", width="fill", height="fill")
 ```
 
 El mismo árbol puede servir para 16:9 y 9:16. El wrap del flujo, los tracks
@@ -349,17 +349,17 @@ preferible a filas anidadas cuando varias regiones deben compartir líneas de
 alineación.
 
 ```python
-cards = scene.grid(
-    [hero, scene.item(chart, column_span=2), notes],
+cards = scene.layout.grid(
+    [hero, scene.layout.item(chart, column_span=2), notes],
     columns=[240, "1fr", "2fr"],
     rows=["auto", "1fr"],
     gap=24,
     width="fill",
 )
 
-overlay = scene.stack([
-    scene.item(photo, fit="cover"),
-    scene.item(caption, absolute=True, offset=(0, -180)),
+overlay = scene.layout.stack([
+    scene.layout.item(photo, fit="cover"),
+    scene.layout.item(caption, absolute=True, offset=(0, -180)),
 ], within="frame", width="fill", height="fill")
 ```
 
@@ -385,7 +385,7 @@ transforman el árbol completo. La restricción anterior corresponde únicamente
 a los hijos cuya traslación pertenece al contenedor.
 
 ```python
-panel = scene.column([formula, explanation], gap=50, align="center")
+panel = scene.layout.column([formula, explanation], gap=50, align="center")
 panel.at(400, 200)
 ```
 
@@ -439,7 +439,7 @@ cuando dos ramas separadas deban compartir una relación geométrica, por ejempl
 alinear una etiqueta externa con el centro de un gráfico.
 
 ```python
-relations = scene.constrain(
+relations = scene.layout.constrain(
     (label.left == chart.right + 24).strong(),
     label.center_y == chart.center_y,
     (label.width <= page.width * 0.30).weak(),
@@ -451,7 +451,7 @@ Las relaciones son `required` por defecto y ofrecen las alternativas `strong`,
 IDs estables, el orden canónico y las permanencias débiles explícitas hacen
 reproducibles las soluciones equivalentes.
 
-`scene.check_layout()` devuelve diagnósticos de restricciones blandas justo
+`scene.layout.check_layout()` devuelve diagnósticos de restricciones blandas justo
 después del registro y fallos de composición intrínseca encontrados durante la
 reproducción. El contenido Typst adaptable inválido no termina el hot reload del
 editor. `layout.diagnostics()` filtra los diagnósticos de una raíz. Un mensaje de
@@ -473,9 +473,9 @@ copy = scene.text(
     "Layout v2 mide este texto con el ancho de su tarjeta.",
     flow=TextFlow(wrap="auto", align="justify", line_spacing=1.25),
 )
-page = scene.row([
-    scene.item(copy, grow=2),
-    scene.item(diagram, grow=3, fit="contain"),
+page = scene.layout.row([
+    scene.layout.item(copy, grow=2),
+    scene.layout.item(diagram, grow=3, fit="contain"),
 ], width="fill", gap=32)
 ```
 
@@ -502,13 +502,13 @@ from gaanim import comparison, layout_template
 
 @layout_template
 def two_columns(scene, *, title, left, right, footer=None):
-    return scene.column([
+    return scene.layout.column([
         title,
-        scene.row([scene.item(left, grow=1), scene.item(right, grow=1)]),
+        scene.layout.row([scene.layout.item(left, grow=1), scene.layout.item(right, grow=1)]),
         footer,
     ], within="safe", width="fill", height="fill")
 
-page = scene.template(two_columns, title=title, left=copy, right=diagram)
+page = scene.layout.template(two_columns, title=title, left=copy, right=diagram)
 slide = scene.segment("Comparison", template=comparison)
 page = slide.bind(title=title, left=copy, right=diagram)
 ```

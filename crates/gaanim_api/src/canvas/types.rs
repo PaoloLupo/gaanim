@@ -344,7 +344,7 @@ pub struct ImageCrop {
     pub height: f64,
 }
 
-/// Optional destination sizing, crop, and sampling quality for `Canvas::image_with_options`.
+/// Optional destination sizing, crop, and sampling quality for `SceneModel::image_with_options`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ImageOptions {
     pub width: Option<f64>,
@@ -355,7 +355,7 @@ pub struct ImageOptions {
     pub quality: ImageQuality,
 }
 
-/// Playback, sizing, and embedded-audio options for `Canvas::video_with_options`.
+/// Playback, sizing, and embedded-audio options for `SceneModel::video_with_options`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VideoOptions {
     pub image: ImageOptions,
@@ -929,7 +929,7 @@ impl ObjectSpec {
     }
 }
 
-/// A queued Canvas animation.
+/// A queued SceneModel animation.
 ///
 /// Methods like `DrawableHandle::fade_in()` create one of these and immediately
 /// append an active `Op::Animate` to the owning segment. Fluent configuration

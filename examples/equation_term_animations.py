@@ -6,7 +6,7 @@ from gaanim import BLACK, CORAL, GOLD, GRAY, WHITE, Scene, part
 scene = Scene(1280, 720, background=BLACK)
 
 title = scene.text("Ecuaciones por significado, no por glifos", role="title").fill(WHITE).at(0, 270)
-formula = scene.equation(
+formula = scene.text.equation(
     part("energy", "E"), part("equals", "="),
     part("mass", "m"), part("light_speed", "c^2")
 ).at(0, 70)
