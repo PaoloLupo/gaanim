@@ -192,7 +192,7 @@ Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python
 diagram = scene.media.svg("architecture.svg")
-diagram.part("database").animate.indicate(0.6)
+diagram.part("database").animate.indicate().duration(0.6)
 diagram.part("caption").animate.opacity(0.5)
 ```
 

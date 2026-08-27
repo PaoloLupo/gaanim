@@ -18,7 +18,7 @@ planos retirados.
 #table(
   columns: (1fr, 1fr),
   [*0.1*], [*0.2*],
-  [`scene.circle(r)`], [`scene.geometry.circle(r)`],
+  [`scene.circle(r)`], [`scene.geometry.circle(radius)`],
   [`scene.equation(...)`], [`scene.text.equation(...)`],
   [`scene.row(children)`], [`scene.layout.row(children)`],
   [`scene.image(path)`], [`scene.media.image(path)`],
@@ -35,6 +35,15 @@ planos retirados.
   [`Succession(a, b)`], [`sequence(a, b)`],
   [`LaggedStart(a, b, lag=t)`], [`stagger(a, b, each=t)`],
   [`scene.play(items, lag=t)`], [`scene.play(stagger(*items, each=t))`],
+  [`.smooth()`], [`.easing(Easing.SMOOTH)`],
+  [`.linear()`], [`.easing(Easing.LINEAR)`],
+  [`.spring()`], [`.easing(Easing.spring(stiffness=90, damping=12))`],
+  [`.ease("spring")`], [`.easing(Easing.spring(stiffness=300, damping=20))`],
+  [`.steps(n)`], [`.easing(Easing.steps(n))`],
+  [`scene.play(items, rate="linear")`], [`scene.play(items, easing=Easing.LINEAR)`],
+  [`obj.animate.write(0.8)`], [`obj.animate.write().duration(seconds=0.8)`],
+  [`obj.at_anchor(x, y, anchor)`], [`obj.move_to(x, y, anchor=anchor)`],
+  [`obj.color(value)`], [`obj.fill(value)`],
 )
 
 Los setters directos son cortes reversibles en el cursor actual y no consumen
@@ -45,6 +54,10 @@ de incorporarlo al timeline.
 `scene.text("Hola")` no cambia. Desde 0.2, `scene.text` es una capacidad
 invocable `Typography` que también expone `equation`, `typst`, `measure` y
 `code`.
+
+`Easing` y `EasingCurve` se importan desde `gaanim`. Son objetos tipados e
+inmutables, por lo que el autocompletado enumera presets y familias y los
+nombres desconocidos fallan en vez de degradarse a otra curva.
 
 = Qué permanece en Scene
 

@@ -14,7 +14,7 @@ def main():
     bobbing_dot = scene.geometry.dot(14).fill(GOLD).move_to(300, 0)
     bobbing_dot.add_updater(Updater.bob(50, 0.5))
     pulsing_square = scene.geometry.square(60).fill(CORAL).move_to(-300, -110)
-    pulsing_square.add_updater(Updater.pulse(0.7, 1.3, 1.0))
+    pulsing_square.add_updater(Updater.pulse(1.0, 1.3, 1.0))
     pulsing_square.add_updater(Updater.rotate(1.5))
     follower = scene.geometry.dot(10).fill(GREEN).move_to(-180, -110)
     follower.add_updater(Updater.advance_x(45))

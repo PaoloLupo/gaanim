@@ -22,6 +22,6 @@ video = scene.media.video(
 )
 label = scene.text("MP4 · seek · loop · audio", role="caption").fill(WHITE).move_to(0, -235)
 
-scene.play([video, video.animate.fade_in(0.4), label.animate.write(0.4)])
+scene.play([video, video.animate.fade_in().duration(0.4), label.animate.write().duration(0.4)])
 scene.wait(7.6)
 scene.render()

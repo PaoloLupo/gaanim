@@ -1,6 +1,6 @@
 """Minimal reproducible scene used by the repository quickstart."""
 
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=48)
 
@@ -11,5 +11,5 @@ scene.play([
     circle.animate.create().duration(0.8),
     title.animate.write().duration(0.6),
 ])
-scene.play([circle.animate.shift_by(240, 0).duration(1.0).smooth()])
+scene.play([circle.animate.shift_by(240, 0).duration(1.0).easing(Easing.SMOOTH)])
 scene.render()

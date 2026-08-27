@@ -12,8 +12,8 @@ matrix = scene.viz.matrix(
 
 matrix.diagonal().fill(GOLD)
 scene.play(matrix.entries.animate.write(order="spiral_in", stagger=0.06).duration(0.45))
-scene.play(matrix.row(1).animate(order="column_major", stagger=0.05).color(BLUE).duration(0.5))
-scene.play(matrix[:, 0].animate.indicate(0.5, stagger=0.08))
+scene.play(matrix.row(1).animate.fill(BLUE, order="column_major", stagger=0.05).duration(0.5))
+scene.play(matrix[:, 0].animate.indicate(stagger=0.08).duration(0.5))
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.0, 0.8, 1.8, 2.19])

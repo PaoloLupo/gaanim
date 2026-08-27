@@ -4,7 +4,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3, EulerRot};
 use gaanim_core::peniko::{Brush, Color, ImageData, ImageQuality};
 use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
-use gaanim_math::{Bounds3D, EasingCurve, RateFunc};
+use gaanim_math::{Bounds3D, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
 use gaanim_text::prelude::TextAnchor;
 use std::path::PathBuf;
@@ -1607,21 +1607,6 @@ impl Anim {
         self
     }
 
-    pub fn spring(self) -> Self {
-        self.rate_func(RateFunc::Spring {
-            stiffness: 90.0,
-            damping: 12.0,
-        })
-    }
-
-    pub fn smooth(self) -> Self {
-        self.rate_func(RateFunc::Smooth)
-    }
-
-    pub fn linear(self) -> Self {
-        self.rate_func(RateFunc::Linear)
-    }
-
     pub fn lag_ratio(mut self, lag_ratio: f64) -> Self {
         self.inner = self.inner.lag_ratio(lag_ratio);
         self
@@ -1659,42 +1644,6 @@ impl Anim {
         let delay = sec.max(0.0);
         self.inner.delay = delay;
         self
-    }
-
-    pub fn steps(self, n: u32) -> Self {
-        self.rate_func(RateFunc::Steps(n.max(1)))
-    }
-
-    pub fn rate(self, name: &str) -> Self {
-        self.ease(name)
-    }
-
-    pub fn ease(self, name: &str) -> Self {
-        self.rate_func(named_rate_func(name))
-    }
-}
-
-/// Resolve the public string vocabulary used by `Anim.rate` and `Scene.play`.
-pub fn named_rate_func(name: &str) -> RateFunc {
-    match name {
-        "linear" => RateFunc::Linear,
-        "smooth" | "ease" => RateFunc::Smooth,
-        "ease_in" | "ease_in_quad" => RateFunc::EaseIn(EasingCurve::Quadratic),
-        "ease_out" | "ease_out_quad" => RateFunc::EaseOut(EasingCurve::Quadratic),
-        "ease_in_out" => RateFunc::EaseInOut(EasingCurve::Quadratic),
-        "ease_in_cubic" => RateFunc::EaseIn(EasingCurve::Cubic),
-        "ease_out_cubic" => RateFunc::EaseOut(EasingCurve::Cubic),
-        "bounce" | "ease_out_bounce" => RateFunc::EaseOut(EasingCurve::Bounce),
-        "elastic" | "ease_out_elastic" => RateFunc::EaseOut(EasingCurve::Elastic),
-        "spring" => RateFunc::Spring {
-            stiffness: 300.0,
-            damping: 20.0,
-        },
-        "back" | "ease_out_back" => RateFunc::EaseOut(EasingCurve::Back),
-        "there_and_back" => RateFunc::ThereAndBack,
-        "running_start" => RateFunc::RunningStart,
-        "exponential_decay" => RateFunc::ExponentialDecay,
-        _ => RateFunc::Smooth,
     }
 }
 

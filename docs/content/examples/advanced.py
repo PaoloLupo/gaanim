@@ -1,5 +1,5 @@
 # %% transforms
-from gaanim import BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
+from gaanim import Easing, BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
 scene = Scene(1280, 720, background=BLACK)
 scene.segment("shapes")
@@ -8,10 +8,10 @@ scene.play([circle.animate.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
 headline = scene.text("A stable transform", role="title").fill(GOLD).move_to(0, 0)
-scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).spring()])
+scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).easing(Easing.spring(stiffness=90.0, damping=12.0))])
 
 formula = scene.text("$E = m c^2$").fill(GREEN).move_to(0, -150)
-scene.play([headline.animate.transform_to(formula).duration(1.4).smooth()])
+scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.SMOOTH)])
 scene.render()
 
 # %% groups
@@ -23,7 +23,7 @@ middle = scene.geometry.circle(40).fill(RED).move_to(0, 0)
 right = scene.geometry.circle(40).fill(GREEN).move_to(80, 0)
 group = scene.geometry.group([left, middle, right])
 
-scene.play([group.animate.grow_from_center().duration(1.0).spring()])
+scene.play([group.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90.0, damping=12.0))])
 scene.play([group.animate.shift_by(0, 120).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
 scene.render()
 

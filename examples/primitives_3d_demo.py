@@ -22,8 +22,8 @@ cone = scene.geometry.cone(1.25, 3.0, material=Material3D.matte(CORAL)).move_to_
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.camera.look_at(eye=(10, 7, 13), target=(0, -0.5, 0))
 
-scene.play([floor.animate.fade_in(0.6)])
-scene.play([cube.animate.create(0.9), sphere.animate.create(0.9), cylinder.animate.create(0.9), cone.animate.create(0.9)])
+scene.play([floor.animate.fade_in().duration(0.6)])
+scene.play([cube.animate.create().duration(0.9), sphere.animate.create().duration(0.9), cylinder.animate.create().duration(0.9), cone.animate.create().duration(0.9)])
 scene.play(
     [
         cube.animate
@@ -32,9 +32,9 @@ scene.play(
         .duration(1.2),
         sphere.animate
         .material(Material3D.emissive(WHITE, strength=2.5))
-        .animate.scale_by(1.15)
+        .scale_by(1.15)
         .duration(1.2),
-        cylinder.animate.color(GOLD).rotate_by_3d("y", 1.2).duration(1.2),
+        cylinder.animate.fill(GOLD).rotate_by_3d("y", 1.2).duration(1.2),
         cone.animate.shift_by_3d(0, 0.4, 0).rotate_by_3d("y", -1.2).duration(1.2),
     ]
 )

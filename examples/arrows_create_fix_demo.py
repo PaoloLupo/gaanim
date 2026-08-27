@@ -6,7 +6,7 @@ de `create` (antes se veia como si el fill siguiera al cursor).
 
 import os
 
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=60)
 
@@ -26,9 +26,9 @@ guide = scene.geometry.circle(110).stroke(WHITE, 1).move_to(0, -140).opacity(0.1
 
 scene.play([
     title.animate.write().duration(0.5),
-    da.animate.create().duration(1.2).smooth(),
-    ca.animate.create().duration(1.2).smooth(),
-    caa.animate.create().duration(1.2).smooth(),
+    da.animate.create().duration(1.2).easing(Easing.SMOOTH),
+    ca.animate.create().duration(1.2).easing(Easing.SMOOTH),
+    caa.animate.create().duration(1.2).easing(Easing.SMOOTH),
 ])
 
 # Segundo bloque: mismo create pero con otro timing para visual diff

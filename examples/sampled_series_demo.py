@@ -46,10 +46,10 @@ tag_sway = scene.slides.badge("drive_from_samples", color=GOLD).move_to(330, 180
 
 scene.play(
     parallel(
-        sequence(kicker.animate.fade_in(0.4), title.animate.write(0.8)),
+        sequence(kicker.animate.fade_in().duration(0.4), title.animate.write().duration(0.8)),
         stagger(
-            tag_source.animate.grow_from_center(0.5),
-            tag_sway.animate.grow_from_center(0.5),
+            tag_source.animate.grow_from_center().duration(0.5),
+            tag_sway.animate.grow_from_center().duration(0.5),
             each=0.15,
         ),
     ),
@@ -88,11 +88,11 @@ tower.drive_from_samples(TIMES, SWAY, "y", scale=100.0)
 
 scene.play(
     parallel(
-        plane.animate.create(0.8),
-        stagger(tower.animate.fade_in(0.6), *[line.animate.fade_in(0.3) for line in floors], each=0.06),
+        plane.animate.create().duration(0.8),
+        stagger(tower.animate.fade_in().duration(0.6), *[line.animate.fade_in().duration(0.3) for line in floors], each=0.06),
     )
 )
-scene.play([curve.animate.create(2.2), peaks.animate.fade_in(0.5)])
+scene.play([curve.animate.create().duration(2.2), peaks.animate.fade_in().duration(0.5)])
 scene.wait(2.0)
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ footnote = "u(t) = e^{-ζ ω t}·sin Δ t = 0.02 s"
 width, height = scene.text.measure(footnote, role="caption")
 box = scene.geometry.rounded_rect(width , height + 36, 16).fill(GOLD).opacity(0.12).move_to(0, -380)
 label = scene.text.equation(footnote, role="caption").move_to(0, -380)
-scene.play(parallel(box.animate.grow_from_center(0.5), label.animate.write(0.6)))
+scene.play(parallel(box.animate.grow_from_center().duration(0.5), label.animate.write().duration(0.6)))
 scene.wait(1.2)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

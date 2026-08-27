@@ -10,11 +10,11 @@ product = a.matmul(b)
 product.result.move_to(260, 70)
 a.row(0).fill(GOLD)
 b.column(0).fill(GOLD)
-scene.play(product.animate(duration=0.5, stagger=0.08))
+scene.play(product.animations(stagger=0.08).duration(0.5))
 
 rref = a.rref()
 rref.result.move_to(0, -130)
-scene.play(rref.animate(duration=0.45, order="main_diagonal", stagger=0.06))
+scene.play(rref.animations(order="main_diagonal", stagger=0.06).duration(0.45))
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.0, 0.7, 1.369])

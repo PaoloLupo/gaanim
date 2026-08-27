@@ -1,6 +1,6 @@
 """Mathematical text, writing, and transforms using Scene."""
 
-from gaanim import BLACK, BLUE, CORAL, GOLD, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, CORAL, GOLD, WHITE, Scene
 
 
 def main():
@@ -12,13 +12,13 @@ def main():
 
     scene.play([
         title.animate.write().duration(1.0),
-        energy.animate.write().duration(2.0).smooth(),
-        sum_formula.animate.write().duration(2.0).linear(),
-        halo.animate.create().duration(1.2).spring(),
+        energy.animate.write().duration(2.0).easing(Easing.SMOOTH),
+        sum_formula.animate.write().duration(2.0).easing(Easing.LINEAR),
+        halo.animate.create().duration(1.2).easing(Easing.spring(stiffness=90.0, damping=12.0)),
     ])
     scene.wait(0.8)
     target = scene.text.equation("p = m v").fill(GOLD).move_to(-180, 0)
-    scene.play([energy.animate.transform_to(target).duration(1.5).spring()])
+    scene.play([energy.animate.transform_to(target).duration(1.5).easing(Easing.spring(stiffness=90.0, damping=12.0))])
     scene.wait(1.0)
     scene.render()
 

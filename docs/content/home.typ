@@ -23,7 +23,8 @@
 
 *GPU sin dolor.* Vello (compute) + Bevy ECS + PyO3. Python fluido por fuera, Rust rápido por dentro.
 
-*API que encadena.* `scene.geometry.circle(80).fill(BLUE).move_to(0, 100).play([circle.animate.create().spring()])` — sin boilerplate, sin `.animate`.
+*Un vocabulario, dos tiempos.* `circle.move_to(0, 100)` corta en el cursor;
+`circle.animate.move_to(200, 100)` describe el mismo cambio para `Scene.play`.
 
 *Tipografía de verdad.* Texto y ecuaciones como vectores via Typst. Selección por glifo, `write` animado, `color_by` y tags semánticos.
 
@@ -32,17 +33,17 @@
 == En 30 segundos
 
 ```python
-from gaanim import BLUE, GOLD, Scene
+from gaanim import Easing, BLUE, GOLD, Scene
 
 scene = Scene(1280, 720)
 circle = scene.geometry.circle(80).fill(BLUE).move_to(-160, 0)
 rect = scene.geometry.rect(180, 100).fill(GOLD).move_to(160, 0)
 
 scene.play([
-    circle.animate.create().duration(1.0).spring(),
+    circle.animate.create().duration(1.0).easing(Easing.spring(stiffness=90, damping=12)),
     rect.animate.grow_from_center().duration(1.0),
 ])
-scene.play([circle.animate.shift_by(200, 0).duration(0.8).smooth()])
+scene.play([circle.animate.shift_by(200, 0).duration(0.8).easing(Easing.SMOOTH)])
 # output: demo.mp4
 scene.render()
 ```
@@ -51,7 +52,7 @@ scene.render()
   #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
     #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-gold); margin-bottom: 8px;", [30+ ANIMACIONES])
     #html.div(style: "font-weight: 700; margin-bottom: 6px;", [Todo lo que necesitas])
-    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [write, create, fade, spin, wiggle, transform… con easing spring/smooth/linear.])
+    #html.div(style: "font-size: 0.88rem; color: var(--text-muted);", [write, create, fade, spin, wiggle, transform… con easings tipados y autocompletables.])
   ])
   #html.div(style: "background: var(--bg-card); border: 1px solid var(--code-border); border-radius: 12px; padding: 18px;", [
     #html.div(style: "font-family: var(--font-code); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; color: var(--accent-violet); margin-bottom: 8px;", [VECTORES REALES])

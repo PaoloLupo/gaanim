@@ -24,8 +24,8 @@ title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().move_t
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([scene.camera.animate.look_at(eye=(11, 8, 11), target=(0, 0, 0)).duration(1.0)])
-scene.play([axes.animate.create(1.0), title.animate.write(0.6)])
-scene.play([surface.animate.create(1.0), helix.animate.create(1.0)])
+scene.play([axes.animate.create().duration(1.0), title.animate.write().duration(0.6)])
+scene.play([surface.animate.create().duration(1.0), helix.animate.create().duration(1.0)])
 scene.play([scene.camera.animate.orbit(delta_yaw=0.8, delta_pitch=0.2).duration(1.4)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

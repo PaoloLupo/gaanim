@@ -1,5 +1,5 @@
 import math
-from gaanim import BLACK, BLUE, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, WHITE, Scene
 
 # En gaanim las coordenadas son en píxeles (ej: 100px equivale a ~1 unidad Manim)
 scene = Scene(1920, 1080, background=BLACK)
@@ -13,18 +13,17 @@ line = scene.geometry.line(300, 0, 500, 0).stroke(WHITE, 3.0)
 
 # 2. Animaciones
 # GrowFromCenter(circle)
-scene.play([circle.animate.grow_from_center().duration(1.0).
-smooth()])
+scene.play([circle.animate.grow_from_center().duration(1.0).easing(Easing.SMOOTH)])
 
 # Transform(dot, dot2)
-scene.play([dot.animate.transform_to(dot2).duration(1.0).smooth()])
+scene.play([dot.animate.transform_to(dot2).duration(1.0).easing(Easing.SMOOTH)])
 
 # MoveAlongPath(dot, circle)
-scene.play([dot.animate.move_along(circle).duration(2.0).linear()])
+scene.play([dot.animate.move_along(circle).duration(2.0).easing(Easing.LINEAR)])
 
 # Rotating(dot, about_point=[2, 0, 0])
 # En gaanim pivot(200, 0) define el punto sobre el cual rota
-scene.play([dot.pivot(200, 0).animate.rotate_by(math.pi).duration(1.5).linear()])
+scene.play([dot.pivot(200, 0).animate.rotate_by(math.pi).duration(1.5).easing(Easing.LINEAR)])
 
 import os
 

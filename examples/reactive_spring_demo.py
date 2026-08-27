@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
+from gaanim import Easing, Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(800, 420, background=WHITE)
@@ -25,8 +25,8 @@ scene.play([
     mass_label.animate.fade_in().duration(0.3),
     label.animate.write().duration(0.4),
 ])
-scene.play([mass.animate.shift_by(180, 0).duration(1.2).smooth()])
-scene.play([mass.animate.shift_by(-110, 0).duration(0.8).smooth()])
+scene.play([mass.animate.shift_by(180, 0).duration(1.2).easing(Easing.SMOOTH)])
+scene.play([mass.animate.shift_by(-110, 0).duration(0.8).easing(Easing.SMOOTH)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

@@ -34,9 +34,9 @@ crop = (
 )
 caption = scene.text("contain • cover • crop + stretch").fill(GOLD).move_to(0, -205, anchor=Anchor.CENTER)
 
-scene.play([title.animate.write(0.6), contain.animate.fade_in(0.8), cover.animate.fade_in(0.8), crop.animate.fade_in(0.8)])
+scene.play([title.animate.write().duration(0.6), contain.animate.fade_in().duration(0.8), cover.animate.fade_in().duration(0.8), crop.animate.fade_in().duration(0.8)])
 scene.play([contain.animate.shift_by(20, 0).duration(0.7), crop.animate.rotate_by(0.16).duration(0.7)])
-scene.play([caption.animate.write(0.5)])
+scene.play([caption.animate.write().duration(0.5)])
 scene.wait(0.4)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

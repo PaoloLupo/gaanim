@@ -24,9 +24,9 @@ scene.play([title.animate.write(), before.animate.write(), caption.animate.fade_
 scene.wait(0.4)
 
 # La línea hereda el color del término, se dibuja y luego este desaparece.
-scene.play([before["constant"].animate.cancel(duration=0.65)])
+scene.play([before["constant"].animate.cancel().duration(0.65)])
 
-scene.play([caption.animate.fade_out(duration=0.2)])
+scene.play([caption.animate.fade_out().duration(0.2)])
 caption = scene.text("Reemplazamos el paso y conservamos x").fill(GRAY).move_to(0, -150, anchor=Anchor.CENTER)
 scene.play([caption.animate.fade_in()])
 

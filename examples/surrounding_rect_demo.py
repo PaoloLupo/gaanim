@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import GOLD, WHITE, Scene, part
+from gaanim import Easing, GOLD, WHITE, Scene, part
 
 
 scene = Scene(720, 405, background="#0f172a")
@@ -21,8 +21,12 @@ momentum = scene.text.equation(
 frame = scene.geometry.surrounding_rect(energy["mass"]).stroke(GOLD, 4)
 
 scene.play([energy.animate.fade_in(), momentum.animate.fade_in(), frame.animate.create()])
-scene.play([frame.retarget(energy["light"], duration=0.8).smooth()])
-scene.play([frame.retarget(momentum["velocity"], duration=1.0).spring()])
+scene.play([frame.retarget(energy["light"]).duration(0.8).easing(Easing.SMOOTH)])
+scene.play([
+    frame.retarget(momentum["velocity"])
+    .duration(1.0)
+    .easing(Easing.spring(stiffness=90.0, damping=12.0))
+])
 scene.play([momentum.animate.shift_by(110, 0).duration(0.8)])
 scene.wait(0.3)
 

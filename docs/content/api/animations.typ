@@ -41,23 +41,22 @@ scene.play([
     .stroke(WHITE, 5)
     .opacity(0.8)
     .duration(1.5)
-    .smooth()
+    .easing(Easing.SMOOTH)
 ])
 ```
 
 El proxy admite movimiento 2D y 3D, escala 3D absoluta, rotación relativa o
-absoluta, opacidad, relleno sólido y trazo vectorial. `color(c)` recolorea solo
-la pintura vectorial ya visible. Llamar `fill(c)` tras `no_fill()`, o
+absoluta, opacidad, relleno sólido y trazo vectorial. Llamar `fill(c)` tras `no_fill()`, o
 `stroke(c, width)` tras `no_stroke()`, revela suavemente la pintura desde la
 transparencia; un trazo nuevo también crece desde ancho cero.
 
 En objetos `Text` y Typst, los canales de relleno y trazo se propagan a cada
 glifo visible. Cada glifo interpola desde su pintura actual, incluso si un
-fragmento tiene color propio. Por eso `fill(c)` o `color(c)` sobre el texto
+fragmento tiene color propio. Por eso `fill(c)` sobre el texto
 completo converge esos colores al objetivo, mientras `stroke(c, width)` cambia
 el contorno sin reemplazar sus rellenos distintos.
 
-En una `Primitive3D` nativa, `fill(c)` y `color(c)` cambian el color base PBR y
+En una `Primitive3D` nativa, `fill(c)` cambia el color base PBR y
 conservan rugosidad, metalicidad y emisión. Usa
 `primitive.animate.material(Material3D(...))` para interpolar el material PBR
 completo junto con transformaciones y opacidad. Los métodos de trazo vectorial
@@ -125,10 +124,10 @@ raises `TypeError` with guidance to use `create()`.
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, Scene
+from gaanim import Easing, BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 circle = scene.geometry.circle(40).fill(BLUE).move_to(-80, 0)
-scene.play([circle.animate.shift_by(160, 0).duration(1.0).spring()])
+scene.play([circle.animate.shift_by(160, 0).duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
 ```
@@ -144,10 +143,10 @@ scene.render()
 )[
 ```python
 # show-code: true
-from gaanim import Anchor, BLUE, WHITE, Scene
+from gaanim import Easing, Anchor, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 rect = scene.geometry.rect(100, 60).fill(BLUE).stroke(WHITE, 2).move_to(-120, 0)
-scene.play([rect.animate.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).smooth()])
+scene.play([rect.animate.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).easing(Easing.SMOOTH)])
 # output: preview.webp
 scene.render()
 ```
@@ -156,13 +155,13 @@ scene.render()
 #api-entry(
   name: "SurroundingRect.retarget",
   kind: "animation",
-  signature: ".retarget(targets, *, duration=None) -> Anim",
-  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [New live bounds, including semantic text or equation parts.]), (name: "duration", type: "float | None", default: "None", desc: [Positive finite seconds; `None` uses the animation default.])),
+  signature: ".retarget(targets).duration(seconds) -> Anim",
+  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [New live bounds, including semantic text or equation parts.]),),
   returns: (type: "Anim", desc: [Edge-interpolation animation supporting normal easing.]),
   desc: [Interpolates left, right, top, and bottom while both source and destination may continue moving. At completion the frame remains bound to the destination. Timeline seeks and rewinds reproduce the same geometry.],
 )[
 ```python
-scene.play([frame.retarget(equation["result"], duration=0.9).spring()])
+scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
 ```
 ]
 
@@ -195,10 +194,10 @@ scene.render()
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, WHITE, Scene
+from gaanim import Easing, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 icon = scene.geometry.circle(36).fill(BLUE).stroke(WHITE, 2).move_to(0, 0)
-scene.play([icon.animate.scale_by(1.8).duration(0.7).spring()])
+scene.play([icon.animate.scale_by(1.8).duration(0.7).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
 ```
@@ -230,15 +229,15 @@ scene.render()
   signature: ".animate.move_along(target: Drawable) -> Anim",
   params: ((name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),),
   returns: (type: "Anim", desc: [Follow-path translation.]),
-  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.linear()` for uniform speed, or `.smooth()` for ease. Rotation/scale unaffected.],
+  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. Rotation/scale unaffected.],
 )[
 ```python
 # show-code: true
-from gaanim import BLACK, BLUE, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, WHITE, Scene
 scene = Scene(480, 270, background=BLACK)
 circle = scene.geometry.circle(60).stroke(BLUE, 3).no_fill().move_to(0, 0)
 dot = scene.geometry.dot(8).fill(WHITE).move_to(60, 0)
-scene.play([dot.animate.move_along(circle).duration(2.0).linear()])
+scene.play([dot.animate.move_along(circle).duration(2.0).easing(Easing.LINEAR)])
 # output: preview.webp
 scene.render()
 ```
@@ -254,10 +253,10 @@ scene.render()
 )[
 ```python
 import math
-from gaanim import BLACK, WHITE, Scene
+from gaanim import Easing, BLACK, WHITE, Scene
 scene = Scene(480, 270, background=BLACK)
 dot = scene.geometry.dot(10).fill(WHITE).move_to(60, 0)
-scene.play([dot.pivot(0, 0).animate.rotate_by(math.tau).duration(1.5).linear()])
+scene.play([dot.pivot(0, 0).animate.rotate_by(math.tau).duration(1.5).easing(Easing.LINEAR)])
 # output: preview.webp
 scene.render()
 ```
@@ -268,8 +267,8 @@ scene.render()
 #api-entry(
   name: "Drawable.fade_in / fade_out / fade_to",
   kind: "method",
-  signature: ".animate.fade_in(duration?) .animate.fade_out(duration?) .animate.opacity(alpha: 0..1)",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds, uses default if None.]),),
+  signature: ".animate.fade_in() .animate.fade_out() .animate.opacity(alpha: 0..1)",
+  params: (),
   returns: (type: "Anim", desc: [Opacity anim.]),
   desc: [`fade_to` animates to target alpha. `fade_in_from` below is directional.],
 )[
@@ -290,7 +289,7 @@ scene.render()
 #api-entry(
   name: "Drawable.fade_in_from",
   kind: "method",
-  signature: ".animate.fade_in_from(direction: Direction, distance=48, duration?) -> Anim",
+  signature: ".animate.fade_in_from(direction: Direction, distance=48) -> Anim",
   params: ((name: "direction", type: "Direction", default: none, desc: [UP/DOWN/LEFT/RIGHT]), (name: "distance", type: "float", default: "48.0", desc: [Offset before entrance.]),),
   returns: (type: "Anim", desc: [Entrance from offset.]),
   desc: [Starts invisible at the requested offset, then fades and moves into place.],
@@ -311,8 +310,8 @@ scene.render()
 #api-entry(
   name: "Drawable.write / unwrite",
   kind: "method",
-  signature: ".animate.write(duration?) .animate.unwrite(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
+  signature: ".animate.write() .animate.unwrite() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Glyph-by-glyph write.]),
   desc: [For text/equation. Respects vector paths, not just opacity. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `unwrite` reverses.],
 )[
@@ -331,10 +330,10 @@ scene.render()
 #api-entry(
   name: "Text.write grouping",
   kind: "method",
-  signature: ".animate.write(duration=None, *, by=\"grapheme\", order=\"forward\", stagger=0.0) -> Anim",
-  params: ((name: "duration", type: "float | None", default: "None", desc: [Optional total duration, accepted as the first positional argument.]), (name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),),
+  signature: ".animate.write(*, by=\"grapheme\", order=\"forward\", stagger=0.0) -> Anim",
+  params: ((name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),),
   returns: (type: "Anim", desc: [Animation descriptor accepted by #raw("scene.play()") .]),
-  desc: [Writes graphemes, words, rendered lines, or semantic parts in deterministic order. The duration is positional, so #raw("text.animate.write(0.8, by=\"word\")") is valid.],
+  desc: [Writes graphemes, words, rendered lines, or semantic parts in deterministic order. Configure time afterward with #raw("text.animate.write(by=\"word\").duration(0.8)").],
 )[
 ```python
 # show-code: true
@@ -342,7 +341,7 @@ from gaanim import Scene, part
 scene = Scene(480, 270, background="#0f172a")
 # Grouping is resolved by the specialized Text API.
 eq = scene.text("$", part("energy", "E"), " = ", part("mass", "m"), " ", part("speed", "c^2"), "$").move_to(0, 0)
-scene.play([eq.animate.write(1.4, by="part", stagger=0.08)])
+scene.play([eq.animate.write(by="part", stagger=0.08).duration(1.4)])
 # output: preview.webp
 scene.render()
 ```
@@ -351,17 +350,17 @@ scene.render()
 #api-entry(
   name: "Drawable.create / uncreate",
   kind: "method",
-  signature: ".animate.create(duration?) .animate.uncreate(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
+  signature: ".animate.create() .animate.uncreate() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Stroke-drawing.]),
   desc: [Draws outline progressively. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `uncreate` erases. Different from `write` (which follows glyphs).],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, WHITE, Scene
+from gaanim import Easing, BLUE, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 circle = scene.geometry.circle(50).no_fill().stroke(BLUE, 4).move_to(0, 0)
-scene.play([circle.animate.create().duration(1.0).smooth()])
+scene.play([circle.animate.create().duration(1.0).easing(Easing.SMOOTH)])
 scene.play([circle.animate.uncreate().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -373,21 +372,21 @@ scene.render()
 #api-entry(
   name: "Drawable.grow_from_center / shrink_to_center",
   kind: "method",
-  signature: ".animate.grow_from_center(duration?) .animate.shrink_to_center(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
+  signature: ".animate.grow_from_center() .animate.shrink_to_center() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Scale from/to center.]),
   desc: [Pop in/out. Great for charts, badges.],
 )[
 ```python
 # show-code: true
 # Visualization uses immutable ChartSpec batches.
-from gaanim import Axis, BLUE, ChartSpec, Scene
+from gaanim import Easing, Axis, BLUE, ChartSpec, Scene
 scene = Scene(480, 270, background="#0f172a")
 spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
   .mark("bar").encode(x="x", y="value") \
   .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
 chart = scene.viz.chart(spec)
-scene.play([chart.layer("marks").animate.grow_from_center().duration(0.7).spring()])
+scene.play([chart.layer("marks").animate.grow_from_center().duration(0.7).easing(Easing.spring(stiffness=90, damping=12))])
 scene.play([chart.layer("marks").animate.shrink_to_center().duration(0.5)])
 # output: preview.webp
 scene.render()
@@ -397,17 +396,17 @@ scene.render()
 #api-entry(
   name: "Drawable.spin_in_from_nothing",
   kind: "method",
-  signature: ".animate.spin_in_from_nothing(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
+  signature: ".animate.spin_in_from_nothing() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Spin + scale from nothing.]),
   desc: [Playful entrance for stars, icons.],
 )[
 ```python
 # show-code: true
-from gaanim import GOLD, Scene
+from gaanim import Easing, GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
 star = scene.geometry.star(5, 55, 26).fill(GOLD).move_to(0, 0)
-scene.play([star.animate.spin_in_from_nothing().duration(0.9).spring()])
+scene.play([star.animate.spin_in_from_nothing().duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
 ```
@@ -416,8 +415,8 @@ scene.render()
 #api-entry(
   name: "Drawable.draw_border_then_fill",
   kind: "method",
-  signature: ".animate.draw_border_then_fill(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds, border then fill.] ),),
+  signature: ".animate.draw_border_then_fill() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Two-phase: stroke then fill.]),
   desc: [Elegant for filled shapes — draws edge first, then floods.],
 )[
@@ -435,8 +434,8 @@ scene.render()
 #api-entry(
   name: "Drawable.indicate / wiggle",
   kind: "method",
-  signature: ".animate.indicate(duration?) .animate.wiggle(duration?) -> Anim",
-  params: ((name: "duration", type: "float", default: "None", desc: [Seconds.]),),
+  signature: ".animate.indicate() .animate.wiggle() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Attention anims.]),
   desc: [`indicate` makes a subtle upward hop from the visual center and highlights the target; `wiggle` shakes. Use for wrong answer / highlight.],
 )[
@@ -482,7 +481,7 @@ before["result"].fill(GOLD)
 after["result"].fill(GOLD)
 scene.play([before.animate.write().duration(0.7)])
 scene.play([before.animate.transform_to(after).duration(0.9)])
-scene.play([after["result"].animate.indicate(duration=0.4)])
+scene.play([after["result"].animate.indicate().duration(0.4)])
 # output: preview.webp
 scene.render()
 ```
@@ -491,8 +490,8 @@ scene.render()
 #api-entry(
   name: "TextSelection.animate.cancel",
   kind: "method",
-  signature: "selection.animate.cancel(duration=None) -> Anim",
-  params: ((name: "duration", type: "float | None", default: "None", desc: [Positive finite seconds; the animation default is used when omitted.]),),
+  signature: "selection.animate.cancel() -> Anim",
+  params: (),
   returns: (type: "Anim", desc: [Deferred cancellation animation accepted by `scene.play()`.]),
   desc: [Draws a diagonal mark and dims the selected glyphs. The mark remains associated with its owning `Text` until a replacing transition retires it.],
 )[
@@ -501,7 +500,7 @@ from gaanim import Scene, part
 scene = Scene(480, 270)
 before = scene.text("$x + ", part("obsolete", "3"), " = 7$")
 after = scene.text("$x = 4$")
-scene.play([before["obsolete"].animate.cancel(duration=0.6)])
+scene.play([before["obsolete"].animate.cancel().duration(0.6)])
 scene.play([before.animate.transform_to(after).duration(0.8)])
 ```
 ]
@@ -548,12 +547,12 @@ scene.play([energy["mass"].animate.copy_to(momentum["mass"]).duration(0.8)])
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, GOLD, Scene
+from gaanim import Easing, BLUE, GOLD, Scene
 scene = Scene(480, 270, background="#0f172a")
 circle = scene.geometry.circle(42).fill(BLUE).move_to(-90, 0)
 target = scene.geometry.rect(90, 60).fill(GOLD).move_to(80, 0)
 scene.play([circle.animate.create().duration(0.6)])
-scene.play([circle.animate.transform_to(target).duration(1.0).spring()])
+scene.play([circle.animate.transform_to(target).duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
 ```
@@ -630,8 +629,8 @@ updates the full path source and reapplies the current draw progress:
 
 ```python
 rod = scene.geometry.tracking_line(anchor, mass).no_fill().stroke(WHITE, 4)
-scene.play([rod.animate.create(0.8), mass.animate.shift_by(120, 0).duration(0.8)])
-scene.play([rod.animate.write(0.8), mass.animate.shift_by(-80, 40).duration(0.8)])
+scene.play([rod.animate.create().duration(0.8), mass.animate.shift_by(120, 0).duration(0.8)])
+scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-80, 40).duration(0.8)])
 ```
 
 == Series muestreadas nativas
@@ -685,7 +684,7 @@ from gaanim import Scene, parallel, sequence, stagger
 
 scene.play(
     sequence(
-        title.animate.write(0.8),
+        title.animate.write().duration(0.8),
         parallel(
             box.animate.create(),
             stagger(label.animate.fade_in(), badge.animate.fade_in(), each=0.15),
@@ -705,26 +704,40 @@ trees; media are rejected because their playback speed is not silently changed.
 Configure any `Anim` fluently before passing to `play`:
 
 ```python
+from gaanim import Easing, EasingCurve
+
 scene.play([
-    circle.animate.shift_by(240, 0).duration(1.0).linear(),
-    label.animate.opacity(0.5).duration(1.0).smooth(),
-    icon.animate.rotate_by(1.5).duration(0.8).spring(),
+    circle.animate.shift_by(240, 0).duration(1.0).easing(Easing.LINEAR),
+    label.animate.opacity(0.5).duration(1.0).easing(Easing.SMOOTH),
+    icon.animate.rotate_by(1.5).duration(0.8).easing(Easing.spring(stiffness=90, damping=12)),
 ])
 
 # chainable
-anim = circle.animate.create().duration(1.2).delay(0.3).ease("cubic").lag_ratio(0.2)
+anim = circle.animate.create().duration(1.2).delay(0.3).easing(Easing.ease_in_out(EasingCurve.CUBIC)).lag_ratio(0.2)
 
 # stagger a list
 scene.play(stagger(a.animate.fade_in(), b.animate.fade_in(), c.animate.fade_in(), each=0.1))
 ```
 
+El IDE puede navegar el catálogo sin recordar strings:
+
+- Presets: `LINEAR`, `SMOOTH`, `DOUBLE_SMOOTH`, `THERE_AND_BACK`,
+  `LINGERING`, `RUNNING_START`, `EXPONENTIAL_DECAY` y `NOT_QUITE_THERE`.
+- Familias de `EasingCurve`: `QUADRATIC`, `CUBIC`, `QUARTIC`, `QUINTIC`,
+  `EXPONENTIAL`, `SINE`, `CIRCULAR`, `BACK`, `ELASTIC` y `BOUNCE`.
+- Fábricas: `ease_in`, `ease_out`, `ease_in_out`, `spring`, `steps`,
+  `mirror`, `there_and_back` y `cubic_bezier`.
+
+Las fábricas rechazan números no finitos y dominios inválidos. No se aceptan
+nombres de easing ni existe un fallback silencioso a `SMOOTH`.
+
 #api-entry(
   name: "Anim timing",
   kind: "method",
-  signature: ".duration(s) .delay(s) .steps(n) .lag_ratio(0..1)",
+  signature: ".duration(seconds) .delay(seconds) .easing(Easing) .lag_ratio(0..1)",
   params: ((name: "value", type: "float|int", default: none, desc: [Timing value.]),),
   returns: (type: "Anim", desc: [Self.]),
-  desc: [`duration` total time, `delay` wait before start, `steps` discrete steps, `lag_ratio` staggers sub-paths inside one drawable (for groups/text).],
+  desc: [`duration` controls total time, `delay` waits before start, `easing` selects a typed interpolation, and `lag_ratio` staggers sub-paths inside one drawable. Use `Easing.steps(count)` for discrete interpolation.],
 )[
 ```python
 # show-code: true
@@ -740,18 +753,18 @@ scene.render()
 #api-entry(
   name: "Anim easing",
   kind: "method",
-  signature: ".linear() .smooth() .spring() .ease(name) .rate(name)",
-  params: ((name: "name", type: "str", default: "—", desc: ["Easing name for ease/rate if needed."]),),
+  signature: ".easing(easing: Easing) -> Anim",
+  params: ((name: "easing", type: "Easing", default: none, desc: [Typed preset or validated factory result.]),),
   returns: (type: "Anim", desc: [Self.]),
-  desc: [Built-ins cover most cases. `smooth` is cubic in/out, `spring` overshoots.],
+  desc: [`Easing` exposes IDE-discoverable presets, curve families, springs, steps, mirrored curves, there-and-back motion, and cubic Bézier controls. Unknown strings are rejected.],
 )[
 ```python
 # show-code: true
-from gaanim import BLUE, Scene
+from gaanim import Easing, BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
 dot = scene.geometry.dot(10).fill(BLUE).move_to(-110, 0)
-scene.play([dot.animate.shift_by(220, 0).duration(0.9).spring()])
-scene.play([dot.animate.shift_by(-220, 0).duration(0.9).smooth()])
+scene.play([dot.animate.shift_by(220, 0).duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
+scene.play([dot.animate.shift_by(-220, 0).duration(0.9).easing(Easing.SMOOTH)])
 # output: preview.webp
 scene.render()
 ```

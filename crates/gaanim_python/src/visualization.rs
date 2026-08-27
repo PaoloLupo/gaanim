@@ -1112,35 +1112,27 @@ pub struct PyCoordinateSpaceAnimation {
 
 #[pymethods]
 impl PyCoordinateSpaceAnimation {
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.inner.drawable().animate().create();
+    fn create(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.drawable().animate().create(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.inner.drawable().animate().write();
+    fn write(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.drawable().animate().write(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.inner.drawable().animate().fade_in();
+    fn fade_in(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.drawable().animate().fade_in(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.inner.drawable().animate().fade_out();
+    fn fade_out(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.drawable().animate().fade_out(),
         }
     }
 

@@ -54,7 +54,8 @@ También están disponibles `row`, `column`, `block`, `diagonal`,
 `set`, `insert_row`, `remove_row`, `insert_column`, `remove_column`,
 `swap_rows`, `swap_columns`, `reorder_rows`, `reorder_columns` y `become`
 actualizan la composición. `morph_to(match="auto")` empareja claves de
-`MatrixEntry`, luego valores y finalmente posiciones.
+`MatrixEntry`, luego valores y finalmente posiciones; devuelve una composición
+configurable con `.duration(seconds).easing(Easing...)`.
 
 == Álgebra opcional
 
@@ -74,5 +75,5 @@ a = scene.viz.matrix([[1, 2], [3, 4]])
 b = scene.viz.matrix([[2, 0], [1, 2]])
 derivation = a.matmul(b)
 derivation.result.move_to(180, 0)
-scene.play(derivation.animate)
+scene.play(derivation.animations().duration(0.7))
 ```

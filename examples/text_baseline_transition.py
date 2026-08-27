@@ -49,16 +49,16 @@ multiline_label = (
 
 scene.play(
     [
-        fade_from.animate.fade_in(0.5),
-        morph_from.animate.fade_in(0.5),
-        equation_from.animate.fade_in(0.5),
+        fade_from.animate.fade_in().duration(0.5),
+        morph_from.animate.fade_in().duration(0.5),
+        equation_from.animate.fade_in().duration(0.5),
     ]
 )
 scene.wait(0.25)
 scene.play(
     [
-        fade_from.animate.fade_out(0.8),
-        fade_to.animate.fade_in(0.8),
+        fade_from.animate.fade_out().duration(0.8),
+        fade_to.animate.fade_in().duration(0.8),
         morph_from.animate.transform_to(morph_to).duration(0.8),
         equation_from.animate.transform_to(equation_to).duration(0.8),
     ]

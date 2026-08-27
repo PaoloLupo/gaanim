@@ -85,7 +85,7 @@ scene.play(
         rod.animate.fade_in(),
         length.animate.fade_in(),
         trail.animate.fade_in(),
-        bob.animate.grow_from_center(0.5),
+        bob.animate.grow_from_center().duration(0.5),
     ]
 )
 scene.wait(7.0)
@@ -227,8 +227,8 @@ scene.play(
         double_rod1.animate.fade_in(),
         double_rod2.animate.fade_in(),
         double_trail.animate.fade_in(),
-        double_bob1.animate.grow_from_center(0.5),
-        double_bob2.animate.grow_from_center(0.5),
+        double_bob1.animate.grow_from_center().duration(0.5),
+        double_bob2.animate.grow_from_center().duration(0.5),
     ]
 )
 scene.wait(8.0)

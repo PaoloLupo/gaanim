@@ -1,8 +1,9 @@
 """Native reactive camera bindings in orthographic and perspective modes."""
 
+import math
 import os
 
-from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
+from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene, computed
 
 
 scene = Scene(960, 540, background=BLACK)
@@ -13,27 +14,33 @@ scene.geometry.circle(150).no_fill().stroke(BLUE, 3)
 cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).move_to_3d(-1.8, -0.5, 0)
 sphere = scene.geometry.sphere(1.25, material=Material3D.metal(CYAN)).move_to_3d(1.8, -0.5, 0)
 theta = scene.viz.parameter(0.0)
-focus = scene.geometry.point_ref(theta * 260 - 130, (theta * 3.14159).sin() * 90)
+focus = scene.geometry.point_ref(
+    computed(lambda value: value * 260 - 130, inputs=[theta]),
+    computed(lambda value: math.sin(value * math.pi) * 90, inputs=[theta]),
+)
 marker.follow(focus)
 
 rig_2d = scene.camera.bind_2d(
     center=focus,
-    zoom=1.0 + theta * 0.35,
-    rotation=(theta - 0.5) * 0.12,
+    zoom=computed(lambda value: 1.0 + value * 0.35, inputs=[theta]),
+    rotation=computed(lambda value: (value - 0.5) * 0.12, inputs=[theta]),
 )
-scene.play([theta.animate.set(1.0).duration(2.0), marker.animate.fade_in(duration=0.3)])
+scene.play([theta.animate.set(1.0).duration(2.0), marker.animate.fade_in().duration(0.3)])
 rig_2d.disable()
 
 target_x = scene.viz.parameter(0.0)
-focus_3d = scene.geometry.point_ref((target_x - 0.5) * 3.0, -0.5)
+focus_3d = scene.geometry.point_ref(
+    computed(lambda value: (value - 0.5) * 3.0, inputs=[target_x]),
+    -0.5,
+)
 rig_3d = scene.camera.bind_3d(
     eye=(7.0, 4.5, 10.0), target=focus_3d, fov_y=0.72,
 )
 scene.play(
     [
         target_x.animate.set(1.0).duration(2.0),
-        cube.animate.create(duration=0.5),
-        sphere.animate.create(duration=0.5),
+        cube.animate.create().duration(0.5),
+        sphere.animate.create().duration(0.5),
     ]
 )
 rig_3d.disable()

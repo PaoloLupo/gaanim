@@ -30,8 +30,8 @@ copy = scene.text(
     flow=TextFlow(wrap=520, align="center"),
 ).move_to(0, 0)
 
-scene.play([copy.animate.write(1.2, by="part", stagger=0.06)])
-scene.play([copy["formula"]["mass"].animate.indicate(0.6)])
+scene.play([copy.animate.write(by="part", stagger=0.06).duration(1.2)])
+scene.play([copy["formula"]["mass"].animate.indicate().duration(0.6)])
 ```
 
 Usa un rol para la prosa y `scene.text.equation()` para una ecuación independiente.
@@ -77,7 +77,7 @@ copy = scene.text(
     role="body",
     flow=TextFlow(wrap=400, align="center", line_spacing=1.2),
 ).move_to(0, 0)
-scene.play([copy.animate.write(1.0, by="part")])
+scene.play([copy.animate.write(by="part").duration(1.0)])
 # output: text_factory.webp
 scene.render()
 ```
@@ -106,7 +106,7 @@ equation = scene.text.equation(
     parts(mass="m", acceleration="a_t"),
 ).move_to(0, 0)
 equation["acceleration"].fill(GOLD)
-scene.play([equation.animate.write(1.0, by="part")])
+scene.play([equation.animate.write(by="part").duration(1.0)])
 # output: equation_factory.webp
 scene.render()
 ```
@@ -186,8 +186,8 @@ copy = scene.text(
     "Normal, _emphasis_, *strong* and *_both_*.",
     size=36,
 ).move_to(0, 0)
-scene.play([copy.animate.write(1.2, by="word", stagger=0.05)])
-scene.play([copy.words[3].animate.indicate(0.6, color=GOLD)])
+scene.play([copy.animate.write(by="word", stagger=0.05).duration(1.2)])
+scene.play([copy.words[3].animate.indicate().duration(0.6)])
 # output: text_inline_markup.webp
 scene.render()
 ```
@@ -223,8 +223,8 @@ equation = scene.text.equation(
     "=",
     parts(mass_right="m", length="L", acceleration="theta''"),
 ).move_to(0, 0)
-scene.play([equation.animate.write(1.2, by="part")])
-scene.play([equation["gravity"].animate.indicate(0.6)])
+scene.play([equation.animate.write(by="part").duration(1.2)])
+scene.play([equation["gravity"].animate.indicate().duration(0.6)])
 scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
 # output: compact_text_parts.webp
 scene.render()
@@ -257,7 +257,7 @@ formula = part(
     "$",
 )
 text = scene.text("Resultado: ", formula).move_to(0, 0)
-scene.play([text.animate.write(1.1, by="part", stagger=0.05)])
+scene.play([text.animate.write(by="part", stagger=0.05).duration(1.1)])
 # output: text_parts.webp
 scene.render()
 ```
@@ -413,7 +413,7 @@ copy = scene.text(
 ).move_to(0, 0)
 copy["concept"].fill(GOLD)
 copy["formula"]["mass"].fill(BLUE)
-scene.play([copy.animate.write(1.0, by="word")])
+scene.play([copy.animate.write(by="word").duration(1.0)])
 scene.play([
     copy.words[1].animate.pulse(0.6),
     copy["formula"]["mass"].animate.focus(0.6),
@@ -447,19 +447,19 @@ selection.animate.fill(color).duration(seconds) -> Anim
 selection.animate.opacity(opacity).duration(seconds) -> Anim
 selection.animate.fill(color).opacity(value) -> Anim
 
-selection.animate.indicate(duration=None) -> Anim
-selection.animate.pulse(duration=None) -> Anim
-selection.animate.wiggle(duration=None) -> Anim
-selection.animate.wave(duration=None) -> Anim
-selection.animate.highlight(duration=None) -> Anim
-selection.animate.focus(duration=None) -> Anim
-selection.animate.cancel(duration=None) -> Anim
+selection.animate.indicate() -> Anim
+selection.animate.pulse() -> Anim
+selection.animate.wiggle() -> Anim
+selection.animate.wave() -> Anim
+selection.animate.highlight() -> Anim
+selection.animate.focus() -> Anim
+selection.animate.cancel() -> Anim
 
 selection.animate.morph_to(target_selection).duration(seconds) -> Anim
 selection.animate.copy_to(target_selection).duration(seconds) -> Anim
 ```
 
-The `animate` proxy is deliberately local: it accepts fill/color
+The `animate` proxy is deliberately local: it accepts fill
 and opacity, while transform, scale, rotation, material, and stroke targets
 raise `TypeError`. `cancel` draws a diagonal mark and dims the glyphs; the next
 replacing text transition retires both.
@@ -470,25 +470,26 @@ Every animation descriptor above can be placed directly in `scene.play([...])`.
 === Entrada y salida
 
 ```text
-text.animate.write(duration=None, *, by="grapheme", order="forward", stagger=0) -> Anim
-text.animate.fade_in(duration=None) -> Anim
+text.animate.write(*, by="grapheme", order="forward", stagger=0) -> Anim
+text.animate.fade_in() -> Anim
 
-text.animate.unwrite(duration=None) -> Anim
-text.animate.fade_out(duration=None) -> Anim
+text.animate.unwrite() -> Anim
+text.animate.fade_out() -> Anim
 ```
 
 `by` accepts `grapheme`, `word`, `line`, or `part`; `order` accepts `forward`,
 `reverse`, `center`, or `random`; `stagger` must be finite and non-negative.
-The duration is the first optional positional argument, so `text.animate.write(0.8)`
-and `text.animate.write(0.8, by="word")` are the intended forms. In the current
+Timing is configured uniformly after choosing the effect, so
+`text.animate.write().duration(0.8)` and
+`text.animate.write(by="word").duration(0.8)` are the intended forms. In the current
 renderer, `by="part"` has a dedicated semantic schedule; the other grouping,
 order, and stagger values are validated but share the vector write schedule.
 
 === Énfasis y anotación
 
 ```text
-text.animate.indicate(duration=None) -> Anim
-text.animate.wiggle(duration=None) -> Anim
+text.animate.indicate() -> Anim
+text.animate.wiggle() -> Anim
 ```
 
 These operate on the complete `Text`; the typed selection proxy adds `pulse`,
@@ -513,8 +514,8 @@ from gaanim import GOLD, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 before = scene.text("$x + ", part("obsolete", "3"), " = 7$").move_to(0, 0)
 after = scene.text("$x = ", part("result", "4", color=GOLD), "$").move_to(0, 0)
-scene.play([before.animate.write(0.8)])
-    scene.play([before["obsolete"].animate.cancel(0.5)])
+scene.play([before.animate.write().duration(0.8)])
+scene.play([before["obsolete"].animate.cancel().duration(0.5)])
 scene.play([before.animate.transform_to(after).duration(0.8)])
 # output: text_transition.webp
 scene.render()
@@ -550,9 +551,9 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 == TextAnchor y posicionamiento
 
 #api-entry(
-  name: "Text.at / Text.at_anchor",
+  name: "Text.move_to",
   kind: "method",
-  signature: ".move_to(x, y, anchor: Anchor | TextAnchor = None) -> Text\n.at_anchor(x, y, anchor: Anchor | TextAnchor) -> Text",
+  signature: ".move_to(x, y, *, anchor: Anchor | TextAnchor = None) -> Text",
   params: (
     (name: "x / y", type: "float", default: none, desc: [Target point in canvas units.]),
     (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor.]),
@@ -564,9 +565,9 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 # show-code: true
 from gaanim import Anchor, Scene, TextAnchor
 scene = Scene(640, 360)
-scene.text("baseline left").move_to(-220, 60, TextAnchor.BASELINE_LEFT)
+scene.text("baseline left").move_to(-220, 60, anchor=TextAnchor.BASELINE_LEFT)
 scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, 0)
-scene.text("geometric corner").move_to(-220, -100, Anchor.TOP_LEFT)
+scene.text("geometric corner").move_to(-220, -100, anchor=Anchor.TOP_LEFT)
 ```
 ]
 

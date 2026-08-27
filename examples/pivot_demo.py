@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
+from gaanim import Easing, Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(640, 360, background=WHITE)
@@ -21,7 +21,7 @@ scene.play([
     arm.animate.create().duration(0.5),
     mass.animate.create().duration(0.5),
 ])
-scene.play([mechanism.animate.rotate_by(math.pi / 2).duration(1.2).smooth()])
+scene.play([mechanism.animate.rotate_by(math.pi / 2).duration(1.2).easing(Easing.SMOOTH)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

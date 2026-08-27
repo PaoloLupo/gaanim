@@ -12,7 +12,7 @@ composition = scene.media.lottie(
     fit="contain",
 )
 
-scene.play([title.animate.fade_in(0.5), composition])
+scene.play([title.animate.fade_in().duration(0.5), composition])
 scene.wait(0.5)
 
 if snapshot_dir := os.environ.get("GAANIM_SNAPSHOTS"):

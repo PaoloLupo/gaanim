@@ -42,7 +42,7 @@ gaanim --help         # si tienes el zip en PATH
 Crea un archivo llamado `my_animation.py`:
 
 ```python
-from gaanim import BLACK, BLUE, GOLD, Scene
+from gaanim import Easing, BLACK, BLUE, GOLD, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 
@@ -50,13 +50,13 @@ circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.text("Hello World", role="title")
 
 scene.play([
-    circle.animate.grow_from_center().duration(2.0).spring(),
-    text.animate.write().duration(2.0).smooth(),
+    circle.animate.grow_from_center().duration(2.0).easing(Easing.spring(stiffness=90, damping=12)),
+    text.animate.write().duration(2.0).easing(Easing.SMOOTH),
 ])
 
 scene.wait(1.0)
 scene.play([
-    circle.animate.shift_by(200, 0).duration(1.5).smooth(),
+    circle.animate.shift_by(200, 0).duration(1.5).easing(Easing.SMOOTH),
     text.animate.fade_out().duration(0.5),
 ])
 

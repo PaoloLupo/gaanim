@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLACK, GRAY, RED, WHITE, Anchor, Scene
+from gaanim import Easing, BLACK, GRAY, RED, WHITE, Anchor, Scene
 
 scene = Scene(1280, 720, background=WHITE)
 
@@ -102,9 +102,9 @@ scene.play(
 scene.wait(0.5)
 scene.play(
     [
-        frame.animate.shift_by(55, 0).duration(1.4).smooth(),
-        mass.animate.shift_by(185, 0).duration(1.4).smooth(),
-        bob.animate.shift_by(245, 35).duration(1.4).smooth(),
+        frame.animate.shift_by(55, 0).duration(1.4).easing(Easing.SMOOTH),
+        mass.animate.shift_by(185, 0).duration(1.4).easing(Easing.SMOOTH),
+        bob.animate.shift_by(245, 35).duration(1.4).easing(Easing.SMOOTH),
         displayed_x.animate.set(4.0).duration(1.4),
     ]
 )

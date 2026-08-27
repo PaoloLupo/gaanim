@@ -31,7 +31,7 @@ surface = (
 )
 
 chart = scene.viz.chart(heatmap)
-scene.play([chart.animate.create(0.8)])
+scene.play([chart.drawable().animate.create().duration(0.8)])
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([
     chart.animate.to(surface).duration(1.5),

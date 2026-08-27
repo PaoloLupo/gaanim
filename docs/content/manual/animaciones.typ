@@ -14,8 +14,8 @@ Los métodos como `create`, `move`, `rotate` y `fade_out` devuelven un `Anim`.
 Puedes configurar ese descriptor antes de entregarlo a la escena.
 
 ```python
-entrance = orbit.animate.create().duration(1.2).smooth()
-movement = point.animate.rotate_by(6.28318).about(0, 0).duration(4.0).linear()
+entrance = orbit.animate.create().duration(1.2).easing(Easing.SMOOTH)
+movement = point.animate.rotate_by(6.28318).about(0, 0).duration(4.0).easing(Easing.LINEAR)
 
 scene.play([entrance])
 scene.play([movement])

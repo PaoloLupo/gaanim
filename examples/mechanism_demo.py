@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Anchor, BLUE, CYAN, GOLD, GRAY, WHITE, Scene
+from gaanim import Easing, Anchor, BLUE, CYAN, GOLD, GRAY, WHITE, Scene
 
 
 scene = Scene(960, 540, background=WHITE)
@@ -44,7 +44,7 @@ scene.play([
     extension_label.animate.write().duration(0.4),
     equation.animate.write().duration(0.8),
 ])
-scene.play([mechanism.animate.rotate_by(0.16).duration(0.8).smooth()])
+scene.play([mechanism.animate.rotate_by(0.16).duration(0.8).easing(Easing.SMOOTH)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

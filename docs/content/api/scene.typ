@@ -407,8 +407,8 @@ single list run in parallel.
 
 ```python
 scene.play([
-    circle.animate.create().duration(1.0).smooth(),
-    rect.animate.grow_from_center().duration(1.0).spring(),
+    circle.animate.create().duration(1.0).easing(Easing.SMOOTH),
+    rect.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90, damping=12)),
     label.animate.write().duration(0.8),
 ])
 scene.wait(0.5)
@@ -558,8 +558,8 @@ and returns a `CameraState`; the operation itself has zero duration. It runs
 before persistent bindings, temporary rig effects, shake, and editor view
 overrides, so restoring it is deterministic across preview, seek, and export.
 `camera.save(name)` captures and stores the same state under a non-empty name,
-replacing an existing entry. `camera.to(state, duration=1)` and
-`camera.restore(name, duration=1)` return ordinary composable `Anim` values.
+replacing an existing entry. `camera.animate.to(state).duration(1)` and
+`camera.animate.restore(name).duration(1)` return ordinary composable `Anim` values.
 States belong to their creating `Scene`; unknown names and cross-scene use
 raise `ValueError`.
 
@@ -575,7 +575,7 @@ lag. `camera.orthographic(...)` changes projection explicitly, while
 camera methods return `Anim`: discarded results retain the existing sequential
 behavior, while passing them to `scene.play` regroups them with drawable or
 glTF Action animations at the same timeline start. Fluent `Anim` controls such
-as `.duration()`, `.delay()`, `.smooth()`, and `.linear()` also apply. The
+as `.duration()`, `.delay()`, `.easing(Easing.SMOOTH)`, and `.easing(Easing.LINEAR)` also apply. The
 old flat `scene.camera_*` methods are removed; `scene.camera.*` is the sole
 public camera surface.
 
@@ -650,7 +650,7 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 ```python
 marker = scene.geometry.dot(6)
 scene.play([
-    marker.animate.fade_in(1.0),
+    marker.animate.fade_in().duration(1.0),
     scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0),
 ])
 ```

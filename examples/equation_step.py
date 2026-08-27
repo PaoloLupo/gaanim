@@ -19,7 +19,7 @@ after["result"].fill(GOLD)
 scene.play([title.animate.write(), before.animate.write()])
 scene.wait(0.4)
 scene.play([before.animate.transform_to(after).duration(0.8)])
-scene.play([after["result"].animate.indicate(duration=0.45)])
+scene.play([after["result"].animate.indicate().duration(0.45)])
 scene.wait(0.4)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

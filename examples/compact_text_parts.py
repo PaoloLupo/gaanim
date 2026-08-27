@@ -26,8 +26,8 @@ caption = scene.text(
     role="caption",
 ).fill(GRAY).move_to(0, -150)
 
-scene.play([title.animate.write(0.7), equation.animate.write(1.8), caption.animate.fade_in(0.7)])
-scene.play([equation["gravity"].animate.indicate(0.7)])
+scene.play([title.animate.write().duration(0.7), equation.animate.write().duration(1.8), caption.animate.fade_in().duration(0.7)])
+scene.play([equation["gravity"].animate.indicate().duration(0.7)])
 scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.7)])
 scene.wait(0.5)
 

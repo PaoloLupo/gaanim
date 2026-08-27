@@ -1,6 +1,6 @@
 """Example: Scene grouping and simple timeline sequencing."""
 
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
 c = Scene(1920, 1080, background=BLACK)
 
@@ -8,8 +8,8 @@ logo = c.geometry.circle(80.0).fill(BLUE).move_to(0.0, 0.0)
 c.play([logo.animate.fade_in().duration(1.0)])
 c.wait(0.5)
 
-title = c.title("Gaanim").fill(WHITE).move_to(0.0, 180.0)
-c.play([title.animate.fade_in().duration(1.0).ease("spring")])
+title = c.text("Gaanim", role="title").fill(WHITE).move_to(0.0, 180.0)
+c.play([title.animate.fade_in().duration(1.0).easing(Easing.spring(stiffness=300.0, damping=20.0))])
 c.wait(1.0)
 
 c.play([logo.animate.shift_by(-300.0, 0.0).duration(1.0)])

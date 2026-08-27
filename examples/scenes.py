@@ -12,6 +12,7 @@ Demonstrates:
 import math
 
 from gaanim import (
+    Easing, EasingCurve,
     BLACK,
     BLUE,
     CORAL,
@@ -33,11 +34,11 @@ c = Scene(1920, 1080, background=BLACK)
 # ── Segment 1: Title ────────────────────────────────────────────
 c.segment("intro")
 
-title = c.title("Gaanim").fill(WHITE).move_to(0.0, 200.0)
-subtitle = c.subtitle("Animaciones").fill(GRAY).move_to(0.0, 100.0)
+title = c.text("Gaanim", role="title").fill(WHITE).move_to(0.0, 200.0)
+subtitle = c.text("Animaciones", role="subtitle").fill(GRAY).move_to(0.0, 100.0)
 
-c.play([title.animate.write().duration(2.0).linear()])
-c.play([subtitle.animate.fade_in().duration(1.0).delay(1.5).smooth()])
+c.play([title.animate.write().duration(2.0).easing(Easing.LINEAR)])
+c.play([subtitle.animate.fade_in().duration(1.0).delay(1.5).easing(Easing.SMOOTH)])
 
 c.wait(2.0)
 
@@ -45,22 +46,22 @@ c.wait(2.0)
 c.segment("shapes", Transition.cross_fade(0.8))
 
 heading = c.text("Formas Geometricas").fill(GOLD).move_to(0.0, 250.0)
-c.play([heading.animate.write().duration(1.0).linear()])
+c.play([heading.animate.write().duration(1.0).easing(Easing.LINEAR)])
 
 circle = c.geometry.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).move_to(-300.0, 0.0)
 rect = c.geometry.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).move_to(0.0, 0.0)
 square = c.geometry.square(100.0).fill(GREEN).stroke(WHITE, 3.0).move_to(300.0, 0.0)
 
-c.play([circle.animate.grow_from_center().duration(0.8).ease("ease_out_elastic")])
-c.play([rect.animate.grow_from_center().duration(0.8).delay(0.3).ease("ease_out_elastic")])
-c.play([square.animate.grow_from_center().duration(0.8).delay(0.6).ease("ease_out_elastic")])
+c.play([circle.animate.grow_from_center().duration(0.8).easing(Easing.ease_out(EasingCurve.ELASTIC))])
+c.play([rect.animate.grow_from_center().duration(0.8).delay(0.3).easing(Easing.ease_out(EasingCurve.ELASTIC))])
+c.play([square.animate.grow_from_center().duration(0.8).delay(0.6).easing(Easing.ease_out(EasingCurve.ELASTIC))])
 
 c.wait(1.0)
 
 # Animate them moving
-c.play([circle.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
-c.play([rect.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
-c.play([square.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
+c.play([circle.animate.shift_by(0.0, -80.0).duration(0.6).easing(Easing.SMOOTH)])
+c.play([rect.animate.shift_by(0.0, -80.0).duration(0.6).easing(Easing.SMOOTH)])
+c.play([square.animate.shift_by(0.0, -80.0).duration(0.6).easing(Easing.SMOOTH)])
 
 c.wait(1.0)
 
@@ -76,23 +77,23 @@ c.wait(0.5)
 c.segment("typography", Transition.fade_through(0.6, BLACK))
 
 label = c.text("Texto y Flechas").fill(YELLOW).move_to(0.0, 250.0)
-c.play([label.animate.write().duration(1.0).linear()])
+c.play([label.animate.write().duration(1.0).easing(Easing.LINEAR)])
 
 hello = c.text("Hola Mundo!").fill(WHITE).move_to(-200.0, 0.0)
 c.play([hello.animate.draw_border_then_fill().duration(1.5).stroke_width(2.0)])
 
 arrow = c.geometry.arrow(-50.0, 0.0, 150.0, 0.0).stroke(ORANGE, 4.0)
-c.play([arrow.animate.create().duration(0.8).delay(1.0).linear()])
+c.play([arrow.animate.create().duration(0.8).delay(1.0).easing(Easing.LINEAR)])
 
 world = c.text("Gaanim").fill(PURPLE).move_to(300.0, 0.0)
-c.play([world.animate.fade_in().duration(0.8).delay(1.5).ease("bounce")])
+c.play([world.animate.fade_in().duration(0.8).delay(1.5).easing(Easing.ease_out(EasingCurve.BOUNCE))])
 
 c.wait(2.0)
 
 # Slide everything to the left
 c.play([
-    hello.animate.move_to(-400.0, 0.0).duration(1.0).smooth(),
-    world.animate.move_to(100.0, 0.0).duration(1.0).smooth(),
+    hello.animate.move_to(-400.0, 0.0).duration(1.0).easing(Easing.SMOOTH),
+    world.animate.move_to(100.0, 0.0).duration(1.0).easing(Easing.SMOOTH),
 ])
 
 c.wait(1.0)
@@ -103,8 +104,8 @@ c.wait(0.5)
 # ── Segment 4: Parallel animations finale ───────────────────────
 c.segment("finale", Transition.slide(0.5, "up"))
 
-outro = c.title("Gracias!").fill(GOLD).move_to(0.0, 100.0)
-c.play([outro.animate.spin_in_from_nothing().duration(1.2).ease("ease_out_back")])
+outro = c.text("Gracias!", role="title").fill(GOLD).move_to(0.0, 100.0)
+c.play([outro.animate.spin_in_from_nothing().duration(1.2).easing(Easing.ease_out(EasingCurve.BACK))])
 
 # Burst of colored dots
 dots = []
@@ -114,7 +115,7 @@ for i, color in enumerate(colors):
     dx = 200.0 * math.cos(angle)
     dy = 200.0 * math.sin(angle)
     dot = c.geometry.dot(15.0).fill(color).move_to(dx, dy)
-    c.play([dot.animate.grow_from_center().duration(0.5).delay(0.8 + i * 0.1).ease("ease_out_back")])
+    c.play([dot.animate.grow_from_center().duration(0.5).delay(0.8 + i * 0.1).easing(Easing.ease_out(EasingCurve.BACK))])
     dots.append(dot)
 
 c.wait(2.0)

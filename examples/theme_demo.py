@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Anchor, BLUE, GOLD, GREEN, Direction, Scene
+from gaanim import Easing, Anchor, BLUE, GOLD, GREEN, Direction, Scene
 
 
 def main():
@@ -15,11 +15,11 @@ def main():
     equation = scene.text.equation("H psi = E psi").move_to(0, -180, anchor=Anchor.CENTER)
 
     scene.play([
-        circle.animate.grow_from_center().duration(1.2).spring(),
-        square.animate.create().duration(1.5).smooth(),
+        circle.animate.grow_from_center().duration(1.2).easing(Easing.spring(stiffness=90.0, damping=12.0)),
+        square.animate.create().duration(1.5).easing(Easing.SMOOTH),
         title.animate.write().duration(1.0),
         subtitle.animate.fade_in_from(Direction.DOWN, distance=20).duration(0.4),
-        equation.animate.spin_in_from_nothing().duration(1.4).smooth(),
+        equation.animate.spin_in_from_nothing().duration(1.4).easing(Easing.SMOOTH),
     ])
     scene.wait(1.0)
     circle.fill(BLUE)

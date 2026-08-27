@@ -1,6 +1,6 @@
 """Math and annotation composition using public Scene primitives."""
 
-from gaanim import BLACK, BLUE, CORAL, GOLD, RED, WHITE, YELLOW, Scene
+from gaanim import Easing, BLACK, BLUE, CORAL, GOLD, RED, WHITE, YELLOW, Scene
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
         y_axis.animate.create().duration(0.8),
     ])
     scene.play([
-        vector.animate.create().duration(0.9).spring(),
+        vector.animate.create().duration(0.9).easing(Easing.spring(stiffness=90.0, damping=12.0)),
         point.animate.grow_from_center().duration(0.5),
         vector_label.animate.write().duration(0.6),
         formula.animate.write().duration(1.0),

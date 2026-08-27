@@ -173,7 +173,7 @@ def validate_editorial_contract(module: object) -> list[str]:
     )
     if not all(isinstance(component, module.Drawable) for component in components):
         failures.append("one or more editorial factories did not return Drawable")
-    animations = [component.animate.fade_in(duration=0.1) for component in components]
+    animations = [component.animate.fade_in().duration(0.1) for component in components]
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("one or more editorial groups did not preserve Drawable animations")
     else:
@@ -325,7 +325,7 @@ def validate_visualization_contract(module: object) -> list[str]:
             "create", "write", "fade_in", "fade_out", "uncreate", "unwrite",
             "grow_from_center", "shrink_to_center",
         ):
-            animation = getattr(aggregate.animate, method)(0.1)
+            animation = getattr(aggregate.animate, method)().duration(0.1)
             if not isinstance(animation, module.Anim):
                 failures.append(
                     f"{type(aggregate).__name__}.animate.{method} did not return Anim"
@@ -361,15 +361,17 @@ def validate_visualization_contract(module: object) -> list[str]:
     if not isinstance(view_animation, module.Anim):
         failures.append("CoordinateSpace.animate.view_to did not return Anim")
     for method, args in (
-        ("create", (0.25,)),
-        ("write", (0.25,)),
-        ("fade_in", (0.25,)),
-        ("fade_out", (0.25,)),
+        ("create", ()),
+        ("write", ()),
+        ("fade_in", ()),
+        ("fade_out", ()),
         ("move_to", (10.0, 20.0)),
         ("scale_to", (1.2,)),
         ("rotate_to", (0.1,)),
     ):
         result = getattr(linear_space.animate, method)(*args)
+        if method in {"create", "write", "fade_in", "fade_out"}:
+            result = result.duration(0.25)
         if not isinstance(result, module.Anim):
             failures.append(f"CoordinateSpace.animate.{method} did not return Anim")
     if hasattr(linear_space, "animate_view"):
@@ -490,13 +492,13 @@ def validate_visualization_contract(module: object) -> list[str]:
             failures.append(f"Scene.equation lost semantic part {name!r}")
         if not isinstance(equation[name], module.TextSelection):
             failures.append(f"Scene.equation part {name!r} was not selectable")
-    if not isinstance(equation.animate.write(0.5), module.Anim):
+    if not isinstance(equation.animate.write().duration(0.5), module.Anim):
         failures.append("Scene.equation did not preserve Text animations")
     codex_equation = scene.text.equation(
         module.parts(gravity="g sin(theta)", acceleration="theta''")
     )
     codex_animations = (
-        codex_equation["gravity"].animate.indicate(0.3),
+        codex_equation["gravity"].animate.indicate().duration(0.3),
         codex_equation["acceleration"].animate.fill(module.GOLD).duration(0.3),
     )
     if not all(isinstance(animation, module.Anim) for animation in codex_animations):
@@ -540,11 +542,11 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("Text.parts membership did not resolve semantic part names")
     if not isinstance(text["formula"]["mass"].fill(module.RED), module.TextSelection):
         failures.append("TextSelection.fill did not preserve the semantic selection")
-    positional_write = text.animate.write(0.6)
-    if not isinstance(positional_write, module.Anim):
-        failures.append("Text.write did not accept positional duration")
+    configured_write = text.animate.write().duration(0.6)
+    if not isinstance(configured_write, module.Anim):
+        failures.append("Text.write did not support post-effect duration configuration")
     else:
-        scene.play([positional_write])
+        scene.play([configured_write])
     selection_anim = text["formula"]["mass"].animate.indicate()
     if not isinstance(text["formula"]["mass"].animate, module.TextSelectionAnimation):
         failures.append("TextSelection.animate did not return its typed proxy")
@@ -593,8 +595,8 @@ def validate_visualization_contract(module: object) -> list[str]:
     baseline_text = scene.text("Baseline").move_to(
         0.0, 0.0, anchor=module.TextAnchor.BASELINE_LEFT
     )
-    baseline_equation = scene.text.equation("x_1 = 2").at_anchor(
-        0.0, 0.0, module.TextAnchor.BASELINE_RIGHT
+    baseline_equation = scene.text.equation("x_1 = 2").move_to(
+        0.0, 0.0, anchor=module.TextAnchor.BASELINE_RIGHT
     )
     if not all(isinstance(value, module.Text) for value in (baseline_text, baseline_equation)):
         failures.append("TextAnchor positioning did not preserve Text/Equation handles")
@@ -873,6 +875,18 @@ def validate_matrix_contract(module: object) -> list[str]:
     ordered = matrix.entries.animate.write(order="spiral_in", stagger=0.01).duration(0.1)
     if len(ordered) != 6 or not all(isinstance(animation, module.Anim) for animation in ordered):
         failures.append("matrix ordered animation did not return one Anim per cell")
+    if hasattr(matrix.entries.animate, "color") or hasattr(matrix.entries.animate, "ease"):
+        failures.append("matrix selection animation still exposes legacy styling or easing")
+    target = scene.viz.matrix([[1, 2, 3], [4, 5, 7]])
+    morph = matrix.morph_to(target, stagger=0.01).duration(0.2).easing(module.Easing.SMOOTH)
+    if not isinstance(morph, type(ordered)):
+        failures.append("Matrix.morph_to did not return a configurable compound animation")
+    try:
+        matrix.morph_to(target, duration=0.2)
+    except TypeError:
+        pass
+    else:
+        failures.append("Matrix.morph_to still accepts an embedded duration")
     random_a = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
     random_b = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
     if random_a != random_b:
@@ -979,7 +993,7 @@ def validate_composition_contract(module) -> list[str]:
     else:
         failures.append("parallel same-channel animations were not rejected")
 
-    plan = module.sequence(first, second).defaults(rate="linear")
+    plan = module.sequence(first, second).defaults(easing=module.Easing.LINEAR)
     schedule = plan.schedule()
     if not isinstance(plan, module.Composition):
         failures.append("sequence did not return Composition")
@@ -1007,6 +1021,130 @@ def validate_composition_contract(module) -> list[str]:
     ).stretch(3.0)
     if stretched.schedule().span != 3.0:
         failures.append("Composition.stretch did not produce the requested span")
+    return failures
+
+
+def validate_easing_contract(module) -> list[str]:
+    failures: list[str] = []
+    preset_names = (
+        "LINEAR", "SMOOTH", "DOUBLE_SMOOTH", "THERE_AND_BACK",
+        "LINGERING", "RUNNING_START", "EXPONENTIAL_DECAY", "NOT_QUITE_THERE",
+    )
+    curve_names = (
+        "QUADRATIC", "CUBIC", "QUARTIC", "QUINTIC", "EXPONENTIAL",
+        "SINE", "CIRCULAR", "BACK", "ELASTIC", "BOUNCE",
+    )
+    for name in preset_names:
+        if not isinstance(getattr(module.Easing, name, None), module.Easing):
+            failures.append(f"Easing.{name} is missing or has the wrong type")
+    for name in curve_names:
+        if not isinstance(getattr(module.EasingCurve, name, None), module.EasingCurve):
+            failures.append(f"EasingCurve.{name} is missing or has the wrong type")
+
+    curves = [getattr(module.EasingCurve, name) for name in curve_names]
+    easings = [
+        *(module.Easing.ease_in(curve) for curve in curves),
+        *(module.Easing.ease_out(curve) for curve in curves),
+        *(module.Easing.ease_in_out(curve) for curve in curves),
+        module.Easing.spring(stiffness=90, damping=12),
+        module.Easing.steps(4),
+        module.Easing.mirror(module.Easing.SMOOTH),
+        module.Easing.there_and_back(pause=0.25),
+        module.Easing.cubic_bezier(0.25, 0.1, 0.25, 1.0),
+    ]
+    if not all(isinstance(easing, module.Easing) for easing in easings):
+        failures.append("one or more Easing factories returned the wrong type")
+
+    for call in (
+        lambda: module.Easing.spring(stiffness=0, damping=12),
+        lambda: module.Easing.spring(stiffness=90, damping=-1),
+        lambda: module.Easing.spring(stiffness=math.nan, damping=12),
+        lambda: module.Easing.steps(0),
+        lambda: module.Easing.steps(-1),
+        lambda: module.Easing.there_and_back(pause=-0.1),
+        lambda: module.Easing.there_and_back(pause=1.1),
+        lambda: module.Easing.cubic_bezier(-0.1, 0, 0.5, 1),
+        lambda: module.Easing.cubic_bezier(0.1, 0, 1.1, 1),
+        lambda: module.Easing.cubic_bezier(0.1, math.inf, 0.9, 1),
+    ):
+        try:
+            call()
+        except (TypeError, ValueError, OverflowError):
+            pass
+        else:
+            failures.append("an Easing factory accepted invalid input")
+
+    try:
+        module.Easing()
+    except TypeError:
+        pass
+    else:
+        failures.append("Easing unexpectedly exposes a public constructor")
+    try:
+        module.Easing.SMOOTH.custom = 1
+    except (AttributeError, TypeError):
+        pass
+    else:
+        failures.append("Easing instances are mutable")
+
+    for call in (
+        lambda: module.Easing.ease_in("cubic"),
+        lambda: module.Easing.mirror("smooth"),
+        lambda: module.Easing.spring(stiffness="fast", damping=12),
+        lambda: module.Easing.steps(1.5),
+    ):
+        try:
+            call()
+        except (TypeError, ValueError):
+            pass
+        else:
+            failures.append("an Easing factory accepted an incorrect type")
+
+    scene = module.Scene(640, 360)
+    dot = scene.geometry.dot(8)
+    anim = dot.animate.shift_by(10, 0)
+    for legacy in (
+        "ease", "rate", "smooth", "spring", "linear", "steps", "color",
+        "stroke_color",
+    ):
+        if hasattr(anim, legacy):
+            failures.append(f"Anim still exposes legacy member {legacy}")
+    for legacy in ("at_anchor", "color"):
+        if hasattr(dot, legacy):
+            failures.append(f"Drawable still exposes legacy member {legacy}")
+
+    for call in (
+        lambda: anim.easing("smooth"),
+        lambda: scene.play([anim], rate="linear"),
+        lambda: module.sequence(anim).defaults(rate="linear"),
+        lambda: module.sequence(anim).schedule(easing=module.Easing.LINEAR),
+        lambda: dot.animate.fade_in(0.2),
+        lambda: scene.text("x").animate.write(0.2),
+        lambda: scene.viz.parameter(0).animate.set(1, 0.2),
+        lambda: scene.camera.animate.pan_to(0, 0, 0.2),
+        lambda: scene.geometry.circle(r=8),
+        lambda: scene.geometry.rect(w=10, h=10),
+    ):
+        try:
+            call()
+        except (AttributeError, TypeError):
+            pass
+        else:
+            failures.append("a removed easing, duration, or abbreviated API was accepted")
+
+    for invalid_seconds in (-1.0, math.nan, math.inf):
+        try:
+            anim.duration(seconds=invalid_seconds)
+        except ValueError:
+            pass
+        else:
+            failures.append("Anim.duration accepted invalid seconds")
+        try:
+            anim.delay(seconds=invalid_seconds)
+        except ValueError:
+            pass
+        else:
+            failures.append("Anim.delay accepted invalid seconds")
     return failures
 
 
@@ -1079,6 +1217,7 @@ def main() -> int:
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_composition_contract(module))
+    missing.extend(validate_easing_contract(module))
     missing.extend(validate_scene_capability_surface(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))

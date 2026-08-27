@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from gaanim import BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, BLUE, GOLD, WHITE, Scene
 
 
 ROOT = Path(__file__).resolve().parent
@@ -29,7 +29,7 @@ scene.play(
 )
 scene.play(
     [
-        orb.move(360, 0).duration(1.0).smooth(),
+        orb.animate.shift_by(360, 0).duration(1.0).easing(Easing.SMOOTH),
         label.animate.write().duration(0.8),
     ]
 )

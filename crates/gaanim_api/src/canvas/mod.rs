@@ -17,7 +17,7 @@ pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CanvasUnits, CurveControl,
     CurveElement, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError,
     LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin,
-    LottieOptions, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions, named_rate_func,
+    LottieOptions, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions,
 };
 mod drawable;
 pub use drawable::{

@@ -55,7 +55,7 @@ spec = (
   .guides(color=Guide.legend(title="Grupo"))
 )
 chart = scene.viz.chart(spec)
-scene.play([chart.animate.create()])
+scene.play([chart.drawable().animate.create()])
 ```
 
 == ChartSpec
@@ -225,7 +225,7 @@ omitidas continúan heredándose del tema. Así, cambiar únicamente `width` no
 pierde el negro de los ejes en `paper`. Usa `color`, `tick_color`,
 `number_color` o `label_color` para sustituir explícitamente cada color.
 
-`Cartesian2D.animate.write(duration)` construye en paralelo los ejes, las guías, los
+`Cartesian2D.animate.write().duration(seconds)` construye en paralelo los ejes, las guías, los
 ticks, los números y los títulos. Durante el trazado, las guías asociadas a X
 avanzan de arriba hacia abajo y las asociadas a Y de izquierda a derecha.
 
@@ -322,7 +322,7 @@ plane = scene.viz.cartesian_2d(
   Axis.linear(-6, 6).label("x"),
   Axis.linear(-3, 3).label("y"),
 )
-scene.play([plane.animate.write(1.2)])
+scene.play([plane.animate.write().duration(1.2)])
 ```
 
 `Parameter`, `Variable`, `Computed` y `scene.viz.time` forman la ruta reactiva. Rust
@@ -462,7 +462,7 @@ plane = scene.viz.cartesian_2d(
   height=570,
 )
 curve = plane.plot_data(times, accel, color=CYAN, width=4)
-scene.play([plane.animate.create(0.85), curve.animate.create(2.2)])
+scene.play([plane.animate.create().duration(0.85), curve.animate.create().duration(2.2)])
 ```
 ]
 
@@ -533,7 +533,7 @@ curve = line.function(lambda t: math.sin(t), normal_scale=120, reveal=theta)
 point = scene.geometry.dot(8).follow(
   line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
 )
-scene.play([line.animate.create(), curve.animate.fade_in(duration=0.01), point.animate.fade_in()])
+scene.play([line.animate.create(), curve.animate.fade_in().duration(0.01), point.animate.fade_in()])
 scene.play([theta.animate.set(3 * math.pi).duration(4)])
 ```
 ]

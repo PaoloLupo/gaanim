@@ -38,26 +38,26 @@ scene.camera.perspective(fov_y=1, near=0.1, far=500.0)
 scene.camera.look_at(eye=(3.8, 2.4, 5.8), target=(0.0, 0.15, 0.0))
 scene.play([
     fox.animation("Survey", duration=2.4),
-    title.animate.write(0.8),
-    caption.animate.fade_in(0.5),
-    survey_label.animate.fade_in(0.4),
+    title.animate.write().duration(0.8),
+    caption.animate.fade_in().duration(0.5),
+    survey_label.animate.fade_in().duration(0.4),
 ])
 scene.play([
     fox.animation("Walk", duration=3.6, loop=True, transition=0.45),
-    survey_label.animate.fade_out(0.25),
-    walk_label.animate.fade_in(0.35),
+    survey_label.animate.fade_out().duration(0.25),
+    walk_label.animate.fade_in().duration(0.35),
 ])
 scene.play([
     fox.animation("Run", duration=3.0, loop=True, transition=0.45),
     scene.camera.animate.orbit(delta_yaw=0.32, delta_pitch=0.04).duration(3.6),
-    walk_label.animate.fade_out(0.25),
-    run_label.animate.fade_in(0.35),
+    walk_label.animate.fade_out().duration(0.25),
+    run_label.animate.fade_in().duration(0.35),
 ])
 scene.play([
     fox.animation("Survey", duration=1.8, reverse=True, transition=0.45),
     scene.camera.animate.orbit(delta_yaw=-0.18, delta_pitch=-0.02).duration(3.0),
-    run_label.animate.fade_out(0.25),
-    survey_label.animate.fade_in(0.35),
+    run_label.animate.fade_out().duration(0.25),
+    survey_label.animate.fade_in().duration(0.35),
 ])
 
 

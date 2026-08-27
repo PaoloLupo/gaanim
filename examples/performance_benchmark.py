@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLUE, GOLD, GREEN, RED, WHITE, Scene
+from gaanim import Easing, BLUE, GOLD, GREEN, RED, WHITE, Scene
 
 
 FPS = 30
@@ -36,8 +36,7 @@ scene.play(
             72 if index % 2 == 0 else -72,
             54 if (index // 2) % 2 == 0 else -54,
         )
-        .duration(motion_duration)
-        .smooth()
+        .duration(motion_duration).easing(Easing.SMOOTH)
         for index, shape in enumerate(objects)
     ]
 )

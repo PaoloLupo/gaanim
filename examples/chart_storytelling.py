@@ -33,7 +33,7 @@ target = base.encode(z="z").axes(z=Axis.symlog(-3, 3).ticks(1).label("z"))
 chart = scene.viz.chart(base).inspect(("id", "group", "x", "y", "z"), format="{id}: {group}")
 title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
 
-scene.play([chart.animate.create(0.9), title.animate.write(0.6)])
+scene.play([chart.drawable().animate.create().duration(0.9), title.animate.write().duration(0.6)])
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([
     chart.animate.to(target).duration(1.4),

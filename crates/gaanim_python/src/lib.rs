@@ -10,6 +10,7 @@ pyo3::create_exception!(
 mod brush;
 mod color;
 mod composition;
+mod easing;
 mod py3d;
 mod pycanvas;
 mod pydrawable;
@@ -62,6 +63,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<composition::PyComposition>()?;
     m.add_class::<composition::PySchedule>()?;
     m.add_class::<composition::PyScheduleEntry>()?;
+    m.add_class::<easing::PyEasingCurve>()?;
+    m.add_class::<easing::PyEasing>()?;
     m.add_function(wrap_pyfunction!(composition::parallel, m)?)?;
     m.add_function(wrap_pyfunction!(composition::sequence, m)?)?;
     m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;

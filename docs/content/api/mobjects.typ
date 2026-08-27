@@ -80,8 +80,8 @@ from gaanim import GOLD, WHITE, Scene
 scene = Scene(480, 270, background="#0f172a")
 tip = scene.geometry.dot(9).fill(GOLD).move_to(100, 30)
 rod = scene.geometry.tracking_line((-100, -30), tip).no_fill().stroke(WHITE, 4)
-scene.play([rod.animate.create(0.8), tip.animate.shift_by(-40, 80).duration(0.8)])
-scene.play([rod.animate.write(0.8), tip.animate.shift_by(80, -50).duration(0.8)])
+scene.play([rod.animate.create().duration(0.8), tip.animate.shift_by(-40, 80).duration(0.8)])
+scene.play([rod.animate.write().duration(0.8), tip.animate.shift_by(80, -50).duration(0.8)])
 # output: preview.webp
 scene.render()
 ```
@@ -233,7 +233,7 @@ scene = Scene(480, 270, background="#0f172a")
 eq = scene.text.equation("E =", part("mass", "m"), part("light", "c^2"))
 frame = scene.geometry.surrounding_rect(eq["mass"]).stroke(GOLD, 3)
 scene.play([eq.animate.fade_in(), frame.animate.create()])
-scene.play([frame.retarget(eq["light"], duration=0.8)])
+scene.play([frame.retarget(eq["light"]).duration(0.8)])
 # output: preview.webp
 scene.render()
 ```
@@ -860,7 +860,7 @@ This page keeps a compact factory index. The canonical, complete reference is
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(480, 270, background="#0f172a")
 label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).move_to(0, 0)
-scene.play([label.animate.write(0.9)])
+scene.play([label.animate.write().duration(0.9)])
 # output: preview.webp
 scene.render()
 ```
@@ -880,7 +880,7 @@ from gaanim import GOLD, Scene, part, parts
 scene = Scene(480, 270, background="#0f172a")
 eq = scene.text.equation(part("force", "sum F_t"), "=", parts(mass="m", acceleration="a_t"))
 eq["acceleration"].fill(GOLD)
-scene.play([eq.animate.write(1.0, by="part")])
+scene.play([eq.animate.write(by="part").duration(1.0)])
 # output: preview.webp
 scene.render()
 ```
@@ -919,7 +919,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(480, 270, background="#0f172a")
 t = scene.text("Fourier Transform", role="title").move_to(0, 30)
 s = scene.text("A visual proof", role="subtitle").move_to(0, -20)
-scene.play([t.animate.write(0.7), s.animate.fade_in().duration(0.5)])
+scene.play([t.animate.write().duration(0.7), s.animate.fade_in().duration(0.5)])
 # output: preview.webp
 scene.render()
 ```
@@ -940,7 +940,7 @@ scene = Scene(480, 270, background="#0f172a")
 # Fluent placement preserves the specialized Text handle.
 eq = scene.text.equation(parts(variable="x", operator="dot 5 =", result="25")).move_to(0, 0)
 eq["result"].fill(GOLD)
-scene.play([eq.animate.write(1.0)])
+scene.play([eq.animate.write().duration(1.0)])
 # output: preview.webp
 scene.render()
 ```
@@ -1021,7 +1021,7 @@ from gaanim import Scene
 scene = Scene(960, 540)
 # Con un MP4 local: clip = scene.media.video("assets/clip.mp4", width=720, duration=4, loop=True, volume=0.8); scene.play([clip])
 clip = scene.geometry.rect(720, 405) # placeholder ejecutable para la documentación
-scene.play([clip.animate.fade_in(0.4)])
+scene.play([clip.animate.fade_in().duration(0.4)])
 scene.wait(7.6)
 # output: preview.webp
 scene.render()
@@ -1042,7 +1042,7 @@ from gaanim import Scene
 scene = Scene(480, 270, background="#0f172a")
 # Con un JSON local: clip = scene.media.lottie("assets/pulse.json", width=180); scene.play([clip])
 clip = scene.geometry.circle(70) # placeholder ejecutable para la documentación
-scene.play([clip.animate.fade_in(0.4)])
+scene.play([clip.animate.fade_in().duration(0.4)])
 # output: preview.webp
 scene.render()
 ```
@@ -1810,7 +1810,7 @@ scene.render()
   signature: "text[name] / text[index_or_slice] / text.graphemes|words|lines|parts[index] -> TextSelection; name in text.parts -> bool",
   params: ((name: "name", type: "str", default: none, desc: [Nested semantic path from `part()`.]), (name: "index", type: "int | slice", default: none, desc: [Rendered unit selection, Unicode-grapheme safe.])),
   returns: (type: "TextSelection", desc: [Deferred local selection; never a Layout leaf.]),
-  desc: [Selections support persistent `fill`, animated `color_to`/`opacity_to`, compound `animate().fill().opacity()`, emphasis, braces, annotations, and structural morph/copy transitions. Use `"mass" in text.parts` before optional styling; membership recognizes both leaf names and dotted nested paths such as `"formula.mass"`. The compound builder rejects non-local transform and stroke channels.],
+  desc: [Selections support persistent `fill`, compound `animate.fill(...).opacity(...)`, typed emphasis effects, and structural morph/copy transitions. Use `"mass" in text.parts` before optional styling; membership recognizes both leaf names and dotted nested paths such as `"formula.mass"`. The proxy rejects non-local transform and stroke channels.],
 )[
 ```python
 # show-code: true
@@ -1821,7 +1821,7 @@ eq = scene.text("$E = ", part("mass", "m"), " c^2$").move_to(0, 0)
 if "mass" in eq.parts:
   eq["mass"].fill(GOLD)
 scene.play([
-    eq.animate.write(0.8),
+    eq.animate.write().duration(0.8),
     eq["mass"].animate.fill(RED).opacity(0.7).duration(0.8),
 ])
 # output: preview.webp

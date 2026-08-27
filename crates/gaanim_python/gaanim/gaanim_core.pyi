@@ -19,6 +19,59 @@ CurveControl: TypeAlias = CurvePoint | Literal["auto"] | None
 CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
 """A ``Scene.path`` or ``Scene.curve`` command and its arguments."""
 
+class EasingCurve:
+    """A discoverable curve family used by the typed ``Easing`` factories."""
+    QUADRATIC: ClassVar[EasingCurve]
+    CUBIC: ClassVar[EasingCurve]
+    QUARTIC: ClassVar[EasingCurve]
+    QUINTIC: ClassVar[EasingCurve]
+    EXPONENTIAL: ClassVar[EasingCurve]
+    SINE: ClassVar[EasingCurve]
+    CIRCULAR: ClassVar[EasingCurve]
+    BACK: ClassVar[EasingCurve]
+    ELASTIC: ClassVar[EasingCurve]
+    BOUNCE: ClassVar[EasingCurve]
+
+class Easing:
+    """An immutable, IDE-discoverable animation timing function.
+
+    Use a preset such as ``Easing.SMOOTH`` or a validated factory such as
+    ``Easing.spring(stiffness=90, damping=12)``. Instances only describe
+    interpolation and never mutate an animation or timeline.
+    """
+    LINEAR: ClassVar[Easing]
+    SMOOTH: ClassVar[Easing]
+    DOUBLE_SMOOTH: ClassVar[Easing]
+    THERE_AND_BACK: ClassVar[Easing]
+    LINGERING: ClassVar[Easing]
+    RUNNING_START: ClassVar[Easing]
+    EXPONENTIAL_DECAY: ClassVar[Easing]
+    NOT_QUITE_THERE: ClassVar[Easing]
+    @staticmethod
+    def ease_in(curve: EasingCurve) -> Easing: ...
+    @staticmethod
+    def ease_out(curve: EasingCurve) -> Easing: ...
+    @staticmethod
+    def ease_in_out(curve: EasingCurve) -> Easing: ...
+    @staticmethod
+    def spring(stiffness: float = 90.0, damping: float = 12.0) -> Easing:
+        """Create a finite spring; stiffness must be positive and damping non-negative."""
+        ...
+    @staticmethod
+    def steps(count: int) -> Easing:
+        """Create a discrete easing with at least one step."""
+        ...
+    @staticmethod
+    def mirror(easing: Easing) -> Easing: ...
+    @staticmethod
+    def there_and_back(pause: float = 0.0) -> Easing:
+        """Rise and return, optionally pausing at the peak for a fraction in ``[0, 1]``."""
+        ...
+    @staticmethod
+    def cubic_bezier(x1: float, y1: float, x2: float, y2: float) -> Easing:
+        """Create a finite CSS-style cubic Bézier; both X controls must be in ``[0, 1]``."""
+        ...
+
 class Color:
     @overload
     def __init__(self, value: str) -> None: ...
@@ -484,22 +537,11 @@ class Anim:
         """
         ...
 
-    def color(self, color: ColorLike) -> Anim:
-        """Target currently visible vector paints, including every text glyph.
-
-        Glyphs interpolate from their own current colors; any fragment-specific
-        colors are replaced by the common target when the animation completes.
-        On ``Primitive3D`` this targets the PBR material base color.
-        """
-        ...
     def stroke(self, color: ColorLike, width: float) -> Anim:
         """Target vector stroke color and width, including every text glyph.
 
         This is unavailable for ``Primitive3D``.
         """
-        ...
-    def stroke_color(self, color: ColorLike) -> Anim:
-        """Target only the vector stroke color, including every text glyph."""
         ...
     def material(self, material: Material3D) -> Anim:
         """Target every animatable PBR channel of a native Primitive3D."""
@@ -556,23 +598,23 @@ class Anim:
     def rotate_to_3d(self, x: float, y: float, z: float) -> Anim:
         """Target an absolute XYZ Euler orientation in radians."""
         ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
+    def fade_in(self) -> Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``."""
         ...
     def fade_in_from(self, direction: Direction, distance: float = 48.0) -> Anim: ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
+    def fade_out(self) -> Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
-    def write(self, duration: Optional[float] = None, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
+    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
         """Select the path-writing effect without mutating the timeline."""
         ...
-    def create(self, duration: Optional[float] = None) -> Anim:
+    def create(self) -> Anim:
         """Select the path or mesh creation effect without mutating the timeline."""
         ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim: ...
-    def uncreate(self, duration: Optional[float] = None) -> Anim: ...
-    def grow_from_center(self, duration: Optional[float] = None) -> Anim: ...
-    def shrink_to_center(self, duration: Optional[float] = None) -> Anim: ...
+    def unwrite(self) -> Anim: ...
+    def uncreate(self) -> Anim: ...
+    def grow_from_center(self) -> Anim: ...
+    def shrink_to_center(self) -> Anim: ...
     def spin_in_from_nothing(self) -> Anim: ...
     def draw_border_then_fill(self) -> Anim: ...
     def circumscribe(self) -> Anim: ...
@@ -581,63 +623,16 @@ class Anim:
     def move_along(self, target: Drawable) -> Anim: ...
     def fade_transform_to(self, target: Drawable) -> Anim: ...
     def replacement_transform_to(self, target: Drawable) -> Anim: ...
-    def indicate(self, duration: Optional[float] = None) -> Anim: ...
-    def wiggle(self, duration: Optional[float] = None) -> Anim: ...
-    def duration(self, d: float) -> Anim:
-        """Configure this animation with duration.
-
-        Example:
-            result = animation.duration(1.0)
-        """
+    def indicate(self) -> Anim: ...
+    def wiggle(self) -> Anim: ...
+    def duration(self, seconds: float) -> Anim:
+        """Return a copy configured to last finite, non-negative ``seconds``."""
         ...
-    def ease(self, name: str) -> Anim:
-        """Configure this animation with ease.
-
-        Example:
-            result = animation.ease("example")
-        """
+    def easing(self, easing: Easing) -> Anim:
+        """Return a copy using a typed timing function; scheduling remains deferred."""
         ...
-    def rate(self, name: str) -> Anim:
-        """Configure this animation with rate.
-
-        Example:
-            result = animation.rate("example")
-        """
-        ...
-    def delay(self, sec: float) -> Anim:
-        """Configure this animation with delay.
-
-        Example:
-            result = animation.delay(1.0)
-        """
-        ...
-    def steps(self, n: int) -> Anim:
-        """Configure this animation with steps.
-
-        Example:
-            result = animation.steps(1)
-        """
-        ...
-    def spring(self) -> Anim:
-        """Configure this animation with spring.
-
-        Example:
-            result = animation.spring()
-        """
-        ...
-    def smooth(self) -> Anim:
-        """Configure this animation with smooth.
-
-        Example:
-            result = animation.smooth()
-        """
-        ...
-    def linear(self) -> Anim:
-        """Configure this animation with linear.
-
-        Example:
-            result = animation.linear()
-        """
+    def delay(self, seconds: float) -> Anim:
+        """Return a copy delayed by finite, non-negative ``seconds``."""
         ...
     def lag_ratio(self, value: float) -> Anim:
         """Configure this animation with lag ratio.
@@ -700,13 +695,13 @@ class Composition:
     def delay(self, seconds: float) -> Composition:
         """Return a copy whose complete subtree starts after ``seconds``."""
         ...
-    def defaults(self, *, duration: Optional[float] = None, rate: Optional[str] = None) -> Composition:
+    def defaults(self, *, duration: Optional[float] = None, easing: Optional[Easing] = None) -> Composition:
         """Fill duration and easing only on descendant animations without overrides."""
         ...
     def stretch(self, seconds: float) -> Composition:
         """Rescale an animation-only subtree to an exact finite span; media are rejected."""
         ...
-    def schedule(self, *, duration: Optional[float] = None, rate: Optional[str] = None) -> Schedule:
+    def schedule(self, *, duration: Optional[float] = None) -> Schedule:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
 
@@ -1065,13 +1060,6 @@ class Drawable:
             result = drawable.pivot(1.0, 1.0)
         """
         ...
-    def at_anchor(self, x: float, y: float, anchor: Anchor) -> Self:
-        """Apply at anchor to this drawable and return the result.
-
-        Example:
-            result = drawable.at_anchor(1.0, 1.0, Anchor.CENTER)
-        """
-        ...
     def next_to(
         self,
         reference: Drawable,
@@ -1264,13 +1252,11 @@ class SurroundingRect(Drawable):
     def retarget(
         self,
         targets: Drawable | TextSelection | Sequence[Drawable | TextSelection],
-        *,
-        duration: Optional[float] = None,
     ) -> Anim:
         """Tween all four frame edges to new live targets and keep following them.
 
-        ``duration`` is measured in seconds; ``None`` uses the standard
-        animation duration. The returned animation supports normal easing.
+        Configure timing afterward with ``duration`` and ``easing``. The
+        returned animation remains pure until passed to ``Scene.play``.
         Empty, foreign-scene, or invalid targets raise ``ValueError`` or
         ``TypeError``.
         """
@@ -1449,15 +1435,14 @@ def part(
 class TextSelectionAnimation:
     """Pure typed proxy for one text selection."""
     def fill(self, color: Color) -> Anim: ...
-    def color(self, color: Color) -> Anim: ...
     def opacity(self, value: float) -> Anim: ...
-    def indicate(self, duration: Optional[float] = None) -> Anim: ...
-    def wiggle(self, duration: Optional[float] = None) -> Anim: ...
-    def pulse(self, duration: Optional[float] = None) -> Anim: ...
-    def wave(self, duration: Optional[float] = None) -> Anim: ...
-    def highlight(self, duration: Optional[float] = None) -> Anim: ...
-    def focus(self, duration: Optional[float] = None) -> Anim: ...
-    def cancel(self, duration: Optional[float] = None) -> Anim: ...
+    def indicate(self) -> Anim: ...
+    def wiggle(self) -> Anim: ...
+    def pulse(self) -> Anim: ...
+    def wave(self) -> Anim: ...
+    def highlight(self) -> Anim: ...
+    def focus(self) -> Anim: ...
+    def cancel(self) -> Anim: ...
     def morph_to(self, target: TextSelection) -> Anim: ...
     def copy_to(self, target: TextSelection) -> Anim: ...
 
@@ -1485,7 +1470,7 @@ class TextSelection:
     def animate(self) -> TextSelectionAnimation:
         """Return a pure animation proxy scoped to the selected glyphs.
 
-        Only ``fill``/``color`` and ``opacity`` targets are supported; other
+        Only ``fill`` and ``opacity`` targets are supported; other
         property channels raise ``TypeError``.
 
         Example:
@@ -1571,17 +1556,6 @@ class Text(Drawable):
             label.move_to(0.0, 40.0, TextAnchor.BASELINE_LEFT)
             label.move_to(marker)
             label.move_to(marker.anchor_point(Anchor.TOP))
-        """
-        ...
-    def at_anchor(self, x: float, y: float, anchor: Anchor | TextAnchor) -> Self:
-        """Place a geometric or typographic text anchor at ``(x, y)``.
-
-        ``TextAnchor`` uses the first visual line's baseline, including for
-        multiline text. Other values raise ``TypeError``; layout-owned text
-        raises ``LayoutOwnershipError``.
-
-        Example:
-            equation.at_anchor(0.0, 0.0, TextAnchor.BASELINE_CENTER)
         """
         ...
     def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None) -> None:
@@ -1716,21 +1690,21 @@ class Camera:
     def bind_3d(self, *, eye: Optional[Endpoint] = None, target: Optional[Endpoint] = None, fov_y: Optional[ScalarSource] = None, up: tuple[float, float, float] = (0.0, 1.0, 0.0), influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
 
 class CameraAnimation:
-    def to(self, state: CameraState, duration: float = 1.0) -> Anim:
+    def to(self, state: CameraState) -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 
-        ``duration`` is finite and non-negative. A state owned by another
-        Scene raises ``ValueError``.
+        A state owned by another Scene raises ``ValueError``. Configure timing
+        on the returned animation.
         """
         ...
-    def restore(self, name: str, duration: float = 1.0) -> Anim:
+    def restore(self, name: str) -> Anim:
         """Animate to a named saved state and return a composable Anim.
 
-        Unknown names and invalid durations raise ``ValueError``.
+        Unknown names raise ``ValueError``.
         """
         ...
     @overload
-    def pan_to(self, x: float, y: float, duration: float = 1.0) -> Anim:
+    def pan_to(self, x: float, y: float) -> Anim:
         """Configure the camera with pan to.
 
         Example:
@@ -1738,8 +1712,8 @@ class CameraAnimation:
         """
         ...
     @overload
-    def pan_to(self, target: Endpoint, duration: float = 1.0) -> Anim: ...
-    def zoom_to(self, zoom: ScalarSource, duration: float = 1.0) -> Anim:
+    def pan_to(self, target: Endpoint) -> Anim: ...
+    def zoom_to(self, zoom: ScalarSource) -> Anim:
         """Configure the camera with zoom to.
 
         Example:
@@ -1750,7 +1724,6 @@ class CameraAnimation:
         self,
         targets: Drawable | Sequence[Drawable],
         margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None,
-        duration: float = 1.0,
         *,
         dynamic: bool = False,
     ) -> Anim:
@@ -1760,7 +1733,7 @@ class CameraAnimation:
             scene.camera.frame_to(target)
         """
         ...
-    def rotate_to(self, angle: ScalarSource, duration: float = 1.0) -> Anim:
+    def rotate_to(self, angle: ScalarSource) -> Anim:
         """Configure the camera with rotate to.
 
         Example:
@@ -1774,7 +1747,6 @@ class CameraAnimation:
         offset: tuple[float, float] = (0.0, 0.0),
         offset_space: Literal["world", "local"] = "world",
         lag: float = 0.0,
-        duration: float = 1.0,
     ) -> Anim:
         """Configure the camera with follow.
 
@@ -1786,7 +1758,6 @@ class CameraAnimation:
         self,
         amplitude: float = 12.0,
         frequency: float = 8.0,
-        duration: float = 0.5,
     ) -> Anim:
         """Configure the camera with shake.
 
@@ -1799,7 +1770,6 @@ class CameraAnimation:
         eye: Endpoint,
         target: Endpoint,
         up: Optional[tuple[float, float, float]] = None,
-        duration: float = 1.0,
     ) -> Anim:
         """Aim the camera from ``eye`` toward ``target``.
 
@@ -1807,10 +1777,7 @@ class CameraAnimation:
             eye: Camera position in world coordinates.
             target: World-space point to look at.
             up: World-up direction. Defaults to ``(0, 1, 0)``.
-            duration: Transition duration in seconds. Use ``0`` for setup.
-
-        Example:
-            scene.camera.look_at((7, 5, 6), (0, 0, 0), duration=0.0)
+        Configure timing afterward on the returned ``Anim``.
         """
         ...
 
@@ -1818,15 +1785,13 @@ class CameraAnimation:
         self,
         delta_yaw: float,
         delta_pitch: float,
-        duration: float = 1.0,
     ) -> Anim:
         """Orbit around the current look-at target.
 
-        ``delta_yaw`` and ``delta_pitch`` are radians. Positive duration
-        animates the orbit on the scene timeline.
+        ``delta_yaw`` and ``delta_pitch`` are radians.
 
         Example:
-            scene.camera.orbit(delta_yaw=0.6, delta_pitch=0.12, duration=1.0)
+            scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.12).duration(1.0)
         """
         ...
 
@@ -1835,7 +1800,6 @@ class CameraAnimation:
         fov_y: float,
         near: float = 0.1,
         far: float = 1000.0,
-        duration: float = 1.0,
     ) -> Anim:
         """Use perspective projection with a vertical field of view.
 
@@ -1843,26 +1807,26 @@ class CameraAnimation:
         are positive clipping distances with ``near < far``.
 
         Example:
-            scene.camera.perspective(0.785, near=0.1, far=1000.0, duration=0.0)
+            scene.camera.animate.perspective(0.785, near=0.1, far=1000.0)
         """
         ...
 
-    def dolly(self, factor: float, duration: float = 1.0) -> Anim:
+    def dolly(self, factor: float) -> Anim:
         """Move toward or away from the current target.
 
         A factor below ``1`` moves closer; a factor above ``1`` moves farther.
         The factor must be finite and positive.
 
         Example:
-            scene.camera.dolly(factor=0.85, duration=0.6)
+            scene.camera.animate.dolly(factor=0.85).duration(0.6)
         """
         ...
 
-    def orthographic(self, zoom: float = 1.0, duration: float = 0.0) -> Anim:
+    def orthographic(self, zoom: float = 1.0) -> Anim:
         """Select orthographic projection; ``zoom`` must be positive."""
         ...
 
-    def reset(self, duration: float = 1.0) -> Anim:
+    def reset(self) -> Anim:
         """Restore the default 2D pose, up vector, target, and projection."""
         ...
 
@@ -2264,10 +2228,10 @@ class FlowParticles:
         ...
 
 class CoordinateSpaceAnimation:
-    def create(self, duration: Optional[float] = None) -> Anim: ...
-    def write(self, duration: Optional[float] = None) -> Anim: ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim: ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim: ...
+    def create(self) -> Anim: ...
+    def write(self) -> Anim: ...
+    def fade_in(self) -> Anim: ...
+    def fade_out(self) -> Anim: ...
     def move_to(self, x: float, y: float) -> Anim: ...
     def scale_to(self, factor: float) -> Anim: ...
     def rotate_to(self, radians: float) -> Anim: ...
@@ -2328,7 +2292,7 @@ class CoordinateSpace:
         Example:
             plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
             curve = plane.plot_data(times, accel, color=CYAN, width=4)
-            scene.play(curve.animate.create(2.0))
+            scene.play(curve.animate.create().duration(2.0))
         """
         ...
     def scatter_data(
@@ -2448,7 +2412,7 @@ class Lottie(Drawable):
 
 class Geometry:
     """Scene-owned factory for vector, path, boolean, 3D, and reactive geometry."""
-    def circle(self, r: float) -> Drawable:
+    def circle(self, radius: float) -> Drawable:
         """Create a circle drawable in the scene.
 
         Example:
@@ -2473,14 +2437,14 @@ class Geometry:
     def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
         """Configure the scene's single automatic 3D light rig."""
         ...
-    def rect(self, w: float, h: float) -> Drawable:
+    def rect(self, width: float, height: float) -> Drawable:
         """Create a rect drawable in the scene.
 
         Example:
             result = scene.rect(1.0, 1.0)
         """
         ...
-    def rounded_rect(self, w: float, h: float, r: float) -> Drawable:
+    def rounded_rect(self, width: float, height: float, radius: float) -> Drawable:
         """Create a rounded rect drawable in the scene.
 
         Example:
@@ -2510,7 +2474,7 @@ class Geometry:
             result = scene.square(1.0)
         """
         ...
-    def dot(self, r: float) -> Drawable:
+    def dot(self, radius: float) -> Drawable:
         """Create a dot drawable in the scene.
 
         Example:
@@ -2954,7 +2918,7 @@ class Typography:
                 "=",
                 parts(mass="m", acceleration="a_t"),
             )
-            scene.play([equation.animate.write(1.0, by="part")])
+            scene.play([equation.animate.write(by="part").duration(1.0)])
         """
         ...
     def typst(self, source: str | os.PathLike[str], *, width: Optional[str | float | int] = None) -> Drawable:
@@ -3987,7 +3951,7 @@ class Scene:
             ValueError: If any drawable belongs to another ``Scene``.
         """
         ...
-    def wait(self, d: float) -> None:
+    def wait(self, seconds: float) -> None:
         """Schedule wait on the scene timeline.
 
         Example:
@@ -4007,16 +3971,16 @@ class Scene:
         items: Playable | Sequence[Playable],
         *,
         duration: Optional[float] = None,
-        rate: Optional[str] = None,
+        easing: Optional[Easing] = None,
     ) -> None:
         """Atomically schedule a leaf, implicit parallel batch, or composition tree.
 
-        ``duration`` and ``rate`` are defaults overridden by explicit ``Anim``
+        ``duration`` and ``easing`` are defaults overridden by explicit ``Anim``
         or nested group configuration. Reused, foreign, duplicate, or temporally
         overlapping channel writes raise ``ValueError`` without partial changes.
         """
         ...
-    def fade_out_all(self, d: float) -> None:
+    def fade_out_all(self, seconds: float) -> None:
         """Configure or query the scene with fade out all.
 
         Example:

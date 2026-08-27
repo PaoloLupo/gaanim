@@ -114,16 +114,16 @@ scene.play([scene.camera.animate.look_at(eye=(-55, -70, 60), target=(0, 0, 25)).
 # ---------------------------------------------------------------------------
 # 5. Timeline
 # ---------------------------------------------------------------------------
-scene.play([axes.animate.create(duration=1.0), title.animate.write(0.8)])
-scene.play([subtitle.animate.fade_in(0.6)])
+scene.play([axes.animate.create().duration(1.0), title.animate.write().duration(0.8)])
+scene.play([subtitle.animate.fade_in().duration(0.6)])
 
 # El trail dinámico ya está creciendo vía updater+traced_path_3d;
 # inicialmente solo se ve el trail reactivo creciendo; el estático aparece al final.
 scene.play([
-    dot.animate.fade_in(0.4),
-    trail.animate.fade_in(0.4),
+    dot.animate.fade_in().duration(0.4),
+    trail.animate.fade_in().duration(0.4),
     head_glow.animate.opacity(0.35).duration(0.4),
-    origin_tag.animate.fade_in(0.5),
+    origin_tag.animate.fade_in().duration(0.5),
 ])
 scene.wait(1.0)  # deja que el atractor se despliegue 1s (dot ya traza)
 

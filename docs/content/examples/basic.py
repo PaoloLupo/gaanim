@@ -1,13 +1,13 @@
 # %% basic_circle
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK)
 circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-120, 0)
 rect = scene.geometry.rect(160, 100).fill(GOLD).move_to(120, 0)
 
 scene.play([
-    circle.animate.create().duration(1.0).smooth(),
-    rect.animate.grow_from_center().duration(1.0).spring(),
+    circle.animate.create().duration(1.0).easing(Easing.SMOOTH),
+    rect.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90.0, damping=12.0)),
 ])
 scene.wait(0.5)
 scene.play([circle.animate.shift_by(180, 0).duration(1.0), rect.animate.fade_out().duration(0.5)])

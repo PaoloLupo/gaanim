@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLACK, BLUE, NAVY, WHITE, Scene
+from gaanim import Easing, BLACK, BLUE, NAVY, WHITE, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
@@ -26,7 +26,7 @@ scene.play([
     rail.animate.create().duration(0.6),
     mass.animate.grow_from_center().duration(0.5),
 ])
-scene.play([mass.animate.shift_by(600, 0).duration(2.0).smooth(), callout.animate.fade_in()])
+scene.play([mass.animate.shift_by(600, 0).duration(2.0).easing(Easing.SMOOTH), callout.animate.fade_in()])
 scene.wait(0.4)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

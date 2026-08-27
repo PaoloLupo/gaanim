@@ -1,6 +1,6 @@
 """Layout verification using Scene, Anchor, and Direction."""
 
-from gaanim import Anchor, BLACK, BLUE, GOLD, GREEN, RED, WHITE, Direction, Scene
+from gaanim import Easing, Anchor, BLACK, BLUE, GOLD, GREEN, RED, WHITE, Direction, Scene
 
 
 def main():
@@ -13,7 +13,7 @@ def main():
     group = scene.geometry.group([square, circle, dot, label])
 
     scene.play([title.animate.write().duration(0.8), group.animate.grow_from_center().duration(1.0)])
-    scene.play([group.animate.shift_by(120, -40).duration(1.0).smooth()])
+    scene.play([group.animate.shift_by(120, -40).duration(1.0).easing(Easing.SMOOTH)])
     scene.play([circle.animate.indicate().duration(0.6), dot.animate.indicate().duration(0.6)])
     scene.render()
 

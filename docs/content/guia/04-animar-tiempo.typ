@@ -55,8 +55,8 @@ fundido corto.
 Para mover el sistema completo y devolverlo a su sitio:
 
 ```python
-scene.play([system.animate.shift_by(40, 0).duration(0.6).smooth()])
-scene.play([system.animate.shift_by(-40, 0).duration(0.6).smooth()])
+scene.play([system.animate.shift_by(40, 0).duration(0.6).easing(Easing.SMOOTH)])
+scene.play([system.animate.shift_by(-40, 0).duration(0.6).easing(Easing.SMOOTH)])
 ```
 
 `smooth` desacelera cerca de los extremos. Para una magnitud que representa

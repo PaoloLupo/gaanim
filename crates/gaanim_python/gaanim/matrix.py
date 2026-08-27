@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
-from .gaanim_core import Anim, Drawable, MatrixOrder, Text
+from .gaanim_core import Anim, Drawable, Easing, MatrixOrder, Text
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,13 @@ class MatrixSelectionAnimation(Sequence[Anim]):
         self._selection = selection
         self._animations: list[Anim] = []
 
+    @classmethod
+    def _from_animations(cls, animations: Iterable[Anim]) -> "MatrixSelectionAnimation":
+        instance = cls.__new__(cls)
+        instance._selection = None
+        instance._animations = list(animations)
+        return instance
+
     def _targets(self, order: Any, stagger: float, seed: int) -> list[Anim]:
         stagger = _non_negative(stagger, "stagger")
         return [cell.animate.delay(index * stagger) for index, (_, cell) in enumerate(self._selection._ordered(order, seed))]
@@ -51,7 +58,6 @@ class MatrixSelectionAnimation(Sequence[Anim]):
         return self
 
     def fill(self, color: Any, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("fill", color, order=order, stagger=stagger, seed=seed)
-    def color(self, color: Any, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("color", color, order=order, stagger=stagger, seed=seed)
     def opacity(self, value: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("opacity", value, order=order, stagger=stagger, seed=seed)
     def scale_by(self, factor: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("scale_by", factor, order=order, stagger=stagger, seed=seed)
     def rotate_by(self, radians: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("rotate_by", radians, order=order, stagger=stagger, seed=seed)
@@ -62,7 +68,7 @@ class MatrixSelectionAnimation(Sequence[Anim]):
     def indicate(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("indicate", order=order, stagger=stagger, seed=seed)
     def wiggle(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("wiggle", order=order, stagger=stagger, seed=seed)
     def duration(self, seconds: float) -> "MatrixSelectionAnimation": return self._apply("duration", seconds)
-    def ease(self, name: str) -> "MatrixSelectionAnimation": return self._apply("ease", name)
+    def easing(self, easing: Easing) -> "MatrixSelectionAnimation": return self._apply("easing", easing)
 
     def __len__(self) -> int: return len(self._animations)
     def __getitem__(self, index: int | slice) -> Anim | list[Anim]: return self._animations[index]
@@ -236,13 +242,13 @@ class Matrix:
         if sorted(normalized) != list(range(self.ncols)): raise ValueError("column order must be a permutation")
         return self.become([[row[index] for index in normalized] for row in self._values])
 
-    def morph_to(self, target: "Matrix", *, match: str = "auto", duration: float = 1.0, stagger: float = 0.0) -> list[Anim]:
+    def morph_to(self, target: "Matrix", *, match: str = "auto", stagger: float = 0.0) -> MatrixSelectionAnimation:
         if match not in {"auto", "key", "value", "position"}: raise ValueError("match must be auto, key, value, or position")
         pairs, source_only, target_only = _match_entries(self, target, match)
-        animations = [source.animate.transform_to(destination).duration(duration).delay(index * stagger) for index, (source, destination) in enumerate(pairs)]
-        animations.extend(cell.animate.fade_out().duration(duration) for cell in source_only)
-        animations.extend(cell.animate.fade_in().duration(duration) for cell in target_only)
-        return animations
+        animations = [source.animate.transform_to(destination).delay(index * stagger) for index, (source, destination) in enumerate(pairs)]
+        animations.extend(cell.animate.fade_out() for cell in source_only)
+        animations.extend(cell.animate.fade_in() for cell in target_only)
+        return MatrixSelectionAnimation._from_animations(animations)
 
     def to_sympy(self) -> Any: return _sympy().Matrix([[_entry_value(value) for value in row] for row in self._values])
     def add(self, other: "Matrix", **options: Any) -> "MatrixDerivation": return _derive_binary(self, other, "add", **options)
@@ -267,13 +273,13 @@ class MatrixDerivation:
     def __init__(self, value: Any, result: Any, steps: Sequence[MatrixStep]):
         self.value, self.result, self.steps = value, result, tuple(steps)
 
-    def animations(self, *, duration: float = 0.7, order: Any = "row_major", stagger: float = 0.04) -> list[Anim]:
+    def animations(self, *, order: Any = "row_major", stagger: float = 0.04) -> MatrixSelectionAnimation:
         results = self.result if isinstance(self.result, tuple) else (self.result,)
         animations: list[Anim] = []
         for result in results:
-            if isinstance(result, Matrix): animations.extend(result.entries.animate.fade_in(order=order, stagger=stagger).duration(duration))
-            else: animations.append(result.animate.write().duration(duration))
-        return animations
+            if isinstance(result, Matrix): animations.extend(result.entries.animate.fade_in(order=order, stagger=stagger))
+            else: animations.append(result.animate.write())
+        return MatrixSelectionAnimation._from_animations(animations)
 
 
 def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:

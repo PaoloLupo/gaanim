@@ -359,12 +359,8 @@ impl Composition {
         self.resolve(duration, rate, &mut Vec::new())
     }
 
-    pub fn schedule(
-        &self,
-        duration: Option<f64>,
-        rate: Option<RateFunc>,
-    ) -> Result<Schedule, PlayError> {
-        let resolved = self.resolved(duration, rate)?;
+    pub fn schedule(&self, duration: Option<f64>) -> Result<Schedule, PlayError> {
+        let resolved = self.resolved(duration, None)?;
         Ok(Schedule {
             span: resolved_span(&resolved),
             entries: resolved
@@ -6680,7 +6676,10 @@ mod tests {
         let mut canvas = SceneModel::new(1280, 720);
         let marker = canvas.circle(20.0);
         let marker_anim = marker.fade_in(2.0);
-        let camera_anim = canvas.camera_orbit(0.5, 0.1, 2.0).linear().delay(0.25);
+        let camera_anim = canvas
+            .camera_orbit(0.5, 0.1, 2.0)
+            .rate_func(gaanim_math::RateFunc::Linear)
+            .delay(0.25);
 
         canvas.play(vec![marker_anim, camera_anim]);
 
@@ -7708,7 +7707,7 @@ mod tests {
             0.0,
         )
         .unwrap();
-        let schedule = plan.schedule(None, None).unwrap();
+        let schedule = plan.schedule(None).unwrap();
         assert_eq!(schedule.entries[0].duration, None);
         assert_eq!(schedule.entries[1].start, 0.0);
         assert_eq!(schedule.span, 0.5);
@@ -8190,7 +8189,7 @@ mod tests {
         let group =
             Composition::parallel(vec![Composition::leaf(b), Composition::leaf(c)]).unwrap();
         let plan = Composition::sequence(vec![Composition::leaf(a), group], -0.25).unwrap();
-        let schedule = plan.schedule(None, None).unwrap();
+        let schedule = plan.schedule(None).unwrap();
         assert_eq!(schedule.span, 2.75);
         assert_eq!(schedule.entries[0].start, 0.0);
         assert_eq!(schedule.entries[1].start, 0.75);
@@ -8243,7 +8242,7 @@ mod tests {
         .unwrap()
         .stretch(5.0)
         .unwrap();
-        let schedule = plan.schedule(None, None).unwrap();
+        let schedule = plan.schedule(None).unwrap();
         assert_eq!(schedule.span, 5.0);
         assert_eq!(schedule.entries[0].duration, Some(1.5));
         assert_eq!(schedule.entries[1].start, 1.0);

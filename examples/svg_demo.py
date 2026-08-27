@@ -16,7 +16,7 @@ top_spark = art.part("spark-top")
 caption = scene.text("gradients, text outlines, clipPath, filters and <use>").fill(GOLD).move_to(0, -205, anchor=Anchor.CENTER)
 
 scene.wait(0.4)
-scene.play([orb.animate.indicate(0.8), top_spark.animate.rotate_by(0.8).duration(0.8)])
+scene.play([orb.animate.indicate().duration(0.8), top_spark.animate.rotate_by(0.8).duration(0.8)])
 scene.wait(0.4)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

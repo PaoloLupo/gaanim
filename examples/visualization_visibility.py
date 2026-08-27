@@ -42,14 +42,14 @@ line = scene.viz.number_line(
 title = scene.text("Visibility: per-axis, rings, and annotations").fill(GOLD).move_to(
     0, 315, anchor=Anchor.CENTER
 )
-scene.play([plane.animate.write(0.9), curve.animate.create(0.9), polar.animate.create(0.9), line.animate.create(0.9), title.animate.write(0.5)])
+scene.play([plane.animate.write().duration(0.9), curve.animate.create().duration(0.9), polar.animate.create().duration(0.9), line.animate.create().duration(0.9), title.animate.write().duration(0.5)])
 scene.wait(0.4)
 scene.play([
-    plane.animate.fade_out(0.4),
-    curve.animate.fade_out(0.4),
-    polar.animate.fade_out(0.4),
-    line.animate.fade_out(0.4),
-    title.animate.fade_out(0.4),
+    plane.animate.fade_out().duration(0.4),
+    curve.animate.fade_out().duration(0.4),
+    polar.animate.fade_out().duration(0.4),
+    line.animate.fade_out().duration(0.4),
+    title.animate.fade_out().duration(0.4),
 ])
 
 space_3d = scene.viz.cartesian_3d(
@@ -75,7 +75,7 @@ title_3d = scene.text("Visibility: XY grid with selected 3D axes").fill(GOLD).hu
 )
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.camera.look_at(eye=(9, 7, 9), target=(0, 0, 0))
-scene.play([space_3d.animate.create(1.0), title_3d.animate.write(0.5)])
+scene.play([space_3d.animate.create().duration(1.0), title_3d.animate.write().duration(0.5)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.45, 1.2, 1.9, 2.6])

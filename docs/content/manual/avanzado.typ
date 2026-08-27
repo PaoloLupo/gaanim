@@ -37,7 +37,7 @@ radius = scene.mechanics.bar_between((0, 0), tip).stroke(GOLD, 6)
 label = scene.viz.readout(lambda value: value, inputs=[theta], label="$theta$", format=".2f")
 label.follow(tip, offset=(0, 28))
 
-scene.play([radius.animate.create(0.5), label.animate.fade_in(0.3)])
+scene.play([radius.animate.create().duration(0.5), label.animate.fade_in().duration(0.3)])
 scene.play([theta.animate.set(2 * pi).duration(4.0)])
 scene.render()
 ```

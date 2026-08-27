@@ -2,6 +2,7 @@ use gaanim_api::canvas::{Composition, PlayError, Schedule};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
+use crate::easing::PyEasing;
 use crate::pycanvas::{PyAudio, PyLottie, PyVideo};
 use crate::pydrawable::PyCanvasAnim;
 
@@ -93,11 +94,11 @@ impl PyComposition {
             .map_err(play_error)
     }
 
-    #[pyo3(signature = (*, duration=None, rate=None))]
-    fn defaults(&self, duration: Option<f64>, rate: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (*, duration=None, easing=None))]
+    fn defaults(&self, duration: Option<f64>, easing: Option<&PyEasing>) -> PyResult<Self> {
         self.inner
             .clone()
-            .defaults(duration, rate.map(gaanim_api::canvas::named_rate_func))
+            .defaults(duration, easing.map(|value| value.inner.clone()))
             .map(|inner| Self { inner })
             .map_err(play_error)
     }
@@ -110,10 +111,10 @@ impl PyComposition {
             .map_err(play_error)
     }
 
-    #[pyo3(signature = (*, duration=None, rate=None))]
-    fn schedule(&self, duration: Option<f64>, rate: Option<&str>) -> PyResult<PySchedule> {
+    #[pyo3(signature = (*, duration=None))]
+    fn schedule(&self, duration: Option<f64>) -> PyResult<PySchedule> {
         self.inner
-            .schedule(duration, rate.map(gaanim_api::canvas::named_rate_func))
+            .schedule(duration)
             .map(Into::into)
             .map_err(play_error)
     }

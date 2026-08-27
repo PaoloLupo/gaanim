@@ -6,6 +6,7 @@ use pyo3::types::PyTuple;
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
+use crate::easing::PyEasing;
 use crate::py3d::PyMaterial3D;
 use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression};
 use crate::pystyle::PyStrokeStyle;
@@ -77,21 +78,15 @@ impl PyCanvasAnim {
         }
     }
 
-    fn color(&self, color: PyColor) -> Self {
-        Self {
-            inner: self.inner.clone().color(color.0),
-        }
-    }
-
     fn stroke(&self, color: PyColor, width: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if self.inner.property_target_is_primitive_3d() {
             return Err(PyTypeError::new_err(
-                "stroke() is only available for vector drawables; animate material() or color() on Primitive3D",
+                "stroke() is only available for vector drawables; animate fill() or material() on Primitive3D",
             ));
         }
         Ok(Self {
@@ -99,26 +94,10 @@ impl PyCanvasAnim {
         })
     }
 
-    fn stroke_color(&self, color: PyColor) -> PyResult<Self> {
-        if self.inner.property_target_is_text_selection() {
-            return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
-            ));
-        }
-        if self.inner.property_target_is_primitive_3d() {
-            return Err(PyTypeError::new_err(
-                "stroke_color() is only available for vector drawables",
-            ));
-        }
-        Ok(Self {
-            inner: self.inner.clone().stroke_color(color.0),
-        })
-    }
-
     fn material(&self, material: PyMaterial3D) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if !self.inner.property_target_is_primitive_3d() {
@@ -137,14 +116,12 @@ impl PyCanvasAnim {
         }
     }
 
-    #[pyo3(signature = (value, duration=None))]
-    fn set(&self, value: f64, duration: Option<f64>) -> PyResult<Self> {
+    fn set(&self, value: f64) -> PyResult<Self> {
         if !value.is_finite() {
             return Err(PyValueError::new_err("parameter values must be finite"));
         }
-        let inner = self.inner.clone().set(value);
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
+            inner: self.inner.clone().set(value),
         })
     }
 
@@ -159,7 +136,7 @@ impl PyCanvasAnim {
     fn shift_by(&self, dx: f64, dy: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if !self.inner.property_position_is_free() {
@@ -176,7 +153,7 @@ impl PyCanvasAnim {
     fn move_to(&self, x: f64, y: f64, anchor: Option<&PyAnchor>) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if !self.inner.property_position_is_free() {
@@ -196,7 +173,7 @@ impl PyCanvasAnim {
     fn shift_by_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if !self.inner.property_position_is_free() {
@@ -212,7 +189,7 @@ impl PyCanvasAnim {
     fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         if !self.inner.property_position_is_free() {
@@ -228,7 +205,7 @@ impl PyCanvasAnim {
     fn scale_by(&self, factor: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         self.require_transformable()?;
@@ -240,7 +217,7 @@ impl PyCanvasAnim {
     fn scale_to(&self, factor: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         self.require_transformable()?;
@@ -252,7 +229,7 @@ impl PyCanvasAnim {
     fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         self.require_transformable()?;
@@ -264,7 +241,7 @@ impl PyCanvasAnim {
     fn scale_by_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         self.require_transformable()?;
@@ -276,7 +253,7 @@ impl PyCanvasAnim {
     fn rotate_by(&self, radians: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
-                "TextSelection.animate() supports only fill/color and opacity targets",
+                "TextSelection.animate supports only fill and opacity targets",
             ));
         }
         self.require_transformable()?;
@@ -323,16 +300,14 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyResult<Self> {
+    fn fade_in(&self) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "fade_in() requires a Drawable animation proxy",
             ));
         }
-        let inner = self.inner.clone().fade_in();
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().fade_in(),
         })
     }
 
@@ -357,21 +332,19 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyResult<Self> {
+    fn fade_out(&self) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "fade_out() requires a Drawable animation proxy",
             ));
         }
-        let inner = self.inner.clone().fade_out();
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().fade_out(),
         })
     }
 
-    #[pyo3(signature = (duration=None, *, by="grapheme", order="forward", stagger=0.0))]
-    fn write(&self, duration: Option<f64>, by: &str, order: &str, stagger: f64) -> PyResult<Self> {
+    #[pyo3(signature = (*, by="grapheme", order="forward", stagger=0.0))]
+    fn write(&self, by: &str, order: &str, stagger: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "write() requires a Drawable animation proxy",
@@ -392,64 +365,53 @@ impl PyCanvasAnim {
                 "stagger must be finite and non-negative",
             ));
         }
-        let inner = self.inner.clone().write().lag_ratio(stagger);
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().write().lag_ratio(stagger),
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyResult<Self> {
+    fn create(&self) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "create() requires a Drawable animation proxy",
             ));
         }
-        let inner = self.inner.clone().create();
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().create(),
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyResult<Self> {
+    fn unwrite(&self) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "unwrite() requires a Drawable animation proxy",
             ));
         }
-        let inner = self.inner.clone().unwrite();
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().unwrite(),
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn uncreate(&self, duration: Option<f64>) -> PyResult<Self> {
+    fn uncreate(&self) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "uncreate() requires a Drawable animation proxy",
             ));
         }
-        let inner = self.inner.clone().uncreate();
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().uncreate(),
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn grow_from_center(&self, duration: Option<f64>) -> Self {
-        let inner = self.inner.clone().grow_from_center();
+    fn grow_from_center(&self) -> Self {
         Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().grow_from_center(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn shrink_to_center(&self, duration: Option<f64>) -> Self {
-        let inner = self.inner.clone().shrink_to_center();
+    fn shrink_to_center(&self) -> Self {
         Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().shrink_to_center(),
         }
     }
 
@@ -515,19 +477,15 @@ impl PyCanvasAnim {
             .map_err(PyValueError::new_err)
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> PyResult<Self> {
-        let inner = self.inner.clone().indicate();
+    fn indicate(&self) -> PyResult<Self> {
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().indicate(),
         })
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn wiggle(&self, duration: Option<f64>) -> PyResult<Self> {
-        let inner = self.inner.clone().wiggle();
+    fn wiggle(&self) -> PyResult<Self> {
         Ok(Self {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.inner.clone().wiggle(),
         })
     }
 
@@ -561,50 +519,32 @@ impl PyCanvasAnim {
         }
     }
 
-    fn duration(&self, d: f64) -> Self {
+    fn duration(&self, seconds: f64) -> PyResult<Self> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(PyValueError::new_err(
+                "seconds must be finite and non-negative",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().duration(seconds),
+        })
+    }
+
+    fn easing(&self, easing: &PyEasing) -> Self {
         Self {
-            inner: self.inner.clone().duration(d),
+            inner: self.inner.clone().rate_func(easing.inner.clone()),
         }
     }
 
-    fn ease(&self, name: &str) -> Self {
-        Self {
-            inner: self.inner.clone().ease(name),
+    fn delay(&self, seconds: f64) -> PyResult<Self> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(PyValueError::new_err(
+                "seconds must be finite and non-negative",
+            ));
         }
-    }
-
-    fn rate(&self, name: &str) -> Self {
-        self.ease(name)
-    }
-
-    fn delay(&self, sec: f64) -> Self {
-        Self {
-            inner: self.inner.clone().delay(sec),
-        }
-    }
-
-    fn steps(&self, n: u32) -> Self {
-        Self {
-            inner: self.inner.clone().steps(n),
-        }
-    }
-
-    fn spring(&self) -> Self {
-        Self {
-            inner: self.inner.clone().spring(),
-        }
-    }
-
-    fn smooth(&self) -> Self {
-        Self {
-            inner: self.inner.clone().smooth(),
-        }
-    }
-
-    fn linear(&self) -> Self {
-        Self {
-            inner: self.inner.clone().linear(),
-        }
+        Ok(Self {
+            inner: self.inner.clone().delay(seconds),
+        })
     }
 
     fn lag_ratio(&self, value: f64) -> Self {
@@ -1011,10 +951,6 @@ impl PyDrawable {
     }
     fn pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().pivot(x, y))
-    }
-    fn at_anchor(&self, x: f64, y: f64, anchor: &PyAnchor) -> PyResult<Self> {
-        self.require_free_position("at_anchor")?;
-        Ok(Self(self.0.clone().at_anchor(x, y, anchor.0)))
     }
     #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
     fn next_to(

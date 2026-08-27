@@ -12,7 +12,7 @@ scene.canvas.set_theme(paper)
 
 scene.segment("Introduction")
 title = scene.text("glTF segment visibility").fill(BLACK).hud().move_to(0, 420)
-scene.play([title.animate.write(0.6)])
+scene.play([title.animate.write().duration(0.6)])
 scene.wait(1.0)
 
 scene.segment("Character", Transition.cross_fade(1.0))

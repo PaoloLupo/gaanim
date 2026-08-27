@@ -539,69 +539,51 @@ impl PyTextSelectionAnimation {
         }
     }
 
-    fn color(&self, color: PyColor) -> PyCanvasAnim {
-        self.fill(color)
-    }
-
     fn opacity(&self, value: f32) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.source.clone().animate_properties().opacity(value),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().indicate();
+    fn indicate(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().indicate(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().wiggle();
+    fn wiggle(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().wiggle(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn pulse(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().pulse();
+    fn pulse(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().pulse(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn wave(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().wave();
+    fn wave(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().wave(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn highlight(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().highlight();
+    fn highlight(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().highlight(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn focus(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().focus();
+    fn focus(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().focus(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn cancel(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let inner = self.source.clone().animate_properties().cancel();
+    fn cancel(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+            inner: self.source.clone().animate_properties().cancel(),
         }
     }
 
@@ -919,24 +901,6 @@ impl PyText {
     fn pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyRef<'_, Self> {
         slf.handle.clone().pivot(x, y);
         slf
-    }
-
-    fn at_anchor<'py>(
-        slf: PyRef<'py, Self>,
-        x: f64,
-        y: f64,
-        anchor: &Bound<'_, PyAny>,
-    ) -> PyResult<PyRef<'py, Self>> {
-        slf.require_free_position("at_anchor")?;
-        match resolve_text_anchor(anchor)? {
-            ResolvedTextAnchor::Geometric(anchor) => {
-                slf.handle.clone().at_anchor(x, y, anchor);
-            }
-            ResolvedTextAnchor::Typographic(anchor) => {
-                slf.handle.clone().at_text_anchor(x, y, anchor);
-            }
-        }
-        Ok(slf)
     }
 
     #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]

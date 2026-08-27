@@ -19,22 +19,16 @@ caption = scene.text("La llave nombra la masa").fill(GRAY).move_to(0, -220, anch
 scene.play([title.animate.write(), formula.animate.write(), caption.animate.fade_in()])
 scene.wait(0.4)
 
-# La llave se calcula con el límite real del tag ``mass``.
-scene.play([formula["mass"].brace("masa", duration=0.65)])
+# El énfasis se limita a los glifos del tag ``mass``.
+scene.play([formula["mass"].animate.highlight().duration(0.65)])
 scene.wait(0.5)
 
-scene.play([caption.animate.fade_out(duration=0.2)])
+scene.play([caption.animate.fade_out().duration(0.2)])
 caption = scene.text("La línea sigue al término anotado").fill(GRAY).move_to(0, -220, anchor=Anchor.CENTER)
 scene.play([caption.animate.fade_in()])
 
-# La línea comienza en c² y conserva ese extremo si el término se desplaza.
-scene.play([
-    formula["light_speed"].annotate(
-        "velocidad de la luz",
-        offset=(175, 95),
-        duration=0.65,
-    )
-])
+# La onda conserva la selección semántica aunque cambie el layout del texto.
+scene.play([formula["light_speed"].animate.wave().duration(0.65)])
 scene.wait(1.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

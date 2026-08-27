@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import Anchor, BLACK, GOLD, WHITE, Scene
+from gaanim import Easing, Anchor, BLACK, GOLD, WHITE, Scene
 
 
 scene = Scene(960, 540, background=WHITE)
@@ -21,7 +21,7 @@ scene.play([
     disk.animate.create().duration(0.6),
     marker.animate.fade_in().duration(0.3),
     rotation.animate.fade_in().duration(0.3),
-    theta.animate.set(4.8).duration(2.4).smooth(),
+    theta.animate.set(4.8).duration(2.4).easing(Easing.SMOOTH),
 ])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
