@@ -13,6 +13,6 @@ if audio := os.environ.get("GAANIM_EXPORT_SMOKE_AUDIO"):
 else:
     audio = None
 
-scene.play([circle.create().duration(0.3), *([audio] if audio else [])])
-scene.play([circle.move(48, 0).duration(0.3)])
+scene.play([circle.animate.create().duration(0.3), *([audio] if audio else [])])
+scene.play([circle.animate.shift_by(48, 0).duration(0.3)])
 scene.render()

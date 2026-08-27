@@ -18,16 +18,19 @@ revelarse.
 Sustituye la última línea por:
 
 ```python
-scene.play([
-    title.write().duration(0.8),
-    caption.fade_in().duration(0.6),
-], lag=0.12)
+from gaanim import stagger
+scene.play(stagger(
+    title.animate.write().duration(0.8),
+    caption.animate.fade_in().duration(0.6),
+    each=0.12,
+))
 
-scene.play([
-    orbit.create().duration(1.0),
-    radius.create().duration(0.7),
-    point.fade_in().duration(0.35),
-], lag=0.15)
+scene.play(stagger(
+    orbit.animate.create().duration(1.0),
+    radius.animate.create().duration(0.7),
+    point.animate.fade_in().duration(0.35),
+    each=0.15,
+))
 
 scene.wait(0.8)
 scene.render()
@@ -35,7 +38,7 @@ scene.render()
 
 == Qué devuelve una animación
 
-`title.write()` y `orbit.create()` devuelven objetos `Anim`. Todavía no
+`title.animate.write()` y `orbit.animate.create()` devuelven objetos `Anim`. Todavía no
 modifican el tiempo. `scene.play([...])` programa esos descriptores en el cursor
 actual de la timeline.
 
@@ -52,8 +55,8 @@ fundido corto.
 Para mover el sistema completo y devolverlo a su sitio:
 
 ```python
-scene.play([system.move(40, 0).duration(0.6).smooth()])
-scene.play([system.move(-40, 0).duration(0.6).smooth()])
+scene.play([system.animate.shift_by(40, 0).duration(0.6).smooth()])
+scene.play([system.animate.shift_by(-40, 0).duration(0.6).smooth()])
 ```
 
 `smooth` desacelera cerca de los extremos. Para una magnitud que representa

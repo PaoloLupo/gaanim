@@ -17,7 +17,7 @@ un proyecto creado con `gaanim init video mi-movimiento`.
 == Crea la escena
 
 ```python
-from gaanim import BLUE, WHITE, YELLOW, Scene
+from gaanim import BLUE, WHITE, YELLOW, Scene, stagger
 
 scene = Scene(1280, 720, background="#0f172a")
 ```
@@ -28,9 +28,9 @@ CSS o un objeto `Color`.
 == Añade los objetos
 
 ```python
-title = scene.text("Movimiento circular", role="title").fill(WHITE).at(0, 250)
+title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 250)
 orbit = scene.geometry.circle(140).stroke(BLUE, 4).no_fill()
-point = scene.geometry.dot(12).fill(YELLOW).at(140, 0)
+point = scene.geometry.dot(12).fill(YELLOW).move_to(140, 0)
 ```
 
 Cada fábrica devuelve un objeto fluido. `fill`, `stroke`, `no_fill` y `at`
@@ -40,16 +40,17 @@ encadenando llamadas.
 == Programa la entrada
 
 ```python
-scene.play([
-    title.write().duration(0.8),
-    orbit.create().duration(1.0),
-    point.fade_in().duration(0.4),
-], lag=0.12)
+scene.play(stagger(
+    title.animate.write().duration(0.8),
+    orbit.animate.create().duration(1.0),
+    point.animate.fade_in().duration(0.4),
+    each=0.12,
+))
 scene.wait(0.5)
 ```
 
-Las animaciones de una lista comienzan como grupo. `lag` escalona sus inicios;
-`duration` controla la duración individual.
+Las animaciones de una lista comienzan como grupo. `stagger(..., each=...)`
+escalona sus inicios; `duration` controla la duración individual.
 
 == Previsualiza o exporta
 

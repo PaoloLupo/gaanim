@@ -173,7 +173,7 @@ def validate_editorial_contract(module: object) -> list[str]:
     )
     if not all(isinstance(component, module.Drawable) for component in components):
         failures.append("one or more editorial factories did not return Drawable")
-    animations = [component.fade_in(duration=0.1) for component in components]
+    animations = [component.animate.fade_in(duration=0.1) for component in components]
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("one or more editorial groups did not preserve Drawable animations")
     else:
@@ -201,7 +201,7 @@ def validate_editorial_contract(module: object) -> list[str]:
         failures.append("removed Scene.caption remains public")
     try:
         scene.slides.badge("legacy", 0.0, 0.0)
-    except TypeError:
+    except (TypeError, AttributeError):
         pass
     else:
         failures.append("Scene.badge still accepts legacy positional coordinates")
@@ -322,20 +322,16 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("FlowParticles did not expose drawable and flow handles")
     for aggregate in (arrows, streams, particles):
         for method in (
-            "create",
-            "write",
-            "fade_in",
-            "fade_out",
-            "uncreate",
-            "unwrite",
-            "grow_from_center",
-            "shrink_to_center",
+            "create", "write", "fade_in", "fade_out", "uncreate", "unwrite",
+            "grow_from_center", "shrink_to_center",
         ):
-            animation = getattr(aggregate, method)(0.1)
+            animation = getattr(aggregate.animate, method)(0.1)
             if not isinstance(animation, module.Anim):
                 failures.append(
-                    f"{type(aggregate).__name__}.{method} did not return Anim"
+                    f"{type(aggregate).__name__}.animate.{method} did not return Anim"
                 )
+            if hasattr(aggregate, method):
+                failures.append(f"legacy {type(aggregate).__name__}.{method} remains public")
     if len(module.ColorMap.names("matplotlib")) != 39:
         failures.append("Matplotlib ColorMap catalog is incomplete")
     if len(module.ColorMap.names("scientific")) != 39:
@@ -361,8 +357,23 @@ def validate_visualization_contract(module: object) -> list[str]:
         module.Axis.linear(-4.0, 4.0),
         module.Axis.linear(-3.0, 3.0),
     )
-    if len(linear_space.animate_view((-2.0, 2.0), (-1.5, 1.5))) != 2:
-        failures.append("CoordinateSpace.animate_view did not return pan/zoom animations")
+    view_animation = linear_space.animate.view_to((-2.0, 2.0), (-1.5, 1.5))
+    if not isinstance(view_animation, module.Anim):
+        failures.append("CoordinateSpace.animate.view_to did not return Anim")
+    for method, args in (
+        ("create", (0.25,)),
+        ("write", (0.25,)),
+        ("fade_in", (0.25,)),
+        ("fade_out", (0.25,)),
+        ("move_to", (10.0, 20.0)),
+        ("scale_to", (1.2,)),
+        ("rotate_to", (0.1,)),
+    ):
+        result = getattr(linear_space.animate, method)(*args)
+        if not isinstance(result, module.Anim):
+            failures.append(f"CoordinateSpace.animate.{method} did not return Anim")
+    if hasattr(linear_space, "animate_view"):
+        failures.append("legacy CoordinateSpace.animate_view remains public")
 
     space_3d = scene.viz.cartesian_3d(
         module.Axis.linear(-2.0, 2.0),
@@ -460,9 +471,7 @@ def validate_visualization_contract(module: object) -> list[str]:
         if path not in nested_text.parts:
             failures.append(f"TextParts did not expand inside part(): {path}")
 
-    if compact_text.become(
-        "$", module.parts(first="x", second="y"), "$", duration=0.1
-    ) is not None:
+    if compact_text.become("$", module.parts(first="x", second="y"), "$") is not None:
         failures.append("Text.become with TextParts did not preserve its None return")
     for name in ("first", "second"):
         if name not in compact_text.parts:
@@ -481,14 +490,14 @@ def validate_visualization_contract(module: object) -> list[str]:
             failures.append(f"Scene.equation lost semantic part {name!r}")
         if not isinstance(equation[name], module.TextSelection):
             failures.append(f"Scene.equation part {name!r} was not selectable")
-    if not isinstance(equation.write(0.5, by="part"), module.Anim):
+    if not isinstance(equation.animate.write(0.5), module.Anim):
         failures.append("Scene.equation did not preserve Text animations")
     codex_equation = scene.text.equation(
         module.parts(gravity="g sin(theta)", acceleration="theta''")
     )
     codex_animations = (
-        codex_equation["gravity"].indicate(0.3),
-        codex_equation["acceleration"].color_to(module.GOLD, duration=0.3),
+        codex_equation["gravity"].animate.indicate(0.3),
+        codex_equation["acceleration"].animate.fill(module.GOLD).duration(0.3),
     )
     if not all(isinstance(animation, module.Anim) for animation in codex_animations):
         failures.append("Typst/Codex semantic selections did not return animations")
@@ -531,29 +540,32 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("Text.parts membership did not resolve semantic part names")
     if not isinstance(text["formula"]["mass"].fill(module.RED), module.TextSelection):
         failures.append("TextSelection.fill did not preserve the semantic selection")
-    positional_write = text.write(0.6, by="word")
+    positional_write = text.animate.write(0.6)
     if not isinstance(positional_write, module.Anim):
         failures.append("Text.write did not accept positional duration")
     else:
         scene.play([positional_write])
-    selection_anim = text["formula"]["mass"].indicate()
+    selection_anim = text["formula"]["mass"].animate.indicate()
+    if not isinstance(text["formula"]["mass"].animate, module.TextSelectionAnimation):
+        failures.append("TextSelection.animate did not return its typed proxy")
     if not isinstance(selection_anim, module.Anim):
         failures.append("TextSelection.indicate did not return Anim")
     else:
         scene.play([selection_anim])
-    selection_color = text["formula"]["mass"].color_to(module.RED, duration=0.4)
-    selection_opacity = text["formula"]["mass"].opacity_to(0.6, duration=0.4)
-    selection_compound = text["formula"]["mass"].animate().fill(module.BLUE).opacity(0.8)
+    selection_color = text["formula"]["mass"].animate.fill(module.RED).duration(0.4)
+    selection_opacity = text["formula"]["mass"].animate.opacity(0.6).duration(0.4)
+    selection_compound = text["formula"]["mass"].animate.fill(module.BLUE).opacity(0.8)
     if not all(
         isinstance(anim, module.Anim)
         for anim in (selection_color, selection_opacity, selection_compound)
     ):
         failures.append("TextSelection color/opacity animations did not return Anim")
     else:
-        scene.play([selection_color, selection_opacity, selection_compound])
+        scene.play([selection_color, selection_opacity])
+        scene.play([selection_compound])
     try:
-        text["formula"]["mass"].animate().scale(2.0)
-    except TypeError:
+        text["formula"]["mass"].animate.scale_by(2.0)
+    except (TypeError, AttributeError):
         pass
     else:
         failures.append("TextSelection.animate accepted an unsupported scale target")
@@ -563,17 +575,22 @@ def validate_visualization_contract(module: object) -> list[str]:
             "formula", "$E = ", module.part("mass", "m", color=module.BLUE), " c^2$"
         ),
     )
-    text_transition = text.step_to(target_text)
+    text_transition = text.animate.transform_to(target_text)
     if not isinstance(text_transition, module.Anim):
-        failures.append("Text.step_to did not return Anim")
+        failures.append("Text.animate.transform_to did not return Anim")
     else:
         scene.play([text_transition])
-    chained_text = scene.text("Chain").fill(module.WHITE).at(
+    border_fill = text.animate.draw_border_then_fill().duration(0.3)
+    if not isinstance(border_fill, module.Anim):
+        failures.append("Text.animate.draw_border_then_fill did not return Anim")
+    if hasattr(text, "draw_border_then_fill"):
+        failures.append("legacy Text.draw_border_then_fill remains public")
+    chained_text = scene.text("Chain").fill(module.WHITE).move_to(
         0.0, 0.0, module.Anchor.TOP_LEFT
     )
     if not isinstance(chained_text, module.Text):
         failures.append("Text fluent styling or positioning erased the Text subtype")
-    baseline_text = scene.text("Baseline").at(
+    baseline_text = scene.text("Baseline").move_to(
         0.0, 0.0, anchor=module.TextAnchor.BASELINE_LEFT
     )
     baseline_equation = scene.text.equation("x_1 = 2").at_anchor(
@@ -581,33 +598,33 @@ def validate_visualization_contract(module: object) -> list[str]:
     )
     if not all(isinstance(value, module.Text) for value in (baseline_text, baseline_equation)):
         failures.append("TextAnchor positioning did not preserve Text/Equation handles")
-    anchored_drawable = scene.geometry.rect(40.0, 20.0).at(20.0, 10.0, anchor=module.Anchor.RIGHT)
+    anchored_drawable = scene.geometry.rect(40.0, 20.0).move_to(20.0, 10.0, anchor=module.Anchor.RIGHT)
     if not isinstance(anchored_drawable, module.Drawable):
         failures.append("Drawable.at with an anchor did not return Drawable")
-    reference_drawable = scene.geometry.dot(6.0).at(-25.0, 15.0)
-    centered_drawable = scene.geometry.rect(40.0, 20.0).at(reference_drawable)
+    reference_drawable = scene.geometry.dot(6.0).move_to(-25.0, 15.0)
+    centered_drawable = scene.geometry.rect(40.0, 20.0).move_to(reference_drawable)
     if not isinstance(centered_drawable, module.Drawable):
         failures.append("Drawable.at with a reference did not return Drawable")
-    centered_text = scene.text("Centered").at(reference_drawable)
+    centered_text = scene.text("Centered").move_to(reference_drawable)
     if not isinstance(centered_text, module.Text):
         failures.append("Text.at with a reference erased the Text subtype")
-    centered_primitive = scene.geometry.cube().at(reference_drawable)
+    centered_primitive = scene.geometry.cube().move_to(reference_drawable)
     if not isinstance(centered_primitive, module.Primitive3D):
         failures.append("Primitive3D.at with a reference erased the Primitive3D subtype")
     try:
-        scene.geometry.rect(40.0, 20.0).at(reference_drawable, anchor=module.Anchor.TOP)
+        scene.geometry.rect(40.0, 20.0).move_to(reference_drawable, anchor=module.Anchor.TOP)
     except TypeError:
         pass
     else:
         failures.append("Drawable.at accepted an anchor with a reference")
     try:
-        scene.geometry.rect(40.0, 20.0).at(10.0)
+        scene.geometry.rect(40.0, 20.0).move_to(10.0)
     except TypeError:
         pass
     else:
         failures.append("Drawable.at accepted a numeric x without y")
     try:
-        scene.geometry.rect(40.0, 20.0).at(
+        scene.geometry.rect(40.0, 20.0).move_to(
             0.0, 0.0, anchor=module.TextAnchor.BASELINE_CENTER
         )
     except TypeError:
@@ -616,11 +633,11 @@ def validate_visualization_contract(module: object) -> list[str]:
         failures.append("Drawable.at accepted a TextAnchor")
     if not isinstance(
         anchored_drawable.move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
-        module.Anim,
+        module.Drawable,
     ):
-        failures.append("Drawable.move_to with an anchor did not return Anim")
+        failures.append("Drawable.move_to with an anchor did not remain immediate")
     if not isinstance(
-        anchored_drawable.animate().move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
+        anchored_drawable.animate.move_to(80.0, 40.0, anchor=module.Anchor.TOP_RIGHT),
         module.Anim,
     ):
         failures.append("Anim.move_to with an anchor did not return Anim")
@@ -660,8 +677,8 @@ def validate_layout_detach_contract(module: object) -> list[str]:
     except module.LayoutOwnershipError:
         failures.append("Layout.detach did not release positional ownership")
     else:
-        if not isinstance(movement, module.Anim):
-            failures.append("a detached child move_to did not return Anim")
+        if not isinstance(movement, module.Text):
+            failures.append("a detached child move_to was not immediate")
     return failures
 
 
@@ -730,7 +747,7 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     )
     if not isinstance(semantic_dimension.number, module.Drawable):
         failures.append("dimension_between(value=parameter) did not imply a number readout")
-    value_animation = physical_width.animate_to(4.0, duration=0.4)
+    value_animation = physical_width.animate.set(4.0).duration(0.4)
     if not isinstance(value_animation, module.Anim):
         failures.append("dimension value Parameter did not remain animatable")
     else:
@@ -793,20 +810,19 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     constraint.enable()
     scene.camera.bind_3d(eye=(4.0, 3.0, 8.0), target=point, fov_y=0.8).disable()
 
+    immediate = (
+        scene.camera.pan_to(point), scene.camera.zoom_to(parameter),
+        scene.camera.rotate_to(module.computed(lambda value: value * 0.1, inputs=[parameter])),
+        scene.camera.frame_to([marker], margin=(10.0, 20.0), dynamic=True),
+        scene.camera.look_at((4.0, 3.0, 8.0), point), scene.camera.orthographic(1.0),
+        scene.camera.reset(), scene.camera.to(state_2d), scene.camera.restore("overview"),
+    )
+    if not all(isinstance(value, module.Camera) for value in immediate):
+        failures.append("one or more direct camera operations were not immediate")
     animations = (
-        scene.camera.pan_to(point, duration=0.0),
-        scene.camera.zoom_to(parameter, duration=0.0),
-        scene.camera.rotate_to(
-            module.computed(lambda value: value * 0.1, inputs=[parameter]),
-            duration=0.0,
-        ),
-        scene.camera.frame_to([marker], margin=(10.0, 20.0), dynamic=True, duration=0.0),
-        scene.camera.follow(point, offset=(2.0, 3.0), lag=0.2, duration=0.1),
-        scene.camera.look_at((4.0, 3.0, 8.0), point, duration=0.0),
-        scene.camera.orthographic(1.0, duration=0.0),
-        scene.camera.reset(duration=0.0),
-        scene.camera.to(state_2d, duration=0.0),
-        scene.camera.restore("overview", duration=0.0),
+        scene.camera.animate.pan_to(point), scene.camera.animate.zoom_to(parameter),
+        scene.camera.animate.follow(point, offset=(2.0, 3.0), lag=0.2),
+        scene.camera.animate.shake(), scene.camera.animate.to(state_2d),
     )
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("one or more camera rig operations did not return Anim")
@@ -854,14 +870,14 @@ def validate_matrix_contract(module: object) -> list[str]:
         failures.append("matrix row selection returned wrong coordinates")
     if matrix.diagonal().coordinates != ((0, 0), (1, 1)):
         failures.append("matrix diagonal selection returned wrong coordinates")
-    ordered = matrix.entries.write(0.1, order="spiral_in", stagger=0.01)
+    ordered = matrix.entries.animate.write(order="spiral_in", stagger=0.01).duration(0.1)
     if len(ordered) != 6 or not all(isinstance(animation, module.Anim) for animation in ordered):
         failures.append("matrix ordered animation did not return one Anim per cell")
     random_a = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
     random_b = module.MatrixOrder.order(2, 3, matrix.entries.coordinates, "random", 7)
     if random_a != random_b:
         failures.append("matrix random order is not reproducible")
-    replacement = matrix.set(0, 1, "x", animate=0.1)
+    replacement = matrix.set(0, 1, "x")
     if not isinstance(replacement, module.Drawable):
         failures.append("Matrix.set did not return the replacement Drawable")
     try:
@@ -901,8 +917,8 @@ def validate_vector_geometry_contract(module) -> list[str]:
     """Exercise the public varargs, clipping, and fill-level contracts."""
     failures: list[str] = []
     scene = module.Scene(640, 360)
-    left = scene.geometry.circle(60).at(-25, 0)
-    right = scene.geometry.circle(60).at(25, 0)
+    left = scene.geometry.circle(60).move_to(-25, 0)
+    right = scene.geometry.circle(60).move_to(25, 0)
 
     for name, result in (
         ("union", scene.geometry.union(left, right)),
@@ -915,7 +931,7 @@ def validate_vector_geometry_contract(module) -> list[str]:
 
     live = scene.geometry.union(left, right, live=True)
     try:
-        live.at(0, 0)
+        live.move_to(0, 0)
     except ValueError:
         pass
     else:
@@ -928,13 +944,13 @@ def validate_vector_geometry_contract(module) -> list[str]:
     level = scene.geometry.fill_level(left.opacity(0), module.BLUE, 0.25, keep_outline=True)
     if not isinstance(level.set_fill_level(0.5), module.Drawable):
         failures.append("Drawable.set_fill_level did not return Drawable")
-    if not isinstance(level.animate().fill_level(0.75), module.Anim):
+    if not isinstance(level.animate.fill_level(0.75), module.Anim):
         failures.append("Anim.fill_level did not return Anim")
 
     for call in (
         lambda: scene.geometry.union(left),
         lambda: scene.geometry.fill_level(left, module.BLUE, -0.1),
-        lambda: level.animate().fill_level(1.1),
+        lambda: level.animate.fill_level(1.1),
     ):
         try:
             call()
@@ -942,6 +958,55 @@ def validate_vector_geometry_contract(module) -> list[str]:
             pass
         else:
             failures.append("vector geometry API accepted invalid input")
+    return failures
+
+
+def validate_composition_contract(module) -> list[str]:
+    failures: list[str] = []
+    for legacy in ("AnimationGroup", "Succession", "LaggedStart"):
+        if hasattr(module, legacy):
+            failures.append(f"legacy composition helper {legacy} remains public")
+
+    scene = module.Scene(640, 360)
+    dot = scene.geometry.dot(8)
+    first = dot.animate.shift_by(20, 0).duration(1.0)
+    second = dot.animate.shift_by(20, 0).duration(1.0)
+    overlapping = module.parallel(first, second)
+    try:
+        scene.play(overlapping)
+    except ValueError:
+        pass
+    else:
+        failures.append("parallel same-channel animations were not rejected")
+
+    plan = module.sequence(first, second).defaults(rate="linear")
+    schedule = plan.schedule()
+    if not isinstance(plan, module.Composition):
+        failures.append("sequence did not return Composition")
+    if not isinstance(schedule, module.Schedule) or schedule.span != 2.0:
+        failures.append("sequence schedule did not resolve the expected span")
+    if len(schedule.entries) != 2 or schedule.entries[1].start != 1.0:
+        failures.append("sequence schedule offsets are incorrect")
+    if not isinstance(schedule.entries[0].path, tuple):
+        failures.append("ScheduleEntry.path is not immutable")
+    scene.play(plan)
+
+    single = scene.geometry.circle(6).animate.fade_in().duration(0.1)
+    scene.play(single)
+    try:
+        scene.play(scene.geometry.circle(6).animate.fade_in(), lag=0.1)
+    except TypeError:
+        pass
+    else:
+        failures.append("Scene.play still accepts legacy lag=")
+
+    stretched = module.stagger(
+        scene.geometry.dot(4).animate.fade_in(),
+        scene.geometry.dot(4).animate.fade_in(),
+        each=0.5,
+    ).stretch(3.0)
+    if stretched.schedule().span != 3.0:
+        failures.append("Composition.stretch did not produce the requested span")
     return failures
 
 
@@ -963,7 +1028,7 @@ def validate_scene_capability_surface(module) -> list[str]:
 
     scene = module.Scene(640, 360)
     first = scene.geometry.circle(20)
-    second = scene.geometry.circle(20).at(10, 0)
+    second = scene.geometry.circle(20).move_to(10, 0)
     if not isinstance(scene.geometry.union(first, second), module.Drawable):
         failures.append("repeated geometry capability access did not share the Scene model")
 
@@ -1001,7 +1066,7 @@ def main() -> int:
             missing.append(node.target.id)
         elif (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {"part", "parts"}
+            and node.name in {"part", "parts", "parallel", "sequence", "stagger"}
         ):
             if not hasattr(module, node.name):
                 missing.append(node.name)
@@ -1013,6 +1078,7 @@ def main() -> int:
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
+    missing.extend(validate_composition_contract(module))
     missing.extend(validate_scene_capability_surface(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))

@@ -115,7 +115,10 @@ all use the application host, which owns the native runtime.
 - **No wrapper types** for graphics primitives: use `peniko::Color`, `peniko::Brush`, `kurbo::BezPath`, `kurbo::Affine` directly in ECS components.
 - **3D-ready types:** `glam::DVec3` / `DQuat` for transforms; `Bounds3D` for bounding boxes. 2D is the z=0 projection.
 - **System ordering:** all ordering is centralized in `gaanim_scene::hierarchy::SceneSet`. Add new systems into the appropriate `SceneSet` phase rather than ad-hoc `before`/`after`.
-- **Python API style:** fluent chaining on `PyMobject` (e.g., `.fill(BLUE).at(0,0)`). Mutations are deferred via `Arc<Mutex<MobjectSpec>>` and replayed at startup.
+- **Python API style:** fluent immediate setters on handles (e.g.,
+  `.move_to(0, 0).fill(BLUE)`) and the same vocabulary under the read-only
+  `.animate` proxy for timeline changes. Immediate setters create reversible
+  cuts at the current cursor after declaration state has frozen.
 
 ## Gotchas
 

@@ -21,7 +21,7 @@ for row in range(6):
             scene.geometry.circle(28 + (row + column) % 3 * 4)
             .fill(colors[(row + column) % len(colors)])
             .stroke(WHITE, 2)
-            .at(x, y)
+            .move_to(x, y)
         )
         objects.append(shape)
 
@@ -29,10 +29,10 @@ entry_duration = min(0.4, DURATION * 0.25)
 exit_duration = min(0.4, DURATION * 0.25)
 motion_duration = max(0.1, DURATION - entry_duration - exit_duration)
 
-scene.play([shape.create().duration(entry_duration) for shape in objects])
+scene.play([shape.animate.create().duration(entry_duration) for shape in objects])
 scene.play(
     [
-        shape.move(
+        shape.animate.shift_by(
             72 if index % 2 == 0 else -72,
             54 if (index // 2) % 2 == 0 else -54,
         )

@@ -13,15 +13,15 @@ opening = scene.slides.title_card(
     accent=BLUE,
 )
 
-scene.play([opening.fade_in_from(Direction.DOWN, distance=56).duration(0.7)])
+scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=56).duration(0.7)])
 scene.wait(1.0)
-scene.play([opening.fade_out().duration(0.45)])
+scene.play([opening.animate.fade_out().duration(0.45)])
 
-circle = scene.geometry.circle(92).fill(BLUE).stroke(WHITE, 4).at(-180, -30)
-label = scene.text("The main scene begins").fill(WHITE).at(150, -30)
+circle = scene.geometry.circle(92).fill(BLUE).stroke(WHITE, 4).move_to(-180, -30)
+label = scene.text("The main scene begins").fill(WHITE).move_to(150, -30)
 scene.play([
-    circle.create().duration(0.6),
-    label.write().duration(0.6),
+    circle.animate.create().duration(0.6),
+    label.animate.write().duration(0.6),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

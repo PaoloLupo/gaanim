@@ -10,7 +10,7 @@ scene.canvas.set_theme("paper")
 
 x_axis = Axis.linear(-6, 6).ticks(1).minor_ticks(2).label("$x$").style(color=BLACK)
 y_axis = Axis.linear(-3, 3).ticks(1).minor_ticks(2).label("$f (x)$").style(color=BLACK)
-plane = scene.viz.cartesian_2d(x_axis, y_axis, width=1500, height=900).at(100,0)
+plane = scene.viz.cartesian_2d(x_axis, y_axis, width=1500, height=900).move_to(100,0)
 
 amplitude = scene.viz.parameter(1.0)
 sine = plane.plot(lambda x, a: a * math.sin(x), inputs=[amplitude]).stroke(BLUE, 4)
@@ -21,16 +21,16 @@ riemann = plane.riemann_sum(lambda value: math.sin(value), (-2* math.pi,0), rect
 
 
 point = scene.geometry.dot(7).fill(RED).at_coordinate(plane.coord(2, 2))
-title = scene.text("CoordinateSpace + Parameter").fill(BLACK).at(0, 500, anchor=Anchor.CENTER)
+title = scene.text("CoordinateSpace + Parameter").fill(BLACK).move_to(0, 500, anchor=Anchor.CENTER)
 
-scene.play([plane.write(), title.write().duration(0.6)])
-scene.play([sine.write().duration(0.8), parabola.write().duration(0.8)])
-scene.play([area.fade_in().duration(0.5), tangent.create().duration(0.5), point.fade_in().duration(0.3)])
-scene.play([riemann.create().duration(1)])
-scene.play([amplitude.animate_to(2.5).duration(1.2)])
+scene.play([plane.animate.write(), title.animate.write().duration(0.6)])
+scene.play([sine.animate.write().duration(0.8), parabola.animate.write().duration(0.8)])
+scene.play([area.animate.fade_in().duration(0.5), tangent.animate.create().duration(0.5), point.animate.fade_in().duration(0.3)])
+scene.play([riemann.animate.create().duration(1)])
+scene.play([amplitude.animate.set(2.5).duration(1.2)])
 
 # Every layer is a real drawable and can be animated independently.
-scene.play([plane.layer("minor_grid").fade_to(0.15).duration(0.4)])
+scene.play([plane.layer("minor_grid").animate.opacity(0.15).duration(0.4)])
 scene.wait(0.4)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -7,9 +7,9 @@ from gaanim import BLACK, BLUE, NAVY, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=56)
 
-title = scene.text("Reactive callouts", role="title").fill(WHITE).at(0, 250)
+title = scene.text("Reactive callouts", role="title").fill(WHITE).move_to(0, 250)
 rail = scene.geometry.line(-420, -90, 420, -90).stroke(WHITE, 4)
-mass = scene.geometry.dot(28).fill(BLUE).stroke(WHITE, 3).at(-300, -90)
+mass = scene.geometry.dot(28).fill(BLUE).stroke(WHITE, 3).move_to(-300, -90)
 
 callout = scene.slides.callout(
     "Moving mass",
@@ -22,11 +22,11 @@ callout = scene.slides.callout(
 )
 
 scene.play([
-    title.write().duration(0.6),
-    rail.create().duration(0.6),
-    mass.grow_from_center().duration(0.5),
+    title.animate.write().duration(0.6),
+    rail.animate.create().duration(0.6),
+    mass.animate.grow_from_center().duration(0.5),
 ])
-scene.play([mass.move(600, 0).duration(2.0).smooth(), callout.fade_in()])
+scene.play([mass.animate.shift_by(600, 0).duration(2.0).smooth(), callout.animate.fade_in()])
 scene.wait(0.4)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

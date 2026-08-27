@@ -34,21 +34,33 @@ class MatrixAlgebraError(ValueError):
 class MatrixSelectionAnimation(Sequence[Anim]):
     """Compound property animation over a matrix selection."""
 
-    def __init__(self, selection: "MatrixSelection", *, order: Any, stagger: float, seed: int):
+    def __init__(self, selection: "MatrixSelection"):
         self._selection = selection
-        self._ordered = selection._ordered(order, seed)
-        self._stagger = _non_negative(stagger, "stagger")
-        self._animations = [cell.animate().delay(index * self._stagger) for index, (_, cell) in enumerate(self._ordered)]
+        self._animations: list[Anim] = []
+
+    def _targets(self, order: Any, stagger: float, seed: int) -> list[Anim]:
+        stagger = _non_negative(stagger, "stagger")
+        return [cell.animate.delay(index * stagger) for index, (_, cell) in enumerate(self._selection._ordered(order, seed))]
 
     def _apply(self, name: str, *args: Any) -> "MatrixSelectionAnimation":
         self._animations = [getattr(animation, name)(*args) for animation in self._animations]
         return self
 
-    def fill(self, color: Any) -> "MatrixSelectionAnimation": return self._apply("fill", color)
-    def color(self, color: Any) -> "MatrixSelectionAnimation": return self._apply("color", color)
-    def opacity(self, value: float) -> "MatrixSelectionAnimation": return self._apply("opacity", value)
-    def scale(self, factor: float) -> "MatrixSelectionAnimation": return self._apply("scale", factor)
-    def rotate(self, radians: float) -> "MatrixSelectionAnimation": return self._apply("rotate", radians)
+    def _action(self, name: str, *args: Any, order: Any, stagger: float, seed: int) -> "MatrixSelectionAnimation":
+        self._animations = [getattr(animation, name)(*args) for animation in self._targets(order, stagger, seed)]
+        return self
+
+    def fill(self, color: Any, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("fill", color, order=order, stagger=stagger, seed=seed)
+    def color(self, color: Any, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("color", color, order=order, stagger=stagger, seed=seed)
+    def opacity(self, value: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("opacity", value, order=order, stagger=stagger, seed=seed)
+    def scale_by(self, factor: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("scale_by", factor, order=order, stagger=stagger, seed=seed)
+    def rotate_by(self, radians: float, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("rotate_by", radians, order=order, stagger=stagger, seed=seed)
+    def write(self, *, order: Any = "row_major", stagger: float = 0.05, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("write", order=order, stagger=stagger, seed=seed)
+    def create(self, *, order: Any = "row_major", stagger: float = 0.05, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("create", order=order, stagger=stagger, seed=seed)
+    def fade_in(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("fade_in", order=order, stagger=stagger, seed=seed)
+    def fade_out(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("fade_out", order=order, stagger=stagger, seed=seed)
+    def indicate(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("indicate", order=order, stagger=stagger, seed=seed)
+    def wiggle(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> "MatrixSelectionAnimation": return self._action("wiggle", order=order, stagger=stagger, seed=seed)
     def duration(self, seconds: float) -> "MatrixSelectionAnimation": return self._apply("duration", seconds)
     def ease(self, name: str) -> "MatrixSelectionAnimation": return self._apply("ease", name)
 
@@ -83,35 +95,15 @@ class MatrixSelection(Sequence[Drawable]):
         for cell in self: cell.opacity(value)
         return self
 
-    def animate(self, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> MatrixSelectionAnimation:
-        return MatrixSelectionAnimation(self, order=order, stagger=stagger, seed=seed)
+    @property
+    def animate(self) -> MatrixSelectionAnimation:
+        return MatrixSelectionAnimation(self)
 
-    def _effect(self, name: str, duration: float | None, order: Any, stagger: float, seed: int) -> list[Anim]:
-        stagger = _non_negative(stagger, "stagger")
-        animations = []
-        for index, (_, cell) in enumerate(self._ordered(order, seed)):
-            animation = getattr(cell, name)(duration)
-            animations.append(animation.delay(index * stagger))
-        return animations
-
-    def write(self, duration: float | None = None, *, order: Any = "row_major", stagger: float = 0.05, seed: int = 0) -> list[Anim]:
-        return self._effect("write", duration, order, stagger, seed)
-    def create(self, duration: float | None = None, *, order: Any = "row_major", stagger: float = 0.05, seed: int = 0) -> list[Anim]:
-        return self._effect("create", duration, order, stagger, seed)
-    def fade_in(self, duration: float | None = None, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> list[Anim]:
-        return self._effect("fade_in", duration, order, stagger, seed)
-    def fade_out(self, duration: float | None = None, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> list[Anim]:
-        return self._effect("fade_out", duration, order, stagger, seed)
-    def indicate(self, duration: float | None = None, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> list[Anim]:
-        return self._effect("indicate", duration, order, stagger, seed)
-    def wiggle(self, duration: float | None = None, *, order: Any = "simultaneous", stagger: float = 0.0, seed: int = 0) -> list[Anim]:
-        return self._effect("wiggle", duration, order, stagger, seed)
-
-    def offset(self, dx: float, dy: float, *, animate: float | None = None) -> "MatrixSelection":
+    def offset(self, dx: float, dy: float) -> "MatrixSelection":
         if not all(isinstance(value, (int, float)) and float(value) == float(value) for value in (dx, dy)):
             raise ValueError("matrix selection offset must be finite")
         for position, (_, cell) in enumerate(self._entries):
-            self._matrix._grid.configure_item(cell, offset=(float(dx), float(dy)), animate=animate if position == len(self._entries) - 1 else None)
+            self._matrix._grid.configure_item(cell, offset=(float(dx), float(dy)))
         return self
 
     def _ordered(self, order: Any, seed: int) -> list[tuple[tuple[int, int], Drawable]]:
@@ -160,10 +152,11 @@ class Matrix:
     def drawable(self) -> Drawable: return self._root
 
     def __getattr__(self, name: str) -> Any: return getattr(self._root, name)
-    def at(self, *args: Any, **kwargs: Any) -> "Matrix": self._root.at(*args, **kwargs); return self
+    def move_to(self, *args: Any, **kwargs: Any) -> "Matrix": self._root.move_to(*args, **kwargs); return self
     def fill(self, color: Any) -> "Matrix": self._root.fill(color); return self
     def opacity(self, value: float) -> "Matrix": self._root.opacity(value); return self
-    def scaled(self, factor: float) -> "Matrix": self._root.scaled(factor); return self
+    def scale_to(self, factor: float) -> "Matrix": self._root.scale_to(factor); return self
+    def scale_by(self, factor: float) -> "Matrix": self._root.scale_by(factor); return self
 
     def __getitem__(self, key: tuple[Any, Any]) -> Drawable | MatrixSelection:
         if not isinstance(key, tuple) or len(key) != 2:
@@ -197,59 +190,58 @@ class Matrix:
             keep = lambda row, column: bool(mask[row][column])
         return MatrixSelection(self, (((row, column), self._cells[row][column]) for row in range(self.nrows) for column in range(self.ncols) if keep(row, column)))
 
-    def set(self, row: int, column: int, value: Any, *, animate: float | None = None) -> Drawable:
+    def set(self, row: int, column: int, value: Any) -> Drawable:
         row = _normalize_index(row, self.nrows); column = _normalize_index(column, self.ncols)
         entry, cell = _make_cell(self._scene, value, row, column, self._options)
         old = self._cells[row][column]
-        replacement = self._grid.replace(old, cell, animate=animate)
+        replacement = self._grid.replace(old, cell)
         self._values[row][column], self._cells[row][column] = entry, replacement
         return replacement
 
-    def become(self, data: Any, *, animate: float | None = 1.0) -> list[Anim]:
+    def become(self, data: Any) -> "Matrix":
         rows = _matrix_rows(data)
         options = dict(self._options)
         if options.get("row_labels") is not None and len(options["row_labels"]) != len(rows): options.pop("row_labels")
         if rows and options.get("column_labels") is not None and len(options["column_labels"]) != len(rows[0]): options.pop("column_labels")
         target = _build_matrix(self._scene, rows, **options)
-        animations = [] if animate is None else [self._root.fade_out(animate), target._root.fade_in(animate)]
-        if animate is None: self._root.opacity(0.0)
+        self._root.opacity(0.0)
         self.__dict__.update(target.__dict__)
-        return animations
+        return self
 
-    def insert_row(self, index: int, values: Sequence[Any], *, animate: float | None = 1.0) -> list[Anim]:
-        data = [row[:] for row in self._values]; data.insert(index, list(values)); return self.become(data, animate=animate)
-    def remove_row(self, index: int, *, animate: float | None = 1.0) -> list[Anim]:
-        data = [row[:] for row in self._values]; data.pop(_normalize_index(index, self.nrows)); return self.become(data, animate=animate)
-    def insert_column(self, index: int, values: Sequence[Any], *, animate: float | None = 1.0) -> list[Anim]:
+    def insert_row(self, index: int, values: Sequence[Any]) -> "Matrix":
+        data = [row[:] for row in self._values]; data.insert(index, list(values)); return self.become(data)
+    def remove_row(self, index: int) -> "Matrix":
+        data = [row[:] for row in self._values]; data.pop(_normalize_index(index, self.nrows)); return self.become(data)
+    def insert_column(self, index: int, values: Sequence[Any]) -> "Matrix":
         if len(values) != self.nrows: raise ValueError("inserted column length must match matrix rows")
         data = [row[:] for row in self._values]
         for row, value in zip(data, values): row.insert(index, value)
-        return self.become(data, animate=animate)
-    def remove_column(self, index: int, *, animate: float | None = 1.0) -> list[Anim]:
+        return self.become(data)
+    def remove_column(self, index: int) -> "Matrix":
         column = _normalize_index(index, self.ncols); data = [row[:] for row in self._values]
         for row in data: row.pop(column)
-        return self.become(data, animate=animate)
-    def swap_rows(self, first: int, second: int, *, animate: float | None = 1.0) -> list[Anim]:
-        data = [row[:] for row in self._values]; first = _normalize_index(first, self.nrows); second = _normalize_index(second, self.nrows); data[first], data[second] = data[second], data[first]; return self.become(data, animate=animate)
-    def swap_columns(self, first: int, second: int, *, animate: float | None = 1.0) -> list[Anim]:
+        return self.become(data)
+    def swap_rows(self, first: int, second: int) -> "Matrix":
+        data = [row[:] for row in self._values]; first = _normalize_index(first, self.nrows); second = _normalize_index(second, self.nrows); data[first], data[second] = data[second], data[first]; return self.become(data)
+    def swap_columns(self, first: int, second: int) -> "Matrix":
         first = _normalize_index(first, self.ncols); second = _normalize_index(second, self.ncols); data = [row[:] for row in self._values]
         for row in data: row[first], row[second] = row[second], row[first]
-        return self.become(data, animate=animate)
-    def reorder_rows(self, order: Sequence[int], *, animate: float | None = 1.0) -> list[Anim]:
+        return self.become(data)
+    def reorder_rows(self, order: Sequence[int]) -> "Matrix":
         normalized = [_normalize_index(index, self.nrows) for index in order]
         if sorted(normalized) != list(range(self.nrows)): raise ValueError("row order must be a permutation")
-        return self.become([self._values[index][:] for index in normalized], animate=animate)
-    def reorder_columns(self, order: Sequence[int], *, animate: float | None = 1.0) -> list[Anim]:
+        return self.become([self._values[index][:] for index in normalized])
+    def reorder_columns(self, order: Sequence[int]) -> "Matrix":
         normalized = [_normalize_index(index, self.ncols) for index in order]
         if sorted(normalized) != list(range(self.ncols)): raise ValueError("column order must be a permutation")
-        return self.become([[row[index] for index in normalized] for row in self._values], animate=animate)
+        return self.become([[row[index] for index in normalized] for row in self._values])
 
     def morph_to(self, target: "Matrix", *, match: str = "auto", duration: float = 1.0, stagger: float = 0.0) -> list[Anim]:
         if match not in {"auto", "key", "value", "position"}: raise ValueError("match must be auto, key, value, or position")
         pairs, source_only, target_only = _match_entries(self, target, match)
-        animations = [source.transform(destination).duration(duration).delay(index * stagger) for index, (source, destination) in enumerate(pairs)]
-        animations.extend(cell.fade_out(duration) for cell in source_only)
-        animations.extend(cell.fade_in(duration) for cell in target_only)
+        animations = [source.animate.transform_to(destination).duration(duration).delay(index * stagger) for index, (source, destination) in enumerate(pairs)]
+        animations.extend(cell.animate.fade_out().duration(duration) for cell in source_only)
+        animations.extend(cell.animate.fade_in().duration(duration) for cell in target_only)
         return animations
 
     def to_sympy(self) -> Any: return _sympy().Matrix([[_entry_value(value) for value in row] for row in self._values])
@@ -257,7 +249,7 @@ class Matrix:
     def subtract(self, other: "Matrix", **options: Any) -> "MatrixDerivation": return _derive_binary(self, other, "subtract", **options)
     def matmul(self, other: "Matrix", **options: Any) -> "MatrixDerivation": return _derive_binary(self, other, "matmul", **options)
     def hadamard(self, other: "Matrix", **options: Any) -> "MatrixDerivation": return _derive_binary(self, other, "hadamard", **options)
-    def scale_by(self, scalar: Any, **options: Any) -> "MatrixDerivation": return _derive_unary(self, "scale", scalar=scalar, **options)
+    def scalar_multiply(self, scalar: Any, **options: Any) -> "MatrixDerivation": return _derive_unary(self, "scale", scalar=scalar, **options)
     def transpose(self, **options: Any) -> "MatrixDerivation": return _derive_unary(self, "transpose", **options)
     def determinant(self, **options: Any) -> "MatrixDerivation": return _derive_unary(self, "determinant", **options)
     def inverse(self, **options: Any) -> "MatrixDerivation": return _derive_unary(self, "inverse", **options)
@@ -275,12 +267,12 @@ class MatrixDerivation:
     def __init__(self, value: Any, result: Any, steps: Sequence[MatrixStep]):
         self.value, self.result, self.steps = value, result, tuple(steps)
 
-    def animate(self, *, duration: float = 0.7, order: Any = "row_major", stagger: float = 0.04) -> list[Anim]:
+    def animations(self, *, duration: float = 0.7, order: Any = "row_major", stagger: float = 0.04) -> list[Anim]:
         results = self.result if isinstance(self.result, tuple) else (self.result,)
         animations: list[Anim] = []
         for result in results:
-            if isinstance(result, Matrix): animations.extend(result.entries.fade_in(duration, order=order, stagger=stagger))
-            else: animations.append(result.write(duration))
+            if isinstance(result, Matrix): animations.extend(result.entries.animate.fade_in(order=order, stagger=stagger).duration(duration))
+            else: animations.append(result.animate.write().duration(duration))
         return animations
 
 

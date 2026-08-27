@@ -4,7 +4,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
-use crate::pydrawable::{resolve_at_target, PyAtTarget, PyCanvasAnim, PyDrawable};
+use crate::pydrawable::{resolve_at_target, PyAtTarget, PyDrawable};
 use crate::pylayout::PyAnchor;
 
 #[pyclass(name = "Material3D", module = "gaanim_core", frozen, from_py_object)]
@@ -131,14 +131,14 @@ impl PyPrimitive3D {
     }
 
     #[pyo3(signature = (x, y=None, anchor=None))]
-    fn at<'py>(
+    fn move_to<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<f64>,
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        slf.require_free_position("at")?;
-        match resolve_at_target("at", x, y, anchor.is_some())? {
+        slf.require_free_position("move_to")?;
+        match resolve_at_target("move_to", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => {
                 slf.handle.clone().at_anchor(
                     x,
@@ -160,29 +160,29 @@ impl PyPrimitive3D {
         Ok(slf)
     }
 
-    fn at_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("at_3d")?;
-        slf.handle.clone().at_3d(x, y, z);
+    fn move_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
+        slf.require_free_position("move_to_3d")?;
+        slf.handle.clone().move_to_3d(x, y, z);
         Ok(slf)
     }
 
-    fn scaled(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scaled(factor);
+    fn scale_to(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_to(factor);
         slf
     }
 
-    fn scaled_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scaled_3d(x, y, z);
+    fn scale_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_to_3d(x, y, z);
         slf
     }
 
-    fn rotated(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotated(radians);
+    fn rotate_to(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().rotate_to(radians);
         slf
     }
 
-    fn rotated_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotated_3d(x, y, z);
+    fn rotate_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().rotate_to_3d(x, y, z);
         slf
     }
 
@@ -197,20 +197,5 @@ impl PyPrimitive3D {
             .material(material.0)
             .map_err(|_| PyTypeError::new_err("material() requires a native Primitive3D"))?;
         Ok(slf)
-    }
-
-    fn material_to(&self, material: PyMaterial3D) -> PyResult<PyCanvasAnim> {
-        self.handle
-            .material_to(material.0)
-            .map(|inner| PyCanvasAnim { inner })
-            .map_err(|_| PyTypeError::new_err("material_to() requires a native Primitive3D"))
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        let _ = duration;
-        Err(PyTypeError::new_err(
-            "write() is a vector-path animation and is not supported by Primitive3D; use create()",
-        ))
     }
 }

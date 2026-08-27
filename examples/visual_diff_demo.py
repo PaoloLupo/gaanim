@@ -8,11 +8,11 @@ import os
 from gaanim import BLUE, GOLD, WHITE, Scene
 
 scene = Scene(960, 540)
-circle = scene.geometry.circle(72).fill(BLUE).stroke(WHITE, 4).at(-220, 0)
+circle = scene.geometry.circle(72).fill(BLUE).stroke(WHITE, 4).move_to(-220, 0)
 
-scene.play([circle.create(1.0).smooth()])
-scene.play([circle.move(440, 0).duration(1.5).smooth()])
-scene.play([circle.rotate(3.14159).duration(0.5), circle.fade_to(0.65).duration(0.5)])
+scene.play([circle.animate.create(1.0).smooth()])
+scene.play([circle.animate.shift_by(440, 0).duration(1.5).smooth()])
+scene.play([circle.animate.rotate_by(3.14159).duration(0.5), circle.animate.opacity(0.65).duration(0.5)])
 circle.stroke(GOLD, 7)
 scene.wait(0.5)
 

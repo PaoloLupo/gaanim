@@ -10,6 +10,7 @@ use gaanim_animation::ScalarSource;
 use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::{Cap, Shape, Stroke};
 use gaanim_core::peniko::{Brush, Color};
+use gaanim_math::RateFunc;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
 use gaanim_objects::primitives3d;
 use gaanim_text::prelude::TextRole;
@@ -107,6 +108,295 @@ pub enum PlayItem {
     Lottie(LottieClip),
 }
 
+/// A pure, nestable description of temporal composition.
+#[derive(Debug, Clone)]
+pub struct Composition {
+    node: CompositionNode,
+    delay: f64,
+    default_duration: Option<f64>,
+    default_rate: Option<RateFunc>,
+    stretch: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+enum CompositionNode {
+    Leaf(Box<PlayItem>),
+    Parallel(Vec<Composition>),
+    Sequence {
+        children: Vec<Composition>,
+        gap: f64,
+    },
+    Stagger {
+        children: Vec<Composition>,
+        each: f64,
+    },
+}
+
+/// One resolved leaf returned by [`Composition::schedule`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleEntry {
+    pub path: Vec<usize>,
+    pub kind: &'static str,
+    pub start: f64,
+    pub duration: Option<f64>,
+    pub end: Option<f64>,
+}
+
+/// Read-only local timing information for a composition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Schedule {
+    pub entries: Vec<ScheduleEntry>,
+    pub span: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPlayItem {
+    item: PlayItem,
+    start: f64,
+    path: Vec<usize>,
+    duration: Option<f64>,
+}
+
+impl Composition {
+    pub fn leaf(item: impl Into<PlayItem>) -> Self {
+        Self {
+            node: CompositionNode::Leaf(Box::new(item.into())),
+            delay: 0.0,
+            default_duration: None,
+            default_rate: None,
+            stretch: None,
+        }
+    }
+
+    fn branch(node: CompositionNode) -> Result<Self, PlayError> {
+        let empty = match &node {
+            CompositionNode::Leaf(_) => false,
+            CompositionNode::Parallel(children)
+            | CompositionNode::Sequence { children, .. }
+            | CompositionNode::Stagger { children, .. } => children.is_empty(),
+        };
+        if empty {
+            return Err(PlayError::EmptyComposition);
+        }
+        Ok(Self {
+            node,
+            delay: 0.0,
+            default_duration: None,
+            default_rate: None,
+            stretch: None,
+        })
+    }
+
+    pub fn parallel(children: Vec<Self>) -> Result<Self, PlayError> {
+        Self::branch(CompositionNode::Parallel(children))
+    }
+
+    pub fn sequence(children: Vec<Self>, gap: f64) -> Result<Self, PlayError> {
+        if !gap.is_finite() {
+            return Err(PlayError::InvalidCompositionTiming("gap"));
+        }
+        Self::branch(CompositionNode::Sequence { children, gap })
+    }
+
+    pub fn stagger(children: Vec<Self>, each: f64) -> Result<Self, PlayError> {
+        if !each.is_finite() || each < 0.0 {
+            return Err(PlayError::InvalidCompositionTiming("each"));
+        }
+        Self::branch(CompositionNode::Stagger { children, each })
+    }
+
+    pub fn delay(mut self, seconds: f64) -> Result<Self, PlayError> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(PlayError::InvalidCompositionTiming("delay"));
+        }
+        self.delay = seconds;
+        Ok(self)
+    }
+
+    pub fn defaults(
+        mut self,
+        duration: Option<f64>,
+        rate: Option<RateFunc>,
+    ) -> Result<Self, PlayError> {
+        if duration.is_some_and(|value| !value.is_finite() || value < 0.0) {
+            return Err(PlayError::InvalidCompositionTiming("duration"));
+        }
+        self.default_duration = duration;
+        self.default_rate = rate;
+        Ok(self)
+    }
+
+    pub fn stretch(mut self, seconds: f64) -> Result<Self, PlayError> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(PlayError::InvalidCompositionTiming("stretch"));
+        }
+        if self.contains_media() {
+            return Err(PlayError::StretchContainsMedia);
+        }
+        self.stretch = Some(seconds);
+        Ok(self)
+    }
+
+    fn contains_media(&self) -> bool {
+        match &self.node {
+            CompositionNode::Leaf(item) => !matches!(item.as_ref(), PlayItem::Animation(_)),
+            CompositionNode::Parallel(children)
+            | CompositionNode::Sequence { children, .. }
+            | CompositionNode::Stagger { children, .. } => {
+                children.iter().any(Self::contains_media)
+            }
+        }
+    }
+
+    fn resolve(
+        &self,
+        inherited_duration: Option<f64>,
+        inherited_rate: Option<RateFunc>,
+        path: &mut Vec<usize>,
+    ) -> Result<Vec<ResolvedPlayItem>, PlayError> {
+        let duration = self.default_duration.or(inherited_duration);
+        let rate = self.default_rate.clone().or(inherited_rate);
+        let mut resolved = match &self.node {
+            CompositionNode::Leaf(item) => {
+                let mut item = item.as_ref().clone();
+                if let PlayItem::Animation(anim) = &mut item {
+                    anim.apply_play_defaults(duration, rate);
+                }
+                let (start, item_duration) = match &mut item {
+                    PlayItem::Animation(anim) => {
+                        let start = anim.inner.delay.max(0.0);
+                        anim.inner.delay = 0.0;
+                        (start, Some(anim.inner.duration.max(0.0)))
+                    }
+                    PlayItem::Audio(audio) => (0.0, audio.track.duration),
+                    PlayItem::Video(video) => (0.0, video.duration),
+                    PlayItem::Lottie(lottie) => (0.0, lottie.duration),
+                };
+                vec![ResolvedPlayItem {
+                    item,
+                    start,
+                    path: path.clone(),
+                    duration: item_duration,
+                }]
+            }
+            CompositionNode::Parallel(children) => {
+                let mut items = Vec::new();
+                for (index, child) in children.iter().enumerate() {
+                    path.push(index);
+                    items.extend(child.resolve(duration, rate.clone(), path)?);
+                    path.pop();
+                }
+                items
+            }
+            CompositionNode::Stagger { children, each } => {
+                let mut items = Vec::new();
+                for (index, child) in children.iter().enumerate() {
+                    path.push(index);
+                    let mut child_items = child.resolve(duration, rate.clone(), path)?;
+                    path.pop();
+                    let offset = index as f64 * *each;
+                    child_items.iter_mut().for_each(|item| item.start += offset);
+                    items.extend(child_items);
+                }
+                items
+            }
+            CompositionNode::Sequence { children, gap } => {
+                let mut items = Vec::new();
+                let mut cursor = 0.0;
+                for (index, child) in children.iter().enumerate() {
+                    path.push(index);
+                    let mut child_items = child.resolve(duration, rate.clone(), path)?;
+                    path.pop();
+                    let child_span = resolved_span(&child_items);
+                    child_items.iter_mut().for_each(|item| item.start += cursor);
+                    items.extend(child_items);
+                    if index + 1 < children.len() {
+                        let next = cursor + child_span + *gap;
+                        if next + f64::EPSILON < cursor {
+                            return Err(PlayError::SequenceOverlapTooLarge);
+                        }
+                        cursor = next.max(cursor);
+                    }
+                }
+                items
+            }
+        };
+
+        if let Some(target_span) = self.stretch {
+            if resolved
+                .iter()
+                .any(|item| !matches!(item.item, PlayItem::Animation(_)))
+            {
+                return Err(PlayError::StretchContainsMedia);
+            }
+            let current_span = resolved_span(&resolved);
+            if current_span == 0.0 {
+                if target_span != 0.0 {
+                    return Err(PlayError::CannotStretchZeroSpan);
+                }
+            } else {
+                let factor = target_span / current_span;
+                for item in &mut resolved {
+                    item.start *= factor;
+                    if let PlayItem::Animation(anim) = &mut item.item {
+                        anim.inner.duration *= factor;
+                        item.duration = Some(anim.inner.duration);
+                    }
+                }
+            }
+        }
+        resolved
+            .iter_mut()
+            .for_each(|item| item.start += self.delay);
+        Ok(resolved)
+    }
+
+    fn resolved(
+        &self,
+        duration: Option<f64>,
+        rate: Option<RateFunc>,
+    ) -> Result<Vec<ResolvedPlayItem>, PlayError> {
+        self.resolve(duration, rate, &mut Vec::new())
+    }
+
+    pub fn schedule(
+        &self,
+        duration: Option<f64>,
+        rate: Option<RateFunc>,
+    ) -> Result<Schedule, PlayError> {
+        let resolved = self.resolved(duration, rate)?;
+        Ok(Schedule {
+            span: resolved_span(&resolved),
+            entries: resolved
+                .into_iter()
+                .map(|item| ScheduleEntry {
+                    path: item.path,
+                    kind: play_item_kind(&item.item),
+                    start: item.start,
+                    duration: item.duration,
+                    end: item.duration.map(|duration| item.start + duration),
+                })
+                .collect(),
+        })
+    }
+}
+
+fn play_item_kind(item: &PlayItem) -> &'static str {
+    match item {
+        PlayItem::Animation(_) => "animation",
+        PlayItem::Audio(_) => "audio",
+        PlayItem::Video(_) => "video",
+        PlayItem::Lottie(_) => "lottie",
+    }
+}
+
+fn resolved_span(items: &[ResolvedPlayItem]) -> f64 {
+    items
+        .iter()
+        .map(|item| item.start + item.duration.unwrap_or(0.0))
+        .fold(0.0, f64::max)
+}
+
 impl From<Anim> for PlayItem {
     fn from(value: Anim) -> Self {
         Self::Animation(value)
@@ -133,6 +423,19 @@ impl From<LottieClip> for PlayItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
+    #[error("animations can only be played by their owning Scene")]
+    ForeignAnimation,
+    #[error("an Anim can only be played once")]
+    AnimationAlreadyConsumed,
+    #[error("the same Anim cannot appear twice in one play call")]
+    DuplicateAnimation,
+    #[error("an animation proxy must select at least one action or property")]
+    EmptyAnimation,
+    #[error("play contains multiple animations for target {target:?} channel '{channel}'")]
+    ConflictingChannel {
+        target: gaanim_core::ObjectId,
+        channel: String,
+    },
     #[error("audio declarations can only be played by their owning Scene")]
     ForeignAudio,
     #[error("video declarations can only be played by their owning Scene")]
@@ -143,6 +446,88 @@ pub enum PlayError {
     ForeignLottie,
     #[error("a Lottie declaration can only be activated once")]
     LottieAlreadyActivated,
+    #[error("a composition must contain at least one item")]
+    EmptyComposition,
+    #[error("composition {0} must be finite and valid")]
+    InvalidCompositionTiming(&'static str),
+    #[error("a negative sequence gap cannot start a step before the previous step")]
+    SequenceOverlapTooLarge,
+    #[error("stretch() cannot contain Audio, Video, or Lottie leaves")]
+    StretchContainsMedia,
+    #[error("a zero-span composition can only be stretched to zero seconds")]
+    CannotStretchZeroSpan,
+}
+
+fn animation_channels(anim: &Anim) -> Vec<String> {
+    use crate::anim::AnimationType::*;
+    let properties = match &anim.inner.anim_type {
+        Properties(properties) | TextSelectionProperties { properties, .. } => Some(properties),
+        _ => None,
+    };
+    if let Some(properties) = properties {
+        let prefix = match &anim.inner.anim_type {
+            TextSelectionProperties {
+                fragment,
+                occurrence,
+                ..
+            } => {
+                format!("text:{fragment}:{occurrence:?}:")
+            }
+            _ => String::new(),
+        };
+        let mut channels = Vec::new();
+        for (present, name) in [
+            (properties.translation.is_some(), "translation"),
+            (properties.rotation.is_some(), "rotation"),
+            (properties.scale.is_some(), "scale"),
+            (properties.opacity.is_some(), "opacity"),
+            (properties.fill.is_some(), "fill"),
+            (properties.stroke_color.is_some(), "stroke_color"),
+            (properties.stroke_width.is_some(), "stroke_width"),
+            (properties.visible_color.is_some(), "visible_color"),
+            (properties.material.is_some(), "material"),
+            (properties.fill_level.is_some(), "fill_level"),
+        ] {
+            if present {
+                channels.push(format!("{prefix}{name}"));
+            }
+        }
+        return channels;
+    }
+    let channel = match &anim.inner.anim_type {
+        TranslateTo { .. }
+        | TranslateAnchorTo { .. }
+        | TranslateToAnchorPoint { .. }
+        | TranslateBy { .. } => "translation",
+        RotateTo { .. } | RotateBy { .. } | RotateBy3D { .. } => "rotation",
+        ScaleTo { .. } | ScaleUniform { .. } | ScaleBy3D { .. } => "scale",
+        FadeTo { .. } | FadeIn | FadeOut | FadeInFrom { .. } => "opacity",
+        FillColorTo { .. } => "fill",
+        StrokeColorTo { .. } => "stroke_color",
+        StrokeWidthTo { .. } => "stroke_width",
+        Material3DTo { .. } => "material",
+        SignalFloat { .. } => "signal",
+        CameraPosition { .. }
+        | CameraPositionSource { .. }
+        | CameraFrame { .. }
+        | CameraFrameMany { .. }
+        | CameraFollow { .. }
+        | CameraFollowEndpoint { .. }
+        | CameraLookAt { .. }
+        | CameraLookAtSource { .. }
+        | CameraOrbit { .. }
+        | CameraDolly { .. }
+        | CameraState { .. }
+        | CameraReset => "camera_pose",
+        CameraZoom { .. }
+        | CameraZoomSource { .. }
+        | CameraOrthographic { .. }
+        | CameraPerspective { .. } => "camera_projection",
+        CameraRotation { .. } | CameraRotationSource { .. } => "camera_rotation",
+        CameraShake { .. } => "camera_shake",
+        _ => "effect",
+    };
+    vec![channel.to_owned()]
 }
 
 /// Default length in scene units for the straight segments at either spring end.
@@ -631,8 +1016,6 @@ pub struct SceneModel {
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
-    pub(crate) camera_zoom: f64,
-    pub(crate) camera_rotation: gaanim_core::glam::DQuat,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
 }
@@ -656,8 +1039,6 @@ impl SceneModel {
             audio_tracks: Vec::new(),
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
-            camera_zoom: 1.0,
-            camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Mutex::new(CanvasState::new())),
         }
@@ -1134,9 +1515,13 @@ impl SceneModel {
         drop(guard);
 
         let handle = DrawableHandle::new(id, kind, self.state.clone(), active_idx);
-        self.state.lock().expect("canvas state poisoned").segments[active_idx]
-            .ops
-            .push(Op::Spawn(handle.spec.clone()));
+        {
+            let mut state = self.state.lock().expect("canvas state poisoned");
+            state.object_specs.insert(id, handle.spec.clone());
+            state.segments[active_idx]
+                .ops
+                .push(Op::Spawn(handle.spec.clone()));
+        }
         handle
     }
 
@@ -1997,7 +2382,7 @@ impl SceneModel {
     /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
     ///
     /// Source pixels are decoded once per canonical path and are displayed at
-    /// their native pixel dimensions before `.scaled()` is applied.
+    /// their native pixel dimensions before `.scale_to()` is applied.
     pub fn image(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, ImageLoadError> {
         self.image_with_options(path, ImageOptions::default())
     }
@@ -2598,13 +2983,15 @@ impl SceneModel {
             .lock()
             .expect("canvas state poisoned")
             .next_camera_state_id();
-        Ok(self.camera_anim(
-            AnimationType::CameraState {
-                from: gaanim_animation::CameraStateSource::Captured(from_id),
-                to: state_handle.source,
-            },
-            duration,
-        ))
+        Ok(self
+            .camera_anim(
+                AnimationType::CameraState {
+                    from: gaanim_animation::CameraStateSource::Captured(from_id),
+                    to: state_handle.source,
+                },
+                duration,
+            )
+            .capture_camera_before_play(from_id))
     }
 
     /// Animate to a previously saved named camera state.
@@ -2623,7 +3010,6 @@ impl SceneModel {
     /// Pan the orthographic camera to a world-space point.
     pub fn camera_pan_to(&mut self, x: f64, y: f64, duration: f64) -> Anim {
         let to = gaanim_core::glam::DVec3::new(x, y, self.camera_position.z);
-        self.camera_position = to;
         self.camera_anim(AnimationType::CameraPosition { to }, duration)
     }
 
@@ -2635,7 +3021,6 @@ impl SceneModel {
     /// Animate orthographic zoom. Values above one zoom in.
     pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) -> Anim {
         let to = zoom;
-        self.camera_zoom = to;
         self.camera_anim(AnimationType::CameraZoom { to }, duration)
     }
 
@@ -2681,7 +3066,6 @@ impl SceneModel {
     /// Rotate the 2D camera around the viewport center, in radians.
     pub fn camera_rotate_to(&mut self, angle: f64, duration: f64) -> Anim {
         let to = gaanim_core::glam::DQuat::from_rotation_z(angle);
-        self.camera_rotation = to;
         self.camera_anim(AnimationType::CameraRotation { to }, duration)
     }
 
@@ -2899,6 +3283,7 @@ impl SceneModel {
 
     pub fn wait(&mut self, dur: f64) {
         let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.freeze_spawn_specs();
         guard.active_mut().cursor += dur.max(0.0);
         guard.active_mut().ops.push(Op::Wait(dur.max(0.0)));
     }
@@ -2907,53 +3292,120 @@ impl SceneModel {
     /// cursor. Each `Anim` passed here is deactivated from its original
     /// sequential position before the batch is inserted.
     pub fn play(&mut self, anims: Vec<Anim>) {
-        self.play_with_lag(anims, 0.0);
-    }
-
-    /// Parallel playback with a uniform stagger between each animation's
-    /// start time. Existing per-animation delays are preserved and the lag is
-    /// added on top.
-    pub fn play_with_lag(&mut self, anims: Vec<Anim>, lag: f64) {
-        let lag = lag.max(0.0);
-        let builders: Vec<AnimationBuilder> = anims
-            .into_iter()
-            .filter(|anim| !anim.inner.anim_type.is_empty_properties())
-            .enumerate()
-            .map(|(idx, anim)| {
-                anim.deactivate_auto_queue();
-                let mut anim = anim.into_builder();
-                anim.delay += idx as f64 * lag;
-                anim
-            })
-            .collect();
-        self.play_builders(builders);
+        self.play_items(anims.into_iter().map(PlayItem::Animation).collect())
+            .expect("invalid animation batch");
     }
 
     /// Activate animations and declared audio together at the current cursor.
     ///
     /// Audio with an explicit duration contributes to the play duration. An
     /// open-ended clip starts with the batch but does not extend the timeline.
-    pub fn play_items(&mut self, items: Vec<PlayItem>, lag: f64) -> Result<(), PlayError> {
-        if items
+    pub fn play_items(&mut self, items: Vec<PlayItem>) -> Result<(), PlayError> {
+        self.play_items_configured(items, None, None)
+    }
+
+    /// Validate and atomically schedule a mixed play batch.
+    pub fn play_items_configured(
+        &mut self,
+        items: Vec<PlayItem>,
+        default_duration: Option<f64>,
+        default_rate: Option<RateFunc>,
+    ) -> Result<(), PlayError> {
+        let children = items.into_iter().map(Composition::leaf).collect();
+        let composition = Composition::parallel(children)?;
+        self.play_composition_configured(composition, default_duration, default_rate)
+    }
+
+    /// Validate, resolve, and atomically schedule a composition tree.
+    pub fn play_composition_configured(
+        &mut self,
+        composition: Composition,
+        default_duration: Option<f64>,
+        default_rate: Option<RateFunc>,
+    ) -> Result<(), PlayError> {
+        let mut resolved = composition.resolved(default_duration, default_rate)?;
+        resolved.sort_by(|left, right| {
+            left.start
+                .total_cmp(&right.start)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+        let animations = resolved
             .iter()
-            .any(|item| matches!(item, PlayItem::Audio(audio) if !audio.belongs_to(&self.state)))
+            .filter_map(|resolved| match &resolved.item {
+                PlayItem::Animation(anim) => Some(anim),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if animations.iter().any(|anim| !anim.belongs_to(&self.state)) {
+            return Err(PlayError::ForeignAnimation);
+        }
+        if animations.iter().any(|anim| anim.is_consumed()) {
+            return Err(PlayError::AnimationAlreadyConsumed);
+        }
+        if animations
+            .iter()
+            .any(|anim| anim.inner.anim_type.is_empty_properties())
         {
+            return Err(PlayError::EmptyAnimation);
+        }
+        for (index, anim) in animations.iter().enumerate() {
+            if animations[..index]
+                .iter()
+                .any(|previous| anim.same_token(previous))
+            {
+                return Err(PlayError::DuplicateAnimation);
+            }
+        }
+        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64)> = Vec::new();
+        for resolved_item in &resolved {
+            let PlayItem::Animation(anim) = &resolved_item.item else {
+                continue;
+            };
+            let start = resolved_item.start;
+            let end = start + resolved_item.duration.unwrap_or(0.0);
+            for channel in animation_channels(anim) {
+                let conflicts = occupied.iter().any(
+                    |(target, occupied_channel, occupied_start, occupied_end)| {
+                        if *target != anim.inner.target || *occupied_channel != channel {
+                            return false;
+                        }
+                        let left_zero = end == start;
+                        let right_zero = occupied_end == occupied_start;
+                        match (left_zero, right_zero) {
+                            (true, true) => start == *occupied_start,
+                            (true, false) => start >= *occupied_start && start < *occupied_end,
+                            (false, true) => *occupied_start >= start && *occupied_start < end,
+                            (false, false) => start < *occupied_end && *occupied_start < end,
+                        }
+                    },
+                );
+                if conflicts {
+                    return Err(PlayError::ConflictingChannel {
+                        target: anim.inner.target,
+                        channel,
+                    });
+                }
+                occupied.push((anim.inner.target, channel, start, end));
+            }
+        }
+        if resolved.iter().any(
+            |item| matches!(&item.item, PlayItem::Audio(audio) if !audio.belongs_to(&self.state)),
+        ) {
             return Err(PlayError::ForeignAudio);
         }
-        if items
-            .iter()
-            .any(|item| matches!(item, PlayItem::Video(video) if !video.belongs_to(&self.state)))
-        {
+        if resolved.iter().any(
+            |item| matches!(&item.item, PlayItem::Video(video) if !video.belongs_to(&self.state)),
+        ) {
             return Err(PlayError::ForeignVideo);
         }
-        if items
+        if resolved
             .iter()
-            .any(|item| matches!(item, PlayItem::Lottie(lottie) if !lottie.belongs_to(&self.state)))
+            .any(|item| matches!(&item.item, PlayItem::Lottie(lottie) if !lottie.belongs_to(&self.state)))
         {
             return Err(PlayError::ForeignLottie);
         }
         let mut video_activations = HashSet::new();
-        if items.iter().any(|item| match item {
+        if resolved.iter().any(|item| match &item.item {
             PlayItem::Video(video) => {
                 video.activated.load(Ordering::Acquire)
                     || !video_activations.insert(Arc::as_ptr(&video.activated))
@@ -2963,7 +3415,7 @@ impl SceneModel {
             return Err(PlayError::VideoAlreadyActivated);
         }
         let mut lottie_activations = HashSet::new();
-        if items.iter().any(|item| match item {
+        if resolved.iter().any(|item| match &item.item {
             PlayItem::Lottie(lottie) => {
                 lottie.activated.load(Ordering::Acquire)
                     || !lottie_activations.insert(Arc::as_ptr(&lottie.activated))
@@ -2973,23 +3425,27 @@ impl SceneModel {
             return Err(PlayError::LottieAlreadyActivated);
         }
 
-        let lag = lag.max(0.0);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .freeze_spawn_specs();
+
         let play_start = self.current_time();
         let mut builders = Vec::new();
-        let mut max_duration: f64 = 0.0;
+        let mut camera_captures = Vec::new();
+        let max_duration = resolved_span(&resolved);
         let mut visual_duration: f64 = 0.0;
-        for (index, item) in items.into_iter().enumerate() {
-            let delay = index as f64 * lag;
-            match item {
+        for resolved_item in resolved {
+            let delay = resolved_item.start;
+            match resolved_item.item {
                 PlayItem::Animation(anim) => {
-                    if anim.inner.anim_type.is_empty_properties() {
-                        continue;
+                    anim.mark_consumed();
+                    anim.commit_authoring_target();
+                    if let Some(id) = anim.camera_capture_before_play() {
+                        camera_captures.push(id);
                     }
-                    anim.deactivate_auto_queue();
                     let mut builder = anim.into_builder();
                     builder.delay += delay;
-                    max_duration =
-                        max_duration.max(builder.delay.max(0.0) + builder.duration.max(0.0));
                     visual_duration =
                         visual_duration.max(builder.delay.max(0.0) + builder.duration.max(0.0));
                     builders.push(builder);
@@ -2997,7 +3453,6 @@ impl SceneModel {
                 PlayItem::Audio(audio) => {
                     let mut track = audio.track;
                     track.start_time = play_start + delay;
-                    max_duration = max_duration.max(delay + track.duration.unwrap_or(0.0));
                     self.audio_tracks.push(track);
                 }
                 PlayItem::Video(video) => {
@@ -3014,7 +3469,6 @@ impl SceneModel {
                         track.start_time = start_time;
                         self.audio_tracks.push(track);
                     }
-                    max_duration = max_duration.max(delay + video.duration.unwrap_or(0.0));
                 }
                 PlayItem::Lottie(lottie) => {
                     lottie.activated.store(true, Ordering::Release);
@@ -3027,13 +3481,15 @@ impl SceneModel {
                         playback.scene_start = start_time;
                         playback.active = true;
                     }
-                    max_duration = max_duration.max(delay + lottie.duration.unwrap_or(0.0));
                 }
             }
         }
 
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.active_mut().cursor += max_duration;
+        for id in camera_captures {
+            guard.active_mut().ops.push(Op::CaptureCameraState { id });
+        }
         guard.active_mut().ops.push(Op::Play(builders));
         let media_remainder = (max_duration - visual_duration).max(0.0);
         if media_remainder > 0.0 {
@@ -3096,8 +3552,8 @@ impl SceneModel {
         if let Some(footer) = footer {
             self.text(&footer)
                 .fill(muted)
-                .scaled(0.5)
-                .at(frame.min.x + frame.width() * 0.14, footer_y + 8.0)
+                .scale_to(0.5)
+                .move_to(frame.min.x + frame.width() * 0.14, footer_y + 8.0)
                 .z_index(101);
         }
         if let Some(logo) = branding.logo.as_deref() {
@@ -3115,7 +3571,7 @@ impl SceneModel {
                     message: error.to_string(),
                 })?
             };
-            logo.scaled(branding.logo_scale)
+            logo.scale_to(branding.logo_scale)
                 .at_anchor(frame.max.x, frame.max.y, Anchor::TopRight)
                 .z_index(101);
         }
@@ -3315,7 +3771,7 @@ impl SceneModel {
     // -- Reactive objects --
 
     /// Spawn a value tracker — a reactive float signal that can be animated
-    /// with `.animate_to()` and referenced by other reactive components.
+    /// with `.animate().set(...)` and referenced by other reactive components.
     pub fn value_tracker(&mut self, initial: f64) -> DrawableHandle {
         self.spawn(SpawnKind::ValueTracker(initial))
     }
@@ -4092,7 +4548,7 @@ impl SceneModel {
                             self.dot(s * 0.11)
                                 .fill(background)
                                 .stroke(foreground, s * 0.055)
-                                .at(center.x, center.y),
+                                .move_to(center.x, center.y),
                         );
                     }
                 }
@@ -4140,8 +4596,8 @@ impl SceneModel {
                     self.rounded_rect(s * 0.72, s * 0.42, s * 0.08)
                         .fill(background)
                         .stroke(foreground, s * 0.065)
-                        .at(center.x, center.y)
-                        .rotated(direction.y.atan2(direction.x) - std::f64::consts::FRAC_PI_2),
+                        .move_to(center.x, center.y)
+                        .rotate_to(direction.y.atan2(direction.x) - std::f64::consts::FRAC_PI_2),
                 );
                 if kind == "guided" {
                     for x in [-s * 0.48, s * 0.48] {
@@ -4176,7 +4632,7 @@ impl SceneModel {
                     self.dot(s * 0.10)
                         .fill(background)
                         .stroke(foreground, s * 0.055)
-                        .at(lower.x, lower.y),
+                        .move_to(lower.x, lower.y),
                 );
             }
             "spring" => {
@@ -4253,7 +4709,9 @@ impl SceneModel {
             self.group_no_center(&[&ground, &hatching, &guides, &body, &rollers, &joint]);
         match point {
             CanvasEndpoint::Static(position) => {
-                drawable.clone().at_3d(position.x, position.y, position.z);
+                drawable
+                    .clone()
+                    .move_to_3d(position.x, position.y, position.z);
             }
             point => {
                 drawable.follow_endpoint(
@@ -4289,7 +4747,7 @@ impl SceneModel {
                 .rounded_rect(size, size * 0.56, size * 0.1)
                 .fill(background)
                 .stroke(foreground, size * 0.08)
-                .rotated(axis.y.atan2(axis.x)),
+                .rotate_to(axis.y.atan2(axis.x)),
             _ => self
                 .dot(size * 0.28)
                 .fill(background)
@@ -5105,8 +5563,8 @@ mod tests {
     #[test]
     fn reactive_visuals_require_their_own_play_entry() {
         let mut canvas = SceneModel::new(320, 180);
-        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
-        let mass = canvas.dot(8.0).at(60.0, 0.0);
+        let anchor = canvas.dot(8.0).move_to(-60.0, 0.0);
+        let mass = canvas.dot(8.0).move_to(60.0, 0.0);
         let spring = canvas.spring_between_with_crossing(
             CanvasEndpoint::Entity(anchor.id),
             CanvasEndpoint::Entity(mass.id),
@@ -5168,7 +5626,7 @@ mod tests {
     #[test]
     fn line_between_accepts_static_and_anchor_endpoints() {
         let mut canvas = SceneModel::new(320, 180);
-        let reference = canvas.rect(100.0, 40.0).at(30.0, 40.0);
+        let reference = canvas.rect(100.0, 40.0).move_to(30.0, 40.0);
         let anchor = reference.anchor_point(Anchor::TopRight, DVec3::ZERO);
         canvas.line_between(
             CanvasEndpoint::Static(DVec3::new(-10.0, -20.0, 0.0)),
@@ -5203,7 +5661,7 @@ mod tests {
     #[test]
     fn deferred_group_fade_in_reveals_deferred_children() {
         let mut canvas = SceneModel::new(320, 180);
-        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
+        let anchor = canvas.dot(8.0).move_to(-60.0, 0.0);
         let child = canvas.dot(8.0);
         child.follow_to(&anchor, 0.0, 24.0);
         let group = canvas.group(&[&child]);
@@ -5242,8 +5700,8 @@ mod tests {
     #[test]
     fn moving_a_group_does_not_reveal_unentered_deferred_children() {
         let mut canvas = SceneModel::new(320, 180);
-        let anchor = canvas.dot(8.0).at(-60.0, 0.0);
-        let mass = canvas.dot(8.0).at(60.0, 0.0);
+        let anchor = canvas.dot(8.0).move_to(-60.0, 0.0);
+        let mass = canvas.dot(8.0).move_to(60.0, 0.0);
         let spring = canvas.spring_between(
             CanvasEndpoint::Entity(anchor.id),
             CanvasEndpoint::Entity(mass.id),
@@ -5251,7 +5709,7 @@ mod tests {
             10.0,
         );
         let group = canvas.group(&[&anchor, &mass, &spring]);
-        canvas.play(vec![group.animate().r#move(40.0, 0.0).duration(1.0)]);
+        canvas.play(vec![group.animate().shift_by(40.0, 0.0).duration(1.0)]);
         canvas.play(vec![spring.fade_in(1.0)]);
 
         let mut world = World::new();
@@ -5307,9 +5765,9 @@ mod tests {
             70.0,
             None,
         );
-        let mass = canvas.dot(8.0).at(60.0, -40.0);
+        let mass = canvas.dot(8.0).move_to(60.0, -40.0);
         let group = canvas.group(&[&support.drawable, &mass]);
-        canvas.play(vec![group.move_to(40.0, 0.0).duration(1.0)]);
+        canvas.play(vec![group.animate().move_to(40.0, 0.0).duration(1.0)]);
 
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -5368,7 +5826,7 @@ mod tests {
     fn writing_or_creating_a_group_keeps_updater_coordinates_and_reveals_deferred_members() {
         for use_write in [true, false] {
             let mut canvas = SceneModel::new(320, 180);
-            let mass = canvas.dot(8.0).at(60.0, -40.0);
+            let mass = canvas.dot(8.0).move_to(60.0, -40.0);
             mass.add_custom_updater(gaanim_animation::Updater::new(
                 |_dt, _elapsed, entity, world| {
                     if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
@@ -5958,7 +6416,7 @@ mod tests {
         .unwrap();
 
         let mut canvas = SceneModel::new(320, 180);
-        canvas.svg(&temp).unwrap().scaled(2.0);
+        canvas.svg(&temp).unwrap().scale_to(2.0);
         std::fs::remove_file(temp).unwrap();
 
         let mut app = bevy::prelude::App::new();
@@ -6038,12 +6496,22 @@ mod tests {
     }
 
     #[test]
-    fn play_with_lag_offsets_delays_and_cursor() {
+    fn stagger_offsets_delays_and_cursor() {
         let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.circle(20.0);
         let second = canvas.circle(20.0);
 
-        canvas.play_with_lag(vec![first.fade_in(1.0), second.fade_in(1.0)], 0.25);
+        let plan = Composition::stagger(
+            vec![
+                Composition::leaf(first.fade_in(1.0)),
+                Composition::leaf(second.fade_in(1.0)),
+            ],
+            0.25,
+        )
+        .unwrap();
+        canvas
+            .play_composition_configured(plan, None, None)
+            .unwrap();
 
         let guard = canvas.state.lock().expect("canvas state poisoned");
         let segment = guard.active();
@@ -6058,7 +6526,7 @@ mod tests {
     }
 
     #[test]
-    fn compound_property_animation_queues_once_and_regroups_as_one_anim() {
+    fn compound_property_animation_stays_pure_and_schedules_as_one_anim() {
         let mut canvas = SceneModel::new(1280, 720);
         let shape = canvas.circle(20.0).fill(Color::WHITE);
 
@@ -6076,11 +6544,8 @@ mod tests {
             .opacity(0.6);
         {
             let guard = canvas.state.lock().expect("canvas state poisoned");
-            assert_eq!(guard.active().cursor, 2.0);
-            let Some(Op::Animate { anim, active: true }) = guard.active().ops.last() else {
-                panic!("compound animation should auto-queue on the first property");
-            };
-            let AnimationType::Properties(properties) = &anim.anim_type else {
+            assert_eq!(guard.active().cursor, 0.0);
+            let AnimationType::Properties(properties) = &animation.inner.anim_type else {
                 panic!("expected typed property animation");
             };
             assert!(properties.translation.is_some());
@@ -6104,7 +6569,7 @@ mod tests {
     #[test]
     fn move_to_anchor_places_the_requested_anchor_at_the_target() {
         let mut canvas = SceneModel::new(640, 360);
-        let rect = canvas.rect(100.0, 60.0).at(-120.0, 0.0);
+        let rect = canvas.rect(100.0, 60.0).move_to(-120.0, 0.0);
         canvas.play(vec![
             rect.move_to_anchor(80.0, 40.0, Anchor::TopRight)
                 .duration(1.0),
@@ -6138,8 +6603,8 @@ mod tests {
     #[test]
     fn move_to_anchor_point_animates_center_to_reference_anchor() {
         let mut canvas = SceneModel::new(640, 360);
-        let reference = canvas.rect(100.0, 40.0).at(50.0, 20.0);
-        let moving = canvas.rect(10.0, 6.0).at(-100.0, -80.0);
+        let reference = canvas.rect(100.0, 40.0).move_to(50.0, 20.0);
+        let moving = canvas.rect(10.0, 6.0).move_to(-100.0, -80.0);
         let point = reference.anchor_point(
             Anchor::TopRight,
             gaanim_core::glam::DVec3::new(-5.0, -3.0, 0.0),
@@ -6920,7 +7385,7 @@ mod tests {
     #[test]
     fn anchored_bar_and_labeled_dimension_compile_the_reactive_contract() {
         let mut canvas = SceneModel::new(640, 360);
-        let frame = canvas.rect(180.0, 80.0).at(20.0, 0.0);
+        let frame = canvas.rect(180.0, 80.0).move_to(20.0, 0.0);
         let left = frame.anchor_point(Anchor::TopLeft, DVec3::ZERO);
         let right = frame.anchor_point(Anchor::TopRight, DVec3::ZERO);
         let _bar = canvas.bar_between(
@@ -7197,7 +7662,7 @@ mod tests {
         let audio = canvas.audio(&path, Some(2.0), 0.5, 0.1, 0.2).unwrap();
 
         assert!(canvas.audio_tracks.is_empty(), "declaration must be inert");
-        canvas.play_items(vec![audio.into()], 0.0).unwrap();
+        canvas.play_items(vec![audio.into()]).unwrap();
 
         assert_eq!(canvas.audio_tracks.len(), 1);
         assert_eq!(canvas.audio_tracks[0].start_time, 3.0);
@@ -7223,10 +7688,38 @@ mod tests {
         let mut canvas = SceneModel::new(1280, 720);
         canvas.wait(1.25);
         let audio = canvas.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
-        canvas.play_items(vec![audio.into()], 0.0).unwrap();
+        canvas.play_items(vec![audio.into()]).unwrap();
 
         assert_eq!(canvas.audio_tracks[0].start_time, 1.25);
         assert_eq!(canvas.current_time(), 1.25);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn composition_schedules_open_audio_without_blocking_and_rejects_stretch() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-composed-audio-{}.wav", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+        let mut canvas = SceneModel::new(320, 180);
+        let audio = canvas.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
+        let visual = canvas.circle(8.0).animate().fade_in().duration(0.5);
+        let plan = Composition::sequence(
+            vec![Composition::leaf(audio), Composition::leaf(visual)],
+            0.0,
+        )
+        .unwrap();
+        let schedule = plan.schedule(None, None).unwrap();
+        assert_eq!(schedule.entries[0].duration, None);
+        assert_eq!(schedule.entries[1].start, 0.0);
+        assert_eq!(schedule.span, 0.5);
+        assert!(matches!(
+            plan.clone().stretch(2.0),
+            Err(PlayError::StretchContainsMedia)
+        ));
+        canvas
+            .play_composition_configured(plan, None, None)
+            .unwrap();
+        assert_eq!(canvas.current_time(), 0.5);
         let _ = std::fs::remove_file(path);
     }
 
@@ -7278,12 +7771,12 @@ mod tests {
         };
 
         assert_eq!(
-            canvas.play_items(vec![video.clone().into(), video.clone().into()], 0.0),
+            canvas.play_items(vec![video.clone().into(), video.clone().into()]),
             Err(PlayError::VideoAlreadyActivated)
         );
         assert_eq!(canvas.current_time(), 1.5);
         assert!(canvas.audio_tracks.is_empty());
-        canvas.play_items(vec![video.clone().into()], 0.0).unwrap();
+        canvas.play_items(vec![video.clone().into()]).unwrap();
 
         let spec = drawable.spec.lock().expect("object spec poisoned");
         let SpawnKind::Video { playback, .. } = &spec.kind else {
@@ -7294,7 +7787,7 @@ mod tests {
         assert_eq!(canvas.audio_tracks[0].start_time, 1.5);
         assert_eq!(canvas.current_time(), 3.5);
         assert_eq!(
-            canvas.play_items(vec![video.into()], 0.0),
+            canvas.play_items(vec![video.into()]),
             Err(PlayError::VideoAlreadyActivated)
         );
         assert_eq!(canvas.audio_tracks.len(), 1);
@@ -7487,22 +7980,18 @@ mod tests {
     fn layout_ownership_rejects_positioning_but_allows_visual_transforms() {
         let mut canvas = SceneModel::new(320, 180);
         let owner = canvas.group(&[]);
-        let positioned = canvas.circle(10.0).at(12.0, 0.0);
+        let positioned = canvas.circle(10.0).move_to(12.0, 0.0);
         assert_eq!(
             positioned.claim_layout(&owner),
             Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
         );
 
         let animated = canvas.circle(10.0);
-        let _ = animated.r#move(8.0, 0.0);
-        assert_eq!(
-            animated.claim_layout(&owner),
-            Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
-        );
+        let _description = animated.animate().shift_by(8.0, 0.0);
+        assert!(animated.claim_layout(&owner).is_ok());
 
         let visual = canvas.circle(10.0);
-        let _ = visual.scale(1.5);
-        let _ = visual.rotate(0.25);
+        let _ = visual.animate().scale_by(1.5).rotate_by(0.25);
         assert!(visual.claim_layout(&owner).is_ok());
 
         let mut foreign_canvas = SceneModel::new(320, 180);
@@ -7521,7 +8010,7 @@ mod tests {
             .circle(40.0)
             .no_fill()
             .stroke(Color::WHITE, 3.0)
-            .at(0.0, -10.0)
+            .move_to(0.0, -10.0)
             .opacity(0.0);
         let fill = canvas
             .fill_level(
@@ -7607,5 +8096,157 @@ mod tests {
         assert_eq!(outline_paths[0].3, Some(1.0));
         assert_eq!(outline_paths[0].5, true);
         assert!(outline_paths[0].4.is_none());
+    }
+
+    #[test]
+    fn animation_descriptions_are_pure_until_play() {
+        let mut scene = SceneModel::new(320, 180);
+        let dot = scene.circle(10.0);
+        let before_ops = scene.state.lock().unwrap().active().ops.len();
+        let anim = dot
+            .animate()
+            .shift_by(20.0, 0.0)
+            .fill(Color::from_rgb8(255, 0, 0))
+            .duration(0.75)
+            .delay(0.25);
+        assert_eq!(scene.current_time(), 0.0);
+        assert_eq!(scene.state.lock().unwrap().active().ops.len(), before_ops);
+
+        scene.play_items(vec![anim.into()]).unwrap();
+        assert_eq!(scene.current_time(), 1.0);
+        assert!(matches!(
+            scene.state.lock().unwrap().active().ops.last(),
+            Some(Op::Play(_))
+        ));
+    }
+
+    #[test]
+    fn play_rejects_reuse_duplicates_foreign_owners_and_channel_conflicts() {
+        let mut scene = SceneModel::new(320, 180);
+        let dot = scene.circle(10.0);
+        let used = dot.animate().opacity(0.5);
+        scene.play_items(vec![used.clone().into()]).unwrap();
+        assert_eq!(
+            scene.play_items(vec![used.into()]),
+            Err(PlayError::AnimationAlreadyConsumed)
+        );
+
+        let duplicate = dot.animate().fill(Color::from_rgb8(255, 0, 0));
+        assert_eq!(
+            scene.play_items(vec![duplicate.clone().into(), duplicate.into()]),
+            Err(PlayError::DuplicateAnimation)
+        );
+
+        let left = dot.animate().shift_by(10.0, 0.0);
+        let right = dot.animate().move_to(20.0, 0.0);
+        assert!(matches!(
+            scene.play_items(vec![left.into(), right.into()]),
+            Err(PlayError::ConflictingChannel { channel, .. }) if channel == "translation"
+        ));
+
+        let mut foreign_scene = SceneModel::new(320, 180);
+        let foreign = foreign_scene.circle(10.0).animate().fade_in();
+        assert_eq!(
+            scene.play_items(vec![foreign.into()]),
+            Err(PlayError::ForeignAnimation)
+        );
+    }
+
+    #[test]
+    fn immediate_setters_after_time_advance_record_zero_duration_cuts() {
+        let mut scene = SceneModel::new(320, 180);
+        let dot = scene.circle(10.0).move_to(0.0, 0.0).fill(Color::WHITE);
+        scene.wait(1.0);
+        let cursor = scene.current_time();
+        let initial = scene
+            .state
+            .lock()
+            .unwrap()
+            .frozen_spawn_specs
+            .get(&dot.id)
+            .cloned()
+            .unwrap();
+        dot.clone()
+            .shift_by(12.0, 0.0)
+            .fill(Color::from_rgb8(255, 0, 0));
+        let state = scene.state.lock().unwrap();
+        assert_eq!(state.active().cursor, cursor);
+        assert!(
+            state
+                .active()
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::Immediate(_)))
+        );
+        assert_eq!(initial.fill, Some(Brush::Solid(Color::WHITE)));
+    }
+
+    #[test]
+    fn composition_resolves_nested_spans_without_flattening_early() {
+        let mut scene = SceneModel::new(320, 180);
+        let a = scene.circle(10.0).animate().fade_in().duration(1.0);
+        let b = scene.circle(10.0).animate().fade_in().duration(2.0);
+        let c = scene.circle(10.0).animate().fade_in().duration(1.0);
+        let group =
+            Composition::parallel(vec![Composition::leaf(b), Composition::leaf(c)]).unwrap();
+        let plan = Composition::sequence(vec![Composition::leaf(a), group], -0.25).unwrap();
+        let schedule = plan.schedule(None, None).unwrap();
+        assert_eq!(schedule.span, 2.75);
+        assert_eq!(schedule.entries[0].start, 0.0);
+        assert_eq!(schedule.entries[1].start, 0.75);
+        assert_eq!(schedule.entries[2].start, 0.75);
+        assert_eq!(scene.current_time(), 0.0);
+    }
+
+    #[test]
+    fn composition_allows_sequential_channel_reuse_but_rejects_overlap() {
+        let mut scene = SceneModel::new(320, 180);
+        let dot = scene.circle(10.0);
+        let sequence = Composition::sequence(
+            vec![
+                Composition::leaf(dot.animate().shift_by(10.0, 0.0)),
+                Composition::leaf(dot.animate().shift_by(10.0, 0.0)),
+            ],
+            0.0,
+        )
+        .unwrap();
+        scene
+            .play_composition_configured(sequence, None, None)
+            .unwrap();
+        assert_eq!(scene.current_time(), 2.0);
+
+        let overlap = Composition::sequence(
+            vec![
+                Composition::leaf(dot.animate().shift_by(10.0, 0.0)),
+                Composition::leaf(dot.animate().shift_by(10.0, 0.0)),
+            ],
+            -0.25,
+        )
+        .unwrap();
+        assert!(matches!(
+            scene.play_composition_configured(overlap, None, None),
+            Err(PlayError::ConflictingChannel { channel, .. }) if channel == "translation"
+        ));
+    }
+
+    #[test]
+    fn composition_defaults_and_stretch_resolve_before_scheduling() {
+        let mut scene = SceneModel::new(320, 180);
+        let first = scene.circle(10.0).animate().fade_in();
+        let second = scene.circle(10.0).animate().fade_in().duration(2.0);
+        let plan = Composition::stagger(
+            vec![Composition::leaf(first), Composition::leaf(second)],
+            0.5,
+        )
+        .unwrap()
+        .defaults(Some(0.75), Some(RateFunc::Linear))
+        .unwrap()
+        .stretch(5.0)
+        .unwrap();
+        let schedule = plan.schedule(None, None).unwrap();
+        assert_eq!(schedule.span, 5.0);
+        assert_eq!(schedule.entries[0].duration, Some(1.5));
+        assert_eq!(schedule.entries[1].start, 1.0);
+        assert_eq!(schedule.entries[1].duration, Some(4.0));
     }
 }

@@ -28,10 +28,10 @@ copy = scene.text(
     role="body",
     style=TextStyle(size=34),
     flow=TextFlow(wrap=520, align="center"),
-).at(0, 0)
+).move_to(0, 0)
 
-scene.play([copy.write(1.2, by="part", stagger=0.06)])
-scene.play([copy["formula"]["mass"].indicate(0.6)])
+scene.play([copy.animate.write(1.2, by="part", stagger=0.06)])
+scene.play([copy["formula"]["mass"].animate.indicate(0.6)])
 ```
 
 Usa un rol para la prosa y `scene.text.equation()` para una ecuación independiente.
@@ -76,8 +76,8 @@ copy = scene.text(
     "La energía es ", formula,
     role="body",
     flow=TextFlow(wrap=400, align="center", line_spacing=1.2),
-).at(0, 0)
-scene.play([copy.write(1.0, by="part")])
+).move_to(0, 0)
+scene.play([copy.animate.write(1.0, by="part")])
 # output: text_factory.webp
 scene.render()
 ```
@@ -104,9 +104,9 @@ equation = scene.text.equation(
     part("sum_force", "sum F_t"),
     "=",
     parts(mass="m", acceleration="a_t"),
-).at(0, 0)
+).move_to(0, 0)
 equation["acceleration"].fill(GOLD)
-scene.play([equation.write(1.0, by="part")])
+scene.play([equation.animate.write(1.0, by="part")])
 # output: equation_factory.webp
 scene.render()
 ```
@@ -130,8 +130,8 @@ typography. Under a theme, `kicker` resolves to the palette's `accent` color,
 which makes it the natural small line above a title:
 
 ```python
-kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").at(0, 452)
-title = scene.text("¿Cuál sufrirá más?", role="title").at(0, 360)
+kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").move_to(0, 452)
+title = scene.text("¿Cuál sufrirá más?", role="title").move_to(0, 360)
 ```
 
 Resolution order is:
@@ -158,7 +158,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 )[
 ```python
 width, height = scene.text.measure("PGA = 0.35 g", role="label")
-box = scene.geometry.rounded_rect(width + 56, height + 32, 14).at(0, -414)
+box = scene.geometry.rounded_rect(width + 56, height + 32, 14).move_to(0, -414)
 ```
 ]
 
@@ -185,9 +185,9 @@ scene = Scene(640, 360, background="#0f172a")
 copy = scene.text(
     "Normal, _emphasis_, *strong* and *_both_*.",
     size=36,
-).at(0, 0)
-scene.play([copy.write(1.2, by="word", stagger=0.05)])
-scene.play([copy.words[3].indicate(0.6, color=GOLD)])
+).move_to(0, 0)
+scene.play([copy.animate.write(1.2, by="word", stagger=0.05)])
+scene.play([copy.words[3].animate.indicate(0.6, color=GOLD)])
 # output: text_inline_markup.webp
 scene.render()
 ```
@@ -222,10 +222,10 @@ equation = scene.text.equation(
     parts(mass_left="m", gravity="g sin(theta)"),
     "=",
     parts(mass_right="m", length="L", acceleration="theta''"),
-).at(0, 0)
-scene.play([equation.write(1.2, by="part")])
-scene.play([equation["gravity"].indicate(0.6)])
-scene.play([equation["acceleration"].color_to(GOLD, duration=0.6)])
+).move_to(0, 0)
+scene.play([equation.animate.write(1.2, by="part")])
+scene.play([equation["gravity"].animate.indicate(0.6)])
+scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
 # output: compact_text_parts.webp
 scene.render()
 ```
@@ -256,8 +256,8 @@ formula = part(
     part("result", "25", color=GOLD),
     "$",
 )
-text = scene.text("Resultado: ", formula).at(0, 0)
-scene.play([text.write(1.1, by="part", stagger=0.05)])
+text = scene.text("Resultado: ", formula).move_to(0, 0)
+scene.play([text.animate.write(1.1, by="part", stagger=0.05)])
 # output: text_parts.webp
 scene.render()
 ```
@@ -362,7 +362,7 @@ page = scene.layout.column(
     [scene.text("Texto responsive", role="heading").fill(GOLD), body],
     within="safe", width="fill", height="fill", padding=28, gap=18,
 )
-scene.play([page.fade_in().duration(0.7)])
+scene.play([page.animate.fade_in().duration(0.7)])
 # output: text_flow.webp
 scene.render()
 ```
@@ -379,13 +379,13 @@ layout use the same intrinsic text measurer. `wrap="auto"` makes the leaf
 width-sensitive. Numeric wrapping is further limited by the owner's offered
 constraints.
 
-Metric changes and `become`, `morph_to`, `step_to`, or `expand_to` invalidate
-measurement and request reflow from the owning Layout. A replacing transition
-uses the same duration for text and reflow. Transient `indicate`, `pulse`,
+Metric changes and `become` invalidate measurement and request reflow from the
+owning Layout. A replacing `text.animate.transform_to(target)` transition uses
+the same duration for text and reflow. Transient `indicate`, `pulse`,
 `wiggle`, `wave`, `highlight`, and `focus` do not change measurement.
 
 Layout owns translation. Once managed, a `Text` rejects manual placement such
-as `at`, `move`, `next_to`, and positional animations; configure its
+as `move_to`, `shift_by`, `next_to`, and positional animations; configure its
 `scene.layout.item(...)` or Layout owner instead. Cross-scene or incompatible-owner
 transition targets raise `LayoutOwnershipError`.
 
@@ -410,11 +410,14 @@ scene = Scene(480, 270, background="#0f172a")
 copy = scene.text(
     "La ", part("concept", "energía"), " depende de ",
     part("formula", "$", part("mass", "m"), " c^2$"),
-).at(0, 0)
+).move_to(0, 0)
 copy["concept"].fill(GOLD)
 copy["formula"]["mass"].fill(BLUE)
-scene.play([copy.write(1.0, by="word")])
-scene.play([copy.words[1].pulse(0.6), copy["formula"]["mass"].focus(0.6)])
+scene.play([copy.animate.write(1.0, by="word")])
+scene.play([
+    copy.words[1].animate.pulse(0.6),
+    copy["formula"]["mass"].animate.focus(0.6),
+])
 # output: text_selection.webp
 scene.render()
 ```
@@ -440,31 +443,26 @@ Unknown identifiers such as `sin` remain unchanged.
 
 ```text
 selection.fill(color) -> TextSelection
-selection.color_to(color, duration=None) -> Anim
-selection.opacity_to(opacity, duration=None) -> Anim
-selection.animate().fill(color).opacity(value) -> Anim
+selection.animate.fill(color).duration(seconds) -> Anim
+selection.animate.opacity(opacity).duration(seconds) -> Anim
+selection.animate.fill(color).opacity(value) -> Anim
 
-selection.indicate(duration=None) -> Anim
-selection.pulse(duration=None) -> Anim
-selection.wiggle(duration=None) -> Anim
-selection.wave(duration=None) -> Anim
-selection.highlight(duration=None) -> Anim
-selection.focus(duration=None) -> Anim
-selection.cancel(duration=None) -> Anim
+selection.animate.indicate(duration=None) -> Anim
+selection.animate.pulse(duration=None) -> Anim
+selection.animate.wiggle(duration=None) -> Anim
+selection.animate.wave(duration=None) -> Anim
+selection.animate.highlight(duration=None) -> Anim
+selection.animate.focus(duration=None) -> Anim
+selection.animate.cancel(duration=None) -> Anim
 
-selection.reveal(*, style="fade", duration=None) -> Anim
-selection.brace(label, *, above=False, duration=None) -> Anim
-selection.annotate(label, *, offset=(120, 80), duration=None) -> Anim
-
-selection.morph_to(target_selection, *, duration=None) -> Anim
-selection.copy_to(target_selection, *, duration=None) -> Anim
+selection.animate.morph_to(target_selection).duration(seconds) -> Anim
+selection.animate.copy_to(target_selection).duration(seconds) -> Anim
 ```
 
-The compound `animate()` builder is deliberately local: it accepts fill/color
+The `animate` proxy is deliberately local: it accepts fill/color
 and opacity, while transform, scale, rotation, material, and stroke targets
-raise `TypeError`. `reveal` accepts `fade`, `wipe`, or `from_below`. `cancel` draws a diagonal
-mark and dims the glyphs; the next replacing text transition retires both.
-`brace` and `annotate` use canvas-unit geometry around the selected glyphs.
+raise `TypeError`. `cancel` draws a diagonal mark and dims the glyphs; the next
+replacing text transition retires both.
 Every animation descriptor above can be placed directly in `scene.play([...])`.
 
 == Animaciones de texto completo
@@ -472,80 +470,60 @@ Every animation descriptor above can be placed directly in `scene.play([...])`.
 === Entrada y salida
 
 ```text
-text.write(duration=None, *, by="grapheme", order="forward", stagger=0) -> Anim
-text.type_in(duration=None, *, by="grapheme", order="forward", stagger=0.04) -> Anim
-text.reveal(duration=None, *, by="grapheme", order="forward", stagger=0) -> Anim
-text.fade_in(duration=None) -> Anim
-text.slide_in(direction="up", *, distance=24, duration=None) -> Anim
+text.animate.write(duration=None, *, by="grapheme", order="forward", stagger=0) -> Anim
+text.animate.fade_in(duration=None) -> Anim
 
-text.unwrite(duration=None) -> Anim
-text.erase(duration=None) -> Anim
-text.fade_out(duration=None) -> Anim
-text.slide_out(direction="down", *, distance=24, duration=None) -> Anim
+text.animate.unwrite(duration=None) -> Anim
+text.animate.fade_out(duration=None) -> Anim
 ```
 
 `by` accepts `grapheme`, `word`, `line`, or `part`; `order` accepts `forward`,
 `reverse`, `center`, or `random`; `stagger` must be finite and non-negative.
-The duration is the first optional positional argument, so `text.write(0.8)`
-and `text.write(0.8, by="word")` are the intended forms. In the current
+The duration is the first optional positional argument, so `text.animate.write(0.8)`
+and `text.animate.write(0.8, by="word")` are the intended forms. In the current
 renderer, `by="part"` has a dedicated semantic schedule; the other grouping,
 order, and stagger values are validated but share the vector write schedule.
 
 === Énfasis y anotación
 
 ```text
-text.indicate(duration=None) -> Anim
-text.pulse(duration=None) -> Anim
-text.wiggle(duration=None) -> Anim
-text.wave(duration=None) -> Anim
-text.highlight(duration=None) -> Anim
-text.focus(duration=None) -> Anim
-text.cancel(duration=None) -> Anim
-text.brace(label, *, above=False, duration=None) -> Anim
-text.annotate(label, *, offset=(120, 80), duration=None) -> Anim
+text.animate.indicate(duration=None) -> Anim
+text.animate.wiggle(duration=None) -> Anim
 ```
 
-These operate on the complete `Text`; their selection equivalents use the
-same engine on a local subset.
+These operate on the complete `Text`; the typed selection proxy adds `pulse`,
+`wave`, `highlight`, `focus`, and `cancel` for local subsets.
 
 == Transiciones estructurales
 
 #api-entry(
-  name: "Text structural transitions",
+  name: "Text.animate.transform_to",
   kind: "method",
-  signature: "morph_to(target, *, match=\"auto\", duration=1.0) | step_to(target, *, matches=None, duration=1.0) | expand_to(target, *, anchor=\"part\", duration=1.0) -> Anim",
+  signature: "text.animate.transform_to(target).duration(seconds) -> Anim",
   params: (
     (name: "target", type: "Text", default: none, desc: [Destination text in the same scene and a compatible Layout ownership context.]),
-    (name: "match", type: "auto | semantic | grapheme | shape", default: "\"auto\"", desc: [General matching strategy for `morph_to`.]),
-    (name: "matches", type: "Mapping[str,str] | Sequence[tuple[str,str]] | None", default: "None", desc: [Explicit semantic path pairs for `step_to`.]),
-    (name: "anchor", type: "str", default: "\"part\"", desc: [Shared semantic path for `expand_to`; `part` chooses the first shared path.]),
     (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds, shared with Layout reflow.]),
   ),
   returns: (type: "Anim", desc: [Deferred structural transition accepted by `scene.play()`.]),
-  desc: [Semantic paths are considered before remaining glyph and shape matches. Unmatched source/target glyphs use exit/entry behavior. Ownership violations raise `LayoutOwnershipError`; a missing automatic expansion anchor raises `KeyError`.],
+  desc: [The pure proxy does not change either text until `scene.play` commits it. Ownership violations raise `LayoutOwnershipError`.],
 )[
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part
 scene = Scene(480, 270, background="#0f172a")
-before = scene.text("$x + ", part("obsolete", "3"), " = 7$").at(0, 0)
-after = scene.text("$x = ", part("result", "4", color=GOLD), "$").at(0, 0)
-scene.play([before.write(0.8)])
-scene.play([before["obsolete"].cancel(0.5)])
-scene.play([before.step_to(after, duration=0.8)])
+before = scene.text("$x + ", part("obsolete", "3"), " = 7$").move_to(0, 0)
+after = scene.text("$x = ", part("result", "4", color=GOLD), "$").move_to(0, 0)
+scene.play([before.animate.write(0.8)])
+    scene.play([before["obsolete"].animate.cancel(0.5)])
+scene.play([before.animate.transform_to(after).duration(0.8)])
 # output: text_transition.webp
 scene.render()
 ```
 ]
 
-Matching behavior:
-
-- `morph_to`: general transition; `auto` favors semantic paths, then remaining
-  glyph/shape matching.
-- `step_to`: derivation/equation step with optional explicit path mapping.
-- `expand_to`: one-to-many expansion around a shared semantic part.
-- `selection.morph_to`: replaces one local selection with another.
-- `selection.copy_to`: preserves the source while moving a copy to the target.
+For local transitions, `selection.animate.morph_to(target)` replaces one
+selection and `selection.animate.copy_to(target)` preserves the source while
+moving a copy to the target.
 
 == Sustitución de contenido con become
 
@@ -574,7 +552,7 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 #api-entry(
   name: "Text.at / Text.at_anchor",
   kind: "method",
-  signature: ".at(x, y, anchor: Anchor | TextAnchor = None) -> Text\n.at_anchor(x, y, anchor: Anchor | TextAnchor) -> Text",
+  signature: ".move_to(x, y, anchor: Anchor | TextAnchor = None) -> Text\n.at_anchor(x, y, anchor: Anchor | TextAnchor) -> Text",
   params: (
     (name: "x / y", type: "float", default: none, desc: [Target point in canvas units.]),
     (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor.]),
@@ -586,9 +564,9 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 # show-code: true
 from gaanim import Anchor, Scene, TextAnchor
 scene = Scene(640, 360)
-scene.text("baseline left").at(-220, 60, TextAnchor.BASELINE_LEFT)
-scene.text.equation("frac(x_1^2, y_2) = 1").at(0, 0)
-scene.text("geometric corner").at(-220, -100, Anchor.TOP_LEFT)
+scene.text("baseline left").move_to(-220, 60, TextAnchor.BASELINE_LEFT)
+scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, 0)
+scene.text("geometric corner").move_to(-220, -100, Anchor.TOP_LEFT)
 ```
 ]
 
@@ -599,13 +577,13 @@ common fluent methods:
 
 ```text
 text.fill(color).stroke(color, width).opacity(alpha).z_index(layer)
-text.at(x, y).at_3d(x, y, z).next_to(other, direction)
+text.move_to(x, y).move_to_3d(x, y, z).next_to(other, direction)
 text.align_to(other, anchor).to_edge(direction).to_corner(anchor)
-text.scaled(factor).rotated(radians).with_pivot(x, y)
+text.scale_to(factor).rotate_to(radians).with_pivot(x, y)
 text.billboard().hud()
 ```
 
-For single-line text, `text.at(x, y)` places the visual horizontal center on
+For single-line text, `text.move_to(x, y)` places the visual horizontal center on
 `x` and the typographic baseline on `y`. `scene.text.equation(...)` returns the same
 `Text` type and follows the same rule, so words and equations with different
 ascenders, descenders, fractions, scripts, or authored sizes can share a
@@ -615,11 +593,11 @@ stable baseline:
 from gaanim import Scene, TextAnchor
 
 scene = Scene(960, 540)
-word = scene.text("Typography").at(0, 80)
-equation = scene.text.equation("frac(x_1^2, y_2) = 1").at(
+word = scene.text("Typography").move_to(0, 80)
+equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(
     0, -40, TextAnchor.BASELINE_CENTER
 )
-left = scene.text("left aligned").at(
+left = scene.text("left aligned").move_to(
     -320, -160, TextAnchor.BASELINE_LEFT
 )
 ```

@@ -18,7 +18,7 @@ plane = scene.viz.cartesian_2d(
     y_numbers=True,
     labels=False,
     x_labels=True,
-).at(-330, 120)
+).move_to(-330, 120)
 curve = plane.plot(lambda x: 0.12 * x * x - 1).stroke(CYAN, 3)
 
 polar = scene.viz.polar(
@@ -29,7 +29,7 @@ polar = scene.viz.polar(
     rings=True,
     axes=False,
     numbers=False,
-).drawable().at(330, 120)
+).drawable().move_to(330, 120)
 
 line = scene.viz.number_line(
     Axis.linear(0, 6).ticks(1).label("t").style(color=WHITE),
@@ -37,19 +37,19 @@ line = scene.viz.number_line(
     ticks=False,
     numbers=True,
     labels=False,
-).drawable().at(0, -245)
+).drawable().move_to(0, -245)
 
-title = scene.text("Visibility: per-axis, rings, and annotations").fill(GOLD).at(
+title = scene.text("Visibility: per-axis, rings, and annotations").fill(GOLD).move_to(
     0, 315, anchor=Anchor.CENTER
 )
-scene.play([plane.write(0.9), curve.create(0.9), polar.create(0.9), line.create(0.9), title.write(0.5)])
+scene.play([plane.animate.write(0.9), curve.animate.create(0.9), polar.animate.create(0.9), line.animate.create(0.9), title.animate.write(0.5)])
 scene.wait(0.4)
 scene.play([
-    plane.fade_out(0.4),
-    curve.fade_out(0.4),
-    polar.fade_out(0.4),
-    line.fade_out(0.4),
-    title.fade_out(0.4),
+    plane.animate.fade_out(0.4),
+    curve.animate.fade_out(0.4),
+    polar.animate.fade_out(0.4),
+    line.animate.fade_out(0.4),
+    title.animate.fade_out(0.4),
 ])
 
 space_3d = scene.viz.cartesian_3d(
@@ -70,12 +70,12 @@ space_3d = scene.viz.cartesian_3d(
 space_3d.parametric(lambda t: (t, 0.35 * t * t - 1, 0.5 * t), (-3, 3), samples=120).stroke(
     GREEN, 3
 )
-title_3d = scene.text("Visibility: XY grid with selected 3D axes").fill(GOLD).hud().at(
+title_3d = scene.text("Visibility: XY grid with selected 3D axes").fill(GOLD).hud().move_to(
     0, 315, anchor=Anchor.CENTER
 )
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
-scene.camera.look_at(eye=(9, 7, 9), target=(0, 0, 0), duration=0.0)
-scene.play([space_3d.create(1.0), title_3d.write(0.5)])
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
+scene.camera.look_at(eye=(9, 7, 9), target=(0, 0, 0))
+scene.play([space_3d.animate.create(1.0), title_3d.animate.write(0.5)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.45, 1.2, 1.9, 2.6])

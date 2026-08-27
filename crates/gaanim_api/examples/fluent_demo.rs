@@ -48,7 +48,7 @@ fn setup_scene(
     let logo = canvas
         .circle(80.0)
         .fill(Color::from_rgb8(0x19, 0x32, 0x64))
-        .at(0.0, 0.0);
+        .move_to(0.0, 0.0);
     let title_spec = gaanim_text::prelude::TextSpec::new(
         vec!["Gaanim".into()],
         Some(gaanim_text::prelude::TextRole::Title),
@@ -59,13 +59,13 @@ fn setup_scene(
     let title = canvas
         .text_spec(title_spec)
         .fill(Color::WHITE)
-        .at(0.0, 180.0);
+        .move_to(0.0, 180.0);
 
-    logo.fade_in(1.0);
+    canvas.play(vec![logo.animate().fade_in().duration(1.0)]);
     canvas.wait(0.5);
-    title.fade_in(1.0);
+    canvas.play(vec![title.animate().fade_in().duration(1.0)]);
     canvas.wait(1.0);
-    logo.r#move(-300.0, 0.0).duration(1.5);
+    canvas.play(vec![logo.animate().shift_by(-300.0, 0.0).duration(1.5)]);
     canvas.wait(0.5);
     canvas.fade_out_all(1.0);
     canvas.wait(0.5);

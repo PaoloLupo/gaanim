@@ -27,7 +27,7 @@ axis = (
   .numbers("pi", denominator=1)
 )
 timeline = scene.viz.number_line(axis, length=600)
-timeline.drawable().at(180, -20)
+timeline.drawable().move_to(180, -20)
 ```
 
 La primera coordenada está exactamente al inicio de la recta. Las marcas se
@@ -79,13 +79,13 @@ radius_line = scene.geometry.tracking_line(circle_center, circle_ref)
 projection = scene.geometry.tracking_line(circle_ref, wave_ref)
 
 scene.play([
-  timeline.create().duration(0.8),
-  sine_curve.fade_in().duration(0.01),
-  wave_dot.fade_in().duration(0.3),
-  projection.fade_in().duration(0.3),
+  timeline.animate.create().duration(0.8),
+  sine_curve.animate.fade_in().duration(0.01),
+  wave_dot.animate.fade_in().duration(0.3),
+  projection.animate.fade_in().duration(0.3),
 ])
 scene.play([
-  theta.animate_to(3 * math.pi, duration=8),
+  theta.animate.set(3 * math.pi).duration(8),
 ])
 ```
 

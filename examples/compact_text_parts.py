@@ -7,7 +7,7 @@ from gaanim import BLACK, GOLD, GRAY, WHITE, Scene, parts
 
 scene = Scene(1280, 720, background=BLACK)
 
-title = scene.text("Partes semánticas compactas", role="title").fill(WHITE).at(0, 250)
+title = scene.text("Partes semánticas compactas", role="title").fill(WHITE).move_to(0, 250)
 equation = scene.text.equation(
     "-",
     parts(
@@ -20,15 +20,15 @@ equation = scene.text.equation(
         length="L",
         acceleration="theta''",
     ),
-).at(0, 45).scaled(1.25)
+).move_to(0, 45).scale_to(1.25)
 caption = scene.text(
     "equation() crea math de bloque; parts() conserva nombres semánticos",
     role="caption",
-).fill(GRAY).at(0, -150)
+).fill(GRAY).move_to(0, -150)
 
-scene.play([title.write(0.7), equation.write(1.8), caption.fade_in(0.7)])
-scene.play([equation["gravity"].indicate(0.7)])
-scene.play([equation["acceleration"].color_to(GOLD, duration=0.7)])
+scene.play([title.animate.write(0.7), equation.animate.write(1.8), caption.animate.fade_in(0.7)])
+scene.play([equation["gravity"].animate.indicate(0.7)])
+scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.7)])
 scene.wait(0.5)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -150,7 +150,7 @@ def make_visual(
 ):
     """Create a color-coded diagram whose rods and labels follow the physics."""
     initial_pos1, initial_pos2 = system.positions()
-    hinge = scene.geometry.dot(10 * scale).fill(WHITE).at(system.px, system.py)
+    hinge = scene.geometry.dot(10 * scale).fill(WHITE).move_to(system.px, system.py)
     support = scene.mechanics.fixed_support(
         hinge,
         direction=Direction.DOWN,
@@ -161,13 +161,13 @@ def make_visual(
         scene.geometry.circle(28 * scale)
         .fill(bob1_color)
         .stroke(WHITE, 4 * scale)
-        .at(*initial_pos1[:2])
+        .move_to(*initial_pos1[:2])
     )
     bob2 = (
         scene.geometry.circle(34 * scale)
         .fill(bob2_color)
         .stroke(WHITE, 4 * scale)
-        .at(*initial_pos2[:2])
+        .move_to(*initial_pos2[:2])
     )
     rod1 = scene.geometry.tracking_line(hinge, bob1).no_fill().stroke(bob1_color, 6 * scale)
     rod2 = scene.geometry.tracking_line(bob1, bob2).no_fill().stroke(bob2_color, 6 * scale)
@@ -210,11 +210,11 @@ def make_visual(
         .no_fill()
         .stroke(trail_color, 3 * scale)
     )
-    label1 = scene.text(label1_text, role="subtitle").fill(bob1_color).at(
+    label1 = scene.text(label1_text, role="subtitle").fill(bob1_color).move_to(
         initial_pos1[0] + label_offset[0] * scale,
         initial_pos1[1] + label_offset[1] * scale,
     )
-    label2 = scene.text(label2_text, role="subtitle").fill(bob2_color).at(
+    label2 = scene.text(label2_text, role="subtitle").fill(bob2_color).move_to(
         initial_pos2[0] + label_offset[0] * scale,
         initial_pos2[1] + label_offset[1] * scale,
     )
@@ -238,18 +238,18 @@ def make_visual(
 def reveal_visual(visual):
     scene.play(
         [
-            visual.support.fade_in().duration(0.35),
-            visual.hinge.grow_from_center().duration(0.35),
-            visual.rod1.fade_in().duration(0.45),
-            visual.rod2.fade_in().duration(0.45),
-            visual.length1.fade_in().duration(0.45),
-            visual.length2.fade_in().duration(0.45),
-            visual.angle1.fade_in().duration(0.45),
-            visual.angle2.fade_in().duration(0.45),
-            visual.bob1.grow_from_center().duration(0.55),
-            visual.bob2.grow_from_center().duration(0.55),
-            visual.label1.write().duration(0.45),
-            visual.label2.write().duration(0.45),
+            visual.support.animate.fade_in().duration(0.35),
+            visual.hinge.animate.grow_from_center().duration(0.35),
+            visual.rod1.animate.fade_in().duration(0.45),
+            visual.rod2.animate.fade_in().duration(0.45),
+            visual.length1.animate.fade_in().duration(0.45),
+            visual.length2.animate.fade_in().duration(0.45),
+            visual.angle1.animate.fade_in().duration(0.45),
+            visual.angle2.animate.fade_in().duration(0.45),
+            visual.bob1.animate.grow_from_center().duration(0.55),
+            visual.bob2.animate.grow_from_center().duration(0.55),
+            visual.label1.animate.write().duration(0.45),
+            visual.label2.animate.write().duration(0.45),
         ]
     )
 
@@ -314,7 +314,7 @@ title = scene.text("PÉNDULO DOBLE", role="title").fill(WHITE)
 subtitle = scene.text(
     "Un ejemplo de las capacidades",
     role="subtitle",
-).fill("#A9B1D6").scaled(0.78)
+).fill("#A9B1D6").scale_to(0.78)
 header = scene.layout.column(
     [title, subtitle],
     width=1200,
@@ -332,9 +332,9 @@ header_layer = scene.layout.stack(
 question = scene.text(
     "¿Puede un sistema con reglas exactas volverse impredecible?",
     role="subtitle",
-).fill(GOLD).at(0, 40)
-scene.play([title.write().duration(0.8), subtitle.fade_in().duration(0.6)])
-scene.play([question.fade_in().duration(0.7)])
+).fill(GOLD).move_to(0, 40)
+scene.play([title.animate.write().duration(0.8), subtitle.animate.fade_in().duration(0.6)])
+scene.play([question.animate.fade_in().duration(0.7)])
 scene.wait(0.8)
 scene.persist(header_layer)
 scene.stop("question")
@@ -358,14 +358,14 @@ angle1 = scene.geometry.arc(
     -math.pi / 2.0,
     -math.pi / 2.0 + model_system.theta1_0,
 ).no_fill().stroke(GOLD, 3)
-angle1_label = scene.text("$theta_1$").fill(GOLD).at(-165.0, 140.0)
+angle1_label = scene.text("$theta_1$").fill(GOLD).move_to(-165.0, 140.0)
 angle2 = scene.geometry.arc(
     *model_system.positions()[0][:2],
     76.0,
     -math.pi / 2.0,
     -math.pi / 2.0 + model_system.theta2_0,
 ).no_fill().stroke(RED, 3)
-angle2_label = scene.text("$theta_2$").fill(RED).at(40.0, -70.0)
+angle2_label = scene.text("$theta_2$").fill(RED).move_to(40.0, -70.0)
 panel_layer, panel_content = make_panel(
     "EL MODELO",
     ["$L_1 = L_2$", "$m_1 = m_2$", "Cada brazo", "transmite energía."],
@@ -374,20 +374,20 @@ panel_layer, panel_content = make_panel(
 model_caption = scene.text(
     "$m_1$ se mueve… y convierte su posición en el nuevo pivote de $m_2$",
     role="subtitle",
-).fill(WHITE).at(-245.0, -400.0).scaled(0.78)
+).fill(WHITE).move_to(-245.0, -400.0).scale_to(0.78)
 
 scene.play(
     [
-        panel_layer.fade_in().duration(0.5),
-        guide.fade_in().duration(0.4),
-        angle1.create().duration(0.5),
-        angle2.create().duration(0.5),
-        angle1_label.write().duration(0.4),
-        angle2_label.write().duration(0.4),
+        panel_layer.animate.fade_in().duration(0.5),
+        guide.animate.fade_in().duration(0.4),
+        angle1.animate.create().duration(0.5),
+        angle2.animate.create().duration(0.5),
+        angle1_label.animate.write().duration(0.4),
+        angle2_label.animate.write().duration(0.4),
     ]
 )
 reveal_visual(model_visual)
-scene.play([model_caption.fade_in().duration(0.5)])
+scene.play([model_caption.animate.fade_in().duration(0.5)])
 scene.stop("model-ready")
 scene.wait(0.8)
 
@@ -419,13 +419,13 @@ scene.reuse(
 motion_caption = scene.text(
     "La estela de $m_2$ hace visible una trayectoria que no se repite",
     role="subtitle",
-).fill("#F7768E").at(-245.0, -400.0).scaled(0.82)
+).fill("#F7768E").move_to(-245.0, -400.0).scale_to(0.82)
 activate_visual(model_system, model_visual)
 scene.play(
     [
-        model_caption.fade_out().duration(0.3),
-        motion_caption.fade_in().duration(0.5),
-        model_visual.trail.fade_in().duration(0.5),
+        model_caption.animate.fade_out().duration(0.3),
+        motion_caption.animate.fade_in().duration(0.5),
+        model_visual.trail.animate.fade_in().duration(0.5),
     ]
 )
 scene.wait(8.0)
@@ -444,7 +444,7 @@ scene.segment(
 comparison_title = scene.text(
     "SENSIBILIDAD A LAS CONDICIONES INICIALES",
     role="subtitle",
-).fill(GOLD).at(0.0, 310.0).scaled(0.72)
+).fill(GOLD).move_to(0.0, 310.0).scale_to(0.72)
 comparison_background = (
     scene.geometry.rounded_rect(520, 420, 26)
     .fill("#121A2B")
@@ -480,11 +480,11 @@ comparison_panel_layer = scene.layout.stack(
 delta_caption = scene.text(
     "Solo cambiamos $theta_2$ al inicio",
     role="subtitle",
-).fill(WHITE).at(-245.0, -360.0).scaled(0.78)
+).fill(WHITE).move_to(-245.0, -360.0).scale_to(0.78)
 separation_caption = scene.text(
     "Al principio coinciden. Después, sus trayectorias se separan.",
     role="subtitle",
-).fill("#A9B1D6").at(-245.0, -430.0).scaled(0.72)
+).fill("#A9B1D6").move_to(-245.0, -430.0).scale_to(0.72)
 
 system_a = DoublePendulum(
     -285.0,
@@ -529,7 +529,7 @@ separation_line = (
     .stroke(WHITE, 4)
     .z_index(3)
 )
-separation_label = scene.text("$Delta x(t)$", role="subtitle").fill(WHITE).at(-245.0, 80.0)
+separation_label = scene.text("$Delta x(t)$", role="subtitle").fill(WHITE).move_to(-245.0, 80.0)
 separation_label.follow(
     scene.geometry.point_between(visual_a.bob2, visual_b.bob2),
     offset=(0.0, 34.0),
@@ -537,23 +537,23 @@ separation_label.follow(
 
 scene.play(
     [
-        comparison_title.write().duration(0.6),
-        comparison_panel_layer.fade_in().duration(0.5),
-        delta_caption.fade_in().duration(0.5),
+        comparison_title.animate.write().duration(0.6),
+        comparison_panel_layer.animate.fade_in().duration(0.5),
+        delta_caption.animate.fade_in().duration(0.5),
     ]
 )
 reveal_visual(visual_a)
 reveal_visual(visual_b)
 activate_visual(system_a, visual_a, scale=0.78, label_offset=(-72.0, 0.0))
 activate_visual(system_b, visual_b, scale=0.78, label_offset=(44.0, 0.0))
-scene.play([separation_caption.fade_in().duration(0.5)])
+scene.play([separation_caption.animate.fade_in().duration(0.5)])
 scene.wait(1.2)
 scene.play(
     [
-        visual_a.trail.fade_in().duration(0.5),
-        visual_b.trail.fade_in().duration(0.5),
-        separation_line.fade_in().duration(0.5),
-        separation_label.fade_in().duration(0.5),
+        visual_a.trail.animate.fade_in().duration(0.5),
+        visual_b.trail.animate.fade_in().duration(0.5),
+        separation_line.animate.fade_in().duration(0.5),
+        separation_label.animate.fade_in().duration(0.5),
     ]
 )
 scene.stop("comparison-start")
@@ -579,11 +579,11 @@ closing_body = scene.text(
 closing_formula = scene.text(
     "Misma ley + mínima diferencia → trayectorias distintas",
     role="subtitle",
-).fill("#7DCFFF").scaled(0.82)
+).fill("#7DCFFF").scale_to(0.82)
 closing_footer = scene.text(
     "El péndulo doble convierte la sensibilidad en una experiencia visible.",
     role="subtitle",
-).fill("#A9B1D6").scaled(0.72)
+).fill("#A9B1D6").scale_to(0.72)
 closing = scene.layout.column(
     [closing_title, closing_body, closing_formula, closing_footer],
     width=1250,
@@ -598,7 +598,7 @@ closing_layer = scene.layout.stack(
     width="fill",
     height="fill",
 )
-scene.play([closing_layer.fade_in().duration(0.8)])
+scene.play([closing_layer.animate.fade_in().duration(0.8)])
 scene.wait(2.0)
 
 

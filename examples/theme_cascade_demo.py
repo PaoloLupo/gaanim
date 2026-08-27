@@ -33,19 +33,19 @@ theme = Theme(
 )
 
 scene = Scene(1920, 1080, margin=56, theme=theme)
-scene.text("Diseño una vez, contenido después", role="title").at(0, 275)
+scene.text("Diseño una vez, contenido después", role="title").move_to(0, 275)
 scene.text(
     "TextStyle conserva la nueva API estructurada y Theme aporta la cascada.",
     role="body",
-).at(0, 215)
+).move_to(0, 215)
 
-scene.geometry.circle(62).at(-450, 70)
-scene.geometry.square(118).style_class("warning").at(-260, 70)
+scene.geometry.circle(62).move_to(-450, 70)
+scene.geometry.square(118).style_class("warning").move_to(-260, 70)
 scene.geometry.line(-510, -30, -190, -30)
 
 x = Axis.linear(-3, 3).ticks(1).label("x")
 y = Axis.linear(-2, 2).ticks(1).label("y")
-scene.viz.cartesian_2d(x, y, width=560, height=330).at(260, -70)
+scene.viz.cartesian_2d(x, y, width=560, height=330).move_to(260, -70)
 
 scene.wait(1.0)
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -32,12 +32,12 @@ from gaanim import BLUE, Scene
 
 scene = Scene(1280, 720)
 circle = scene.geometry.circle(80).fill(BLUE)
-scene.play([circle.create().duration(1.0)])
+scene.play([circle.animate.create().duration(1.0)])
 scene.render()
 ```
 
 El objeto se crea primero y su aparición se programa después. La llamada
-`circle.create()` no dibuja inmediatamente: devuelve una descripción de
+`circle.animate.create()` no dibuja inmediatamente: devuelve una descripción de
 animación que `scene.play` añade a la línea de tiempo.
 
 == Unidades y coordenadas

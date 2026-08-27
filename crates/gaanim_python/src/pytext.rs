@@ -521,6 +521,107 @@ pub struct PyTextSelection {
     occurrence: Option<usize>,
 }
 
+#[pyclass(
+    name = "TextSelectionAnimation",
+    module = "gaanim_core",
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct PyTextSelectionAnimation {
+    source: gaanim_api::canvas::FragmentSelection,
+}
+
+#[pymethods]
+impl PyTextSelectionAnimation {
+    fn fill(&self, color: PyColor) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.source.clone().animate_properties().fill(color.0),
+        }
+    }
+
+    fn color(&self, color: PyColor) -> PyCanvasAnim {
+        self.fill(color)
+    }
+
+    fn opacity(&self, value: f32) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.source.clone().animate_properties().opacity(value),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().indicate();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().wiggle();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn pulse(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().pulse();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn wave(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().wave();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn highlight(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().highlight();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn focus(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().focus();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn cancel(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.source.clone().animate_properties().cancel();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    fn morph_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
+        self.source
+            .clone()
+            .morph_to(&target.inner(), None)
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(|error| crate::LayoutOwnershipError::new_err(error.to_string()))
+    }
+
+    fn copy_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
+        self.source
+            .clone()
+            .copy_to(&target.inner(), None)
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(|error| crate::LayoutOwnershipError::new_err(error.to_string()))
+    }
+}
+
 impl PyTextSelection {
     fn inner(&self) -> gaanim_api::canvas::FragmentSelection {
         match self.occurrence {
@@ -563,132 +664,10 @@ impl PyTextSelection {
     }
 
     /// Start a compound fill/opacity animation scoped to this selection.
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().animate_properties(),
-        }
-    }
-
-    #[pyo3(signature = (color, duration=None))]
-    fn color_to(&self, color: PyColor, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().color_to(color.0, duration),
-        }
-    }
-
-    #[pyo3(signature = (opacity, duration=None))]
-    fn opacity_to(&self, opacity: f32, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
-            return Err(PyValueError::new_err(
-                "opacity must be finite and within 0..1",
-            ));
-        }
-        Ok(PyCanvasAnim {
-            inner: self.inner().opacity_to(opacity, duration),
-        })
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().indicate(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn pulse(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().pulse(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().wiggle(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn wave(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().wave(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn highlight(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().highlight(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn focus(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().focus(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn cancel(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().cancel(duration),
-        }
-    }
-
-    #[pyo3(signature = (*, style="fade", duration=None))]
-    fn reveal(&self, style: &str, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        let style = match style {
-            "fade" => gaanim_api::canvas::FragmentRevealStyle::Fade,
-            "wipe" => gaanim_api::canvas::FragmentRevealStyle::Wipe,
-            "from_below" => gaanim_api::canvas::FragmentRevealStyle::FromBelow,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "style must be fade, wipe, or from_below",
-                ))
-            }
-        };
-        Ok(PyCanvasAnim {
-            inner: self.inner().reveal(style, duration),
-        })
-    }
-
-    #[pyo3(signature = (target, *, duration=None))]
-    fn morph_to(&self, target: &PyTextSelection, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        Ok(PyCanvasAnim {
-            inner: self
-                .inner()
-                .morph_to(&target.inner(), duration)
-                .map_err(text_transition_error)?,
-        })
-    }
-
-    #[pyo3(signature = (target, *, duration=None))]
-    fn copy_to(&self, target: &PyTextSelection, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        Ok(PyCanvasAnim {
-            inner: self
-                .inner()
-                .copy_to(&target.inner(), duration)
-                .map_err(text_transition_error)?,
-        })
-    }
-
-    #[pyo3(signature = (label, *, above=false, duration=None))]
-    fn brace(&self, label: String, above: bool, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().brace(label, above, duration),
-        }
-    }
-
-    #[pyo3(signature = (label, *, offset=(120.0, 80.0), duration=None))]
-    fn annotate(&self, label: String, offset: (f64, f64), duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner().annotate(
-                label,
-                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-                duration,
-            ),
+    #[getter]
+    fn animate(&self) -> PyTextSelectionAnimation {
+        PyTextSelectionAnimation {
+            source: self.inner(),
         }
     }
 }
@@ -720,16 +699,6 @@ impl PyText {
             fragment: part.text,
             occurrence: Some(part.occurrence),
         })
-    }
-
-    fn whole(&self) -> PyTextSelection {
-        PyTextSelection {
-            handle: self.handle.clone(),
-            spec: self.spec.clone(),
-            path: Vec::new(),
-            fragment: gaanim_text::prelude::rendered_text(&self.spec.plain_text()),
-            occurrence: None,
-        }
     }
 
     fn require_free_position(&self, operation: &str) -> PyResult<()> {
@@ -769,7 +738,7 @@ mod tests {
                     styled.is_instance(&text_type)?,
                     "{method} must preserve the specialized Text handle"
                 );
-                styled.call_method1("at", (0.0, 0.0))?;
+                styled.call_method1("move_to", (0.0, 0.0))?;
             }
             Ok(())
         })
@@ -866,14 +835,14 @@ impl PyText {
     }
 
     #[pyo3(signature = (x, y=None, anchor=None))]
-    fn at<'py>(
+    fn move_to<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<f64>,
         anchor: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
-        slf.require_free_position("at")?;
-        match resolve_at_target("at", x, y, anchor.is_some())? {
+        slf.require_free_position("move_to")?;
+        match resolve_at_target("move_to", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => {
                 match anchor.map(resolve_text_anchor).transpose()? {
                     Some(ResolvedTextAnchor::Geometric(anchor)) => {
@@ -901,9 +870,9 @@ impl PyText {
         Ok(slf)
     }
 
-    fn at_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("at_3d")?;
-        slf.handle.clone().at_3d(x, y, z);
+    fn move_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
+        slf.require_free_position("move_to_3d")?;
+        slf.handle.clone().move_to_3d(x, y, z);
         Ok(slf)
     }
 
@@ -917,23 +886,23 @@ impl PyText {
         slf
     }
 
-    fn scaled(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scaled(factor);
+    fn scale_to(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_to(factor);
         slf
     }
 
-    fn scaled_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scaled_3d(x, y, z);
+    fn scale_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_to_3d(x, y, z);
         slf
     }
 
-    fn rotated(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotated(radians);
+    fn rotate_to(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().rotate_to(radians);
         slf
     }
 
-    fn rotated_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotated_3d(x, y, z);
+    fn rotate_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().rotate_to_3d(x, y, z);
         slf
     }
 
@@ -1084,225 +1053,14 @@ impl PyText {
         }
     }
 
-    #[pyo3(signature = (duration=None, *, by="grapheme", order="forward", stagger=0.0))]
-    fn write(
-        &self,
-        duration: Option<f64>,
-        by: &str,
-        order: &str,
-        stagger: f64,
-    ) -> PyResult<PyCanvasAnim> {
-        validate_grouping(by, order, stagger)?;
-        if by == "part" {
-            self.handle.write_by_parts(None, duration.unwrap_or(1.0));
-        }
-        Ok(PyCanvasAnim {
-            inner: self.handle.write(duration),
-        })
-    }
-
-    #[pyo3(signature = (duration=None, *, by="grapheme", order="forward", stagger=0.04))]
-    fn type_in(
-        &self,
-        duration: Option<f64>,
-        by: &str,
-        order: &str,
-        stagger: f64,
-    ) -> PyResult<PyCanvasAnim> {
-        self.write(duration, by, order, stagger)
-    }
-
-    #[pyo3(signature = (duration=None, *, by="grapheme", order="forward", stagger=0.0))]
-    fn reveal(
-        &self,
-        duration: Option<f64>,
-        by: &str,
-        order: &str,
-        stagger: f64,
-    ) -> PyResult<PyCanvasAnim> {
-        self.write(duration, by, order, stagger)
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.fade_in(duration),
-        }
-    }
-
-    #[pyo3(signature = (direction="up", *, distance=24.0, duration=None))]
-    fn slide_in(
-        &self,
-        direction: &str,
-        distance: f64,
-        duration: Option<f64>,
-    ) -> PyResult<PyCanvasAnim> {
-        let direction = match direction {
-            "up" => gaanim_layout::Direction::Up,
-            "down" => gaanim_layout::Direction::Down,
-            "left" => gaanim_layout::Direction::Left,
-            "right" => gaanim_layout::Direction::Right,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "direction must be up, down, left, or right",
-                ))
-            }
-        };
-        Ok(PyCanvasAnim {
-            inner: self.handle.fade_in_from(direction, distance, duration),
-        })
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.unwrite(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn erase(&self, duration: Option<f64>) -> PyCanvasAnim {
-        self.unwrite(duration)
-    }
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.fade_out(duration),
-        }
-    }
-    #[pyo3(signature = (direction="down", *, distance=24.0, duration=None))]
-    fn slide_out(
-        &self,
-        direction: &str,
-        distance: f64,
-        duration: Option<f64>,
-    ) -> PyResult<PyCanvasAnim> {
-        if !matches!(direction, "up" | "down" | "left" | "right") {
-            return Err(PyValueError::new_err(
-                "direction must be up, down, left, or right",
-            ));
-        }
-        if !distance.is_finite() || distance < 0.0 {
-            return Err(PyValueError::new_err(
-                "distance must be finite and non-negative",
-            ));
-        }
-        Ok(self.fade_out(duration))
-    }
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.indicate(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn pulse(&self, duration: Option<f64>) -> PyCanvasAnim {
-        self.indicate(duration)
-    }
-    #[pyo3(signature = (duration=None))]
-    fn wiggle(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.wiggle(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn wave(&self, duration: Option<f64>) -> PyCanvasAnim {
-        self.wiggle(duration)
-    }
-    #[pyo3(signature = (duration=None))]
-    fn highlight(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.handle.circumscribe(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn focus(&self, duration: Option<f64>) -> PyCanvasAnim {
-        self.indicate(duration)
-    }
-    #[pyo3(signature = (duration=None))]
-    fn cancel(&self, duration: Option<f64>) -> PyCanvasAnim {
-        let selection = self.whole();
-        selection.cancel(duration)
-    }
-    #[pyo3(signature = (label, *, above=false, duration=None))]
-    fn brace(&self, label: String, above: bool, duration: Option<f64>) -> PyCanvasAnim {
-        let selection = self.whole();
-        selection.brace(label, above, duration)
-    }
-    #[pyo3(signature = (label, *, offset=(120.0, 80.0), duration=None))]
-    fn annotate(&self, label: String, offset: (f64, f64), duration: Option<f64>) -> PyCanvasAnim {
-        let selection = self.whole();
-        selection.annotate(label, offset, duration)
-    }
-
-    #[pyo3(signature = (target, *, r#match="auto", duration=1.0))]
-    fn morph_to(&self, target: &PyText, r#match: &str, duration: f64) -> PyResult<PyCanvasAnim> {
-        if !matches!(r#match, "auto" | "semantic" | "grapheme" | "shape") {
-            return Err(PyValueError::new_err(
-                "match must be 'auto', 'semantic', 'grapheme', or 'shape'",
-            ));
-        }
-        validate_duration(duration)?;
-        Ok(PyCanvasAnim {
-            inner: self
-                .handle
-                .morph_to(&target.handle, duration)
-                .map_err(text_transition_error)?,
-        })
-    }
-
-    #[pyo3(signature = (target, *, matches=None, duration=1.0))]
-    fn step_to(
-        &self,
-        target: &PyText,
-        matches: Option<&Bound<'_, PyAny>>,
-        duration: f64,
-    ) -> PyResult<PyCanvasAnim> {
-        validate_duration(duration)?;
-        Ok(PyCanvasAnim {
-            inner: self
-                .handle
-                .step_to(&target.handle, parse_matches(matches)?, duration)
-                .map_err(text_transition_error)?,
-        })
-    }
-
-    #[pyo3(signature = (target, *, anchor="part", duration=1.0))]
-    fn expand_to(&self, target: &PyText, anchor: &str, duration: f64) -> PyResult<PyCanvasAnim> {
-        validate_duration(duration)?;
-        let anchor = if anchor == "part" {
-            self.spec
-                .parts()
-                .into_iter()
-                .find(|source| {
-                    target
-                        .spec
-                        .parts()
-                        .iter()
-                        .any(|candidate| candidate.path == source.path)
-                })
-                .map(|part| part.path.join("."))
-                .ok_or_else(|| PyKeyError::new_err("no shared semantic part to use as anchor"))?
-        } else {
-            anchor.to_string()
-        };
-        Ok(PyCanvasAnim {
-            inner: self
-                .handle
-                .expand_to(&target.handle, &anchor, duration)
-                .map_err(text_transition_error)?,
-        })
-    }
-
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, duration=1.0))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None))]
     fn r#become(
         &mut self,
         content: &Bound<'_, PyTuple>,
         role: Option<&str>,
         style: Option<PyTextStyle>,
         flow: Option<PyTextFlow>,
-        duration: f64,
     ) -> PyResult<()> {
-        validate_duration(duration)?;
         let mut spec = TextSpec::new(
             content_from_tuple(content)?,
             parse_role(role)?,
@@ -1314,64 +1072,10 @@ impl PyText {
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         spec.version = self.spec.version.saturating_add(1);
-        self.handle.r#become(spec.clone(), Some(duration));
+        self.handle.r#become(spec.clone(), None);
         self.spec = spec;
         Ok(())
     }
-}
-
-fn validate_duration(duration: f64) -> PyResult<()> {
-    if duration.is_finite() && duration > 0.0 {
-        Ok(())
-    } else {
-        Err(PyValueError::new_err(
-            "duration must be a finite positive number",
-        ))
-    }
-}
-
-fn text_transition_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
-    crate::LayoutOwnershipError::new_err(error.to_string())
-}
-
-fn parse_matches(matches: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<(String, String)>>> {
-    let Some(matches) = matches else {
-        return Ok(None);
-    };
-    if let Ok(mapping) = matches.cast::<PyDict>() {
-        return mapping
-            .iter()
-            .map(|(source, target)| Ok((source.extract()?, target.extract()?)))
-            .collect::<PyResult<Vec<_>>>()
-            .map(Some);
-    }
-    matches
-        .extract::<Vec<(String, String)>>()
-        .map(Some)
-        .map_err(|_| {
-            PyTypeError::new_err(
-                "matches must be a mapping or a sequence of (source_part, target_part) pairs",
-            )
-        })
-}
-
-fn validate_grouping(by: &str, order: &str, stagger: f64) -> PyResult<()> {
-    if !matches!(by, "grapheme" | "word" | "line" | "part") {
-        return Err(PyValueError::new_err(
-            "by must be grapheme, word, line, or part",
-        ));
-    }
-    if !matches!(order, "forward" | "reverse" | "center" | "random") {
-        return Err(PyValueError::new_err(
-            "order must be forward, reverse, center, or random",
-        ));
-    }
-    if !stagger.is_finite() || stagger < 0.0 {
-        return Err(PyValueError::new_err(
-            "stagger must be finite and non-negative",
-        ));
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

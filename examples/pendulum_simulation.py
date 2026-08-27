@@ -23,12 +23,12 @@ state = {
     "omega": initial_omega,
 }
 
-hinge = scene.geometry.dot(8).fill(WHITE).at(px, py)
+hinge = scene.geometry.dot(8).fill(WHITE).move_to(px, py)
 bob = (
     scene.geometry.circle(20)
     .fill(GOLD)
     .stroke(WHITE, 3)
-    .at(
+    .move_to(
         px + L * math.sin(initial_theta),
         py - L * math.cos(initial_theta),
     )
@@ -81,11 +81,11 @@ bob.add_updater_fn(
 # A traced path is hidden until its entrance is explicitly authored.
 scene.play(
     [
-        hinge.fade_in(),
-        rod.fade_in(),
-        length.fade_in(),
-        trail.fade_in(),
-        bob.grow_from_center(0.5),
+        hinge.animate.fade_in(),
+        rod.animate.fade_in(),
+        length.animate.fade_in(),
+        trail.animate.fade_in(),
+        bob.animate.grow_from_center(0.5),
     ]
 )
 scene.wait(7.0)
@@ -190,18 +190,18 @@ def second_bob_position(_pos, _dt, _elapsed):
     return double_positions()[1]
 
 
-double_hinge = scene.geometry.dot(8).fill(WHITE).at(double_px, double_py)
+double_hinge = scene.geometry.dot(8).fill(WHITE).move_to(double_px, double_py)
 double_bob1 = (
     scene.geometry.circle(21)
     .fill(GOLD)
     .stroke(WHITE, 3)
-    .at(*double_positions()[0][:2])
+    .move_to(*double_positions()[0][:2])
 )
 double_bob2 = (
     scene.geometry.circle(27)
     .fill(RED)
     .stroke(WHITE, 3)
-    .at(*double_positions()[1][:2])
+    .move_to(*double_positions()[1][:2])
 )
 
 double_rod1 = scene.geometry.tracking_line(double_hinge, double_bob1).no_fill().stroke(WHITE, 4)
@@ -223,12 +223,12 @@ double_bob2.add_updater_fn(second_bob_position)
 
 scene.play(
     [
-        double_hinge.fade_in(),
-        double_rod1.fade_in(),
-        double_rod2.fade_in(),
-        double_trail.fade_in(),
-        double_bob1.grow_from_center(0.5),
-        double_bob2.grow_from_center(0.5),
+        double_hinge.animate.fade_in(),
+        double_rod1.animate.fade_in(),
+        double_rod2.animate.fade_in(),
+        double_trail.animate.fade_in(),
+        double_bob1.animate.grow_from_center(0.5),
+        double_bob2.animate.grow_from_center(0.5),
     ]
 )
 scene.wait(8.0)

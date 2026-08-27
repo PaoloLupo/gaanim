@@ -350,6 +350,10 @@ class LayoutItem:
     """Immutable per-child grow, grid, absolute-placement, offset, and fit rules."""
 
 class Layout(Drawable):
+    @property
+    def animate(self) -> Anim:
+        """Return the pure animation proxy for the layout root."""
+        ...
     """Persistent row, column, grid, or stack that owns child translation.
 
     Layout is itself a ``Drawable``: positioning, anchor, scale, rotation, and
@@ -359,35 +363,35 @@ class Layout(Drawable):
     ``configure_item`` offsets.
     """
     count: int
-    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None, animate: Optional[float] = None) -> Drawable:
-        """Insert a direct child and return it; ``animate`` is seconds for reflow.
+    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None) -> Drawable:
+        """Insert a direct child immediately and return it.
 
         Raises ``IndexError`` for an invalid index and ``LayoutOwnershipError``
         when the child is positioned manually, foreign, or already managed.
         """
         ...
-    def remove(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
+    def remove(self, child: Drawable | Layout) -> None:
         """Remove a direct child and release its positional ownership."""
         ...
-    def detach(self, child: Drawable | Layout, *, animate: Optional[float] = None) -> None:
+    def detach(self, child: Drawable | Layout) -> None:
         """Release a direct child from the layout without hiding it.
 
         The child preserves its world position, opacity, and scene membership,
         so positional methods such as ``move_to`` are valid immediately after
-        this call. ``animate`` optionally reflows the remaining children in
-        seconds. A non-member raises ``ValueError``.
+        this call. The remaining children reflow immediately. A non-member
+        raises ``ValueError``.
 
         Example:
             scene.reuse(title)
             page.detach(title)
-            scene.play([title.move_to(0.0, 200.0)])
+            scene.play([title.animate.move_to(0.0, 200.0)])
         """
         ...
-    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem, *, animate: Optional[float] = None) -> Drawable:
+    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem) -> Drawable:
         """Replace a direct child, returning the replacement after optional reflow."""
         ...
-    def reflow(self, *, animate: Optional[float] = None) -> None:
-        """Resolve external geometry changes; ``animate`` transitions in seconds."""
+    def reflow(self) -> None:
+        """Resolve external geometry changes immediately."""
         ...
     def configure(
         self,
@@ -405,7 +409,6 @@ class Layout(Drawable):
         justify: Optional[Justify] = None,
         wrap: Optional[bool] = None,
         within: Optional[Literal["safe", "frame"]] = None,
-        animate: Optional[float] = None,
     ) -> None:
         """Update container rules and queue deterministic reflow.
 
@@ -414,8 +417,8 @@ class Layout(Drawable):
         ``ValueError``.
         """
         ...
-    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None, animate: Optional[float] = None) -> None:
-        """Update direct-child rules and optionally animate the resulting reflow."""
+    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None) -> None:
+        """Update direct-child rules and immediately apply the resulting reflow."""
         ...
     def diagnostics(self) -> list[str]:
         """Return soft-constraint diagnostics associated with this layout root."""
@@ -473,7 +476,7 @@ class Transition:
 
 class Anim:
     def fill(self, color: ColorLike) -> Anim:
-        """Target a solid fill color in a compound ``Drawable.animate()`` animation.
+        """Target a solid fill color in a compound ``Drawable.animate`` animation.
 
         Text glyphs interpolate independently from their current fills, so
         fragment-specific colors converge to this target. On ``Primitive3D``
@@ -504,10 +507,16 @@ class Anim:
     def opacity(self, value: float) -> Anim:
         """Target drawable opacity, clamped to the 0..1 range."""
         ...
+    def set(self, value: float) -> Anim:
+        """Target a finite Parameter or Variable value without scheduling it."""
+        ...
+    def transform_to(self, target: Drawable) -> Anim:
+        """Morph the source drawable to a same-scene target when played."""
+        ...
     def fill_level(self, level: float) -> Anim:
         """Animate a ``Scene.fill_level`` drawable to a normalized value in ``[0, 1]``."""
         ...
-    def move(self, dx: float, dy: float) -> Anim:
+    def shift_by(self, dx: float, dy: float) -> Anim:
         """Target a relative 2D translation in a compound property animation."""
         ...
     def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
@@ -517,13 +526,13 @@ class Anim:
         be chained with other property targets.
         """
         ...
-    def move_3d(self, dx: float, dy: float, dz: float) -> Anim:
+    def shift_by_3d(self, dx: float, dy: float, dz: float) -> Anim:
         """Target a relative 3D translation in scene units."""
         ...
     def move_to_3d(self, x: float, y: float, z: float) -> Anim:
         """Target an absolute 3D position in scene units."""
         ...
-    def scale(self, factor: float) -> Anim:
+    def scale_by(self, factor: float) -> Anim:
         """Multiply the current uniform scale by ``factor``."""
         ...
     def scale_to(self, factor: float) -> Anim:
@@ -532,7 +541,10 @@ class Anim:
     def scale_to_3d(self, x: float, y: float, z: float) -> Anim:
         """Target absolute scale independently on three axes."""
         ...
-    def rotate(self, radians: float) -> Anim:
+    def scale_by_3d(self, x: float, y: float, z: float) -> Anim:
+        """Multiply the current scale independently on three axes."""
+        ...
+    def rotate_by(self, radians: float) -> Anim:
         """Target a relative Z rotation in radians."""
         ...
     def rotate_to(self, radians: float) -> Anim:
@@ -544,19 +556,38 @@ class Anim:
     def rotate_to_3d(self, x: float, y: float, z: float) -> Anim:
         """Target an absolute XYZ Euler orientation in radians."""
         ...
+    def fade_in(self, duration: Optional[float] = None) -> Anim:
+        """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``."""
+        ...
+    def fade_in_from(self, direction: Direction, distance: float = 48.0) -> Anim: ...
+    def fade_out(self, duration: Optional[float] = None) -> Anim:
+        """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
+        ...
+    def write(self, duration: Optional[float] = None, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
+        """Select the path-writing effect without mutating the timeline."""
+        ...
+    def create(self, duration: Optional[float] = None) -> Anim:
+        """Select the path or mesh creation effect without mutating the timeline."""
+        ...
+    def unwrite(self, duration: Optional[float] = None) -> Anim: ...
+    def uncreate(self, duration: Optional[float] = None) -> Anim: ...
+    def grow_from_center(self, duration: Optional[float] = None) -> Anim: ...
+    def shrink_to_center(self, duration: Optional[float] = None) -> Anim: ...
+    def spin_in_from_nothing(self) -> Anim: ...
+    def draw_border_then_fill(self) -> Anim: ...
+    def circumscribe(self) -> Anim: ...
+    def flash(self) -> Anim: ...
+    def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
+    def move_along(self, target: Drawable) -> Anim: ...
+    def fade_transform_to(self, target: Drawable) -> Anim: ...
+    def replacement_transform_to(self, target: Drawable) -> Anim: ...
+    def indicate(self, duration: Optional[float] = None) -> Anim: ...
+    def wiggle(self, duration: Optional[float] = None) -> Anim: ...
     def duration(self, d: float) -> Anim:
         """Configure this animation with duration.
 
         Example:
             result = animation.duration(1.0)
-        """
-        ...
-    @property
-    def timing(self) -> tuple[float, float]:
-        """Currently configured ``(duration, delay)`` in seconds.
-
-        Example:
-            duration, delay = animation.timing
         """
         ...
     def ease(self, name: str) -> Anim:
@@ -644,6 +675,55 @@ class Anim:
         """
         ...
 
+class ScheduleEntry:
+    """One immutable leaf in a locally resolved composition schedule."""
+    @property
+    def path(self) -> tuple[int, ...]: ...
+    @property
+    def kind(self) -> Literal["animation", "audio", "video", "lottie"]: ...
+    @property
+    def start(self) -> float: ...
+    @property
+    def duration(self) -> Optional[float]: ...
+    @property
+    def end(self) -> Optional[float]: ...
+
+class Schedule:
+    """Read-only timing inspection that neither schedules nor consumes leaves."""
+    @property
+    def span(self) -> float: ...
+    @property
+    def entries(self) -> tuple[ScheduleEntry, ...]: ...
+
+class Composition:
+    """Pure, immutable tree of animations and timeline-synchronized media."""
+    def delay(self, seconds: float) -> Composition:
+        """Return a copy whose complete subtree starts after ``seconds``."""
+        ...
+    def defaults(self, *, duration: Optional[float] = None, rate: Optional[str] = None) -> Composition:
+        """Fill duration and easing only on descendant animations without overrides."""
+        ...
+    def stretch(self, seconds: float) -> Composition:
+        """Rescale an animation-only subtree to an exact finite span; media are rejected."""
+        ...
+    def schedule(self, *, duration: Optional[float] = None, rate: Optional[str] = None) -> Schedule:
+        """Resolve local offsets using the supplied outer defaults without scheduling."""
+        ...
+
+Playable: TypeAlias = Anim | Audio | Video | Lottie | Composition
+
+def parallel(*items: Playable) -> Composition:
+    """Compose one or more items at the same local origin."""
+    ...
+
+def sequence(*items: Playable, gap: float = 0.0) -> Composition:
+    """Compose items consecutively; a bounded negative gap creates overlap."""
+    ...
+
+def stagger(*items: Playable, each: float = 0.1) -> Composition:
+    """Offset each item by ``index * each`` seconds."""
+    ...
+
 class Audio:
     """A validated audio declaration activated explicitly by ``Scene.play``.
 
@@ -710,6 +790,7 @@ class Drawable:
 
     def parts(self) -> tuple[str, ...]: ...
     def animations(self) -> tuple[str, ...]: ...
+    @property
     def animate(self) -> Anim:
         """Start a typed compound property animation.
 
@@ -718,7 +799,7 @@ class Drawable:
         and easing and run concurrently.
 
         Example:
-            scene.play([drawable.animate().move_to(120, 0).fill(BLUE).duration(1.5)])
+            scene.play([drawable.animate.move_to(120, 0).fill(BLUE).duration(1.5)])
         """
         ...
     def animation(
@@ -842,11 +923,11 @@ class Drawable:
         """
         ...
     @overload
-    def at(self, reference: Drawable, /) -> Self: ...
+    def move_to(self, reference: Drawable, /) -> Self: ...
     @overload
-    def at(self, point: AnchorPoint, /) -> Self: ...
+    def move_to(self, point: AnchorPoint, /) -> Self: ...
     @overload
-    def at(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
+    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
         """Place this drawable at coordinates, another drawable, or an anchor point.
 
         Omitting ``anchor`` places ordinary drawables by their visual center.
@@ -860,9 +941,9 @@ class Drawable:
         combined with ``y`` or ``anchor``.
 
         Example:
-            result = drawable.at(1.0, 1.0, Anchor.TOP_LEFT)
-            centered = label.at(drawable)
-            corner_label = label.at(drawable.anchor_point(Anchor.TOP_RIGHT))
+            result = drawable.move_to(1.0, 1.0, Anchor.TOP_LEFT)
+            centered = label.move_to(drawable)
+            corner_label = label.move_to(drawable.anchor_point(Anchor.TOP_RIGHT))
         """
         ...
     def anchor_point(
@@ -885,15 +966,21 @@ class Drawable:
     def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
         """Place this drawable at a symbolic coordinate owned by a coordinate space."""
         ...
-    def at_3d(self, x: float, y: float, z: float) -> Self:
+    def move_to_3d(self, x: float, y: float, z: float) -> Self:
         """Place the drawable at a 3D world-space position.
 
         Coordinates are interpreted by the perspective camera. The method is
         chainable and returns the same ``Drawable``.
 
         Example:
-            dot = scene.dot(8).fill(RED).at_3d(1.0, 2.0, 0.5)
+            dot = scene.dot(8).fill(RED).move_to_3d(1.0, 2.0, 0.5)
         """
+        ...
+    def shift_by(self, dx: float, dy: float) -> Self:
+        """Apply a relative 2D translation as an immediate cursor cut."""
+        ...
+    def shift_by_3d(self, dx: float, dy: float, dz: float) -> Self:
+        """Apply a relative 3D translation as an immediate cursor cut."""
         ...
     def billboard(self) -> Self:
         """Keep a 3D drawable facing the perspective camera.
@@ -902,47 +989,59 @@ class Drawable:
         method is chainable and returns the same ``Drawable``.
 
         Example:
-            label = scene.text("origin").at_3d(0.0, 1.0, 0.0).billboard()
+            label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()
         """
         ...
     def hud(self) -> Self:
         """Pin the drawable to the screen as a fixed HUD overlay.
 
         HUD drawables use screen-space coordinates and are not affected by
-        the 3D camera. Use ``.at(x, y)`` after ``.hud()`` to position them in
+        the 3D camera. Use ``.move_to(x, y)`` after ``.hud()`` to position them in
         the viewport. The method is chainable and returns the same
         ``Drawable``.
 
         Example:
-            title = scene.text("glTF demo").hud().at(0.0, 300.0)
+            title = scene.text("glTF demo").hud().move_to(0.0, 300.0)
         """
         ...
-    def scaled(self, factor: float) -> Self:
+    def scale_by(self, factor: float) -> Self:
+        """Multiply uniform scale immediately at the current cursor."""
+        ...
+    def scale_to(self, factor: float) -> Self:
         """Apply scaled to this drawable and return the result.
 
         Example:
-            result = drawable.scaled(1.0)
+            result = drawable.scale_to(1.0)
         """
         ...
-    def scaled_3d(self, x: float, y: float, z: float) -> Self:
+    def scale_by_3d(self, x: float, y: float, z: float) -> Self:
+        """Multiply per-axis scale immediately at the current cursor."""
+        ...
+    def scale_to_3d(self, x: float, y: float, z: float) -> Self:
         """Scale independently on three axes and preserve the specialized handle.
 
         Example:
-            label = scene.text("depth").scaled_3d(1.0, 1.0, 0.5)
+            label = scene.text("depth").scale_to_3d(1.0, 1.0, 0.5)
         """
         ...
-    def rotated(self, radians: float) -> Self:
+    def rotate_by(self, radians: float) -> Self:
+        """Apply a relative Z rotation immediately at the current cursor."""
+        ...
+    def rotate_to(self, radians: float) -> Self:
         """Apply rotated to this drawable and return the result.
 
         Example:
-            result = drawable.rotated(1.0)
+            result = drawable.rotate_to(1.0)
         """
         ...
-    def rotated_3d(self, x: float, y: float, z: float) -> Self:
+    def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Self:
+        """Apply a relative 3D axis rotation immediately at the current cursor."""
+        ...
+    def rotate_to_3d(self, x: float, y: float, z: float) -> Self:
         """Apply Euler rotation in radians and preserve the specialized handle.
 
         Example:
-            label = scene.text("axis").rotated_3d(0.0, 0.0, 0.5)
+            label = scene.text("axis").rotate_to_3d(0.0, 0.0, 0.5)
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
@@ -1010,197 +1109,6 @@ class Drawable:
 
         Example:
             result = drawable.to_corner(Anchor.CENTER)
-        """
-        ...
-    def move(self, dx: float, dy: float) -> Anim:
-        """Create a move animation for this drawable.
-
-        Example:
-            result = drawable.move(1.0, 1.0)
-        """
-        ...
-    @overload
-    def move_to(self, reference: Drawable, /) -> Anim: ...
-    @overload
-    def move_to(self, point: AnchorPoint, /) -> Anim: ...
-    @overload
-    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
-        """Animate toward coordinates, another drawable, or an anchor point.
-
-        The selected ``anchor`` arrives at ``(x, y)``; omitting it uses
-        ``Anchor.CENTER``. A ``Drawable`` targets its center, while an
-        ``AnchorPoint`` targets that transformed local point. These reference
-        forms cannot be combined with ``y`` or ``anchor``.
-
-        Example:
-            result = drawable.move_to(1.0, 1.0)
-            result = drawable.move_to(card.anchor_point(Anchor.TOP_RIGHT))
-        """
-        ...
-    def move_3d(self, dx: float, dy: float, dz: float) -> Anim: ...
-    def move_to_3d(self, x: float, y: float, z: float) -> Anim: ...
-    def glide_to(self, x: float, y: float) -> Anim:
-        """Create a glide to animation for this drawable.
-
-        Example:
-            result = drawable.glide_to(1.0, 1.0)
-        """
-        ...
-    def scale(self, factor: float) -> Anim:
-        """Create a scale animation for this drawable.
-
-        Example:
-            result = drawable.scale(1.0)
-        """
-        ...
-    def scale_to_3d(self, x: float, y: float, z: float) -> Anim: ...
-    def rotate(self, rad: float) -> Anim:
-        """Create a rotate animation for this drawable.
-
-        Example:
-            result = drawable.rotate(1.0)
-        """
-        ...
-    def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Anim: ...
-    def rotate_to_3d(self, x: float, y: float, z: float) -> Anim: ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Create a fade in animation for this drawable.
-
-        Use this animation in ``scene.play(...)`` to reveal a generated
-        reactive visual.
-
-        Example:
-            result = drawable.fade_in()
-        """
-        ...
-    def fade_in_from(
-        self,
-        direction: Direction,
-        distance: float = 48.0,
-        duration: Optional[float] = None,
-    ) -> Anim:
-        """Create a fade in from animation for this drawable.
-
-        Example:
-            result = drawable.fade_in_from(Direction.RIGHT)
-        """
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Create a fade out animation for this drawable.
-
-        Example:
-            result = drawable.fade_out()
-        """
-        ...
-    def fade_to(self, alpha: float) -> Anim:
-        """Create a fade to animation for this drawable.
-
-        Example:
-            result = drawable.fade_to(1.0)
-        """
-        ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Create a write animation for this drawable.
-
-        Reactive and generated descendants stay hidden before the scheduled
-        animation and preserve the current reveal progress while updating.
-
-        Example:
-            result = drawable.write()
-        """
-        ...
-    def create(self, duration: Optional[float] = None) -> Anim:
-        """Create a create animation for this drawable.
-
-        Reactive and generated descendants stay hidden before the scheduled
-        animation and preserve the current reveal progress while updating.
-
-        Example:
-            result = drawable.create()
-        """
-        ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim:
-        """Create a unwrite animation for this drawable.
-
-        Example:
-            result = drawable.unwrite()
-        """
-        ...
-    def uncreate(self, duration: Optional[float] = None) -> Anim:
-        """Create a uncreate animation for this drawable.
-
-        Example:
-            result = drawable.uncreate()
-        """
-        ...
-    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
-        """Create a grow from center animation for this drawable.
-
-        Example:
-            result = drawable.grow_from_center()
-        """
-        ...
-    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
-        """Create a shrink to center animation for this drawable.
-
-        Example:
-            result = drawable.shrink_to_center()
-        """
-        ...
-    def spin_in_from_nothing(self, duration: Optional[float] = None) -> Anim:
-        """Create a spin in from nothing animation for this drawable.
-
-        Example:
-            result = drawable.spin_in_from_nothing()
-        """
-        ...
-    def draw_border_then_fill(self, duration: Optional[float] = None) -> Anim:
-        """Create a draw border then fill animation for this drawable.
-
-        Example:
-            result = drawable.draw_border_then_fill()
-        """
-        ...
-    def indicate(self, duration: Optional[float] = None) -> Anim:
-        """Create a subtle upward hop around the drawable's visual center.
-
-        Example:
-            result = drawable.indicate()
-        """
-        ...
-    def wiggle(self, duration: Optional[float] = None) -> Anim:
-        """Create a wiggle animation for this drawable.
-
-        Example:
-            result = drawable.wiggle()
-        """
-        ...
-    def move_along_path(self, target: Drawable) -> Anim:
-        """Create a move along path animation for this drawable.
-
-        Example:
-            result = drawable.move_along_path(target)
-        """
-        ...
-    def fade_transform(self, target: Drawable) -> Anim:
-        """Create a fade transform animation for this drawable.
-
-        Example:
-            result = drawable.fade_transform(target)
-        """
-        ...
-    def transform(self, target: Drawable) -> Anim:
-        """Create a transform animation for this drawable.
-
-        Example:
-            result = drawable.transform(target)
-        """
-        ...
-    def replacement_transform(self, target: Drawable) -> Anim:
-        """Create a replacement transform animation for this drawable.
-
-        Example:
-            result = drawable.replacement_transform(target)
         """
         ...
     # Reactive methods
@@ -1430,10 +1338,6 @@ class Material3D:
 class Primitive3D(Drawable):
     """Native indexed 3D mesh with an animatable PBR material."""
     def material(self, material: Material3D) -> Self: ...
-    def material_to(self, material: Material3D) -> Anim: ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Unsupported for meshes; use :meth:`Drawable.create`."""
-        ...
 
 class TextStyle:
     """Reusable visual and metric text style without outer box layout."""
@@ -1542,6 +1446,21 @@ def part(
     """
     ...
 
+class TextSelectionAnimation:
+    """Pure typed proxy for one text selection."""
+    def fill(self, color: Color) -> Anim: ...
+    def color(self, color: Color) -> Anim: ...
+    def opacity(self, value: float) -> Anim: ...
+    def indicate(self, duration: Optional[float] = None) -> Anim: ...
+    def wiggle(self, duration: Optional[float] = None) -> Anim: ...
+    def pulse(self, duration: Optional[float] = None) -> Anim: ...
+    def wave(self, duration: Optional[float] = None) -> Anim: ...
+    def highlight(self, duration: Optional[float] = None) -> Anim: ...
+    def focus(self, duration: Optional[float] = None) -> Anim: ...
+    def cancel(self, duration: Optional[float] = None) -> Anim: ...
+    def morph_to(self, target: TextSelection) -> Anim: ...
+    def copy_to(self, target: TextSelection) -> Anim: ...
+
 class TextSelection:
     """Deferred grapheme, word, line, or semantic-part selection.
 
@@ -1562,121 +1481,17 @@ class TextSelection:
             formula["mass"].fill(GOLD)
         """
         ...
-    def animate(self) -> Anim:
-        """Start a compound animation scoped to the selected glyphs.
+    @property
+    def animate(self) -> TextSelectionAnimation:
+        """Return a pure animation proxy scoped to the selected glyphs.
 
         Only ``fill``/``color`` and ``opacity`` targets are supported; other
         property channels raise ``TypeError``.
 
         Example:
-            scene.play([formula["mass"].animate().fill(RED).opacity(0.6)])
+            scene.play([formula["mass"].animate.fill(RED).opacity(0.6)])
         """
         ...
-    def color_to(self, color: Color, duration: Optional[float] = None) -> Anim:
-        """Animate only the selected glyph fills to ``color``.
-
-        Example:
-            scene.play([formula["mass"].color_to(RED, duration=0.6)])
-        """
-        ...
-    def opacity_to(self, opacity: float, duration: Optional[float] = None) -> Anim:
-        """Animate selected glyph opacity to a finite value within 0..1.
-
-        Example:
-            scene.play([formula["mass"].opacity_to(0.5, duration=0.6)])
-        """
-        ...
-    def indicate(self, duration: Optional[float] = None) -> Anim:
-        """Emphasize selected glyphs without changing their measured size.
-
-        Example:
-            scene.play([copy["concept"].indicate()])
-        """
-        ...
-    def pulse(self, duration: Optional[float] = None) -> Anim:
-        """Pulse selected glyphs without causing layout reflow.
-
-        Example:
-            scene.play([copy.words[1].pulse()])
-        """
-        ...
-    def wiggle(self, duration: Optional[float] = None) -> Anim:
-        """Wiggle selected glyphs without changing intrinsic measurement.
-
-        Example:
-            scene.play([copy["warning"].wiggle()])
-        """
-        ...
-    def wave(self, duration: Optional[float] = None) -> Anim:
-        """Apply a wave emphasis to the selected glyph sequence.
-
-        Example:
-            scene.play([copy.words[0:3].wave()])
-        """
-        ...
-    def highlight(self, duration: Optional[float] = None) -> Anim:
-        """Highlight the selected glyph sequence.
-
-        Example:
-            scene.play([copy.lines[0].highlight()])
-        """
-        ...
-    def focus(self, duration: Optional[float] = None) -> Anim:
-        """Focus attention on this selection without making it a Layout leaf.
-
-        Example:
-            scene.play([formula["mass"].focus()])
-        """
-        ...
-    def cancel(self, duration: Optional[float] = None) -> Anim:
-        """Strike through and dim the selected glyphs.
-
-        The mark remains with the owning ``Text`` until its next replacing
-        ``morph_to()``, ``step_to()`` or ``expand_to()`` transition, where both
-        the mark and canceled glyphs fade out. Returns an ``Anim`` for
-        ``scene.play()``; ``duration=None`` uses the animation default.
-
-        Example:
-            scene.play([formula["obsolete"].cancel(duration=0.6)])
-            scene.play([formula.step_to(simplified, duration=0.8)])
-        """
-        ...
-    def reveal(self, *, style: Literal["fade", "wipe", "from_below"] = "fade", duration: Optional[float] = None) -> Anim:
-        """Reveal only this selection using a deterministic fragment preset.
-
-        Example:
-            scene.play([formula["answer"].reveal(style="wipe")])
-        """
-        ...
-    def morph_to(self, target: TextSelection, *, duration: Optional[float] = None) -> Anim:
-        """Morph this selection into another selection.
-
-        Example:
-            scene.play([source["term"].morph_to(target["term"])])
-        """
-        ...
-    def copy_to(self, target: TextSelection, *, duration: Optional[float] = None) -> Anim:
-        """Copy this selection toward another selection while preserving its source.
-
-        Example:
-            scene.play([source["term"].copy_to(target["term"])])
-        """
-        ...
-    def brace(self, label: str, *, above: bool = False, duration: Optional[float] = None) -> Anim:
-        """Attach an animated brace and label to this selection.
-
-        Example:
-            scene.play([formula["mass"].brace("mass")])
-        """
-        ...
-    def annotate(self, label: str, *, offset: tuple[float, float] = (120.0, 80.0), duration: Optional[float] = None) -> Anim:
-        """Attach an animated annotation at a local canvas-unit offset.
-
-        Example:
-            scene.play([formula["mass"].annotate("converted energy", offset=(100, 60))])
-        """
-        ...
-
 class TextQuery:
     """Deferred indexable view over rendered text units."""
     def __len__(self) -> int: ...
@@ -1692,14 +1507,14 @@ class Text(Drawable):
         """Apply glow while preserving Text chaining and typographic placement.
 
         Example:
-            title.glow(BLUE).at(0.0, 0.0)
+            title.glow(BLUE).move_to(0.0, 0.0)
         """
         ...
     def blur(self, sigma: float = 4.0) -> Self:
         """Apply blur while preserving Text chaining and typographic placement.
 
         Example:
-            label.blur(4.0).at(0.0, 0.0)
+            label.blur(4.0).move_to(0.0, 0.0)
         """
         ...
     def shadow(
@@ -1712,14 +1527,14 @@ class Text(Drawable):
         """Apply shadow while preserving Text chaining and typographic placement.
 
         Example:
-            title.shadow(BLACK).at(0.0, 0.0)
+            title.shadow(BLACK).move_to(0.0, 0.0)
         """
         ...
     def no_effects(self) -> Self:
         """Remove visual effects while preserving the specialized Text handle.
 
         Example:
-            title.no_effects().at(0.0, 0.0)
+            title.no_effects().move_to(0.0, 0.0)
         """
         ...
     @overload
@@ -1735,11 +1550,7 @@ class Text(Drawable):
     @property
     def parts(self) -> TextQuery: ...
     @overload
-    def at(self, reference: Drawable, /) -> Self: ...
-    @overload
-    def at(self, point: AnchorPoint, /) -> Self: ...
-    @overload
-    def at(
+    def move_to(
         self,
         x: float,
         y: float,
@@ -1757,9 +1568,9 @@ class Text(Drawable):
         neither form creates a reactive follow relationship.
 
         Example:
-            label.at(0.0, 40.0, TextAnchor.BASELINE_LEFT)
-            label.at(marker)
-            label.at(marker.anchor_point(Anchor.TOP))
+            label.move_to(0.0, 40.0, TextAnchor.BASELINE_LEFT)
+            label.move_to(marker)
+            label.move_to(marker.anchor_point(Anchor.TOP))
         """
         ...
     def at_anchor(self, x: float, y: float, anchor: Anchor | TextAnchor) -> Self:
@@ -1773,161 +1584,7 @@ class Text(Drawable):
             equation.at_anchor(0.0, 0.0, TextAnchor.BASELINE_CENTER)
         """
         ...
-    def write(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
-        """Write text over an optional positional duration, grouped as requested.
-
-        Example:
-            scene.play([copy.write(0.8, by="word", stagger=0.06)])
-        """
-        ...
-    def type_in(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.04) -> Anim:
-        """Type text over an optional positional duration with deterministic grouping.
-
-        Example:
-            scene.play([copy.type_in(1.0, by="word")])
-        """
-        ...
-    def reveal(self, duration: Optional[float] = None, *, by: TextGrouping = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
-        """Reveal structured text over an optional positional duration.
-
-        Example:
-            scene.play([copy.reveal(0.7, by="line")])
-        """
-        ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Fade the complete Text into the scene.
-
-        Example:
-            scene.play([copy.fade_in()])
-        """
-        ...
-    def slide_in(self, direction: Literal["up", "down", "left", "right"] = "up", *, distance: float = 24.0, duration: Optional[float] = None) -> Anim:
-        """Fade and slide Text from a direction by a canvas-unit distance.
-
-        Example:
-            scene.play([copy.slide_in("up")])
-        """
-        ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim:
-        """Remove Text by reversing its writing animation.
-
-        Example:
-            scene.play([copy.unwrite()])
-        """
-        ...
-    def erase(self, duration: Optional[float] = None) -> Anim:
-        """Erase Text using its vector writing order.
-
-        Example:
-            scene.play([copy.erase()])
-        """
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Fade the complete Text out of the scene.
-
-        Example:
-            scene.play([copy.fade_out()])
-        """
-        ...
-    def slide_out(self, direction: Literal["up", "down", "left", "right"] = "down", *, distance: float = 24.0, duration: Optional[float] = None) -> Anim:
-        """Remove Text with a directional slide/fade exit preset.
-
-        Example:
-            scene.play([copy.slide_out("down")])
-        """
-        ...
-    def indicate(self, duration: Optional[float] = None) -> Anim:
-        """Indicate Text transiently without causing reflow.
-
-        Example:
-            scene.play([copy.indicate()])
-        """
-        ...
-    def pulse(self, duration: Optional[float] = None) -> Anim:
-        """Pulse Text transiently without changing its measurement.
-
-        Example:
-            scene.play([copy.pulse()])
-        """
-        ...
-    def wiggle(self, duration: Optional[float] = None) -> Anim:
-        """Wiggle Text transiently without changing Layout geometry.
-
-        Example:
-            scene.play([copy.wiggle()])
-        """
-        ...
-    def wave(self, duration: Optional[float] = None) -> Anim:
-        """Apply a wave emphasis to the complete Text.
-
-        Example:
-            scene.play([copy.wave()])
-        """
-        ...
-    def highlight(self, duration: Optional[float] = None) -> Anim:
-        """Circumscribe the complete Text as a highlight.
-
-        Example:
-            scene.play([copy.highlight()])
-        """
-        ...
-    def focus(self, duration: Optional[float] = None) -> Anim:
-        """Focus the complete Text transiently.
-
-        Example:
-            scene.play([copy.focus()])
-        """
-        ...
-    def cancel(self, duration: Optional[float] = None) -> Anim:
-        """Strike through and dim the complete Text.
-
-        The mark is retired by the next replacing text transition. Returns an
-        ``Anim`` for ``scene.play()``; ``duration=None`` uses the animation
-        default.
-
-        Example:
-            scene.play([copy.cancel(duration=0.6)])
-        """
-        ...
-    def brace(self, label: str, *, above: bool = False, duration: Optional[float] = None) -> Anim:
-        """Attach a brace and label to the complete Text.
-
-        Example:
-            scene.play([formula.brace("identity", above=True)])
-        """
-        ...
-    def annotate(self, label: str, *, offset: tuple[float, float] = (120.0, 80.0), duration: Optional[float] = None) -> Anim:
-        """Attach an animated annotation to the complete Text.
-
-        Example:
-            scene.play([formula.annotate("important result")])
-        """
-        ...
-    def morph_to(self, target: Text, *, match: Literal["auto", "semantic", "grapheme", "shape"] = "auto", duration: float = 1.0) -> Anim:
-        """Morph into another Text, matching semantic paths before glyphs and shapes.
-
-        Foreign scenes or incompatible Layout owners raise
-        ``LayoutOwnershipError``.
-
-        Example:
-            scene.play([source.morph_to(target, match="auto")])
-        """
-        ...
-    def step_to(self, target: Text, *, matches: Optional[Mapping[str, str] | Sequence[tuple[str, str]]] = None, duration: float = 1.0) -> Anim:
-        """Advance a structured derivation, replacing ``Scene.step_equation``.
-
-        Example:
-            scene.play([first.step_to(second, matches={"left": "result"})])
-        """
-        ...
-    def expand_to(self, target: Text, *, anchor: str = "part", duration: float = 1.0) -> Anim:
-        """Expand toward another Text around a shared semantic part.
-
-        Example:
-            scene.play([short.expand_to(long, anchor="formula.mass")])
-        """
-        ...
-    def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None, duration: float = 1.0) -> None:
+    def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None) -> None:
         """Replace structured content while retaining Text identity and reflowing owners.
 
         The text version and all owning Layout snapshots are incremented. An
@@ -2036,52 +1693,34 @@ class CameraConstraint:
         ...
 
 class Camera:
-    def state_2d(
-        self,
-        center: tuple[float, float] = (0.0, 0.0),
-        zoom: float = 1.0,
-        rotation: float = 0.0,
-    ) -> CameraState:
-        """Create a concrete orthographic state without advancing the timeline.
+    @property
+    def animate(self) -> CameraAnimation: ...
+    def state_2d(self, center: tuple[float, float] = (0.0, 0.0), zoom: float = 1.0, rotation: float = 0.0) -> CameraState: ...
+    def state_3d(self, eye: tuple[float, float, float], target: tuple[float, float, float], up: tuple[float, float, float] = (0.0, 1.0, 0.0), fov_y: float = 0.7853981633974483, near: float = 0.1, far: float = 1000.0) -> CameraState: ...
+    def capture(self) -> CameraState: ...
+    def save(self, name: str) -> CameraState: ...
+    def to(self, state: CameraState) -> Camera: ...
+    def restore(self, name: str) -> Camera: ...
+    @overload
+    def pan_to(self, x: float, y: float) -> Camera: ...
+    @overload
+    def pan_to(self, target: Endpoint) -> Camera: ...
+    def zoom_to(self, zoom: ScalarSource) -> Camera: ...
+    def frame_to(self, targets: Drawable | Sequence[Drawable], margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None, *, dynamic: bool = False) -> Camera: ...
+    def rotate_to(self, angle: ScalarSource) -> Camera: ...
+    def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
+    def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
+    def orthographic(self, zoom: float = 1.0) -> Camera: ...
+    def reset(self) -> Camera: ...
+    def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
+    def bind_3d(self, *, eye: Optional[Endpoint] = None, target: Optional[Endpoint] = None, fov_y: Optional[ScalarSource] = None, up: tuple[float, float, float] = (0.0, 1.0, 0.0), influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
 
-        ``rotation`` is in radians and ``zoom`` must be finite and positive;
-        invalid values raise ``ValueError``.
-        """
-        ...
-    def state_3d(
-        self,
-        eye: tuple[float, float, float],
-        target: tuple[float, float, float],
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
-        fov_y: float = 0.7853981633974483,
-        near: float = 0.1,
-        far: float = 1000.0,
-    ) -> CameraState:
-        """Create a concrete perspective look-at state.
-
-        Angles are radians; eye/target/up and projection parameters are
-        validated and invalid or degenerate poses raise ``ValueError``.
-        """
-        ...
-    def capture(self) -> CameraState:
-        """Capture authored camera state at the current cursor without advancing it.
-
-        The value is evaluated during playback before camera bindings, shake,
-        and editor-only view overrides.
-        """
-        ...
+class CameraAnimation:
     def to(self, state: CameraState, duration: float = 1.0) -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 
         ``duration`` is finite and non-negative. A state owned by another
         Scene raises ``ValueError``.
-        """
-        ...
-    def save(self, name: str) -> CameraState:
-        """Capture and save a named state, replacing the same name if present.
-
-        The operation does not advance the timeline; an empty name raises
-        ``ValueError``.
         """
         ...
     def restore(self, name: str, duration: float = 1.0) -> Anim:
@@ -2225,41 +1864,6 @@ class Camera:
 
     def reset(self, duration: float = 1.0) -> Anim:
         """Restore the default 2D pose, up vector, target, and projection."""
-        ...
-
-    def bind_2d(
-        self,
-        *,
-        center: Optional[Endpoint] = None,
-        zoom: Optional[ScalarSource] = None,
-        rotation: Optional[ScalarSource] = None,
-        influence: Optional[ScalarSource] = None,
-        enabled: bool = True,
-    ) -> CameraConstraint:
-        """Bind orthographic channels to native reactive sources.
-
-        ``rotation`` is in radians. ``zoom`` must evaluate to a finite positive
-        value and ``influence`` defaults to ``1`` (``None`` at runtime means
-        the default). At least one channel is required.
-        """
-        ...
-
-    def bind_3d(
-        self,
-        *,
-        eye: Optional[Endpoint] = None,
-        target: Optional[Endpoint] = None,
-        fov_y: Optional[ScalarSource] = None,
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
-        influence: Optional[ScalarSource] = None,
-        enabled: bool = True,
-    ) -> CameraConstraint:
-        """Bind perspective pose or FOV channels to native reactive sources.
-
-        ``fov_y`` is a vertical field of view in radians. ``up`` must be
-        finite and non-zero. At least one of ``eye``, ``target``, or ``fov_y``
-        is required.
-        """
         ...
 
 class Axis:
@@ -2430,7 +2034,10 @@ class Parameter:
     @property
     def current(self) -> float: ...
     def set(self, value: float) -> None: ...
-    def animate_to(self, value: float, duration: Optional[float] = None) -> Anim: ...
+    @property
+    def animate(self) -> Anim:
+        """Return a pure proxy; use ``parameter.animate.set(value)`` and pass it to ``Scene.play``."""
+        ...
     def add_updater_fn(
         self,
         callback: Callable[[float, float, float], float],
@@ -2484,7 +2091,10 @@ class Variable(Drawable):
     @property
     def current(self) -> float: ...
     def set(self, value: float) -> None: ...
-    def animate_to(self, value: float, duration: Optional[float] = None) -> Anim: ...
+    @property
+    def animate(self) -> Anim:
+        """Return a pure scalar animation proxy for ``set(value)``."""
+        ...
     def add_updater_fn(
         self,
         callback: Callable[[float, float, float], float],
@@ -2522,6 +2132,9 @@ class DataSource:
     def version(self) -> int: ...
     def __len__(self) -> int: ...
 
+class ChartAnimation:
+    def to(self, target: ChartSpec, *, match_: Literal["key", "index"] = "key", fallback: Literal["error", "crossfade"] = "error") -> Anim: ...
+
 class Chart:
     """Materialized chart with stable marks, axes, grid, and guide layers."""
     def drawable(self) -> Drawable:
@@ -2530,29 +2143,16 @@ class Chart:
     def layer(self, name: Literal["marks", "axes", "grid", "guides", "labels"]) -> Drawable:
         """Return one semantic layer; ``labels`` exists only when a bar label channel materializes text."""
         ...
-    def at(self, x: float, y: float) -> Chart:
+    @property
+    def animate(self) -> ChartAnimation: ...
+    def move_to(self, x: float, y: float) -> Chart:
         """Return a chart handle translated in the 2D canvas plane."""
         ...
-    def at_3d(self, x: float, y: float, z: float) -> Chart:
+    def move_to_3d(self, x: float, y: float, z: float) -> Chart:
         """Return a chart handle translated in world coordinates."""
         ...
-    def scaled(self, factor: float) -> Chart:
+    def scale_to(self, factor: float) -> Chart:
         """Return a uniformly scaled chart handle."""
-        ...
-    def create(self, duration: Optional[float] = None) -> Anim:
-        """Animate the chart root with the native create transition."""
-        ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Animate the chart root with the native write transition."""
-        ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Fade all vector and native 3D mesh layers of the chart into the scene."""
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Fade all vector and native 3D mesh layers of the chart out of the scene."""
-        ...
-    def to(self, target: ChartSpec, *, match_: Literal["key", "index"] = "key", fallback: Literal["error", "crossfade"] = "error") -> Anim:
-        """Build a deterministic transition after validating identity and morph compatibility."""
         ...
     def inspect(self, fields: Sequence[str], *, format: Optional[str] = None) -> Chart:
         """Enable preview-only inspection metadata for the selected data fields."""
@@ -2644,103 +2244,43 @@ class VectorField:
 
 class ArrowVectorField:
     def drawable(self) -> Drawable: ...
-    def create(self, duration: Optional[float] = None) -> Anim:
-        """Reveal all arrow glyphs using their drawable creation animation."""
-        ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Write the arrow glyphs using their authored strokes."""
-        ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Fade all arrows from transparent to their authored opacity."""
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Fade all arrows to transparent."""
-        ...
-    def uncreate(self, duration: Optional[float] = None) -> Anim:
-        """Erase the arrow glyphs using the reverse creation animation."""
-        ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim:
-        """Erase the arrow glyph strokes using the reverse writing animation."""
-        ...
-    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
-        """Grow the arrow-field group from its center."""
-        ...
-    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
-        """Shrink the arrow-field group into its center."""
-        ...
+    @property
+    def animate(self) -> Anim: ...
 
 class StreamLines:
     def drawable(self) -> Drawable: ...
-    def create(self, duration: Optional[float] = None) -> Anim:
-        """Reveal the persistent base streamlines."""
-        ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Write the persistent base streamlines along their paths."""
-        ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Fade the persistent base streamlines in."""
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Fade the persistent base streamlines out."""
-        ...
-    def uncreate(self, duration: Optional[float] = None) -> Anim:
-        """Erase the base streamlines using the reverse creation animation."""
-        ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim:
-        """Erase the base streamlines using the reverse writing animation."""
-        ...
-    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
-        """Grow the streamline group from its center."""
-        ...
-    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
-        """Shrink the streamline group into its center."""
-        ...
+    @property
+    def animate(self) -> Anim: ...
     def flow(self, duration: float = 2.0, *, time_width: float = 0.15) -> list[Anim]:
         """Animate brighter moving highlights without clipping the persistent base lines."""
         ...
 
 class FlowParticles:
     def drawable(self) -> Drawable: ...
-    def create(self, duration: Optional[float] = None) -> Anim:
-        """Reveal all particles; particles remain hidden before their first entry animation."""
-        ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Write all particle shapes using the standard drawable animation."""
-        ...
-    def fade_in(self, duration: Optional[float] = None) -> Anim:
-        """Fade all particles in from transparent."""
-        ...
-    def fade_out(self, duration: Optional[float] = None) -> Anim:
-        """Fade all particles to transparent."""
-        ...
-    def uncreate(self, duration: Optional[float] = None) -> Anim:
-        """Erase all particles using the reverse creation animation."""
-        ...
-    def unwrite(self, duration: Optional[float] = None) -> Anim:
-        """Erase all particle shapes using the reverse writing animation."""
-        ...
-    def grow_from_center(self, duration: Optional[float] = None) -> Anim:
-        """Grow the particle group from its center."""
-        ...
-    def shrink_to_center(self, duration: Optional[float] = None) -> Anim:
-        """Shrink the particle group into its center."""
-        ...
+    @property
+    def animate(self) -> Anim: ...
     def flow(self) -> list[Anim]:
         """Return one finite seekable advection clip per retained particle."""
         ...
 
-class CoordinateSpace:
-    def drawable(self) -> Drawable: ...
-    def at(self, x: float, y: float) -> CoordinateSpace: ...
-    def scaled(self, factor: float) -> CoordinateSpace: ...
-    def rotated(self, radians: float) -> CoordinateSpace: ...
+class CoordinateSpaceAnimation:
     def create(self, duration: Optional[float] = None) -> Anim: ...
-    def write(self, duration: Optional[float] = None) -> Anim:
-        """Write axes, guides, ticks, numbers, and labels concurrently; vertical x-guides reveal top-to-bottom and horizontal y-guides left-to-right."""
-        ...
+    def write(self, duration: Optional[float] = None) -> Anim: ...
     def fade_in(self, duration: Optional[float] = None) -> Anim: ...
     def fade_out(self, duration: Optional[float] = None) -> Anim: ...
-    def animate_view(self, x_domain: tuple[float, float], y_domain: tuple[float, float], *, duration: float = 1.0) -> list[Anim]: ...
+    def move_to(self, x: float, y: float) -> Anim: ...
+    def scale_to(self, factor: float) -> Anim: ...
+    def rotate_to(self, radians: float) -> Anim: ...
+    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim: ...
+
+class CoordinateSpace:
+    def drawable(self) -> Drawable: ...
+    @property
+    def animate(self) -> CoordinateSpaceAnimation: ...
+    def move_to(self, x: float, y: float) -> CoordinateSpace: ...
+    def scale_to(self, factor: float) -> CoordinateSpace: ...
+    def rotate_to(self, radians: float) -> CoordinateSpace: ...
+    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace: ...
     def coord(self, x: float, y: float) -> CoordinateRef: ...
     def data_to_local(self, x: float, y: float) -> tuple[float, float]: ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]: ...
@@ -2788,7 +2328,7 @@ class CoordinateSpace:
         Example:
             plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
             curve = plane.plot_data(times, accel, color=CYAN, width=4)
-            scene.play(curve.create(2.0))
+            scene.play(curve.animate.create(2.0))
         """
         ...
     def scatter_data(
@@ -2810,6 +2350,8 @@ class CoordinateSpace:
 class NumberLine:
     """A one-dimensional typed coordinate space with scale-aware labels and reactive points."""
     def drawable(self) -> Drawable: ...
+    @property
+    def animate(self) -> Anim: ...
     def coord(self, value: float) -> CoordinateRef: ...
     def data_to_local(self, value: float) -> float: ...
     def point_ref(
@@ -2849,26 +2391,26 @@ class NumberLine:
         """
         ...
     def layer(self, name: Literal["axis", "ticks", "numbers", "labels"]) -> Drawable: ...
-    def create(self, duration: Optional[float] = None) -> Anim: ...
-    def write(self, duration: Optional[float] = None) -> Anim: ...
 
 class PolarSpace:
     def drawable(self) -> Drawable: ...
+    @property
+    def animate(self) -> Anim: ...
     def coord(self, radius: float, angle: float) -> CoordinateRef: ...
     def layer(self, name: Literal["grid", "axes", "numbers", "labels"]) -> Drawable:
         """Return a stable polar layer; disabled layers are empty Drawables."""
         ...
     def plot(self, function: Callable[[float], float], domain: tuple[float, float] = (0.0, 6.283185307179586), *, samples: int = 360) -> Drawable: ...
-    def create(self, duration: Optional[float] = None) -> Anim: ...
 
 class CoordinateSpace3D:
     def drawable(self) -> Drawable: ...
+    @property
+    def animate(self) -> Anim: ...
     def layer(self, name: Literal["grid", "axes", "ticks", "numbers", "labels"]) -> Drawable:
         """Return an independently animatable scale-aware 3D axes layer."""
         ...
-    def at_3d(self, x: float, y: float, z: float) -> CoordinateSpace3D: ...
-    def scaled(self, factor: float) -> CoordinateSpace3D: ...
-    def create(self, duration: Optional[float] = None) -> Anim: ...
+    def move_to_3d(self, x: float, y: float, z: float) -> CoordinateSpace3D: ...
+    def scale_to(self, factor: float) -> CoordinateSpace3D: ...
     def data_to_local(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def local_to_data(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def surface(self, function: Callable[..., float], *, resolution: tuple[int, int] = (64, 48), inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
@@ -3293,7 +2835,7 @@ class Geometry:
         colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
 
         Example:
-            dot = scene.dot(7).at_3d(1, 0, 0)
+            dot = scene.dot(7).move_to_3d(1, 0, 0)
             dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
             trail = scene.traced_path_3d(
                 dot, colormap="viridis", max_points=600
@@ -3412,7 +2954,7 @@ class Typography:
                 "=",
                 parts(mass="m", acceleration="a_t"),
             )
-            scene.play([equation.write(1.0, by="part")])
+            scene.play([equation.animate.write(1.0, by="part")])
         """
         ...
     def typst(self, source: str | os.PathLike[str], *, width: Optional[str | float | int] = None) -> Drawable:
@@ -3508,7 +3050,7 @@ class LayoutBuilder:
         removes the item from normal flow. Negative grow/shrink values error.
         """
         ...
-    def constrain(self, *constraints: LayoutConstraint, animate: Optional[float] = None) -> ConstraintSet:
+    def constrain(self, *constraints: LayoutConstraint) -> ConstraintSet:
         """Register prioritized linear relations and return their count.
 
         Conflicting required relations or cross-scene references raise
@@ -3859,11 +3401,11 @@ class SlideKit:
         ``radius=None`` produces a pill. Semantic variants inherit Theme color
         tokens; explicit colors override them. Empty text or invalid finite
         geometry raises ``ValueError``. Position the returned group with
-        ``.at(...)`` and animate it like any other ``Drawable``.
+        ``.move_to(...)`` and animate it like any other ``Drawable``.
 
         Example:
-            tag = scene.badge("READY", variant="success").at(-300, 180)
-            scene.play(tag.grow_from_center())
+            tag = scene.badge("READY", variant="success").move_to(-300, 180)
+            scene.play(tag.animate.grow_from_center())
         """
         ...
     def chip(
@@ -4460,17 +4002,18 @@ class Scene:
         Export ignores stops and renders the timeline continuously.
         """
         ...
-    def play(self, items: Sequence[Anim | Audio | Video | Lottie], lag: Optional[float] = None) -> None:
-        """Activate animations and declared audio at the current cursor.
+    def play(
+        self,
+        items: Playable | Sequence[Playable],
+        *,
+        duration: Optional[float] = None,
+        rate: Optional[str] = None,
+    ) -> None:
+        """Atomically schedule a leaf, implicit parallel batch, or composition tree.
 
-        Items run in parallel, with optional ``lag`` added by sequence order.
-        Finite audio durations participate in the batch duration; open-ended
-        audio starts without extending the timeline. Video starts its frames
-        and embedded audio together and can be activated once. Media declared
-        by another scene raises ``ValueError``.
-
-        Example:
-            scene.play([animation, music])
+        ``duration`` and ``rate`` are defaults overridden by explicit ``Anim``
+        or nested group configuration. Reused, foreign, duplicate, or temporally
+        overlapping channel writes raise ``ValueError`` without partial changes.
         """
         ...
     def fade_out_all(self, d: float) -> None:

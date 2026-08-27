@@ -39,7 +39,7 @@ from gaanim import GOLD, Scene
 scene = Scene(640, 360)
 m = scene.viz.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
 m[0, :].fill(GOLD)
-scene.play(m.entries.write(0.4, order="spiral_in", stagger=0.05))
+scene.play(m.entries.animate.write(order="spiral_in", stagger=0.05).duration(0.4))
 ```
 ]
 
@@ -63,7 +63,7 @@ Instala `gaanim[algebra]` para habilitar SymPy. `add`, `subtract`, `matmul`,
 `rref`, `lu`, `qr` y `eigen` devuelven `MatrixDerivation[T]`: `T` es `Matrix`
 para resultados matriciales, `Drawable` para escalares y `tuple[Matrix, Matrix]`
 para descomposiciones. `Matrix` expone en el LSP los métodos fluidos de
-`Drawable`, incluido `result.at(...)`. Los fallos exactos no se
+`Drawable`, incluido `result.move_to(...)`. Los fallos exactos no se
 aproximan silenciosamente; usa `exact=False, precision=N` de forma explícita.
 
 ```python
@@ -73,6 +73,6 @@ scene = Scene(640, 360)
 a = scene.viz.matrix([[1, 2], [3, 4]])
 b = scene.viz.matrix([[2, 0], [1, 2]])
 derivation = a.matmul(b)
-derivation.result.at(180, 0)
-scene.play(derivation.animate())
+derivation.result.move_to(180, 0)
+scene.play(derivation.animate)
 ```

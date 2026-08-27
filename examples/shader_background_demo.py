@@ -41,9 +41,9 @@ scene = Scene(
     margin=48,
 )
 
-title = scene.text("WGSL BACKGROUND", role="title").fill(WHITE).at(0, 42)
+title = scene.text("WGSL BACKGROUND", role="title").fill(WHITE).move_to(0, 42)
 rule = scene.geometry.line(-180, -20, 180, -20).stroke(GRAY, 4)
-scene.play([title.write().duration(0.8), rule.create().duration(0.8)])
+scene.play([title.animate.write().duration(0.8), rule.animate.create().duration(0.8)])
 scene.wait(4.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

@@ -32,10 +32,10 @@ value = scene.viz.readout(
     inputs=[amplitude, phase],
     label="$q$",
     invalid="invalid",
-).fill(RED).at(430, 260)
+).fill(RED).move_to(430, 260)
 
-scene.play([plane.create(), curve.create(), marker.fade_in(), value.fade_in()])
-scene.play([amplitude.animate_to(2.0, duration=2.0), phase.animate_to(math.pi, duration=2.0)])
+scene.play([plane.animate.create(), curve.animate.create(), marker.animate.fade_in(), value.animate.fade_in()])
+scene.play([amplitude.animate.set(2.0).duration(2.0), phase.animate.set(math.pi).duration(2.0)])
 scene.wait(1.0)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -26,7 +26,21 @@ planos retirados.
   [`scene.badge(text)`], [`scene.slides.badge(text)`],
   [`scene.force_at(...)`], [`scene.mechanics.force_at(...)`],
   [`scene.assets_dir(path)`], [`scene.assets.assets_dir(path)`],
+  [`dot.at(x, y)`], [`dot.move_to(x, y)`],
+  [`dot.move_to(x, y)` (animado)], [`dot.animate.move_to(x, y)`],
+  [`tracker.animate_to(v)`], [`tracker.animate.set(v)`],
+  [`space.animate_view(x, y)`], [`space.animate.view_to(x, y)`],
+  [`matrix.scale_by(k)` (álgebra)], [`matrix.scalar_multiply(k)`],
+  [`AnimationGroup(a, b)`], [`parallel(a, b)`],
+  [`Succession(a, b)`], [`sequence(a, b)`],
+  [`LaggedStart(a, b, lag=t)`], [`stagger(a, b, each=t)`],
+  [`scene.play(items, lag=t)`], [`scene.play(stagger(*items, each=t))`],
 )
+
+Los setters directos son cortes reversibles en el cursor actual y no consumen
+tiempo. `animate` nunca se invoca: es una propiedad de solo lectura. El `Anim`
+resultante es una descripción pura y `Scene.play` valida el lote completo antes
+de incorporarlo al timeline.
 
 `scene.text("Hola")` no cambia. Desde 0.2, `scene.text` es una capacidad
 invocable `Typography` que también expone `equation`, `typst`, `measure` y
@@ -47,6 +61,6 @@ scene = Scene(1280, 720)
 circle = scene.geometry.circle(96).fill(BLUE)
 title = scene.text("Capacidades", role="title")
 page = scene.layout.column([title, circle], within="safe", gap=24)
-scene.play([page.fade_in()])
+scene.play([page.animate.fade_in()])
 scene.render()
 ```

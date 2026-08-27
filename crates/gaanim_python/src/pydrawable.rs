@@ -137,7 +137,26 @@ impl PyCanvasAnim {
         }
     }
 
-    fn r#move(&self, dx: f64, dy: f64) -> PyResult<Self> {
+    #[pyo3(signature = (value, duration=None))]
+    fn set(&self, value: f64, duration: Option<f64>) -> PyResult<Self> {
+        if !value.is_finite() {
+            return Err(PyValueError::new_err("parameter values must be finite"));
+        }
+        let inner = self.inner.clone().set(value);
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
+        })
+    }
+
+    fn transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
+        self.inner
+            .clone()
+            .transform_to(&target.0)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
+    fn shift_by(&self, dx: f64, dy: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "TextSelection.animate() supports only fill/color and opacity targets",
@@ -149,7 +168,7 @@ impl PyCanvasAnim {
             ));
         }
         Ok(Self {
-            inner: self.inner.clone().r#move(dx, dy),
+            inner: self.inner.clone().shift_by(dx, dy),
         })
     }
 
@@ -174,7 +193,7 @@ impl PyCanvasAnim {
         })
     }
 
-    fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
+    fn shift_by_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "TextSelection.animate() supports only fill/color and opacity targets",
@@ -186,7 +205,7 @@ impl PyCanvasAnim {
             ));
         }
         Ok(Self {
-            inner: self.inner.clone().move_3d(dx, dy, dz),
+            inner: self.inner.clone().shift_by_3d(dx, dy, dz),
         })
     }
 
@@ -206,7 +225,7 @@ impl PyCanvasAnim {
         })
     }
 
-    fn scale(&self, factor: f64) -> PyResult<Self> {
+    fn scale_by(&self, factor: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "TextSelection.animate() supports only fill/color and opacity targets",
@@ -214,7 +233,7 @@ impl PyCanvasAnim {
         }
         self.require_transformable()?;
         Ok(Self {
-            inner: self.inner.clone().scale(factor),
+            inner: self.inner.clone().scale_by(factor),
         })
     }
 
@@ -242,7 +261,7 @@ impl PyCanvasAnim {
         })
     }
 
-    fn rotate(&self, radians: f64) -> PyResult<Self> {
+    fn scale_by_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "TextSelection.animate() supports only fill/color and opacity targets",
@@ -250,7 +269,19 @@ impl PyCanvasAnim {
         }
         self.require_transformable()?;
         Ok(Self {
-            inner: self.inner.clone().rotate(radians),
+            inner: self.inner.clone().scale_by_3d(x, y, z),
+        })
+    }
+
+    fn rotate_by(&self, radians: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate() supports only fill/color and opacity targets",
+            ));
+        }
+        self.require_transformable()?;
+        Ok(Self {
+            inner: self.inner.clone().rotate_by(radians),
         })
     }
 
@@ -292,18 +323,248 @@ impl PyCanvasAnim {
         })
     }
 
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "fade_in() requires a Drawable animation proxy",
+            ));
+        }
+        let inner = self.inner.clone().fade_in();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (direction, distance=48.0))]
+    fn fade_in_from(&self, direction: &PyDirection, distance: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "fade_in_from() requires a Drawable animation proxy",
+            ));
+        }
+        self.require_transformable()?;
+        if !distance.is_finite() || distance < 0.0 {
+            return Err(PyValueError::new_err(
+                "distance must be a finite non-negative number",
+            ));
+        }
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .fade_in_from(direction.0.clone(), distance),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "fade_out() requires a Drawable animation proxy",
+            ));
+        }
+        let inner = self.inner.clone().fade_out();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None, *, by="grapheme", order="forward", stagger=0.0))]
+    fn write(&self, duration: Option<f64>, by: &str, order: &str, stagger: f64) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "write() requires a Drawable animation proxy",
+            ));
+        }
+        if !matches!(by, "grapheme" | "word" | "line" | "part") {
+            return Err(PyValueError::new_err(
+                "by must be grapheme, word, line, or part",
+            ));
+        }
+        if !matches!(order, "forward" | "reverse" | "center" | "random") {
+            return Err(PyValueError::new_err(
+                "order must be forward, reverse, center, or random",
+            ));
+        }
+        if !stagger.is_finite() || stagger < 0.0 {
+            return Err(PyValueError::new_err(
+                "stagger must be finite and non-negative",
+            ));
+        }
+        let inner = self.inner.clone().write().lag_ratio(stagger);
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "create() requires a Drawable animation proxy",
+            ));
+        }
+        let inner = self.inner.clone().create();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn unwrite(&self, duration: Option<f64>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "unwrite() requires a Drawable animation proxy",
+            ));
+        }
+        let inner = self.inner.clone().unwrite();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn uncreate(&self, duration: Option<f64>) -> PyResult<Self> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "uncreate() requires a Drawable animation proxy",
+            ));
+        }
+        let inner = self.inner.clone().uncreate();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn grow_from_center(&self, duration: Option<f64>) -> Self {
+        let inner = self.inner.clone().grow_from_center();
+        Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn shrink_to_center(&self, duration: Option<f64>) -> Self {
+        let inner = self.inner.clone().shrink_to_center();
+        Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    fn spin_in_from_nothing(&self) -> PyResult<Self> {
+        self.require_transformable()?;
+        Ok(Self {
+            inner: self.inner.clone().spin_in_from_nothing(),
+        })
+    }
+
+    fn draw_border_then_fill(&self) -> Self {
+        Self {
+            inner: self.inner.clone().draw_border_then_fill(),
+        }
+    }
+
+    fn circumscribe(&self) -> Self {
+        Self {
+            inner: self.inner.clone().circumscribe(),
+        }
+    }
+
+    fn flash(&self) -> Self {
+        Self {
+            inner: self.inner.clone().flash(),
+        }
+    }
+
+    #[pyo3(signature = (*, time_width=0.2))]
+    fn show_passing_flash(&self, time_width: f64) -> PyResult<Self> {
+        if !time_width.is_finite() || time_width <= 0.0 || time_width > 1.0 {
+            return Err(PyValueError::new_err(
+                "time_width must be finite and in (0, 1]",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().show_passing_flash(time_width),
+        })
+    }
+
+    fn move_along(&self, target: &PyDrawable) -> PyResult<Self> {
+        self.require_transformable()?;
+        self.inner
+            .clone()
+            .move_along(&target.0)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
+    fn fade_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
+        self.inner
+            .clone()
+            .fade_transform_to(&target.0)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
+    fn replacement_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
+        self.inner
+            .clone()
+            .replacement_transform_to(&target.0)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn indicate(&self, duration: Option<f64>) -> PyResult<Self> {
+        let inner = self.inner.clone().indicate();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn wiggle(&self, duration: Option<f64>) -> PyResult<Self> {
+        let inner = self.inner.clone().wiggle();
+        Ok(Self {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        })
+    }
+
+    fn pulse(&self) -> Self {
+        Self {
+            inner: self.inner.clone().pulse(),
+        }
+    }
+
+    fn wave(&self) -> Self {
+        Self {
+            inner: self.inner.clone().wave(),
+        }
+    }
+
+    fn highlight(&self) -> Self {
+        Self {
+            inner: self.inner.clone().highlight(),
+        }
+    }
+
+    fn focus(&self) -> Self {
+        Self {
+            inner: self.inner.clone().focus(),
+        }
+    }
+
+    fn cancel(&self) -> Self {
+        Self {
+            inner: self.inner.clone().cancel(),
+        }
+    }
+
     fn duration(&self, d: f64) -> Self {
         Self {
             inner: self.inner.clone().duration(d),
         }
-    }
-
-    /// Currently configured `(duration, delay)` in seconds, so helpers like
-    /// `gaanim.Succession` can compute cumulative delays without re-specifying
-    /// durations.
-    #[getter]
-    fn timing(&self) -> (f64, f64) {
-        (self.inner.inner.duration, self.inner.inner.delay)
     }
 
     fn ease(&self, name: &str) -> Self {
@@ -520,7 +781,8 @@ impl PyDrawable {
         Ok(PyTuple::new(py, self.0.animations())?.unbind())
     }
 
-    /// Start a typed compound property animation.
+    /// Return a fresh, pure animation proxy. Accessing it never schedules work.
+    #[getter]
     fn animate(&self) -> PyCanvasAnim {
         PyCanvasAnim {
             inner: self.0.animate(),
@@ -666,18 +928,18 @@ impl PyDrawable {
         Self(self.0.clone().z_index(z))
     }
     #[pyo3(signature = (x, y=None, anchor=None))]
-    fn at(
+    fn move_to(
         &self,
         x: &Bound<'_, PyAny>,
         y: Option<f64>,
         anchor: Option<&PyAnchor>,
     ) -> PyResult<Self> {
-        self.require_free_position("at")?;
-        match resolve_at_target("at", x, y, anchor.is_some())? {
+        self.require_free_position("move_to")?;
+        match resolve_at_target("move_to", x, y, anchor.is_some())? {
             PyAtTarget::Coordinates { x, y } => Ok(Self(if let Some(anchor) = anchor {
                 self.0.clone().at_anchor(x, y, anchor.0)
             } else {
-                self.0.clone().at_default(x, y)
+                self.0.clone().move_to_default(x, y)
             })),
             PyAtTarget::Drawable(reference) => Ok(Self(self.0.clone().align_to(
                 &reference,
@@ -687,9 +949,17 @@ impl PyDrawable {
             PyAtTarget::AnchorPoint(point) => Ok(Self(self.0.clone().at_anchor_point(point))),
         }
     }
-    fn at_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
-        self.require_free_position("at_3d")?;
-        Ok(Self(self.0.clone().at_3d(x, y, z)))
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        self.require_free_position("move_to_3d")?;
+        Ok(Self(self.0.clone().move_to_3d(x, y, z)))
+    }
+    fn shift_by(&self, dx: f64, dy: f64) -> PyResult<Self> {
+        self.require_free_position("shift_by")?;
+        Ok(Self(self.0.clone().shift_by(dx, dy)))
+    }
+    fn shift_by_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
+        self.require_free_position("shift_by_3d")?;
+        Ok(Self(self.0.clone().shift_by_3d(dx, dy, dz)))
     }
     fn billboard(&self) -> Self {
         Self(self.0.clone().billboard())
@@ -697,21 +967,41 @@ impl PyDrawable {
     fn hud(&self) -> Self {
         Self(self.0.clone().hud())
     }
-    fn scaled(&self, factor: f64) -> PyResult<Self> {
-        self.require_free_position("scaled")?;
-        Ok(Self(self.0.clone().scaled(factor)))
+    fn scale_to(&self, factor: f64) -> PyResult<Self> {
+        self.require_free_position("scale_to")?;
+        Ok(Self(self.0.clone().scale_to(factor)))
     }
-    fn scaled_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
-        self.require_free_position("scaled_3d")?;
-        Ok(Self(self.0.clone().scaled_3d(x, y, z)))
+    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        self.require_free_position("scale_to_3d")?;
+        Ok(Self(self.0.clone().scale_to_3d(x, y, z)))
     }
-    fn rotated(&self, radians: f64) -> PyResult<Self> {
-        self.require_free_position("rotated")?;
-        Ok(Self(self.0.clone().rotated(radians)))
+    fn scale_by(&self, factor: f64) -> PyResult<Self> {
+        self.require_free_position("scale_by")?;
+        Ok(Self(self.0.clone().scale_by(factor)))
     }
-    fn rotated_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
-        self.require_free_position("rotated_3d")?;
-        Ok(Self(self.0.clone().rotated_3d(x, y, z)))
+    fn scale_by_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        self.require_free_position("scale_by_3d")?;
+        Ok(Self(self.0.clone().scale_by_3d(x, y, z)))
+    }
+    fn rotate_to(&self, radians: f64) -> PyResult<Self> {
+        self.require_free_position("rotate_to")?;
+        Ok(Self(self.0.clone().rotate_to(radians)))
+    }
+    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        self.require_free_position("rotate_to_3d")?;
+        Ok(Self(self.0.clone().rotate_to_3d(x, y, z)))
+    }
+    fn rotate_by(&self, radians: f64) -> PyResult<Self> {
+        self.require_free_position("rotate_by")?;
+        Ok(Self(self.0.clone().rotate_by(radians)))
+    }
+    fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
+        self.require_free_position("rotate_by_3d")?;
+        self.0
+            .clone()
+            .rotate_by_3d(axis, radians)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
     fn with_pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().with_pivot(x, y))
@@ -772,215 +1062,6 @@ impl PyDrawable {
         self.require_free_position("to_corner")?;
         Ok(Self(self.0.clone().to_corner(corner.0, buff)))
     }
-    fn r#move(&self, dx: f64, dy: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.r#move(dx, dy),
-        })
-    }
-    #[pyo3(signature = (x, y=None, anchor=None))]
-    fn move_to(
-        &self,
-        x: &Bound<'_, PyAny>,
-        y: Option<f64>,
-        anchor: Option<&PyAnchor>,
-    ) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move_to")?;
-        let inner = match resolve_at_target("move_to", x, y, anchor.is_some())? {
-            PyAtTarget::Coordinates { x, y } => {
-                self.0
-                    .move_to_anchor(x, y, anchor.map(|anchor| anchor.0).unwrap_or_default())
-            }
-            PyAtTarget::Drawable(reference) => self.0.move_to_anchor_point(reference.anchor_point(
-                gaanim_api::canvas::Anchor::Center,
-                gaanim_core::glam::DVec3::ZERO,
-            )),
-            PyAtTarget::AnchorPoint(point) => self.0.move_to_anchor_point(point),
-        };
-        Ok(PyCanvasAnim { inner })
-    }
-    fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move_3d")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.move_3d(dx, dy, dz),
-        })
-    }
-    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move_to_3d")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.move_to_3d(x, y, z),
-        })
-    }
-    fn glide_to(&self, x: f64, y: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("glide_to")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.glide_to(x, y),
-        })
-    }
-    fn scale(&self, factor: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("scale")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.scale(factor),
-        })
-    }
-    fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("scale_to_3d")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.scale_to_3d(x, y, z),
-        })
-    }
-    fn rotate(&self, rad: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("rotate")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.rotate(rad),
-        })
-    }
-    fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("rotate_by_3d")?;
-        self.0
-            .rotate_by_3d(axis, radians)
-            .map(|inner| PyCanvasAnim { inner })
-            .map_err(|error| PyValueError::new_err(error.to_string()))
-    }
-    fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("rotate_to_3d")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.rotate_to_3d(x, y, z),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.fade_in(duration),
-        }
-    }
-    /// Fade in while moving from ``direction`` (for example ``Direction.DOWN``).
-    #[pyo3(signature = (direction, distance=48.0, duration=None))]
-    fn fade_in_from(
-        &self,
-        direction: &PyDirection,
-        distance: f64,
-        duration: Option<f64>,
-    ) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("fade_in_from")?;
-        if !distance.is_finite() || distance < 0.0 {
-            return Err(PyValueError::new_err(
-                "distance must be a finite non-negative number",
-            ));
-        }
-        Ok(PyCanvasAnim {
-            inner: self.0.fade_in_from(direction.0.clone(), distance, duration),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.fade_out(duration),
-        }
-    }
-    fn fade_to(&self, alpha: f32) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.fade_to(alpha),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.write(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.create(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.unwrite(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.uncreate(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn grow_from_center(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("grow_from_center")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.grow_from_center(duration),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn shrink_to_center(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("shrink_to_center")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.shrink_to_center(duration),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn spin_in_from_nothing(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("spin_in_from_nothing")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.spin_in_from_nothing(duration),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn draw_border_then_fill(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.0.draw_border_then_fill(duration),
-        }
-    }
-    #[pyo3(signature = (duration=None))]
-    fn indicate(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("indicate")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.indicate(duration),
-        })
-    }
-    #[pyo3(signature = (duration=None))]
-    fn wiggle(&self, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("wiggle")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.wiggle(duration),
-        })
-    }
-
-    fn move_along_path(&self, target: &PyDrawable) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move_along_path")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.move_along_drawable(&target.0),
-        })
-    }
-
-    fn move_along_drawable(&self, target: &PyDrawable) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("move_along_drawable")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.move_along_drawable(&target.0),
-        })
-    }
-    fn fade_transform(&self, target: &PyDrawable) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("fade_transform")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.fade_transform(&target.0),
-        })
-    }
-    fn transform(&self, target: &PyDrawable) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("transform")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.transform(&target.0),
-        })
-    }
-    fn replacement_transform(&self, target: &PyDrawable) -> PyResult<PyCanvasAnim> {
-        self.require_free_position("replacement_transform")?;
-        Ok(PyCanvasAnim {
-            inner: self.0.replacement_transform(&target.0),
-        })
-    }
-
     // -- Reactive methods --
 
     /// Attach a preset updater that runs every frame.

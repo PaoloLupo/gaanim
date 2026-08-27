@@ -21,13 +21,13 @@ page = scene.layout.column(
     align="center",
     justify="center",
 )
-scene.play([title.write().duration(0.5), subtitle.fade_in().duration(0.4)])
+scene.play([title.animate.write().duration(0.5), subtitle.animate.fade_in().duration(0.4)])
 scene.wait(0.4)
 
 scene.segment("detail", Transition.cross_fade(0.5))
 scene.reuse(title)
 page.detach(title)
-scene.play([title.move_to(0, 240).duration(0.4)])
+scene.play([title.animate.move_to(0, 240).duration(0.4)])
 scene.wait(0.8)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

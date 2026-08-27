@@ -5,28 +5,28 @@ from gaanim import BLACK, BLUE, CORAL, CYAN, GOLD, GREEN, ORANGE, WHITE, Scene, 
 
 def main():
     scene = Scene(1280, 720, background=BLACK)
-    title = scene.text("Gaanim Reactive Engine", role="title").fill(WHITE).at(0, 240)
-    orbiting_dot = scene.geometry.dot(15).fill(ORANGE).at(150, 0)
+    title = scene.text("Gaanim Reactive Engine", role="title").fill(WHITE).move_to(0, 240)
+    orbiting_dot = scene.geometry.dot(15).fill(ORANGE).move_to(150, 0)
     orbiting_dot.add_updater(Updater.orbit(0, 0, 150, 2.0))
     trail = scene.geometry.traced_path(orbiting_dot).stroke(CYAN, 4).no_fill()
     radius = scene.geometry.tracking_line((0, 0), orbiting_dot).stroke(BLUE, 2).no_fill()
 
-    bobbing_dot = scene.geometry.dot(14).fill(GOLD).at(300, 0)
+    bobbing_dot = scene.geometry.dot(14).fill(GOLD).move_to(300, 0)
     bobbing_dot.add_updater(Updater.bob(50, 0.5))
-    pulsing_square = scene.geometry.square(60).fill(CORAL).at(-300, -110)
+    pulsing_square = scene.geometry.square(60).fill(CORAL).move_to(-300, -110)
     pulsing_square.add_updater(Updater.pulse(0.7, 1.3, 1.0))
     pulsing_square.add_updater(Updater.rotate(1.5))
-    follower = scene.geometry.dot(10).fill(GREEN).at(-180, -110)
+    follower = scene.geometry.dot(10).fill(GREEN).move_to(-180, -110)
     follower.add_updater(Updater.advance_x(45))
 
     scene.play([
-        title.write().duration(1.0),
-        orbiting_dot.grow_from_center().duration(0.5),
-        trail.fade_in().duration(0.5),
-        radius.create().duration(0.5),
-        bobbing_dot.grow_from_center().duration(0.5),
-        pulsing_square.create().duration(0.5),
-        follower.fade_in().duration(0.5),
+        title.animate.write().duration(1.0),
+        orbiting_dot.animate.grow_from_center().duration(0.5),
+        trail.animate.fade_in().duration(0.5),
+        radius.animate.create().duration(0.5),
+        bobbing_dot.animate.grow_from_center().duration(0.5),
+        pulsing_square.animate.create().duration(0.5),
+        follower.animate.fade_in().duration(0.5),
     ])
     scene.wait(5.0)
     orbiting_dot.remove_updater()

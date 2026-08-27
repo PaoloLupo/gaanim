@@ -30,11 +30,11 @@ axes = scene.viz.cartesian_3d(
     Axis.linear(0, 50).ticks(10).label("z").style(color=WHITE),
     size=(60, 60, 50),
     grid=True,
-).at_3d(0, 0, 25)
+).move_to_3d(0, 0, 25)
 
-title = scene.text("Lorenz — GLMakie con APIs genéricas").fill(WHITE).hud().at(0, 500)
-subtitle = scene.text("polyline colormap + dot + updater genérico + traced_path_3d").fill(Color(180,180,190)).hud().at(0, 460)
-info = scene.text("azimuth oscila $1.7pi ± 0.3$ como Makie  •  colormap inferno por tiempo").fill(GOLD).hud().at(0, -500)
+title = scene.text("Lorenz — GLMakie con APIs genéricas").fill(WHITE).hud().move_to(0, 500)
+subtitle = scene.text("polyline colormap + dot + updater genérico + traced_path_3d").fill(Color(180,180,190)).hud().move_to(0, 460)
+info = scene.text("azimuth oscila $1.7pi ± 0.3$ como Makie  •  colormap inferno por tiempo").fill(GOLD).hud().move_to(0, -500)
 
 # ---------------------------------------------------------------------------
 # 2. Opción A: Estático con colormap (un solo draw call, per-vertex)
@@ -72,7 +72,7 @@ static_trail.opacity(0.0)  # aparece al final como referencia tenue
 # 3. Opción B: Dinámico reactivo (fiel a Makie `record` + `push!(points, step!)`)
 #    Dot que integra Lorenz vía updater genérico + trail 3D que crece solo.
 # ---------------------------------------------------------------------------
-dot = scene.geometry.dot(7).fill(WHITE).at_3d(1, 1, 1).billboard()
+dot = scene.geometry.dot(7).fill(WHITE).move_to_3d(1, 1, 1).billboard()
 
 def reset_lorenz():
     # El estado está en la posición del dot, que Gaanim restaura automáticamente.
@@ -100,43 +100,43 @@ dot.add_updater_fn(lorenz_step, reset=reset_lorenz, fixed_dt=1.0/600.0)
 trail = scene.geometry.traced_path_3d(dot, colormap="inferno", max_points=6000, min_distance=0.35)
 
 # Marcadores
-origin_tag = scene.text("origen").fill(Color(120,200,120)).at_3d(0,0,2).billboard().scaled(0.45)
-head_glow = scene.geometry.dot(10).fill(Color(255,255,220)).at_3d(1,1,1).billboard()
+origin_tag = scene.text("origen").fill(Color(120,200,120)).move_to_3d(0,0,2).billboard().scale_to(0.45)
+head_glow = scene.geometry.dot(10).fill(Color(255,255,220)).move_to_3d(1,1,1).billboard()
 head_glow.bind_position_from(dot, "xyz")  # sigue al dot en XYZ (perspectiva)
 head_glow.opacity(0.35)
 
 # ---------------------------------------------------------------------------
 # 4. Cámara perspectiva (makie viewmode=:fit, limits, azimuth)
 # ---------------------------------------------------------------------------
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
-scene.camera.look_at(eye=(-55, -70, 60), target=(0, 0, 25), duration=1.2)
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
+scene.play([scene.camera.animate.look_at(eye=(-55, -70, 60), target=(0, 0, 25)).duration(1.2)])
 
 # ---------------------------------------------------------------------------
 # 5. Timeline
 # ---------------------------------------------------------------------------
-scene.play([axes.create(duration=1.0), title.write(0.8)])
-scene.play([subtitle.fade_in(0.6)])
+scene.play([axes.animate.create(duration=1.0), title.animate.write(0.8)])
+scene.play([subtitle.animate.fade_in(0.6)])
 
 # El trail dinámico ya está creciendo vía updater+traced_path_3d;
 # inicialmente solo se ve el trail reactivo creciendo; el estático aparece al final.
 scene.play([
-    dot.fade_in(0.4),
-    trail.fade_in(0.4),
-    head_glow.fade_to(0.35).duration(0.4),
-    origin_tag.fade_in(0.5),
+    dot.animate.fade_in(0.4),
+    trail.animate.fade_in(0.4),
+    head_glow.animate.opacity(0.35).duration(0.4),
+    origin_tag.animate.fade_in(0.5),
 ])
 scene.wait(1.0)  # deja que el atractor se despliegue 1s (dot ya traza)
 
 # Azimuth Makie: 1.7π ±0.3 sin(2π*frame/120) → lo aproximamos con órbitas
 # Durante estas órbitas el dot sigue integrando Lorenz y el trail crece
-scene.camera.orbit(delta_yaw=0.6, delta_pitch=0.08, duration=1.8)
-scene.camera.orbit(delta_yaw=-0.35, delta_pitch=-0.05, duration=1.4)
-scene.camera.orbit(delta_yaw=0.45, delta_pitch=0.06, duration=1.6)
-scene.camera.dolly(factor=0.88, duration=0.9)
+scene.play([scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.08).duration(1.8)])
+scene.play([scene.camera.animate.orbit(delta_yaw=-0.35, delta_pitch=-0.05).duration(1.4)])
+scene.play([scene.camera.animate.orbit(delta_yaw=0.45, delta_pitch=0.06).duration(1.6)])
+scene.play([scene.camera.animate.dolly(factor=0.88).duration(0.9)])
 scene.wait(2.0)  # trail sigue creciendo mientras la cámara orbita
 # Al final, mostramos el trazo estático completo como referencia tenue (antes estaba visible desde t=0 y tapaba la generación)
-scene.play([static_trail.fade_to(0.22)])
-scene.camera.dolly(factor=1.08, duration=0.9)
+scene.play([static_trail.animate.opacity(0.22)])
+scene.play([scene.camera.animate.dolly(factor=1.08).duration(0.9)])
 scene.wait(2.0)
 
 if os.environ.get("GAANIM_SNAPSHOTS"):

@@ -62,11 +62,11 @@ pueden consultarse mediante los diagnósticos de layout.
 
 Conserva el mismo árbol y cambia solo el viewport. Usa `fill`, crecimiento,
 tracks fr, wrapping y templates para que el contenido se redistribuya. Reserva
-`absolute=True` para overlays y evita `at()` dentro del árbol.
+`absolute=True` para overlays y evita `move_to()` dentro del árbol.
 
 Los cambios de estructura disparan reflow. `Text` también invalida su medida
 al cambiar contenido, fuente, tamaño, spacing o wrapping. Transiciones
-estructurales como `become`, `morph_to`, `step_to` y `expand_to` propagan el
+estructurales como `become` y `text.animate.transform_to(target)` propagan el
 reflow al layout padre con la misma duración.
 
 == Referencia

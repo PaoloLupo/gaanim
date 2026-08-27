@@ -31,13 +31,13 @@ base = (
 target = base.encode(z="z").axes(z=Axis.symlog(-3, 3).ticks(1).label("z"))
 
 chart = scene.viz.chart(base).inspect(("id", "group", "x", "y", "z"), format="{id}: {group}")
-title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
+title = scene.text("Identidad estable: 2D → 3D").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
 
-scene.play([chart.create(0.9), title.write(0.6)])
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
+scene.play([chart.animate.create(0.9), title.animate.write(0.6)])
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([
-    chart.to(target).duration(1.4),
-    scene.camera.look_at(eye=(8, 6, 8), target=(0, 0, 0)).duration(1.4),
+    chart.animate.to(target).duration(1.4),
+    scene.camera.animate.look_at(eye=(8, 6, 8), target=(0, 0, 0)).duration(1.4),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

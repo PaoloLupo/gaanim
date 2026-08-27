@@ -10,10 +10,10 @@ use gaanim_text::prelude::TextAnchor;
 use std::path::PathBuf;
 
 use crate::anim::{
-    AnimationBuilder, AnimationType, PropertyAnimation, PropertyRotation, PropertyScale,
-    PropertyTranslation,
+    AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, PropertyRotation,
+    PropertyScale, PropertyTranslation,
 };
-use crate::canvas::ops::{Op, SharedCanvasState};
+use crate::canvas::ops::SharedCanvasState;
 
 /// Public operation used by vector boolean drawables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -758,10 +758,13 @@ pub enum CurveElement {
 #[derive(Debug, Clone)]
 pub enum LayoutOp {
     SetTranslation(DVec3),
+    ShiftBy(DVec3),
     SetScale(f64),
     SetScale3D(DVec3),
+    ScaleBy(DVec3),
     SetRotation(f64),
     SetRotation3D(DVec3),
+    RotateBy(DQuat),
     /// Scene-space point around which rotation and scaling are performed.
     SetPivot(DVec3),
     MoveAnchorTo {
@@ -929,31 +932,20 @@ impl ObjectSpec {
     }
 }
 
-/// A queued SceneModel animation.
+/// A pure, scene-bound animation description.
 ///
-/// Methods like `DrawableHandle::fade_in()` create one of these and immediately
-/// append an active `Op::Animate` to the owning segment. Fluent configuration
-/// methods update both this value and the queued op, so `obj.fade_in(2.0)` or
-/// keeps the deferred timeline consistent.
+/// Constructing and configuring an `Anim` never mutates the timeline. The
+/// owning [`SceneModel`](super::SceneModel) schedules it atomically from
+/// `play`, after validating ownership, conflicts, and single-use state.
 #[derive(Debug, Clone)]
 pub struct Anim {
     pub inner: AnimationBuilder,
-    queued: Option<QueuedAnim>,
-    pending_queue: Option<PendingQueuedAnim>,
+    owner: Option<SharedCanvasState>,
+    consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    duration_explicit: bool,
+    rate_explicit: bool,
     property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
-}
-
-#[derive(Debug, Clone)]
-struct QueuedAnim {
-    state: SharedCanvasState,
-    segment_idx: usize,
-    op_idx: usize,
-}
-
-#[derive(Debug, Clone)]
-struct PendingQueuedAnim {
-    state: SharedCanvasState,
-    segment_idx: usize,
+    camera_capture_before_play: Option<u64>,
 }
 
 impl Anim {
@@ -966,23 +958,26 @@ impl Anim {
                 duration: 1.0,
                 delay: 0.0,
             },
-            queued: None,
-            pending_queue: None,
+            owner: None,
+            consumed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            duration_explicit: false,
+            rate_explicit: false,
             property_spec: None,
+            camera_capture_before_play: None,
         }
     }
 
     pub(crate) fn properties(
         target: ObjectId,
         state: SharedCanvasState,
-        segment_idx: usize,
+        _segment_idx: usize,
         spec: std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
     ) -> Self {
         let mut anim = Self::new(
             target,
             AnimationType::Properties(PropertyAnimation::default()),
         );
-        anim.pending_queue = Some(PendingQueuedAnim { state, segment_idx });
+        anim.owner = Some(state);
         anim.property_spec = Some(spec);
         anim
     }
@@ -992,7 +987,7 @@ impl Anim {
         fragment: String,
         occurrence: Option<usize>,
         state: SharedCanvasState,
-        segment_idx: usize,
+        _segment_idx: usize,
     ) -> Self {
         let mut anim = Self::new(
             target,
@@ -1002,7 +997,7 @@ impl Anim {
                 properties: PropertyAnimation::default(),
             },
         );
-        anim.pending_queue = Some(PendingQueuedAnim { state, segment_idx });
+        anim.owner = Some(state);
         anim
     }
 
@@ -1010,49 +1005,20 @@ impl Anim {
         target: ObjectId,
         anim_type: AnimationType,
         state: SharedCanvasState,
-        segment_idx: usize,
+        _segment_idx: usize,
     ) -> Self {
         let mut anim = Self::new(target, anim_type);
-        let mut guard = state.lock().expect("canvas state poisoned");
-        let segment = &mut guard.segments[segment_idx];
-        let op_idx = segment.ops.len();
-        // Only advance cursor by duration; delay is per-animation and does not
-        // occupy segment time (it shifts the clip start during compilation).
-        segment.cursor += anim.inner.duration;
-        segment.ops.push(Op::Animate {
-            anim: anim.inner.clone(),
-            active: true,
-        });
-        drop(guard);
-        anim.queued = Some(QueuedAnim {
-            state,
-            segment_idx,
-            op_idx,
-        });
+        anim.owner = Some(state);
         anim
     }
 
-    fn activate_pending_queue(&mut self) {
-        if self.queued.is_some() || self.inner.anim_type.is_empty_properties() {
-            return;
-        }
-        let Some(pending) = self.pending_queue.take() else {
-            return;
-        };
-        let mut guard = pending.state.lock().expect("canvas state poisoned");
-        let segment = &mut guard.segments[pending.segment_idx];
-        let op_idx = segment.ops.len();
-        segment.cursor += self.inner.duration;
-        segment.ops.push(Op::Animate {
-            anim: self.inner.clone(),
-            active: true,
-        });
-        drop(guard);
-        self.queued = Some(QueuedAnim {
-            state: pending.state,
-            segment_idx: pending.segment_idx,
-            op_idx,
-        });
+    pub(crate) fn capture_camera_before_play(mut self, id: u64) -> Self {
+        self.camera_capture_before_play = Some(id);
+        self
+    }
+
+    pub(crate) fn camera_capture_before_play(&self) -> Option<u64> {
+        self.camera_capture_before_play
     }
 
     fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
@@ -1062,9 +1028,122 @@ impl Anim {
             _ => panic!("property modifiers require a compound property animation"),
         };
         update(properties);
-        self.activate_pending_queue();
-        self.sync_queued(None);
         self
+    }
+
+    fn effect(mut self, anim_type: AnimationType) -> Self {
+        assert!(
+            self.inner.anim_type.is_empty_properties(),
+            "temporal effects cannot be combined with property targets in one Anim"
+        );
+        self.inner.rate_func = anim_type.default_rate_func();
+        self.inner.anim_type = anim_type;
+        self
+    }
+
+    fn selection_effect(mut self, effect: crate::anim::TextSelectionEffect) -> Self {
+        let AnimationType::TextSelectionProperties {
+            fragment,
+            occurrence,
+            properties,
+        } = &self.inner.anim_type
+        else {
+            panic!("selection effects require a TextSelection animation proxy");
+        };
+        assert!(
+            properties.is_empty(),
+            "selection effects cannot be combined with property targets"
+        );
+        self.inner.anim_type = AnimationType::TextSelection {
+            fragment: fragment.clone(),
+            occurrence: *occurrence,
+            effect,
+        };
+        self
+    }
+
+    pub(crate) fn belongs_to(&self, state: &SharedCanvasState) -> bool {
+        self.owner
+            .as_ref()
+            .is_some_and(|owner| std::sync::Arc::ptr_eq(owner, state))
+    }
+
+    pub(crate) fn is_consumed(&self) -> bool {
+        self.consumed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn same_token(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.consumed, &other.consumed)
+    }
+
+    pub(crate) fn mark_consumed(&self) {
+        self.consumed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub(crate) fn apply_play_defaults(
+        &mut self,
+        duration: Option<f64>,
+        rate_func: Option<RateFunc>,
+    ) {
+        if !self.duration_explicit
+            && let Some(duration) = duration
+        {
+            self.inner.duration = duration.max(0.0);
+        }
+        if !self.rate_explicit
+            && let Some(rate_func) = rate_func
+        {
+            self.inner.rate_func = rate_func;
+        }
+    }
+
+    pub(crate) fn commit_authoring_target(&self) {
+        match &self.inner.anim_type {
+            AnimationType::Properties(properties) => {
+                if let Some(spec) = &self.property_spec {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let Some((_, material)) = properties.material {
+                        spec.material_animation_cursor = Some(material);
+                    }
+                    if let Some((_, level)) = properties.fill_level {
+                        spec.fill_level_cursor = Some(level);
+                    }
+                }
+            }
+            AnimationType::Material3DTo { to, .. } => {
+                if let Some(spec) = &self.property_spec {
+                    spec.lock()
+                        .expect("object spec poisoned")
+                        .material_animation_cursor = Some(*to);
+                }
+            }
+            AnimationType::FillLevelTo { to, .. } => {
+                if let Some(spec) = &self.property_spec {
+                    spec.lock().expect("object spec poisoned").fill_level_cursor = Some(*to);
+                }
+            }
+            AnimationType::SignalFloat { to } => {
+                if let Some(owner) = &self.owner {
+                    let mirror = owner
+                        .lock()
+                        .expect("canvas state poisoned")
+                        .parameter_values
+                        .get(&self.inner.target)
+                        .cloned();
+                    if let Some(mirror) = mirror {
+                        *mirror.lock().expect("parameter poisoned") = *to;
+                    }
+                }
+                if let Some(spec) = &self.property_spec {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let SpawnKind::ValueTracker(value) = &mut spec.kind {
+                        *value = *to;
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn configured_pivot(&self) -> Option<DVec3> {
@@ -1145,11 +1224,6 @@ impl Anim {
         from: gaanim_scene::Material3D,
         to: gaanim_scene::Material3D,
     ) -> Self {
-        if let Some(spec) = &self.property_spec {
-            spec.lock()
-                .expect("object spec poisoned")
-                .material_animation_cursor = Some(to);
-        }
         self = self.update_properties(|properties| {
             let baseline = properties
                 .material
@@ -1225,11 +1299,10 @@ impl Anim {
             .property_spec
             .as_ref()
             .ok_or("fill_level() requires Drawable.animate()")?;
-        let mut spec = spec.lock().expect("object spec poisoned");
+        let spec = spec.lock().expect("object spec poisoned");
         let from = spec
             .fill_level_cursor
             .ok_or("fill_level() requires a Scene.fill_level drawable")?;
-        spec.fill_level_cursor = Some(level);
         drop(spec);
         Ok(self.update_properties(|properties| properties.fill_level = Some((from, level))))
     }
@@ -1239,7 +1312,7 @@ impl Anim {
             .expect("invalid fill level animation")
     }
 
-    pub fn r#move(self, dx: f64, dy: f64) -> Self {
+    pub fn shift_by(self, dx: f64, dy: f64) -> Self {
         self.assert_free_position();
         self.update_properties(|properties| {
             properties.translation = Some(PropertyTranslation::By(DVec3::new(dx, dy, 0.0)))
@@ -1261,7 +1334,7 @@ impl Anim {
         })
     }
 
-    pub fn move_3d(self, dx: f64, dy: f64, dz: f64) -> Self {
+    pub fn shift_by_3d(self, dx: f64, dy: f64, dz: f64) -> Self {
         self.assert_free_position();
         self.update_properties(|properties| {
             properties.translation = Some(PropertyTranslation::By(DVec3::new(dx, dy, dz)))
@@ -1275,7 +1348,7 @@ impl Anim {
         })
     }
 
-    pub fn scale(self, factor: f64) -> Self {
+    pub fn scale_by(self, factor: f64) -> Self {
         self.update_properties(|properties| properties.scale = Some(PropertyScale::Uniform(factor)))
     }
 
@@ -1291,7 +1364,13 @@ impl Anim {
         })
     }
 
-    pub fn rotate(self, radians: f64) -> Self {
+    pub fn scale_by_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.update_properties(|properties| {
+            properties.scale = Some(PropertyScale::By(DVec3::new(x, y, z)))
+        })
+    }
+
+    pub fn rotate_by(self, radians: f64) -> Self {
         let pivot = self.configured_pivot();
         self.update_properties(|properties| {
             properties.rotation = Some(PropertyRotation::By2D { radians, pivot })
@@ -1331,6 +1410,176 @@ impl Anim {
         })
     }
 
+    /// Select the drawable's entry fade effect. Scheduling still belongs to `Scene.play`.
+    pub fn fade_in(self) -> Self {
+        self.effect(AnimationType::FadeIn)
+    }
+
+    pub fn fade_in_from(self, direction: Direction, distance: f64) -> Self {
+        self.effect(AnimationType::FadeInFrom {
+            offset: direction.to_vector() * distance.max(0.0),
+        })
+    }
+
+    pub fn fade_out(self) -> Self {
+        self.effect(AnimationType::FadeOut)
+    }
+
+    pub fn write(self) -> Self {
+        self.effect(AnimationType::Write {
+            config: DrawAnimationConfig::default(),
+        })
+    }
+
+    pub fn create(self) -> Self {
+        let is_3d = self
+            .property_spec
+            .as_ref()
+            .and_then(|spec| spec.lock().ok())
+            .is_some_and(|spec| matches!(spec.kind, SpawnKind::Primitive3D(..)));
+        if is_3d {
+            self.effect(AnimationType::Create3D)
+        } else {
+            self.effect(AnimationType::Create {
+                config: DrawAnimationConfig::default(),
+            })
+        }
+    }
+
+    pub fn unwrite(self) -> Self {
+        self.effect(AnimationType::Unwrite {
+            config: DrawAnimationConfig::default(),
+        })
+    }
+
+    pub fn uncreate(self) -> Self {
+        self.effect(AnimationType::Uncreate {
+            config: DrawAnimationConfig::default(),
+        })
+    }
+
+    pub fn grow_from_center(self) -> Self {
+        self.effect(AnimationType::GrowFromCenter)
+    }
+
+    pub fn shrink_to_center(self) -> Self {
+        self.effect(AnimationType::ShrinkToCenter)
+    }
+
+    pub fn spin_in_from_nothing(self) -> Self {
+        self.effect(AnimationType::SpinInFromNothing)
+    }
+
+    pub fn draw_border_then_fill(self) -> Self {
+        self.effect(AnimationType::DrawBorderThenFill {
+            config: DrawAnimationConfig::default(),
+        })
+    }
+
+    pub fn circumscribe(self) -> Self {
+        self.effect(AnimationType::Circumscribe { color: None })
+    }
+
+    pub fn flash(self) -> Self {
+        self.effect(AnimationType::Flash {
+            color: None,
+            n_lines: 16,
+            radius: 100.0,
+        })
+    }
+
+    pub fn show_passing_flash(self, time_width: f64) -> Self {
+        self.effect(AnimationType::ShowPassingFlash {
+            time_width: time_width.clamp(f64::EPSILON, 1.0),
+        })
+    }
+
+    pub fn indicate(self) -> Self {
+        if self.property_target_is_text_selection() {
+            return self.selection_effect(crate::anim::TextSelectionEffect::Indicate);
+        }
+        self.effect(AnimationType::Indicate {
+            color: None,
+            scale_factor: 1.1,
+        })
+    }
+
+    pub fn wiggle(self) -> Self {
+        if self.property_target_is_text_selection() {
+            return self.selection_effect(crate::anim::TextSelectionEffect::Wiggle);
+        }
+        self.effect(AnimationType::Wiggle)
+    }
+
+    pub fn pulse(self) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Pulse)
+    }
+
+    pub fn wave(self) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Wave)
+    }
+
+    pub fn highlight(self) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Highlight)
+    }
+
+    pub fn focus(self) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Focus)
+    }
+
+    pub fn cancel(self) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Cancel)
+    }
+
+    /// Target a scalar Parameter/Variable value through the common proxy.
+    pub fn set(self, value: f64) -> Self {
+        assert!(value.is_finite(), "parameter values must be finite");
+        self.effect(AnimationType::SignalFloat { to: value })
+    }
+
+    pub fn transform_to(
+        self,
+        target: &super::drawable::DrawableHandle,
+    ) -> Result<Self, &'static str> {
+        if !self.belongs_to(&target.state) {
+            return Err("transform targets must belong to the same Scene");
+        }
+        Ok(self.effect(AnimationType::Transform { target: target.id }))
+    }
+
+    pub fn move_along(
+        self,
+        target: &super::drawable::DrawableHandle,
+    ) -> Result<Self, &'static str> {
+        if !self.belongs_to(&target.state) {
+            return Err("path targets must belong to the same Scene");
+        }
+        Ok(self.effect(AnimationType::MoveAlongPath {
+            path: gaanim_core::kurbo::BezPath::new(),
+            path_target: Some(target.id),
+        }))
+    }
+
+    pub fn fade_transform_to(
+        self,
+        target: &super::drawable::DrawableHandle,
+    ) -> Result<Self, &'static str> {
+        if !self.belongs_to(&target.state) {
+            return Err("transform targets must belong to the same Scene");
+        }
+        Ok(self.effect(AnimationType::FadeTransform { target: target.id }))
+    }
+
+    pub fn replacement_transform_to(
+        self,
+        target: &super::drawable::DrawableHandle,
+    ) -> Result<Self, &'static str> {
+        if !self.belongs_to(&target.state) {
+            return Err("transform targets must belong to the same Scene");
+        }
+        Ok(self.effect(AnimationType::ReplacementTransform { target: target.id }))
+    }
+
     pub fn into_builder(self) -> AnimationBuilder {
         self.inner
     }
@@ -1340,61 +1589,21 @@ impl Anim {
     /// parameter (e.g. `obj.fade_in(2.0)`).
     pub(crate) fn with_duration(mut self, sec: Option<f64>) -> Self {
         if let Some(sec) = sec {
-            let old = self.inner.duration;
             self.inner.duration = sec.max(0.0);
-            self.sync_queued(Some(old));
+            self.duration_explicit = true;
         }
         self
     }
 
-    pub(crate) fn deactivate_auto_queue(&self) -> bool {
-        let Some(queue) = &self.queued else {
-            return false;
-        };
-        let mut guard = queue.state.lock().expect("canvas state poisoned");
-        let Some(segment) = guard.segments.get_mut(queue.segment_idx) else {
-            return false;
-        };
-        let Some(Op::Animate { anim, active }) = segment.ops.get_mut(queue.op_idx) else {
-            return false;
-        };
-        if !*active {
-            return false;
-        }
-        *active = false;
-        segment.cursor -= anim.duration;
-        true
-    }
-
-    fn sync_queued(&self, old_duration: Option<f64>) {
-        let Some(queue) = &self.queued else {
-            return;
-        };
-        let mut guard = queue.state.lock().expect("canvas state poisoned");
-        let Some(segment) = guard.segments.get_mut(queue.segment_idx) else {
-            return;
-        };
-        let Some(Op::Animate { anim, active }) = segment.ops.get_mut(queue.op_idx) else {
-            return;
-        };
-        if let Some(old_duration) = old_duration {
-            if *active {
-                segment.cursor += self.inner.duration - old_duration;
-            }
-        }
-        *anim = self.inner.clone();
-    }
-
     pub fn duration(mut self, sec: f64) -> Self {
-        let old = self.inner.duration;
         self.inner.duration = sec.max(0.0);
-        self.sync_queued(Some(old));
+        self.duration_explicit = true;
         self
     }
 
     pub fn rate_func(mut self, f: RateFunc) -> Self {
         self.inner.rate_func = f;
-        self.sync_queued(None);
+        self.rate_explicit = true;
         self
     }
 
@@ -1415,7 +1624,6 @@ impl Anim {
 
     pub fn lag_ratio(mut self, lag_ratio: f64) -> Self {
         self.inner = self.inner.lag_ratio(lag_ratio);
-        self.sync_queued(None);
         self
     }
 
@@ -1430,19 +1638,16 @@ impl Anim {
             });
         }
         self.inner = self.inner.stroke_width(stroke_width);
-        self.sync_queued(None);
         self
     }
 
     pub fn with_pen_tip(mut self) -> Self {
         self.inner = self.inner.with_pen_tip();
-        self.sync_queued(None);
         self
     }
 
     pub fn pivot(mut self, x: f64, y: f64) -> Self {
         self.inner = self.inner.pivot(x, y);
-        self.sync_queued(None);
         self
     }
 
@@ -1453,17 +1658,6 @@ impl Anim {
     pub fn delay(mut self, sec: f64) -> Self {
         let delay = sec.max(0.0);
         self.inner.delay = delay;
-        // Sync the delay into the queued Op so the compiler sees it.
-        // Do NOT adjust segment.cursor: delay is a per-animation offset,
-        // not segment time. The cursor only tracks cumulative duration.
-        if let Some(queue) = &self.queued {
-            let mut guard = queue.state.lock().expect("canvas state poisoned");
-            if let Some(segment) = guard.segments.get_mut(queue.segment_idx) {
-                if let Some(Op::Animate { anim, .. }) = segment.ops.get_mut(queue.op_idx) {
-                    anim.delay = delay;
-                }
-            }
-        }
         self
     }
 
@@ -1476,27 +1670,31 @@ impl Anim {
     }
 
     pub fn ease(self, name: &str) -> Self {
-        let rate_func = match name {
-            "linear" => RateFunc::Linear,
-            "smooth" | "ease" => RateFunc::Smooth,
-            "ease_in" | "ease_in_quad" => RateFunc::EaseIn(EasingCurve::Quadratic),
-            "ease_out" | "ease_out_quad" => RateFunc::EaseOut(EasingCurve::Quadratic),
-            "ease_in_out" => RateFunc::EaseInOut(EasingCurve::Quadratic),
-            "ease_in_cubic" => RateFunc::EaseIn(EasingCurve::Cubic),
-            "ease_out_cubic" => RateFunc::EaseOut(EasingCurve::Cubic),
-            "bounce" | "ease_out_bounce" => RateFunc::EaseOut(EasingCurve::Bounce),
-            "elastic" | "ease_out_elastic" => RateFunc::EaseOut(EasingCurve::Elastic),
-            "spring" => RateFunc::Spring {
-                stiffness: 300.0,
-                damping: 20.0,
-            },
-            "back" | "ease_out_back" => RateFunc::EaseOut(EasingCurve::Back),
-            "there_and_back" => RateFunc::ThereAndBack,
-            "running_start" => RateFunc::RunningStart,
-            "exponential_decay" => RateFunc::ExponentialDecay,
-            _ => RateFunc::Smooth,
-        };
-        self.rate_func(rate_func)
+        self.rate_func(named_rate_func(name))
+    }
+}
+
+/// Resolve the public string vocabulary used by `Anim.rate` and `Scene.play`.
+pub fn named_rate_func(name: &str) -> RateFunc {
+    match name {
+        "linear" => RateFunc::Linear,
+        "smooth" | "ease" => RateFunc::Smooth,
+        "ease_in" | "ease_in_quad" => RateFunc::EaseIn(EasingCurve::Quadratic),
+        "ease_out" | "ease_out_quad" => RateFunc::EaseOut(EasingCurve::Quadratic),
+        "ease_in_out" => RateFunc::EaseInOut(EasingCurve::Quadratic),
+        "ease_in_cubic" => RateFunc::EaseIn(EasingCurve::Cubic),
+        "ease_out_cubic" => RateFunc::EaseOut(EasingCurve::Cubic),
+        "bounce" | "ease_out_bounce" => RateFunc::EaseOut(EasingCurve::Bounce),
+        "elastic" | "ease_out_elastic" => RateFunc::EaseOut(EasingCurve::Elastic),
+        "spring" => RateFunc::Spring {
+            stiffness: 300.0,
+            damping: 20.0,
+        },
+        "back" | "ease_out_back" => RateFunc::EaseOut(EasingCurve::Back),
+        "there_and_back" => RateFunc::ThereAndBack,
+        "running_start" => RateFunc::RunningStart,
+        "exponential_decay" => RateFunc::ExponentialDecay,
+        _ => RateFunc::Smooth,
     }
 }
 

@@ -6,5 +6,5 @@ page = scene.layout.column(
     [scene.text("Safe frame", role="title").fill(GOLD), scene.layout.item(scene.text("Responsive content").fill(WHITE), grow=1), scene.text("within='safe'").fill(GRAY)],
     within="safe", width="fill", height="fill", padding=32, gap=24, align="stretch", justify="between",
 )
-scene.play([page.fade_in().duration(0.5)])
+scene.play([page.animate.fade_in().duration(0.5)])
 scene.render()

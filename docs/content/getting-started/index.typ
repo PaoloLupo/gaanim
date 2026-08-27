@@ -50,14 +50,14 @@ circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.text("Hello World", role="title")
 
 scene.play([
-    circle.grow_from_center().duration(2.0).spring(),
-    text.write().duration(2.0).smooth(),
+    circle.animate.grow_from_center().duration(2.0).spring(),
+    text.animate.write().duration(2.0).smooth(),
 ])
 
 scene.wait(1.0)
 scene.play([
-    circle.move(200, 0).duration(1.5).smooth(),
-    text.fade_out().duration(0.5),
+    circle.animate.shift_by(200, 0).duration(1.5).smooth(),
+    text.animate.fade_out().duration(0.5),
 ])
 
 # Run with: gaanim my_animation.py

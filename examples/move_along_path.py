@@ -5,26 +5,26 @@ from gaanim import BLACK, BLUE, WHITE, Scene
 scene = Scene(1920, 1080, background=BLACK)
 
 # 1. Creación de objetos
-circle = scene.geometry.circle(100.0).stroke(BLUE, 4.0).no_fill().at(0, 0)
-dot = scene.geometry.dot(8.0).fill(WHITE).at(0, 0)
-dot2 = scene.geometry.dot(8.0).fill(WHITE).at(100, 0)
+circle = scene.geometry.circle(100.0).stroke(BLUE, 4.0).no_fill().move_to(0, 0)
+dot = scene.geometry.dot(8.0).fill(WHITE).move_to(0, 0)
+dot2 = scene.geometry.dot(8.0).fill(WHITE).move_to(100, 0)
 
 line = scene.geometry.line(300, 0, 500, 0).stroke(WHITE, 3.0)
 
 # 2. Animaciones
 # GrowFromCenter(circle)
-scene.play([circle.grow_from_center().duration(1.0).
+scene.play([circle.animate.grow_from_center().duration(1.0).
 smooth()])
 
 # Transform(dot, dot2)
-scene.play([dot.transform(dot2).duration(1.0).smooth()])
+scene.play([dot.animate.transform_to(dot2).duration(1.0).smooth()])
 
 # MoveAlongPath(dot, circle)
-scene.play([dot.move_along_path(circle).duration(2.0).linear()])
+scene.play([dot.animate.move_along(circle).duration(2.0).linear()])
 
 # Rotating(dot, about_point=[2, 0, 0])
 # En gaanim pivot(200, 0) define el punto sobre el cual rota
-scene.play([dot.pivot(200, 0).rotate(math.pi).duration(1.5).linear()])
+scene.play([dot.pivot(200, 0).animate.rotate_by(math.pi).duration(1.5).linear()])
 
 import os
 

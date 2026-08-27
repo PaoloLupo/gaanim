@@ -814,12 +814,11 @@ impl PyParameter {
         self.inner.set(value).map_err(value_error)
     }
 
-    #[pyo3(signature = (value, duration=None))]
-    fn animate_to(&self, value: f64, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        let inner = self.inner.animate_to(value).map_err(value_error)?;
-        Ok(PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
-        })
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.animate(),
+        }
     }
 
     /// Drive this scalar directly from a Python callback.
@@ -995,16 +994,11 @@ impl PyVariable {
         self.parameter.inner.set(value).map_err(value_error)
     }
 
-    #[pyo3(signature = (value, duration=None))]
-    fn animate_to(&self, value: f64, duration: Option<f64>) -> PyResult<PyCanvasAnim> {
-        let inner = self
-            .parameter
-            .inner
-            .animate_to(value)
-            .map_err(value_error)?;
-        Ok(PyCanvasAnim {
-            inner: duration.map_or(inner.clone(), |seconds| inner.duration(seconds)),
-        })
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.parameter.inner.animate(),
+        }
     }
 
     #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
@@ -1104,6 +1098,76 @@ impl PyCoordinateRef {
 pub struct PyCoordinateSpace {
     pub(crate) inner: CoordinateSpaceHandle,
     canvas: Arc<Mutex<ApiCanvas>>,
+}
+
+#[pyclass(
+    name = "CoordinateSpaceAnimation",
+    module = "gaanim_core",
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct PyCoordinateSpaceAnimation {
+    inner: CoordinateSpaceHandle,
+}
+
+#[pymethods]
+impl PyCoordinateSpaceAnimation {
+    #[pyo3(signature = (duration=None))]
+    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.inner.drawable().animate().create();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.inner.drawable().animate().write();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.inner.drawable().animate().fade_in();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    #[pyo3(signature = (duration=None))]
+    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
+        let inner = self.inner.drawable().animate().fade_out();
+        PyCanvasAnim {
+            inner: duration.map_or(inner.clone(), |value| inner.duration(value)),
+        }
+    }
+
+    fn move_to(&self, x: f64, y: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate().move_to(x, y),
+        }
+    }
+
+    fn scale_to(&self, factor: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate().scale_to(factor),
+        }
+    }
+
+    fn rotate_to(&self, radians: f64) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate().rotate_to(radians),
+        }
+    }
+
+    fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<PyCanvasAnim> {
+        self.inner
+            .view_to_animation(x_domain, y_domain)
+            .map(|inner| PyCanvasAnim { inner })
+            .map_err(value_error)
+    }
 }
 
 /// A typed 3D coordinate space with native surface and curve sampling.
@@ -1430,59 +1494,10 @@ impl PyArrowVectorField {
         PyDrawable(self.inner.drawable().clone())
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.inner.create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.write(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_in(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_out(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.uncreate(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.unwrite(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.grow_from_center(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.shrink_to_center(duration),
+            inner: self.inner.drawable().animate(),
         }
     }
 }
@@ -1493,59 +1508,10 @@ impl PyStreamLines {
         PyDrawable(self.inner.drawable().clone())
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.inner.create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.write(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_in(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_out(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.uncreate(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.unwrite(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.grow_from_center(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.shrink_to_center(duration),
+            inner: self.inner.drawable().animate(),
         }
     }
 
@@ -1572,59 +1538,10 @@ impl PyFlowParticles {
         PyDrawable(self.inner.drawable().clone())
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
         PyCanvasAnim {
-            inner: self.inner.create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.write(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_in(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.fade_out(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn uncreate(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.uncreate(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn unwrite(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.unwrite(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn grow_from_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.grow_from_center(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn shrink_to_center(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.shrink_to_center(duration),
+            inner: self.inner.drawable().animate(),
         }
     }
 
@@ -1647,84 +1564,17 @@ pub struct PyChart {
     inspection_format: Option<String>,
 }
 
-impl PyChart {
-    fn new(inner: ChartHandle, canvas: Arc<Mutex<ApiCanvas>>) -> Self {
-        Self {
-            inner,
-            canvas,
-            inspection_fields: Vec::new(),
-            inspection_format: None,
-        }
-    }
+#[pyclass(name = "ChartAnimation", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyChartAnimation {
+    inner: ChartHandle,
+    canvas: Arc<Mutex<ApiCanvas>>,
 }
 
 #[pymethods]
-impl PyChart {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
-    }
-
-    fn layer(&self, name: &str) -> PyResult<PyDrawable> {
-        self.inner
-            .layer(name)
-            .cloned()
-            .map(PyDrawable)
-            .ok_or_else(|| value_error("layer must be marks, axes, grid, guides, or labels"))
-    }
-
-    fn at(&self, x: f64, y: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().at(x, y);
-        result
-    }
-
-    fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().at_3d(x, y, z);
-        result
-    }
-
-    fn scaled(&self, factor: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().scaled(factor);
-        result
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().write(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().fade_in(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().fade_out(duration),
-        }
-    }
-
-    #[pyo3(name = "to", signature = (target, *, match_="key", fallback="error"))]
-    fn transition_to(
-        &self,
-        target: &PyChartSpec,
-        match_: &str,
-        fallback: &str,
-    ) -> PyResult<PyCanvasAnim> {
+impl PyChartAnimation {
+    #[pyo3(signature = (target, *, match_="key", fallback="error"))]
+    fn to(&self, target: &PyChartSpec, match_: &str, fallback: &str) -> PyResult<PyCanvasAnim> {
         let matching = match match_ {
             "key" => MatchPolicy::Key,
             "index" => MatchPolicy::Index,
@@ -1745,6 +1595,58 @@ impl PyChart {
             .transition_to(&target, matching, fallback)
             .map(|inner| PyCanvasAnim { inner })
             .map_err(value_error)
+    }
+}
+
+impl PyChart {
+    fn new(inner: ChartHandle, canvas: Arc<Mutex<ApiCanvas>>) -> Self {
+        Self {
+            inner,
+            canvas,
+            inspection_fields: Vec::new(),
+            inspection_format: None,
+        }
+    }
+}
+
+#[pymethods]
+impl PyChart {
+    fn drawable(&self) -> PyDrawable {
+        PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[getter]
+    fn animate(&self) -> PyChartAnimation {
+        PyChartAnimation {
+            inner: self.inner.clone(),
+            canvas: self.canvas.clone(),
+        }
+    }
+
+    fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        self.inner
+            .layer(name)
+            .cloned()
+            .map(PyDrawable)
+            .ok_or_else(|| value_error("layer must be marks, axes, grid, guides, or labels"))
+    }
+
+    fn move_to(&self, x: f64, y: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().move_to(x, y);
+        result
+    }
+
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().move_to_3d(x, y, z);
+        result
+    }
+
+    fn scale_to(&self, factor: f64) -> Self {
+        let mut result = self.clone();
+        result.inner = result.inner.clone().scale_to(factor);
+        result
     }
 
     #[pyo3(signature = (fields, *, format=None))]
@@ -1779,6 +1681,13 @@ pub struct PyNumberLine {
 impl PyNumberLine {
     fn drawable(&self) -> PyDrawable {
         PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate(),
+        }
     }
 
     fn coord(&self, value: f64) -> PyResult<PyCoordinateRef> {
@@ -1854,20 +1763,6 @@ impl PyNumberLine {
             .map(PyDrawable)
             .ok_or_else(|| value_error("layer is not available"))
     }
-
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().write(duration),
-        }
-    }
 }
 
 #[pyclass(name = "PolarSpace", module = "gaanim_core", skip_from_py_object)]
@@ -1881,6 +1776,13 @@ pub struct PyPolarSpace {
 impl PyPolarSpace {
     fn drawable(&self) -> PyDrawable {
         PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate(),
+        }
     }
 
     fn coord(&self, radius: f64, angle: f64) -> PyResult<PyCoordinateRef> {
@@ -1927,20 +1829,6 @@ impl PyPolarSpace {
             .map(PyDrawable)
             .map_err(value_error)
     }
-
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().write(duration),
-        }
-    }
 }
 
 impl PyCoordinateSpace3D {
@@ -1953,6 +1841,13 @@ impl PyCoordinateSpace3D {
 impl PyCoordinateSpace3D {
     fn drawable(&self) -> PyDrawable {
         PyDrawable(self.inner.drawable().clone())
+    }
+
+    #[getter]
+    fn animate(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.inner.drawable().animate(),
+        }
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
@@ -1975,26 +1870,12 @@ impl PyCoordinateSpace3D {
             .ok_or_else(|| value_error(format!("layer {name:?} is not present")))
     }
 
-    fn at_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        Self::new(self.inner.clone().at([x, y, z]), self.canvas.clone())
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
+        Self::new(self.inner.clone().move_to([x, y, z]), self.canvas.clone())
     }
 
-    fn scaled(&self, factor: f64) -> Self {
-        Self::new(self.inner.clone().scaled(factor), self.canvas.clone())
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().create(duration),
-        }
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().write(duration),
-        }
+    fn scale_to(&self, factor: f64) -> Self {
+        Self::new(self.inner.clone().scale_to(factor), self.canvas.clone())
     }
 
     fn data_to_local(&self, x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
@@ -2075,62 +1956,30 @@ impl PyCoordinateSpace {
         PyDrawable(self.inner.drawable().clone())
     }
 
-    fn at(&self, x: f64, y: f64) -> Self {
-        Self::new(self.inner.clone().at(x, y), self.canvas.clone())
-    }
-
-    fn scaled(&self, factor: f64) -> Self {
-        Self::new(self.inner.clone().scaled(factor), self.canvas.clone())
-    }
-
-    fn rotated(&self, radians: f64) -> Self {
-        Self::new(self.inner.clone().rotated(radians), self.canvas.clone())
-    }
-
-    #[pyo3(signature = (duration=None))]
-    fn create(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().create(duration),
+    #[getter]
+    fn animate(&self) -> PyCoordinateSpaceAnimation {
+        PyCoordinateSpaceAnimation {
+            inner: self.inner.clone(),
         }
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn write(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.write(duration),
-        }
+    fn move_to(&self, x: f64, y: f64) -> Self {
+        Self::new(self.inner.clone().move_to(x, y), self.canvas.clone())
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_in(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().fade_in(duration),
-        }
+    fn scale_to(&self, factor: f64) -> Self {
+        Self::new(self.inner.clone().scale_to(factor), self.canvas.clone())
     }
 
-    #[pyo3(signature = (duration=None))]
-    fn fade_out(&self, duration: Option<f64>) -> PyCanvasAnim {
-        PyCanvasAnim {
-            inner: self.inner.drawable().fade_out(duration),
-        }
+    fn rotate_to(&self, radians: f64) -> Self {
+        Self::new(self.inner.clone().rotate_to(radians), self.canvas.clone())
     }
 
-    #[pyo3(signature = (x_domain, y_domain, *, duration=1.0))]
-    fn animate_view(
-        &self,
-        x_domain: (f64, f64),
-        y_domain: (f64, f64),
-        duration: f64,
-    ) -> PyResult<Vec<PyCanvasAnim>> {
+    fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<Self> {
         self.inner
-            .animate_view(x_domain, y_domain, duration)
-            .map(|animations| {
-                animations
-                    .into_iter()
-                    .map(|inner| PyCanvasAnim { inner })
-                    .collect()
-            })
-            .map_err(value_error)
+            .view_to(x_domain, y_domain)
+            .map_err(value_error)?;
+        Ok(self.clone())
     }
 
     fn coord(&self, x: f64, y: f64) -> PyResult<PyCoordinateRef> {

@@ -2,7 +2,7 @@
 
 import math
 
-from gaanim import BLACK, BLUE, GREEN, RED, WHITE, YELLOW, Scene
+from gaanim import BLACK, BLUE, GREEN, RED, WHITE, YELLOW, Scene, stagger
 
 
 def main():
@@ -17,12 +17,12 @@ def main():
         for (x1, y1), (x2, y2) in zip(points, points[1:])
     ]
     tangent = scene.geometry.line(-120, -90, 220, 165).stroke(YELLOW, 4)
-    dot = scene.geometry.dot(12).fill(RED).at(50, 60)
-    label = scene.text("tangent").fill(GREEN).at(280, 175)
+    dot = scene.geometry.dot(12).fill(RED).move_to(50, 60)
+    label = scene.text("tangent").fill(GREEN).move_to(280, 175)
 
-    scene.play([axis.create().duration(0.6) for axis in axes])
-    scene.play([segment.create().duration(0.8) for segment in curve], lag=0.03)
-    scene.play([dot.grow_from_center().duration(0.4), tangent.create().duration(0.8), label.write().duration(0.6)])
+    scene.play([axis.animate.create().duration(0.6) for axis in axes])
+    scene.play(stagger(*[segment.animate.create().duration(0.8) for segment in curve], each=0.03))
+    scene.play([dot.animate.grow_from_center().duration(0.4), tangent.animate.create().duration(0.8), label.animate.write().duration(0.6)])
     scene.wait(1.0)
     scene.render()
 

@@ -82,14 +82,14 @@ opcional pertenece al espacio local de la referencia.
 ```python
 from gaanim import Anchor
 
-card = scene.geometry.rect(240, 120).at(80, 20).rotated(0.15)
-label = scene.text("Detalle").at(
+card = scene.geometry.rect(240, 120).move_to(80, 20).rotate_to(0.15)
+label = scene.text("Detalle").move_to(
     card.anchor_point(Anchor.TOP_RIGHT, offset=(-12, -12))
 )
 ```
 
 La firma relevante es
-`drawable.at(reference.anchor_point(anchor, offset=(dx, dy))) -> Drawable`.
+`drawable.move_to(reference.anchor_point(anchor, offset=(dx, dy))) -> Drawable`.
 No se puede combinar un `AnchorPoint` con los argumentos `y` o `anchor` de la
 variante numérica. La relación se resuelve durante el layout inicial; para
 seguir una referencia mientras se anima, usa `follow` o `attach_to`.
@@ -191,7 +191,7 @@ page = scene.layout.column(
     justify="between",
 )
 
-scene.play([page.fade_in().duration(0.6)])
+scene.play([page.animate.fade_in().duration(0.6)])
 scene.render()
 ```
 
@@ -298,7 +298,6 @@ page.configure_item(
     align="stretch",
     offset=(12, 0),
     fit="contain",
-    animate=0.35,
 )
 ```
 
@@ -379,14 +378,14 @@ Después de adjuntar un objeto, las llamadas posicionales como `at`, `next_to`,
 un desplazamiento intencional mediante `offset`.
 
 El contenedor raíz sí es un `Drawable` posicionable. Operaciones como
-`page.at(400, 200)`, `at_anchor`, `next_to`, `align_to`, `to_edge`, `to_corner`,
+`page.move_to(400, 200)`, `at_anchor`, `next_to`, `align_to`, `to_edge`, `to_corner`,
 rotación y escala se reaplican sobre la caja final después de cada reflow y
 transforman el árbol completo. La restricción anterior corresponde únicamente
 a los hijos cuya traslación pertenece al contenedor.
 
 ```python
 panel = scene.layout.column([formula, explanation], gap=50, align="center")
-panel.at(400, 200)
+panel.move_to(400, 200)
 ```
 
 Este error no es una limitación accidental: protege la búsqueda temporal. Si
@@ -394,14 +393,14 @@ Layout y una animación escribieran la misma posición, recorrer la línea de
 tiempo podría resolver resultados diferentes según el orden de evaluación.
 
 ```python
-page.add(extra, at=1, animate=0.35)
-page.replace(old, new, animate=0.35)
-page.detach(title, animate=0.35)
-scene.play([title.move_to(0, 200)])
-page.configure(gap=40, padding=56, animate=0.4)
+page.add(extra, at=1)
+page.replace(old, new)
+page.detach(title)
+scene.play([title.animate.move_to(0, 200)])
+page.configure(gap=40, padding=56)
 page.configure(min_width=480, max_width=960, aspect_ratio=16 / 9)
-page.configure_item(chart, grow=2, offset=(12, 0), animate=0.3)
-page.reflow(animate=0.25)
+page.configure_item(chart, grow=2, offset=(12, 0))
+page.reflow()
 ```
 
 Las mutaciones estructurales se propagan por los layouts anidados. Las
@@ -419,7 +418,7 @@ segmento nuevo:
 scene.segment("detail", Transition.cross_fade(0.4))
 scene.reuse(title)
 page.detach(title)
-scene.play([title.move_to(0, 200).duration(0.35)])
+scene.play([title.animate.move_to(0, 200).duration(0.35)])
 ```
 
 El valor `animate` de estas operaciones, así como el de `configure`,
@@ -483,12 +482,12 @@ El adaptador `CompiledTextMeasure` reutiliza la medición intrínseca, la
 convergencia de ocho pasadas, clips, diagnósticos y `ResolvedLayout`; no existe
 un solucionador separado para texto. La clave de caché incluye el contenido
 estructurado, el estilo resuelto, el flujo y las restricciones ofrecidas. Los
-cambios métricos y `become`, `morph_to`, `step_to` o `expand_to` invalidan la
+cambios métricos, `become` y `text.animate.transform_to(target)` invalidan la
 instantánea versionada compartida y provocan el reflow de los padres con la
 misma duración de transición. Los efectos transitorios `wiggle`, `pulse` y
 `wave` no invalidan la medición.
 
-Un `Text` administrado rechaza `at`, `move`, `next_to` y las animaciones
+Un `Text` administrado rechaza `move_to`, `shift_by`, `next_to` y las animaciones
 posicionales manuales igual que cualquier otro hijo de Layout. Una
 `TextSelection` nunca se convierte en una hoja independiente, pero sus métodos
 devuelven valores `Anim` normales; por eso sus selecciones se componen en

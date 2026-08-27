@@ -14,13 +14,13 @@ space = scene.viz.cartesian_3d(
 curve = space.parametric(
     lambda t: (10 ** (3 * t - 1), 80 * (2 * t - 1), 16 * t * t), (0, 1)
 ).stroke(RED, 3)
-title = scene.text("Escalas no lineales en Cartesian3D").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
+title = scene.text("Escalas no lineales en Cartesian3D").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
 
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
-scene.camera.look_at(eye=(11, 9.5, 11), target=(0, 0, 0), duration=0.0)
-scene.play([space.layer("grid").fade_in(0.5), space.layer("axes").create(0.7)])
-scene.play([space.layer("ticks").fade_in(0.4), space.layer("numbers").write(0.5), title.write(0.5)])
-scene.play([curve.create(1.0)])
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
+scene.camera.look_at(eye=(11, 9.5, 11), target=(0, 0, 0))
+scene.play([space.layer("grid").animate.fade_in(0.5), space.layer("axes").animate.create(0.7)])
+scene.play([space.layer("ticks").animate.fade_in(0.4), space.layer("numbers").animate.write(0.5), title.animate.write(0.5)])
+scene.play([curve.animate.create(1.0)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.0, 0.6, 1.2, 2.0])

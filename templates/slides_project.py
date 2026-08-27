@@ -48,7 +48,7 @@ message = idea.region("content").place(
     ),
     Anchor.CENTER,
 )
-scene.play([message.fade_in_from(Direction.DOWN).duration(0.5)])
+scene.play([message.animate.fade_in_from(Direction.DOWN).duration(0.5)])
 scene.stop("mensaje")
 
 closing = scene.segment(

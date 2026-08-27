@@ -18,26 +18,26 @@ c = Scene(1920, 1080, background=BLACK)
 # Segment 1: shape -> shape
 c.segment("shape_to_shape")
 
-title = c.text("Transform Demo", role="title").fill(WHITE).at(0.0, 260.0, anchor=Anchor.CENTER)
+title = c.text("Transform Demo", role="title").fill(WHITE).move_to(0.0, 260.0, anchor=Anchor.CENTER)
 subtitle = (
     c.text(
         "shape -> shape, shape -> text, text -> math, math -> math",
         role="subtitle",
     )
     .fill(WHITE)
-    .at(0.0, 200.0, anchor=Anchor.CENTER)
+    .move_to(0.0, 200.0, anchor=Anchor.CENTER)
 )
-title.write().duration(1.0).smooth()
-subtitle.write().duration(1.0).smooth()
+c.play([title.animate.write().duration(1.0).smooth()])
+c.play([subtitle.animate.write().duration(1.0).smooth()])
 
-circle = c.geometry.circle(95.0).fill(BLUE).stroke(WHITE, 4.0).at(-260.0, -20.0)
-circle.create().duration(0.9).smooth()
+circle = c.geometry.circle(95.0).fill(BLUE).stroke(WHITE, 4.0).move_to(-260.0, -20.0)
+c.play([circle.animate.create().duration(0.9).smooth()])
 c.wait(0.3)
 
 diamond = (
-    c.geometry.rect(180.0, 180.0).fill(RED).stroke(WHITE, 4.0).at(260.0, 20.0).rotated(0.785398)
+    c.geometry.rect(180.0, 180.0).fill(RED).stroke(WHITE, 4.0).move_to(260.0, 20.0).rotate_to(0.785398)
 )
-circle.transform(diamond).duration(2.0).spring()
+c.play([circle.animate.transform_to(diamond).duration(2.0).spring()])
 c.wait(0.8)
 
 
@@ -45,10 +45,10 @@ c.wait(0.8)
 c.segment("shape_to_text", Transition.cross_fade(0.5))
 c.wait(1.0)
 
-headline = c.text("Morphing into text", role="title").fill(GREEN).at(0.0, 100.0, anchor=Anchor.CENTER)
-circle.replacement_transform(headline).duration(2.1).spring()
+headline = c.text("Morphing into text", role="title").fill(GREEN).move_to(0.0, 100.0, anchor=Anchor.CENTER)
+c.play([circle.animate.replacement_transform_to(headline).duration(2.1).spring()])
 c.wait(0.5)
-headline.indicate().duration(0.9)
+c.play([headline.animate.indicate().duration(0.9)])
 c.wait(0.7)
 
 
@@ -56,29 +56,29 @@ c.wait(0.7)
 # Keep this in the same segment to avoid transition flicker while exercising
 # text/text and text/math conversions.
 
-phrase = c.text("Energy", role="title").fill(WHITE).at(-260.0, 40.0, anchor=Anchor.CENTER)
-phrase.write().duration(0.8).smooth()
+phrase = c.text("Energy", role="title").fill(WHITE).move_to(-260.0, 40.0, anchor=Anchor.CENTER)
+c.play([phrase.animate.write().duration(0.8).smooth()])
 c.wait(0.3)
 
-target_text = c.text("Momentum", role="title").fill(BLUE).at(240.0, -20.0, anchor=Anchor.CENTER).scaled(1.1)
-phrase.transform(target_text).duration(2.2).spring()
+target_text = c.text("Momentum", role="title").fill(BLUE).move_to(240.0, -20.0, anchor=Anchor.CENTER).scale_to(1.1)
+c.play([phrase.animate.transform_to(target_text).duration(2.2).spring()])
 c.wait(0.8)
 
-target_math = c.text("$p = m v$").fill(GREEN).at(0.0, 10.0, anchor=Anchor.CENTER).scaled(1.2)
-phrase.transform(target_math).duration(2.2).spring()
+target_math = c.text("$p = m v$").fill(GREEN).move_to(0.0, 10.0, anchor=Anchor.CENTER).scale_to(1.2)
+c.play([phrase.animate.transform_to(target_math).duration(2.2).spring()])
 c.wait(0.8)
 
-alt_math = c.text("$E = m c^2$").fill(BLUE).at(0.0, 10.0, anchor=Anchor.CENTER).scaled(1.2)
-phrase.replacement_transform(alt_math).duration(2.2).spring()
+alt_math = c.text("$E = m c^2$").fill(BLUE).move_to(0.0, 10.0, anchor=Anchor.CENTER).scale_to(1.2)
+c.play([phrase.animate.replacement_transform_to(alt_math).duration(2.2).spring()])
 c.wait(0.8)
 
 finale = (
     c.text("Transform pipeline with text and math hierarchies", role="subtitle")
     .fill(GREEN)
-    .at(0.0, -240.0, anchor=Anchor.CENTER)
+    .move_to(0.0, -240.0, anchor=Anchor.CENTER)
 )
-finale.write().duration(0.9).smooth()
-alt_math.indicate().duration(0.9)
+c.play([finale.animate.write().duration(0.9).smooth()])
+c.play([alt_math.animate.indicate().duration(0.9)])
 c.wait(1.8)
 
 

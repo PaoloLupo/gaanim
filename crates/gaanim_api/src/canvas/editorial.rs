@@ -518,7 +518,7 @@ impl SceneModel {
                 self.dot(dot_diameter * 0.5)
                     .fill(style.compact_text)
                     .no_stroke()
-                    .at(start_x + dot_diameter * 0.5, 0.0),
+                    .move_to(start_x + dot_diameter * 0.5, 0.0),
             );
         }
         members.push(label);

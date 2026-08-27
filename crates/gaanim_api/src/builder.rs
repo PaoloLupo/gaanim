@@ -998,7 +998,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::RotateTo { .. }
             | AnimationType::RotateBy { .. }
             | AnimationType::RotateBy3D { .. } => "Rotate",
-            AnimationType::ScaleTo { .. } | AnimationType::ScaleUniform { .. } => "Scale",
+            AnimationType::ScaleTo { .. }
+            | AnimationType::ScaleUniform { .. }
+            | AnimationType::ScaleBy3D { .. } => "Scale",
             AnimationType::FadeTo { .. }
             | AnimationType::FadeIn
             | AnimationType::FadeOut
@@ -2029,6 +2031,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     crate::anim::PropertyScale::Uniform(factor) => {
                         AnimationType::ScaleUniform { factor }
                     }
+                    crate::anim::PropertyScale::By(factor) => AnimationType::ScaleBy3D { factor },
                 });
             }
             if let Some(opacity) = properties.opacity {
@@ -2446,6 +2449,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 PropertyLensSpec::Scale { from, to }
             }
             AnimationType::ScaleUniform { factor } => {
+                let from = state.transform.scale;
+                let to = from * factor;
+                state.transform.scale = to;
+                PropertyLensSpec::Scale { from, to }
+            }
+            AnimationType::ScaleBy3D { factor } => {
                 let from = state.transform.scale;
                 let to = from * factor;
                 state.transform.scale = to;

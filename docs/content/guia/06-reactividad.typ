@@ -48,8 +48,8 @@ Como la geometría reactiva comienza oculta, revélala dentro de la timeline:
 
 ```python
 scene.play([
-    point.fade_in().duration(0.3),
-    radius.fade_in().duration(0.3),
+    point.animate.fade_in().duration(0.3),
+    radius.animate.fade_in().duration(0.3),
 ])
 scene.wait(5.3)
 point.remove_updater()

@@ -21,16 +21,16 @@ spec = (
         ),
     )
 )
-chart = scene.viz.chart(spec).at(0, -35)
+chart = scene.viz.chart(spec).move_to(0, -35)
 
-title = scene.text("Convergence benchmark", role="title").fill(WHITE).at(0, 400, anchor=Anchor.CENTER)
-subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).at(0, 350, anchor=Anchor.CENTER)
+title = scene.text("Convergence benchmark", role="title").fill(WHITE).move_to(0, 400, anchor=Anchor.CENTER)
+subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).move_to(0, 350, anchor=Anchor.CENTER)
 scene.play([
-    title.write().duration(0.55),
-    subtitle.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
-    chart.layer("axes").create().duration(0.7),
-    chart.layer("marks").write().duration(0.7),
-    chart.layer("labels").write().duration(0.7),
+    title.animate.write().duration(0.55),
+    subtitle.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
+    chart.layer("axes").animate.create().duration(0.7),
+    chart.layer("marks").animate.write().duration(0.7),
+    chart.layer("labels").animate.write().duration(0.7),
 ])
 scene.wait(0.31)
 

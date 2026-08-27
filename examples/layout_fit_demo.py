@@ -8,7 +8,7 @@ formula = scene.layout.column(
     [scene.text("Fit modes", role="title").fill(GOLD), scene.layout.item(scene.geometry.circle(110).fill(BLUE), fit="contain", grow=1)],
     within="safe", width="fill", height="fill", padding=32, gap=28, align="center",
 )
-scene.play([formula.fade_in().duration(0.5)])
+scene.play([formula.animate.fade_in().duration(0.5)])
 scene.wait(1.5)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -110,7 +110,7 @@ from gaanim import Scene, BLACK
 scene = Scene(1920, 1080, background=BLACK)
 scene.assets.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proyecto
 circle = scene.geometry.circle(80).fill(BLUE)
-scene.play([circle.create().duration(1).spring()])
+scene.play([circle.animate.create().duration(1).spring()])
 scene.render()  # para preview
 # luego: gaanim export . --output exports/demo.mp4
 ```

@@ -15,9 +15,9 @@ curve = (
 )
 tracker = scene.viz.parameter(0.0)
 normal = scene.geometry.normal_on_curve(curve, tracker, length=92).stroke(GOLD, 5)
-title = scene.text("normal on curve").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
-scene.play([curve.create().duration(0.7), normal.create().duration(0.3), title.write().duration(0.4)])
-scene.play([tracker.animate_to(1.0).duration(2.0)])
+title = scene.text("normal on curve").fill(BLACK).move_to(0, 190, anchor=Anchor.CENTER)
+scene.play([curve.animate.create().duration(0.7), normal.animate.create().duration(0.3), title.animate.write().duration(0.4)])
+scene.play([tracker.animate.set(1.0).duration(2.0)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

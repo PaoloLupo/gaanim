@@ -20,13 +20,13 @@ helix = axes.parametric(
     (0, 8 * math.pi),
     samples=320,
 ).stroke(RED, 3)
-title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().at(0, 310, anchor=Anchor.CENTER)
+title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
 
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
-scene.camera.look_at(eye=(11, 8, 11), target=(0, 0, 0), duration=1.0)
-scene.play([axes.create(1.0), title.write(0.6)])
-scene.play([surface.create(1.0), helix.create(1.0)])
-scene.camera.orbit(delta_yaw=0.8, delta_pitch=0.2, duration=1.4)
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
+scene.play([scene.camera.animate.look_at(eye=(11, 8, 11), target=(0, 0, 0)).duration(1.0)])
+scene.play([axes.animate.create(1.0), title.animate.write(0.6)])
+scene.play([surface.animate.create(1.0), helix.animate.create(1.0)])
+scene.play([scene.camera.animate.orbit(delta_yaw=0.8, delta_pitch=0.2).duration(1.4)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.5, 1.5, 2.8, 4.4])

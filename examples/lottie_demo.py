@@ -5,14 +5,14 @@ import os
 from gaanim import GOLD, Scene
 
 scene = Scene(background="#0b1020")
-title = scene.text("Lottie + Velato", role="title").fill(GOLD).at(0, 230)
+title = scene.text("Lottie + Velato", role="title").fill(GOLD).move_to(0, 230)
 composition = scene.media.lottie(
     "examples/assets/lottie_balls.json",
     width=1000,
     fit="contain",
 )
 
-scene.play([title.fade_in(0.5), composition])
+scene.play([title.animate.fade_in(0.5), composition])
 scene.wait(0.5)
 
 if snapshot_dir := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -7,11 +7,11 @@ from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene
 
 scene = Scene(960, 540, background=BLACK)
 scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
-scene.text("Reactive camera rig", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
+scene.text("Reactive camera rig", role="title").fill(WHITE).move_to(0, 220, anchor=Anchor.CENTER)
 marker = scene.geometry.dot(18).fill(GOLD)
 scene.geometry.circle(150).no_fill().stroke(BLUE, 3)
-cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).at_3d(-1.8, -0.5, 0)
-sphere = scene.geometry.sphere(1.25, material=Material3D.metal(CYAN)).at_3d(1.8, -0.5, 0)
+cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).move_to_3d(-1.8, -0.5, 0)
+sphere = scene.geometry.sphere(1.25, material=Material3D.metal(CYAN)).move_to_3d(1.8, -0.5, 0)
 theta = scene.viz.parameter(0.0)
 focus = scene.geometry.point_ref(theta * 260 - 130, (theta * 3.14159).sin() * 90)
 marker.follow(focus)
@@ -21,7 +21,7 @@ rig_2d = scene.camera.bind_2d(
     zoom=1.0 + theta * 0.35,
     rotation=(theta - 0.5) * 0.12,
 )
-scene.play([theta.animate_to(1.0, duration=2.0), marker.fade_in(duration=0.3)])
+scene.play([theta.animate.set(1.0).duration(2.0), marker.animate.fade_in(duration=0.3)])
 rig_2d.disable()
 
 target_x = scene.viz.parameter(0.0)
@@ -31,13 +31,13 @@ rig_3d = scene.camera.bind_3d(
 )
 scene.play(
     [
-        target_x.animate_to(1.0, duration=2.0),
-        cube.create(duration=0.5),
-        sphere.create(duration=0.5),
+        target_x.animate.set(1.0).duration(2.0),
+        cube.animate.create(duration=0.5),
+        sphere.animate.create(duration=0.5),
     ]
 )
 rig_3d.disable()
-scene.camera.reset(duration=0.7)
+scene.play([scene.camera.animate.reset().duration(0.7)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

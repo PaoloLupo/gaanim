@@ -36,10 +36,10 @@ from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720, background=BLACK, margin=48)
 circle = scene.geometry.circle(96).fill(BLUE).stroke(WHITE, 4)
-title = scene.text("Hola, Gaanim", role="title").fill(GOLD).at(0, 180)
+title = scene.text("Hola, Gaanim", role="title").fill(GOLD).move_to(0, 180)
 
-scene.play([circle.create().duration(0.8), title.write().duration(0.6)])
-scene.play([circle.move(240, 0).duration(1.0).smooth()])
+scene.play([circle.animate.create().duration(0.8), title.animate.write().duration(0.6)])
+scene.play([circle.animate.shift_by(240, 0).duration(1.0).smooth()])
 scene.render()
 ```
 
@@ -88,7 +88,7 @@ from gaanim import Anchor, Scene
 scene = Scene(1280, 720)
 intro = scene.segment("Introducción", notes="Presenta el objetivo", layout="cover")
 intro.region("title").place(scene.text("Una idea clara", role="title"), Anchor.CENTER)
-scene.play([scene.text("Resultado").write().duration(0.5)])
+scene.play([scene.text("Resultado").animate.write().duration(0.5)])
 scene.stop("resultado")
 ```
 

@@ -124,8 +124,8 @@ from gaanim import Axis, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(1280, 720)
 
-circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).at(-160, 0)
-rect = scene.geometry.rect(180, 100).fill(GOLD).at(160, 0)
+circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-160, 0)
+rect = scene.geometry.rect(180, 100).fill(GOLD).move_to(160, 0)
 triangle = scene.geometry.polygon([(0, 100), (-90, -70), (90, -70)])
 star = scene.geometry.star(5, 90, 42)
 hexagon = scene.geometry.regular_polygon(6, 84)
@@ -135,8 +135,8 @@ underbrace = scene.geometry.brace(-120, -100, 120, -100, 36)
 approved = scene.geometry.checkmark(32).fill(GREEN)
 rejected = scene.geometry.cross(32).stroke(WHITE, 4)
 corner = scene.geometry.right_angle(40)
-label = scene.text("Gaanim", role="title").at(0, 220)
-formula = scene.text("$E = m c^2$").at(0, -180)
+label = scene.text("Gaanim", role="title").move_to(0, 220)
+formula = scene.text("$E = m c^2$").move_to(0, -180)
 arrow = scene.geometry.arrow(-80, 0, 80, 0)
 angle = scene.geometry.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
 rotation = scene.geometry.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
@@ -149,8 +149,8 @@ axes = scene.viz.cartesian_2d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
 )
-logo = scene.media.image("assets/logo.webp").scaled(0.25).at(360, 180)
-icon = scene.media.svg("assets/icon.svg").scaled(0.5).at(-360, 180)
+logo = scene.media.image("assets/logo.webp").scale_to(0.25).move_to(360, 180)
+icon = scene.media.svg("assets/icon.svg").scale_to(0.5).move_to(-360, 180)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
@@ -172,7 +172,7 @@ arm = robot.part("left-arm")
 joint = robot.part("elbow")
 
 arm.fill(BLUE)  # group styles reach every descendant path
-scene.play([joint.rotate(0.6)])
+scene.play([joint.animate.rotate_by(0.6)])
 ```
 
 Part IDs are case-sensitive. Duplicate source IDs fail during import, while an
@@ -236,16 +236,16 @@ double-headed measurement arrow.
 `Parameter` anima un escalar independientemente de los objetos visibles. Usa
 `always_redraw_arc` to regenerate a curved arrow from that value each frame.
 Reactive visual helpers are hidden when declared. Add their entry animation to
-`scene.play(...)`—for example `arc.fade_in()`, `trail.fade_in()`, or
-`spring.create()`—before or alongside the animation that drives them. The
+`scene.play(...)`—for example `arc.animate.fade_in()`, `trail.animate.fade_in()`, or
+`spring.animate.create()`—before or alongside the animation that drives them. The
 `Parameter` es una señal no visual y no necesita una animación de entrada.
 
 ```python
 theta = scene.viz.parameter(0.2)
 rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
 scene.play([
-    rotation.fade_in().duration(0.3),
-    theta.animate_to(4.5).duration(2.0),
+    rotation.animate.fade_in().duration(0.3),
+    theta.animate.set(4.5).duration(2.0),
 ])
 ```
 
@@ -257,7 +257,7 @@ another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
 label = scene.text("moving label")
 label.attach_to(marker)
 marker.add_updater(Updater.orbit(0, 0, 120, 1.2))
-scene.play([label.fade_in().duration(0.3)])
+scene.play([label.animate.fade_in().duration(0.3)])
 ```
 
 Groups and drawables can rotate or scale around a scene-space point through
@@ -266,7 +266,7 @@ with a physical hinge:
 
 ```python
 mechanism = scene.geometry.group([rail, spring, mass]).with_pivot(0, 0)
-scene.play([mechanism.rotate(PI / 3).duration(1.0)])
+scene.play([mechanism.animate.rotate_by(PI / 3).duration(1.0)])
 ```
 
 `spring_between(from, to, coils=8, amplitude=12, crossing=0)` creates a native
@@ -283,14 +283,14 @@ other mobject.
 ```python
 mass = scene.geometry.dot(20).fill(GOLD)
 note = scene.slides.callout("Moving mass", mass, offset=(180, 100))
-scene.play([mass.move(240, 0).duration(1.2), note.fade_in().duration(0.4)])
+scene.play([mass.animate.shift_by(240, 0).duration(1.2), note.animate.fade_in().duration(0.4)])
 ```
 
 The themed factories `badge`, `chip`, `card`, `banner`, `lower_third`,
 `stat_card`, `quote_card`, and `section_header` are documented together under
 #link("/api/mobjects/", [Mobjects — Composición editorial]). `banner` replaces
 the removed `caption` helper, while `badge` is positioned through the regular
-Drawable API (`scene.slides.badge("READY").at(x, y)`).
+Drawable API (`scene.slides.badge("READY").move_to(x, y)`).
 
 `title_card(title, subtitle=None)` returns a restrained, centered opening with
 title, optional subtitle, and an accent rule. Its elements remain a single
@@ -298,7 +298,7 @@ animatable drawable. Pass `panel=True` for a framed version.
 
 ```python
 opening = scene.slides.title_card("Vector motion", "A short technical explanation")
-scene.play([opening.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
+scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
 ```
 
 `bullets(items)` creates a vertically aligned bullet list as one drawable. The
@@ -307,7 +307,7 @@ default gap and colors are suitable for a technical presentation; tune
 
 ```python
 agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=72)
-scene.play([agenda.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
+scene.play([agenda.animate.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
 ```
 
 Charts are immutable tabular specifications materialized into stable semantic
@@ -320,7 +320,7 @@ spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
   .mark("bar").encode(x="x", y="value") \
   .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
 chart = scene.viz.chart(spec)
-scene.play([chart.layer("axes").create(), chart.layer("marks").grow_from_center().duration(0.6)])
+scene.play([chart.layer("axes").animate.create(), chart.layer("marks").animate.grow_from_center().duration(0.6)])
 ```
 
 `table(headers, rows)` creates a compact table with a restrained blue header and
@@ -331,7 +331,7 @@ results = scene.slides.table(
     ["Method", "Error", "Time"],
     [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
 )
-scene.play([results.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
+scene.play([results.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
 ```
 
 `typst(source)` compiles full Typst document markup into a vector drawable.
@@ -364,7 +364,7 @@ one drawable; token-level highlighting and diffs are planned separately.
 
 ```python
 snippet = scene.text.code("result = mass * acceleration", language="python")
-scene.play([snippet.fade_in().duration(0.4)])
+scene.play([snippet.animate.fade_in().duration(0.4)])
 ```
 
 `point_on_curve(curve, tracker)` creates a dot whose position follows the
@@ -379,7 +379,7 @@ curve = scene.geometry.polyline([
   for u in (2 * PI * index / 240 for index in range(241))
 ])
 dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
-scene.play([dot.fade_in().duration(0.3), t.animate_to(1.0).duration(2.0)])
+scene.play([dot.animate.fade_in().duration(0.3), t.animate.set(1.0).duration(2.0)])
 ```
 
 `tangent_on_curve(curve, tracker, length=80)` returns a line centered on that
@@ -407,13 +407,13 @@ single list run in parallel.
 
 ```python
 scene.play([
-    circle.create().duration(1.0).smooth(),
-    rect.grow_from_center().duration(1.0).spring(),
-    label.write().duration(0.8),
+    circle.animate.create().duration(1.0).smooth(),
+    rect.animate.grow_from_center().duration(1.0).spring(),
+    label.animate.write().duration(0.8),
 ])
 scene.wait(0.5)
-scene.play([circle.move(200, 0).duration(1.0)])
-scene.play([rect.fade_out().duration(0.5)])
+scene.play([circle.animate.shift_by(200, 0).duration(1.0)])
+scene.play([rect.animate.fade_out().duration(0.5)])
 ```
 
 `segment` is the single structural unit for visibility, transitions, notes,
@@ -456,7 +456,7 @@ scene.link(intro, details, Transition.cross_fade(0.4))
   desc: [Pauses real-time playback when the playhead reaches this exact position. At a segment boundary, the completed outgoing segment remains visible until playback advances, so no trailing `wait()` is required. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
 )[
 ```python
-scene.play([result.write().duration(0.6)])
+scene.play([result.animate.write().duration(0.6)])
 scene.stop("result-ready")
 ```
 ]
@@ -474,13 +474,13 @@ scene.stop("result-ready")
 from gaanim import BLUE, GOLD, Scene, Transition
 
 scene = Scene(480, 270, background="#0f172a")
-title = scene.text("Shared context", role="title").fill(GOLD).at(0, 70)
-scene.play([title.write().duration(0.5)])
+title = scene.text("Shared context", role="title").fill(GOLD).move_to(0, 70)
+scene.play([title.animate.write().duration(0.5)])
 
 scene.segment("content", Transition.cross_fade(0.35))
 scene.reuse(title)
-dot = scene.geometry.dot(18).fill(BLUE).at(0, -30)
-scene.play([dot.grow_from_center().duration(0.4)])
+dot = scene.geometry.dot(18).fill(BLUE).move_to(0, -30)
+scene.play([dot.animate.grow_from_center().duration(0.4)])
 scene.persist(title)
 
 scene.segment("closing", Transition.slide(0.35, "left"))
@@ -530,20 +530,20 @@ of the outgoing scene introduces the following section.
 ```python
 overview = scene.camera.save("overview")
 detail = scene.camera.state_2d(center=(-160, 40), zoom=1.5)
-scene.camera.to(detail, duration=0.8)
-scene.camera.restore("overview", duration=0.6)
+scene.play([scene.camera.animate.to(detail).duration(0.8)])
+scene.play([scene.camera.animate.restore("overview").duration(0.6)])
 
-scene.camera.pan_to(-160, 40, duration=0.8)
-scene.camera.zoom_to(1.5, duration=0.6)
-scene.camera.frame_to([circle, label], margin=(32, 48), duration=0.9, dynamic=True)
-scene.camera.rotate_to(0.15, duration=0.5)
-scene.camera.follow(circle.anchor(Anchor.TOP), offset=(0, 24), lag=0.2, duration=2.0)
-scene.camera.shake(amplitude=12, frequency=8, duration=0.4)
+scene.play([scene.camera.animate.pan_to(-160, 40).duration(0.8)])
+scene.play([scene.camera.animate.zoom_to(1.5).duration(0.6)])
+scene.play([scene.camera.animate.frame_to([circle, label], margin=(32, 48), dynamic=True).duration(0.9)])
+scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
+scene.play([scene.camera.animate.follow(circle.anchor(Anchor.TOP), offset=(0, 24), lag=0.2).duration(2.0)])
+scene.play([scene.camera.animate.shake(amplitude=12, frequency=8).duration(0.4)])
 
 # Camera animations return Anim and can run beside drawable animations.
 scene.play([
-    circle.move_to(180, 0).duration(1.2),
-    scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.2),
+    circle.animate.move_to(180, 0).duration(1.2),
+    scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.2),
 ])
 ```
 
@@ -592,7 +592,7 @@ framing runs after bindings, and shake is always an additive final modifier.
 theta = scene.viz.parameter(0.0)
 focus = scene.geometry.point_ref(theta * 180, (theta * 2).sin() * 80)
 rig2d = scene.camera.bind_2d(center=focus, zoom=1 + theta * 0.3)
-scene.play([theta.animate_to(1.0, duration=2.0)])
+scene.play([theta.animate.set(1.0).duration(2.0)])
 rig2d.disable()
 
 rig3d = scene.camera.bind_3d(
@@ -622,7 +622,7 @@ positive duration for an animated camera move. Angles are in radians.
   desc: [Switches the scene to perspective projection. Requires `0 < near < far` and `0 < fov_y < pi`.],
 )[
 ```python
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
 ```
 ]
 
@@ -635,7 +635,7 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0, duration=0.0)
   desc: [Positions the camera at `eye` and aims it at `target`. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear.],
 )[
 ```python
-scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
+scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 ```
 ]
 
@@ -650,8 +650,8 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0), duration=0.0)
 ```python
 marker = scene.geometry.dot(6)
 scene.play([
-    marker.fade_in(1.0),
-    scene.camera.orbit(delta_yaw=0.5, delta_pitch=0.1, duration=1.0),
+    marker.animate.fade_in(1.0),
+    scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0),
 ])
 ```
 ]
@@ -665,7 +665,7 @@ scene.play([
   desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
 )[
 ```python
-scene.camera.dolly(factor=0.85, duration=0.6)
+scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
 ```
 ]
 

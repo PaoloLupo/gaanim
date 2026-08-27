@@ -87,6 +87,7 @@ pub enum PropertyRotation {
 pub enum PropertyScale {
     To(DVec3),
     Uniform(f64),
+    By(DVec3),
 }
 
 /// High-level, developer-friendly animation types that do not require explicitly defining
@@ -211,6 +212,9 @@ pub enum AnimationType {
     },
     ScaleUniform {
         factor: f64,
+    },
+    ScaleBy3D {
+        factor: DVec3,
     },
     FadeTo {
         to: f32,
@@ -1011,10 +1015,23 @@ pub struct ValueTrackerRef {
 }
 
 impl ValueTrackerRef {
-    /// Animate this ValueTracker's float value to a target value.
-    pub fn animate_to(self, to: f64) -> AnimationBuilder {
+    /// Start a pure animation description for this signal.
+    pub fn animate(self) -> ValueTrackerAnimationRef {
+        ValueTrackerAnimationRef { target: self.id }
+    }
+}
+
+/// Pure animation proxy for the lower-level [`ValueTrackerRef`] API.
+#[derive(Clone, Copy, Debug)]
+pub struct ValueTrackerAnimationRef {
+    target: ObjectId,
+}
+
+impl ValueTrackerAnimationRef {
+    /// Animate the signal to a target value.
+    pub fn set(self, to: f64) -> AnimationBuilder {
         AnimationBuilder {
-            target: self.id,
+            target: self.target,
             anim_type: AnimationType::SignalFloat { to },
             duration: 1.0,
             rate_func: RateFunc::Smooth,

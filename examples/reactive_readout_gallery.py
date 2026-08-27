@@ -16,11 +16,11 @@ area = scene.viz.readout(
     label="$A$",
     unit="$m^2$",
 )
-area.at(360, 220).fill(BLACK)
-k.at(-360, 220)
+area.move_to(360, 220).fill(BLACK)
+k.move_to(-360, 220)
 
-scene.play([k.create(), area.create(), axes.create(), curve.write()])
-scene.play([k.animate_to(4.0, duration=2), radius.animate_to(3.0, duration=2)])
+scene.play([k.animate.create(), area.animate.create(), axes.animate.create(), curve.animate.write()])
+scene.play([k.animate.set(4.0).duration(2), radius.animate.set(3.0).duration(2)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.0, 1.5, 2.25, 3.0])

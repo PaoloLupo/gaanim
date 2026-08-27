@@ -351,9 +351,9 @@ mod tests {
         let mut canvas = gaanim_api::canvas::SceneModel::new(320, 180);
         let later = canvas.text("Later explanation");
         canvas.wait(1.0);
-        canvas.play(vec![later.fade_in(0.5)]);
+        canvas.play(vec![later.animate().fade_in().duration(0.5)]);
         canvas.wait(0.5);
-        canvas.play(vec![later.fade_out(0.5)]);
+        canvas.play(vec![later.animate().fade_out().duration(0.5)]);
 
         reload_with(&mut world, canvas);
 

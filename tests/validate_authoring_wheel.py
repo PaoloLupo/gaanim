@@ -40,8 +40,6 @@ def validate_archive(wheel: Path) -> list[str]:
     ]
     required = {
         "gaanim/__init__.py",
-        "gaanim/composition.py",
-        "gaanim/composition.pyi",
         "gaanim/gaanim_core.pyi",
         "gaanim/matrix.py",
         "gaanim/matrix.pyi",

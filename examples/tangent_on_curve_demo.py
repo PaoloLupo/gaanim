@@ -15,9 +15,9 @@ curve = (
 )
 tracker = scene.viz.parameter(0.0)
 tangent = scene.geometry.tangent_on_curve(curve, tracker, length=200).stroke(GOLD, 5)
-title = scene.text("tangent on curve").fill(BLACK).at(0, 190, anchor=Anchor.CENTER)
-scene.play([curve.create().duration(0.7), tangent.create().duration(0.3), title.write().duration(0.4)])
-scene.play([tracker.animate_to(1.0).duration(2.0)])
+title = scene.text("tangent on curve").fill(BLACK).move_to(0, 190, anchor=Anchor.CENTER)
+scene.play([curve.animate.create().duration(0.7), tangent.animate.create().duration(0.3), title.animate.write().duration(0.4)])
+scene.play([tracker.animate.set(1.0).duration(2.0)])
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:

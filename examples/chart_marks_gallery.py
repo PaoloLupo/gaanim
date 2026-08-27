@@ -51,14 +51,14 @@ for index, (name, spec) in enumerate(specs):
     if name == "surface":
         # The perspective camera uses world units while the 2D panels use
         # canvas pixels. At eye.z=18 this conversion aligns the hybrid cells.
-        chart = scene.viz.chart(spec).scaled(0.2).at_3d(x / 60, y / 60, 0)
+        chart = scene.viz.chart(spec).scale_to(0.2).move_to_3d(x / 60, y / 60, 0)
     else:
-        chart = scene.viz.chart(spec).scaled(0.17).at(x, y)
-    label = scene.text(name).hud().scaled(0.55).at(x, y + 150, anchor=Anchor.CENTER)
+        chart = scene.viz.chart(spec).scale_to(0.17).move_to(x, y)
+    label = scene.text(name).hud().scale_to(0.55).move_to(x, y + 150, anchor=Anchor.CENTER)
     charts.extend([chart.drawable(), label])
 
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
-scene.camera.look_at(eye=(0, 0, 18), target=(0, 0, 0), duration=0.0)
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
+scene.camera.look_at(eye=(0, 0, 18), target=(0, 0, 0))
 scene.wait(1.0)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

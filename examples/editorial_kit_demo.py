@@ -2,7 +2,7 @@
 
 import os
 
-from gaanim import BLACK, AnimationGroup, Direction, Scene
+from gaanim import BLACK, Direction, Scene, parallel
 
 
 scene = Scene(1600, 900, background=BLACK, margin=52)
@@ -17,14 +17,14 @@ heading = scene.slides.section_header(
     width=1180,
     align="center",
     variant="accent",
-).at(0,315)
+).move_to(0,315)
 
 badges = [
-    scene.slides.badge(name.upper(), variant=name, appearance=appearance).at(-520 + i * 260, 130)
+    scene.slides.badge(name.upper(), variant=name, appearance=appearance).move_to(-520 + i * 260, 130)
     for i, (name, appearance) in enumerate(zip(variants, appearances))
 ]
 chips = [
-    scene.slides.chip(name.title(), variant=name, appearance=appearances[(i + 1) % 3]).at(
+    scene.slides.chip(name.title(), variant=name, appearance=appearances[(i + 1) % 3]).move_to(
         -520 + i * 260, 25
     )
     for i, name in enumerate(variants)
@@ -32,33 +32,33 @@ chips = [
 
 compact = scene.geometry.group([heading, *badges, *chips])
 scene.play([
-    heading.fade_in_from(Direction.DOWN, distance=28),
-    *[item.grow_from_center() for item in badges],
+    heading.animate.fade_in_from(Direction.DOWN, distance=28),
+    *[item.animate.grow_from_center() for item in badges],
 ])
-scene.play([item.fade_in() for item in chips])
+scene.play([item.animate.fade_in() for item in chips])
 scene.wait(0.6)
-scene.play([compact.fade_out().duration(0.3)])
+scene.play([compact.animate.fade_out().duration(0.3)])
 
 card = scene.slides.card(
     "Measured card",
     "Body text wraps inside the authored width without guessed heights.",
     "Theme role: caption",
     variant="accent",
-).at(-500, 30)
+).move_to(-500, 30)
 stat = scene.slides.stat_card(
     "98%", "Accuracy", delta="+4.2%", variant="success", appearance="solid"
-).at(0, 30)
+).move_to(0, 30)
 quote = scene.slides.quote_card(
     "Clarity turns motion into explanation.",
     "Gaanim",
     width=500,
     variant="warning",
     appearance="outline",
-).at(500, 30)
+).move_to(500, 30)
 cards = scene.geometry.group([card, stat, quote])
-scene.play(AnimationGroup(card.fade_in(), stat.grow_from_center(), quote.fade_in()))
+scene.play(parallel(card.animate.fade_in(), stat.animate.grow_from_center(), quote.animate.fade_in()))
 scene.wait(0.7)
-scene.play([cards.fade_out().duration(0.3)])
+scene.play([cards.animate.fade_out().duration(0.3)])
 
 banner = scene.slides.banner(
     "Safe-area banner",
@@ -74,8 +74,8 @@ lower = scene.slides.lower_third(
     appearance="outline",
 )
 scene.play([
-    banner.fade_in_from(Direction.DOWN, distance=24),
-    lower.fade_in_from(Direction.DOWN, distance=24),
+    banner.animate.fade_in_from(Direction.DOWN, distance=24),
+    lower.animate.fade_in_from(Direction.DOWN, distance=24),
 ])
 scene.wait(1.0)
 

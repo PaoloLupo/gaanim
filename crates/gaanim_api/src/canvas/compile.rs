@@ -2303,7 +2303,14 @@ impl SceneModel {
         for op in &seg.ops {
             match op {
                 Op::Spawn(spec) => {
-                    let authored = spec.lock().expect("object spec poisoned").clone();
+                    let live = spec.lock().expect("object spec poisoned").clone();
+                    let authored = diagnostic_state
+                        .lock()
+                        .expect("canvas state poisoned")
+                        .frozen_spawn_specs
+                        .get(&live.id)
+                        .cloned()
+                        .unwrap_or(live);
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
                         .transpose()
@@ -2447,6 +2454,13 @@ impl SceneModel {
                                 builder.play(anim);
                             }
                         }
+                    }
+                }
+                Op::Immediate(anim) => {
+                    if let Some(mut anim) = Self::remap_anim(anim, id_map) {
+                        anim.duration = 0.0;
+                        anim.delay = 0.0;
+                        builder.play(anim);
                     }
                 }
                 Op::Play(anims) => {
@@ -7636,11 +7650,18 @@ impl SceneModel {
                         *translation
                     };
                 }
+                LayoutOp::ShiftBy(delta) => {
+                    pending_text_anchor = None;
+                    transform.translation += *delta;
+                }
                 LayoutOp::SetScale(factor) => {
                     transform.scale = original_transform.scale * *factor;
                 }
                 LayoutOp::SetScale3D(scale) => {
                     transform.scale = original_transform.scale * *scale;
+                }
+                LayoutOp::ScaleBy(factor) => {
+                    transform.scale *= *factor;
                 }
                 LayoutOp::SetRotation(radians) => {
                     transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(*radians);
@@ -7652,6 +7673,9 @@ impl SceneModel {
                         euler.y,
                         euler.z,
                     );
+                }
+                LayoutOp::RotateBy(delta) => {
+                    transform.rotation = *delta * transform.rotation;
                 }
                 LayoutOp::SetPivot(pivot) => {
                     pivot_in_scene = Some(*pivot);
@@ -7905,9 +7929,9 @@ mod tests {
         let mut canvas = SceneModel::new(640, 360);
         let reference = canvas
             .rect(100.0, 40.0)
-            .at(30.0, -10.0)
-            .scaled(1.5)
-            .rotated(std::f64::consts::FRAC_PI_2);
+            .move_to(30.0, -10.0)
+            .scale_to(1.5)
+            .rotate_to(std::f64::consts::FRAC_PI_2);
         let point = reference.anchor_point(Anchor::TopRight, DVec3::new(5.0, -3.0, 0.0));
         canvas.rect(10.0, 6.0).at_anchor_point(point);
 
@@ -7947,8 +7971,8 @@ mod tests {
             canvas
                 .text(source)
                 .at_text_default(73.0, -41.0)
-                .scaled(1.65)
-                .rotated(0.23)
+                .scale_to(1.65)
+                .rotate_to(0.23)
                 .with_pivot(-120.0, 95.0);
 
             let mut world = compile_canvas_for_layout(canvas);
@@ -8118,7 +8142,7 @@ mod tests {
                 gaanim_visualization::Sampling::Fixed { samples: 33 },
             )
             .unwrap();
-        canvas.play(vec![amplitude.animate_to(2.0).unwrap().duration(2.0)]);
+        canvas.play(vec![amplitude.animate().set(2.0).duration(2.0)]);
 
         let mut world = World::new();
         world.insert_resource(gaanim_animation::PlaybackState::default());
@@ -8707,10 +8731,13 @@ mod tests {
     fn named_camera_state_restores_complete_authored_pose() {
         let mut canvas = SceneModel::new(960, 540);
         let _marker = canvas.circle(1.0);
-        canvas.camera_pan_to(120.0, -30.0, 1.0);
+        let pan_to_detail = canvas.camera_pan_to(120.0, -30.0, 1.0);
+        canvas.play(vec![pan_to_detail]);
         let saved = canvas.camera_save("detail").unwrap();
-        canvas.camera_pan_to(0.0, 0.0, 1.0);
+        let pan_home = canvas.camera_pan_to(0.0, 0.0, 1.0);
+        canvas.play(vec![pan_home]);
         let restored = canvas.camera_restore("detail", 1.0).unwrap();
+        canvas.play(vec![restored.clone()]);
         let _ = saved;
         assert!(matches!(
             restored.inner.anim_type,
@@ -8772,12 +8799,14 @@ mod tests {
             .unwrap(),
             ScalarSource::constant(25.0),
         );
-        let parameter_anim = parameter.animate_to(1.0).unwrap().duration(1.0);
+        let parameter_anim = parameter.animate().set(1.0).duration(1.0);
         let camera_anim = canvas.camera_pan_to_endpoint(point.0, 1.0);
         canvas.play(vec![parameter_anim, camera_anim]);
         let captured = canvas.camera_capture();
-        canvas.camera_pan_to(0.0, 0.0, 1.0);
-        canvas.camera_to(&captured, 1.0).unwrap();
+        let pan_home = canvas.camera_pan_to(0.0, 0.0, 1.0);
+        canvas.play(vec![pan_home]);
+        let restore_capture = canvas.camera_to(&captured, 1.0).unwrap();
+        canvas.play(vec![restore_capture]);
 
         let (mut world, mut timeline) = compile_camera_timeline(canvas);
         timeline.seek(&mut world, 3.0);
@@ -8799,11 +8828,13 @@ mod tests {
                 1000.0,
             )
             .unwrap();
-        canvas.camera_to(&perspective, 1.0).unwrap();
+        let to_perspective = canvas.camera_to(&perspective, 1.0).unwrap();
+        canvas.play(vec![to_perspective]);
         let orthographic = canvas
             .camera_state_2d(DVec2::new(40.0, -20.0), 1.5, 0.2)
             .unwrap();
-        canvas.camera_to(&orthographic, 0.0).unwrap();
+        let to_orthographic = canvas.camera_to(&orthographic, 0.0).unwrap();
+        canvas.play(vec![to_orthographic]);
 
         let (mut world, mut timeline) = compile_camera_timeline(canvas);
         timeline.seek(&mut world, 0.0);
@@ -8970,8 +9001,8 @@ mod tests {
     #[test]
     fn clip_mask_uses_another_drawables_world_geometry() {
         let mut canvas = SceneModel::new(640, 360);
-        let target = canvas.rect(300.0, 160.0).at(80.0, 0.0);
-        let mask = canvas.circle(55.0).at(80.0, 0.0);
+        let target = canvas.rect(300.0, 160.0).move_to(80.0, 0.0);
+        let mask = canvas.circle(55.0).move_to(80.0, 0.0);
         target.clip(&mask, gaanim_core::peniko::Fill::NonZero);
 
         let world = World::new();
@@ -9320,7 +9351,10 @@ mod tests {
     fn theme_selected_after_authoring_is_materialized_during_compile() {
         let mut canvas = SceneModel::new(640, 360);
         canvas.circle(40.0);
-        canvas.circle(20.0).fill(PenikoColor::BLACK).at(100.0, 0.0);
+        canvas
+            .circle(20.0)
+            .fill(PenikoColor::BLACK)
+            .move_to(100.0, 0.0);
         let mut theme = crate::canvas::CanvasTheme::builtin("paper").unwrap();
         let brand = PenikoColor::from_rgb8(0x25, 0x63, 0xEB);
         theme
@@ -9350,8 +9384,8 @@ mod tests {
     #[test]
     fn dynamic_camera_frame_keeps_all_compiled_targets_and_bounds() {
         let mut canvas = SceneModel::new(960, 540);
-        let left = canvas.circle(85.0).at(-260.0, -10.0);
-        let right = canvas.rect(180.0, 110.0).at(250.0, -10.0);
+        let left = canvas.circle(85.0).move_to(-260.0, -10.0);
+        let right = canvas.rect(180.0, 110.0).move_to(250.0, -10.0);
         let frame = canvas.camera_frame_many(
             &[left.clone(), right.clone()],
             [48.0, 72.0, 48.0, 72.0],
@@ -9707,11 +9741,11 @@ mod tests {
         let source = canvas
             .math_text("E = m c^2")
             .define_tag("mass", "m", None)
-            .at(0.0, 70.0);
+            .move_to(0.0, 70.0);
         let target = canvas
             .math_text("p = m v")
             .define_tag("mass", "m", None)
-            .at(0.0, -90.0);
+            .move_to(0.0, -90.0);
         let copy = source
             .tag("mass")
             .unwrap()
@@ -9933,8 +9967,8 @@ mod tests {
             )
             .expect("valid structured equation")
         };
-        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scaled(2.0);
-        let target = canvas.text_spec(equation(" = ", "5")).scaled(2.0);
+        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scale_to(2.0);
+        let target = canvas.text_spec(equation(" = ", "5")).scale_to(2.0);
         let step = source.step_to(&target, None, 0.8).unwrap();
         canvas.play(vec![step]);
         canvas.play(vec![
@@ -10116,7 +10150,7 @@ mod tests {
                 )
                 .expect("valid title"),
             )
-            .at(0.0, 120.0);
+            .move_to(0.0, 120.0);
         let equation = |middle: &str, result: &str| {
             StructuredTextSpec::new(
                 vec![
@@ -10142,8 +10176,8 @@ mod tests {
             )
             .expect("valid structured equation")
         };
-        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scaled(2.0);
-        let target = canvas.text_spec(equation(" = ", "5")).scaled(2.0);
+        let source = canvas.text_spec(equation(" dot 5 = ", "25")).scale_to(2.0);
+        let target = canvas.text_spec(equation(" = ", "5")).scale_to(2.0);
         canvas.play(vec![title.write(1.0), source.write(1.0)]);
         canvas.wait(0.4);
         canvas.play(vec![source.step_to(&target, None, 0.8).unwrap()]);
@@ -10209,11 +10243,11 @@ mod tests {
         let source = canvas
             .math_text("E = m c^2")
             .define_tag("mass", "m", None)
-            .at(0.0, 70.0);
+            .move_to(0.0, 70.0);
         let target = canvas
             .math_text("p = m v")
             .define_tag("mass", "m", None)
-            .at(0.0, -90.0);
+            .move_to(0.0, -90.0);
         let copy = source
             .tag("mass")
             .unwrap()
@@ -10261,11 +10295,11 @@ mod tests {
         let source = canvas
             .math_text("E = m c^2")
             .define_tag("mass", "m", None)
-            .at(0.0, 70.0);
+            .move_to(0.0, 70.0);
         let target = canvas
             .math_text("p = m v")
             .define_tag("mass", "m", None)
-            .at(0.0, -90.0);
+            .move_to(0.0, -90.0);
         canvas.play(vec![
             title.write(1.0),
             source.write(1.0),
@@ -10320,7 +10354,11 @@ mod tests {
     fn fade_in_from_down_schedules_opacity_and_upward_translation() {
         let mut canvas = SceneModel::new(640, 360);
         let label = canvas.text("Aparece desde abajo");
-        label.fade_in_from(crate::canvas::Direction::Down, 72.0, 0.8);
+        let entrance = label
+            .animate()
+            .fade_in_from(crate::canvas::Direction::Down, 72.0)
+            .duration(0.8);
+        canvas.play(vec![entrance]);
 
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -10659,7 +10697,7 @@ mod tests {
             None,
             None,
         );
-        root.at(400.0, 200.0);
+        root.move_to(400.0, 200.0);
 
         let mut world = compile_canvas_for_layout(canvas);
         let transform = world
@@ -10705,8 +10743,8 @@ mod tests {
             None,
             None,
         );
-        root.scaled(1.5)
-            .rotated(0.25)
+        root.scale_to(1.5)
+            .rotate_to(0.25)
             .at_anchor(300.0, 140.0, Anchor::TopRight);
 
         let mut world = compile_canvas_for_layout(canvas);

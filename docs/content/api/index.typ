@@ -71,8 +71,8 @@ Los ejemplos con preview son escenas mínimas y autocontenidas:
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(480, 270, background="#0f172a")
-node = scene.geometry.circle(60).fill(BLUE).at(0, 0)
-scene.play([node.create().duration(1.0)])
+node = scene.geometry.circle(60).fill(BLUE).move_to(0, 0)
+scene.play([node.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
 ```

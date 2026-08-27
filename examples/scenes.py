@@ -33,39 +33,39 @@ c = Scene(1920, 1080, background=BLACK)
 # ── Segment 1: Title ────────────────────────────────────────────
 c.segment("intro")
 
-title = c.title("Gaanim").fill(WHITE).at(0.0, 200.0)
-subtitle = c.subtitle("Animaciones").fill(GRAY).at(0.0, 100.0)
+title = c.title("Gaanim").fill(WHITE).move_to(0.0, 200.0)
+subtitle = c.subtitle("Animaciones").fill(GRAY).move_to(0.0, 100.0)
 
-title.write().duration(2.0).linear()
-subtitle.fade_in().duration(1.0).delay(1.5).smooth()
+c.play([title.animate.write().duration(2.0).linear()])
+c.play([subtitle.animate.fade_in().duration(1.0).delay(1.5).smooth()])
 
 c.wait(2.0)
 
 # ── Segment 2: Geometric shapes ─────────────────────────────────
 c.segment("shapes", Transition.cross_fade(0.8))
 
-heading = c.text("Formas Geometricas").fill(GOLD).at(0.0, 250.0)
-heading.write().duration(1.0).linear()
+heading = c.text("Formas Geometricas").fill(GOLD).move_to(0.0, 250.0)
+c.play([heading.animate.write().duration(1.0).linear()])
 
-circle = c.geometry.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).at(-300.0, 0.0)
-rect = c.geometry.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).at(0.0, 0.0)
-square = c.geometry.square(100.0).fill(GREEN).stroke(WHITE, 3.0).at(300.0, 0.0)
+circle = c.geometry.circle(80.0).fill(BLUE).stroke(WHITE, 3.0).move_to(-300.0, 0.0)
+rect = c.geometry.rect(140.0, 100.0).fill(CORAL).stroke(WHITE, 3.0).move_to(0.0, 0.0)
+square = c.geometry.square(100.0).fill(GREEN).stroke(WHITE, 3.0).move_to(300.0, 0.0)
 
-circle.grow_from_center().duration(0.8).ease("ease_out_elastic")
-rect.grow_from_center().duration(0.8).delay(0.3).ease("ease_out_elastic")
-square.grow_from_center().duration(0.8).delay(0.6).ease("ease_out_elastic")
+c.play([circle.animate.grow_from_center().duration(0.8).ease("ease_out_elastic")])
+c.play([rect.animate.grow_from_center().duration(0.8).delay(0.3).ease("ease_out_elastic")])
+c.play([square.animate.grow_from_center().duration(0.8).delay(0.6).ease("ease_out_elastic")])
 
 c.wait(1.0)
 
 # Animate them moving
-circle.move(0.0, -80.0).duration(0.6).smooth()
-rect.move(0.0, -80.0).duration(0.6).smooth()
-square.move(0.0, -80.0).duration(0.6).smooth()
+c.play([circle.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
+c.play([rect.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
+c.play([square.animate.shift_by(0.0, -80.0).duration(0.6).smooth()])
 
 c.wait(1.0)
 
 # Indicate effect on circle
-circle.indicate().duration(0.6)
+c.play([circle.animate.indicate().duration(0.6)])
 
 c.wait(1.0)
 
@@ -75,23 +75,25 @@ c.wait(0.5)
 # ── Segment 3: Typography and arrows ────────────────────────────
 c.segment("typography", Transition.fade_through(0.6, BLACK))
 
-label = c.text("Texto y Flechas").fill(YELLOW).at(0.0, 250.0)
-label.write().duration(1.0).linear()
+label = c.text("Texto y Flechas").fill(YELLOW).move_to(0.0, 250.0)
+c.play([label.animate.write().duration(1.0).linear()])
 
-hello = c.text("Hola Mundo!").fill(WHITE).at(-200.0, 0.0)
-hello.draw_border_then_fill().duration(1.5).stroke_width(2.0)
+hello = c.text("Hola Mundo!").fill(WHITE).move_to(-200.0, 0.0)
+c.play([hello.animate.draw_border_then_fill().duration(1.5).stroke_width(2.0)])
 
 arrow = c.geometry.arrow(-50.0, 0.0, 150.0, 0.0).stroke(ORANGE, 4.0)
-arrow.create().duration(0.8).delay(1.0).linear()
+c.play([arrow.animate.create().duration(0.8).delay(1.0).linear()])
 
-world = c.text("Gaanim").fill(PURPLE).at(300.0, 0.0)
-world.fade_in().duration(0.8).delay(1.5).ease("bounce")
+world = c.text("Gaanim").fill(PURPLE).move_to(300.0, 0.0)
+c.play([world.animate.fade_in().duration(0.8).delay(1.5).ease("bounce")])
 
 c.wait(2.0)
 
 # Slide everything to the left
-hello.glide_to(-400.0, 0.0).duration(1.0).smooth()
-world.glide_to(100.0, 0.0).duration(1.0).smooth()
+c.play([
+    hello.animate.move_to(-400.0, 0.0).duration(1.0).smooth(),
+    world.animate.move_to(100.0, 0.0).duration(1.0).smooth(),
+])
 
 c.wait(1.0)
 
@@ -101,8 +103,8 @@ c.wait(0.5)
 # ── Segment 4: Parallel animations finale ───────────────────────
 c.segment("finale", Transition.slide(0.5, "up"))
 
-outro = c.title("Gracias!").fill(GOLD).at(0.0, 100.0)
-outro.spin_in_from_nothing().duration(1.2).ease("ease_out_back")
+outro = c.title("Gracias!").fill(GOLD).move_to(0.0, 100.0)
+c.play([outro.animate.spin_in_from_nothing().duration(1.2).ease("ease_out_back")])
 
 # Burst of colored dots
 dots = []
@@ -111,16 +113,16 @@ for i, color in enumerate(colors):
     angle = i * (2.0 * math.pi / len(colors))
     dx = 200.0 * math.cos(angle)
     dy = 200.0 * math.sin(angle)
-    dot = c.geometry.dot(15.0).fill(color).at(dx, dy)
-    dot.grow_from_center().duration(0.5).delay(0.8 + i * 0.1).ease("ease_out_back")
+    dot = c.geometry.dot(15.0).fill(color).move_to(dx, dy)
+    c.play([dot.animate.grow_from_center().duration(0.5).delay(0.8 + i * 0.1).ease("ease_out_back")])
     dots.append(dot)
 
 c.wait(2.0)
 
 # All dots and title fade out together
-outro.fade_out().duration(1.0)
+c.play([outro.animate.fade_out().duration(1.0)])
 for dot in dots:
-    dot.shrink_to_center().duration(0.8)
+    c.play([dot.animate.shrink_to_center().duration(0.8)])
 
 c.wait(1.0)
 

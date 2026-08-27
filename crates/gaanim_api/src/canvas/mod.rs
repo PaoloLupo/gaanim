@@ -17,7 +17,7 @@ pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CanvasUnits, CurveControl,
     CurveElement, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError,
     LabelMode, LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin,
-    LottieOptions, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions,
+    LottieOptions, Margin, ObjectSpec, OptDuration, SpawnKind, VideoOptions, named_rate_func,
 };
 mod drawable;
 pub use drawable::{
@@ -45,10 +45,11 @@ pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
-    DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle, DimensionOptions,
-    ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError, PlayItem,
-    SceneModel, SceneObjectError, SupportHandle, SurroundingRectError, SurroundingRectHandle,
-    ThemeError, TypstAssetError, VideoClip, VideoLoadError,
+    Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle,
+    DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
+    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, SupportHandle,
+    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
+    VideoLoadError,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

@@ -16,8 +16,8 @@ tema y animaciones.
 
 ```python
 orbit = scene.geometry.circle(140).stroke(BLUE, 4).no_fill()
-point = scene.geometry.dot(12).fill(YELLOW).at(140, 0)
-label = scene.text("r", role="body").fill(WHITE).at(70, 24)
+point = scene.geometry.dot(12).fill(YELLOW).move_to(140, 0)
+label = scene.text("r", role="body").fill(WHITE).move_to(70, 24)
 system = scene.geometry.group([orbit, point, label])
 ```
 

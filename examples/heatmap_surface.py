@@ -31,11 +31,11 @@ surface = (
 )
 
 chart = scene.viz.chart(heatmap)
-scene.play([chart.create(0.8)])
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000, duration=0.0)
+scene.play([chart.animate.create(0.8)])
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([
-    chart.to(surface).duration(1.5),
-    scene.camera.look_at(eye=(11, 9, 11), target=(0, 0, 0)).duration(1.5),
+    chart.animate.to(surface).duration(1.5),
+    scene.camera.animate.look_at(eye=(11, 9, 11), target=(0, 0, 0)).duration(1.5),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

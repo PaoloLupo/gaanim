@@ -41,7 +41,7 @@ panel = scene.layout.column(
     gap=18,
     align="start",
 )
-panel.at(280, 150)
+panel.move_to(280, 150)
 ```
 
 Layout posee la posición de sus hijos. Después de crear la columna no llames
@@ -79,10 +79,12 @@ cada sistema la responsabilidad adecuada.
 Añade después de la entrada del sistema:
 
 ```python
-scene.play([
-    formula.write().duration(0.8),
-    explanation.fade_in().duration(0.6),
-], lag=0.1)
+from gaanim import stagger
+scene.play(stagger(
+    formula.animate.write().duration(0.8),
+    explanation.animate.fade_in().duration(0.6),
+    each=0.1,
+))
 scene.wait(0.8)
 ```
 

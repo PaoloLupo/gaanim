@@ -4,7 +4,7 @@ Cubre, en orden de aparición:
 - rol tipográfico "kicker" y badges auto-dimensionados (scene.slides.badge),
 - plot_data / scatter_data sobre un cartesian_2d en coordenadas de datos,
 - drive_from_samples: serie muestreada nativa que anima sin callbacks,
-- Succession / LaggedStart / AnimationGroup para componer animaciones,
+- sequence / stagger / parallel para componer animaciones,
 - measure_text para dimensionar cajas a partir del texto.
 
 Set GAANIM_SNAPSHOTS to capture this scene before opening the viewer.
@@ -13,7 +13,7 @@ Set GAANIM_SNAPSHOTS to capture this scene before opening the viewer.
 import math
 import os
 
-from gaanim import CYAN, GOLD, AnimationGroup, Axis, LaggedStart, Scene, Succession
+from gaanim import CYAN, GOLD, Axis, Scene, parallel, sequence, stagger
 
 scene = Scene(1920, 1080, margin=72)
 scene.canvas.set_theme("gruvbox-dark")
@@ -39,14 +39,20 @@ SWAY = damped_response(1.4)
 # ---------------------------------------------------------------------------
 
 scene.segment("Novedades", notes="Rol kicker, badges y measure_text.")
-kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").at(0, 430)
-title = scene.text("Una serie medida conduce la escena", role="title").at(0, 340)
-tag_source = scene.slides.badge("serie muestreada nativa", color=CYAN).at(-330, 180)
-tag_sway = scene.slides.badge("drive_from_samples", color=GOLD).at(330, 180)
+kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").move_to(0, 430)
+title = scene.text("Una serie medida conduce la escena", role="title").move_to(0, 340)
+tag_source = scene.slides.badge("serie muestreada nativa", color=CYAN).move_to(-330, 180)
+tag_sway = scene.slides.badge("drive_from_samples", color=GOLD).move_to(330, 180)
 
 scene.play(
-    Succession(kicker.fade_in(0.4), title.write(0.8))
-    + LaggedStart(tag_source.grow_from_center(0.5), tag_sway.grow_from_center(0.5), lag=0.15)
+    parallel(
+        sequence(kicker.animate.fade_in(0.4), title.animate.write(0.8)),
+        stagger(
+            tag_source.animate.grow_from_center(0.5),
+            tag_sway.animate.grow_from_center(0.5),
+            each=0.15,
+        ),
+    ),
 )
 scene.wait(0.8)
 
@@ -60,7 +66,7 @@ plane = scene.viz.cartesian_2d(
     Axis.linear(-1.0, 1.0).ticks(0.5).label("u(t)"),
     width=880,
     height=460,
-).at(-460, -60)
+).move_to(-460, -60)
 curve = plane.plot_data(TIMES, SWAY, color=CYAN, width=4)
 peaks = plane.scatter_data(
     [TIMES[i] for i in range(0, len(TIMES), 4)],
@@ -70,7 +76,7 @@ peaks = plane.scatter_data(
 )
 
 ground = scene.geometry.line(695, 120, 865, 120).stroke(CYAN, 5)
-building = scene.geometry.rounded_rect(150, 320, 12).fill(CYAN).opacity(0.25).at(780, -40)
+building = scene.geometry.rounded_rect(150, 320, 12).fill(CYAN).opacity(0.25).move_to(780, -40)
 floors = [
     scene.geometry.line(713, 120 - level * 55, 847, 120 - level * 55).stroke(GOLD, 2)
     for level in range(1, 6)
@@ -81,12 +87,12 @@ tower = scene.geometry.group([ground, building, *floors])
 tower.drive_from_samples(TIMES, SWAY, "y", scale=100.0)
 
 scene.play(
-    AnimationGroup(
-        plane.create(0.8),
-        LaggedStart(tower.fade_in(0.6), *[line.fade_in(0.3) for line in floors], lag=0.06),
+    parallel(
+        plane.animate.create(0.8),
+        stagger(tower.animate.fade_in(0.6), *[line.animate.fade_in(0.3) for line in floors], each=0.06),
     )
 )
-scene.play([curve.create(2.2), peaks.fade_in(0.5)])
+scene.play([curve.animate.create(2.2), peaks.animate.fade_in(0.5)])
 scene.wait(2.0)
 
 # ---------------------------------------------------------------------------
@@ -96,9 +102,9 @@ scene.wait(2.0)
 scene.segment("Medición", notes="measure_text reemplaza anchos a ojo.")
 footnote = "u(t) = e^{-ζ ω t}·sin Δ t = 0.02 s"
 width, height = scene.text.measure(footnote, role="caption")
-box = scene.geometry.rounded_rect(width , height + 36, 16).fill(GOLD).opacity(0.12).at(0, -380)
-label = scene.text.equation(footnote, role="caption").at(0, -380)
-scene.play(AnimationGroup(box.grow_from_center(0.5), label.write(0.6)))
+box = scene.geometry.rounded_rect(width , height + 36, 16).fill(GOLD).opacity(0.12).move_to(0, -380)
+label = scene.text.equation(footnote, role="caption").move_to(0, -380)
+scene.play(parallel(box.animate.grow_from_center(0.5), label.animate.write(0.6)))
 scene.wait(1.2)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

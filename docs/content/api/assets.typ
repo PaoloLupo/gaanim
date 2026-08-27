@@ -192,8 +192,8 @@ Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python
 diagram = scene.media.svg("architecture.svg")
-diagram.part("database").indicate(0.6)
-diagram.part("caption").fade_to(0.5)
+diagram.part("database").animate.indicate(0.6)
+diagram.part("caption").animate.opacity(0.5)
 ```
 
 La importación prioriza deliberadamente los vectores. Todavía no conserva

@@ -9,6 +9,7 @@ pyo3::create_exception!(
 
 mod brush;
 mod color;
+mod composition;
 mod py3d;
 mod pycanvas;
 mod pydrawable;
@@ -44,6 +45,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyTheme>()?;
     m.add_class::<pycanvas::PyCanvas>()?;
     m.add_class::<pycanvas::PyCamera>()?;
+    m.add_class::<pycanvas::PyCameraAnimation>()?;
     m.add_class::<pycanvas::PyCameraState>()?;
     m.add_class::<pycanvas::PyCameraConstraint>()?;
     m.add_class::<pycanvas::PyScene>()?;
@@ -57,6 +59,12 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyAssetManager>()?;
     m.add_class::<pycanvas::PySegment>()?;
     m.add_class::<pycanvas::PyAudio>()?;
+    m.add_class::<composition::PyComposition>()?;
+    m.add_class::<composition::PySchedule>()?;
+    m.add_class::<composition::PyScheduleEntry>()?;
+    m.add_function(wrap_pyfunction!(composition::parallel, m)?)?;
+    m.add_function(wrap_pyfunction!(composition::sequence, m)?)?;
+    m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyAnchorPoint>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
@@ -80,6 +88,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytext::PyTextParts>()?;
     m.add_class::<pytext::PyTextQuery>()?;
     m.add_class::<pytext::PyTextSelection>()?;
+    m.add_class::<pytext::PyTextSelectionAnimation>()?;
     m.add_class::<pytext::PyText>()?;
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;
     m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
@@ -102,6 +111,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
+    m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;
+    m.add_class::<visualization::PyChartAnimation>()?;
     m.add_class::<visualization::PyCoordinateSpace3D>()?;
     m.add_class::<visualization::PyVectorField>()?;
     m.add_class::<visualization::PyArrowVectorField>()?;

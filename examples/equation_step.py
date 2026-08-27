@@ -6,20 +6,20 @@ from gaanim import Anchor, BLACK, GOLD, RED, WHITE, Scene, part
 
 
 scene = Scene(1920, 1080, background=BLACK)
-title = scene.text("Resolver paso a paso", role="title").fill(WHITE).at(0, 220, anchor=Anchor.CENTER)
+title = scene.text("Resolver paso a paso", role="title").fill(WHITE).move_to(0, 220, anchor=Anchor.CENTER)
 before = scene.text.equation(
     part("variable", "x"), "dot 5 =", part("factor", "25")
-).at(0, 0, anchor=Anchor.CENTER).scaled(2)
+).move_to(0, 0, anchor=Anchor.CENTER).scale_to(2)
 after = scene.text.equation(
     part("variable", "x"), "=", part("result", "5")
-).at(0, 0, anchor=Anchor.CENTER).scaled(2)
+).move_to(0, 0, anchor=Anchor.CENTER).scale_to(2)
 before["factor"].fill(RED)
 after["result"].fill(GOLD)
 
-scene.play([title.write(), before.write()])
+scene.play([title.animate.write(), before.animate.write()])
 scene.wait(0.4)
-scene.play([before.step_to(after, duration=0.8)])
-scene.play([after["result"].indicate(duration=0.45)])
+scene.play([before.animate.transform_to(after).duration(0.8)])
+scene.play([after["result"].animate.indicate(duration=0.45)])
 scene.wait(0.4)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

@@ -167,7 +167,7 @@ mod tests {
         let mut canvas = SceneModel::new(640, 360);
         canvas.wait(1.5);
         let audio = canvas.audio(&path, Some(2.0), 0.5, 0.1, 0.2).unwrap();
-        canvas.play_items(vec![audio.into()], 0.0).unwrap();
+        canvas.play_items(vec![audio.into()]).unwrap();
 
         let mut world = World::new();
         world.insert_resource(Timeline::new());

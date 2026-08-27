@@ -20,13 +20,13 @@ from gaanim import BLUE, WHITE, YELLOW, Scene
 scene = Scene(1280, 720, background="#0f172a", margin=48)
 
 title = scene.text("Movimiento circular", role="title")
-title.fill(WHITE).at(0, 260)
+title.fill(WHITE).move_to(0, 260)
 
 orbit = scene.geometry.circle(120)
-orbit.stroke(BLUE, 4).no_fill().at(-320, 0)
+orbit.stroke(BLUE, 4).no_fill().move_to(-320, 0)
 
 point = scene.geometry.dot(10)
-point.fill(YELLOW).at(-200, 0)
+point.fill(YELLOW).move_to(-200, 0)
 
 scene.render()
 ```
@@ -52,7 +52,7 @@ Separamos algunas llamadas en dos líneas para ver la intención:
 
 ```python
 orbit = scene.geometry.circle(120)
-orbit.stroke(BLUE, 4).no_fill().at(-320, 0)
+orbit.stroke(BLUE, 4).no_fill().move_to(-320, 0)
 ```
 
 La misma construcción podría escribirse como una sola cadena. Ambas formas

@@ -55,7 +55,7 @@ spec = (
   .guides(color=Guide.legend(title="Grupo"))
 )
 chart = scene.viz.chart(spec)
-scene.play(chart.create())
+scene.play([chart.animate.create()])
 ```
 
 == ChartSpec
@@ -165,8 +165,8 @@ los extremos. Un dominio definido explícitamente nunca se modifica.
 ```python
 target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))
 scene.play([
-  chart.to(target).duration(1.4),
-  scene.camera.look_at(eye=(8, 6, 8), target=(0, 0, 0)).duration(1.4),
+  chart.animate.to(target).duration(1.4),
+  scene.camera.animate.look_at(eye=(8, 6, 8), target=(0, 0, 0)).duration(1.4),
 ])
 ```
 
@@ -225,7 +225,7 @@ omitidas continúan heredándose del tema. Así, cambiar únicamente `width` no
 pierde el negro de los ejes en `paper`. Usa `color`, `tick_color`,
 `number_color` o `label_color` para sustituir explícitamente cada color.
 
-`Cartesian2D.write(duration)` construye en paralelo los ejes, las guías, los
+`Cartesian2D.animate.write(duration)` construye en paralelo los ejes, las guías, los
 ticks, los números y los títulos. Durante el trazado, las guías asociadas a X
 avanzan de arriba hacia abajo y las asociadas a Y de izquierda a derecha.
 
@@ -322,7 +322,7 @@ plane = scene.viz.cartesian_2d(
   Axis.linear(-6, 6).label("x"),
   Axis.linear(-3, 3).label("y"),
 )
-scene.play(plane.write(1.2))
+scene.play([plane.animate.write(1.2)])
 ```
 
 `Parameter`, `Variable`, `Computed` y `scene.viz.time` forman la ruta reactiva. Rust
@@ -352,7 +352,7 @@ streams = field.streamlines(
   seeds=(16, 10), direction="both", tolerance=1e-5,
   max_time=3.5, separation=0.045, colormap="vik",
 )
-scene.play([plane.create(), arrows.write(), streams.write()])
+scene.play([plane.animate.create(), arrows.animate.write(), streams.animate.write()])
 scene.play(streams.flow(3.0, time_width=0.12))
 ```
 
@@ -462,7 +462,7 @@ plane = scene.viz.cartesian_2d(
   height=570,
 )
 curve = plane.plot_data(times, accel, color=CYAN, width=4)
-scene.play([plane.create(0.85), curve.create(2.2)])
+scene.play([plane.animate.create(0.85), curve.animate.create(2.2)])
 ```
 ]
 
@@ -481,7 +481,7 @@ scene.play([plane.create(0.85), curve.create(2.2)])
 )[
 ```python
 peaks = plane.scatter_data(peak_times, peak_values, radius=7, color=GOLD)
-scene.play(peaks.fade_in())
+scene.play([peaks.animate.fade_in()])
 ```
 ]
 
@@ -533,8 +533,8 @@ curve = line.function(lambda t: math.sin(t), normal_scale=120, reveal=theta)
 point = scene.geometry.dot(8).follow(
   line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
 )
-scene.play([line.create(), curve.fade_in(duration=0.01), point.fade_in()])
-scene.play([theta.animate_to(3 * math.pi, duration=4)])
+scene.play([line.animate.create(), curve.animate.fade_in(duration=0.01), point.animate.fade_in()])
+scene.play([theta.animate.set(3 * math.pi).duration(4)])
 ```
 ]
 

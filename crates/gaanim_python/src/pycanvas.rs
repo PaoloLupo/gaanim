@@ -819,14 +819,14 @@ pub struct PyCanvas {
 #[pyclass(name = "Audio", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyAudio {
-    inner: gaanim_api::canvas::AudioClip,
+    pub(crate) inner: gaanim_api::canvas::AudioClip,
 }
 
 /// A drawable video declaration that starts only when passed to ``Scene.play``.
 #[pyclass(name = "Video", module = "gaanim_core", extends = PyDrawable, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyVideo {
-    inner: gaanim_api::canvas::VideoClip,
+    pub(crate) inner: gaanim_api::canvas::VideoClip,
 }
 
 impl PyVideo {
@@ -839,7 +839,7 @@ impl PyVideo {
 #[pyclass(name = "Lottie", module = "gaanim_core", extends = PyDrawable, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyLottie {
-    inner: gaanim_api::canvas::LottieClip,
+    pub(crate) inner: gaanim_api::canvas::LottieClip,
 }
 
 impl PyLottie {
@@ -1103,6 +1103,12 @@ pub struct PyCamera {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
+#[pyclass(name = "CameraAnimation", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCameraAnimation {
+    inner: Arc<Mutex<ApiCanvas>>,
+}
+
 /// Reusable complete authored camera state.
 #[pyclass(name = "CameraState", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone)]
@@ -1218,6 +1224,20 @@ fn validate_force_metrics(
     Ok(())
 }
 
+impl PyCamera {
+    fn commit_immediate(&self, animation: PyCanvasAnim) -> PyResult<()> {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .play_items_configured(
+                vec![PlayItem::Animation(animation.inner.duration(0.0))],
+                None,
+                None,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+}
+
 #[pymethods]
 impl PyCamera {
     /// Create a concrete orthographic camera state.
@@ -1273,6 +1293,16 @@ impl PyCamera {
         PyCameraState { inner }
     }
 
+    #[getter]
+    fn animate(&self) -> PyCameraAnimation {
+        PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[pymethods]
+impl PyCameraAnimation {
     /// Animate to a reusable camera state.
     #[pyo3(signature = (state, duration=1.0))]
     fn to(&self, state: &PyCameraState, duration: f64) -> PyResult<PyCanvasAnim> {
@@ -1284,17 +1314,6 @@ impl PyCamera {
             .camera_to(&state.inner, duration)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyCanvasAnim { inner })
-    }
-
-    /// Save or replace a named camera capture at the current cursor.
-    fn save(&self, name: &str) -> PyResult<PyCameraState> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_save(name)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        Ok(PyCameraState { inner })
     }
 
     /// Animate to a previously saved named camera state.
@@ -1641,6 +1660,124 @@ impl PyCamera {
             .expect("scene canvas poisoned")
             .camera_dolly(factor, duration);
         Ok(PyCanvasAnim { inner })
+    }
+}
+
+#[pymethods]
+impl PyCamera {
+    fn save(&self, name: &str) -> PyResult<PyCameraState> {
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_save(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
+    fn to(&self, state: &PyCameraState) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .to(state, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    fn restore(&self, name: &str) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .restore(name, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (target, y=None))]
+    fn pan_to(&self, target: Bound<'_, PyAny>, y: Option<f64>) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .pan_to(target, y, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    fn zoom_to(&self, zoom: Bound<'_, PyAny>) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .zoom_to(zoom, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (targets, margin=None, *, dynamic=false))]
+    fn frame_to(
+        &self,
+        targets: Bound<'_, PyAny>,
+        margin: Option<Bound<'_, PyAny>>,
+        dynamic: bool,
+    ) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .frame_to(targets, margin, 0.0, dynamic)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    fn rotate_to(&self, angle: Bound<'_, PyAny>) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .rotate_to(angle, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (eye, target, up=None))]
+    fn look_at(
+        &self,
+        eye: Bound<'_, PyAny>,
+        target: Bound<'_, PyAny>,
+        up: Option<(f64, f64, f64)>,
+    ) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .look_at(eye, target, up, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (fov_y, near=0.1, far=1000.0))]
+    fn perspective(&self, fov_y: f64, near: f64, far: f64) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .perspective(fov_y, near, far, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (zoom=1.0))]
+    fn orthographic(&self, zoom: f64) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .orthographic(zoom, 0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    fn reset(&self) -> PyResult<Self> {
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .reset(0.0)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
     }
 
     /// Persistently bind orthographic camera channels to native reactive sources.
@@ -2048,12 +2185,8 @@ impl PyLayoutBuilder {
     }
 
     /// Register prioritized linear relations between drawable bounds.
-    #[pyo3(signature = (*constraints, animate=None))]
-    fn constrain(
-        &self,
-        constraints: &Bound<'_, PyTuple>,
-        animate: Option<f64>,
-    ) -> PyResult<PyConstraintSet> {
+    #[pyo3(signature = (*constraints))]
+    fn constrain(&self, constraints: &Bound<'_, PyTuple>) -> PyResult<PyConstraintSet> {
         let mut parsed = Vec::with_capacity(constraints.len());
         for constraint in constraints.iter() {
             let constraint = constraint
@@ -2085,7 +2218,7 @@ impl PyLayoutBuilder {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .constrain_layout(constraints, animate)
+            .constrain_layout(constraints, None)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyConstraintSet { count })
     }
@@ -3991,7 +4124,10 @@ impl PySlideKit {
             gaanim_text::prelude::TextFlow::default(),
         )
         .expect("title card validates title text");
-        let title = scene.text_spec(title_spec).fill(color).at(0.0, title_y);
+        let title = scene
+            .text_spec(title_spec)
+            .fill(color)
+            .move_to(0.0, title_y);
         let rule = scene
             .line(-width * 0.28, -12.0, width * 0.28, -12.0)
             .stroke(accent, 5.0);
@@ -4014,7 +4150,12 @@ impl PySlideKit {
                 gaanim_text::prelude::TextFlow::default(),
             )
             .expect("title card validates subtitle text");
-            members.push(scene.text_spec(subtitle_spec).fill(color).at(0.0, -64.0));
+            members.push(
+                scene
+                    .text_spec(subtitle_spec)
+                    .fill(color)
+                    .move_to(0.0, -64.0),
+            );
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
@@ -4070,7 +4211,12 @@ impl PySlideKit {
         let mut members = Vec::with_capacity(items.len() * 2);
         for (index, item) in items.iter().enumerate() {
             let y = start_y - index as f64 * gap;
-            members.push(scene.dot(bullet_radius).fill(bullet_color).at(bullet_x, y));
+            members.push(
+                scene
+                    .dot(bullet_radius)
+                    .fill(bullet_color)
+                    .move_to(bullet_x, y),
+            );
             let label_spec = gaanim_text::prelude::TextSpec::new(
                 vec![item.clone().into()],
                 Some(gaanim_text::prelude::TextRole::Body),
@@ -4081,7 +4227,7 @@ impl PySlideKit {
                 },
             )
             .expect("bullet text is validated by its public arguments");
-            members.push(scene.text_spec(label_spec).fill(color).at(label_x, y));
+            members.push(scene.text_spec(label_spec).fill(color).move_to(label_x, y));
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))
@@ -4149,7 +4295,7 @@ impl PySlideKit {
             scene
                 .rounded_rect(width, row_height, 6.0)
                 .fill(header_background)
-                .at(0.0, top_y - row_height * 0.5),
+                .move_to(0.0, top_y - row_height * 0.5),
         );
         for column in 1..headers.len() {
             let x = -width * 0.5 + cell_width * column as f64;
@@ -4173,14 +4319,14 @@ impl PySlideKit {
                 scene
                     .text(header)
                     .fill(color)
-                    .at(x, top_y - row_height * 0.5),
+                    .move_to(x, top_y - row_height * 0.5),
             );
         }
         for (row_index, row) in rows.iter().enumerate() {
             let y = top_y - row_height * (row_index as f64 + 1.5);
             for (column, cell) in row.iter().enumerate() {
                 let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
-                members.push(scene.text(cell).fill(color).at(x, y));
+                members.push(scene.text(cell).fill(color).move_to(x, y));
             }
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
@@ -4268,13 +4414,13 @@ impl PyTypography {
         let label = scene
             .text(&language.to_ascii_uppercase())
             .fill(accent)
-            .at(-width * 0.5 + 90.0, height * 0.5 - 20.0);
+            .move_to(-width * 0.5 + 90.0, height * 0.5 - 20.0);
         // Typst hierarchies are centered on their visual bounds. Shift the
         // resulting raw block into the panel's reading column.
         let body = scene
             .typst(&typst_source)
             .fill(color)
-            .at(-width * 0.25, -18.0);
+            .move_to(-width * 0.25, -18.0);
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 }
@@ -4382,28 +4528,26 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    #[pyo3(signature = (items, *, lag=None))]
-    fn play(&self, items: &Bound<'_, PyAny>, lag: Option<f64>) -> PyResult<()> {
-        let mut play_items = Vec::new();
-        for item in items.try_iter()? {
-            let item = item?;
-            if let Ok(anim) = item.extract::<PyRef<'_, PyCanvasAnim>>() {
-                play_items.push(PlayItem::Animation(anim.inner.clone()));
-            } else if let Ok(audio) = item.extract::<PyRef<'_, PyAudio>>() {
-                play_items.push(PlayItem::Audio(audio.inner.clone()));
-            } else if let Ok(video) = item.extract::<PyRef<'_, PyVideo>>() {
-                play_items.push(PlayItem::Video(video.inner.clone()));
-            } else if let Ok(lottie) = item.extract::<PyRef<'_, PyLottie>>() {
-                play_items.push(PlayItem::Lottie(lottie.inner.clone()));
-            } else {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "Scene.play items must be Anim, Audio, Video, or Lottie values",
-                ));
-            }
+    #[pyo3(signature = (items, *, duration=None, rate=None))]
+    fn play(
+        &self,
+        items: &Bound<'_, PyAny>,
+        duration: Option<f64>,
+        rate: Option<&str>,
+    ) -> PyResult<()> {
+        if duration.is_some_and(|value| !value.is_finite() || value < 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be finite and non-negative",
+            ));
         }
+        let composition = crate::composition::extract_play_root(items)?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         scene
-            .play_items(play_items, lag.unwrap_or(0.0))
+            .play_composition_configured(
+                composition,
+                duration,
+                rate.map(gaanim_api::canvas::named_rate_func),
+            )
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 

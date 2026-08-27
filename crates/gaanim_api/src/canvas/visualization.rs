@@ -98,12 +98,8 @@ impl Parameter {
         Ok(())
     }
 
-    pub fn animate_to(&self, value: f64) -> Result<super::types::Anim, VisualizationError> {
-        if !value.is_finite() {
-            return Err(VisualizationError::InvalidParameter);
-        }
-        *self.value.lock().expect("parameter poisoned") = value;
-        Ok(self.handle.animate_value_to(value))
+    pub fn animate(&self) -> super::types::Anim {
+        self.handle.animate()
     }
 }
 
@@ -171,38 +167,6 @@ impl FlowParticlesHandle {
     pub fn flow(&self) -> Vec<super::types::Anim> {
         self.animations.clone()
     }
-
-    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.create(duration)
-    }
-
-    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.write(duration).lag_ratio(0.0)
-    }
-
-    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_in(duration)
-    }
-
-    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_out(duration)
-    }
-
-    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.uncreate(duration)
-    }
-
-    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.unwrite(duration)
-    }
-
-    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.grow_from_center(duration)
-    }
-
-    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.shrink_to_center(duration)
-    }
 }
 
 impl StreamLinesHandle {
@@ -224,72 +188,6 @@ impl StreamLinesHandle {
                 ]
             })
             .collect()
-    }
-
-    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.create(duration)
-    }
-
-    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.write(duration).lag_ratio(0.0)
-    }
-
-    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_in(duration)
-    }
-
-    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_out(duration)
-    }
-
-    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.uncreate(duration)
-    }
-
-    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.unwrite(duration)
-    }
-
-    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.grow_from_center(duration)
-    }
-
-    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.shrink_to_center(duration)
-    }
-}
-
-impl ArrowVectorFieldHandle {
-    pub fn create(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.create(duration)
-    }
-
-    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.write(duration).lag_ratio(0.0)
-    }
-
-    pub fn fade_in(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_in(duration)
-    }
-
-    pub fn fade_out(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.fade_out(duration)
-    }
-
-    pub fn uncreate(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.uncreate(duration)
-    }
-
-    pub fn unwrite(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.unwrite(duration)
-    }
-
-    pub fn grow_from_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.grow_from_center(duration)
-    }
-
-    pub fn shrink_to_center(&self, duration: Option<f64>) -> super::types::Anim {
-        self.drawable.shrink_to_center(duration)
     }
 }
 
@@ -404,18 +302,18 @@ impl ChartHandle {
         }
     }
 
-    pub fn at(self, x: f64, y: f64) -> Self {
-        self.root.clone().at(x, y);
+    pub fn move_to(self, x: f64, y: f64) -> Self {
+        self.root.clone().move_to(x, y);
         self
     }
 
-    pub fn at_3d(self, x: f64, y: f64, z: f64) -> Self {
-        self.root.clone().at_3d(x, y, z);
+    pub fn move_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.root.clone().move_to_3d(x, y, z);
         self
     }
 
-    pub fn scaled(self, factor: f64) -> Self {
-        self.root.clone().scaled(factor);
+    pub fn scale_to(self, factor: f64) -> Self {
+        self.root.clone().scale_to(factor);
         self
     }
 
@@ -747,13 +645,13 @@ impl CoordinateSpace3DHandle {
         self.layers.get(&layer)
     }
 
-    pub fn at(self, point: [f64; 3]) -> Self {
-        self.root.clone().at_3d(point[0], point[1], point[2]);
+    pub fn move_to(self, point: [f64; 3]) -> Self {
+        self.root.clone().move_to_3d(point[0], point[1], point[2]);
         self
     }
 
-    pub fn scaled(self, factor: f64) -> Self {
-        self.root.clone().scaled_3d(factor, factor, factor);
+    pub fn scale_to(self, factor: f64) -> Self {
+        self.root.clone().scale_to_3d(factor, factor, factor);
         self
     }
 }
@@ -792,39 +690,26 @@ impl CoordinateSpaceHandle {
         self.layers.get(&layer)
     }
 
-    pub fn at(self, x: f64, y: f64) -> Self {
-        self.root.clone().at(x, y);
+    pub fn move_to(self, x: f64, y: f64) -> Self {
+        self.root.clone().move_to(x, y);
         self
     }
 
-    pub fn scaled(self, factor: f64) -> Self {
-        self.root.clone().scaled(factor);
+    pub fn scale_to(self, factor: f64) -> Self {
+        self.root.clone().scale_to(factor);
         self
     }
 
-    pub fn rotated(self, radians: f64) -> Self {
-        self.root.clone().rotated(radians);
+    pub fn rotate_to(self, radians: f64) -> Self {
+        self.root.clone().rotate_to(radians);
         self
     }
 
-    /// Write axes, guides, ticks, numbers, and labels concurrently.
-    ///
-    /// A normal group `Write` staggers visual leaves. Coordinate spaces use a
-    /// zero lag so their semantic layers are constructed together, like a
-    /// Manim number plane.
-    pub fn write(&self, duration: Option<f64>) -> super::types::Anim {
-        self.root.write(duration).lag_ratio(0.0)
-    }
-
-    /// Animate an affine view window. Associated plots and marks are children
-    /// of the space's internal view group, so they remain aligned throughout
-    /// the view change without overwriting layout transforms on the root.
-    pub fn animate_view(
+    fn view_transform(
         &self,
         x_domain: (f64, f64),
         y_domain: (f64, f64),
-        duration: f64,
-    ) -> Result<Vec<super::types::Anim>, VisualizationError> {
+    ) -> Result<(f64, f64, DVec3), VisualizationError> {
         if !matches!(self.map.x.scale(), Scale::Linear | Scale::Time)
             || !matches!(self.map.y.scale(), Scale::Linear | Scale::Time)
         {
@@ -836,8 +721,6 @@ impl CoordinateSpaceHandle {
             || !y_domain.1.is_finite()
             || x_domain.0 >= x_domain.1
             || y_domain.0 >= y_domain.1
-            || !duration.is_finite()
-            || duration < 0.0
         {
             return Err(VisualizationError::InvalidSize);
         }
@@ -849,14 +732,37 @@ impl CoordinateSpaceHandle {
             (x_domain.0 + x_domain.1) * 0.5,
             (y_domain.0 + y_domain.1) * 0.5,
         )?;
-        Ok(vec![
-            self.view
-                .scale_to_3d(scale_x, scale_y, 1.0)
-                .duration(duration),
-            self.view
-                .move_to(-center.x * scale_x, -center.y * scale_y)
-                .duration(duration),
-        ])
+        Ok((
+            scale_x,
+            scale_y,
+            DVec3::new(-center.x * scale_x, -center.y * scale_y, 0.0),
+        ))
+    }
+
+    /// Change the affine view window immediately at the current cursor.
+    pub fn view_to(
+        &self,
+        x_domain: (f64, f64),
+        y_domain: (f64, f64),
+    ) -> Result<(), VisualizationError> {
+        let (scale_x, scale_y, center) = self.view_transform(x_domain, y_domain)?;
+        self.view.clone().scale_to_3d(scale_x, scale_y, 1.0);
+        self.view.clone().move_to(center.x, center.y);
+        Ok(())
+    }
+
+    /// Describe an affine view-window animation without touching the timeline.
+    pub fn view_to_animation(
+        &self,
+        x_domain: (f64, f64),
+        y_domain: (f64, f64),
+    ) -> Result<super::types::Anim, VisualizationError> {
+        let (scale_x, scale_y, center) = self.view_transform(x_domain, y_domain)?;
+        Ok(self
+            .view
+            .animate()
+            .scale_to_3d(scale_x, scale_y, 1.0)
+            .move_to(center.x, center.y))
     }
 }
 
@@ -952,7 +858,7 @@ impl SceneModel {
                     .enumerate()
                     .map(|(index, title)| {
                         self.text(title)
-                            .at(width * 0.5 + 70.0, height * 0.5 - index as f64 * 34.0)
+                            .move_to(width * 0.5 + 70.0, height * 0.5 - index as f64 * 34.0)
                     })
                     .collect();
                 let refs: Vec<_> = labels.iter().collect();
@@ -1368,7 +1274,7 @@ impl SceneModel {
                 labels.push(
                     self.text(text)
                         .fill(label_color.unwrap_or(color))
-                        .at(center_x, center_y + direction * label_offset)
+                        .move_to(center_x, center_y + direction * label_offset)
                         .z_index(10),
                 );
             }
@@ -1855,9 +1761,9 @@ impl SceneModel {
                     numbers.push(
                         self.text(&tick.label)
                             .fill(axis.style_value().number_color)
-                            .at_3d(label_position[0], label_position[1], label_position[2])
+                            .move_to_3d(label_position[0], label_position[1], label_position[2])
                             .billboard()
-                            .scaled(0.016),
+                            .scale_to(0.016),
                     );
                 }
             }
@@ -1888,9 +1794,9 @@ impl SceneModel {
                 labels.push(
                     self.text(label)
                         .fill(axis.style_value().label_color)
-                        .at_3d(position[0], position[1], position[2])
+                        .move_to_3d(position[0], position[1], position[2])
                         .billboard()
-                        .scaled(0.019),
+                        .scale_to(0.019),
                 );
             }
         }
@@ -2131,8 +2037,8 @@ impl SceneModel {
             .map(|label| {
                 self.text(&label.text)
                     .fill(label.color)
-                    .scaled(number_scale)
-                    .at(label.position.x, label.position.y)
+                    .scale_to(number_scale)
+                    .move_to(label.position.x, label.position.y)
             })
             .collect();
         let number_refs: Vec<&DrawableHandle> = number_handles.iter().collect();
@@ -2143,32 +2049,38 @@ impl SceneModel {
         let mut label_index = 0;
         if space.visibility.x_labels && space.map.x.label_text().is_some() {
             let label = &geometry.labels[label_index];
-            let handle = self.text(&label.text).fill(label.color).scaled(label_scale);
+            let handle = self
+                .text(&label.text)
+                .fill(label.color)
+                .scale_to(label_scale);
             let handle = match space.map.x.label_position_value() {
                 AxisLabelPosition::Start => {
                     handle.at_anchor(label.position.x, label.position.y, Anchor::Right)
                 }
-                AxisLabelPosition::Center => handle.at(label.position.x, label.position.y),
+                AxisLabelPosition::Center => handle.move_to(label.position.x, label.position.y),
                 AxisLabelPosition::End => {
                     handle.at_anchor(label.position.x, label.position.y, Anchor::Left)
                 }
             };
-            label_handles.push(handle.rotated(label.rotation));
+            label_handles.push(handle.rotate_to(label.rotation));
             label_index += 1;
         }
         if space.visibility.y_labels && space.map.y.label_text().is_some() {
             let label = &geometry.labels[label_index];
-            let handle = self.text(&label.text).fill(label.color).scaled(label_scale);
+            let handle = self
+                .text(&label.text)
+                .fill(label.color)
+                .scale_to(label_scale);
             let handle = match space.map.y.label_position_value() {
                 AxisLabelPosition::Start => {
                     handle.at_anchor(label.position.x, label.position.y, Anchor::Top)
                 }
-                AxisLabelPosition::Center => handle.at(label.position.x, label.position.y),
+                AxisLabelPosition::Center => handle.move_to(label.position.x, label.position.y),
                 AxisLabelPosition::End => {
                     handle.at_anchor(label.position.x, label.position.y, Anchor::Bottom)
                 }
             };
-            label_handles.push(handle.rotated(label.rotation));
+            label_handles.push(handle.rotate_to(label.rotation));
         }
         let label_refs: Vec<&DrawableHandle> = label_handles.iter().collect();
         let labels = self.group(&label_refs);
@@ -2251,8 +2163,8 @@ impl SceneModel {
                 number_handles.push(
                     self.text(&tick.label)
                         .fill(style.number_color)
-                        .scaled(number_scale)
-                        .at(x, -style.tick_length - 22.0),
+                        .scale_to(number_scale)
+                        .move_to(x, -style.tick_length - 22.0),
                 );
             }
         }
@@ -2271,8 +2183,8 @@ impl SceneModel {
             let label = self
                 .text(label)
                 .fill(style.label_color)
-                .scaled(label_scale)
-                .at(length * 0.5 + 30.0, 0.0);
+                .scale_to(label_scale)
+                .move_to(length * 0.5 + 30.0, 0.0);
             self.group(&[&label])
         } else {
             self.group(&[])
@@ -2338,8 +2250,8 @@ impl SceneModel {
                     numbers_handles.push(
                         self.text(&tick.label)
                             .fill(style.number_color)
-                            .scaled(number_scale)
-                            .at(ring_radius, -20.0),
+                            .scale_to(number_scale)
+                            .move_to(ring_radius, -20.0),
                     );
                 }
             }
@@ -2391,7 +2303,7 @@ impl SceneModel {
             let label = self
                 .text(label)
                 .fill(style.label_color)
-                .scaled(label_scale)
+                .scale_to(label_scale)
                 .at_anchor(radius + 30.0, 0.0, Anchor::Left);
             self.group(&[&label])
         } else {
@@ -3315,7 +3227,7 @@ impl SceneModel {
                 .circle(options.radius)
                 .fill(color)
                 .no_stroke()
-                .at(start.x, start.y);
+                .move_to(start.x, start.y);
             particle.defer_visibility_until_play();
             animations.push(particle.move_along_path(path).duration(options.duration));
             particles.push(particle);
@@ -3395,7 +3307,7 @@ impl SceneModel {
                     gaanim_scene::Material3D::matte(color),
                 )
                 .map_err(|_| VisualizationError::InvalidSize)?
-                .at_3d(start.x, start.y, start.z);
+                .move_to_3d(start.x, start.y, start.z);
             particle.defer_visibility_until_play();
             animations.push(
                 particle
@@ -3573,7 +3485,7 @@ impl SceneModel {
         let marks: Vec<DrawableHandle> = points
             .iter()
             .map(|point| {
-                let mark = self.dot(radius).at(point.x, point.y);
+                let mark = self.dot(radius).move_to(point.x, point.y);
                 if let Some(color) = series_color {
                     mark.fill(color)
                 } else {
@@ -3608,7 +3520,7 @@ impl SceneModel {
             .map(|rect| {
                 let mark = self
                     .rect(rect.max.x - rect.min.x, rect.max.y - rect.min.y)
-                    .at(
+                    .move_to(
                         (rect.min.x + rect.max.x) * 0.5,
                         (rect.min.y + rect.max.y) * 0.5,
                     );
@@ -3678,7 +3590,7 @@ impl SceneModel {
         let right = space.map.data_to_local(center + width * 0.5, stats.q3)?;
         let mut marks = vec![
             self.rect((right.x - left.x).abs(), (right.y - left.y).abs())
-                .at((left.x + right.x) * 0.5, (left.y + right.y) * 0.5),
+                .move_to((left.x + right.x) * 0.5, (left.y + right.y) * 0.5),
         ];
         let median = space.map.data_to_local(center, stats.median)?;
         let minimum = space.map.data_to_local(center, stats.minimum)?;
@@ -4305,7 +4217,7 @@ mod tests {
                 Some(600.0),
             )
             .unwrap();
-        line.drawable().clone().at_default(-250.0, 0.0);
+        line.drawable().clone().move_to_default(-250.0, 0.0);
 
         let mut world = bevy::prelude::World::new();
         world.insert_resource(gaanim_timeline::timeline::Timeline::new());
@@ -4379,19 +4291,17 @@ mod tests {
                 true,
             )
             .unwrap()
-            .at(37.0, -18.0);
+            .move_to(37.0, -18.0);
 
         let coordinate = space.coord(1.0, 2.0).unwrap();
-        let animations = space.animate_view((-2.0, 2.0), (-1.5, 1.5), 1.2).unwrap();
+        let animation = space
+            .view_to_animation((-2.0, 2.0), (-1.5, 1.5))
+            .unwrap()
+            .duration(1.2);
 
         assert_ne!(space.root.id, space.view.id);
         assert_eq!(coordinate.space, space.view.id);
-        assert_eq!(animations.len(), 2);
-        assert!(
-            animations
-                .iter()
-                .all(|animation| animation.inner.target == space.view.id)
-        );
+        assert_eq!(animation.inner.target, space.view.id);
     }
 
     #[test]
@@ -4408,7 +4318,7 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            space.animate_view((0.2, 5.0), (-1.0, 1.0), 1.0),
+            space.view_to_animation((0.2, 5.0), (-1.0, 1.0)),
             Err(VisualizationError::UnsupportedAnimatedView)
         ));
     }
@@ -4428,9 +4338,9 @@ mod tests {
             2.25
         );
 
-        let animation = parameter.animate_to(4.0).unwrap();
+        let animation = parameter.animate().set(4.0);
         assert_eq!(animation.inner.target, parameter.drawable().id);
-        assert_eq!(parameter.current(), 4.0);
+        assert_eq!(parameter.current(), 2.25);
         assert!(matches!(
             parameter.set(f64::NAN),
             Err(VisualizationError::InvalidParameter)
@@ -4898,7 +4808,12 @@ mod tests {
             )
             .unwrap();
 
-        let animation = space.write(Some(1.5));
+        let animation = space
+            .drawable()
+            .animate()
+            .write()
+            .duration(1.5)
+            .lag_ratio(0.0);
         let crate::anim::AnimationType::Write { config } = animation.inner.anim_type else {
             panic!("coordinate-space write should remain a Write animation");
         };
@@ -4975,15 +4890,33 @@ mod tests {
             streams.flow_lines.len()
         );
         assert!(matches!(
-            streams.write(Some(0.5)).inner.anim_type,
+            streams
+                .drawable()
+                .animate()
+                .write()
+                .duration(0.5)
+                .inner
+                .anim_type,
             crate::anim::AnimationType::Write { .. }
         ));
         assert!(matches!(
-            particles.create(Some(0.5)).inner.anim_type,
+            particles
+                .drawable()
+                .animate()
+                .create()
+                .duration(0.5)
+                .inner
+                .anim_type,
             crate::anim::AnimationType::Create { .. }
         ));
         assert!(matches!(
-            particles.fade_out(Some(0.5)).inner.anim_type,
+            particles
+                .drawable()
+                .animate()
+                .fade_out()
+                .duration(0.5)
+                .inner
+                .anim_type,
             crate::anim::AnimationType::FadeOut
         ));
         assert_eq!(particles.flow().len(), 4);

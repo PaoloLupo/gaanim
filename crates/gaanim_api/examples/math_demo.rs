@@ -55,10 +55,13 @@ fn setup_scene(
         gaanim_text::prelude::TextFlow::default(),
     )
     .expect("valid unified title text");
-    let title = canvas.text_spec(title_spec).fill(Color::WHITE).at(0.0, 0.0);
-    title.fade_in(1.0);
+    let title = canvas
+        .text_spec(title_spec)
+        .fill(Color::WHITE)
+        .move_to(0.0, 0.0);
+    canvas.play(vec![title.animate().fade_in().duration(1.0)]);
     canvas.wait(1.5);
-    title.fade_out(0.8); // manual exit (Patron B)
+    canvas.play(vec![title.animate().fade_out().duration(0.8)]); // manual exit (Patron B)
     canvas.wait(0.3);
 
     // Segment 2: Content with auto cross-fade
@@ -68,10 +71,10 @@ fn setup_scene(
     let circle = canvas
         .circle(60.0)
         .fill(Color::from_rgb8(0xE5, 0x4B, 0x4B))
-        .at(-200.0, 0.0);
-    circle.create(1.5);
+        .move_to(-200.0, 0.0);
+    canvas.play(vec![circle.animate().create().duration(1.5)]);
     canvas.wait(0.5);
-    circle.grow_from_center(1.0);
+    canvas.play(vec![circle.animate().grow_from_center().duration(1.0)]);
     canvas.wait(1.0);
     canvas.fade_out_all(0.8);
     canvas.wait(0.3);
@@ -96,8 +99,8 @@ fn setup_scene(
     let thanks = canvas
         .text_spec(thanks_spec)
         .fill(Color::WHITE)
-        .at(0.0, 0.0);
-    thanks.fade_in(1.0);
+        .move_to(0.0, 0.0);
+    canvas.play(vec![thanks.animate().fade_in().duration(1.0)]);
     canvas.wait(2.0);
 
     info!(

@@ -11,23 +11,21 @@ scene.assets.assets_dir("examples/assets")
 scene.canvas.set_theme(paper)
 
 scene.segment("Introduction")
-title = scene.text("glTF segment visibility").fill(BLACK).hud().at(0, 420)
-scene.play([title.write(0.6)])
+title = scene.text("glTF segment visibility").fill(BLACK).hud().move_to(0, 420)
+scene.play([title.animate.write(0.6)])
 scene.wait(1.0)
 
 scene.segment("Character", Transition.cross_fade(1.0))
 scene.reuse(title)
-scene.play([title.move_to(-250, 400)])
+scene.play([title.animate.move_to(-250, 400)])
 
 # The model is declared after the title move. It must not leak into the first
 # second of this segment while the camera is still orthographic.
-fox = scene.media.gltf("Fox.glb").at_3d(2.0, -1.0, 0.0).scaled_3d(0.04, 0.04, 0.04)
+fox = scene.media.gltf("Fox.glb").move_to_3d(2.0, -1.0, 0.0).scale_to_3d(0.04, 0.04, 0.04)
+scene.camera.perspective(fov_y=1.0, near=0.1, far=500.0)
+scene.camera.look_at(eye=(10.5, 3.8, 0.0), target=(0.0, 0.15, 0.0))
 scene.play(
     [
-        scene.camera.perspective(fov_y=1.0, near=0.1, far=500.0, duration=0.0),
-        scene.camera.look_at(
-            eye=(10.5, 3.8, 0.0), target=(0.0, 0.15, 0.0), duration=0.0
-        ),
         fox.animation("Survey", duration=2.4),
     ]
 )

@@ -14,7 +14,9 @@ use gaanim_layout::{Anchor, Direction};
 use gaanim_objects::prelude::GltfAnimationMetadata;
 use gaanim_text::prelude::TextAnchor;
 
-use crate::anim::{AnimationType, DrawAnimationConfig, TextSelectionEffect};
+use crate::anim::{
+    AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, TextSelectionEffect,
+};
 use crate::canvas::ops::{
     AnchorPoint, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
@@ -22,7 +24,7 @@ use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
 /// An ergonomic handle to a mobject on a SceneModel.
 ///
-/// - Instant setters return `Self` (fluent): `obj.fill(RED).at(0,0)`.
+/// - Immediate setters return `Self` (fluent): `obj.move_to(0, 0).fill(RED)`.
 /// - Animation methods return `Anim` and auto-enqueue the animation on the
 ///   active segment's sequential track. They accept an optional duration:
 ///     - `obj.fade_in()`       — default 1.0s
@@ -132,6 +134,7 @@ fn math_source_terms(source: &str) -> Vec<String> {
     terms
 }
 
+#[allow(dead_code)]
 impl DrawableHandle {
     pub fn bounds_target(&self) -> crate::anim::BoundsTarget {
         crate::anim::BoundsTarget::Drawable(self.id)
@@ -431,11 +434,51 @@ impl DrawableHandle {
     }
 
     fn update_style(&self, f: impl Fn(&mut ObjectSpec)) -> Self {
-        f(&mut self.spec.lock().expect("object spec poisoned"));
-        for target in self.style_targets.iter() {
-            f(&mut target.lock().expect("SVG part spec poisoned"));
+        for target in std::iter::once(&self.spec).chain(self.style_targets.iter()) {
+            let (before, after) = {
+                let mut spec = target.lock().expect("object spec poisoned");
+                let before = spec.clone();
+                f(&mut spec);
+                (before, spec.clone())
+            };
+            let mut properties = PropertyAnimation::default();
+            if before.opacity != after.opacity {
+                properties.opacity = Some(after.opacity);
+            }
+            if before.fill != after.fill
+                && let Some(Brush::Solid(color)) = after.fill.as_ref()
+            {
+                properties.fill = Some(*color);
+            }
+            if before.stroke != after.stroke
+                && let Some((Brush::Solid(color), width)) = after.stroke.as_ref()
+            {
+                properties.stroke_color = Some(*color);
+                properties.stroke_width = Some(*width);
+            }
+            if !properties.is_empty() {
+                self.push_immediate(
+                    target.lock().expect("object spec poisoned").id,
+                    AnimationType::Properties(properties),
+                );
+            }
         }
         self.clone()
+    }
+
+    fn push_immediate(&self, target: ObjectId, anim_type: AnimationType) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if !state.frozen_spawn_specs.contains_key(&target) {
+            return;
+        }
+        let rate_func = anim_type.default_rate_func();
+        state.push_immediate(AnimationBuilder {
+            target,
+            anim_type,
+            duration: 0.0,
+            delay: 0.0,
+            rate_func,
+        });
     }
 
     /// Keep a generated reactive visual hidden until it is included in a
@@ -614,10 +657,38 @@ impl DrawableHandle {
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {
-        self.update_spec(|spec| {
+        let immediate = match &op {
+            LayoutOp::SetTranslation(to) => Some(AnimationType::TranslateTo { to: *to }),
+            LayoutOp::ShiftBy(delta) => Some(AnimationType::TranslateBy { delta: *delta }),
+            LayoutOp::SetScale(factor) => Some(AnimationType::ScaleTo {
+                to: DVec3::splat(*factor),
+            }),
+            LayoutOp::SetScale3D(to) => Some(AnimationType::ScaleTo { to: *to }),
+            LayoutOp::ScaleBy(factor) if factor.x == factor.y && factor.y == factor.z => {
+                Some(AnimationType::ScaleUniform { factor: factor.x })
+            }
+            LayoutOp::ScaleBy(factor) => Some(AnimationType::ScaleBy3D { factor: *factor }),
+            LayoutOp::SetRotation(radians) => Some(AnimationType::RotateTo {
+                to: DQuat::from_rotation_z(*radians),
+            }),
+            LayoutOp::SetRotation3D(euler) => Some(AnimationType::RotateTo {
+                to: DQuat::from_euler(EulerRot::XYZ, euler.x, euler.y, euler.z),
+            }),
+            LayoutOp::RotateBy(delta) => Some(AnimationType::RotateBy3D { delta: *delta }),
+            LayoutOp::MoveAnchorTo { target, anchor } => Some(AnimationType::TranslateAnchorTo {
+                to: *target,
+                anchor: *anchor,
+            }),
+            LayoutOp::MoveToAnchorPoint { point } => {
+                Some(AnimationType::TranslateToAnchorPoint { point: *point })
+            }
+            _ => None,
+        };
+        let result = self.update_spec(|spec| {
             let positional = matches!(
                 op,
                 LayoutOp::SetTranslation(_)
+                    | LayoutOp::ShiftBy(_)
                     | LayoutOp::MoveAnchorTo { .. }
                     | LayoutOp::MoveToAnchorPoint { .. }
                     | LayoutOp::MoveTextAnchorTo { .. }
@@ -631,7 +702,11 @@ impl DrawableHandle {
                 "layout owns this drawable's position; use LayoutItem offset or absolute placement"
             );
             spec.layout_ops.push(op);
-        })
+        });
+        if let Some(anim_type) = immediate {
+            self.push_immediate(self.id, anim_type);
+        }
+        result
     }
 
     pub fn layout_owner(&self) -> Option<ObjectId> {
@@ -942,11 +1017,13 @@ impl DrawableHandle {
     /// Sets the initial value of a `ValueTracker` before the scene is compiled.
     /// Calling this on a regular drawable has no effect.
     pub fn set_value(self, value: f64) -> Self {
-        self.update_spec(|spec| {
+        let result = self.update_spec(|spec| {
             if let SpawnKind::ValueTracker(current) = &mut spec.kind {
                 *current = value;
             }
-        })
+        });
+        self.push_immediate(self.id, AnimationType::SignalFloat { to: value });
+        result
     }
 
     pub fn opacity(self, op: f32) -> Self {
@@ -960,8 +1037,16 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.z_index = z)
     }
 
-    pub fn at(self, x: f64, y: f64) -> Self {
+    pub fn move_to(self, x: f64, y: f64) -> Self {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
+    }
+
+    pub fn shift_by(self, dx: f64, dy: f64) -> Self {
+        self.push_layout(LayoutOp::ShiftBy(DVec3::new(dx, dy, 0.0)))
+    }
+
+    pub fn shift_by_3d(self, dx: f64, dy: f64, dz: f64) -> Self {
+        self.push_layout(LayoutOp::ShiftBy(DVec3::new(dx, dy, dz)))
     }
 
     /// Apply the default 2D placement semantics used by the Python API.
@@ -970,49 +1055,75 @@ impl DrawableHandle {
     /// groups preserve an authored local coordinate frame, so their local
     /// origin is placed at the target instead. Coordinate systems use identity
     /// groups specifically so labels cannot displace their mathematical origin.
-    pub fn at_default(self, x: f64, y: f64) -> Self {
+    pub fn move_to_default(self, x: f64, y: f64) -> Self {
         let preserves_authored_origin = matches!(
             self.spec.lock().expect("object spec poisoned").kind,
             SpawnKind::GroupNoCenter(_)
         );
         if preserves_authored_origin {
-            self.at(x, y)
+            self.move_to(x, y)
         } else {
             self.at_anchor(x, y, Anchor::Center)
         }
     }
 
     /// 3D position in world space (perspective-aware).
-    pub fn at_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn move_to_3d(self, x: f64, y: f64, z: f64) -> Self {
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, z)))
     }
 
     /// Makes this drawable always face the camera (billboard) in 3D.
-    /// Chainable: `scene.text("label").at_3d(x,y,z).billboard()`
+    /// Chainable: `scene.text("label").move_to_3d(x,y,z).billboard()`
     pub fn billboard(self) -> Self {
         self.update_spec(|spec| spec.billboard = true)
     }
 
     /// Makes this drawable a fixed HUD overlay (screen-space, not affected by 3D camera).
-    /// Chainable: `scene.text("title").hud().at(0,300)`
+    /// Chainable: `scene.text("title").hud().move_to(0, 300)`
     pub fn hud(self) -> Self {
         self.update_spec(|spec| spec.hud = true)
     }
 
-    pub fn scaled(self, factor: f64) -> Self {
+    pub fn scale_to(self, factor: f64) -> Self {
         self.push_layout(LayoutOp::SetScale(factor))
     }
 
-    pub fn scaled_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn scale_by(self, factor: f64) -> Self {
+        self.push_layout(LayoutOp::ScaleBy(DVec3::splat(factor)))
+    }
+
+    pub fn scale_by_3d(self, x: f64, y: f64, z: f64) -> Self {
+        self.push_layout(LayoutOp::ScaleBy(DVec3::new(x, y, z)))
+    }
+
+    pub fn scale_to_3d(self, x: f64, y: f64, z: f64) -> Self {
         self.push_layout(LayoutOp::SetScale3D(DVec3::new(x, y, z)))
     }
 
-    pub fn rotated(self, radians: f64) -> Self {
+    pub fn rotate_to(self, radians: f64) -> Self {
         self.push_layout(LayoutOp::SetRotation(radians))
     }
 
+    pub fn rotate_by(self, radians: f64) -> Self {
+        self.push_layout(LayoutOp::RotateBy(DQuat::from_rotation_z(radians)))
+    }
+
+    pub fn rotate_by_3d(self, axis: &str, radians: f64) -> Result<Self, RotationAxisError> {
+        let delta = match axis.to_ascii_lowercase().as_str() {
+            "x" => DQuat::from_rotation_x(radians),
+            "y" => DQuat::from_rotation_y(radians),
+            "z" => DQuat::from_rotation_z(radians),
+            _ => {
+                return Err(RotationAxisError {
+                    axis: axis.to_owned(),
+                });
+            }
+        };
+        Ok(self.push_layout(LayoutOp::RotateBy(delta)))
+    }
+
     /// Set XYZ Euler rotation in radians.
-    pub fn rotated_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn rotate_to_3d(self, x: f64, y: f64, z: f64) -> Self {
         self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
@@ -1162,18 +1273,18 @@ impl DrawableHandle {
         Anim::properties(self.id, self.state.clone(), active_idx, self.spec.clone())
     }
 
-    pub fn r#move(&self, dx: f64, dy: f64) -> Anim {
+    pub(crate) fn r#move(&self, dx: f64, dy: f64) -> Anim {
         self.anim(AnimationType::TranslateBy {
             delta: DVec3::new(dx, dy, 0.0),
         })
     }
 
-    pub fn move_to(&self, x: f64, y: f64) -> Anim {
+    pub(crate) fn move_to_anim(&self, x: f64, y: f64) -> Anim {
         self.move_to_anchor(x, y, Anchor::Center)
     }
 
     /// Animate so the selected local bounds anchor reaches `(x, y)`.
-    pub fn move_to_anchor(&self, x: f64, y: f64, anchor: Anchor) -> Anim {
+    pub(crate) fn move_to_anchor(&self, x: f64, y: f64, anchor: Anchor) -> Anim {
         self.anim(AnimationType::TranslateAnchorTo {
             to: DVec3::new(x, y, 0.0),
             anchor,
@@ -1181,37 +1292,37 @@ impl DrawableHandle {
     }
 
     /// Animate this drawable's center to an anchor point on another drawable.
-    pub fn move_to_anchor_point(&self, point: AnchorPoint) -> Anim {
+    pub(crate) fn move_to_anchor_point(&self, point: AnchorPoint) -> Anim {
         self.anim(AnimationType::TranslateToAnchorPoint { point })
     }
 
-    pub fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> Anim {
+    pub(crate) fn move_3d(&self, dx: f64, dy: f64, dz: f64) -> Anim {
         self.anim(AnimationType::TranslateBy {
             delta: DVec3::new(dx, dy, dz),
         })
     }
 
-    pub fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+    pub(crate) fn move_to_3d_anim(&self, x: f64, y: f64, z: f64) -> Anim {
         self.anim(AnimationType::TranslateTo {
             to: DVec3::new(x, y, z),
         })
     }
 
-    pub fn glide_to(&self, x: f64, y: f64) -> Anim {
-        self.move_to(x, y)
+    pub(crate) fn glide_to(&self, x: f64, y: f64) -> Anim {
+        self.move_to_anim(x, y)
     }
 
-    pub fn scale(&self, factor: f64) -> Anim {
+    pub(crate) fn scale(&self, factor: f64) -> Anim {
         self.anim(AnimationType::ScaleUniform { factor })
     }
 
-    pub fn scale_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+    pub(crate) fn scale_to_3d_anim(&self, x: f64, y: f64, z: f64) -> Anim {
         self.anim(AnimationType::ScaleTo {
             to: DVec3::new(x, y, z),
         })
     }
 
-    pub fn rotate(&self, rad: f64) -> Anim {
+    pub(crate) fn rotate(&self, rad: f64) -> Anim {
         let pivot = self.spec.lock().ok().and_then(|spec| {
             spec.layout_ops.iter().rev().find_map(|op| match op {
                 LayoutOp::SetPivot(p) => Some(*p),
@@ -1224,7 +1335,11 @@ impl DrawableHandle {
         })
     }
 
-    pub fn rotate_by_3d(&self, axis: &str, radians: f64) -> Result<Anim, RotationAxisError> {
+    pub(crate) fn rotate_by_3d_anim(
+        &self,
+        axis: &str,
+        radians: f64,
+    ) -> Result<Anim, RotationAxisError> {
         let delta = match axis.to_ascii_lowercase().as_str() {
             "x" => DQuat::from_rotation_x(radians),
             "y" => DQuat::from_rotation_y(radians),
@@ -1239,25 +1354,30 @@ impl DrawableHandle {
     }
 
     /// Animate to an XYZ Euler orientation in radians.
-    pub fn rotate_to_3d(&self, x: f64, y: f64, z: f64) -> Anim {
+    pub(crate) fn rotate_to_3d_anim(&self, x: f64, y: f64, z: f64) -> Anim {
         self.anim(AnimationType::RotateTo {
             to: DQuat::from_euler(EulerRot::XYZ, x, y, z),
         })
     }
 
-    pub fn rotate_about_point(&self, x: f64, y: f64, rad: f64) -> Anim {
+    pub(crate) fn rotate_about_point(&self, x: f64, y: f64, rad: f64) -> Anim {
         self.anim(AnimationType::RotateBy {
             angle_radians: rad,
             pivot: Some(DVec3::new(x, y, 0.0)),
         })
     }
 
-    pub fn fade_in(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn fade_in(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::FadeIn, dur.into_opt())
     }
 
     /// Appears while moving from `direction` toward its final position.
-    pub fn fade_in_from(&self, direction: Direction, distance: f64, dur: impl OptDuration) -> Anim {
+    pub(crate) fn fade_in_from(
+        &self,
+        direction: Direction,
+        distance: f64,
+        dur: impl OptDuration,
+    ) -> Anim {
         self.anim_dur(
             AnimationType::FadeInFrom {
                 offset: direction.to_vector() * distance.max(0.0),
@@ -1266,15 +1386,15 @@ impl DrawableHandle {
         )
     }
 
-    pub fn fade_out(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn fade_out(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::FadeOut, dur.into_opt())
     }
 
-    pub fn fade_to(&self, alpha: f32) -> Anim {
+    pub(crate) fn fade_to(&self, alpha: f32) -> Anim {
         self.anim(AnimationType::FadeTo { to: alpha })
     }
 
-    pub fn write(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn write(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::Write {
                 config: DrawAnimationConfig::default(),
@@ -1283,7 +1403,7 @@ impl DrawableHandle {
         )
     }
 
-    pub fn create(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn create(&self, dur: impl OptDuration) -> Anim {
         if matches!(
             &self.spec.lock().expect("object spec poisoned").kind,
             SpawnKind::Primitive3D(..)
@@ -1298,7 +1418,7 @@ impl DrawableHandle {
         )
     }
 
-    pub fn unwrite(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn unwrite(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::Unwrite {
                 config: DrawAnimationConfig::default(),
@@ -1307,7 +1427,7 @@ impl DrawableHandle {
         )
     }
 
-    pub fn uncreate(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn uncreate(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::Uncreate {
                 config: DrawAnimationConfig::default(),
@@ -1316,29 +1436,29 @@ impl DrawableHandle {
         )
     }
 
-    pub fn grow_from_center(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn grow_from_center(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::GrowFromCenter, dur.into_opt())
     }
 
-    pub fn shrink_to_center(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn shrink_to_center(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::ShrinkToCenter, dur.into_opt())
     }
 
-    pub fn spin_in_from_nothing(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn spin_in_from_nothing(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::SpinInFromNothing, dur.into_opt())
     }
 
-    pub fn grow_from_point(&self, px: f64, py: f64) -> Anim {
+    pub(crate) fn grow_from_point(&self, px: f64, py: f64) -> Anim {
         self.anim(AnimationType::GrowFromPoint { px, py })
     }
 
-    pub fn grow_from_edge(&self, dir: &str) -> Anim {
+    pub(crate) fn grow_from_edge(&self, dir: &str) -> Anim {
         self.anim(AnimationType::GrowFromEdge {
             direction: dir.to_string(),
         })
     }
 
-    pub fn draw_border_then_fill(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn draw_border_then_fill(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::DrawBorderThenFill {
                 config: DrawAnimationConfig::default(),
@@ -1347,7 +1467,7 @@ impl DrawableHandle {
         )
     }
 
-    pub fn indicate(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn indicate(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::Indicate {
                 color: None,
@@ -1357,11 +1477,11 @@ impl DrawableHandle {
         )
     }
 
-    pub fn circumscribe(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn circumscribe(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::Circumscribe { color: None }, dur.into_opt())
     }
 
-    pub fn flash(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn flash(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(
             AnimationType::Flash {
                 color: None,
@@ -1372,12 +1492,12 @@ impl DrawableHandle {
         )
     }
 
-    pub fn wiggle(&self, dur: impl OptDuration) -> Anim {
+    pub(crate) fn wiggle(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::Wiggle, dur.into_opt())
     }
 
     /// Reveal a sliding window along this path over a finite timeline clip.
-    pub fn show_passing_flash(&self, duration: f64, time_width: f64) -> Anim {
+    pub(crate) fn show_passing_flash(&self, duration: f64, time_width: f64) -> Anim {
         self.anim_dur(
             AnimationType::ShowPassingFlash {
                 time_width: time_width.clamp(f64::EPSILON, 1.0),
@@ -1386,33 +1506,33 @@ impl DrawableHandle {
         )
     }
 
-    pub fn move_along_path(&self, path: BezPath) -> Anim {
+    pub(crate) fn move_along_path(&self, path: BezPath) -> Anim {
         self.anim(AnimationType::MoveAlongPath {
             path,
             path_target: None,
         })
     }
 
-    pub fn move_along_path_3d(&self, points: Vec<gaanim_core::glam::DVec3>) -> Anim {
+    pub(crate) fn move_along_path_3d(&self, points: Vec<gaanim_core::glam::DVec3>) -> Anim {
         self.anim(AnimationType::MoveAlongPath3D { points })
     }
 
-    pub fn move_along_drawable(&self, target: &DrawableHandle) -> Anim {
+    pub(crate) fn move_along_drawable(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::MoveAlongPath {
             path: BezPath::new(),
             path_target: Some(target.id),
         })
     }
 
-    pub fn fade_transform(&self, target: &DrawableHandle) -> Anim {
+    pub(crate) fn fade_transform(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::FadeTransform { target: target.id })
     }
 
-    pub fn transform(&self, target: &DrawableHandle) -> Anim {
+    pub(crate) fn transform(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::Transform { target: target.id })
     }
 
-    pub fn replacement_transform(&self, target: &DrawableHandle) -> Anim {
+    pub(crate) fn replacement_transform(&self, target: &DrawableHandle) -> Anim {
         self.anim(AnimationType::ReplacementTransform { target: target.id })
     }
 

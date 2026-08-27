@@ -46,8 +46,8 @@ estructuras editoriales como títulos, columnas y tarjetas.
 una pausa. Varias llamadas consecutivas se reproducen en secuencia.
 
 ```python
-scene.play([orbit.create().duration(1.0)])
-scene.play([moving_point.fade_in().duration(0.3)])
+scene.play([orbit.animate.create().duration(1.0)])
+scene.play([moving_point.animate.fade_in().duration(0.3)])
 scene.wait(1.0)
 ```
 

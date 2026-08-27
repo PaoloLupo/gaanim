@@ -7,9 +7,9 @@ from gaanim import Anchor, BLACK, CYAN, GOLD, GREEN, Scene
 
 
 scene = Scene(1280, 720, background=BLACK, margin=52, theme="technical")
-title = scene.text("Fuerzas dinámicas reactivas", role="title").at(0, 285, anchor=Anchor.CENTER)
+title = scene.text("Fuerzas dinámicas reactivas", role="title").move_to(0, 285, anchor=Anchor.CENTER)
 
-body = scene.geometry.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).at(-120, -20)
+body = scene.geometry.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).move_to(-120, -20)
 force_origin = body.anchor_point(Anchor.TOP_RIGHT)
 resultant_origin = body.anchor_point(Anchor.BOTTOM_RIGHT)
 
@@ -45,21 +45,21 @@ resultant = scene.mechanics.force_from_components(
 caption = scene.text(
     "La escala visual no altera la magnitud física",
     role="caption",
-).at(0, -265, anchor=Anchor.CENTER)
+).move_to(0, -265, anchor=Anchor.CENTER)
 
 scene.play([
-    title.write(),
-    body.fade_in(),
-    force.fade_in(),
-    resultant.fade_in(),
-    caption.write(),
+    title.animate.write(),
+    body.animate.fade_in(),
+    force.animate.fade_in(),
+    resultant.animate.fade_in(),
+    caption.animate.write(),
 ])
 scene.play([
-    magnitude.animate_to(100.0, duration=2.0),
-    direction.animate_to(pi * 0.72, duration=2.0),
-    fx.animate_to(55.0, duration=2.0),
-    fy.animate_to(-45.0, duration=2.0),
-    body.move(220, 35).duration(2.0),
+    magnitude.animate.set(100.0).duration(2.0),
+    direction.animate.set(pi * 0.72).duration(2.0),
+    fx.animate.set(55.0).duration(2.0),
+    fy.animate.set(-45.0).duration(2.0),
+    body.animate.shift_by(220, 35).duration(2.0),
 ])
 
 # No invisible drawable is needed for a continuously evaluated scalar.

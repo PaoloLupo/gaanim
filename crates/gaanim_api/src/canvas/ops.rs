@@ -15,7 +15,7 @@ use gaanim_layout::LayoutConstraint;
 use gaanim_renderer::background::BackgroundPaint;
 use gaanim_timeline::transition::TransitionType;
 
-use crate::anim::AnimationBuilder;
+use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::SegmentId;
 use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 
@@ -43,6 +43,10 @@ pub(crate) struct CanvasState {
     pub latest_layouts: HashMap<ObjectId, LayoutTreeSnapshot>,
     /// Authoring-side mirrors used to materialize initial reactive snapshots.
     pub parameter_values: HashMap<ObjectId, Arc<Mutex<f64>>>,
+    /// Authoring mirrors for every spawned object.
+    pub object_specs: HashMap<ObjectId, SharedObjectSpec>,
+    /// Frozen birth state. Once present, later setters must become timeline cuts.
+    pub frozen_spawn_specs: HashMap<ObjectId, ObjectSpec>,
 }
 
 impl CanvasState {
@@ -60,6 +64,8 @@ impl CanvasState {
             layout_diagnostics: Vec::new(),
             latest_layouts: HashMap::new(),
             parameter_values: HashMap::new(),
+            object_specs: HashMap::new(),
+            frozen_spawn_specs: HashMap::new(),
         }
     }
 
@@ -93,6 +99,93 @@ impl CanvasState {
         let id = self.next_camera_state_id;
         self.next_camera_state_id += 1;
         id
+    }
+
+    pub fn freeze_spawn_specs(&mut self) {
+        for (id, spec) in &self.object_specs {
+            self.frozen_spawn_specs
+                .entry(*id)
+                .or_insert_with(|| spec.lock().expect("object spec poisoned").clone());
+        }
+    }
+
+    pub fn push_immediate(&mut self, builder: AnimationBuilder) {
+        fn channel(ty: &AnimationType) -> &'static str {
+            match ty {
+                AnimationType::Properties(_) => "properties",
+                AnimationType::TranslateTo { .. }
+                | AnimationType::TranslateBy { .. }
+                | AnimationType::TranslateAnchorTo { .. }
+                | AnimationType::TranslateToAnchorPoint { .. } => "translation",
+                AnimationType::ScaleTo { .. }
+                | AnimationType::ScaleUniform { .. }
+                | AnimationType::ScaleBy3D { .. } => "scale",
+                AnimationType::RotateTo { .. }
+                | AnimationType::RotateBy { .. }
+                | AnimationType::RotateBy3D { .. } => "rotation",
+                AnimationType::SignalFloat { .. } => "signal",
+                _ => "other",
+            }
+        }
+
+        let incoming_channel = channel(&builder.anim_type);
+        for op in self.active_mut().ops.iter_mut().rev() {
+            match op {
+                Op::Immediate(previous)
+                    if previous.target == builder.target
+                        && channel(&previous.anim_type) == incoming_channel =>
+                {
+                    if let (
+                        AnimationType::Properties(previous),
+                        AnimationType::Properties(incoming),
+                    ) = (&mut previous.anim_type, &builder.anim_type)
+                    {
+                        if incoming.translation.is_some() {
+                            previous.translation = incoming.translation.clone();
+                        }
+                        if incoming.rotation.is_some() {
+                            previous.rotation = incoming.rotation.clone();
+                        }
+                        if incoming.scale.is_some() {
+                            previous.scale = incoming.scale.clone();
+                        }
+                        if incoming.opacity.is_some() {
+                            previous.opacity = incoming.opacity;
+                        }
+                        if incoming.fill.is_some() {
+                            previous.fill = incoming.fill;
+                        }
+                        if incoming.stroke_color.is_some() {
+                            previous.stroke_color = incoming.stroke_color;
+                        }
+                        if incoming.stroke_width.is_some() {
+                            previous.stroke_width = incoming.stroke_width;
+                        }
+                        if incoming.visible_color.is_some() {
+                            previous.visible_color = incoming.visible_color;
+                        }
+                        if incoming.material.is_some() {
+                            previous.material = incoming.material;
+                        }
+                        if incoming.fill_level.is_some() {
+                            previous.fill_level = incoming.fill_level;
+                        }
+                    } else {
+                        *previous = builder;
+                    }
+                    return;
+                }
+                Op::Wait(_) | Op::Play(_) | Op::Animate { active: true, .. } => break,
+                Op::LayoutTransition {
+                    duration: Some(_), ..
+                }
+                | Op::LayoutConstraints {
+                    duration: Some(_), ..
+                } => break,
+                _ => {}
+            }
+        }
+        self.active_mut().ops.push(Op::Immediate(builder));
     }
 }
 
@@ -155,6 +248,8 @@ pub(crate) enum Op {
         anim: AnimationBuilder,
         active: bool,
     },
+    /// Apply a seek-reversible zero-duration property cut at the cursor.
+    Immediate(AnimationBuilder),
     /// Play several animations in parallel.
     Play(Vec<AnimationBuilder>),
     /// Set the fill of selected glyphs after their textual hierarchy exists.

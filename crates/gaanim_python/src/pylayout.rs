@@ -381,17 +381,20 @@ impl PyLayout {
 #[pymethods]
 impl PyLayout {
     #[getter]
+    fn animate(&self) -> crate::pydrawable::PyCanvasAnim {
+        let root = self.inner.lock().expect("layout poisoned").root.clone();
+        crate::pydrawable::PyCanvasAnim {
+            inner: root.animate(),
+        }
+    }
+
+    #[getter]
     fn count(&self) -> usize {
         self.inner.lock().expect("layout poisoned").members.len()
     }
 
-    #[pyo3(signature = (child, *, at=None, animate=None))]
-    fn add(
-        &self,
-        child: &Bound<'_, PyAny>,
-        at: Option<usize>,
-        animate: Option<f64>,
-    ) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (child, *, at=None))]
+    fn add(&self, child: &Bound<'_, PyAny>, at: Option<usize>) -> PyResult<PyDrawable> {
         let member = Self::member_from_python(child)?;
         let handle = member.handle.clone();
         {
@@ -417,12 +420,11 @@ impl PyLayout {
             }
             state.members.insert(index, member);
         }
-        Self::reflow_inner(&self.inner, animate, Some(handle.clone()), None);
+        Self::reflow_inner(&self.inner, None, Some(handle.clone()), None);
         Ok(PyDrawable(handle))
     }
 
-    #[pyo3(signature = (child, *, animate=None))]
-    fn remove(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
+    fn remove(&self, child: &Bound<'_, PyAny>) -> PyResult<()> {
         let handle = Self::direct_member(child)?;
         let removed = {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -439,13 +441,12 @@ impl PyLayout {
             removed.handle.release_layout(&state.root);
             removed
         };
-        Self::reflow_inner(&self.inner, animate, None, Some(removed.handle));
+        Self::reflow_inner(&self.inner, None, None, Some(removed.handle));
         Ok(())
     }
 
     /// Detach a direct child without hiding it, releasing positional ownership.
-    #[pyo3(signature = (child, *, animate=None))]
-    fn detach(&self, child: &Bound<'_, PyAny>, animate: Option<f64>) -> PyResult<()> {
+    fn detach(&self, child: &Bound<'_, PyAny>) -> PyResult<()> {
         let handle = Self::direct_member(child)?;
         {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -461,17 +462,12 @@ impl PyLayout {
             let detached = state.members.remove(index);
             detached.handle.release_layout(&state.root);
         }
-        Self::reflow_inner(&self.inner, animate, None, None);
+        Self::reflow_inner(&self.inner, None, None, None);
         Ok(())
     }
 
-    #[pyo3(signature = (old, new, *, animate=None))]
-    fn replace(
-        &self,
-        old: &Bound<'_, PyAny>,
-        new: &Bound<'_, PyAny>,
-        animate: Option<f64>,
-    ) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (old, new))]
+    fn replace(&self, old: &Bound<'_, PyAny>, new: &Bound<'_, PyAny>) -> PyResult<PyDrawable> {
         let old = Self::direct_member(old)?;
         let replacement = Self::member_from_python(new)?;
         let replacement_handle = replacement.handle.clone();
@@ -494,14 +490,14 @@ impl PyLayout {
         }
         Self::reflow_inner(
             &self.inner,
-            animate,
+            None,
             Some(replacement_handle.clone()),
             Some(old),
         );
         Ok(PyDrawable(replacement_handle))
     }
 
-    #[pyo3(signature = (*, gap=None, padding=None, width=None, height=None, min_width=None, max_width=None, min_height=None, max_height=None, aspect_ratio=None, align=None, justify=None, wrap=None, within=None, animate=None))]
+    #[pyo3(signature = (*, gap=None, padding=None, width=None, height=None, min_width=None, max_width=None, min_height=None, max_height=None, aspect_ratio=None, align=None, justify=None, wrap=None, within=None))]
     #[allow(clippy::too_many_arguments)]
     fn configure(
         &self,
@@ -518,7 +514,6 @@ impl PyLayout {
         justify: Option<&str>,
         wrap: Option<bool>,
         within: Option<&str>,
-        animate: Option<f64>,
     ) -> PyResult<()> {
         {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -580,11 +575,11 @@ impl PyLayout {
                 state.spec.within = parse_within(Some(within))?;
             }
         }
-        Self::reflow_inner(&self.inner, animate, None, None);
+        Self::reflow_inner(&self.inner, None, None, None);
         Ok(())
     }
 
-    #[pyo3(signature = (child, *, grow=None, shrink=None, align=None, row=None, column=None, row_span=None, column_span=None, absolute=None, anchor=None, offset=None, fit=None, animate=None))]
+    #[pyo3(signature = (child, *, grow=None, shrink=None, align=None, row=None, column=None, row_span=None, column_span=None, absolute=None, anchor=None, offset=None, fit=None))]
     #[allow(clippy::too_many_arguments)]
     fn configure_item(
         &self,
@@ -600,7 +595,6 @@ impl PyLayout {
         anchor: Option<&PyAnchor>,
         offset: Option<(f64, f64)>,
         fit: Option<&str>,
-        animate: Option<f64>,
     ) -> PyResult<()> {
         let handle = Self::direct_member(child)?;
         {
@@ -650,13 +644,12 @@ impl PyLayout {
                 member.style.fit = parse_fit(fit)?;
             }
         }
-        Self::reflow_inner(&self.inner, animate, None, None);
+        Self::reflow_inner(&self.inner, None, None, None);
         Ok(())
     }
 
-    #[pyo3(signature = (*, animate=None))]
-    fn reflow(&self, animate: Option<f64>) {
-        Self::reflow_inner(&self.inner, animate, None, None);
+    fn reflow(&self) {
+        Self::reflow_inner(&self.inner, None, None, None);
     }
 
     fn diagnostics(&self) -> Vec<String> {

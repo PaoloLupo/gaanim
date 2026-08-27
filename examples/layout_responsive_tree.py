@@ -60,7 +60,7 @@ page = scene.layout.column(
     justify="between",
 )
 
-scene.play([page.fade_in().duration(0.6)])
+scene.play([page.animate.fade_in().duration(0.6)])
 scene.wait(0.6)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
