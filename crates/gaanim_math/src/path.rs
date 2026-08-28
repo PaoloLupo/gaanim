@@ -9,7 +9,7 @@
 
 use gaanim_core::glam::DVec3;
 #[allow(unused_imports)]
-use kurbo::{BezPath, ParamCurve, ParamCurveArclen, PathEl, PathSeg, Point, Shape};
+use kurbo::{BezPath, CubicBez, ParamCurve, ParamCurveArclen, PathEl, PathSeg, Point, Shape};
 
 /// Total arc length of a Bézier path, computed segment-by-segment.
 ///
@@ -406,8 +406,6 @@ pub fn interpolate_paths(a: &BezPath, b: &BezPath, t: f64) -> BezPath {
 /// representation while crossing `t = 1`. The animation system is responsible
 /// for assigning the exact target path once the clip has actually completed.
 pub fn interpolate_paths_continuous(a: &BezPath, b: &BezPath, t: f64) -> BezPath {
-    // Fallback: Split into subpaths, discretize each pair into a polyline, and lerp.
-    // This preserves multi-contour glyphs (e.g. "o" has an outer ring + inner hole).
     let subs_a: Vec<_> = split_subpaths(a)
         .into_iter()
         .map(|path| SampledContour::new(path, 64))
@@ -424,42 +422,45 @@ pub fn interpolate_paths_continuous(a: &BezPath, b: &BezPath, t: f64) -> BezPath
     let mut result = BezPath::new();
 
     for (source, target) in match_contours(&subs_a, &subs_b) {
-        let (source_points, target_points, closed) = match (source, target) {
+        let (source_segments, target_segments, closed) = match (source, target) {
             (Some(source_idx), Some(target_idx)) => {
                 let source = &subs_a[source_idx];
                 let target = &subs_b[target_idx];
-                (
-                    source.points.clone(),
-                    align_points(&source.points, &target.points, source.closed),
-                    source.closed || target.closed,
-                )
+                normalize_contour_pair(source, target)
             }
             (Some(source_idx), None) => {
                 let source = &subs_a[source_idx];
+                let center = nearest_center(source.center, &subs_b);
                 (
-                    source.points.clone(),
-                    vec![nearest_center(source.center, &subs_b); source.points.len()],
+                    source.segments.clone(),
+                    degenerate_segments(center, source.segments.len()),
                     source.closed,
                 )
             }
             (None, Some(target_idx)) => {
                 let target = &subs_b[target_idx];
+                let center = nearest_center(target.center, &subs_a);
                 (
-                    vec![nearest_center(target.center, &subs_a); target.points.len()],
-                    target.points.clone(),
+                    degenerate_segments(center, target.segments.len()),
+                    target.segments.clone(),
                     target.closed,
                 )
             }
             (None, None) => continue,
         };
 
-        for (idx, (source, target)) in source_points.iter().zip(&target_points).enumerate() {
-            let point = source.lerp(*target, t);
-            if idx == 0 {
-                result.move_to(point);
-            } else {
-                result.line_to(point);
-            }
+        let Some((first_source, first_target)) =
+            source_segments.first().zip(target_segments.first())
+        else {
+            continue;
+        };
+        result.move_to(first_source.p0.lerp(first_target.p0, t));
+        for (source, target) in source_segments.iter().zip(&target_segments) {
+            result.curve_to(
+                source.p1.lerp(target.p1, t),
+                source.p2.lerp(target.p2, t),
+                source.p3.lerp(target.p3, t),
+            );
         }
         if closed {
             result.close_path();
@@ -493,7 +494,7 @@ fn split_subpaths(path: &BezPath) -> Vec<BezPath> {
 
 #[derive(Debug)]
 struct SampledContour {
-    points: Vec<Point>,
+    segments: Vec<CubicBez>,
     center: Point,
     area: f64,
     closed: bool,
@@ -502,6 +503,7 @@ struct SampledContour {
 impl SampledContour {
     fn new(path: BezPath, sample_count: usize) -> Self {
         let closed = path.elements().contains(&PathEl::ClosePath);
+        let segments = cubic_segments(&path);
         let denominator = if closed {
             sample_count
         } else {
@@ -513,12 +515,131 @@ impl SampledContour {
         let center = average_point(&points);
         let area = signed_area(&points);
         Self {
-            points,
+            segments,
             center,
             area,
             closed,
         }
     }
+}
+
+fn cubic_segments(path: &BezPath) -> Vec<CubicBez> {
+    path.segments()
+        .map(|segment| match segment {
+            PathSeg::Line(line) => CubicBez::new(
+                line.p0,
+                line.p0.lerp(line.p1, 1.0 / 3.0),
+                line.p0.lerp(line.p1, 2.0 / 3.0),
+                line.p1,
+            ),
+            PathSeg::Quad(quad) => CubicBez::new(
+                quad.p0,
+                quad.p0.lerp(quad.p1, 2.0 / 3.0),
+                quad.p2.lerp(quad.p1, 2.0 / 3.0),
+                quad.p2,
+            ),
+            PathSeg::Cubic(cubic) => cubic,
+        })
+        .collect()
+}
+
+fn normalize_contour_pair(
+    source: &SampledContour,
+    target: &SampledContour,
+) -> (Vec<CubicBez>, Vec<CubicBez>, bool) {
+    let segment_count = source.segments.len().max(target.segments.len());
+    let source_segments = subdivide_to_count(&source.segments, segment_count);
+    let target_segments = subdivide_to_count(&target.segments, segment_count);
+    let closed = source.closed || target.closed;
+    let target_segments = align_cubic_segments(&source_segments, &target_segments, closed);
+    (source_segments, target_segments, closed)
+}
+
+fn subdivide_to_count(segments: &[CubicBez], target_count: usize) -> Vec<CubicBez> {
+    if segments.is_empty() || target_count <= segments.len() {
+        return segments.to_vec();
+    }
+
+    let lengths: Vec<_> = segments.iter().map(|segment| segment.arclen(0.1)).collect();
+    let mut subdivisions = vec![1usize; segments.len()];
+    while subdivisions.iter().sum::<usize>() < target_count {
+        let index = lengths
+            .iter()
+            .zip(&subdivisions)
+            .enumerate()
+            .max_by(|(_, (a_length, a_parts)), (_, (b_length, b_parts))| {
+                (**a_length / **a_parts as f64).total_cmp(&(**b_length / **b_parts as f64))
+            })
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        subdivisions[index] += 1;
+    }
+
+    segments
+        .iter()
+        .zip(subdivisions)
+        .flat_map(|(segment, parts)| {
+            (0..parts).map(move |part| {
+                let start = part as f64 / parts as f64;
+                let end = (part + 1) as f64 / parts as f64;
+                segment.subsegment(start..end)
+            })
+        })
+        .collect()
+}
+
+fn degenerate_segments(point: Point, count: usize) -> Vec<CubicBez> {
+    vec![CubicBez::new(point, point, point, point); count]
+}
+
+fn reverse_cubic_segments(segments: &[CubicBez]) -> Vec<CubicBez> {
+    segments
+        .iter()
+        .rev()
+        .map(|segment| CubicBez::new(segment.p3, segment.p2, segment.p1, segment.p0))
+        .collect()
+}
+
+fn cubic_alignment_cost(source: &[CubicBez], target: &[CubicBez]) -> f64 {
+    source
+        .iter()
+        .zip(target)
+        .map(|(source, target)| {
+            distance_squared(source.p0, target.p0)
+                + distance_squared(source.p1, target.p1)
+                + distance_squared(source.p2, target.p2)
+                + distance_squared(source.p3, target.p3)
+        })
+        .sum()
+}
+
+fn align_cubic_segments(source: &[CubicBez], target: &[CubicBez], closed: bool) -> Vec<CubicBez> {
+    if source.len() != target.len() || source.is_empty() {
+        return target.to_vec();
+    }
+
+    if !closed {
+        let reversed = reverse_cubic_segments(target);
+        return if cubic_alignment_cost(source, target) <= cubic_alignment_cost(source, &reversed) {
+            target.to_vec()
+        } else {
+            reversed
+        };
+    }
+
+    // Keep target winding intact so inner contours remain holes under non-zero fill.
+    (0..target.len())
+        .map(|offset| {
+            target
+                .iter()
+                .cycle()
+                .skip(offset)
+                .take(target.len())
+                .copied()
+                .collect::<Vec<_>>()
+        })
+        .min_by(|a, b| cubic_alignment_cost(source, a).total_cmp(&cubic_alignment_cost(source, b)))
+        .unwrap_or_else(|| target.to_vec())
 }
 
 fn average_point(points: &[Point]) -> Point {
@@ -598,53 +719,6 @@ fn nearest_center(center: Point, contours: &[SampledContour]) -> Point {
         .unwrap_or(center)
 }
 
-fn point_alignment_cost(a: &[Point], b: &[Point]) -> f64 {
-    a.iter().zip(b).map(|(a, b)| distance_squared(*a, *b)).sum()
-}
-
-fn align_points(source: &[Point], target: &[Point], closed: bool) -> Vec<Point> {
-    if source.len() != target.len() || source.is_empty() {
-        return target.to_vec();
-    }
-
-    if !closed {
-        let mut candidates = vec![target.to_vec()];
-        let mut reversed = target.to_vec();
-        reversed.reverse();
-        candidates.push(reversed);
-        return candidates
-            .into_iter()
-            .min_by(|a, b| {
-                point_alignment_cost(source, a).total_cmp(&point_alignment_cost(source, b))
-            })
-            .unwrap_or_default();
-    }
-
-    // Non-zero filling depends on the relative winding of every closed
-    // contour. Reversing each target contour independently to minimize a
-    // pairwise match can make the inner contour of an "o" agree with its
-    // outer ring, temporarily turning the glyph into a filled disk. Keep the
-    // target winding intact and optimize only the cyclic start point.
-    let candidate = target.to_vec();
-    let mut best = candidate.clone();
-    let mut best_cost = f64::INFINITY;
-    for offset in 0..candidate.len() {
-        let rotated: Vec<_> = candidate
-            .iter()
-            .cycle()
-            .skip(offset)
-            .take(candidate.len())
-            .copied()
-            .collect();
-        let cost = point_alignment_cost(source, &rotated);
-        if cost < best_cost {
-            best_cost = cost;
-            best = rotated;
-        }
-    }
-    best
-}
-
 #[cfg(test)]
 mod morph_tests {
     use super::*;
@@ -689,6 +763,78 @@ mod morph_tests {
         let b = square(20.0, true);
         assert_eq!(interpolate_paths(&a, &b, 0.0), a);
         assert_eq!(interpolate_paths(&a, &b, 1.0), b);
+    }
+
+    #[test]
+    fn active_morph_preserves_bezier_curves_instead_of_polygonizing_them() {
+        let source = kurbo::Circle::new((0.0, 0.0), 10.0).to_path(0.1);
+        let target = kurbo::Circle::new((24.0, 3.0), 14.0).to_path(0.1);
+
+        let midpoint = interpolate_paths_continuous(&source, &target, 0.5);
+        let curve_count = midpoint
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, PathEl::CurveTo(..)))
+            .count();
+        let line_count = midpoint
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, PathEl::LineTo(..)))
+            .count();
+
+        assert!(
+            curve_count > 0,
+            "active morph discarded all Bezier controls"
+        );
+        assert_eq!(line_count, 0, "active morph polygonized a curved glyph");
+    }
+
+    #[test]
+    fn normalized_bezier_representation_is_geometrically_exact_at_endpoints() {
+        let mut source = BezPath::new();
+        source.move_to((0.0, 0.0));
+        source.curve_to((0.0, 12.0), (12.0, 12.0), (12.0, 0.0));
+
+        let mut target = BezPath::new();
+        target.move_to((2.0, 1.0));
+        target.curve_to((2.0, 8.0), (6.0, 13.0), (10.0, 8.0));
+        target.curve_to((14.0, 3.0), (18.0, 8.0), (18.0, 1.0));
+
+        let source_contour = SampledContour::new(source, 64);
+        let target_contour = SampledContour::new(target, 64);
+        let (normalized_source, normalized_target, _) =
+            normalize_contour_pair(&source_contour, &target_contour);
+
+        assert_eq!(normalized_source.len(), 2);
+        assert_eq!(normalized_target, target_contour.segments);
+        for (segment_index, segment) in normalized_source.iter().enumerate() {
+            for sample in 0..=16 {
+                let local_t = sample as f64 / 16.0;
+                let original_t = (segment_index as f64 + local_t) / 2.0;
+                let distance = segment
+                    .eval(local_t)
+                    .distance(source_contour.segments[0].eval(original_t));
+                assert!(
+                    distance < 1e-9,
+                    "de Casteljau subdivision changed geometry by {distance}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn open_curves_align_reversed_targets_without_collapsing() {
+        let mut source = BezPath::new();
+        source.move_to((0.0, 0.0));
+        source.curve_to((0.0, 10.0), (10.0, 10.0), (10.0, 0.0));
+
+        let mut reversed_target = BezPath::new();
+        reversed_target.move_to((10.0, 0.0));
+        reversed_target.curve_to((10.0, 10.0), (0.0, 10.0), (0.0, 0.0));
+
+        let midpoint = interpolate_paths_continuous(&source, &reversed_target, 0.5);
+        assert!(get_point_at_alpha(&midpoint, 0.0).distance(Point::ZERO) < 1e-6);
+        assert!(get_point_at_alpha(&midpoint, 0.5).y > 7.0);
     }
 
     #[test]
