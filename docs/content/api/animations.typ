@@ -543,7 +543,7 @@ scene.play([energy["mass"].animate.copy_to(momentum["mass"]).duration(0.8)])
   signature: ".animate.transform_to(target) .animate.fade_transform_to(target) .animate.replacement_transform_to(target)",
   params: ((name: "target", type: "Drawable", default: none, desc: [Target shape to morph into.]),),
   returns: (type: "Anim", desc: [Morph anim.]),
-  desc: [`transform` morphs in place, `fade_transform` cross-fades, `replacement_transform` replaces source with target. All pair geometry.],
+  desc: [`transform` morphs in place, `fade_transform` cross-fades, and `replacement_transform` replaces source with target. All honor composition timing, pair geometry, and preserve an absent fill instead of synthesizing one.],
 )[
 ```python
 # show-code: true

@@ -3390,6 +3390,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeTransform { target } => *target,
             _ => return,
         };
+        let transform_start_time = self.current_time + anim.delay.max(0.0);
 
         {
             let source_state = match self.states.get(anim.target) {
@@ -3399,7 +3400,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let from = source_state.opacity;
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                transform_start_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
@@ -3423,7 +3424,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let target_entity = target_state.entity;
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                transform_start_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target,
@@ -3464,7 +3465,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             !source_state.child_spans.is_empty() || !source_state.children.is_empty();
         let target_has_children =
             !target_state.child_spans.is_empty() || !target_state.children.is_empty();
-        let morph_end_time = self.current_time + anim.duration;
+        let morph_start_time = self.current_time + anim.delay.max(0.0);
+        let morph_end_time = morph_start_time + anim.duration;
 
         // Carry the source into the current scene at the scene boundary. A
         // deferred ECS command would overwrite SceneMember in the t=0 snapshot
@@ -3528,7 +3530,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     .unwrap_or(1.0);
                 self.timeline.add_clip(
                     parent_track,
-                    self.current_time,
+                    morph_start_time,
                     0.0,
                     ClipPayload::Animation(AnimationSpec {
                         target: child,
@@ -3550,7 +3552,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // clip re-applies opacity 0 immediately after the restore.
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             0.0,
             ClipPayload::Animation(AnimationSpec {
                 target,
@@ -3571,7 +3573,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let child_opacity = self.states.get(child).map(|s| s.opacity).unwrap_or(1.0);
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                morph_start_time,
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
                     target: child,
@@ -3589,7 +3591,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Morph the path
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -3606,7 +3608,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // Morph the translation, rotation, scale
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -3621,7 +3623,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -3636,7 +3638,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -3651,29 +3653,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
 
         // Morph colors
-        let source_fill = match &source_state.fill {
-            Some(Brush::Solid(c)) => *c,
-            _ => Color::WHITE,
+        let source_fill = source_state.fill.as_ref().and_then(extract_brush_color);
+        let target_fill = target_state.fill.as_ref().and_then(extract_brush_color);
+        let transparent = |color: Color| {
+            let rgba = color.to_rgba8();
+            Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
         };
-        let target_fill = match &target_state.fill {
-            Some(Brush::Solid(c)) => *c,
-            _ => Color::WHITE,
+        let fill_colors = match (source_fill, target_fill) {
+            (Some(from), Some(to)) => Some((from, to)),
+            (Some(from), None) => Some((from, transparent(from))),
+            (None, Some(to)) => Some((transparent(to), to)),
+            (None, None) => None,
         };
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            anim.duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillColor {
-                    from: source_fill,
-                    to: target_fill,
-                },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: None,
-            }),
-        );
+        if let Some((from, to)) = fill_colors {
+            self.timeline.add_clip(
+                parent_track,
+                morph_start_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::FillColor { from, to },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
 
         let source_stroke = source_state
             .stroke
@@ -3698,7 +3703,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some((from, to)) = stroke_colors {
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                morph_start_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
@@ -3713,7 +3718,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if source_stroke.is_some() || target_stroke.is_some() {
             self.timeline.add_clip(
                 parent_track,
-                self.current_time,
+                morph_start_time,
                 anim.duration,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
@@ -3734,7 +3739,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         self.timeline.add_clip(
             parent_track,
-            self.current_time,
+            morph_start_time,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
@@ -7036,6 +7041,128 @@ mod tests {
             !synthesized_stroke,
             "no-stroke text/math morph must not create a white outline"
         );
+    }
+
+    #[test]
+    fn delayed_transform_starts_at_its_resolved_sequence_offset() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let source_id = builder.next_id();
+        let target_id = builder.next_id();
+        let source_entity = builder.commands.spawn_empty().id();
+        let target_entity = builder.commands.spawn_empty().id();
+        builder.states.insert(
+            source_id,
+            hierarchy_state(source_entity, square_path(0.0), Vec::new()),
+        );
+        builder.states.insert(
+            target_id,
+            hierarchy_state(target_entity, square_path(40.0), Vec::new()),
+        );
+
+        builder.play_at_current_time(AnimationBuilder {
+            target: source_id,
+            anim_type: AnimationType::Transform { target: target_id },
+            duration: 1.0,
+            delay: 2.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        let path_morph_start = builder
+            .timeline
+            .clips
+            .values()
+            .find_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::PathMorph { .. },
+                    ..
+                }) if *target == source_id && clip.duration > 0.0 => Some(clip.start),
+                _ => None,
+            })
+            .expect("path morph clip");
+        assert_eq!(path_morph_start, 2.0);
+    }
+
+    #[test]
+    fn no_fill_transforms_do_not_materialize_a_white_fill() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let source_id = builder.next_id();
+        let target_id = builder.next_id();
+        let source_entity = builder.commands.spawn_empty().id();
+        let target_entity = builder.commands.spawn_empty().id();
+        let replacement_source_id = builder.next_id();
+        let replacement_target_id = builder.next_id();
+        let replacement_source_entity = builder.commands.spawn_empty().id();
+        let replacement_target_entity = builder.commands.spawn_empty().id();
+        let mut source = hierarchy_state(source_entity, square_path(0.0), Vec::new());
+        source.fill = None;
+        let mut target = hierarchy_state(target_entity, square_path(40.0), Vec::new());
+        target.fill = None;
+        let mut replacement_source =
+            hierarchy_state(replacement_source_entity, square_path(80.0), Vec::new());
+        replacement_source.fill = None;
+        let mut replacement_target =
+            hierarchy_state(replacement_target_entity, square_path(120.0), Vec::new());
+        replacement_target.fill = None;
+        builder.states.insert(source_id, source);
+        builder.states.insert(target_id, target);
+        builder
+            .states
+            .insert(replacement_source_id, replacement_source);
+        builder
+            .states
+            .insert(replacement_target_id, replacement_target);
+
+        builder.play(AnimationBuilder {
+            target: source_id,
+            anim_type: AnimationType::Transform { target: target_id },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+        builder.play(AnimationBuilder {
+            target: replacement_source_id,
+            anim_type: AnimationType::ReplacementTransform {
+                target: replacement_target_id,
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        assert!(builder.states.get(source_id).unwrap().fill.is_none());
+        assert!(
+            builder
+                .states
+                .get(replacement_source_id)
+                .unwrap()
+                .fill
+                .is_none()
+        );
+        assert!(!builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::FillColor { .. },
+                    ..
+                }) if *target == source_id || *target == replacement_source_id
+            )
+        }));
     }
 
     #[test]
