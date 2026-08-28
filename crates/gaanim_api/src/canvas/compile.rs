@@ -7626,7 +7626,8 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
     ) {
-        if spec.layout_ops.is_empty() {
+        let uses_default_text_anchor = matches!(spec.kind, SpawnKind::Text(_));
+        if spec.layout_ops.is_empty() && !uses_default_text_anchor {
             return;
         }
 
@@ -7638,7 +7639,11 @@ impl SceneModel {
         let entity = state.entity;
         let mut transform = original_transform;
         let mut pivot_in_scene = None;
-        let mut pending_text_anchor = None;
+        let mut pending_text_anchor = uses_default_text_anchor.then_some((
+            DVec3::ZERO,
+            gaanim_text::prelude::TextAnchor::BaselineCenter,
+            true,
+        ));
 
         for op in &spec.layout_ops {
             match op {
@@ -7651,8 +7656,11 @@ impl SceneModel {
                     };
                 }
                 LayoutOp::ShiftBy(delta) => {
-                    pending_text_anchor = None;
-                    transform.translation += *delta;
+                    if let Some((target, _, _)) = &mut pending_text_anchor {
+                        *target += *delta;
+                    } else {
+                        transform.translation += *delta;
+                    }
                 }
                 LayoutOp::SetScale(factor) => {
                     transform.scale = original_transform.scale * *factor;
@@ -7983,6 +7991,47 @@ mod tests {
                 DVec3::new(73.0, -41.0, 0.0),
             );
         }
+    }
+
+    #[test]
+    fn unpositioned_single_line_text_places_its_baseline_center_at_the_origin() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.text("Hola mundo");
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let (bounds, baseline, transform) = only_text_root(&mut world);
+        let local_anchor = DVec3::new(bounds.center().x, baseline.0, bounds.center().z);
+        assert_point_close(
+            transform.to_mat4().transform_point3(local_anchor),
+            DVec3::ZERO,
+        );
+    }
+
+    #[test]
+    fn shifting_unpositioned_text_preserves_its_implicit_baseline_anchor() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.text("Hola mundo").shift_by(2.0, -1.0);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let (bounds, baseline, transform) = only_text_root(&mut world);
+        let local_anchor = DVec3::new(bounds.center().x, baseline.0, bounds.center().z);
+        assert_point_close(
+            transform.to_mat4().transform_point3(local_anchor),
+            DVec3::new(2.0, -1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn unpositioned_multiline_text_keeps_its_visual_center_at_the_origin() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.text("Primera línea\nSegunda línea");
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let (bounds, _, transform) = only_text_root(&mut world);
+        assert_point_close(
+            transform.to_mat4().transform_point3(bounds.center()),
+            DVec3::ZERO,
+        );
     }
 
     #[test]

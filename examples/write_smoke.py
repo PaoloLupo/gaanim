@@ -10,11 +10,12 @@ c.segment("intro")
 circle = c.geometry.circle(0.666667).stroke(RED, 0.033333).no_fill().move_to(-3.5, 1)
 c.play([circle.animate.write().duration(2.0).easing(Easing.LINEAR)])
 
-# Create should now grow fill + outline together, one glyph at a time.
+# Create traces with DoubleSmooth, then fades the authored fill without
+# changing the logical stroke width.
 create_label = c.text("Create").fill(GOLD).move_to(-3.5, -0.166667)
 create_title = c.text("Hola!").fill(BLUE).move_to(-3.5, -1.166667)
 c.play([create_label.animate.write().duration(0.8).easing(Easing.LINEAR)])
-c.play([create_title.animate.create().duration(2.8).easing(Easing.LINEAR)])
+c.play([create_title.animate.create().duration(2.8)])
 
 # Write should keep the border-first split, but stagger glyphs with a
 # typewriter cadence. The lag_ratio override makes the difference obvious.

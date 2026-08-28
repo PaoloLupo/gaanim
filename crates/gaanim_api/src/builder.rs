@@ -2646,17 +2646,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 staggered: true,
                 lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
                 stroke_width: config.stroke_width,
-                auto_stroke_width: 1.0,
-                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+                auto_stroke_width: 0.03,
+                fill_rate_func: gaanim_math::RateFunc::Smooth,
             }),
             AnimationType::Create { config } => Some(DrawSchedule {
-                mode: DrawMode::Grow,
+                mode: DrawMode::BorderThenFill,
                 reversed: false,
                 staggered: true,
                 lag_ratio: config.lag_ratio.unwrap_or(1.0),
                 stroke_width: config.stroke_width,
-                auto_stroke_width: 1.0,
-                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+                auto_stroke_width: 0.03,
+                fill_rate_func: gaanim_math::RateFunc::Smooth,
             }),
             AnimationType::Unwrite { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -2664,8 +2664,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 staggered: true,
                 lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
                 stroke_width: config.stroke_width,
-                auto_stroke_width: 1.0,
-                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+                auto_stroke_width: 0.03,
+                fill_rate_func: gaanim_math::RateFunc::Smooth,
             }),
             AnimationType::Uncreate { config } => Some(DrawSchedule {
                 mode: DrawMode::Grow,
@@ -2673,8 +2673,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 staggered: true,
                 lag_ratio: config.lag_ratio.unwrap_or(1.0),
                 stroke_width: config.stroke_width,
-                auto_stroke_width: 1.0,
-                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+                auto_stroke_width: 0.03,
+                fill_rate_func: gaanim_math::RateFunc::Smooth,
             }),
             AnimationType::DrawBorderThenFill { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -2682,15 +2682,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 staggered: true,
                 lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
                 stroke_width: config.stroke_width,
-                auto_stroke_width: 2.0,
-                fill_rate_func: gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic),
+                auto_stroke_width: 0.04,
+                fill_rate_func: gaanim_math::RateFunc::Smooth,
             }),
             _ => None,
         }
     }
 
     fn play_draw_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        const DRAW_RATIO: f64 = 0.5;
+        const DRAW_RATIO: f64 = 0.7;
         let start_time = self.current_time + anim.delay.max(0.0);
 
         let mut items: Vec<ObjectId> = {
@@ -2797,7 +2797,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         for item_id in &items {
             if let Some(state) = self.states.get(*item_id) {
-                if matches!(schedule.mode, DrawMode::BorderThenFill) {
+                if matches!(schedule.mode, DrawMode::BorderThenFill) && state.fill.is_some() {
                     let initial_fill = if schedule.reversed { 1.0 } else { 0.0 };
                     self.commands
                         .entity(state.entity)
@@ -2879,8 +2879,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         for (i, item_id) in items.iter().enumerate() {
             let item_start = start_time + i as f64 * lag_step;
+            let item_mode = if matches!(schedule.mode, DrawMode::BorderThenFill)
+                && self
+                    .states
+                    .get(*item_id)
+                    .is_some_and(|state| state.fill.is_some())
+            {
+                DrawMode::BorderThenFill
+            } else {
+                DrawMode::Grow
+            };
 
-            match (schedule.mode, schedule.reversed) {
+            match (item_mode, schedule.reversed) {
                 (DrawMode::Grow, false) => {
                     self.timeline.add_clip(
                         parent_track,
@@ -3005,7 +3015,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             // temporary drawing aid, not part of the object's final style.
             // Fade its width while the fill appears so it cannot leave a
             // bright halo or blink on later seeks/transforms.
-            if matches!(schedule.mode, DrawMode::BorderThenFill)
+            if matches!(item_mode, DrawMode::BorderThenFill)
                 && !schedule.reversed
                 && let Some(&width) = temporary_strokes.get(item_id)
             {
@@ -7196,9 +7206,108 @@ mod tests {
                 &clip.payload,
                 ClipPayload::Animation(AnimationSpec {
                     target,
-                    lens: PropertyLensSpec::StrokeWidth { to, .. },
+                    lens: PropertyLensSpec::StrokeWidth { from, to },
                     ..
-                }) if *target == id && *to == 0.0
+                }) if *target == id && *from <= 0.05 && *to == 0.0
+            )
+        }));
+    }
+
+    #[test]
+    fn create_traces_then_smoothly_fades_the_fill() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let id = builder.next_id();
+        let entity = builder.commands.spawn_empty().id();
+        builder
+            .states
+            .insert(id, hierarchy_state(entity, square_path(0.0), Vec::new()));
+
+        builder.play(AnimationBuilder {
+            target: id,
+            anim_type: AnimationType::Create {
+                config: crate::anim::DrawAnimationConfig::default(),
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        let fill_fade = builder
+            .timeline
+            .clips
+            .values()
+            .find_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::FillDrawProgress { from, to },
+                    rate_func,
+                    ..
+                }) if *target == id && *from == 0.0 && *to == 1.0 => {
+                    Some((clip.start, clip.duration, rate_func.clone()))
+                }
+                _ => None,
+            })
+            .expect("Create must fade a closed shape's fill instead of revealing it abruptly");
+
+        assert!((fill_fade.0 - 0.7).abs() < 1e-9);
+        assert!((fill_fade.1 - 0.3).abs() < 1e-9);
+        assert!(matches!(fill_fade.2, gaanim_math::RateFunc::Smooth));
+    }
+
+    #[test]
+    fn create_uses_the_full_duration_for_unfilled_paths() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let id = builder.next_id();
+        let entity = builder.commands.spawn_empty().id();
+        let mut state = hierarchy_state(entity, square_path(0.0), Vec::new());
+        state.fill = None;
+        builder.states.insert(id, state);
+
+        builder.play(AnimationBuilder {
+            target: id,
+            anim_type: AnimationType::Create {
+                config: crate::anim::DrawAnimationConfig::default(),
+            },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::DoubleSmooth,
+        });
+
+        let trace_duration = builder
+            .timeline
+            .clips
+            .values()
+            .find_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::PathCompletion { from, to },
+                    ..
+                }) if *target == id && *from == 0.0 && *to == 1.0 => Some(clip.duration),
+                _ => None,
+            })
+            .expect("unfilled Create path trace");
+
+        assert!((trace_duration - 1.0).abs() < 1e-9);
+        assert!(!builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::FillDrawProgress { to, .. },
+                    ..
+                }) if *target == id && *to == 1.0
             )
         }));
     }

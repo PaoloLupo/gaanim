@@ -542,12 +542,11 @@ impl AnimationType {
             | Self::CameraShake { .. }
             | Self::GltfAnimation { .. }
             | Self::Write { .. }
-            | Self::Create { .. }
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }
             | Self::ShowPassingFlash { .. }
             | Self::Wiggle => RateFunc::Linear,
-            Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
+            Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
             Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {
                 RateFunc::ThereAndBack
             }
@@ -727,7 +726,10 @@ impl MobjectRef {
     }
 
     /// Manim-style **Create**: progressively draws the Mobject's path(s) along
-    /// their arc length in parallel (without character/element stagger).
+    /// their arc length, then smoothly fades an authored fill over the final
+    /// 30% of the animation. The stroke keeps its authored logical width; a
+    /// missing outline uses a temporary 0.03-unit stroke during the trace.
+    /// The default rate function is [`RateFunc::DoubleSmooth`].
     pub fn create(self, duration: f64) -> AnimationBuilder {
         self.create_with_stroke_width(duration, None)
     }
@@ -1045,7 +1047,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draw_animation_defaults_match_manim_style_rate_funcs() {
+    fn draw_animation_defaults_are_explicit() {
         assert!(matches!(
             AnimationType::Write {
                 config: DrawAnimationConfig::default()
@@ -1058,7 +1060,7 @@ mod tests {
                 config: DrawAnimationConfig::default()
             }
             .default_rate_func(),
-            RateFunc::Linear
+            RateFunc::DoubleSmooth
         ));
         assert!(matches!(
             AnimationType::DrawBorderThenFill {

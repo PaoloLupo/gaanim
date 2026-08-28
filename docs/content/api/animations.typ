@@ -313,7 +313,7 @@ scene.render()
   signature: ".animate.write() .animate.unwrite() -> Anim",
   params: (),
   returns: (type: "Anim", desc: [Glyph-by-glyph write.]),
-  desc: [For text/equation. Respects vector paths, not just opacity. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `unwrite` reverses.],
+  desc: [For text/equation. Respects vector paths, not just opacity. Synthesized outlines use 0.03 logical units, stay geometrically constant during the trace, and fade away as the authored fill enters smoothly. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `unwrite` reverses.],
 )[
 ```python
 # show-code: true
@@ -355,14 +355,14 @@ scene.render()
   kind: "method",
   signature: ".animate.create() .animate.uncreate() -> Anim",
   params: (),
-  returns: (type: "Anim", desc: [Stroke-drawing.]),
-  desc: [Draws outline progressively. Generated and reactive descendants remain hidden before the scheduled animation and retain the current reveal progress while updating. `uncreate` erases. Different from `write` (which follows glyphs).],
+  returns: (type: "Anim", desc: [Progressive trace followed by a fill fade.]),
+  desc: [Draws the outline during the first 70% and fades a closed shape's authored fill with a smooth alpha transition during the final 30%. The default easing is `DoubleSmooth`; an explicit `.easing(...)` still overrides it. Stroke width remains constant; if the object has no outline, a temporary 0.03-unit stroke is removed while the fill appears. Unfilled paths use the full duration for tracing. Generated and reactive descendants retain the current reveal progress while updating. `uncreate` erases. Different from `write`, which follows glyph order.],
 )[
 ```python
 # show-code: true
 from gaanim import Easing, BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-circle = scene.geometry.circle(50).no_fill().stroke(BLUE, 4).move_to(0, 0)
+circle = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.04).move_to(0, 0)
 scene.play([circle.animate.create().duration(1.0).easing(Easing.SMOOTH)])
 scene.play([circle.animate.uncreate().duration(0.6)])
 # output: preview.webp

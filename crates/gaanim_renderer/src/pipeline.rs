@@ -1091,29 +1091,10 @@ pub fn compile_scene_from_world(
                         elem_path,
                     );
 
-                    let base_color = match fill_brush {
-                        peniko::Brush::Solid(c) => *c,
-                        _ => peniko::Color::WHITE,
-                    };
-                    let illuminated_color = gaanim_core::interpolate_color(
-                        base_color,
-                        peniko::Color::WHITE,
-                        0.22 * anim_wave,
-                    );
-
-                    // Soft interior ambient light pass (clipped strictly to character body)
-                    draw_soft_fill(
-                        &mut scene,
-                        elem_path,
-                        &peniko::Brush::Solid(illuminated_color),
-                        3.0,
-                        (0.18 * anim_wave) as f32,
-                        kurbo::Affine::IDENTITY,
-                    );
-
-                    // Illuminated main fill
-                    let fill_brush_illuminated = peniko::Brush::Solid(illuminated_color);
-                    let modulated = modulate_brush_alpha(&fill_brush_illuminated, fill_alpha);
+                    // Keep the authored paint intact and reveal it only through
+                    // alpha. Adding white illumination here made the fill flash
+                    // as it entered instead of behaving like a true fade-in.
+                    let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                     if let Some(ref brush) = modulated {
                         scene.fill(
                             peniko::Fill::NonZero,
@@ -1144,21 +1125,8 @@ pub fn compile_scene_from_world(
             && let Some(stroke_brush) = elem_stroke
             && let Some(style) = elem_stroke_style
         {
-            let (effective_stroke_brush, effective_style) = if anim_wave > 0.0 {
-                let base_stroke_color = match stroke_brush {
-                    peniko::Brush::Solid(c) => *c,
-                    _ => peniko::Color::WHITE,
-                };
-                let illuminated_stroke = gaanim_core::interpolate_color(
-                    base_stroke_color,
-                    peniko::Color::WHITE,
-                    0.25 * anim_wave,
-                );
-                let boosted_style = kurbo::Stroke::new(style.width + 0.3 * anim_wave);
-                (peniko::Brush::Solid(illuminated_stroke), boosted_style)
-            } else {
-                (stroke_brush.clone(), style.clone())
-            };
+            let (effective_stroke_brush, effective_style) =
+                animated_stroke_paint(stroke_brush, style, anim_wave);
 
             if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
                 scene.push_layer(
@@ -1564,29 +1532,9 @@ pub fn gaanim_render_system(
                             elem_path,
                         );
 
-                        let base_color = match fill_brush {
-                            peniko::Brush::Solid(c) => *c,
-                            _ => peniko::Color::WHITE,
-                        };
-                        let illuminated_color = gaanim_core::interpolate_color(
-                            base_color,
-                            peniko::Color::WHITE,
-                            0.22 * anim_wave,
-                        );
-
-                        // Soft interior ambient light pass (clipped strictly to character body)
-                        draw_soft_fill(
-                            &mut scene,
-                            elem_path,
-                            &peniko::Brush::Solid(illuminated_color),
-                            3.0,
-                            (0.18 * anim_wave) as f32,
-                            kurbo::Affine::IDENTITY,
-                        );
-
-                        // Illuminated main fill
-                        let fill_brush_illuminated = peniko::Brush::Solid(illuminated_color);
-                        let modulated = modulate_brush_alpha(&fill_brush_illuminated, fill_alpha);
+                        // Fade the authored paint directly; a temporary white
+                        // illumination pass made the fill appear abruptly.
+                        let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
                         if let Some(ref brush) = modulated {
                             scene.fill(
                                 peniko::Fill::NonZero,
@@ -1618,21 +1566,8 @@ pub fn gaanim_render_system(
                 && let Some(stroke_brush) = elem_stroke
                 && let Some(style) = elem_stroke_style
             {
-                let (effective_stroke_brush, effective_style) = if anim_wave > 0.0 {
-                    let base_stroke_color = match stroke_brush {
-                        peniko::Brush::Solid(c) => *c,
-                        _ => peniko::Color::WHITE,
-                    };
-                    let illuminated_stroke = gaanim_core::interpolate_color(
-                        base_stroke_color,
-                        peniko::Color::WHITE,
-                        0.25 * anim_wave,
-                    );
-                    let boosted_style = kurbo::Stroke::new(style.width + 0.3 * anim_wave);
-                    (peniko::Brush::Solid(illuminated_stroke), boosted_style)
-                } else {
-                    (stroke_brush.clone(), style.clone())
-                };
+                let (effective_stroke_brush, effective_style) =
+                    animated_stroke_paint(stroke_brush, style, anim_wave);
 
                 if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
                     scene.push_layer(
@@ -1807,12 +1742,46 @@ fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Bru
     Some(brush.clone().multiply_alpha(alpha))
 }
 
+fn animated_stroke_paint(
+    brush: &peniko::Brush,
+    style: &kurbo::Stroke,
+    wave: f64,
+) -> (peniko::Brush, kurbo::Stroke) {
+    let brush = if wave > 0.0 {
+        let base_color = match brush {
+            peniko::Brush::Solid(color) => *color,
+            _ => peniko::Color::WHITE,
+        };
+        peniko::Brush::Solid(gaanim_core::interpolate_color(
+            base_color,
+            peniko::Color::WHITE,
+            0.25 * wave,
+        ))
+    } else {
+        brush.clone()
+    };
+    // Lighting is a paint effect. It must not alter a stroke's authored
+    // logical geometry as the animation progresses.
+    (brush, style.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn draw_animation_lighting_preserves_logical_stroke_width() {
+        let brush = peniko::Brush::Solid(peniko::Color::from_rgb8(40, 100, 240));
+        let style = kurbo::Stroke::new(0.03);
+
+        for wave in [0.0, 0.25, 0.5, 1.0] {
+            let (_, animated_style) = animated_stroke_paint(&brush, &style, wave);
+            assert_eq!(animated_style.width, style.width);
+        }
     }
 
     #[test]

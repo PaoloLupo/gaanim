@@ -41,6 +41,61 @@ fn effective_zoom(cam: &ResolvedCamera) -> f64 {
     }
 }
 
+fn logical_grid_step(pixels_per_unit: f64) -> f64 {
+    const TARGET_SPACING_PX: f64 = 64.0;
+    if !pixels_per_unit.is_finite() || pixels_per_unit <= 0.0 {
+        return 1.0;
+    }
+
+    let raw_step = TARGET_SPACING_PX / pixels_per_unit;
+    let magnitude = 10.0_f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+    let nice = if normalized <= 1.0 {
+        1.0
+    } else if normalized <= 2.0 {
+        2.0
+    } else if normalized <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    nice * magnitude
+}
+
+fn format_logical_value(value: f64, step: f64) -> String {
+    let decimals = if step >= 1.0 {
+        0
+    } else {
+        (-step.log10().floor()) as usize
+    };
+    format!("{value:.decimals$}")
+}
+
+fn cursor_label_position(cursor: egui::Pos2, viewport: egui::Rect) -> egui::Pos2 {
+    const OFFSET: f32 = 14.0;
+    // An upper bound keeps the non-interactive label inside the window without
+    // requiring a layout pass before positioning it.
+    const LABEL_SIZE: egui::Vec2 = egui::vec2(132.0, 32.0);
+
+    let mut position = cursor + egui::vec2(OFFSET, OFFSET);
+    if position.x + LABEL_SIZE.x > viewport.max.x {
+        position.x = cursor.x - LABEL_SIZE.x - OFFSET;
+    }
+    if position.y + LABEL_SIZE.y > viewport.max.y {
+        position.y = cursor.y - LABEL_SIZE.y - OFFSET;
+    }
+    egui::pos2(
+        position.x.clamp(
+            viewport.min.x,
+            (viewport.max.x - LABEL_SIZE.x).max(viewport.min.x),
+        ),
+        position.y.clamp(
+            viewport.min.y,
+            (viewport.max.y - LABEL_SIZE.y).max(viewport.min.y),
+        ),
+    )
+}
+
 fn world_to_egui(cam: &ResolvedCamera, window: &Window, world: glam::DVec3) -> egui::Pos2 {
     if matches!(cam.projection, gaanim_math::Projection::Perspective { .. }) {
         let s = cam.world_to_screen(world);
@@ -198,7 +253,7 @@ pub fn overlays_settings_ui_system(
                         .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
                         if ui
                             .add(grid_btn)
-                            .on_hover_text("G: alternar grilla cada 100u")
+                            .on_hover_text("G: alternar grilla en unidades lógicas")
                             .clicked()
                         {
                             overlays.show_grid = !overlays.show_grid;
@@ -239,7 +294,10 @@ pub fn scene_overlays_system(
     // Determinar bounds del canvas real
     let (bmin, bmax, label) = if let Some(bg) = canvas_bg.as_ref() {
         let b = bg.bounds;
-        let label = format!("{} × {} units", cam.frame_width, cam.frame_height);
+        let label = format!(
+            "{} × {} unidades lógicas",
+            cam.frame_width, cam.frame_height
+        );
         (
             glam::DVec2::new(b.min.x, b.min.y),
             glam::DVec2::new(b.max.x, b.max.y),
@@ -251,15 +309,18 @@ pub fn scene_overlays_system(
         (
             glam::DVec2::new(-hw, -hh),
             glam::DVec2::new(hw, hh),
-            format!("{} × {} units", cam.frame_width, cam.frame_height),
+            format!(
+                "{} × {} unidades lógicas",
+                cam.frame_width, cam.frame_height
+            ),
         )
     };
 
     let corners_screen: Vec<egui::Pos2> = if is_perspective {
         // En perspectiva el canvas es screen-space (fijo a la cámara), no world-space.
         // Dibujar un rectángulo fijo centrado en la ventana usando viewport scale/offset.
-        let w = window.width() as f32;
-        let h = window.height() as f32;
+        let w = window.width();
+        let h = window.height();
         let vp_w = cam.viewport_width as f32 * cam.viewport.scale as f32;
         let vp_h = cam.viewport_height as f32 * cam.viewport.scale as f32;
         let cx = w * 0.5;
@@ -354,7 +415,7 @@ pub fn scene_overlays_system(
             if overlays.show_grid && !is_perspective {
                 let grid_color = egui::Color32::from_rgba_premultiplied(100, 100, 110, 45);
                 let grid_stroke = egui::Stroke::new(0.7, grid_color);
-                let step = 100.0;
+                let step = logical_grid_step(effective_zoom(&cam));
                 // Líneas verticales
                 let mut x = (bmin.x / step).ceil() * step;
                 while x <= bmax.x + 1e-6 {
@@ -453,9 +514,9 @@ pub fn scene_overlays_system(
                         egui::FontId::proportional(11.0),
                         egui::Color32::from_rgb(90, 220, 120),
                     );
-                    // Etiquetas numéricas en ticks cada 100
+                    // Etiquetas numéricas en el mismo paso lógico adaptativo que la grilla.
                     let tick_len = 4.0;
-                    let step = 100.0;
+                    let step = logical_grid_step(effective_zoom(&cam));
                     let text_color = egui::Color32::from_rgba_premultiplied(180, 180, 190, 190);
                     let font = egui::FontId::proportional(9.0);
                     let mut x = (bmin.x / step).ceil() * step;
@@ -471,7 +532,7 @@ pub fn scene_overlays_system(
                             painter.text(
                                 p + egui::vec2(0.0, 9.0),
                                 egui::Align2::CENTER_TOP,
-                                format!("{}", x as i32),
+                                format_logical_value(x, step),
                                 font.clone(),
                                 text_color,
                             );
@@ -490,7 +551,7 @@ pub fn scene_overlays_system(
                             painter.text(
                                 p + egui::vec2(6.0, 0.0),
                                 egui::Align2::LEFT_CENTER,
-                                format!("{}", y as i32),
+                                format_logical_value(y, step),
                                 font.clone(),
                                 text_color,
                             );
@@ -502,47 +563,49 @@ pub fn scene_overlays_system(
         });
 
     // --- Coordenadas del cursor (fuera del Area para que use viewport_rect) ---
-    if overlays.show_coords {
-        if let Some(cursor) = window.cursor_position() {
-            let world = egui_to_world(&cam, window, egui::pos2(cursor.x, cursor.y));
-            let text = format!("({:.1}, {:.1})", world.x, world.y);
-            let Ok(ctx) = contexts.ctx_mut() else {
-                return;
-            };
-            egui::Area::new("mouse_coords".into())
-                .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, -8.0))
-                .order(egui::Order::Foreground)
-                .interactable(false)
-                .show(ctx, |ui| {
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 210))
-                        .corner_radius(6.0)
-                        .inner_margin(egui::Margin::symmetric(8, 4))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            egui::Color32::from_rgba_premultiplied(70, 70, 85, 160),
-                        ))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("◉")
-                                        .color(egui::Color32::from_rgb(90, 220, 120))
-                                        .size(10.0),
-                                );
-                                ui.monospace(
-                                    egui::RichText::new(text)
-                                        .color(egui::Color32::from_rgb(220, 220, 230))
-                                        .size(11.0),
-                                );
-                                ui.label(
-                                    egui::RichText::new(" world")
-                                        .color(egui::Color32::from_rgb(150, 150, 165))
-                                        .size(10.0),
-                                );
-                            });
+    if overlays.show_coords
+        && let Some(cursor) = window.cursor_position()
+    {
+        let world = egui_to_world(&cam, window, egui::pos2(cursor.x, cursor.y));
+        let text = format!("({:.2}, {:.2})", world.x, world.y);
+        let Ok(ctx) = contexts.ctx_mut() else {
+            return;
+        };
+        let label_position =
+            cursor_label_position(egui::pos2(cursor.x, cursor.y), ctx.viewport_rect());
+        egui::Area::new("mouse_coords".into())
+            .fixed_pos(label_position)
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 210))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_premultiplied(70, 70, 85, 160),
+                    ))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("◉")
+                                    .color(egui::Color32::from_rgb(90, 220, 120))
+                                    .size(10.0),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(text)
+                                    .color(egui::Color32::from_rgb(220, 220, 230))
+                                    .size(11.0),
+                            );
+                            ui.label(
+                                egui::RichText::new(" u")
+                                    .color(egui::Color32::from_rgb(150, 150, 165))
+                                    .size(10.0),
+                            );
                         });
-                });
-        }
+                    });
+            });
     }
 }
 
@@ -580,5 +643,64 @@ pub fn overlays_toggle_keys_system(
     }
     if keys.just_pressed(KeyCode::KeyG) {
         overlays.show_grid = !overlays.show_grid;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grid_step_uses_readable_logical_units_at_common_editor_scales() {
+        assert_eq!(logical_grid_step(80.0), 1.0);
+        assert_eq!(logical_grid_step(40.0), 2.0);
+        assert_eq!(logical_grid_step(160.0), 0.5);
+    }
+
+    #[test]
+    fn logical_tick_labels_preserve_fractional_steps() {
+        assert_eq!(format_logical_value(2.0, 1.0), "2");
+        assert_eq!(format_logical_value(0.5, 0.5), "0.5");
+        assert_eq!(format_logical_value(-0.05, 0.05), "-0.05");
+    }
+
+    #[test]
+    fn cursor_coordinates_follow_pointer_and_flip_inside_viewport_edges() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1280.0, 720.0));
+        assert_eq!(
+            cursor_label_position(egui::pos2(100.0, 80.0), viewport),
+            egui::pos2(114.0, 94.0)
+        );
+
+        let near_edge = cursor_label_position(egui::pos2(1275.0, 715.0), viewport);
+        assert!(near_edge.x < 1275.0);
+        assert!(near_edge.y < 715.0);
+        assert!(near_edge.x + 132.0 <= viewport.max.x);
+        assert!(near_edge.y + 32.0 <= viewport.max.y);
+    }
+
+    #[test]
+    fn overlay_coordinates_are_resolution_independent_logical_units() {
+        for (width, height) in [(1280, 720), (1920, 1080), (3840, 2160)] {
+            let mut window = Window::default();
+            window.resolution.set(width as f32, height as f32);
+            let camera = ResolvedCamera::new(
+                Camera::ortho_2d_frame(16.0, 9.0, width, height),
+                gaanim_math::CameraViewport::default(),
+            );
+
+            let top_left = egui_to_world(&camera, &window, egui::pos2(0.0, 0.0));
+            let bottom_right =
+                egui_to_world(&camera, &window, egui::pos2(width as f32, height as f32));
+            assert!((top_left.x + 8.0).abs() < 1e-9);
+            assert!((top_left.y - 4.5).abs() < 1e-9);
+            assert!((bottom_right.x - 8.0).abs() < 1e-9);
+            assert!((bottom_right.y + 4.5).abs() < 1e-9);
+
+            let authored = glam::DVec3::new(2.25, -1.75, 0.0);
+            let screen = world_to_egui(&camera, &window, authored);
+            let restored = egui_to_world(&camera, &window, screen);
+            assert!((restored - authored).length() < 1e-6);
+        }
     }
 }

@@ -1107,4 +1107,23 @@ mod tests {
         assert_eq!(paragraph.metrics.line_count, 2);
         assert!(paragraph.metrics.first_baseline > 0.0);
     }
+
+    #[test]
+    fn typst_metrics_keep_logical_unit_text_lines_distinct() {
+        let registry = FontRegistry::new();
+        let paragraph = compile_typst_source(
+            &registry,
+            "#set page(width: auto, height: auto, margin: 0pt)\nFirst line\\\nSecond line",
+            false,
+            Some("New Computer Modern"),
+            Some("New Computer Modern Math"),
+            Some(0.475),
+            Some(0.475),
+            &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+            &StrokeBrush::transparent(),
+        )
+        .expect("logical-unit paragraph should compile");
+
+        assert_eq!(paragraph.metrics.line_count, 2);
+    }
 }
