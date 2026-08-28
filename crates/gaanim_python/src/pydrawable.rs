@@ -343,8 +343,8 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (*, by="grapheme", order="forward", stagger=0.0))]
-    fn write(&self, by: &str, order: &str, stagger: f64) -> PyResult<Self> {
+    #[pyo3(signature = (*, by="grapheme", order="forward", stagger=None))]
+    fn write(&self, by: &str, order: &str, stagger: Option<f64>) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "write() requires a Drawable animation proxy",
@@ -360,14 +360,18 @@ impl PyCanvasAnim {
                 "order must be forward, reverse, center, or random",
             ));
         }
-        if !stagger.is_finite() || stagger < 0.0 {
-            return Err(PyValueError::new_err(
-                "stagger must be finite and non-negative",
-            ));
+        if let Some(stagger) = stagger {
+            if !stagger.is_finite() || stagger < 0.0 {
+                return Err(PyValueError::new_err(
+                    "stagger must be finite and non-negative",
+                ));
+            }
         }
-        Ok(Self {
-            inner: self.inner.clone().write().lag_ratio(stagger),
-        })
+        let mut inner = self.inner.clone().write();
+        if let Some(stagger) = stagger {
+            inner = inner.lag_ratio(stagger);
+        }
+        Ok(Self { inner })
     }
 
     fn create(&self) -> PyResult<Self> {
@@ -573,6 +577,29 @@ impl PyCanvasAnim {
 
     fn about_point(&self, x: f64, y: f64) -> Self {
         self.pivot(x, y)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaanim_api::anim::AnimationType;
+    use gaanim_api::canvas::SceneModel;
+
+    #[test]
+    fn write_without_explicit_stagger_preserves_adaptive_scheduling() {
+        let mut scene = SceneModel::new(640, 360);
+        let text = scene.text("sequential");
+        let animation = PyCanvasAnim {
+            inner: text.animate(),
+        }
+        .write("grapheme", "forward", None)
+        .expect("default write should be valid");
+
+        let AnimationType::Write { config } = animation.inner.inner.anim_type else {
+            panic!("write() should produce a Write animation");
+        };
+        assert_eq!(config.lag_ratio, None);
     }
 }
 

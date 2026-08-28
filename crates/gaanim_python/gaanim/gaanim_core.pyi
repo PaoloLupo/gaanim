@@ -605,8 +605,8 @@ class Anim:
     def fade_out(self) -> Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
-    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: float = 0.0) -> Anim:
-        """Select the path-writing effect without mutating the timeline."""
+    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None) -> Anim:
+        """Select path writing; ``None`` uses adaptive sequential staggering and a number overrides it."""
         ...
     def create(self) -> Anim:
         """Select the path or mesh creation effect without mutating the timeline."""
@@ -2109,7 +2109,7 @@ class Chart:
         """Return the root drawable used by layout and generic transforms."""
         ...
     def layer(self, name: Literal["marks", "axes", "grid", "guides", "labels"]) -> Drawable:
-        """Return one semantic layer; ``labels`` exists only when a bar label channel materializes text."""
+        """Return one semantic layer; ``axes`` includes grid, axes, ticks, numbers, and axis labels."""
         ...
     @property
     def animate(self) -> ChartAnimation: ...

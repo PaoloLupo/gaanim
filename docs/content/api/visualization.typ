@@ -154,7 +154,10 @@ guide = Guide.colorbar(title="temperature")
 estables son `marks`, `axes`, `grid`, `guides` y la opcional `labels`; cada una
 se comporta como un objeto dibujable normal. Las marcas se agrupan por estilo
 resuelto (por ejemplo, un lote por color de barra repetido), en lugar de crear
-una entidad ECS por registro.
+una entidad ECS por registro. La capa `axes` reúne la estructura completa del
+sistema de coordenadas —rejilla, ejes, marcas, números y títulos—, por lo que
+`chart.layer("axes").animate.create()` la mantiene oculta hasta que comienza su
+entrada en `scene.play`.
 
 La opacidad del gráfico se propaga por las capas vectoriales y las mallas 3D
 nativas. Por eso `fade_in`, `fade_out` y la opacidad de un padre mantienen el

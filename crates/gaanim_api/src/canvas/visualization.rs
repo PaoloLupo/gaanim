@@ -879,11 +879,10 @@ impl SceneModel {
             if spec.mark_spec().kind == MarkKind::Bar {
                 let (marks, labels) =
                     self.materialize_bar_chart(&space, &spec, chart_series_color(self))?;
-                let axes_layer = space
-                    .layer(SpaceLayer::Axes)
-                    .cloned()
-                    .unwrap_or_else(|| space.drawable().clone())
-                    .z_index(20);
+                if let Some(axes) = space.layer(SpaceLayer::Axes) {
+                    axes.clone().z_index(20);
+                }
+                let axes_layer = space.view.clone();
                 let grid = space
                     .layer(SpaceLayer::MajorGrid)
                     .cloned()
@@ -1028,11 +1027,10 @@ impl SceneModel {
             let mark = mark
                 .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
                 .z_index(0);
-            let axes_layer = space
-                .layer(SpaceLayer::Axes)
-                .cloned()
-                .unwrap_or_else(|| space.drawable().clone())
-                .z_index(20);
+            if let Some(axes) = space.layer(SpaceLayer::Axes) {
+                axes.clone().z_index(20);
+            }
+            let axes_layer = space.view.clone();
             let grid = space
                 .layer(SpaceLayer::MajorGrid)
                 .cloned()
@@ -4612,6 +4610,33 @@ mod tests {
         assert!(
             axis_z > mark_z,
             "semantic axes must remain readable when a bar intersects them",
+        );
+    }
+
+    #[test]
+    fn chart_axes_layer_targets_the_complete_structural_view() {
+        let table = gaanim_visualization::DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("y".to_owned(), vec![3.0, 2.0, 1.0]),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(MarkKind::Bar, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        let axes = chart.layer("axes").expect("chart axes layer");
+        assert!(
+            matches!(
+                axes.spec.lock().expect("axes spec poisoned").kind,
+                SpawnKind::GroupNoCenter(_)
+            ),
+            "the chart axes layer must include grid, axes, ticks, numbers, and labels",
         );
     }
 

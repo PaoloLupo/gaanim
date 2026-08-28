@@ -330,8 +330,11 @@ scene.render()
 #api-entry(
   name: "Text.write grouping",
   kind: "method",
-  signature: ".animate.write(*, by=\"grapheme\", order=\"forward\", stagger=0.0) -> Anim",
-  params: ((name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),),
+  signature: ".animate.write(*, by=\"grapheme\", order=\"forward\", stagger=None) -> Anim",
+  params: (
+    (name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),
+    (name: "stagger", type: "float | None", default: "None", desc: [Uses adaptive sequential staggering by default; pass a non-negative ratio to override it.]),
+  ),
   returns: (type: "Anim", desc: [Animation descriptor accepted by #raw("scene.play()") .]),
   desc: [Writes graphemes, words, rendered lines, or semantic parts in deterministic order. Configure time afterward with #raw("text.animate.write(by=\"word\").duration(0.8)").],
 )[
