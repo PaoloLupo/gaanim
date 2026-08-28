@@ -7,13 +7,13 @@ import os
 
 from gaanim import Easing, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(960, 540)
-circle = scene.geometry.circle(72).fill(BLUE).stroke(WHITE, 4).move_to(-220, 0)
+scene = Scene(frame=(16, 9))
+circle = scene.geometry.circle(1.2).fill(BLUE).stroke(WHITE, 0.066667).move_to(-3.666667, 0)
 
 scene.play([circle.animate.create().duration(1.0).easing(Easing.SMOOTH)])
-scene.play([circle.animate.shift_by(440, 0).duration(1.5).easing(Easing.SMOOTH)])
+scene.play([circle.animate.shift_by(7.333333, 0).duration(1.5).easing(Easing.SMOOTH)])
 scene.play([circle.animate.rotate_by(3.14159).duration(0.5), circle.animate.opacity(0.65).duration(0.5)])
-circle.stroke(GOLD, 7)
+circle.stroke(GOLD, 0.116667)
 scene.wait(0.5)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

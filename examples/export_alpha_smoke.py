@@ -5,8 +5,8 @@ import os
 from gaanim import GOLD, Scene
 
 
-scene = Scene(320, 180, background="#00000000", margin=0)
-scene.geometry.rect(80, 60).fill(GOLD).no_stroke()
+scene = Scene(frame=(16, 9), background="#00000000", margin=0)
+scene.geometry.rect(4, 3).fill(GOLD).no_stroke()
 scene.wait(0.2)
 
 if snapshot_dir := os.environ.get("GAANIM_SNAPSHOTS"):

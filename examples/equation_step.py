@@ -5,8 +5,8 @@ import os
 from gaanim import Anchor, BLACK, GOLD, RED, WHITE, Scene, part
 
 
-scene = Scene(1920, 1080, background=BLACK)
-title = scene.text("Resolver paso a paso", role="title").fill(WHITE).move_to(0, 220, anchor=Anchor.CENTER)
+scene = Scene(frame=(16, 9), background=BLACK)
+title = scene.text("Resolver paso a paso", role="title").fill(WHITE).move_to(0, 1.833333, anchor=Anchor.CENTER)
 before = scene.text.equation(
     part("variable", "x"), "dot 5 =", part("factor", "25")
 ).move_to(0, 0, anchor=Anchor.CENTER).scale_to(2)

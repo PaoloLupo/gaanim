@@ -34,7 +34,9 @@ impl Default for EditorOverlays {
 
 fn effective_zoom(cam: &ResolvedCamera) -> f64 {
     match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => (zoom * cam.viewport.scale).max(0.01),
+        gaanim_math::Projection::Orthographic { zoom } => {
+            (cam.pixels_per_unit() * zoom * cam.viewport.scale).max(0.01)
+        }
         _ => 1.0,
     }
 }
@@ -237,19 +239,19 @@ pub fn scene_overlays_system(
     // Determinar bounds del canvas real
     let (bmin, bmax, label) = if let Some(bg) = canvas_bg.as_ref() {
         let b = bg.bounds;
-        let label = format!("{} × {}", cam.viewport_width, cam.viewport_height);
+        let label = format!("{} × {} units", cam.frame_width, cam.frame_height);
         (
             glam::DVec2::new(b.min.x, b.min.y),
             glam::DVec2::new(b.max.x, b.max.y),
             label,
         )
     } else {
-        let hw = cam.viewport_width as f64 * 0.5;
-        let hh = cam.viewport_height as f64 * 0.5;
+        let hw = cam.frame_width * 0.5;
+        let hh = cam.frame_height * 0.5;
         (
             glam::DVec2::new(-hw, -hh),
             glam::DVec2::new(hw, hh),
-            format!("{} × {}", cam.viewport_width, cam.viewport_height),
+            format!("{} × {} units", cam.frame_width, cam.frame_height),
         )
     };
 

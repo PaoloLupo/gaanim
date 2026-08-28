@@ -3,8 +3,8 @@ import os
 
 from gaanim import BLUE, GOLD, Scene, vertical_short
 
-scene = Scene(720, 1280, background="#0f172a", margin=48)
-page = scene.layout.template(vertical_short, title=scene.text("Vertical", role="title").fill(GOLD), body=scene.geometry.circle(180).fill(BLUE), caption=scene.text("9:16 · no at()"))
+scene = Scene(frame=(9, 16), background="#0f172a", margin=0.6)
+page = scene.layout.template(vertical_short, title=scene.text("Vertical", role="title").fill(GOLD), body=scene.geometry.circle(2.25).fill(BLUE), caption=scene.text("9:16 · no at()"))
 scene.play([page.animate.fade_in().duration(0.5)])
 scene.wait(2.5)
 

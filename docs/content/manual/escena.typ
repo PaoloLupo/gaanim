@@ -17,7 +17,7 @@ escena habitual se lee de arriba abajo en cinco zonas.
 == Configuración
 
 ```python
-scene = Scene(1920, 1080, background="#0f172a", margin=64)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=64)
 ```
 
 El viewport establece el sistema de coordenadas. `margin` define un área

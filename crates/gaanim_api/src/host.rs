@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn snapshot_requests_are_delegated_to_the_host() {
         set_snapshot_handler(Some(Arc::new(|canvas, directory, times| {
-            assert_eq!(canvas.width, 320);
+            assert_eq!(canvas.frame.width, 320.0);
             assert_eq!(directory, "owned-by-host");
             assert_eq!(times, [0.0, 1.5]);
             Ok(times.len())

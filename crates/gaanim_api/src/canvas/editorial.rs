@@ -137,7 +137,7 @@ impl BadgeSpec {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            padding: (18.0, 10.0),
+            padding: (0.18, 0.10),
             radius: None,
             font_size: None,
             min_width: None,
@@ -166,7 +166,7 @@ impl ChipSpec {
         Self {
             text: text.into(),
             dot: true,
-            padding: (14.0, 8.0),
+            padding: (0.14, 0.08),
             radius: None,
             font_size: None,
             style: EditorialStyle::default(),
@@ -198,11 +198,11 @@ impl CardSpec {
             title: title.into(),
             body: None,
             footer: None,
-            width: 420.0,
-            min_height: 180.0,
-            padding: (28.0, 24.0),
-            gap: 14.0,
-            radius: 18.0,
+            width: 4.2,
+            min_height: 1.8,
+            padding: (0.28, 0.24),
+            gap: 0.14,
+            radius: 0.18,
             style: EditorialStyle::default(),
         }
     }
@@ -243,10 +243,10 @@ impl BannerSpec {
             subtitle: None,
             position: BannerPosition::Top,
             width: None,
-            margin: 32.0,
-            padding: (28.0, 18.0),
-            gap: 8.0,
-            radius: 14.0,
+            margin: 0.32,
+            padding: (0.28, 0.18),
+            gap: 0.08,
+            radius: 0.14,
             style: EditorialStyle::default(),
         }
     }
@@ -283,11 +283,11 @@ impl LowerThirdSpec {
             subtitle: None,
             kicker: None,
             side: LowerThirdSide::Left,
-            width: 520.0,
-            margin: 32.0,
-            padding: (28.0, 20.0),
-            gap: 8.0,
-            radius: 16.0,
+            width: 5.2,
+            margin: 0.32,
+            padding: (0.28, 0.20),
+            gap: 0.08,
+            radius: 0.16,
             style: EditorialStyle::default(),
         }
     }
@@ -327,11 +327,11 @@ impl StatCardSpec {
             value: value.into(),
             label: label.into(),
             delta: None,
-            width: 280.0,
-            min_height: 170.0,
-            padding: (24.0, 20.0),
-            gap: 8.0,
-            radius: 18.0,
+            width: 2.8,
+            min_height: 1.7,
+            padding: (0.24, 0.20),
+            gap: 0.08,
+            radius: 0.18,
             style: EditorialStyle::default(),
         }
     }
@@ -363,10 +363,10 @@ impl QuoteCardSpec {
         Self {
             quote: quote.into(),
             attribution: None,
-            width: 620.0,
-            padding: (32.0, 28.0),
-            gap: 16.0,
-            radius: 18.0,
+            width: 6.2,
+            padding: (0.32, 0.28),
+            gap: 0.16,
+            radius: 0.18,
             style: EditorialStyle::default(),
         }
     }
@@ -402,12 +402,12 @@ impl SectionHeaderSpec {
             title: title.into(),
             kicker: None,
             subtitle: None,
-            width: 720.0,
+            width: 7.2,
             align: EditorialAlign::Left,
             rule: false,
-            padding: (24.0, 18.0),
-            gap: 10.0,
-            radius: 12.0,
+            padding: (0.24, 0.18),
+            gap: 0.10,
+            radius: 0.12,
             style: EditorialStyle::default(),
         }
     }
@@ -493,8 +493,8 @@ impl SceneModel {
             style.compact_text,
             None,
         )?;
-        let dot_diameter = if spec.dot { 10.0 } else { 0.0 };
-        let dot_gap = if spec.dot { 8.0 } else { 0.0 };
+        let dot_diameter = if spec.dot { 0.10 } else { 0.0 };
+        let dot_gap = if spec.dot { 0.08 } else { 0.0 };
         let content_width = label_width + dot_diameter + dot_gap;
         let width = content_width + spec.padding.0 * 2.0;
         let height = label_height.max(dot_diameter) + spec.padding.1 * 2.0;
@@ -633,7 +633,7 @@ impl SceneModel {
         validate_non_negative("margin", spec.margin)?;
         validate_box_metrics(spec.width, 0.0, spec.padding, spec.gap, spec.radius)?;
         let style = self.resolve_editorial_style(spec.style);
-        let inner = content_width_with_inset(spec.width, spec.padding.0, 8.0)?;
+        let inner = content_width_with_inset(spec.width, spec.padding.0, 0.08)?;
         let mut blocks = Vec::new();
         if let Some(kicker) = &spec.kicker {
             blocks.push(self.editorial_block(
@@ -738,7 +738,7 @@ impl SceneModel {
         validate_optional_text("attribution", &spec.attribution)?;
         validate_box_metrics(spec.width, 0.0, spec.padding, spec.gap, spec.radius)?;
         let style = self.resolve_editorial_style(spec.style);
-        let inner = content_width_with_inset(spec.width, spec.padding.0, 14.0)?;
+        let inner = content_width_with_inset(spec.width, spec.padding.0, 0.14)?;
         let mut blocks = vec![self.editorial_block(
             &format!("“{}”", spec.quote),
             TextRole::Body,
@@ -1164,14 +1164,14 @@ mod tests {
             EditorialError::EmptyText { field: "text" }
         );
         let mut spec = CardSpec::new("Title");
-        spec.width = 20.0;
-        spec.padding = (12.0, 4.0);
+        spec.width = 0.20;
+        spec.padding = (0.12, 0.04);
         assert_eq!(canvas.card(spec).unwrap_err(), EditorialError::ContentWidth);
     }
 
     #[test]
     fn all_editorial_factories_return_group_drawables() {
-        let mut canvas = SceneModel::new(1280, 720).margin_all(48.0);
+        let mut canvas = SceneModel::new(16.0, 9.0).margin_all(0.48);
         let banner = canvas.banner(BannerSpec::new("Banner")).unwrap();
         let lower_third = canvas.lower_third(LowerThirdSpec::new("Speaker")).unwrap();
         assert!(

@@ -601,7 +601,7 @@ class Anim:
     def fade_in(self) -> Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``."""
         ...
-    def fade_in_from(self, direction: Direction, distance: float = 48.0) -> Anim: ...
+    def fade_in_from(self, direction: Direction, distance: float = 0.48) -> Anim: ...
     def fade_out(self) -> Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
@@ -848,14 +848,14 @@ class Drawable:
     def style_class(self, name: str) -> Self:
         """Attach an ordered theme class; explicit fluent styles still win."""
         ...
-    def glow(self, color: Color, radius: float = 16.0, intensity: float = 1.0) -> Drawable:
+    def glow(self, color: Color, radius: float = 0.16, intensity: float = 1.0) -> Drawable:
         """Apply glow to this drawable and return the result.
 
         Example:
             result = drawable.glow(BLUE)
         """
         ...
-    def blur(self, sigma: float = 4.0) -> Drawable:
+    def blur(self, sigma: float = 0.04) -> Drawable:
         """Apply blur to this drawable and return the result.
 
         Example:
@@ -865,9 +865,9 @@ class Drawable:
     def shadow(
         self,
         color: Color,
-        x: float = 8.0,
-        y: float = -8.0,
-        blur: float = 6.0,
+        x: float = 0.08,
+        y: float = -0.08,
+        blur: float = 0.06,
     ) -> Drawable:
         """Apply shadow to this drawable and return the result.
 
@@ -1068,7 +1068,7 @@ class Drawable:
         self,
         reference: Drawable,
         direction: Direction,
-        spacing: float = 24.0,
+        spacing: float = 0.24,
         aligned_edge: Optional[Anchor] = None,
     ) -> Self:
         """Apply next to to this drawable and return the result.
@@ -1089,14 +1089,14 @@ class Drawable:
             result = drawable.align_to(reference, Anchor.CENTER)
         """
         ...
-    def to_edge(self, direction: Direction, buff: float = 24.0) -> Self:
+    def to_edge(self, direction: Direction, buff: float = 0.24) -> Self:
         """Apply to edge to this drawable and return the result.
 
         Example:
             result = drawable.to_edge(Direction.RIGHT)
         """
         ...
-    def to_corner(self, corner: Anchor, buff: float = 24.0) -> Self:
+    def to_corner(self, corner: Anchor, buff: float = 0.24) -> Self:
         """Apply to corner to this drawable and return the result.
 
         Example:
@@ -1492,14 +1492,14 @@ class TextQuery:
 
 class Text(Drawable):
     """Structured, Layout-v2-measurable vector text and mathematics."""
-    def glow(self, color: Color, radius: float = 16.0, intensity: float = 1.0) -> Self:
+    def glow(self, color: Color, radius: float = 0.16, intensity: float = 1.0) -> Self:
         """Apply glow while preserving Text chaining and typographic placement.
 
         Example:
             title.glow(BLUE).move_to(0.0, 0.0)
         """
         ...
-    def blur(self, sigma: float = 4.0) -> Self:
+    def blur(self, sigma: float = 0.04) -> Self:
         """Apply blur while preserving Text chaining and typographic placement.
 
         Example:
@@ -1509,9 +1509,9 @@ class Text(Drawable):
     def shadow(
         self,
         color: Color,
-        x: float = 8.0,
-        y: float = -8.0,
-        blur: float = 6.0,
+        x: float = 0.08,
+        y: float = -0.08,
+        blur: float = 0.06,
     ) -> Self:
         """Apply shadow while preserving Text chaining and typographic placement.
 
@@ -1574,9 +1574,27 @@ class Text(Drawable):
         ...
 
 class Canvas:
-    """Visual viewport configuration owned by a Scene."""
-    width: int
-    height: int
+    """Resolution-independent logical frame configuration owned by a Scene."""
+    @property
+    def frame_width(self) -> float:
+        """Logical frame width; 16.0 for the default widescreen scene."""
+        ...
+    @property
+    def frame_height(self) -> float:
+        """Logical frame height; 9.0 for the default widescreen scene."""
+        ...
+    @property
+    def aspect_ratio(self) -> float:
+        """Logical frame width divided by height."""
+        ...
+    @property
+    def safe_width(self) -> float:
+        """Logical width remaining after left and right safe-area margins."""
+        ...
+    @property
+    def safe_height(self) -> float:
+        """Logical height remaining after top and bottom safe-area margins."""
+        ...
     background: Optional[BackgroundLike]
     theme: Optional[str]
     def set_theme(self, theme: str | Theme) -> None:
@@ -1638,10 +1656,10 @@ class Canvas:
         """
         ...
     def set_preset(self, name: Literal["widescreen", "vertical", "square"]) -> None:
-        """Configure the canvas with set preset.
+        """Replace the logical frame and safe area with a named composition preset.
 
         Example:
-            scene.canvas.set_preset(None)
+            scene.canvas.set_preset("vertical")
         """
         ...
 class Segment:
@@ -1760,7 +1778,7 @@ class CameraAnimation:
         ...
     def shake(
         self,
-        amplitude: float = 12.0,
+        amplitude: float = 0.12,
         frequency: float = 8.0,
     ) -> Anim:
         """Configure the camera with shake.
@@ -2259,11 +2277,11 @@ class CoordinateSpace:
         domain: Optional[tuple[float, float]] = None,
         *,
         samples: Optional[int] = None,
-        tolerance: float = 0.75,
+        tolerance: float = 0.0075,
         derivative: Optional[Callable[..., float]] = None,
         inputs: Sequence[Parameter | Variable | TimeInput] = (),
     ) -> Drawable: ...
-    def parametric(self, function: Callable[..., tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.75, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
+    def parametric(self, function: Callable[..., tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.0075, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
     def implicit(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def contour(self, function: Callable[[float, float], float], levels: Sequence[float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def field(self, function: Callable[..., tuple[float, float]], *, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> VectorField:
@@ -2304,7 +2322,7 @@ class CoordinateSpace:
         xs: Sequence[Optional[float]],
         ys: Sequence[Optional[float]],
         *,
-        radius: float = 6.0,
+        radius: float = 0.06,
         policy: Literal["gap", "drop", "error"] = "gap",
         color: Optional[Color] = None,
     ) -> Drawable:
@@ -2340,10 +2358,10 @@ class NumberLine:
         function: Callable[..., float],
         domain: Optional[tuple[float, float]] = None,
         *,
-        normal_scale: float = 120.0,
+        normal_scale: float = 1.2,
         reveal: Optional[_ReactiveScalar] = None,
         samples: Optional[int] = None,
-        tolerance: float = 0.75,
+        tolerance: float = 0.0075,
         inputs: Sequence[Parameter | Variable | TimeInput] = (),
     ) -> Drawable:
         """Plot a scalar Python function perpendicular to this number line.
@@ -2460,7 +2478,7 @@ class Geometry:
         targets: Drawable | TextSelection | Sequence[Drawable | TextSelection],
         *,
         padding: Padding = 12.0,
-        corner_radius: float = 8.0,
+        corner_radius: float = 0.08,
     ) -> SurroundingRect:
         """Create a live outline around objects, text parts, or equation parts.
 
@@ -2516,7 +2534,7 @@ class Geometry:
         """
         ...
     def dashed_line(
-        self, x1: float, y1: float, x2: float, y2: float, *, dash_length: float = 16.0, gap_length: float = 10.0
+        self, x1: float, y1: float, x2: float, y2: float, *, dash_length: float = 0.16, gap_length: float = 0.10
     ) -> Drawable:
         """Create a dashed line drawable in the scene.
 
@@ -2730,14 +2748,14 @@ class Geometry:
             result = scene.point_on_curve(curve, None)
         """
         ...
-    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
+    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
         """Create a hidden tangent drawable; reveal it in ``scene.play``.
 
         Example:
             result = scene.tangent_on_curve(curve, None)
         """
         ...
-    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 80.0) -> Drawable:
+    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
         """Create a hidden normal drawable; reveal it in ``scene.play``.
 
         Example:
@@ -2957,7 +2975,7 @@ class Typography:
 
         Example:
             width, height = scene.measure_text("PGA = 0.35 g", role="label")
-            box = scene.rounded_rect(width + 56, height + 32, 14)
+            box = scene.rounded_rect(width + 0.56, height + 0.32, 0.14)
         """
         ...
     def code(
@@ -2965,9 +2983,9 @@ class Typography:
         source: str,
         *,
         language: str = "text",
-        width: float = 760.0,
-        height: float = 300.0,
-        font_size: float = 20.0,
+        width: float = 7.6,
+        height: float = 3.0,
+        font_size: float = 0.2,
         background: Optional[Color] = None,
         color: Optional[Color] = None,
         accent: Optional[Color] = None,
@@ -2981,7 +2999,7 @@ class Typography:
 
 class LayoutBuilder:
     """Scene-owned factory for responsive layouts, items, constraints, and templates."""
-    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
         """Create a horizontal Layout v2 container in canvas units.
 
         ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
@@ -2990,7 +3008,7 @@ class LayoutBuilder:
         Ownership errors are raised before render as ``LayoutOwnershipError``.
         """
         ...
-    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 24.0, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
+    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
         """Create a vertical Layout v2 container with optional wrapping.
 
         Responsive text is composed at the width offered by the column, even
@@ -3221,7 +3239,7 @@ class Visualization:
         self,
         radial: Axis,
         *,
-        radius: float = 220.0,
+        radius: float = 2.2,
         angle_divisions: int = 12,
         grid: bool = True,
         axes: bool = True,
@@ -3270,7 +3288,7 @@ class Visualization:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
-        omitting it selects the shared 48-unit reactive annotation size.
+        omitting it selects the shared 0.48-unit reactive annotation size.
         ``color`` applies to the label, reactive value, and unit and remains in
         effect when the number changes or the timeline seeks.
         """
@@ -3278,7 +3296,7 @@ class Visualization:
     def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
-        Every visible term uses ``font_size``, or 48 units when omitted.
+        Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
         """
         ...
@@ -3303,9 +3321,9 @@ class Visualization:
         self,
         data: Any,
         *,
-        row_gap: float = 24.0,
-        column_gap: float = 24.0,
-        delimiter_gap: float = 12.0,
+        row_gap: float = 0.24,
+        column_gap: float = 0.24,
+        delimiter_gap: float = 0.12,
         delimiters: Literal["brackets", "parentheses", "braces", "bars", "double_bars", "none"] = "brackets",
         delimiter_size: float | None = None,
         delimiter_weight: int = 300,
@@ -3356,7 +3374,7 @@ class SlideKit:
         *,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        padding: tuple[float, float] = (18.0, 10.0),
+        padding: tuple[float, float] = (0.18, 0.10),
         radius: Optional[float] = None,
         font_size: Optional[float] = None,
         min_width: Optional[float] = None,
@@ -3372,7 +3390,7 @@ class SlideKit:
         ``.move_to(...)`` and animate it like any other ``Drawable``.
 
         Example:
-            tag = scene.badge("READY", variant="success").move_to(-300, 180)
+            tag = scene.badge("READY", variant="success").move_to(-3, 1.8)
             scene.play(tag.animate.grow_from_center())
         """
         ...
@@ -3383,7 +3401,7 @@ class SlideKit:
         dot: bool = True,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        padding: tuple[float, float] = (14.0, 8.0),
+        padding: tuple[float, float] = (0.14, 0.08),
         radius: Optional[float] = None,
         font_size: Optional[float] = None,
         color: Optional[Color] = None,
@@ -3406,11 +3424,11 @@ class SlideKit:
         body: Optional[str] = None,
         footer: Optional[str] = None,
         *,
-        width: float = 420.0,
-        min_height: float = 180.0,
-        padding: tuple[float, float] = (28.0, 24.0),
-        gap: float = 14.0,
-        radius: float = 18.0,
+        width: float = 4.2,
+        min_height: float = 1.8,
+        padding: tuple[float, float] = (0.28, 0.24),
+        gap: float = 0.14,
+        radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3433,10 +3451,10 @@ class SlideKit:
         *,
         position: Literal["top", "bottom"] = "top",
         width: Optional[float] = None,
-        margin: float = 32.0,
-        padding: tuple[float, float] = (28.0, 18.0),
-        gap: float = 8.0,
-        radius: float = 14.0,
+        margin: float = 0.32,
+        padding: tuple[float, float] = (0.28, 0.18),
+        gap: float = 0.08,
+        radius: float = 0.14,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3459,11 +3477,11 @@ class SlideKit:
         *,
         kicker: Optional[str] = None,
         side: Literal["left", "right"] = "left",
-        width: float = 520.0,
-        margin: float = 32.0,
-        padding: tuple[float, float] = (28.0, 20.0),
-        gap: float = 8.0,
-        radius: float = 16.0,
+        width: float = 5.2,
+        margin: float = 0.32,
+        padding: tuple[float, float] = (0.28, 0.20),
+        gap: float = 0.08,
+        radius: float = 0.16,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3485,11 +3503,11 @@ class SlideKit:
         label: str,
         *,
         delta: Optional[str] = None,
-        width: float = 280.0,
-        min_height: float = 170.0,
-        padding: tuple[float, float] = (24.0, 20.0),
-        gap: float = 8.0,
-        radius: float = 18.0,
+        width: float = 2.8,
+        min_height: float = 1.7,
+        padding: tuple[float, float] = (0.24, 0.20),
+        gap: float = 0.08,
+        radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3510,10 +3528,10 @@ class SlideKit:
         quote: str,
         attribution: Optional[str] = None,
         *,
-        width: float = 620.0,
-        padding: tuple[float, float] = (32.0, 28.0),
-        gap: float = 16.0,
-        radius: float = 18.0,
+        width: float = 6.2,
+        padding: tuple[float, float] = (0.32, 0.28),
+        gap: float = 0.16,
+        radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3535,12 +3553,12 @@ class SlideKit:
         *,
         kicker: Optional[str] = None,
         subtitle: Optional[str] = None,
-        width: float = 720.0,
+        width: float = 7.2,
         align: Literal["left", "center", "right"] = "left",
         rule: bool = False,
-        padding: tuple[float, float] = (24.0, 18.0),
-        gap: float = 10.0,
-        radius: float = 12.0,
+        padding: tuple[float, float] = (0.24, 0.18),
+        gap: float = 0.10,
+        radius: float = 0.12,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
         color: Optional[Color] = None,
@@ -3563,9 +3581,9 @@ class SlideKit:
         text: str,
         target: Drawable,
         *,
-        offset: tuple[float, float] = (160.0, 96.0),
-        width: float = 240.0,
-        height: float = 72.0,
+        offset: tuple[float, float] = (1.6, 0.96),
+        width: float = 2.4,
+        height: float = 0.72,
         background: Optional[Color] = None,
         color: Optional[Color] = None,
     ) -> Drawable:
@@ -3580,8 +3598,8 @@ class SlideKit:
         title: str,
         subtitle: Optional[str] = None,
         *,
-        width: float = 760.0,
-        height: float = 320.0,
+        width: float = 7.6,
+        height: float = 3.2,
         panel: bool = False,
         background: Optional[Color] = None,
         color: Optional[Color] = None,
@@ -3597,9 +3615,9 @@ class SlideKit:
         self,
         items: Sequence[str],
         *,
-        width: float = 720.0,
-        gap: float = 68.0,
-        bullet_radius: float = 8.0,
+        width: float = 7.2,
+        gap: float = 0.68,
+        bullet_radius: float = 0.08,
         bullet_color: Optional[Color] = None,
         color: Optional[Color] = None,
     ) -> Drawable:
@@ -3614,8 +3632,8 @@ class SlideKit:
         headers: Sequence[str],
         rows: Sequence[Sequence[str]],
         *,
-        width: float = 760.0,
-        row_height: float = 58.0,
+        width: float = 7.6,
+        row_height: float = 0.58,
         header_background: Optional[Color] = None,
         rule_color: Optional[Color] = None,
         color: Optional[Color] = None,
@@ -3641,7 +3659,7 @@ class Mechanics:
         from_: Endpoint,
         to: Endpoint,
         *,
-        width: float = 8.0,
+        width: float = 0.08,
     ) -> Drawable:
         """Create a round-capped reactive bar between two endpoints.
 
@@ -3654,10 +3672,10 @@ class Mechanics:
         from_: Endpoint,
         to: Endpoint,
         coils: int = 8,
-        amplitude: float = 12.0,
+        amplitude: float = 0.12,
         crossing: float = 0.0,
-        start_straight: float = 12.0,
-        end_straight: float = 12.0,
+        start_straight: float = 0.12,
+        end_straight: float = 0.12,
     ) -> Drawable:
         """Create a hidden reactive helical spring; reveal it in ``scene.play``.
 
@@ -3667,7 +3685,7 @@ class Mechanics:
         ``crossing`` ranges from 0 to 1: higher values make each turn fold
         back briefly, creating e-like visual crossings.
         ``start_straight`` and ``end_straight`` are non-negative scene-unit
-        lengths of the straight segments at each endpoint; both default to 12.
+        lengths of the straight segments at each endpoint; both default to 0.12.
         They are shortened proportionally when the endpoints are too close.
         Non-finite or negative straight lengths raise ``ValueError``.
 
@@ -3687,14 +3705,14 @@ class Mechanics:
         format: str = ".2f",
         unit: Optional[str] = None,
         scale: float = 1.0,
-        label_gap: float = 10.0,
+        label_gap: float = 0.10,
         label_orientation: Literal["upright", "aligned"] = "upright",
         font_size: Optional[float] = None,
         color: Optional[Color] = None,
-        line_width: float = 3.0,
+        line_width: float = 0.03,
         extension_style: Literal["solid", "dashed"] = "solid",
-        dash_length: float = 12.0,
-        gap_length: float = 8.0,
+        dash_length: float = 0.12,
+        gap_length: float = 0.08,
     ) -> Dimension:
         """Create a reactive technical dimension and optional annotation.
 
@@ -3708,14 +3726,14 @@ class Mechanics:
         ``label_orientation`` keeps text horizontal or aligned while avoiding
         upside-down labels. ``color`` initializes the extension lines,
         solid triangular arrowheads and the complete annotation, including its
-        reactive value. Math labels and reactive values share one 48-unit typographic baseline by default, including
+        reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry;
         dashed extensions use ``dash_length`` and ``gap_length``. Invalid
         metrics, extension styles, or orientation raise ``ValueError``.
 
         Example:
             width = scene.dimension_between(
-                left, right, 45, label="$W_f$", show_value=True, unit="mm"
+                left, right, 0.45, label="$W_f$", show_value=True, unit="mm"
             )
         """
         ...
@@ -3725,14 +3743,14 @@ class Mechanics:
         from_: AngleRay,
         to: AngleRay,
         *,
-        radius: float = 64.0,
+        radius: float = 0.64,
         label: Optional[str] = None,
         show_value: bool = False,
         format: str = ".1f",
         unit: Literal["deg", "rad"] = "deg",
         sweep: Literal["minor", "major", "cw", "ccw"] = "minor",
         arrowheads: Literal["none", "start", "end", "both"] = "both",
-        label_gap: float = 12.0,
+        label_gap: float = 0.12,
         label_orientation: Literal["upright", "aligned"] = "upright",
         show_extensions: bool = True,
         font_size: Optional[float] = None,
@@ -3741,19 +3759,19 @@ class Mechanics:
         """Create a same-frame angular dimension from fixed directions or endpoints.
 
         ``color`` applies to the arc, arrows, label, reactive value, and unit.
-        All annotation terms default to the shared 48-unit reactive size.
+        All annotation terms default to the shared 0.48-unit reactive size.
         Degenerate rays hide the geometry; invalid modes or metrics raise ``ValueError``.
         """
         ...
-    def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive vector with accessible shaft, solid head, and readout parts.
 
         ``color`` applies to the vector and every readout term, including the
         reactive numeric value after updates and seeks. Labels, values, and
-        units default to 48 scene units.
+        units default to 0.48 scene units.
         """
         ...
-    def force_at(self, origin: Endpoint, magnitude: _ReactiveScalar, *, direction: _ReactiveScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def force_at(self, origin: Endpoint, magnitude: _ReactiveScalar, *, direction: _ReactiveScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive force from physical magnitude and direction in radians.
 
         ``visual_scale`` converts physical units into scene units and must be
@@ -3762,50 +3780,50 @@ class Mechanics:
         row defaults to 48 scene units.
         """
         ...
-    def force_from_components(self, origin: Endpoint, fx: _ReactiveScalar, fy: _ReactiveScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 14.0, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def force_from_components(self, origin: Endpoint, fx: _ReactiveScalar, fy: _ReactiveScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive force from physical X/Y components relative to a moving origin.
 
         ``color`` applies to the force and the complete reactive readout, whose
         terms default to 48 scene units.
         """
         ...
-    def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+    def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
         """Create a theme-aware vector support following ``point``.
 
         Direction runs from the base toward the connection; sizes are scene units.
         """
         ...
-    def fixed_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+    def fixed_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
         """Create a fixed or ceiling support with plate and consistent hatching."""
         ...
-    def pin_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+    def pin_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
         """Create a triangular pinned support with a circular joint."""
         ...
-    def roller_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+    def roller_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
         """Create a triangular support on two aligned rollers."""
         ...
-    def guided_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 48.0, ground_length: float = 70.0, color: Optional[Color] = None) -> Support:
+    def guided_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
         """Create a guided carriage support aligned with ``direction``."""
         ...
-    def joint_at(self, point: Endpoint, *, kind: Literal["revolute", "prismatic"] = "revolute", axis: Optional[Direction] = None, size: float = 36.0, color: Optional[Color] = None) -> Drawable:
+    def joint_at(self, point: Endpoint, *, kind: Literal["revolute", "prismatic"] = "revolute", axis: Optional[Direction] = None, size: float = 0.36, color: Optional[Color] = None) -> Drawable:
         """Create a standalone reactive revolute or prismatic joint symbol."""
         ...
-    def gear(self, radius: float, teeth: int, *, bore_radius: float = 8.0, color: Optional[Color] = None) -> Drawable:
+    def gear(self, radius: float, teeth: int, *, bore_radius: float = 0.08, color: Optional[Color] = None) -> Drawable:
         """Create an editorial gear silhouette; geometry is illustrative, not manufacturing involute."""
         ...
     def rack(self, length: float, teeth: int, *, color: Optional[Color] = None) -> Drawable:
         """Create an editorial straight rack with evenly spaced teeth."""
         ...
-    def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 8.0, color: Optional[Color] = None) -> Drawable:
+    def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 0.08, color: Optional[Color] = None) -> Drawable:
         """Create a closed radial cam from ``(angle_radians, radius)`` samples."""
         ...
-    def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 80.0, normal_length: float = 80.0) -> Drawable:
+    def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
         """Group a reactive contact point, tangent, and normal on a sampled curve."""
         ...
     def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[Color] = None) -> Drawable:
         """Create a curved moment arrow that follows a reactive center."""
         ...
-    def coordinate_frame_at(self, origin: Endpoint, x_direction: Direction, *, length: float = 70.0, labels: Optional[tuple[str, str]] = None, color: Optional[Color] = None) -> Drawable:
+    def coordinate_frame_at(self, origin: Endpoint, x_direction: Direction, *, length: float = 0.70, labels: Optional[tuple[str, str]] = None, color: Optional[Color] = None) -> Drawable:
         """Create a reactive orthogonal 2D coordinate frame at an endpoint."""
         ...
 
@@ -3863,16 +3881,20 @@ class AssetManager:
 class Scene:
     def __init__(
         self,
-        width: int = 1280,
-        height: int = 720,
+        *,
+        frame: tuple[float, float] = (16.0, 9.0),
         background: Optional[BackgroundLike] = None,
         margin: Optional[float] = None,
         theme: Optional[str | Theme] = None,
     ) -> None:
-        """Create a scene and optionally install its centralized theme.
+        """Create a resolution-independent scene in logical units.
 
-        An explicit color, Brush, or Background wins over the theme background.
-        Invalid WGSL and unknown theme names raise ``ValueError``.
+        ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
+        margins, text sizes, strokes, and effects use the same logical unit;
+        output pixels are selected by the editor or exporter. Non-finite or
+        non-positive frame dimensions, invalid WGSL, and unknown themes raise
+        ``ValueError``. The former ``Scene(width, height)`` pixel API is not
+        accepted.
         """
         ...
     @property
@@ -4046,4 +4068,3 @@ class Scene:
     def assets(self) -> AssetManager:
         """Return the scene-owned assets capability."""
         ...
-

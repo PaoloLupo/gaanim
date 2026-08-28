@@ -4,7 +4,7 @@ import os
 
 from gaanim import BLACK, BLUE, GOLD, GRAY, WHITE, Scene, comparison, lecture, title_slide
 
-scene = Scene(1920, 1080, background=BLACK, margin=64)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.533333)
 
 opening = scene.segment("Welcome", notes="Introduce the semantic segment model.", template=title_slide)
 opening.bind(
@@ -40,7 +40,7 @@ benefits = scene.layout.column([
     scene.text("Named slides").fill(WHITE),
     scene.text("Speaker notes").fill(WHITE),
     scene.text("Direct navigation").fill(WHITE),
-], gap=32, align="center")
+], gap=0.266667, align="center")
 reveal = scene.segment("Reveal in steps", notes="Advance once per benefit.", template=lecture)
 reveal.bind(title=scene.text("Reveal only what matters", role="title").fill(GOLD), body=benefits)
 scene.wait(0.35)

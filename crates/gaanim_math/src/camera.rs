@@ -225,6 +225,10 @@ pub struct Camera {
     pub up: DVec3,
     /// The projection settings (orthographic or perspective).
     pub projection: Projection,
+    /// Width of the authored frame in logical scene units.
+    pub frame_width: f64,
+    /// Height of the authored frame in logical scene units.
+    pub frame_height: f64,
     /// Pixel width of the active rendering area.
     pub viewport_width: u32,
     /// Pixel height of the active rendering area.
@@ -279,6 +283,12 @@ impl DerefMut for ResolvedCamera {
 pub struct CameraViewOverride(pub Option<Camera>);
 
 impl Camera {
+    /// Pixels per logical unit before host fitting and authored zoom.
+    pub fn pixels_per_unit(&self) -> f64 {
+        (self.viewport_width as f64 / self.frame_width)
+            .min(self.viewport_height as f64 / self.frame_height)
+    }
+
     /// Return the authored pose without logical viewport dimensions.
     pub const fn pose(&self) -> CameraPose {
         CameraPose {
@@ -311,6 +321,13 @@ impl Camera {
             return Err(CameraValidationError::NonFinite);
         }
         if self.viewport_width == 0 || self.viewport_height == 0 {
+            return Err(CameraValidationError::EmptyViewport);
+        }
+        if !self.frame_width.is_finite()
+            || !self.frame_height.is_finite()
+            || self.frame_width <= 0.0
+            || self.frame_height <= 0.0
+        {
             return Err(CameraValidationError::EmptyViewport);
         }
         match self.projection {
@@ -366,14 +383,26 @@ impl Camera {
 
     /// Creates a default orthographic camera for a given viewport size.
     pub fn ortho_2d(width: u32, height: u32) -> Self {
+        Self::ortho_2d_frame(width as f64, height as f64, width, height)
+    }
+
+    /// Creates an orthographic camera whose authored frame is independent of pixels.
+    pub fn ortho_2d_frame(
+        frame_width: f64,
+        frame_height: f64,
+        viewport_width: u32,
+        viewport_height: u32,
+    ) -> Self {
         Self {
             position: DVec3::ZERO,
             rotation: DQuat::IDENTITY,
             target: DVec3::ZERO,
             up: DVec3::Y,
             projection: Projection::Orthographic { zoom: 1.0 },
-            viewport_width: width,
-            viewport_height: height,
+            frame_width,
+            frame_height,
+            viewport_width,
+            viewport_height,
         }
     }
 
@@ -389,6 +418,8 @@ impl Camera {
                 near: 0.1,
                 far: 1000.0,
             },
+            frame_width: width as f64,
+            frame_height: height as f64,
             viewport_width: width,
             viewport_height: height,
         }
@@ -456,7 +487,9 @@ impl Camera {
         // Scale delta by distance for perspective, or 1/zoom for ortho
         let scale = match self.projection {
             Projection::Perspective { .. } => (self.position - self.target).length() * 0.002,
-            Projection::Orthographic { zoom } => 1.0 / (zoom * viewport.scale).max(0.1),
+            Projection::Orthographic { zoom } => {
+                1.0 / (self.pixels_per_unit() * zoom * viewport.scale).max(0.1)
+            }
         };
         let move_vec = -right * delta.x * scale + up_dir * delta.y * scale;
         self.position += move_vec;
@@ -506,14 +539,14 @@ impl Camera {
     pub fn projection_matrix(&self) -> DMat4 {
         match self.projection {
             Projection::Orthographic { zoom } => {
-                let hw = (self.viewport_width as f64) / (2.0 * zoom);
-                let hh = (self.viewport_height as f64) / (2.0 * zoom);
+                let hw = self.frame_width / (2.0 * zoom);
+                let hh = self.frame_height / (2.0 * zoom);
                 gaanim_core::glam::dcamera::rh::proj::directx::orthographic(
                     -hw, hw, -hh, hh, -1000.0, 1000.0,
                 )
             }
             Projection::Perspective { fov_y, near, far } => {
-                let aspect = (self.viewport_width as f64) / (self.viewport_height as f64);
+                let aspect = self.frame_width / self.frame_height;
                 gaanim_core::glam::dcamera::rh::proj::directx::perspective(fov_y, aspect, near, far)
             }
         }
@@ -539,7 +572,7 @@ impl Camera {
             Projection::Orthographic { zoom } => zoom,
             _ => 1.0,
         };
-        let effective_zoom = zoom * viewport.scale;
+        let effective_zoom = self.pixels_per_unit() * zoom * viewport.scale;
         let z_angle = self.z_angle();
         let hw = (self.viewport_width as f64) / 2.0;
         let hh = (self.viewport_height as f64) / 2.0 + viewport.offset_y;
@@ -552,11 +585,16 @@ impl Camera {
 
     /// Converts a world coordinate into screen coordinates (pixels measured from top-left corner).
     pub fn world_to_screen(&self, world: DVec3) -> DVec2 {
+        self.world_to_screen_size(world, self.viewport_width, self.viewport_height)
+    }
+
+    /// Convert world coordinates into an arbitrary raster with the same frame aspect.
+    pub fn world_to_screen_size(&self, world: DVec3, width: u32, height: u32) -> DVec2 {
         let view_proj = self.projection_matrix() * self.view_matrix();
         let ndc = view_proj.project_point3(world);
 
-        let screen_x = (ndc.x + 1.0) * 0.5 * (self.viewport_width as f64);
-        let screen_y = (1.0 - ndc.y) * 0.5 * (self.viewport_height as f64);
+        let screen_x = (ndc.x + 1.0) * 0.5 * width as f64;
+        let screen_y = (1.0 - ndc.y) * 0.5 * height as f64;
 
         DVec2::new(screen_x, screen_y)
     }
@@ -573,11 +611,16 @@ impl Camera {
 
     /// Converts screen pixel coordinates (measured from top-left corner) back into a world coordinate on the Z = 0 plane.
     pub fn screen_to_world(&self, screen: DVec2) -> DVec3 {
+        self.screen_to_world_size(screen, self.viewport_width, self.viewport_height)
+    }
+
+    /// Invert [`Camera::world_to_screen_size`] on the Z=0 plane.
+    pub fn screen_to_world_size(&self, screen: DVec2, width: u32, height: u32) -> DVec3 {
         let view_proj = self.projection_matrix() * self.view_matrix();
         let inv_view_proj = view_proj.inverse();
 
-        let ndc_x = (screen.x / (self.viewport_width as f64)) * 2.0 - 1.0;
-        let ndc_y = 1.0 - (screen.y / (self.viewport_height as f64)) * 2.0;
+        let ndc_x = (screen.x / width as f64) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (screen.y / height as f64) * 2.0;
 
         let near_world = inv_view_proj.project_point3(DVec3::new(ndc_x, ndc_y, -1.0));
         let far_world = inv_view_proj.project_point3(DVec3::new(ndc_x, ndc_y, 1.0));
@@ -807,6 +850,27 @@ mod tests {
         let proj = cam.projection_matrix();
         // Ensure projection matrix is not identity and has expected structure
         assert_ne!(proj, DMat4::IDENTITY);
+    }
+
+    #[test]
+    fn logical_frame_maps_to_multiple_raster_resolutions() {
+        let cam = Camera::ortho_2d_frame(16.0, 9.0, 1280, 720);
+        for (width, height) in [(1280, 720), (1920, 1080), (3840, 2160)] {
+            let top_left = cam.world_to_screen_size(DVec3::new(-8.0, 4.5, 0.0), width, height);
+            let bottom_right = cam.world_to_screen_size(DVec3::new(8.0, -4.5, 0.0), width, height);
+            assert!(top_left.abs().max_element() < 1.0e-9);
+            assert!(
+                (bottom_right - DVec2::new(width as f64, height as f64))
+                    .abs()
+                    .max_element()
+                    < 1.0e-9
+            );
+
+            let authored = DVec3::new(3.25, -1.75, 0.0);
+            let screen = cam.world_to_screen_size(authored, width, height);
+            let restored = cam.screen_to_world_size(screen, width, height);
+            assert!((restored - authored).abs().max_element() < 1.0e-9);
+        }
     }
 
     #[test]

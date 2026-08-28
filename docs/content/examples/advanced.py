@@ -1,39 +1,39 @@
 # %% transforms
 from gaanim import Easing, BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 scene.segment("shapes")
-circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-180, 0)
+circle = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.05).move_to(-2.25, 0)
 scene.play([circle.animate.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
 headline = scene.text("A stable transform", role="title").fill(GOLD).move_to(0, 0)
 scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).easing(Easing.spring(stiffness=90.0, damping=12.0))])
 
-formula = scene.text("$E = m c^2$").fill(GREEN).move_to(0, -150)
+formula = scene.text("$E = m c^2$").fill(GREEN).move_to(0, -1.875)
 scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.SMOOTH)])
 scene.render()
 
 # %% groups
 from gaanim import BLACK, BLUE, GREEN, RED, Scene
 
-scene = Scene(1280, 720, background=BLACK)
-left = scene.geometry.circle(40).fill(BLUE).move_to(-80, 0)
-middle = scene.geometry.circle(40).fill(RED).move_to(0, 0)
-right = scene.geometry.circle(40).fill(GREEN).move_to(80, 0)
+scene = Scene(frame=(16, 9), background=BLACK)
+left = scene.geometry.circle(0.5).fill(BLUE).move_to(-1, 0)
+middle = scene.geometry.circle(0.5).fill(RED).move_to(0, 0)
+right = scene.geometry.circle(0.5).fill(GREEN).move_to(1, 0)
 group = scene.geometry.group([left, middle, right])
 
 scene.play([group.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90.0, damping=12.0))])
-scene.play([group.animate.shift_by(0, 120).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
+scene.play([group.animate.shift_by(0, 1.5).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
 scene.render()
 
 # %% reactive_path
 from gaanim import BLACK, Color, Scene, Updater
 
-scene = Scene(1280, 720, background=BLACK)
-dot = scene.geometry.dot(10).fill(Color(255, 180, 70)).move_to(200, 0)
+scene = Scene(frame=(16, 9), background=BLACK)
+dot = scene.geometry.dot(0.125).fill(Color(255, 180, 70)).move_to(2.5, 0)
 dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
-trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
+trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 0.0375).no_fill()
 
 scene.play([dot.animate.fade_in().duration(0.3), trail.animate.fade_in().duration(0.3)])
 scene.wait(4.0)

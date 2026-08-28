@@ -836,8 +836,8 @@ impl SceneModel {
             axes.insert(Channel::Y, Axis::linear(0.0, maximum * 1.1)?);
         }
         let dimensions = spec.batch()?.dimensions;
-        let width = (self.width as f64 * 0.72).max(320.0);
-        let height = (self.height as f64 * 0.62).max(220.0);
+        let width = (self.frame.width * 0.72).max(4.0);
+        let height = (self.frame.height * 0.62).max(3.0);
         let guides = if spec.guides_specs().is_empty() {
             None
         } else {
@@ -858,7 +858,7 @@ impl SceneModel {
                     .enumerate()
                     .map(|(index, title)| {
                         self.text(title)
-                            .move_to(width * 0.5 + 70.0, height * 0.5 - index as f64 * 34.0)
+                            .move_to(width * 0.5 + 0.7, height * 0.5 - index as f64 * 0.34)
                     })
                     .collect();
                 let refs: Vec<_> = labels.iter().collect();
@@ -2139,7 +2139,7 @@ impl SceneModel {
             -length * 0.5,
             -style.tick_length - 56.0,
             length * 0.5,
-            style.tick_length + 32.0,
+            style.tick_length + 0.32,
         );
         let axis_handle = self.themed_axis_path(
             axis_path,
@@ -2182,7 +2182,7 @@ impl SceneModel {
                 .text(label)
                 .fill(style.label_color)
                 .scale_to(label_scale)
-                .move_to(length * 0.5 + 30.0, 0.0);
+                .move_to(length * 0.5 + 0.30, 0.0);
             self.group(&[&label])
         } else {
             self.group(&[])
@@ -2302,7 +2302,7 @@ impl SceneModel {
                 .text(label)
                 .fill(style.label_color)
                 .scale_to(label_scale)
-                .at_anchor(radius + 30.0, 0.0, Anchor::Left);
+                .at_anchor(radius + 0.30, 0.0, Anchor::Left);
             self.group(&[&label])
         } else {
             self.group(&[])

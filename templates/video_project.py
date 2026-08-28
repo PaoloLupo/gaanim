@@ -8,17 +8,17 @@ from gaanim import Easing, BLUE, GOLD, WHITE, Scene
 
 ROOT = Path(__file__).resolve().parent
 
-scene = Scene(1920, 1080, margin=72)
-scene.load_project(str(ROOT / "gaanim.toml"))
+scene = Scene(frame=(16, 9), margin=0.6)
+scene.assets.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("technical")
 
-title = scene.text("Mi video con Gaanim", role="title").move_to(0, 300)
+title = scene.text("Mi video con Gaanim", role="title").move_to(0, 2.5)
 subtitle = scene.text(
     "Una escena, un timeline y exportación reproducible",
     role="subtitle",
-).move_to(0, 220)
-orb = scene.geometry.circle(120).fill(BLUE).stroke(WHITE, 5).move_to(-420, -20)
-label = scene.text("Edita main.py para comenzar").fill(GOLD).move_to(180, -20)
+).move_to(0, 1.833)
+orb = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.042).move_to(-3.5, -0.167)
+label = scene.text("Edita main.py para comenzar").fill(GOLD).move_to(1.5, -0.167)
 
 scene.play(
     [
@@ -29,7 +29,7 @@ scene.play(
 )
 scene.play(
     [
-        orb.animate.shift_by(360, 0).duration(1.0).easing(Easing.SMOOTH),
+        orb.animate.shift_by(3, 0).duration(1.0).easing(Easing.SMOOTH),
         label.animate.write().duration(0.8),
     ]
 )

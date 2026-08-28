@@ -24,7 +24,7 @@ incluidas siguen de forma predeterminada este lenguaje más sobrio.
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
@@ -53,7 +53,7 @@ sky = Brush.linear(
     start=(-640, 0),
     end=(640, 0),
 )
-scene = Scene(1280, 720, background=sky)
+scene = Scene(frame=(16, 9), background=sky)
 ```
 
 Para arte procedural o animado, `Background.shader(source, fallback=...)`
@@ -99,7 +99,7 @@ fn gaanim_background(
     return vec4<f32>(0.02, 0.08 + 0.4 * glow, 0.18 + 0.6 * glow, 1.0);
 }
 """, fallback="#071022")
-scene = Scene(1280, 720, background=shader)
+scene = Scene(frame=(16, 9), background=shader)
 
 from pathlib import Path
 asset_shader = Background.shader(Path("assets/background.wgsl"), fallback="#071022")
@@ -122,7 +122,7 @@ dentro de sus límites.
 ```python
 from gaanim import Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 scene.canvas.set_theme("presentation")
 
 title = scene.text("Fourier transform", role="title")
@@ -147,7 +147,7 @@ código; lo omitido conserva su valor anterior:
 )[```python
 from gaanim import Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 scene.canvas.set_fonts(
     font="Inter",
     math_font="New Computer Modern Math",
@@ -221,7 +221,7 @@ theme = Theme(
     },
 )
 
-scene = Scene(1920, 1080, theme=theme)
+scene = Scene(frame=(16, 9), theme=theme)
 ```
 
 El diccionario `text` reutiliza el mismo `TextStyle` que aceptan `Text`

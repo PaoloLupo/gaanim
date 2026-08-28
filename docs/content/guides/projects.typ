@@ -102,7 +102,7 @@ En `main.py`:
 ```python
 from gaanim import Scene
 
-scene = Scene(1920, 1080)
+scene = Scene(frame=(16, 9))
 scene.assets.load_project("gaanim.toml")  # resuelve assets relativo al proyecto
 # ... contenido ...
 scene.render()

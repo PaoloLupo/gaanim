@@ -108,7 +108,8 @@ impl PresenterThumbnailCache {
         let Some(canvas) = stash.canvas.clone() else {
             return;
         };
-        let dimensions = thumbnail_dimensions(canvas.width, canvas.height, max_edge);
+        let (preview_width, preview_height) = canvas.frame.preview_pixel_size();
+        let dimensions = thumbnail_dimensions(preview_width, preview_height, max_edge);
         if stash.revision == 0 || timeline.segments.is_empty() {
             return;
         }

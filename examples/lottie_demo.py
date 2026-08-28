@@ -5,10 +5,10 @@ import os
 from gaanim import GOLD, Scene
 
 scene = Scene(background="#0b1020")
-title = scene.text("Lottie + Velato", role="title").fill(GOLD).move_to(0, 230)
+title = scene.text("Lottie + Velato", role="title").fill(GOLD).move_to(0, 2.875)
 composition = scene.media.lottie(
     "examples/assets/lottie_balls.json",
-    width=1000,
+    width=12.5,
     fit="contain",
 )
 

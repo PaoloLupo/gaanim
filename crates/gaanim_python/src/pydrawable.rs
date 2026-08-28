@@ -311,7 +311,7 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (direction, distance=48.0))]
+    #[pyo3(signature = (direction, distance=0.48))]
     fn fade_in_from(&self, direction: &PyDirection, distance: f64) -> PyResult<Self> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
@@ -821,7 +821,7 @@ impl PyDrawable {
             .map_err(PyValueError::new_err)
     }
     /// Add a cached soft outer glow.
-    #[pyo3(signature = (color, radius=16.0, intensity=1.0))]
+    #[pyo3(signature = (color, radius=0.16, intensity=1.0))]
     fn glow(&self, color: PyColor, radius: f64, intensity: f32) -> PyResult<Self> {
         if !radius.is_finite() || radius <= 0.0 {
             return Err(PyValueError::new_err("radius must be finite and positive"));
@@ -834,7 +834,7 @@ impl PyDrawable {
         Ok(Self(self.0.clone().glow(color.0, radius, intensity)))
     }
     /// Apply a cached soft vector blur.
-    #[pyo3(signature = (sigma=4.0))]
+    #[pyo3(signature = (sigma=0.04))]
     fn blur(&self, sigma: f64) -> PyResult<Self> {
         if !sigma.is_finite() || sigma <= 0.0 {
             return Err(PyValueError::new_err("sigma must be finite and positive"));
@@ -842,7 +842,7 @@ impl PyDrawable {
         Ok(Self(self.0.clone().blur(sigma)))
     }
     /// Add a cached soft shadow behind the drawable.
-    #[pyo3(signature = (color, x=8.0, y=-8.0, blur=6.0))]
+    #[pyo3(signature = (color, x=0.08, y=-0.08, blur=0.06))]
     fn shadow(&self, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<Self> {
         if !x.is_finite() || !y.is_finite() {
             return Err(PyValueError::new_err("shadow offset must be finite"));
@@ -979,7 +979,7 @@ impl PyDrawable {
     fn pivot(&self, x: f64, y: f64) -> Self {
         Self(self.0.clone().pivot(x, y))
     }
-    #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
+    #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
     fn next_to(
         &self,
         reference: &PyDrawable,
@@ -1015,12 +1015,12 @@ impl PyDrawable {
             reference_anchor,
         )))
     }
-    #[pyo3(signature = (direction, buff=24.0))]
+    #[pyo3(signature = (direction, buff=0.24))]
     fn to_edge(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
         self.require_free_position("to_edge")?;
         Ok(Self(self.0.clone().to_edge(direction.0, buff)))
     }
-    #[pyo3(signature = (corner, buff=24.0))]
+    #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
         self.require_free_position("to_corner")?;
         Ok(Self(self.0.clone().to_corner(corner.0, buff)))

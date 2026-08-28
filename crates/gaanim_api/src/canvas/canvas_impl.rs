@@ -24,9 +24,9 @@ use crate::canvas::ops::{
     SharedCanvasState,
 };
 use crate::canvas::types::{
-    Anim, BooleanOperation, BooleanRule, CanvasUnits, FillLevelDirection, ImageOptions,
-    ImageOptionsError, LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, LottieOptions, Margin,
-    ReactiveReadoutLayoutSpec, SpawnKind, VideoOptions,
+    Anim, BooleanOperation, BooleanRule, FillLevelDirection, ImageOptions, ImageOptionsError,
+    LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, LottieOptions, Margin,
+    ReactiveReadoutLayoutSpec, SceneFrame, SpawnKind, VideoOptions,
 };
 use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
@@ -530,7 +530,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
 pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 
 /// Default nominal font size for labels, values, and units in reactive annotations.
-pub const DEFAULT_REACTIVE_TEXT_SIZE: f64 = 48.0;
+pub const DEFAULT_REACTIVE_TEXT_SIZE: f64 = 0.48;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BooleanError {
@@ -987,14 +987,12 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
 pub struct SceneModel {
-    pub width: u32,
-    pub height: u32,
+    pub frame: SceneFrame,
     pub background: Option<Color>,
     /// Full scene-bounds paint. `background` remains the representative color used
     /// for theme contrast and native 3D clears.
     pub background_paint: Option<gaanim_renderer::background::BackgroundPaint>,
     pub(crate) background_overridden: bool,
-    pub units: CanvasUnits,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
@@ -1017,10 +1015,11 @@ pub struct SceneModel {
 }
 
 impl SceneModel {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(width: impl Into<f64>, height: impl Into<f64>) -> Self {
+        let width = width.into();
+        let height = height.into();
         Self {
-            width,
-            height,
+            frame: SceneFrame::new(width, height),
             background: None,
             background_paint: None,
             background_overridden: false,
@@ -1029,7 +1028,6 @@ impl SceneModel {
             font_family_override: None,
             math_font_family_override: None,
             code_font_family_override: None,
-            units: CanvasUnits::Pixels,
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
@@ -1291,7 +1289,7 @@ impl SceneModel {
         };
         let flow = TextFlow {
             wrap: match wrap_width {
-                Some(width) => TextWrap::Width(width.max(1.0)),
+                Some(width) => TextWrap::Width(width.max(1.0e-6)),
                 None => TextWrap::NoWrap,
             },
             ..TextFlow::default()
@@ -1304,7 +1302,7 @@ impl SceneModel {
         )
         .map_err(|error| error.to_string())?;
 
-        let font_size = spec.style.size.unwrap_or(role_style.size).max(1.0);
+        let font_size = spec.style.size.unwrap_or(role_style.size).max(1.0e-6);
         let font_family = spec
             .style
             .font
@@ -1339,8 +1337,8 @@ impl SceneModel {
         Ok((bounds.width().max(0.0), bounds.height().max(0.0)))
     }
 
-    pub fn with_units(mut self, u: CanvasUnits) -> Self {
-        self.units = u;
+    pub fn with_frame(mut self, frame: SceneFrame) -> Self {
+        self.frame = frame;
         self
     }
 
@@ -1462,8 +1460,8 @@ impl SceneModel {
         gaanim_renderer::lottie::clear_lottie_cache();
     }
 
-    pub(crate) fn safe_frame(&self) -> gaanim_math::Bounds3D {
-        let raw = self.units.frame_bounds(self.width, self.height);
+    pub fn safe_frame(&self) -> gaanim_math::Bounds3D {
+        let raw = self.frame.bounds();
         gaanim_math::Bounds3D::new_2d(
             raw.min.x + self.margin.left,
             raw.min.y + self.margin.bottom,
@@ -2377,8 +2375,8 @@ impl SceneModel {
 
     /// Load a PNG, JPEG, or WebP image as an animatable raster mobject.
     ///
-    /// Source pixels are decoded once per canonical path and are displayed at
-    /// their native pixel dimensions before `.scale_to()` is applied.
+    /// Source pixels are decoded once per canonical path. With no explicit
+    /// destination size, the image is contained inside the logical safe frame.
     pub fn image(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, ImageLoadError> {
         self.image_with_options(path, ImageOptions::default())
     }
@@ -2387,9 +2385,14 @@ impl SceneModel {
     pub fn image_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        options: ImageOptions,
+        mut options: ImageOptions,
     ) -> Result<DrawableHandle, ImageLoadError> {
         let image = load_image(self.resolve_asset_path(path))?;
+        if options.width.is_none() && options.height.is_none() {
+            let safe = self.safe_frame();
+            options.width = Some(safe.width());
+            options.height = Some(safe.height());
+        }
         let view = options.resolve(image.width, image.height)?;
         Ok(self.spawn(SpawnKind::Image { image, view }))
     }
@@ -2407,7 +2410,7 @@ impl SceneModel {
     pub fn video_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        options: VideoOptions,
+        mut options: VideoOptions,
     ) -> Result<VideoClip, VideoLoadError> {
         for (name, value, positive) in [
             ("offset", options.offset, false),
@@ -2440,6 +2443,11 @@ impl SceneModel {
             .unwrap_or(metadata.duration - options.offset);
         if options.offset + source_duration > metadata.duration + 1e-6 {
             return Err(VideoLoadError::DurationOutOfRange);
+        }
+        if options.image.width.is_none() && options.image.height.is_none() {
+            let safe = self.safe_frame();
+            options.image.width = Some(safe.width());
+            options.image.height = Some(safe.height());
         }
         let view = options.image.resolve(metadata.width, metadata.height)?;
         let poster = gaanim_media::decode_video_frame(&path, &metadata, options.offset)?;
@@ -2493,13 +2501,18 @@ impl SceneModel {
     pub fn lottie_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        options: LottieOptions,
+        mut options: LottieOptions,
     ) -> Result<LottieClip, LottieLoadError> {
         let asset = gaanim_renderer::lottie::LottieAsset::load(self.resolve_asset_path(path))?;
         let width =
             u32::try_from(asset.width()).map_err(|_| LottieLoadError::DimensionsOutOfRange)?;
         let height =
             u32::try_from(asset.height()).map_err(|_| LottieLoadError::DimensionsOutOfRange)?;
+        if options.width.is_none() && options.height.is_none() {
+            let safe = self.safe_frame();
+            options.width = Some(safe.width());
+            options.height = Some(safe.height());
+        }
         let view = ImageOptions {
             width: options.width,
             height: options.height,
@@ -3549,7 +3562,7 @@ impl SceneModel {
             self.text(&footer)
                 .fill(muted)
                 .scale_to(0.5)
-                .move_to(frame.min.x + frame.width() * 0.14, footer_y + 8.0)
+                .move_to(frame.min.x + frame.width() * 0.14, footer_y + 0.08)
                 .z_index(101);
         }
         if let Some(logo) = branding.logo.as_deref() {
@@ -4879,7 +4892,7 @@ impl SceneModel {
         let annotation = self.annotation_text(&text, None, Some(color))?;
         annotation.follow_endpoint(
             center,
-            DVec3::new(0.0, radius + 18.0, 0.0),
+            DVec3::new(0.0, radius + 0.18, 0.0),
             gaanim_animation::FollowOffsetSpace::World,
         );
         Ok(self.group_no_center(&[&arrow, &annotation]))

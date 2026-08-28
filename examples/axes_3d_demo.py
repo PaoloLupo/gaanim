@@ -6,12 +6,12 @@ import os
 from gaanim import Anchor, Axis, BLACK, GOLD, RED, WHITE, Scene
 
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 axes = scene.viz.cartesian_3d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-5, 5).ticks(1).label("y").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("z").style(color=WHITE),
-    size=(10, 10, 6),
+    size=(0.125, 0.125, 0.075),
 )
 
 surface = axes.surface(lambda x, y: math.sin(x) * math.cos(y), resolution=(36, 36))
@@ -19,8 +19,8 @@ helix = axes.parametric(
     lambda t: (2 * math.cos(t), 2 * math.sin(t), 0.2 * t - 2),
     (0, 8 * math.pi),
     samples=320,
-).stroke(RED, 3)
-title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
+).stroke(RED, 0.0375)
+title = scene.text("Cartesian3D + surface + parametric").fill(GOLD).hud().move_to(0, 3.875, anchor=Anchor.CENTER)
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([scene.camera.animate.look_at(eye=(11, 8, 11), target=(0, 0, 0)).duration(1.0)])

@@ -6,19 +6,19 @@ from gaanim import BLACK, BLUE, GREEN, RED, WHITE, YELLOW, Scene, stagger
 
 
 def main():
-    scene = Scene(1920, 1080, background=BLACK)
+    scene = Scene(frame=(16, 9), background=BLACK)
     axes = [
-        scene.geometry.line(-700, 0, 700, 0).stroke(WHITE, 2),
-        scene.geometry.line(0, -360, 0, 360).stroke(WHITE, 2),
+        scene.geometry.line(-5.833333, 0, 5.833333, 0).stroke(WHITE, 0.016667),
+        scene.geometry.line(0, -3, 0, 3).stroke(WHITE, 0.016667),
     ]
-    points = [(x, 160 * math.sin(x / 130) * math.exp(-x / 1200)) for x in range(-620, 621, 40)]
+    points = [(x / 80, 2.0 * math.sin(x / 130) * math.exp(-x / 1200)) for x in range(-620, 621, 40)]
     curve = [
-        scene.geometry.line(x1, y1, x2, y2).stroke(BLUE, 4)
+        scene.geometry.line(x1, y1, x2, y2).stroke(BLUE, 0.033333)
         for (x1, y1), (x2, y2) in zip(points, points[1:])
     ]
-    tangent = scene.geometry.line(-120, -90, 220, 165).stroke(YELLOW, 4)
-    dot = scene.geometry.dot(12).fill(RED).move_to(50, 60)
-    label = scene.text("tangent").fill(GREEN).move_to(280, 175)
+    tangent = scene.geometry.line(-1, -0.75, 1.833333, 1.375).stroke(YELLOW, 0.033333)
+    dot = scene.geometry.dot(0.1).fill(RED).move_to(0.416667, 0.5)
+    label = scene.text("tangent").fill(GREEN).move_to(2.333333, 1.458333)
 
     scene.play([axis.animate.create().duration(0.6) for axis in axes])
     scene.play(stagger(*[segment.animate.create().duration(0.8) for segment in curve], each=0.03))

@@ -630,8 +630,10 @@ pub fn sync_gaanim_camera_to_bevy_system(
         // HUD and 2D background incorrectly and break the projection.
         let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
         let effective_zoom = match cam.projection {
-            gaanim_math::Projection::Orthographic { zoom } => zoom * cam.viewport.scale,
-            _ => cam.viewport.scale,
+            gaanim_math::Projection::Orthographic { zoom } => {
+                cam.pixels_per_unit() * zoom * cam.viewport.scale
+            }
+            _ => cam.pixels_per_unit() * cam.viewport.scale,
         };
         let offset_world_y = if effective_zoom > 0.0 {
             cam.viewport.offset_y / effective_zoom
@@ -643,8 +645,9 @@ pub fn sync_gaanim_camera_to_bevy_system(
             transform.translation.y = (-offset_world_y) as f32;
             transform.rotation = Quat::IDENTITY;
             if let Projection::Orthographic(ortho) = projection.as_mut() {
-                let scale = if cam.viewport.scale > 0.0 {
-                    1.0 / cam.viewport.scale as f32
+                let effective = cam.pixels_per_unit() * cam.viewport.scale;
+                let scale = if effective > 0.0 {
+                    1.0 / effective as f32
                 } else {
                     1.0
                 };
@@ -662,7 +665,7 @@ pub fn sync_gaanim_camera_to_bevy_system(
             if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
                 // Apply viewport_scale so the scene maintains its aspect ratio
                 // when the window dimensions differ from the scene's native resolution.
-                let effective = zoom * cam.viewport.scale;
+                let effective = cam.pixels_per_unit() * zoom * cam.viewport.scale;
                 let scale = if effective > 0.0 {
                     1.0 / effective as f32
                 } else {
@@ -810,7 +813,8 @@ pub fn sync_gaanim_camera_to_bevy_3d_system(
                 // crop would expose stale pixels around the canvas.
                 bevy_camera.viewport = None;
                 if let Projection::Orthographic(ortho) = projection.as_mut() {
-                    let effective = zoom * resolved_camera.viewport.scale;
+                    let effective =
+                        resolved_camera.pixels_per_unit() * zoom * resolved_camera.viewport.scale;
                     ortho.scale = if effective > 0.0 {
                         1.0 / effective as f32
                     } else {
@@ -875,9 +879,9 @@ pub fn compile_scene_from_world(
     let cam_bounds = camera.and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
             let effective = zoom;
-            let hw = (cam.viewport_width as f64) / (2.0 * effective);
-            let hh = (cam.viewport_height as f64) / (2.0 * effective);
-            let margin = 100.0 / effective.max(0.1);
+            let hw = cam.frame_width / (2.0 * effective);
+            let hh = cam.frame_height / (2.0 * effective);
+            let margin = cam.frame_width.max(cam.frame_height) * 0.08 / effective.max(0.1);
             Some(gaanim_math::Bounds3D::new_2d(
                 cam.position.x - hw - margin,
                 cam.position.y - hh - margin,

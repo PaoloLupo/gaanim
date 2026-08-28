@@ -5,9 +5,9 @@ import os
 from gaanim import BLACK, GOLD, GRAY, WHITE, Scene, parts
 
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
-title = scene.text("Partes semánticas compactas", role="title").fill(WHITE).move_to(0, 250)
+title = scene.text("Partes semánticas compactas", role="title").fill(WHITE).move_to(0, 3.125)
 equation = scene.text.equation(
     "-",
     parts(
@@ -20,11 +20,11 @@ equation = scene.text.equation(
         length="L",
         acceleration="theta''",
     ),
-).move_to(0, 45).scale_to(1.25)
+).move_to(0, 0.5625).scale_to(1.25)
 caption = scene.text(
     "equation() crea math de bloque; parts() conserva nombres semánticos",
     role="caption",
-).fill(GRAY).move_to(0, -150)
+).fill(GRAY).move_to(0, -1.875)
 
 scene.play([title.animate.write().duration(0.7), equation.animate.write().duration(1.8), caption.animate.fade_in().duration(0.7)])
 scene.play([equation["gravity"].animate.indicate().duration(0.7)])

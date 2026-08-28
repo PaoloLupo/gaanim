@@ -433,6 +433,12 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    if let Some(mut background) = app
+        .world_mut()
+        .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
+    {
+        background.pixel_size = (config.width, config.height);
+    }
 
     let timeline_duration = app.world().resource::<Timeline>().cached_duration;
     let render_start = config.start_time.unwrap_or(0.0).max(0.0);
@@ -572,6 +578,12 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    if let Some(mut background) = app
+        .world_mut()
+        .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
+    {
+        background.pixel_size = (config.width, config.height);
+    }
 
     let timeline_duration = app.world().resource::<Timeline>().cached_duration;
     let render_start = config.start_time.unwrap_or(0.0).max(0.0);
@@ -624,21 +636,47 @@ where
                 camera.as_ref(),
             );
 
-            let (zoom, cam_x, cam_y) = camera
+            let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y) = camera
                 .as_ref()
                 .map(|c| {
                     let z = match c.projection {
                         gaanim_math::Projection::Orthographic { zoom } => zoom,
                         _ => 1.0,
                     };
-                    (z, c.position.x, c.position.y)
+                    (
+                        z,
+                        c.pixels_per_unit(),
+                        c.viewport_width.max(1),
+                        c.viewport_height.max(1),
+                        c.position.x,
+                        c.position.y,
+                    )
                 })
-                .unwrap_or((1.0, 0.0, 0.0));
+                .unwrap_or((
+                    1.0,
+                    1.0,
+                    config.width.max(1),
+                    config.height.max(1),
+                    0.0,
+                    0.0,
+                ));
+
+            let fit_x = config.width as f64 / viewport_width as f64;
+            let fit_y = config.height as f64 / viewport_height as f64;
+            let fit_scale = match config.fit {
+                crate::config::OutputFit::Cover => fit_x.max(fit_y),
+                crate::config::OutputFit::Error | crate::config::OutputFit::Contain => {
+                    fit_x.min(fit_y)
+                }
+            };
 
             let mut scene = bevy_vello::vello::Scene::new();
             let camera_to_vello =
                 kurbo::Affine::translate((config.width as f64 / 2.0, config.height as f64 / 2.0))
-                    * kurbo::Affine::scale_non_uniform(zoom, -zoom)
+                    * kurbo::Affine::scale_non_uniform(
+                        pixels_per_unit * zoom * fit_scale,
+                        -pixels_per_unit * zoom * fit_scale,
+                    )
                     * kurbo::Affine::translate((-cam_x, -cam_y));
             scene.append(&raw_scene, Some(camera_to_vello));
             scene
@@ -758,6 +796,12 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    if let Some(mut background) = app
+        .world_mut()
+        .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
+    {
+        background.pixel_size = (config.width, config.height);
+    }
     let setup_ms = capture_started.elapsed().as_secs_f64() * 1000.0;
 
     let duration = app.world().resource::<Timeline>().cached_duration;
@@ -803,6 +847,7 @@ where
             resolved_camera.as_ref(),
             config.width,
             config.height,
+            config.fit,
         );
         scene.append(&raw_scene, Some(camera_to_vello));
         scene_compile += phase_started.elapsed();
@@ -852,36 +897,44 @@ fn capture_camera_to_vello_transform(
     resolved: Option<&gaanim_math::ResolvedCamera>,
     output_width: u32,
     output_height: u32,
+    fit: crate::config::OutputFit,
 ) -> kurbo::Affine {
-    let (zoom, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) = resolved
-        .map(|resolved| {
-            let camera = &resolved.camera;
-            let zoom = match camera.projection {
-                gaanim_math::Projection::Orthographic { zoom } => zoom,
-                _ => 1.0,
-            };
-            (
-                zoom,
-                camera.viewport_width.max(1),
-                camera.viewport_height.max(1),
-                camera.position.x,
-                camera.position.y,
-                camera.z_angle(),
-                resolved.viewport,
-            )
-        })
-        .unwrap_or((
-            1.0,
-            output_width.max(1),
-            output_height.max(1),
-            0.0,
-            0.0,
-            0.0,
-            gaanim_math::CameraViewport::default(),
-        ));
-    let fit_scale = (output_width as f64 / viewport_width as f64)
-        .min(output_height as f64 / viewport_height as f64);
-    let scale = zoom * fit_scale * viewport.scale;
+    let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) =
+        resolved
+            .map(|resolved| {
+                let camera = &resolved.camera;
+                let zoom = match camera.projection {
+                    gaanim_math::Projection::Orthographic { zoom } => zoom,
+                    _ => 1.0,
+                };
+                (
+                    zoom,
+                    camera.pixels_per_unit(),
+                    camera.viewport_width.max(1),
+                    camera.viewport_height.max(1),
+                    camera.position.x,
+                    camera.position.y,
+                    camera.z_angle(),
+                    resolved.viewport,
+                )
+            })
+            .unwrap_or((
+                1.0,
+                1.0,
+                output_width.max(1),
+                output_height.max(1),
+                0.0,
+                0.0,
+                0.0,
+                gaanim_math::CameraViewport::default(),
+            ));
+    let fit_x = output_width as f64 / viewport_width as f64;
+    let fit_y = output_height as f64 / viewport_height as f64;
+    let fit_scale = match fit {
+        crate::config::OutputFit::Cover => fit_x.max(fit_y),
+        crate::config::OutputFit::Error | crate::config::OutputFit::Contain => fit_x.min(fit_y),
+    };
+    let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
     let offset_y = viewport.offset_y * fit_scale;
 
     kurbo::Affine::translate((
@@ -1170,7 +1223,12 @@ mod tests {
         let camera = gaanim_math::Camera::ortho_2d(1920, 1080);
         let resolved =
             gaanim_math::ResolvedCamera::new(camera, gaanim_math::CameraViewport::default());
-        let transform = capture_camera_to_vello_transform(Some(&resolved), 320, 180);
+        let transform = capture_camera_to_vello_transform(
+            Some(&resolved),
+            320,
+            180,
+            crate::config::OutputFit::Error,
+        );
 
         let top_left = transform * kurbo::Point::new(-960.0, 540.0);
         let bottom_right = transform * kurbo::Point::new(960.0, -540.0);
@@ -1178,6 +1236,39 @@ mod tests {
         assert!((top_left.y - 0.0).abs() < 1e-9);
         assert!((bottom_right.x - 320.0).abs() < 1e-9);
         assert!((bottom_right.y - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn direct_capture_contains_or_covers_a_logical_frame() {
+        let camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1280, 720);
+        let resolved =
+            gaanim_math::ResolvedCamera::new(camera, gaanim_math::CameraViewport::default());
+
+        let contain = capture_camera_to_vello_transform(
+            Some(&resolved),
+            1000,
+            1000,
+            crate::config::OutputFit::Contain,
+        );
+        let contain_top_left = contain * kurbo::Point::new(-8.0, 4.5);
+        let contain_bottom_right = contain * kurbo::Point::new(8.0, -4.5);
+        assert!((contain_top_left.x - 0.0).abs() < 1e-9);
+        assert!((contain_top_left.y - 218.75).abs() < 1e-9);
+        assert!((contain_bottom_right.x - 1000.0).abs() < 1e-9);
+        assert!((contain_bottom_right.y - 781.25).abs() < 1e-9);
+
+        let cover = capture_camera_to_vello_transform(
+            Some(&resolved),
+            1000,
+            1000,
+            crate::config::OutputFit::Cover,
+        );
+        let cover_top_left = cover * kurbo::Point::new(-8.0, 4.5);
+        let cover_bottom_right = cover * kurbo::Point::new(8.0, -4.5);
+        assert!((cover_top_left.x + 388.8888888888889).abs() < 1e-9);
+        assert!((cover_top_left.y - 0.0).abs() < 1e-9);
+        assert!((cover_bottom_right.x - 1388.888888888889).abs() < 1e-9);
+        assert!((cover_bottom_right.y - 1000.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1192,7 +1283,12 @@ mod tests {
         };
         let expected = camera.to_vello_transform_with_viewport(viewport);
         let resolved = gaanim_math::ResolvedCamera::new(camera, viewport);
-        let actual = capture_camera_to_vello_transform(Some(&resolved), 960, 540);
+        let actual = capture_camera_to_vello_transform(
+            Some(&resolved),
+            960,
+            540,
+            crate::config::OutputFit::Error,
+        );
 
         for (actual, expected) in actual.as_coeffs().iter().zip(expected.as_coeffs()) {
             assert!((actual - expected).abs() < 1e-9);

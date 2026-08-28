@@ -5,10 +5,10 @@ import os
 from gaanim import Anchor, BLACK, GRAY, GREEN, WHITE, Direction, Scene
 
 
-scene = Scene(1280, 720, background=WHITE, margin=56)
+scene = Scene(frame=(16, 9), background=WHITE, margin=0.7)
 
-title = scene.text("Typst-native layouts", role="title").fill(GREEN).move_to(0, 260, anchor=Anchor.CENTER)
-caption = scene.text("Document table and mathematical matrix", role="subtitle").fill(GRAY).move_to(0, 205, anchor=Anchor.CENTER)
+title = scene.text("Typst-native layouts", role="title").fill(GREEN).move_to(0, 3.25, anchor=Anchor.CENTER)
+caption = scene.text("Document table and mathematical matrix", role="subtitle").fill(GRAY).move_to(0, 2.5625, anchor=Anchor.CENTER)
 table = scene.text.typst('''
     #import "@preview/simple-plot:1.0.0": plot
 
@@ -27,12 +27,12 @@ table = scene.text.typst('''
       (fn: x => calc.sin(x), stroke: blue + 1.2pt, samples: 200, label: $sin(x)$, label-pos: 0.625, label-side: "above"),
       (fn: x => calc.cos(x), stroke: red + 1.2pt, samples: 200, label: $cos(x)$, label-pos: 1.0, label-side: "above-left"),
     )
-''').scale_to(2).move_to(-220, -35)
-matrix = scene.text.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).move_to(285, -35, anchor=Anchor.CENTER)
+''').scale_to(2).move_to(-2.75, -0.4375)
+matrix = scene.text.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).move_to(3.5625, -0.4375, anchor=Anchor.CENTER)
 
 scene.play([
     title.animate.write().duration(0.55),
-    caption.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
+    caption.animate.fade_in_from(Direction.DOWN, distance=0.3).duration(0.45),
     table.animate.write(),
     # table.animate.fade_in_from(Direction.DOWN, distance=30).duration(0.65),
     # matrix.animate.fade_in_from(Direction.DOWN, distance=30).duration(0.65),

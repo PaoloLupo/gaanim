@@ -35,7 +35,7 @@
 ```python
 from gaanim import Easing, BLUE, GOLD, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 circle = scene.geometry.circle(80).fill(BLUE).move_to(-160, 0)
 rect = scene.geometry.rect(180, 100).fill(GOLD).move_to(160, 0)
 

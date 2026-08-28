@@ -5,21 +5,21 @@ import os
 from gaanim import Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene, GREEN, part
 
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
-title = scene.text("Una variable, dos ecuaciones", role="title").fill(WHITE).move_to(0, 230, anchor=Anchor.CENTER)
+title = scene.text("Una variable, dos ecuaciones", role="title").fill(WHITE).move_to(0, 2.875, anchor=Anchor.CENTER)
 
 energy = (
     scene.text.equation("E =", part("mass", "m"), part("light_speed", "c^2"))
-    .move_to(0, 70, anchor=Anchor.CENTER)
+    .move_to(0, 0.875, anchor=Anchor.CENTER)
 )
 
 momentum = (
     scene.text.equation("p =", part("mass", "m"), part("velocity", "v"))
-    .move_to(0, -90, anchor=Anchor.CENTER)
+    .move_to(0, -1.125, anchor=Anchor.CENTER)
 )
 
-caption = scene.text("La etiqueta 'mass' conecta ambos términos.").fill(GRAY).move_to(0, -240, anchor=Anchor.CENTER)
+caption = scene.text("La etiqueta 'mass' conecta ambos términos.").fill(GRAY).move_to(0, -3, anchor=Anchor.CENTER)
 
 # El color también puede aplicarse usando el nombre semántico.
 energy["mass"].fill(GOLD)

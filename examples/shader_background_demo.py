@@ -34,15 +34,13 @@ fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f3
 }
 """
 
-scene = Scene(
-    960,
-    540,
+scene = Scene(frame=(16, 9),
     background=Background.shader(SHADER, fallback="#080A10"),
-    margin=48,
+    margin=0.8,
 )
 
-title = scene.text("WGSL BACKGROUND", role="title").fill(WHITE).move_to(0, 42)
-rule = scene.geometry.line(-180, -20, 180, -20).stroke(GRAY, 4)
+title = scene.text("WGSL BACKGROUND", role="title").fill(WHITE).move_to(0, 0.7)
+rule = scene.geometry.line(-3, -0.333333, 3, -0.333333).stroke(GRAY, 0.066667)
 scene.play([title.animate.write().duration(0.8), rule.animate.create().duration(0.8)])
 scene.wait(4.0)
 

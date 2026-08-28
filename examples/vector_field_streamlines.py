@@ -5,13 +5,13 @@ import os
 from gaanim import Axis, ColorMap, Scene
 
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 scene.canvas.set_theme("technical")
 plane = scene.viz.cartesian_2d(
     Axis.linear(-4.5, 4.5).ticks(1).label("x", position="top"),
     Axis.linear(-2.8, 2.8).ticks(1).label("y", position="top"),
-    width=1040,
-    height=600,
+    width=13,
+    height=7.5,
 )
 
 # The callback receives coordinates directly and is evaluated from a stable
@@ -21,7 +21,7 @@ vortex = plane.field(lambda x, y: (-y - 0.12 * x, x - 0.12 * y))
 arrows = vortex.arrows(
     resolution=(19, 13),
     max_length=34,
-    width=2.2,
+    width=0.0275,
     colormap=ColorMap("batlow"),
 )
 streams = vortex.streamlines(
@@ -29,12 +29,12 @@ streams = vortex.streamlines(
     tolerance=1e-5,
     max_time=4.0,
     separation=0.045,
-    width=3.0,
+    width=0.0375,
     colormap="vik",
 )
 particles = vortex.particles(
     24,
-    radius=4,
+    radius=0.05,
     duration=3.0,
     max_time=3.5,
     colormap="batlow",

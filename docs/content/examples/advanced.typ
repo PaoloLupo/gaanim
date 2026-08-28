@@ -19,7 +19,7 @@ juntas. Copia una receta, ejecútala y cambia una sola decisión cada vez.
 ```python
 from gaanim import Easing, BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 scene.segment("shapes")
 circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-180, 0)
 scene.play([circle.animate.create().duration(0.8)])
@@ -38,7 +38,7 @@ scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.S
 ```python
 from gaanim import Easing, BLACK, BLUE, GREEN, RED, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 left = scene.geometry.circle(40).fill(BLUE).move_to(-80, 0)
 middle = scene.geometry.circle(40).fill(RED).move_to(0, 0)
 right = scene.geometry.circle(40).fill(GREEN).move_to(80, 0)
@@ -54,7 +54,7 @@ scene.play([group.animate.shift_by(0, 120).duration(1.0), group.animate.rotate_b
 ```python
 from gaanim import BLACK, Color, Scene, Updater
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 dot = scene.geometry.dot(10).fill(Color(255, 180, 70)).move_to(200, 0)
 dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
 trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
@@ -73,7 +73,7 @@ solo glifos parecidos.
 ```python
 from gaanim import GOLD, Scene, part
 
-scene = Scene(1280, 720, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 before = scene.text.equation("E =", part("mass", "m"), "c^2")
 after = scene.text.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
 before["mass"].fill(GOLD)
@@ -100,7 +100,7 @@ spec = (
     .axes(x=Axis.category(data["method"]), y=Axis.linear(0, 50).ticks(10))
 )
 
-scene = Scene(1280, 720, theme="technical")
+scene = Scene(frame=(16, 9), theme="technical")
 heading = scene.slides.section_header(
     "Tiempo de renderizado",
     kicker="PERFIL",
@@ -122,7 +122,7 @@ posiciones a mano.
 ```python
 from gaanim import BLUE, Scene
 
-scene = Scene(1080, 1920, theme="presentation")
+scene = Scene(frame=(9, 16), theme="presentation")
 scene.canvas.set_preset("vertical")
 
 header = scene.slides.section_header(
@@ -156,7 +156,7 @@ acumular error entre fotogramas.
 from gaanim import GOLD, WHITE, Scene
 from math import cos, pi, sin
 
-scene = Scene(1280, 720, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.0)
 curve = scene.geometry.polyline([
     (260 * cos(u), 150 * sin(2 * u))
@@ -178,7 +178,7 @@ composición ya sea legible.
 ```python
 from gaanim import BLUE, GOLD, Material3D, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
 cube = scene.geometry.cube(2.0, material=Material3D.matte(BLUE)).move_to_3d(-1.8, 0, 0)
 sphere = scene.geometry.sphere(
@@ -199,7 +199,7 @@ tema; no hace falta reconstruir una portada con textos sueltos.
 ```python
 from gaanim import BLUE, Scene
 
-scene = Scene(1920, 1080, theme="presentation")
+scene = Scene(frame=(16, 9), theme="presentation")
 opening = scene.slides.title_card(
     "El movimiento cuenta una idea",
     "Una presentación construida con Gaanim",

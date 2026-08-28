@@ -4,17 +4,17 @@ import os
 
 from gaanim import Anchor, Axis, BLACK, GOLD, RED, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 space = scene.viz.cartesian_3d(
     Axis.log(0.1, 1000, base=10).ticks(10).label("log x"),
     Axis.symlog(-100, 100, base=10, threshold=1).ticks(10).label("symlog y"),
     Axis.power(0, 16, 0.5).ticks(2).label("sqrt z"),
-    size=(10, 8, 6),
+    size=(0.125, 0.1, 0.075),
 )
 curve = space.parametric(
     lambda t: (10 ** (3 * t - 1), 80 * (2 * t - 1), 16 * t * t), (0, 1)
-).stroke(RED, 3)
-title = scene.text("Escalas no lineales en Cartesian3D").fill(GOLD).hud().move_to(0, 310, anchor=Anchor.CENTER)
+).stroke(RED, 0.0375)
+title = scene.text("Escalas no lineales en Cartesian3D").fill(GOLD).hud().move_to(0, 3.875, anchor=Anchor.CENTER)
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.camera.look_at(eye=(11, 9.5, 11), target=(0, 0, 0))

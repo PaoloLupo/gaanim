@@ -3,8 +3,8 @@ import os
 
 from gaanim import GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, background="#101827", margin=40)
-page = scene.layout.column([scene.text("Incremental flow", role="title").fill(GOLD)], within="safe", width="fill", height="fill", padding=32, gap=20, align="start")
+scene = Scene(frame=(16, 9), background="#101827", margin=0.5)
+page = scene.layout.column([scene.text("Incremental flow", role="title").fill(GOLD)], within="safe", width="fill", height="fill", padding=0.4, gap=0.25, align="start")
 page.add(scene.text("Measure").fill(WHITE))
 page.add(scene.text("Solve").fill(WHITE))
 page.add(scene.text("Place").fill(WHITE))

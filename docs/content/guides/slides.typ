@@ -27,7 +27,7 @@ seleccionar *Slides*. El Inicio detecta Python, `.venv` y uv antes de abrir.
 ```python
 from gaanim import Scene, lecture, title_slide
 
-scene = Scene(1920, 1080, margin=72)
+scene = Scene(frame=(16, 9), margin=72)
 scene.canvas.set_theme("presentation")
 scene.slides.brand(footer="MI CHARLA", slide_numbers=True, rule=True)
 

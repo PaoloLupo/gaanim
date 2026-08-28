@@ -13,6 +13,26 @@ Las fábricas conservan sus firmas y comportamiento, pero se acceden mediante
 una capacidad ligada a la misma escena. No existen aliases para los métodos
 planos retirados.
 
+= Unidades lógicas
+
+La composición ya no se autoriza en píxeles. `Scene()` usa un frame lógico
+centrado de `16×9`; la resolución pertenece al editor o al comando de
+exportación.
+
+```python
+# Antes: composición acoplada a 1920×1080
+scene = Scene(1920, 1080, margin=60)
+circle = scene.geometry.circle(120).move_to(360, -120)
+
+# Ahora: las mismas proporciones en unidades lógicas (escala 1920 / 16 = 120)
+scene = Scene(frame=(16, 9), margin=0.5)
+circle = scene.geometry.circle(1).move_to(3, -1)
+```
+
+`Scene(1280, 720)` produce un `TypeError` de migración. Usa
+`Scene(frame=(16, 9))` y elige los píxeles con `--width` y `--height`. Una
+salida con aspecto distinto requiere `--fit contain` o `--fit cover`.
+
 = Equivalencias
 
 #table(
@@ -63,17 +83,18 @@ nombres desconocidos fallan en vez de degradarse a otra curva.
 
 `play`, `wait`, `stop`, `fade_out_all`, `segment`, `link`, `reuse`, `persist`,
 `release`, `render` y `snapshots` continúan directamente en `Scene`. `canvas`
-y `camera` mantienen sus contratos anteriores.
+expone ahora `frame_width`, `frame_height`, `aspect_ratio` y los límites del
+área segura; `camera` opera sobre esas mismas unidades lógicas.
 
 = Ejemplo completo
 
 ```python
 from gaanim import BLUE, Scene
 
-scene = Scene(1280, 720)
-circle = scene.geometry.circle(96).fill(BLUE)
+scene = Scene(frame=(16, 9))
+circle = scene.geometry.circle(0.96).fill(BLUE)
 title = scene.text("Capacidades", role="title")
-page = scene.layout.column([title, circle], within="safe", gap=24)
+page = scene.layout.column([title, circle], within="safe", gap=0.24)
 scene.play([page.animate.fade_in()])
 scene.render()
 ```

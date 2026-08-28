@@ -15,7 +15,7 @@ import os
 
 from gaanim import CYAN, GOLD, Axis, Scene, parallel, sequence, stagger
 
-scene = Scene(1920, 1080, margin=72)
+scene = Scene(frame=(16, 9), margin=0.6)
 scene.canvas.set_theme("gruvbox-dark")
 
 # ---------------------------------------------------------------------------
@@ -39,10 +39,10 @@ SWAY = damped_response(1.4)
 # ---------------------------------------------------------------------------
 
 scene.segment("Novedades", notes="Rol kicker, badges y measure_text.")
-kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").move_to(0, 430)
-title = scene.text("Una serie medida conduce la escena", role="title").move_to(0, 340)
-tag_source = scene.slides.badge("serie muestreada nativa", color=CYAN).move_to(-330, 180)
-tag_sway = scene.slides.badge("drive_from_samples", color=GOLD).move_to(330, 180)
+kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").move_to(0, 3.583333)
+title = scene.text("Una serie medida conduce la escena", role="title").move_to(0, 2.833333)
+tag_source = scene.slides.badge("serie muestreada nativa", color=CYAN).move_to(-2.75, 1.5)
+tag_sway = scene.slides.badge("drive_from_samples", color=GOLD).move_to(2.75, 1.5)
 
 scene.play(
     parallel(
@@ -64,27 +64,27 @@ scene.segment("Plot de datos", notes="plot_data en coordenadas del plano; sway s
 plane = scene.viz.cartesian_2d(
     Axis.linear(0, DURATION).ticks(1).label("tiempo (s)"),
     Axis.linear(-1.0, 1.0).ticks(0.5).label("u(t)"),
-    width=880,
-    height=460,
-).move_to(-460, -60)
-curve = plane.plot_data(TIMES, SWAY, color=CYAN, width=4)
+    width=7.333333,
+    height=3.833333,
+).move_to(-3.833333, -0.5)
+curve = plane.plot_data(TIMES, SWAY, color=CYAN, width=0.033333)
 peaks = plane.scatter_data(
     [TIMES[i] for i in range(0, len(TIMES), 4)],
     [SWAY[i] for i in range(0, len(TIMES), 4)],
-    radius=4.0,
+    radius=0.033333,
     color=GOLD,
 )
 
-ground = scene.geometry.line(695, 120, 865, 120).stroke(CYAN, 5)
-building = scene.geometry.rounded_rect(150, 320, 12).fill(CYAN).opacity(0.25).move_to(780, -40)
+ground = scene.geometry.line(5.791667, 1, 7.208333, 1).stroke(CYAN, 0.041667)
+building = scene.geometry.rounded_rect(1.25, 2.666667, 0.1).fill(CYAN).opacity(0.25).move_to(6.5, -0.333333)
 floors = [
-    scene.geometry.line(713, 120 - level * 55, 847, 120 - level * 55).stroke(GOLD, 2)
+    scene.geometry.line(5.941667, 1.0 - level * 0.458333, 7.058333, 1.0 - level * 0.458333).stroke(GOLD, 0.016667)
     for level in range(1, 6)
 ]
 tower = scene.geometry.group([ground, building, *floors])
 # La misma serie, ahora conduciendo la posición X del edificio: sin closures,
 # sin interpolate() manual, y con seek determinista gratis.
-tower.drive_from_samples(TIMES, SWAY, "y", scale=100.0)
+tower.drive_from_samples(TIMES, SWAY, "y", scale=0.833333)
 
 scene.play(
     parallel(
@@ -102,8 +102,8 @@ scene.wait(2.0)
 scene.segment("Medición", notes="measure_text reemplaza anchos a ojo.")
 footnote = "u(t) = e^{-ζ ω t}·sin Δ t = 0.02 s"
 width, height = scene.text.measure(footnote, role="caption")
-box = scene.geometry.rounded_rect(width , height + 36, 16).fill(GOLD).opacity(0.12).move_to(0, -380)
-label = scene.text.equation(footnote, role="caption").move_to(0, -380)
+box = scene.geometry.rounded_rect(width, height + 0.3, 0.133333).fill(GOLD).opacity(0.12).move_to(0, -3.166667)
+label = scene.text.equation(footnote, role="caption").move_to(0, -3.166667)
 scene.play(parallel(box.animate.grow_from_center().duration(0.5), label.animate.write().duration(0.6)))
 scene.wait(1.2)
 

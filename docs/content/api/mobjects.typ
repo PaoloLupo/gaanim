@@ -58,7 +58,7 @@ scene.play([water.animate.fill_level(0.72).duration(1.4)])
 # show-code: true
 from gaanim import Scene, Style, Theme
 theme = Theme("paper", styles={".warning": Style(fill="#e11d48")})
-scene = Scene(480, 270, theme=theme)
+scene = Scene(frame=(16, 9), theme=theme)
 warning = scene.geometry.square(90).style_class("warning")
 scene.wait(0.1)
 # output: preview.webp
@@ -77,7 +77,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 tip = scene.geometry.dot(9).fill(GOLD).move_to(100, 30)
 rod = scene.geometry.tracking_line((-100, -30), tip).no_fill().stroke(WHITE, 4)
 scene.play([rod.animate.create().duration(0.8), tip.animate.shift_by(-40, 80).duration(0.8)])
@@ -98,7 +98,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Scene, StrokeStyle
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 guide = scene.geometry.line(-160, 0, 160, 0).stroke_style(
     StrokeStyle("#2563eb", 5, cap="round", dashes=[18, 10])
 )
@@ -131,7 +131,7 @@ world: cylinders and cones grow along Y, while planes lie on XZ.
 ```python
 from gaanim import BLUE, GOLD, Material3D, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 cube = scene.geometry.cube(2, material=Material3D.matte(BLUE))
 sphere = scene.geometry.sphere(1, segments=32, rings=16,
                       material=Material3D.metal(GOLD)).move_to_3d(3, 0, 0)
@@ -171,7 +171,7 @@ while fading it in; vector-only `write()` is rejected explicitly.
 ```python
 # show-code: true
 from gaanim import BLUE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 node = scene.geometry.circle(50).fill(BLUE).move_to(0, 0)
 scene.play([node.animate.create().duration(1.0)])
 # output: preview.webp
@@ -190,7 +190,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 card = scene.geometry.rect(160, 90).fill(BLUE).stroke(WHITE, 2).move_to(0, 0)
 scene.play([card.animate.grow_from_center().duration(0.9)])
 # output: preview.webp
@@ -209,7 +209,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 btn = scene.geometry.rounded_rect(160, 50, 12).fill(GOLD).move_to(0, 0)
 label = scene.text("CLICK").move_to(0, 0)
 scene.play([scene.geometry.group([btn, label]).animate.fade_in().duration(0.6)])
@@ -229,7 +229,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 eq = scene.text.equation("E =", part("mass", "m"), part("light", "c^2"))
 frame = scene.geometry.surrounding_rect(eq["mass"]).stroke(GOLD, 3)
 scene.play([eq.animate.fade_in(), frame.animate.create()])
@@ -250,7 +250,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 cell = scene.geometry.square(80).fill(BLUE).move_to(0, 0)
 scene.play([cell.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
@@ -269,7 +269,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 dot = scene.geometry.dot(8).fill(RED).move_to(0, 0)
 scene.play([dot.animate.grow_from_center().duration(0.5)])
 # output: preview.webp
@@ -288,7 +288,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 orbit = scene.geometry.ellipse(90, 50).no_fill().stroke(GOLD, 2).move_to(0, 0)
 scene.play([orbit.animate.create().duration(1.0)])
 # output: preview.webp
@@ -309,7 +309,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Anchor, GOLD, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 left = scene.geometry.dot(9).fill(GOLD).move_to(-120, -30)
 card = scene.geometry.rect(120, 70).move_to(90, 35)
 connector = scene.geometry.line(
@@ -333,7 +333,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 arrow = scene.geometry.arrow(-100, 0, 100, 0).stroke(GOLD, 4)
 scene.play([arrow.animate.create().duration(0.8)])
 # output: preview.webp
@@ -352,7 +352,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 guide = scene.geometry.dashed_line(-140, 0, 140, 0, dash_length=12, gap_length=8).stroke(WHITE, 2)
 scene.play([guide.animate.create().duration(0.8)])
 # output: preview.webp
@@ -371,7 +371,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 span = scene.geometry.double_arrow(-100, 0, 100, 0).stroke(WHITE, 3)
 scene.play([span.animate.create().duration(0.6)])
 # output: preview.webp
@@ -390,7 +390,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 arc = scene.geometry.arc(0, 0, 60, 0.0, 2.0).no_fill().stroke(GOLD, 4)
 scene.play([arc.animate.create().duration(0.8)])
 # output: preview.webp
@@ -409,7 +409,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 loop = scene.geometry.curved_arrow(-80, 0, 80, 0, 0.9).fill(WHITE)
 scene.play([loop.animate.create().duration(0.9)])
 # output: preview.webp
@@ -428,7 +428,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 arr = scene.geometry.curved_arrow_arc(0, 0, 70, 0.2, 1.8).fill(GOLD)
 scene.play([arr.animate.create().duration(0.8)])
 # output: preview.webp
@@ -447,7 +447,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 dim = scene.mechanics.dimension(-80, 0, 80, 0, 24).stroke(WHITE, 2)
 scene.play([dim.animate.create().duration(0.7)])
 # output: preview.webp
@@ -468,7 +468,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 tri = scene.geometry.polygon([(0, 70), (-65, -50), (65, -50)]).fill(BLUE).stroke(WHITE, 2)
 scene.play([tri.animate.grow_from_center().duration(0.8)])
 # output: preview.webp
@@ -487,7 +487,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 star = scene.geometry.star(5, 70, 32).fill(GOLD).move_to(0, 0)
 scene.play([star.animate.spin_in_from_nothing().duration(1.0)])
 # output: preview.webp
@@ -506,7 +506,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 hexa = scene.geometry.regular_polygon(6, 60).fill(BLUE).stroke(WHITE, 2)
 scene.play([hexa.animate.spin_in_from_nothing().duration(0.9)])
 # output: preview.webp
@@ -525,7 +525,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 slice_ = scene.geometry.sector(0, 0, 70, 0.0, 2.0).fill(GOLD)
 scene.play([slice_.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
@@ -544,7 +544,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 ring = scene.geometry.annulus(60, 34).fill(BLUE).stroke(WHITE, 2)
 scene.play([ring.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
@@ -563,7 +563,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 brace = scene.geometry.brace(-80, -20, 80, -20, 24).stroke(WHITE, 3).no_fill()
 label = scene.text("interval").move_to(0, -55)
 scene.play([brace.animate.create().duration(0.7), label.animate.fade_in().duration(0.4)])
@@ -583,7 +583,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 ok = scene.geometry.checkmark(34).fill(GREEN).move_to(0, 0)
 scene.play([ok.animate.grow_from_center().duration(0.6)])
 # output: preview.webp
@@ -602,7 +602,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 no = scene.geometry.cross(34).stroke(WHITE, 4).move_to(0, 0)
 scene.play([no.animate.create().duration(0.5)])
 # output: preview.webp
@@ -621,7 +621,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 corner = scene.geometry.right_angle(24).stroke(WHITE, 3).move_to(0, 0)
 axis = scene.geometry.line(-80, 0, 80, 0).stroke(WHITE, 2)
 scene.play([scene.geometry.group([axis, corner]).animate.create().duration(0.7)])
@@ -643,7 +643,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 rail = scene.geometry.path([(-140, 0), (0, 60), (140, 0)]).no_fill().stroke(WHITE, 4)
 scene.play([rail.animate.create().duration(1.0)])
 # output: preview.webp
@@ -662,7 +662,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 zig = scene.geometry.polyline([(-100, -30), (0, 30), (100, -30)]).no_fill().stroke(GOLD, 3)
 scene.play([zig.animate.create().duration(0.9)])
 # output: preview.webp
@@ -681,7 +681,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 curve = scene.geometry.bezier((-140, 0), [(-50, 90), (50, -90)], (140, 0)).no_fill().stroke(WHITE, 3)
 scene.play([curve.animate.create().duration(1.0)])
 # output: preview.webp
@@ -700,7 +700,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 shape = scene.geometry.curve([("move", [(0, 0)]), ("cubic", [(50, 60), (110, -60), (160, 0)]), ("close", [])]).no_fill().stroke(WHITE, 3).move_to(-80, 0)
 scene.play([shape.animate.create().duration(1.0)])
 # output: preview.webp
@@ -718,7 +718,7 @@ and the perspective camera:
 ```python
 # show-code: true
 from gaanim import Axis, BLACK, BLUE, GOLD, RED, WHITE, Scene, Updater
-scene = Scene(640, 360, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
 axes = scene.viz.cartesian_3d(
     Axis.linear(-3, 3).ticks(1).label("x").style(color=WHITE),
@@ -836,7 +836,7 @@ and calculus helpers.
 import math
 from gaanim import Axis, BLUE, Scene
 
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 space = scene.viz.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
 curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 3)
 scene.play([space.animate.create(), curve.animate.create()])
@@ -858,7 +858,7 @@ This page keeps a compact factory index. The canonical, complete reference is
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 label = scene.text("Hello, ", part("product", "Gaanim", color=GOLD)).move_to(0, 0)
 scene.play([label.animate.write().duration(0.9)])
 # output: preview.webp
@@ -877,7 +877,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part, parts
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 eq = scene.text.equation(part("force", "sum F_t"), "=", parts(mass="m", acceleration="a_t"))
 eq["acceleration"].fill(GOLD)
 scene.play([eq.animate.write(by="part").duration(1.0)])
@@ -897,7 +897,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Scene, TextFlow
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 body = scene.text("Una explicación larga que se ajusta al ancho.", flow=TextFlow(wrap=320, align="left", line_spacing=1.25)).move_to(0, 0)
 scene.play([body.animate.fade_in().duration(0.6)])
 # output: preview.webp
@@ -916,7 +916,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.text("Fourier Transform", role="title").move_to(0, 30)
 s = scene.text("A visual proof", role="subtitle").move_to(0, -20)
 scene.play([t.animate.write().duration(0.7), s.animate.fade_in().duration(0.5)])
@@ -936,7 +936,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, parts
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 # Fluent placement preserves the specialized Text handle.
 eq = scene.text.equation(parts(variable="x", operator="dot 5 =", result="25")).move_to(0, 0)
 eq["result"].fill(GOLD)
@@ -957,7 +957,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 tbl = scene.text.typst('#table(columns: 2, [*Method*], [*Error*], [Baseline], [0.18], [GPU], [0.04])')
 scene.play([tbl.animate.fade_in().duration(0.6)])
 # output: preview.webp
@@ -976,7 +976,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 snippet = scene.text.code("result = mass * acceleration", language="python").move_to(0, 0)
 scene.play([snippet.animate.fade_in().duration(0.5)])
 # output: preview.webp
@@ -997,7 +997,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 # Usa cualquier PNG/JPG/WebP local — se comparte textura si repites path
 logo = scene.geometry.rect(120, 70).fill(WHITE).move_to(0, 0) # placeholder de imagen
 caption = scene.text("scene.media.image(\"assets/logo.webp\")").move_to(0, -70)
@@ -1018,7 +1018,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Scene
-scene = Scene(960, 540)
+scene = Scene(frame=(16, 9))
 # Con un MP4 local: clip = scene.media.video("assets/clip.mp4", width=720, duration=4, loop=True, volume=0.8); scene.play([clip])
 clip = scene.geometry.rect(720, 405) # placeholder ejecutable para la documentación
 scene.play([clip.animate.fade_in().duration(0.4)])
@@ -1039,7 +1039,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 # Con un JSON local: clip = scene.media.lottie("assets/pulse.json", width=180); scene.play([clip])
 clip = scene.geometry.circle(70) # placeholder ejecutable para la documentación
 scene.play([clip.animate.fade_in().duration(0.4)])
@@ -1059,7 +1059,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 # Importa SVG real con scene.media.svg("assets/robot.svg") y accede con .part("id")
 placeholder = scene.geometry.regular_polygon(6, 50).fill(BLUE).move_to(0, 0)
 label = scene.text("scene.media.svg(\"assets/robot.svg\")").move_to(0, -80)
@@ -1080,7 +1080,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 robot = scene.geometry.regular_polygon(5, 60).fill(BLUE).move_to(0, 0)
 arm = robot # en SVG real: robot.part("arm")
 scene.play([arm.animate.rotate_by(0.4).duration(0.7)])
@@ -1101,7 +1101,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from gaanim import Direction
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 row = scene.geometry.group([scene.geometry.dot(10).fill(BLUE), scene.text("Label").move_to(20, 0)]).move_to(0, 0)
 scene.play([row.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.6)])
 # output: preview.webp
@@ -1122,7 +1122,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 mass = scene.geometry.dot(12).fill(GOLD).move_to(-40, 0)
 note = scene.slides.callout("Moving mass", mass, offset=(130, 70))
 scene.play([mass.animate.shift_by(80, 0).duration(1.0), note.animate.fade_in().duration(0.4)])
@@ -1247,7 +1247,7 @@ heading = scene.slides.section_header("Method", kicker="02", align="center")
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 opening = scene.slides.title_card("Vector Motion", "A technical explanation", panel=True)
 scene.play([opening.animate.fade_in().duration(0.7)])
 # output: preview.webp
@@ -1266,7 +1266,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=48, bullet_color=GOLD).move_to(0, 40)
 scene.play([agenda.animate.fade_in().duration(0.6)])
 # output: preview.webp
@@ -1302,7 +1302,7 @@ chart = scene.viz.chart(spec)
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 tbl = scene.slides.table(["Method","Error","Time"], [["Baseline","0.18","48 ms"],["GPU","0.04","15 ms"]]).move_to(0, 0)
 scene.play([tbl.animate.fade_in().duration(0.6)])
 # output: preview.webp
@@ -1347,7 +1347,7 @@ anteriores.
 import math
 from gaanim import Axis, Scene
 
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 amplitude = scene.viz.parameter(1.0)
 axes = scene.viz.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
 curve = axes.plot(lambda x, a: a * math.sin(x), inputs=[amplitude])
@@ -1366,7 +1366,7 @@ scene.play([axes.animate.create(), curve.animate.write(), amplitude.animate.set(
 ```python
 from gaanim import RED, Scene
 
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 k = scene.viz.variable(10, label="$k$", format=".0f", color=RED)
 scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
 ```
@@ -1384,7 +1384,7 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
 import math
 from gaanim import Scene
 
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 radius = scene.viz.parameter(1.0)
 area = scene.viz.readout(lambda r: math.pi * r**2, inputs=[radius], label="$A$", format=".2f", unit="m²")
 scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
@@ -1413,7 +1413,7 @@ el objeto que lo conduce.
 )[
 ```python
 from gaanim import Anchor, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 frame = scene.geometry.rect(180, 90)
 corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
 ```
@@ -1430,7 +1430,7 @@ corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 theta = scene.viz.parameter(0.2)
 arc = scene.geometry.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([arc.animate.fade_in().duration(0.3), theta.animate.set(4.5).duration(1.6)])
@@ -1451,7 +1451,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.0)
 curve = scene.geometry.polyline([(110*cos(u), 60*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
@@ -1473,7 +1473,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from math import cos, sin, pi
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.35)
 curve = scene.geometry.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 tangent = scene.geometry.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
@@ -1495,7 +1495,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.25)
 curve = scene.geometry.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
 circle = scene.geometry.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
@@ -1516,7 +1516,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 theta = scene.viz.parameter(0.3)
 rot = scene.geometry.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
 scene.play([rot.animate.fade_in().duration(0.3), theta.animate.set(5.0).duration(1.6)])
@@ -1536,7 +1536,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Anchor, BLACK, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 body = scene.geometry.rect(150, 70).move_to(40, -20)
 bar = scene.mechanics.bar_between((-150, 100), body.anchor_point(Anchor.TOP_LEFT), width=9).stroke(BLACK, 9)
 scene.play([bar.animate.fade_in(), body.animate.shift_by(80, 0).duration(1.0)])
@@ -1556,7 +1556,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 mass = scene.geometry.dot(10).fill(GOLD).move_to(70, 0)
 spring = scene.mechanics.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0, start_straight=18, end_straight=18).no_fill().stroke(WHITE, 3)
 scene.play([spring.animate.fade_in().duration(0.3), mass.animate.shift_by(40, 0).duration(1.0)])
@@ -1576,7 +1576,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Anchor, BLACK, WHITE, Scene
-scene = Scene(480, 270, background=WHITE)
+scene = Scene(frame=(16, 9), background=WHITE)
 frame = scene.geometry.rect(180, 80).move_to(0, 0)
 physical_width = scene.viz.parameter(2.5)
 dim = scene.mechanics.dimension_between(
@@ -1601,7 +1601,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLACK, GOLD, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 theta = scene.viz.parameter(0.2)
 tip = scene.geometry.polar_point((0, 0), 85, theta)
 bar = scene.mechanics.bar_between((0, 0), tip).stroke(BLACK, 7)
@@ -1622,7 +1622,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Direction, GOLD, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 bob = scene.geometry.dot(10).move_to(80, -90)
 theta = scene.mechanics.angle_between((0,0), Direction.DOWN, bob, label="$theta$", show_value=True, color=GOLD)
 scene.play([theta.animate.fade_in(), bob.animate.shift_by(90, 35).duration(1.2)])
@@ -1641,7 +1641,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Direction, GOLD, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 force = scene.mechanics.vector_between((-100, 0), (70, 45), label="$F$", color=GOLD)
 moment = scene.mechanics.moment_about((120, -40), radius=42, label="$M$")
 frame = scene.mechanics.coordinate_frame_at((0, -80), Direction.RIGHT, labels=("$e_1$", "$e_2$"))
@@ -1661,7 +1661,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GREEN, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 body = scene.geometry.circle(24)
 magnitude = scene.viz.parameter(30)
 force = scene.mechanics.force_at(
@@ -1684,7 +1684,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Direction, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 pin = scene.mechanics.pin_support((-100, 0), direction=Direction.UP)
 roller = scene.mechanics.roller_support((100, 0), direction=Direction.UP)
 scene.play([pin.animate.fade_in(), roller.animate.fade_in()])
@@ -1703,7 +1703,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import Direction, Scene
-scene = Scene(480, 270)
+scene = Scene(frame=(16, 9))
 driver = scene.mechanics.gear(55, 20).move_to(-55, 20)
 driven = scene.mechanics.gear(33, 12).move_to(33, 20).bind_rotation_from(driver, ratio=-5/3)
 rack = scene.mechanics.rack(220, 18).move_to(0, -65).bind_translation_from_rotation(
@@ -1730,7 +1730,7 @@ Reference for the fluent handle returned by every factory. All return `Drawable`
 ```python
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 obj = scene.geometry.circle(45).fill(BLUE).stroke(GOLD, 3).move_to(0, 0)
 obj.glow(GOLD, radius=18)
 scene.play([obj.animate.grow_from_center().duration(0.8)])
@@ -1751,7 +1751,7 @@ scene.render()
 # show-code: true
 from gaanim import Anchor, BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import pi
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 hinge = scene.geometry.dot(7).fill(GOLD).move_to(-200, 100)
 arm = scene.geometry.rect(90, 18).fill(BLUE).move_to(hinge).with_pivot(-200, 100)
 scene.play([arm.animate.rotate_by(pi/2.5).duration(1.0)])
@@ -1772,7 +1772,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 from gaanim import Anchor, Direction
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 a = scene.geometry.circle(18).fill(BLUE)
 b = scene.geometry.circle(18).fill(WHITE)
 c = scene.geometry.circle(18).fill(BLUE)
@@ -1794,7 +1794,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 mass = scene.geometry.dot(12).fill(GOLD).move_to(-60, 0)
 label = scene.text("follower").move_to(0, 45)
 label.attach_to(mass)
@@ -1815,7 +1815,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, RED, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 # TextSelection animations compose with complete-Text animations.
 eq = scene.text("$E = ", part("mass", "m"), " c^2$").move_to(0, 0)
 if "mass" in eq.parts:

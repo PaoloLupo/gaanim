@@ -17,7 +17,7 @@ dibujables y se entregan a `scene.play` como una lista.
 ```python
 from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-120, 0)
 rect = scene.geometry.rect(160, 100).fill(GOLD).move_to(120, 0)
 
@@ -35,7 +35,7 @@ scene.play([circle.animate.shift_by(180, 0).duration(1.0), rect.animate.fade_out
 ```python
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 title = scene.text("Mass-energy equivalence", role="title").fill(WHITE).move_to(0, 180)
 equation = scene.text.equation("E = m c^2").fill(GOLD).move_to(0, 0)
 caption = scene.text("Energy and mass are related", role="subtitle").fill(BLUE).move_to(0, -150)
@@ -51,7 +51,7 @@ scene.wait(1.0)
 ```python
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene, stagger
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 circle = scene.geometry.circle(60).fill(BLUE).move_to(-240, 80)
 rect = scene.geometry.rect(130, 80).fill(RED).move_to(0, 80)
 square = scene.geometry.square(90).fill(GREEN).move_to(240, 80)

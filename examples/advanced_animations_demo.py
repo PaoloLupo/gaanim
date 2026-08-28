@@ -4,11 +4,11 @@ from gaanim import Easing, BLACK, BLUE, CYAN, GOLD, PURPLE, WHITE, Scene
 
 
 def main():
-    scene = Scene(1280, 720, background=BLACK)
-    square = scene.geometry.rect(150, 150).stroke(PURPLE, 6).no_fill().move_to(300, -20)
-    circle = scene.geometry.circle(75).fill(CYAN).move_to(-300, -20)
-    title = scene.text("Advanced Animations", role="title").fill(WHITE).move_to(0, 180)
-    equation = scene.text.equation("f(x) = x^2 - 2x + 1").fill(GOLD).move_to(0, -20)
+    scene = Scene(frame=(16, 9), background=BLACK)
+    square = scene.geometry.rect(1.875, 1.875).stroke(PURPLE, 0.075).no_fill().move_to(3.75, -0.25)
+    circle = scene.geometry.circle(0.9375).fill(CYAN).move_to(-3.75, -0.25)
+    title = scene.text("Advanced Animations", role="title").fill(WHITE).move_to(0, 2.25)
+    equation = scene.text.equation("f(x) = x^2 - 2x + 1").fill(GOLD).move_to(0, -0.25)
 
     scene.play([
         square.animate.create().duration(2.0).easing(Easing.SMOOTH),

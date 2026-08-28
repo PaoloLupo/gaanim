@@ -5,7 +5,7 @@ import os
 from gaanim import BLUE, CORAL, CYAN, GOLD, NAVY, WHITE, Material3D, Scene
 
 
-scene = Scene(1280, 720, background=NAVY)
+scene = Scene(frame=(16, 9), background=NAVY)
 scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
 
 floor = scene.geometry.plane(

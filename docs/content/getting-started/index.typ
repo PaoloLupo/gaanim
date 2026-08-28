@@ -44,7 +44,7 @@ Crea un archivo llamado `my_animation.py`:
 ```python
 from gaanim import Easing, BLACK, BLUE, GOLD, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
 circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
 text = scene.text("Hello World", role="title")

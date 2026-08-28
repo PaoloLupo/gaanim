@@ -4,18 +4,18 @@ import os
 
 from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(720, 480, background=WHITE)
+scene = Scene(frame=(13.5, 9), background=WHITE)
 curve = (
     scene.geometry.polyline([
-        (210 * math.cos(t), 120 * math.sin(2 * t))
+        (3.9375 * math.cos(t), 2.25 * math.sin(2 * t))
         for t in (2 * math.pi * index / 240 for index in range(241))
     ])
     .no_fill()
-    .stroke(BLUE, 4)
+    .stroke(BLUE, 0.075)
 )
 tracker = scene.viz.parameter(0.0)
-tangent = scene.geometry.tangent_on_curve(curve, tracker, length=200).stroke(GOLD, 5)
-title = scene.text("tangent on curve").fill(BLACK).move_to(0, 190, anchor=Anchor.CENTER)
+tangent = scene.geometry.tangent_on_curve(curve, tracker, length=3.75).stroke(GOLD, 0.09375)
+title = scene.text("tangent on curve").fill(BLACK).move_to(0, 3.5625, anchor=Anchor.CENTER)
 scene.play([curve.animate.create().duration(0.7), tangent.animate.create().duration(0.3), title.animate.write().duration(0.4)])
 scene.play([tracker.animate.set(1.0).duration(2.0)])
 

@@ -4,7 +4,7 @@ import os
 
 from gaanim import Scene, comparison, lecture, title_slide
 
-scene = Scene(1280, 720, margin=48)
+scene = Scene(frame=(16, 9), margin=0.6)
 scene.canvas.set_theme("presentation")
 scene.slides.brand(
     logo="tests/assets/slides_brand.svg",
@@ -28,20 +28,20 @@ content.bind(
     body=scene.text(
         "Scientific presentations need repeatable hierarchy, safe spacing, "
         "and navigation without manually rebuilding chrome on every slide.",
-        size=34,
+        size=0.425,
     ),
     footer=scene.text("Consistent by construction"),
 )
 scene.wait(0.4)
 
 manual = scene.layout.stack([
-    scene.geometry.rounded_rect(310, 120, 18).fill(scene.canvas.color("panel")),
+    scene.geometry.rounded_rect(3.875, 1.5, 0.225).fill(scene.canvas.color("panel")),
     scene.text("Manual"),
-], width=310, height=120)
+], width=3.875, height=1.5)
 semantic = scene.layout.stack([
-    scene.geometry.rounded_rect(310, 120, 18).fill(scene.canvas.color("header")),
+    scene.geometry.rounded_rect(3.875, 1.5, 0.225).fill(scene.canvas.color("header")),
     scene.text("Semantic"),
-], width=310, height=120)
+], width=3.875, height=1.5)
 compare = scene.segment("Comparison", template=comparison, notes="Compare both workflows.")
 compare.bind(title=scene.text("Authoring workflow", role="title"), left=manual, right=semantic)
 scene.wait(0.4)

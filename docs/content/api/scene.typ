@@ -15,7 +15,7 @@
 pertenecen a la misma escena y comparten su modelo diferido:
 
 ```python
-shape = scene.geometry.circle(64)
+shape = scene.geometry.circle(1)
 title = scene.text("Resultado")
 page = scene.layout.column([title, shape])
 value = scene.viz.parameter(0.0)
@@ -37,8 +37,8 @@ nombre. Crea una `Scene` para cada animación.
 #api-entry(
   name: "Scene",
   kind: "constructor",
-  signature: "Scene(width: int = 1280, height: int = 720, background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
-  params: ((name: "width", type: "int", default: "1280", desc: [Ancho del viewport en píxeles.]), (name: "height", type: "int", default: "720", desc: [Alto del viewport en píxeles.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush` o `Background`; tiene prioridad sobre el fondo del tema.]), (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme del marco seguro.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre incluido o tema centralizado reutilizable.]),),
+  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
+  params: ((name: "frame", type: "tuple[float, float]", default: "(16.0, 9.0)", desc: [Ancho y alto del marco lógico centrado en el origen.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush` o `Background`; tiene prioridad sobre el fondo del tema.]), (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme en unidades lógicas.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre incluido o tema centralizado reutilizable.]),),
   returns: (type: "Scene", desc: [Una escena nueva para autoría.]),
   desc: [Instala el tema antes de crear objetos. Nombres desconocidos o valores inválidos producen `ValueError` o `TypeError`.],
 )[
@@ -46,12 +46,12 @@ nombre. Crea una `Scene` para cada animación.
 ```python
 from gaanim import BLACK, Scene
 
-scene = Scene(width=1920, height=1080, background=BLACK, margin=48)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.5)
 
-# Viewport configuration remains available from the scene.
-scene.canvas.width = 1280
-scene.canvas.height = 720
-scene.canvas.set_margin(32)
+# La resolución se elige al exportar, no cambia la composición.
+assert scene.canvas.frame_width == 16
+assert scene.canvas.frame_height == 9
+scene.canvas.set_margin(0.4)
 ```
 ]
 
@@ -60,17 +60,17 @@ compatibles conservan metadatos semánticos hasta la compilación, así que las
 reglas también alcanzan objetos creados antes de esa llamada. Consulta
 #link("/api/themes/", "Temas y colores").
 
-`scene.canvas.set_preset(...)` configura un formato de salida estándar y un área
+`scene.canvas.set_preset(...)` configura un marco lógico estándar y un área
 segura que respetan todas las operaciones de layout y colocación en bordes:
 
 ```python
-scene.canvas.set_preset("vertical")  # 1080×1920, safe around mobile UI
+scene.canvas.set_preset("vertical")  # marco lógico 9×16
 safe = scene.canvas.safe_area()
 title = safe.place(scene.text("Vertical video", role="title"), Anchor.TOP)
 ```
 
-Los presets disponibles son `"widescreen"` (1920×1080 / 16:9), `"vertical"`
-(1080×1920 / 9:16) y `"square"` (1080×1080 / 1:1). Usa
+Los presets disponibles son `"widescreen"` (16×9), `"vertical"` (9×16) y
+`"square"` (10×10). Usa
 `set_safe_area(top=..., right=..., bottom=..., left=...)` cuando una marca o
 plataforma requiera márgenes internos personalizados.
 
@@ -94,7 +94,7 @@ for framing without drawing a bounding box over the selected object.
 - `F`: frame the selection, or the complete scene when nothing is selected.
 - `R`: reset and frame; `I`: toggle inspection mode.
 
-The visible output frame keeps the scene's resolution and aspect ratio fixed.
+The visible output frame keeps the scene's logical frame and aspect ratio fixed.
 Picking and ray casting are limited to that frame. Purely 2D scenes remain
 orthographic unless inspection is enabled manually.
 
@@ -122,35 +122,35 @@ Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
 ```python
 from gaanim import Axis, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 
-circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-160, 0)
-rect = scene.geometry.rect(180, 100).fill(GOLD).move_to(160, 0)
-triangle = scene.geometry.polygon([(0, 100), (-90, -70), (90, -70)])
-star = scene.geometry.star(5, 90, 42)
-hexagon = scene.geometry.regular_polygon(6, 84)
-slice = scene.geometry.sector(0, 0, 100, 0.0, 1.8)
-ring = scene.geometry.annulus(100, 56)
-underbrace = scene.geometry.brace(-120, -100, 120, -100, 36)
-approved = scene.geometry.checkmark(32).fill(GREEN)
-rejected = scene.geometry.cross(32).stroke(WHITE, 4)
-corner = scene.geometry.right_angle(40)
-label = scene.text("Gaanim", role="title").move_to(0, 220)
-formula = scene.text("$E = m c^2$").move_to(0, -180)
-arrow = scene.geometry.arrow(-80, 0, 80, 0)
-angle = scene.geometry.arc(0, 0, 64, 0.0, 1.2).no_fill().stroke(WHITE, 3)
-rotation = scene.geometry.curved_arrow(-90, -80, 90, -80, 0.9).fill(WHITE)
-rotation_arc = scene.geometry.curved_arrow_arc(0, -80, 90, 0.2, 1.4).fill(WHITE)
-guide = scene.geometry.dashed_line(-180, -120, 180, -120, dash_length=18, gap_length=10)
-measure_arrow = scene.geometry.double_arrow(-140, -160, 140, -160)
-measure = scene.mechanics.dimension(-80, 80, 80, 80, 24)
-spring = scene.geometry.path([(-80, 0), (-50, 24), (-20, -24), (10, 24), (40, -24), (80, 0)]).no_fill().stroke(WHITE, 4)
+circle = scene.geometry.circle(0.8).fill(BLUE).stroke(WHITE, 0.04).move_to(-1.6, 0)
+rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
+triangle = scene.geometry.polygon([(0, 1.0), (-0.9, -0.7), (0.9, -0.7)])
+star = scene.geometry.star(5, 0.9, 0.42)
+hexagon = scene.geometry.regular_polygon(6, 0.84)
+slice = scene.geometry.sector(0, 0, 1.0, 0.0, 1.8)
+ring = scene.geometry.annulus(1.0, 0.56)
+underbrace = scene.geometry.brace(-1.2, -1.0, 1.2, -1.0, 0.36)
+approved = scene.geometry.checkmark(0.32).fill(GREEN)
+rejected = scene.geometry.cross(0.32).stroke(WHITE, 0.04)
+corner = scene.geometry.right_angle(0.4)
+label = scene.text("Gaanim", role="title").move_to(0, 2.2)
+formula = scene.text("$E = m c^2$").move_to(0, -1.8)
+arrow = scene.geometry.arrow(-0.8, 0, 0.8, 0)
+angle = scene.geometry.arc(0, 0, 0.64, 0.0, 1.2).no_fill().stroke(WHITE, 0.03)
+rotation = scene.geometry.curved_arrow(-0.9, -0.8, 0.9, -0.8, 0.9).fill(WHITE)
+rotation_arc = scene.geometry.curved_arrow_arc(0, -0.8, 0.9, 0.2, 1.4).fill(WHITE)
+guide = scene.geometry.dashed_line(-1.8, -1.2, 1.8, -1.2, dash_length=0.18, gap_length=0.10)
+measure_arrow = scene.geometry.double_arrow(-1.4, -1.6, 1.4, -1.6)
+measure = scene.mechanics.dimension(-0.8, 0.8, 0.8, 0.8, 0.24)
+spring = scene.geometry.path([(-0.8, 0), (-0.5, 0.24), (-0.2, -0.24), (0.1, 0.24), (0.4, -0.24), (0.8, 0)]).no_fill().stroke(WHITE, 0.04)
 axes = scene.viz.cartesian_2d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
 )
-logo = scene.media.image("assets/logo.webp").scale_to(0.25).move_to(360, 180)
-icon = scene.media.svg("assets/icon.svg").scale_to(0.5).move_to(-360, 180)
+logo = scene.media.image("assets/logo.webp").scale_to(0.25).move_to(3.6, 1.8)
+icon = scene.media.svg("assets/icon.svg").scale_to(0.5).move_to(-3.6, 1.8)
 ```
 
 Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
@@ -193,11 +193,11 @@ from gaanim import Axis, BLUE
 space = scene.viz.cartesian_2d(
     Axis.linear(-3, 3).ticks(1).label("x"),
     Axis.linear(-2, 2).ticks(1).label("f(x)"),
-    width=900,
-    height=480,
+    width=9,
+    height=4.8,
 )
-curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 3)
-marker = scene.geometry.dot(6).at_coordinate(space.coord(1, 1))
+curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 0.03)
+marker = scene.geometry.dot(0.06).at_coordinate(space.coord(1, 1))
 ```
 
 Consulta #link("/api/visualization/", "la API de visualización") para conocer
@@ -209,7 +209,7 @@ control point or a cubic Bézier with two. It remains a real Bézier path, so it
 can drive the reactive curve bindings directly.
 
 ```python
-curve = scene.geometry.bezier((-180, 0), [(-80, 180), (80, -180)], (180, 0))
+curve = scene.geometry.bezier((-1.8, 0), [(-0.8, 1.8), (0.8, -1.8)], (1.8, 0))
 ```
 
 `path(definition)` is the compact entry point for custom technical geometry.
@@ -218,10 +218,10 @@ a composed path. The explicit `polyline` and `curve` factories remain available
 for code that benefits from stating the exact path kind.
 
 ```python
-rail = scene.geometry.path([(-180, 0), (0, 80), (180, 0)])
+rail = scene.geometry.path([(-1.8, 0), (0, 0.8), (1.8, 0)])
 profile = scene.geometry.path([
-    ("move", [(-180, -40)]),
-    ("cubic", [(-80, 100), (80, -100), (180, 40)]),
+    ("move", [(-1.8, -0.4)]),
+    ("cubic", [(-0.8, 1), (0.8, -1), (1.8, 0.4)]),
 ])
 ```
 
@@ -242,7 +242,7 @@ Reactive visual helpers are hidden when declared. Add their entry animation to
 
 ```python
 theta = scene.viz.parameter(0.2)
-rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 140, 0.0).fill(WHITE)
+rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 1.4, 0.0).fill(WHITE)
 scene.play([
     rotation.animate.fade_in().duration(0.3),
     theta.animate.set(4.5).duration(2.0),
@@ -256,7 +256,7 @@ another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
 ```python
 label = scene.text("moving label")
 label.attach_to(marker)
-marker.add_updater(Updater.orbit(0, 0, 120, 1.2))
+marker.add_updater(Updater.orbit(0, 0, 1.2, 1.2))
 scene.play([label.animate.fade_in().duration(0.3)])
 ```
 
@@ -269,21 +269,21 @@ mechanism = scene.geometry.group([rail, spring, mass]).with_pivot(0, 0)
 scene.play([mechanism.animate.rotate_by(PI / 3).duration(1.0)])
 ```
 
-`spring_between(from, to, coils=8, amplitude=12, crossing=0)` creates a native
+`spring_between(from, to, coils=8, amplitude=0.12, crossing=0)` creates a native
 reactive helical spring. Each endpoint can be a drawable or an `(x, y)` tuple,
 so it follows a moving mass without a Python callback every frame. Set
 `crossing` from `0` to `1` to fold parts of each turn back into e-like visual
 crossings.
 
-`callout(text, target, offset=(160, 96), width=240, height=72)` creates a
+`callout(text, target, offset=(1.6, 0.96), width=2.4, height=0.72)` creates a
 reusable editorial label: its card, text, and connector follow the target
 natively. It returns a regular `Drawable` group, so it can be animated like any
 other mobject.
 
 ```python
-mass = scene.geometry.dot(20).fill(GOLD)
-note = scene.slides.callout("Moving mass", mass, offset=(180, 100))
-scene.play([mass.animate.shift_by(240, 0).duration(1.2), note.animate.fade_in().duration(0.4)])
+mass = scene.geometry.dot(0.2).fill(GOLD)
+note = scene.slides.callout("Moving mass", mass, offset=(1.8, 1))
+scene.play([mass.animate.shift_by(2.4, 0).duration(1.2), note.animate.fade_in().duration(0.4)])
 ```
 
 The themed factories `badge`, `chip`, `card`, `banner`, `lower_third`,
@@ -298,7 +298,7 @@ animatable drawable. Pass `panel=True` for a framed version.
 
 ```python
 opening = scene.slides.title_card("Vector motion", "A short technical explanation")
-scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=48).duration(0.6)])
+scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=0.48).duration(0.6)])
 ```
 
 `bullets(items)` creates a vertically aligned bullet list as one drawable. The
@@ -473,7 +473,7 @@ scene.stop("result-ready")
 # show-code: true
 from gaanim import BLUE, GOLD, Scene, Transition
 
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 title = scene.text("Shared context", role="title").fill(GOLD).move_to(0, 70)
 scene.play([title.animate.write().duration(0.5)])
 
@@ -529,20 +529,20 @@ of the outgoing scene introduces the following section.
 
 ```python
 overview = scene.camera.save("overview")
-detail = scene.camera.state_2d(center=(-160, 40), zoom=1.5)
+detail = scene.camera.state_2d(center=(-1.6, 0.4), zoom=1.5)
 scene.play([scene.camera.animate.to(detail).duration(0.8)])
 scene.play([scene.camera.animate.restore("overview").duration(0.6)])
 
-scene.play([scene.camera.animate.pan_to(-160, 40).duration(0.8)])
+scene.play([scene.camera.animate.pan_to(-1.6, 0.4).duration(0.8)])
 scene.play([scene.camera.animate.zoom_to(1.5).duration(0.6)])
-scene.play([scene.camera.animate.frame_to([circle, label], margin=(32, 48), dynamic=True).duration(0.9)])
+scene.play([scene.camera.animate.frame_to([circle, label], margin=(0.32, 0.48), dynamic=True).duration(0.9)])
 scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
-scene.play([scene.camera.animate.follow(circle.anchor(Anchor.TOP), offset=(0, 24), lag=0.2).duration(2.0)])
-scene.play([scene.camera.animate.shake(amplitude=12, frequency=8).duration(0.4)])
+scene.play([scene.camera.animate.follow(circle.anchor(Anchor.TOP), offset=(0, 0.24), lag=0.2).duration(2.0)])
+scene.play([scene.camera.animate.shake(amplitude=0.12, frequency=8).duration(0.4)])
 
 # Camera animations return Anim and can run beside drawable animations.
 scene.play([
-    circle.animate.move_to(180, 0).duration(1.2),
+    circle.animate.move_to(1.8, 0).duration(1.2),
     scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.2),
 ])
 ```
@@ -694,14 +694,16 @@ Preview, export and visual capture are host responsibilities. Export a script
 without changing it:
 
 ```bash
-gaanim export my_animation.py --output output.webp --quality standard
-gaanim export my_animation.py --output output.mp4 --encoder nvenc
+gaanim export my_animation.py --output output.webp --width 1280 --height 720 --quality standard
+gaanim export my_animation.py --output output.mp4 --width 1920 --height 1080 --encoder nvenc
 gaanim export overlay.py --output overlay.webm --transparent
 ```
 
-`--quality` ajusta el FPS, la compresión y la velocidad de codificación; no
-modifica el ancho ni el alto. La exportación conserva siempre la resolución
-definida por la escena. MP4 prueba automáticamente NVENC, AMF y QSV; usa el
+`--width` y `--height` eligen la resolución sin cambiar la composición lógica.
+Una relación de aspecto distinta falla por defecto; `--fit contain` añade
+barras y `--fit cover` recorta los bordes. `--quality` ajusta el FPS, la
+compresión y la velocidad de codificación. MP4 prueba automáticamente NVENC,
+AMF y QSV; usa el
 primer encoder hardware que complete un probe real y cae a `libx264` solo si
 ninguno funciona. `--encoder libx264|nvenc|amf|qsv|vaapi` exige una
 implementación concreta sin fallback; también está disponible en el editor.

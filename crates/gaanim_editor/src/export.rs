@@ -36,6 +36,9 @@ pub struct ExportState {
     pub quality: ExportQuality,
     pub video_encoder: VideoEncoder,
     pub output_path: String,
+    pub width: u32,
+    pub height: u32,
+    pub fit: OutputFit,
     pub active: bool,
     pub show_complete: bool,
     pub message: String,
@@ -116,6 +119,9 @@ impl Default for ExportState {
             quality: ExportQuality::Standard,
             video_encoder: VideoEncoder::Auto,
             output_path: "output.mp4".to_string(),
+            width: 1920,
+            height: 1080,
+            fit: OutputFit::Error,
             active: false,
             show_complete: false,
             message: String::new(),
@@ -344,11 +350,14 @@ pub fn export_dialog_system(
     let mut current_quality = state.quality;
     let mut current_encoder = state.video_encoder;
     let mut current_output = state.output_path.clone();
+    let mut current_width = state.width;
+    let mut current_height = state.height;
+    let mut current_fit = state.fit;
     let has_replay = replay_stash.canvas.is_some();
     let scene_resolution = replay_stash
         .canvas
         .as_ref()
-        .map(|canvas| (canvas.width, canvas.height));
+        .map(|canvas| (canvas.frame.width, canvas.frame.height));
     let dur = timeline.cached_duration;
     let fps = current_quality.fps();
     let total = (dur * fps as f64).ceil() as u64;
@@ -424,12 +433,36 @@ pub fn export_dialog_system(
                 ui.label("Output:");
                 ui.text_edit_singleline(&mut current_output);
             });
+            ui.horizontal(|ui| {
+                ui.label("Resolution:");
+                ui.add(egui::DragValue::new(&mut current_width).range(1..=16384));
+                ui.label("×");
+                ui.add(egui::DragValue::new(&mut current_height).range(1..=16384));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Aspect fit:");
+                egui::ComboBox::from_id_salt("export_fit")
+                    .selected_text(match current_fit {
+                        OutputFit::Error => "Error on mismatch",
+                        OutputFit::Contain => "Contain",
+                        OutputFit::Cover => "Cover",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut current_fit,
+                            OutputFit::Error,
+                            "Error on mismatch",
+                        );
+                        ui.selectable_value(&mut current_fit, OutputFit::Contain, "Contain");
+                        ui.selectable_value(&mut current_fit, OutputFit::Cover, "Cover");
+                    });
+            });
             ui.label(format!(
                 "Duration: {:.1}s → {} frames at {}fps",
                 dur, total, fps
             ));
             if let Some((width, height)) = scene_resolution {
-                ui.label(format!("Resolution: {width}×{height} (scene)"));
+                ui.label(format!("Logical frame: {width}×{height}"));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -447,6 +480,9 @@ pub fn export_dialog_system(
     state.quality = current_quality;
     state.video_encoder = current_encoder;
     state.output_path = current_output;
+    state.width = current_width;
+    state.height = current_height;
+    state.fit = current_fit;
 
     if trigger_cancel {
         state.dialog_open = false;
@@ -486,6 +522,8 @@ pub fn export_dialog_system(
             } else {
                 VideoEncoder::Auto
             };
+            let output_size = (state.width, state.height);
+            let output_fit = state.fit;
             let progress = state.progress_shared.clone();
             let cancel_requested = state.cancel_requested.clone();
             let telemetry = ExportTelemetry::new();
@@ -521,6 +559,8 @@ pub fn export_dialog_system(
                         &out,
                         qual,
                         (fmt, video_encoder),
+                        output_size,
+                        output_fit,
                         telemetry.clone(),
                         cancel_requested,
                     ),
@@ -530,8 +570,9 @@ pub fn export_dialog_system(
                     ),
                     None => {
                         let mut config = ExportConfig::new(&out).with_quality(qual.preset());
-                        config.width = canvas.width;
-                        config.height = canvas.height;
+                        config.width = output_size.0;
+                        config.height = output_size.1;
+                        config.fit = output_fit;
                         config.aspect_ratio = AspectRatioPreset::Custom;
                         config.fps = fps;
                         config.crf = qual.crf();
@@ -693,6 +734,8 @@ fn run_export_worker(
     output_path: &str,
     quality: ExportQuality,
     encoding: (ExportFormat, VideoEncoder),
+    output_size: (u32, u32),
+    fit: OutputFit,
     telemetry: ExportTelemetry,
     cancel_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
@@ -708,6 +751,16 @@ fn run_export_worker(
         .arg(export_format_arg(format))
         .arg("--encoder")
         .arg(video_encoder.arg_name())
+        .arg("--width")
+        .arg(output_size.0.to_string())
+        .arg("--height")
+        .arg(output_size.1.to_string())
+        .arg("--fit")
+        .arg(match fit {
+            OutputFit::Error => "error",
+            OutputFit::Contain => "contain",
+            OutputFit::Cover => "cover",
+        })
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
         .stdout(Stdio::piped())

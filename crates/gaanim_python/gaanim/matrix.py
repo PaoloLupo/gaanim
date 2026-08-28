@@ -287,7 +287,7 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
     _validate_rectangular(values)
     row_gap = _non_negative(float(options.get("row_gap", 24.0)), "row_gap")
     column_gap = _non_negative(float(options.get("column_gap", 24.0)), "column_gap")
-    delimiter_gap = _non_negative(float(options.get("delimiter_gap", 12.0)), "delimiter_gap")
+    delimiter_gap = _non_negative(float(options.get("delimiter_gap", 0.12)), "delimiter_gap")
     delimiter = options.get("delimiters", "brackets")
     row_labels, column_labels = options.get("row_labels"), options.get("column_labels")
     cell_mode, label_mode = options.get("cell_mode", "math"), options.get("label_mode", "math")

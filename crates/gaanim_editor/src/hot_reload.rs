@@ -133,8 +133,7 @@ pub fn reload_listener_system(world: &mut World) {
         (tl.current_time, tl.is_playing, tl.cached_duration > 0.0)
     };
 
-    let width = payload.canvas.width;
-    let height = payload.canvas.height;
+    let (width, height) = payload.canvas.frame.preview_pixel_size();
     let compile_duration = payload.compile_duration.as_secs_f64();
     let replay_started_at = Instant::now();
     reload_with(world, payload.canvas);

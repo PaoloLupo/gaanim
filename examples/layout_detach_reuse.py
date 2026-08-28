@@ -5,19 +5,19 @@ import os
 from gaanim import BLUE, GOLD, WHITE, Scene, Transition
 
 
-scene = Scene(1280, 720, background="#0f172a", margin=48)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.6)
 scene.segment("cover")
 
 title = scene.text("Reusable layout title", role="title").fill(GOLD)
 subtitle = scene.text("Initially positioned by a responsive column").fill(WHITE)
-marker = scene.geometry.circle(32).fill(BLUE)
+marker = scene.geometry.circle(0.4).fill(BLUE)
 
 page = scene.layout.column(
     [title, subtitle, marker],
     within="safe",
     width="fill",
     height="fill",
-    gap=28,
+    gap=0.35,
     align="center",
     justify="center",
 )
@@ -27,7 +27,7 @@ scene.wait(0.4)
 scene.segment("detail", Transition.cross_fade(0.5))
 scene.reuse(title)
 page.detach(title)
-scene.play([title.animate.move_to(0, 240).duration(0.4)])
+scene.play([title.animate.move_to(0, 3).duration(0.4)])
 scene.wait(0.8)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

@@ -12,27 +12,27 @@ ACCENT = YELLOW
 MUTED = Color(148, 163, 184)
 
 # Escena y geometría base.
-scene = Scene(1920, 1080, background=BACKGROUND, margin=48)
-circle_center = (-360.0, -20.0)
-radius_value = 120.0
-line_center = (180.0, -20.0)
-line_length = 600.0
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.4)
+circle_center = (-3.0, -0.166667)
+radius_value = 1.0
+line_center = (1.5, -0.166667)
+line_length = 5.0
 theta = scene.viz.parameter(0.0)
 
 title = scene.text("Movimiento circular y curva seno", role="title")
-title.fill(WHITE).move_to(0, 265, anchor=Anchor.CENTER)
+title.fill(WHITE).move_to(0, 2.208333, anchor=Anchor.CENTER)
 caption = scene.text("Un solo ángulo gobierna ambas representaciones", role="subtitle")
-caption.fill(MUTED).move_to(0, 220, anchor=Anchor.CENTER)
+caption.fill(MUTED).move_to(0, 1.833333, anchor=Anchor.CENTER)
 
 orbit = (
     scene.geometry.circle(radius_value)
-    .stroke(PRIMARY, 4)
+    .stroke(PRIMARY, 0.033333)
     .no_fill()
     .move_to(*circle_center)
 )
 circle_ref = scene.geometry.polar_point(circle_center, radius_value, theta)
-circle_dot = scene.geometry.dot(10).fill(ACCENT).follow(circle_ref)
-radius = scene.geometry.tracking_line(circle_center, circle_ref).stroke(MUTED, 2).no_fill()
+circle_dot = scene.geometry.dot(0.083333).fill(ACCENT).follow(circle_ref)
+radius = scene.geometry.tracking_line(circle_center, circle_ref).stroke(MUTED, 0.016667).no_fill()
 
 # Recta tipada: el cero está en el inicio y las etiquetas nacen de Axis.
 axis = (
@@ -41,8 +41,8 @@ axis = (
     .numbers("pi", denominator=1)
     .style(
         color=MUTED,
-        width=2.0,
-        tick_width=2.0,
+        width=0.016667,
+        tick_width=0.016667,
         number_color=MUTED,
         label_color=MUTED,
     )
@@ -56,7 +56,7 @@ sine_curve = timeline.function(
     normal_scale=radius_value,
     reveal=theta,
 )
-sine_curve.stroke(PRIMARY, 3).no_fill()
+sine_curve.stroke(PRIMARY, 0.025).no_fill()
 
 # El mismo theta determina la coordenada sobre la recta y su altura normal.
 wave_ref = timeline.point_ref(
@@ -66,17 +66,17 @@ wave_ref = timeline.point_ref(
         inputs=[theta],
     ),
 )
-wave_dot = scene.geometry.dot(8).fill(ACCENT).follow(wave_ref)
+wave_dot = scene.geometry.dot(0.066667).fill(ACCENT).follow(wave_ref)
 projection_line = scene.geometry.tracking_line(circle_ref, wave_ref)
-projection_line.stroke(ACCENT, 2).no_fill()
+projection_line.stroke(ACCENT, 0.016667).no_fill()
 
 formula = (
     scene.text.equation("y(theta) = r sin(theta)", role="subtitle")
     .fill(WHITE)
-    .move_to(0, -215, anchor=Anchor.CENTER)
+    .move_to(0, -1.791667, anchor=Anchor.CENTER)
 )
 explanation = scene.text("La fase y la altura comparten el mismo parámetro", role="body")
-explanation.fill(MUTED).move_to(0, -265, anchor=Anchor.CENTER)
+explanation.fill(MUTED).move_to(0, -2.208333, anchor=Anchor.CENTER)
 
 # Timeline narrativa y determinista.
 scene.play(stagger(title.animate.write().duration(0.8), caption.animate.fade_in().duration(0.6), each=0.12))

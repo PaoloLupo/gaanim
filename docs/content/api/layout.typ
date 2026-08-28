@@ -136,7 +136,7 @@ vuelve a medir con el ancho de la tarjeta que lo contiene.
 ```python
 from gaanim import BLUE, GOLD, WHITE, Scene, TextFlow
 
-scene = Scene(1280, 720, background="#0b1020", margin=48)
+scene = Scene(frame=(16, 9), background="#0b1020", margin=48)
 
 copy = scene.text(
     "El mismo árbol puede componer una diapositiva, un panel o un video vertical.",

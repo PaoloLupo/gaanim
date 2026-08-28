@@ -1746,7 +1746,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let Some(bounds) = self.text_selection_world_bounds(selected) else {
             return;
         };
-        let pad = (bounds.width() * 0.08).max(3.0);
+        let pad = (bounds.width() * 0.08).max(0.03);
         let color = self.text_selection_color(selected);
         let strike = self
             .line(
@@ -1796,7 +1796,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let side = if above { 1.0 } else { -1.0 };
         let y = if above {
-            bounds.max.y + 12.0
+            bounds.max.y + 0.12
         } else {
             bounds.min.y - 12.0
         };

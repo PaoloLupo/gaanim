@@ -3,7 +3,7 @@
 from gaanim import BLUE, NAVY, Material3D, Scene
 
 
-scene = Scene(320, 180, background=NAVY)
+scene = Scene(frame=(16, 9), background=NAVY)
 scene.geometry.lighting_3d("studio", intensity=1.0, shadows=False)
 
 cube = scene.geometry.cube(1.6, material=Material3D.matte(BLUE))

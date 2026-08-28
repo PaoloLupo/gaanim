@@ -36,7 +36,7 @@ desarmar el layout.
 ```python
 # show-code: true
 from gaanim import GOLD, Scene
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 m = scene.viz.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
 m[0, :].fill(GOLD)
 scene.play(m.entries.animate.write(order="spiral_in", stagger=0.05).duration(0.4))
@@ -70,7 +70,7 @@ aproximan silenciosamente; usa `exact=False, precision=N` de forma explícita.
 ```python
 # show-code: true
 from gaanim import Scene
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 a = scene.viz.matrix([[1, 2], [3, 4]])
 b = scene.viz.matrix([[2, 0], [1, 2]])
 derivation = a.matmul(b)

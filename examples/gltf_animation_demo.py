@@ -4,7 +4,7 @@ import os
 
 from gaanim import BLACK, CYAN, GOLD, GRAY, WHITE, Scene
 
-scene = Scene(1920, 1080, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 scene.assets.assets_dir("examples/assets")
 
 fox = scene.media.gltf("Fox.glb").move_to_3d(2.0, -1.0, 0.0).scale_to_3d(0.040, 0.040, 0.04)
@@ -19,17 +19,17 @@ title = (
     scene.text("glb character animation")
     .fill(WHITE)
     .hud()
-    .move_to(0, 500)
+    .move_to(0, 4.166667)
 )
 caption = (
     scene.text("Khronos Fox  ·  Survey  →  Walk  →  Run  ·  cross-fade")
     .fill(GRAY)
     .hud()
-    .move_to(0, 450)
+    .move_to(0, 3.75)
 )
-survey_label = scene.text("SURVEY").fill(CYAN).hud().move_to(-505, -300)
-walk_label = scene.text("WALK").fill(GOLD).hud().move_to(-35, -300)
-run_label = scene.text("RUN").fill(WHITE).hud().move_to(410, -300)
+survey_label = scene.text("SURVEY").fill(CYAN).hud().move_to(-4.208333, -2.5)
+walk_label = scene.text("WALK").fill(GOLD).hud().move_to(-0.291667, -2.5)
+run_label = scene.text("RUN").fill(WHITE).hud().move_to(3.416667, -2.5)
 
 
 # Survey is deliberately short: it establishes the character before the

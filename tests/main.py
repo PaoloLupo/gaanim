@@ -9,7 +9,7 @@ from gaanim import BLACK, GOLD, RED, WHITE, Direction, Scene, Transition
 
 
 ROOT = Path(__file__).resolve().parent
-scene = Scene(1920, 1080, background=BLACK, margin=72)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.6)
 scene.assets.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("paper")
 

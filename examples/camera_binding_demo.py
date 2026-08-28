@@ -6,17 +6,17 @@ import os
 from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene, computed
 
 
-scene = Scene(960, 540, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
-scene.text("Reactive camera rig", role="title").fill(WHITE).move_to(0, 220, anchor=Anchor.CENTER)
-marker = scene.geometry.dot(18).fill(GOLD)
-scene.geometry.circle(150).no_fill().stroke(BLUE, 3)
+scene.text("Reactive camera rig", role="title").fill(WHITE).move_to(0, 3.666667, anchor=Anchor.CENTER)
+marker = scene.geometry.dot(0.3).fill(GOLD)
+scene.geometry.circle(2.5).no_fill().stroke(BLUE, 0.05)
 cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).move_to_3d(-1.8, -0.5, 0)
 sphere = scene.geometry.sphere(1.25, material=Material3D.metal(CYAN)).move_to_3d(1.8, -0.5, 0)
 theta = scene.viz.parameter(0.0)
 focus = scene.geometry.point_ref(
-    computed(lambda value: value * 260 - 130, inputs=[theta]),
-    computed(lambda value: math.sin(value * math.pi) * 90, inputs=[theta]),
+    computed(lambda value: value * 4.333333 - 2.166667, inputs=[theta]),
+    computed(lambda value: math.sin(value * math.pi) * 1.5, inputs=[theta]),
 )
 marker.follow(focus)
 

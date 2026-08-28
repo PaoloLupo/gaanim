@@ -6,13 +6,12 @@ from gaanim import BLUE, GOLD, WHITE, Scene
 
 
 vertical = os.environ.get("GAANIM_VERTICAL") == "1"
-scene = Scene(720, 1280, background="#0b1020", margin=48) if vertical else Scene(
-    1280, 720, background="#0b1020", margin=48
+scene = Scene(frame=(9, 16), background="#0b1020", margin=0.6) if vertical else Scene(frame=(16, 9), background="#0b1020", margin=0.6
 )
 
 
 def card(heading: str, copy: str):
-    panel = scene.geometry.rounded_rect(340, 220, 18).fill("#17233d")
+    panel = scene.geometry.rounded_rect(4.25, 2.75, 0.225).fill("#17233d")
     content = scene.layout.column(
         [
             scene.text(heading, role="subtitle").fill(GOLD),
@@ -20,15 +19,15 @@ def card(heading: str, copy: str):
         ],
         width="fill",
         height="fill",
-        padding=28,
-        gap=20,
+        padding=0.35,
+        gap=0.25,
         align="stretch",
         justify="center",
     )
     return scene.layout.stack(
         [scene.layout.item(panel, fit="stretch"), content],
-        width=340,
-        height=220,
+        width=4.25,
+        height=2.75,
         align="stretch",
     )
 
@@ -39,7 +38,7 @@ cards = scene.layout.row(
         card("Place", "The same row wraps when the vertical viewport is narrower."),
     ],
     width="fill",
-    gap=32,
+    gap=0.4,
     wrap=True,
     align="center",
     justify="center",

@@ -6,18 +6,18 @@ from gaanim import BLACK, Scene, Theme, Transition
 
 
 paper = Theme("paper", colors={"background": "#fffbe6"})
-scene = Scene(1920, 1080)
+scene = Scene(frame=(16, 9))
 scene.assets.assets_dir("examples/assets")
 scene.canvas.set_theme(paper)
 
 scene.segment("Introduction")
-title = scene.text("glTF segment visibility").fill(BLACK).hud().move_to(0, 420)
+title = scene.text("glTF segment visibility").fill(BLACK).hud().move_to(0, 3.5)
 scene.play([title.animate.write().duration(0.6)])
 scene.wait(1.0)
 
 scene.segment("Character", Transition.cross_fade(1.0))
 scene.reuse(title)
-scene.play([title.animate.move_to(-250, 400)])
+scene.play([title.animate.move_to(-2.083333, 3.333333)])
 
 # The model is declared after the title move. It must not leak into the first
 # second of this segment while the camera is still orthographic.

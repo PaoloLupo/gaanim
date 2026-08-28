@@ -5,19 +5,19 @@ import os
 
 from gaanim import BLACK, Axis, RED, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 k = scene.viz.variable(1.0, label="$k$", format=".1f", color=RED)
 radius = scene.viz.parameter(1.0)
 axes = scene.viz.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-2, 2))
-curve = axes.plot(lambda x, frequency: math.sin(frequency * x), inputs=[k]).stroke(RED, 3)
+curve = axes.plot(lambda x, frequency: math.sin(frequency * x), inputs=[k]).stroke(RED, 0.0375)
 area = scene.viz.readout(
     lambda current_radius: math.pi * current_radius**2,
     inputs=[radius],
     label="$A$",
     unit="$m^2$",
 )
-area.move_to(360, 220).fill(BLACK)
-k.move_to(-360, 220)
+area.move_to(4.5, 2.75).fill(BLACK)
+k.move_to(-4.5, 2.75)
 
 scene.play([k.animate.create(), area.animate.create(), axes.animate.create(), curve.animate.write()])
 scene.play([k.animate.set(4.0).duration(2), radius.animate.set(3.0).duration(2)])

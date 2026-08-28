@@ -5,7 +5,7 @@ import os
 
 from gaanim import Axis, BLACK, ChartSpec, Field, Guide, Scale, Scene
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 xs = [-2, -1, 0, 1, 2]
 ys = [-2, -1, 0, 1, 2]
 rows = [(x, y, math.sin(x) * math.cos(y)) for y in ys for x in xs]

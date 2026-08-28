@@ -3,14 +3,14 @@ import math
 import os
 from gaanim import Anchor, BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(720, 480, background=WHITE)
+scene = Scene(frame=(13.5, 9), background=WHITE)
 curve = scene.geometry.polyline([
-    (180 * math.cos(t), 100 * math.sin(2 * t))
+    (3.375 * math.cos(t), 1.875 * math.sin(2 * t))
     for t in (2 * math.pi * index / 240 for index in range(241))
-]).no_fill().stroke(BLUE, 4)
+]).no_fill().stroke(BLUE, 0.075)
 tracker = scene.viz.parameter(0.15)
-circle = scene.geometry.curvature_on_curve(curve, tracker).no_fill().stroke(GOLD, 3)
-title = scene.text("osculating circle").fill(BLACK).move_to(0, 190, anchor=Anchor.CENTER)
+circle = scene.geometry.curvature_on_curve(curve, tracker).no_fill().stroke(GOLD, 0.05625)
+title = scene.text("osculating circle").fill(BLACK).move_to(0, 3.5625, anchor=Anchor.CENTER)
 scene.play([curve.animate.create().duration(0.7), circle.animate.create().duration(0.3), title.animate.write().duration(0.4)])
 scene.play([tracker.animate.set(0.85).duration(2.0)])
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")

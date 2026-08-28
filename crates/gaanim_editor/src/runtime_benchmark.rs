@@ -73,8 +73,7 @@ fn benchmark_reload(script: &Path, output: &Path) -> Result<ReloadBenchmarkRepor
     let canvas = crate::script_runner::load_script_canvas(&script)?;
     let python_ms = python_started.elapsed().as_secs_f64() * 1000.0;
 
-    let width = canvas.width;
-    let height = canvas.height;
+    let (width, height) = canvas.frame.preview_pixel_size();
     let replay_started = Instant::now();
     crate::hot_reload::reload_with(&mut world, canvas);
     let replay_ms = replay_started.elapsed().as_secs_f64() * 1000.0;

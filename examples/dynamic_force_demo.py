@@ -6,10 +6,10 @@ from math import pi, sin
 from gaanim import Anchor, BLACK, CYAN, GOLD, GREEN, Scene
 
 
-scene = Scene(1280, 720, background=BLACK, margin=52, theme="technical")
-title = scene.text("Fuerzas dinámicas reactivas", role="title").move_to(0, 285, anchor=Anchor.CENTER)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.65, theme="technical")
+title = scene.text("Fuerzas dinámicas reactivas", role="title").move_to(0, 3.5625, anchor=Anchor.CENTER)
 
-body = scene.geometry.rounded_rect(150, 82, 14).fill(BLACK).stroke(CYAN, 4).move_to(-120, -20)
+body = scene.geometry.rounded_rect(1.875, 1.025, 0.175).fill(BLACK).stroke(CYAN, 0.05).move_to(-1.5, -0.25)
 force_origin = body.anchor_point(Anchor.TOP_RIGHT)
 resultant_origin = body.anchor_point(Anchor.BOTTOM_RIGHT)
 
@@ -19,12 +19,12 @@ force = scene.mechanics.force_at(
     force_origin,
     magnitude,
     direction=direction,
-    visual_scale=2.3,
+    visual_scale=0.02875,
     label="$F(t)$",
     show_value=True,
     format=".1f",
     unit="N",
-    label_gap=28,
+    label_gap=0.35,
     color=GREEN,
 )
 
@@ -34,18 +34,18 @@ resultant = scene.mechanics.force_from_components(
     resultant_origin,
     fx,
     fy,
-    visual_scale=2.8,
+    visual_scale=0.035,
     label="$R$",
     show_value=True,
     unit="N",
-    label_gap=45,
+    label_gap=0.5625,
     color=GOLD,
 )
 
 caption = scene.text(
     "La escala visual no altera la magnitud física",
     role="caption",
-).move_to(0, -265, anchor=Anchor.CENTER)
+).move_to(0, -3.3125, anchor=Anchor.CENTER)
 
 scene.play([
     title.animate.write(),
@@ -59,7 +59,7 @@ scene.play([
     direction.animate.set(pi * 0.72).duration(2.0),
     fx.animate.set(55.0).duration(2.0),
     fy.animate.set(-45.0).duration(2.0),
-    body.animate.shift_by(220, 35).duration(2.0),
+    body.animate.shift_by(2.75, 0.4375).duration(2.0),
 ])
 
 # No invisible drawable is needed for a continuously evaluated scalar.

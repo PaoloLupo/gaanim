@@ -8,10 +8,10 @@ from gaanim import Anchor, Direction, Scene
 
 ROOT = Path(__file__).resolve().parent
 
-scene = Scene(1920, 1080, margin=72)
-scene.load_project(str(ROOT / "gaanim.toml"))
+scene = Scene(frame=(16, 9), margin=0.6)
+scene.assets.load_project(str(ROOT / "gaanim.toml"))
 scene.canvas.set_theme("presentation")
-scene.brand(
+scene.slides.brand(
     footer="MIS SLIDES",
     slide_numbers=True,
     rule=True,
@@ -42,9 +42,9 @@ idea.region("title").place(scene.text("Una idea por slide", role="title"), Ancho
 message = idea.region("content").place(
     scene.text(
         "Usa regiones para mantener jerarquía, alineación y márgenes consistentes.",
-        wrap=1120,
+        wrap=9.333,
         text_align="center",
-        size=42,
+        size=0.42,
     ),
     Anchor.CENTER,
 )

@@ -70,35 +70,66 @@ impl FillLevelDirection {
     }
 }
 
+/// Resolution-independent authored frame, measured in logical scene units.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CanvasUnits {
-    Pixels,
-    Scene { frame_width: f64, frame_height: f64 },
+pub struct SceneFrame {
+    pub width: f64,
+    pub height: f64,
 }
 
-impl Default for CanvasUnits {
-    fn default() -> Self {
-        Self::Pixels
+impl SceneFrame {
+    pub const WIDESCREEN: Self = Self::new(16.0, 9.0);
+    pub const VERTICAL: Self = Self::new(9.0, 16.0);
+    pub const SQUARE: Self = Self::new(10.0, 10.0);
+
+    pub const fn new(width: f64, height: f64) -> Self {
+        Self { width, height }
+    }
+
+    pub fn validate(self) -> Result<Self, &'static str> {
+        if !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.width <= 0.0
+            || self.height <= 0.0
+        {
+            return Err("frame width and height must be finite positive numbers");
+        }
+        Ok(self)
+    }
+
+    pub fn aspect_ratio(self) -> f64 {
+        self.width / self.height
+    }
+
+    pub fn bounds(self) -> Bounds3D {
+        Bounds3D::new_2d(
+            -self.width * 0.5,
+            -self.height * 0.5,
+            self.width * 0.5,
+            self.height * 0.5,
+        )
+    }
+
+    /// Stable raster used only by the interactive host. Export chooses its own pixels.
+    pub fn preview_pixel_size(self) -> (u32, u32) {
+        const LONG_EDGE: f64 = 1280.0;
+        if self.width >= self.height {
+            (
+                LONG_EDGE as u32,
+                (LONG_EDGE / self.aspect_ratio()).round().max(1.0) as u32,
+            )
+        } else {
+            (
+                (LONG_EDGE * self.aspect_ratio()).round().max(1.0) as u32,
+                LONG_EDGE as u32,
+            )
+        }
     }
 }
 
-impl CanvasUnits {
-    pub fn frame_bounds(&self, canvas_width: u32, canvas_height: u32) -> Bounds3D {
-        match self {
-            Self::Pixels => {
-                let half_width = canvas_width as f64 * 0.5;
-                let half_height = canvas_height as f64 * 0.5;
-                Bounds3D::new_2d(-half_width, -half_height, half_width, half_height)
-            }
-            Self::Scene {
-                frame_width,
-                frame_height,
-            } => {
-                let half_width = *frame_width * 0.5;
-                let half_height = *frame_height * 0.5;
-                Bounds3D::new_2d(-half_width, -half_height, half_width, half_height)
-            }
-        }
+impl Default for SceneFrame {
+    fn default() -> Self {
+        Self::WIDESCREEN
     }
 }
 
@@ -1687,7 +1718,7 @@ impl OptDuration for Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ImageCrop, ImageFit, ImageOptions};
+    use super::{ImageCrop, ImageFit, ImageOptions, SceneFrame};
     use gaanim_core::peniko::ImageQuality;
 
     #[test]
@@ -1746,5 +1777,21 @@ mod tests {
         .resolve(640, 360)
         .unwrap();
         assert_eq!(view.quality, ImageQuality::High);
+    }
+
+    #[test]
+    fn scene_frame_is_centered_validated_and_resolution_independent() {
+        let frame = SceneFrame::WIDESCREEN.validate().unwrap();
+        let bounds = frame.bounds();
+        assert_eq!((bounds.min.x, bounds.min.y), (-8.0, -4.5));
+        assert_eq!((bounds.max.x, bounds.max.y), (8.0, 4.5));
+        assert_eq!(frame.preview_pixel_size(), (1280, 720));
+        assert_eq!(SceneFrame::VERTICAL.bounds().min.x, -4.5);
+        assert_eq!(SceneFrame::VERTICAL.bounds().max.y, 8.0);
+        assert_eq!(SceneFrame::SQUARE.aspect_ratio(), 1.0);
+        assert!(SceneFrame::new(0.0, 9.0).validate().is_err());
+        assert!(SceneFrame::new(-16.0, 9.0).validate().is_err());
+        assert!(SceneFrame::new(16.0, f64::INFINITY).validate().is_err());
+        assert!(SceneFrame::new(f64::NAN, 9.0).validate().is_err());
     }
 }

@@ -1176,7 +1176,7 @@ fn compiled_text_measure(
     };
     Some(CompiledTextMeasure {
         spec: spec.clone(),
-        font_size: spec.style.size.unwrap_or(role.size).max(1.0),
+        font_size: spec.style.size.unwrap_or(role.size).max(1.0e-6),
         font_family: spec
             .style
             .font
@@ -1375,7 +1375,7 @@ impl SceneModel {
     ) -> MobjectRef {
         let role = gaanim_text::prelude::TextRole::Body;
         let label = builder.spawn_text(text, role);
-        let base_size = builder.text_config.roles[&role].size.max(1.0);
+        let base_size = builder.text_config.roles[&role].size.max(1.0e-6);
         if let Some(state) = builder.states.get_mut(label.id) {
             state.transform = state.transform.shift_2d(x, y);
             if let Some(size) = size {
@@ -1603,7 +1603,7 @@ impl SceneModel {
                 children.push(Self::axis_text(
                     builder,
                     label,
-                    sx(x_max) + 18.0,
+                    sx(x_max) + 0.18,
                     sy(0.0) - tick_half - 2.0,
                     config.label_color,
                     config.label_size,
@@ -1613,8 +1613,8 @@ impl SceneModel {
                 children.push(Self::axis_text(
                     builder,
                     label,
-                    sx(0.0) + tick_half + 12.0,
-                    sy(y_max) + 12.0,
+                    sx(0.0) + tick_half + 0.12,
+                    sy(y_max) + 0.12,
                     config.label_color,
                     config.label_size,
                 ));
@@ -2130,7 +2130,7 @@ impl SceneModel {
         let mut deferred_visibility: HashSet<ObjectId> = HashSet::new();
         let mut revealed_deferred: HashSet<ObjectId> = HashSet::new();
         // Raw bounds for the canvas background (visual, no margin).
-        let raw_bounds = self.units.frame_bounds(self.width, self.height);
+        let raw_bounds = self.frame.bounds();
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
         let m = &self.margin;
         let frame_bounds = Bounds3D::new_2d(
@@ -2221,7 +2221,7 @@ impl SceneModel {
             .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
                 paint: bg_paint,
                 segment_paints,
-                pixel_size: (self.width, self.height),
+                pixel_size: self.frame.preview_pixel_size(),
                 bounds: raw_bounds,
             });
 
@@ -2647,7 +2647,7 @@ impl SceneModel {
                         })
                         .reduce(|bounds, next| bounds.union(&next));
                     if let Some(bounds) = bounds {
-                        let pad = (bounds.width() * 0.08).max(3.0);
+                        let pad = (bounds.width() * 0.08).max(0.03);
                         let strike = builder
                             .line(
                                 Point::new(bounds.min.x - pad, bounds.min.y - pad * 0.25),
@@ -2708,7 +2708,7 @@ impl SceneModel {
                             .unwrap_or(PenikoColor::WHITE);
                         let side = if *above { 1.0 } else { -1.0 };
                         let y = if *above {
-                            bounds.max.y + 12.0
+                            bounds.max.y + 0.12
                         } else {
                             bounds.min.y - 12.0
                         };

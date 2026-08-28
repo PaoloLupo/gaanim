@@ -5,16 +5,16 @@ import os
 
 from gaanim import BLACK, GOLD, RED, WHITE, Scene, Transition
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
 # The reactive objects are declared after an earlier timeline interval. Their
 # updater and trail must still begin here, not at t=0.
 scene.wait(1.0)
 
-L = 220.0
-g = 980.0
+L = 2.75
+g = 12.25
 damping = 0.03
-px, py = 0.0, 120.0
+px, py = 0.0, 1.5
 initial_theta = 0.65
 initial_omega = 0.0
 
@@ -23,23 +23,23 @@ state = {
     "omega": initial_omega,
 }
 
-hinge = scene.geometry.dot(8).fill(WHITE).move_to(px, py)
+hinge = scene.geometry.dot(0.1).fill(WHITE).move_to(px, py)
 bob = (
-    scene.geometry.circle(20)
+    scene.geometry.circle(0.25)
     .fill(GOLD)
-    .stroke(WHITE, 3)
+    .stroke(WHITE, 0.0375)
     .move_to(
         px + L * math.sin(initial_theta),
         py - L * math.cos(initial_theta),
     )
 )
 
-rod = scene.geometry.tracking_line(hinge, bob).no_fill().stroke(WHITE, 4)
-length = scene.mechanics.dimension_between(hinge, bob, 25).stroke(RED, 2)
+rod = scene.geometry.tracking_line(hinge, bob).no_fill().stroke(WHITE, 0.05)
+length = scene.mechanics.dimension_between(hinge, bob, 0.3125).stroke(RED, 0.025)
 trail = (
     scene.geometry.traced_path(bob, dissipating_time=2.0)
     .no_fill()
-    .stroke(RED, 2)
+    .stroke(RED, 0.025)
 )
 
 
@@ -95,13 +95,13 @@ bob.remove_updater()
 
 scene.segment("double_pendulum", Transition.cross_fade(0.8))
 
-double_l1 = 170.0
-double_l2 = 170.0
-double_g = 980.0
+double_l1 = 2.125
+double_l2 = 2.125
+double_g = 12.25
 double_damping = 0.012
 double_m1 = 1.0
 double_m2 = 1.0
-double_px, double_py = 0.0, 220.0
+double_px, double_py = 0.0, 2.75
 double_initial_theta1 = 0.72
 double_initial_theta2 = -0.42
 
@@ -190,26 +190,26 @@ def second_bob_position(_pos, _dt, _elapsed):
     return double_positions()[1]
 
 
-double_hinge = scene.geometry.dot(8).fill(WHITE).move_to(double_px, double_py)
+double_hinge = scene.geometry.dot(0.1).fill(WHITE).move_to(double_px, double_py)
 double_bob1 = (
-    scene.geometry.circle(21)
+    scene.geometry.circle(0.2625)
     .fill(GOLD)
-    .stroke(WHITE, 3)
+    .stroke(WHITE, 0.0375)
     .move_to(*double_positions()[0][:2])
 )
 double_bob2 = (
-    scene.geometry.circle(27)
+    scene.geometry.circle(0.3375)
     .fill(RED)
-    .stroke(WHITE, 3)
+    .stroke(WHITE, 0.0375)
     .move_to(*double_positions()[1][:2])
 )
 
-double_rod1 = scene.geometry.tracking_line(double_hinge, double_bob1).no_fill().stroke(WHITE, 4)
-double_rod2 = scene.geometry.tracking_line(double_bob1, double_bob2).no_fill().stroke(WHITE, 4)
+double_rod1 = scene.geometry.tracking_line(double_hinge, double_bob1).no_fill().stroke(WHITE, 0.05)
+double_rod2 = scene.geometry.tracking_line(double_bob1, double_bob2).no_fill().stroke(WHITE, 0.05)
 double_trail = (
     scene.geometry.traced_path(double_bob2, dissipating_time=3.0)
     .no_fill()
-    .stroke(RED, 2)
+    .stroke(RED, 0.025)
 )
 
 # Only the first bob advances the shared state. The second updater mirrors its

@@ -5,7 +5,7 @@ import os
 from gaanim import Anchor, Axis, ChartSpec, Scene, Theme
 
 
-scene = Scene(1280, 720, margin=54)
+scene = Scene(frame=(16, 9), margin=0.675)
 
 # Derive Nord and replace only the identity of this presentation.
 # Omitted roles continue to come from Nord.
@@ -30,9 +30,9 @@ research_theme = Theme(
 scene.canvas.set_theme(research_theme)
 assert not scene.canvas.validate_theme()
 
-scene.text("A theme is a visual system", role="title").move_to(0, 265, anchor=Anchor.CENTER)
-scene.text("Nord, customized for a research presentation", role="subtitle").move_to(0, 205, anchor=Anchor.CENTER)
-scene.geometry.line(-460, 165, 460, 165).stroke(scene.canvas.color("rule"), 2)
+scene.text("A theme is a visual system", role="title").move_to(0, 3.3125, anchor=Anchor.CENTER)
+scene.text("Nord, customized for a research presentation", role="subtitle").move_to(0, 2.5625, anchor=Anchor.CENTER)
+scene.geometry.line(-5.75, 2.0625, 5.75, 2.0625).stroke(scene.canvas.color("rule"), 0.025)
 
 scene.slides.bullets(
     [
@@ -40,9 +40,9 @@ scene.slides.bullets(
         "Typography changes by role",
         "Components inherit the same palette",
     ],
-    width=510,
-    gap=64,
-).move_to(-320, -30)
+    width=6.375,
+    gap=0.8,
+).move_to(-4, -0.375)
 
 chart_spec = (
     ChartSpec({"x": [0, 1, 2], "value": [38, 64, 91]})
@@ -53,13 +53,13 @@ chart_spec = (
         y=Axis.linear(0, 100).ticks(25),
     )
 )
-chart = scene.viz.chart(chart_spec).scale_to(0.64).move_to(330, -35)
+chart = scene.viz.chart(chart_spec).scale_to(0.64).move_to(4.125, -0.4375)
 chart.layer("marks").fill(scene.canvas.color("accent"))
 
 scene.slides.banner(
     "Theme(...) derives any built-in scheme.",
-    width=1080,
-    margin=20,
+    width=13.5,
+    margin=0.25,
     position="bottom",
 )
 scene.wait(1.0)

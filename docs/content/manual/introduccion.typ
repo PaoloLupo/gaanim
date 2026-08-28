@@ -30,7 +30,7 @@ Una animación se construye con cuatro piezas:
 ```python
 from gaanim import BLUE, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 circle = scene.geometry.circle(80).fill(BLUE)
 scene.play([circle.animate.create().duration(1.0)])
 scene.render()

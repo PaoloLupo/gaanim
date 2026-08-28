@@ -160,17 +160,17 @@ impl Default for LayoutTokens {
     fn default() -> Self {
         Self {
             values: HashMap::from([
-                ("space_xs".into(), 8.0),
-                ("space_sm".into(), 16.0),
-                ("space_md".into(), 24.0),
-                ("space_lg".into(), 32.0),
-                ("page_padding".into(), 48.0),
-                ("page_padding_wide".into(), 72.0),
-                ("page_padding_x".into(), 64.0),
-                ("column_gap".into(), 40.0),
-                ("vertical_padding".into(), 96.0),
-                ("vertical_padding_x".into(), 56.0),
-                ("lower_third_offset".into(), 240.0),
+                ("space_xs".into(), 0.08),
+                ("space_sm".into(), 0.16),
+                ("space_md".into(), 0.24),
+                ("space_lg".into(), 0.32),
+                ("page_padding".into(), 0.48),
+                ("page_padding_wide".into(), 0.72),
+                ("page_padding_x".into(), 0.64),
+                ("column_gap".into(), 0.40),
+                ("vertical_padding".into(), 0.96),
+                ("vertical_padding_x".into(), 0.56),
+                ("lower_third_offset".into(), 2.40),
             ]),
         }
     }
@@ -419,14 +419,14 @@ impl CanvasTheme {
         self.styles.insert(
             "line".into(),
             ThemeStyle {
-                stroke: Some(ThemeStrokeStyle::new("foreground", 3.0)),
+                stroke: Some(ThemeStrokeStyle::new("foreground", 0.03)),
                 ..Default::default()
             },
         );
         self.styles.insert(
             "plot".into(),
             ThemeStyle {
-                stroke: Some(ThemeStrokeStyle::new("chart", 3.0)),
+                stroke: Some(ThemeStrokeStyle::new("chart", 0.03)),
                 ..Default::default()
             },
         );
@@ -438,10 +438,10 @@ impl CanvasTheme {
             },
         );
         for (part, token, width) in [
-            ("axis", "foreground", 3.0),
-            ("grid", "rule", 1.0),
-            ("minor_grid", "rule", 0.6),
-            ("ticks", "foreground", 2.0),
+            ("axis", "foreground", 0.03),
+            ("grid", "rule", 0.01),
+            ("minor_grid", "rule", 0.006),
+            ("ticks", "foreground", 0.02),
         ] {
             self.styles.insert(
                 format!("axes/{part}"),

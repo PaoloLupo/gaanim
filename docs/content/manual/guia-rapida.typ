@@ -19,7 +19,7 @@ un proyecto creado con `gaanim init video mi-movimiento`.
 ```python
 from gaanim import BLUE, WHITE, YELLOW, Scene, stagger
 
-scene = Scene(1280, 720, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 ```
 
 El ancho y el alto definen el viewport. El color de fondo acepta una cadena

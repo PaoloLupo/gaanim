@@ -12,7 +12,8 @@ use crate::runtime::replay_canvas_into;
 
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
 pub use gaanim_export::prelude::{
-    AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, QualityPreset,
+    AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, OutputFit,
+    QualityPreset,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +36,18 @@ pub enum SegmentExportError {
 
 /// Export a SceneModel using the supplied `gaanim_export::ExportConfig`.
 pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(), ExportError> {
+    if config.fit == OutputFit::Error {
+        let expected_height = config.width as f64 / canvas.frame.aspect_ratio();
+        let expected_width = config.height as f64 * canvas.frame.aspect_ratio();
+        if (expected_height - config.height as f64).abs() > 1.0
+            && (expected_width - config.width as f64).abs() > 1.0
+        {
+            return Err(ExportError::General(format!(
+                "output {}x{} does not match logical frame {:.3}x{:.3}; choose a matching resolution or set fit to contain/cover",
+                config.width, config.height, canvas.frame.width, canvas.frame.height
+            )));
+        }
+    }
     config.audio_tracks.extend(canvas.audio_tracks.clone());
     if config.headless && !canvas.has_native_3d_content() {
         export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
@@ -170,9 +183,6 @@ pub fn export_canvas_to_path(
     transparent: Option<bool>,
 ) -> Result<(), ExportError> {
     let mut config = ExportConfig::new(output_path);
-    config.width = canvas.width;
-    config.height = canvas.height;
-    config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
     if let Some(fps) = fps {
         config.fps = fps;
@@ -186,8 +196,8 @@ pub fn export_canvas_to_path(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportConfig, SegmentExportError, apply_segment_range, export_canvas_segment,
-        export_canvas_segments, safe_segment_filename, segment_output_path,
+        ExportConfig, SegmentExportError, apply_segment_range, export_canvas,
+        export_canvas_segment, export_canvas_segments, safe_segment_filename, segment_output_path,
     };
     use crate::canvas::SceneModel;
 
@@ -206,6 +216,16 @@ mod tests {
             segment_output_path("slides/{index}-{segment}.mp4", 2, "Marco teórico"),
             "slides/03-marco-teórico.mp4"
         );
+    }
+
+    #[test]
+    fn export_rejects_an_output_aspect_mismatch_before_rendering() {
+        let canvas = SceneModel::new(16.0, 9.0);
+        let mut config = ExportConfig::new("mismatch.mp4");
+        config.width = 1000;
+        config.height = 1000;
+        let error = export_canvas(canvas, config).unwrap_err().to_string();
+        assert!(error.contains("does not match logical frame"));
     }
 
     #[test]

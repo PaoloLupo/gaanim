@@ -6,16 +6,16 @@ import os
 from gaanim import Easing, Anchor, BLACK, BLUE, GOLD, GRAY, WHITE, Scene
 
 
-scene = Scene(640, 360, background=WHITE)
+scene = Scene(frame=(16, 9), background=WHITE)
 
-hinge = (-100, -45)
-arm = scene.geometry.line(hinge[0], hinge[1], 70, -45).stroke(GRAY, 7)
-mass = scene.geometry.circle(24).fill(GOLD).stroke(BLACK, 3).move_to(70, -45)
+hinge = (-2.5, -1.125)
+arm = scene.geometry.line(hinge[0], hinge[1], 1.75, -1.125).stroke(GRAY, 0.175)
+mass = scene.geometry.circle(0.6).fill(GOLD).stroke(BLACK, 0.075).move_to(1.75, -1.125)
 mechanism = scene.geometry.group([arm, mass]).with_pivot(*hinge)
 
-scene.geometry.dot(11).fill(BLUE).move_to(*hinge)
-scene.text("scene-space pivot").fill(GRAY).move_to(-35, 95, anchor=Anchor.CENTER)
-scene.text("hinge").fill(GRAY).move_to(-100, -88, anchor=Anchor.CENTER)
+scene.geometry.dot(0.275).fill(BLUE).move_to(*hinge)
+scene.text("scene-space pivot").fill(GRAY).move_to(-0.875, 2.375, anchor=Anchor.CENTER)
+scene.text("hinge").fill(GRAY).move_to(-2.5, -2.2, anchor=Anchor.CENTER)
 
 scene.play([
     arm.animate.create().duration(0.5),

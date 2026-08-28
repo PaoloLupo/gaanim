@@ -5,18 +5,18 @@ import os
 from gaanim import Anchor, BLUE, Direction, Scene
 
 
-scene = Scene(1280, 720, margin=72)
+scene = Scene(frame=(16, 9), margin=0.9)
 scene.canvas.set_theme("paper")
 
-title = scene.text("Technical documentation", role="title").move_to(0, 170, anchor=Anchor.CENTER)
-subtitle = scene.text("White paper theme with restrained contrast", role="subtitle").move_to(0, 105, anchor=Anchor.CENTER)
-body = scene.text("Unfilled text follows the theme foreground.").move_to(0, -10, anchor=Anchor.CENTER)
-equation = scene.text.equation("F(k) = integral f(x) e^(-i k x) dif x").move_to(0, -135, anchor=Anchor.CENTER)
-marker = scene.geometry.circle(34).fill(BLUE).move_to(-360, -8)
+title = scene.text("Technical documentation", role="title").move_to(0, 2.125, anchor=Anchor.CENTER)
+subtitle = scene.text("White paper theme with restrained contrast", role="subtitle").move_to(0, 1.3125, anchor=Anchor.CENTER)
+body = scene.text("Unfilled text follows the theme foreground.").move_to(0, -0.125, anchor=Anchor.CENTER)
+equation = scene.text.equation("F(k) = integral f(x) e^(-i k x) dif x").move_to(0, -1.6875, anchor=Anchor.CENTER)
+marker = scene.geometry.circle(0.425).fill(BLUE).move_to(-4.5, -0.1)
 
 scene.play([
     title.animate.write().duration(0.5),
-    subtitle.animate.fade_in_from(Direction.DOWN, distance=18).duration(0.4),
+    subtitle.animate.fade_in_from(Direction.DOWN, distance=0.225).duration(0.4),
     body.animate.fade_in().duration(0.35),
     equation.animate.fade_in().duration(0.45),
     marker.animate.grow_from_center().duration(0.4),

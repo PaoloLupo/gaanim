@@ -6,33 +6,33 @@ import os
 from gaanim import BLUE, GOLD, RED, Axis, Scene, computed
 
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 amplitude = scene.viz.parameter(1.0)
 phase = scene.viz.parameter(0.0)
 plane = scene.viz.cartesian_2d(
     Axis.linear(-math.pi, math.pi).ticks(math.pi / 2),
     Axis.linear(-3.0, 3.0).ticks(1.0),
-    width=960,
-    height=500,
+    width=12,
+    height=6.25,
 )
 
 curve = plane.plot(
     lambda x, scale, offset: scale * math.sin(x + offset) if x >= 0 else scale * math.cos(x - offset),
     inputs=[amplitude, phase],
-).stroke(BLUE, 4)
+).stroke(BLUE, 0.05)
 
 pulse = computed(
     lambda scale, t: 42.0 + 8.0 * scale * math.sin(t),
     inputs=[amplitude, scene.viz.time],
 )
 angle = computed(lambda offset, t: offset + 0.35 * t, inputs=[phase, scene.viz.time])
-marker = scene.geometry.dot(9).fill(GOLD).follow(scene.geometry.polar_point((0.0, 0.0), pulse, angle))
+marker = scene.geometry.dot(0.1125).fill(GOLD).follow(scene.geometry.polar_point((0.0, 0.0), pulse, angle))
 value = scene.viz.readout(
     lambda scale, offset: scale**2 + offset if scale >= 0 else float("nan"),
     inputs=[amplitude, phase],
     label="$q$",
     invalid="invalid",
-).fill(RED).move_to(430, 260)
+).fill(RED).move_to(5.375, 3.25)
 
 scene.play([plane.animate.create(), curve.animate.create(), marker.animate.fade_in(), value.animate.fade_in()])
 scene.play([amplitude.animate.set(2.0).duration(2.0), phase.animate.set(math.pi).duration(2.0)])

@@ -27,7 +27,7 @@ PRIMARY = BLUE
 ACCENT = YELLOW
 MUTED = Color(148, 163, 184)
 
-scene = Scene(1280, 720, background=BACKGROUND, margin=48)
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=48)
 ```
 
 Los nombres dicen para qué sirve cada color. Si la identidad visual cambia,

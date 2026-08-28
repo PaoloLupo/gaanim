@@ -5,12 +5,12 @@ import os
 from gaanim import Anchor, Axis, BLACK, BLUE, ChartSpec, GRAY, WHITE, Direction, Scene, Value
 
 
-scene = Scene(1920, 1080, background=BLACK, margin=56)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.466667)
 labels = ["Baseline", "Cached", "GPU", "Optimized"]
 data = {"method": labels, "elapsed": [48, 32, 21, 15]}
 spec = (
     ChartSpec(data, key="method")
-    .mark("bar", width=0.72, label_offset=20)
+    .mark("bar", width=0.72, label_offset=0.166667)
     .encode(x="method", y="elapsed", color=Value(BLUE), label="elapsed")
     .axes(
         x=Axis.category(labels).style(
@@ -21,13 +21,13 @@ spec = (
         ),
     )
 )
-chart = scene.viz.chart(spec).move_to(0, -35)
+chart = scene.viz.chart(spec).move_to(0, -0.291667)
 
-title = scene.text("Convergence benchmark", role="title").fill(WHITE).move_to(0, 400, anchor=Anchor.CENTER)
-subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).move_to(0, 350, anchor=Anchor.CENTER)
+title = scene.text("Convergence benchmark", role="title").fill(WHITE).move_to(0, 3.333333, anchor=Anchor.CENTER)
+subtitle = scene.text("Elapsed time (ms) — lower is better", role="subtitle").fill(GRAY).move_to(0, 2.916667, anchor=Anchor.CENTER)
 scene.play([
     title.animate.write().duration(0.55),
-    subtitle.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.45),
+    subtitle.animate.fade_in_from(Direction.DOWN, distance=0.2).duration(0.45),
     chart.layer("axes").animate.create().duration(0.7),
     chart.layer("marks").animate.write().duration(0.7),
     chart.layer("labels").animate.write().duration(0.7),

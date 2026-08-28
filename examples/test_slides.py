@@ -2,15 +2,15 @@
 
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, Scene, comparison, title_slide
 
-scene = Scene(1920, 1080, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 intro = scene.segment("intro", notes="Present the goal.", template=title_slide)
-circle = scene.geometry.circle(60).fill(BLUE)
+circle = scene.geometry.circle(0.5).fill(BLUE)
 intro.bind(title=scene.text("Gaanim slides").scale_to(5.0).fill(GREEN), subtitle=circle)
 scene.wait(0.3)
 scene.stop("circle")
 
 details = scene.segment("details", notes="Introduce the second shape.", template=comparison)
-rect = scene.geometry.rect(120, 80).fill(RED)
+rect = scene.geometry.rect(1, 0.666667).fill(RED)
 details.bind(title=scene.text("Shapes", role="title"), left=scene.text("Shapes").fill(GOLD), right=rect)
 scene.play([rect.animate.create().duration(0.5)])
 scene.wait(0.3)

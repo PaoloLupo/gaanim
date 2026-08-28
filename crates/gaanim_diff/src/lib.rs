@@ -69,8 +69,7 @@ pub fn capture_canvas(
     fs::create_dir_all(output_dir)?;
 
     let mut config = ExportConfig::new("snapshots.png");
-    config.width = canvas.width;
-    config.height = canvas.height;
+    (config.width, config.height) = canvas.frame.preview_pixel_size();
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
 

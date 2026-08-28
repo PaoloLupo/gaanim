@@ -139,6 +139,9 @@ fn dispatch_export_mode() -> bool {
     let mut quality = "standard".to_string();
     let mut encoder = VideoEncoder::Auto;
     let mut transparent = false;
+    let mut width = 1920_u32;
+    let mut height = 1080_u32;
+    let mut fit = gaanim_export::prelude::OutputFit::Error;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -164,6 +167,40 @@ fn dispatch_export_mode() -> bool {
                     });
             }
             "--transparent" => transparent = true,
+            "--width" => {
+                index += 1;
+                width = args
+                    .get(index)
+                    .and_then(|value| value.parse().ok())
+                    .filter(|value| *value > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!("gaanim export: --width requires a positive integer");
+                        std::process::exit(2);
+                    });
+            }
+            "--height" => {
+                index += 1;
+                height = args
+                    .get(index)
+                    .and_then(|value| value.parse().ok())
+                    .filter(|value| *value > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!("gaanim export: --height requires a positive integer");
+                        std::process::exit(2);
+                    });
+            }
+            "--fit" => {
+                index += 1;
+                fit = match args.get(index).map(String::as_str) {
+                    Some("error") => gaanim_export::prelude::OutputFit::Error,
+                    Some("contain") => gaanim_export::prelude::OutputFit::Contain,
+                    Some("cover") => gaanim_export::prelude::OutputFit::Cover,
+                    _ => {
+                        eprintln!("gaanim export: --fit must be error, contain, or cover");
+                        std::process::exit(2);
+                    }
+                };
+            }
             value if value.starts_with('-') => {
                 eprintln!("gaanim export: unknown option `{value}`");
                 std::process::exit(2);
@@ -214,6 +251,9 @@ fn dispatch_export_mode() -> bool {
         format,
         encoder,
         transparent,
+        width,
+        height,
+        fit,
     }) {
         eprintln!("gaanim export: {error}");
         std::process::exit(1);
@@ -247,6 +287,9 @@ struct ExportWorkerArgs {
     format: String,
     encoder: VideoEncoder,
     transparent: bool,
+    width: u32,
+    height: u32,
+    fit: gaanim_export::prelude::OutputFit,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
@@ -264,6 +307,9 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     }
     let mut encoder = VideoEncoder::Auto;
     let mut transparent = false;
+    let mut width = 1920_u32;
+    let mut height = 1080_u32;
+    let mut fit = gaanim_export::prelude::OutputFit::Error;
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
@@ -275,6 +321,31 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
                     .ok_or_else(|| "--encoder requires a value".to_string())?;
                 encoder = VideoEncoder::parse_arg(value)
                     .ok_or_else(|| format!("unknown export encoder '{value}'"))?;
+            }
+            "--width" => {
+                index += 1;
+                width = args
+                    .get(index)
+                    .and_then(|value| value.parse().ok())
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| "--width requires a positive integer".to_string())?;
+            }
+            "--height" => {
+                index += 1;
+                height = args
+                    .get(index)
+                    .and_then(|value| value.parse().ok())
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| "--height requires a positive integer".to_string())?;
+            }
+            "--fit" => {
+                index += 1;
+                fit = match args.get(index).map(String::as_str) {
+                    Some("error") => gaanim_export::prelude::OutputFit::Error,
+                    Some("contain") => gaanim_export::prelude::OutputFit::Contain,
+                    Some("cover") => gaanim_export::prelude::OutputFit::Cover,
+                    _ => return Err("--fit must be error, contain, or cover".to_string()),
+                };
             }
             value => return Err(format!("unknown export worker option '{value}'")),
         }
@@ -290,6 +361,9 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         format: args[3].clone(),
         encoder,
         transparent,
+        width,
+        height,
+        fit,
     })
 }
 
@@ -335,8 +409,9 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     };
     let mut config =
         gaanim_export::prelude::ExportConfig::new(&worker.output).with_quality(quality);
-    config.width = canvas.width;
-    config.height = canvas.height;
+    config.width = worker.width;
+    config.height = worker.height;
+    config.fit = worker.fit;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
     config.video_encoder = worker.encoder;
@@ -598,12 +673,16 @@ fn dispatch_check_mode() -> bool {
     if is_presentation {
         println!(
             "  {} segments · {} stops · {:.1} seconds · {}x{}",
-            report.segment_count, report.stop_count, report.duration, canvas.width, canvas.height
+            report.segment_count,
+            report.stop_count,
+            report.duration,
+            canvas.frame.width,
+            canvas.frame.height
         );
     } else {
         println!(
             "  {:.1} seconds · {}x{}",
-            report.duration, canvas.width, canvas.height
+            report.duration, canvas.frame.width, canvas.frame.height
         );
     }
     for error in &report.errors {
@@ -682,7 +761,7 @@ fn presentation_preflight(
             .push("no segments; use `scene.segment(...)`".to_string());
         return report;
     }
-    let aspect_ratio = canvas.width as f64 / canvas.height.max(1) as f64;
+    let aspect_ratio = canvas.frame.aspect_ratio();
     if (aspect_ratio - 16.0 / 9.0).abs() > 0.02 {
         report.warnings.push(format!(
             "canvas aspect ratio is {:.3}; 16:9 is recommended for projectors",
@@ -737,7 +816,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
         duration: canvas.current_time(),
         ..default()
     };
-    if canvas.width == 0 || canvas.height == 0 {
+    if canvas.frame.validate().is_err() {
         report
             .errors
             .push("canvas width and height must be positive".to_string());
@@ -1191,6 +1270,9 @@ mod tests {
                 format: "mp4".to_string(),
                 encoder: VideoEncoder::Auto,
                 transparent: false,
+                width: 1920,
+                height: 1080,
+                fit: gaanim_export::prelude::OutputFit::Error,
             }
         );
 

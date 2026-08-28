@@ -8,21 +8,21 @@ import os
 
 from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
-scene = Scene(1280, 720, background=BLACK, margin=60)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.75)
 
 # Titulo
-title = scene.text("Arrows create – fill must stay inside", role="title").fill(WHITE).move_to(0, 280)
+title = scene.text("Arrows create – fill must stay inside", role="title").fill(WHITE).move_to(0, 3.5)
 
 # 1. double_arrow horizontal
-da = scene.geometry.double_arrow(-500, 120, -120, 120).fill(BLUE).stroke(WHITE, 2.5)
+da = scene.geometry.double_arrow(-6.25, 1.5, -1.5, 1.5).fill(BLUE).stroke(WHITE, 0.03125)
 
 # 2. curved_arrow con deflexion angular (semicircular)
-ca = scene.geometry.curved_arrow(-80, 120, 260, 120, 0.9).fill(GOLD).stroke(WHITE, 2.5)
+ca = scene.geometry.curved_arrow(-1, 1.5, 3.25, 1.5, 0.9).fill(GOLD).stroke(WHITE, 0.03125)
 
 # 3. curved_arrow_arc circular explícito
-caa = scene.geometry.curved_arrow_arc(0, -140, 110, 0.2, 2.0).fill(WHITE).stroke(WHITE, 2.5)
+caa = scene.geometry.curved_arrow_arc(0, -1.75, 1.375, 0.2, 2.0).fill(WHITE).stroke(WHITE, 0.03125)
 # referencia: circulo guia punteado para ver que la punta stay on radius
-guide = scene.geometry.circle(110).stroke(WHITE, 1).move_to(0, -140).opacity(0.15)
+guide = scene.geometry.circle(1.375).stroke(WHITE, 0.0125).move_to(0, -1.75).opacity(0.15)
 
 scene.play([
     title.animate.write().duration(0.5),

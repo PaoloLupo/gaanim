@@ -1,8 +1,8 @@
 from gaanim import Easing, BLACK, GRAY, WHITE, Anchor, Direction, Scene, stagger
 
-c = Scene(width=1920, height=1080, background=GRAY)
-title = c.text("Hola").to_edge(Direction.UP, 100.0)
-box = c.geometry.rounded_rect(220.0, 90.0, 12.0).next_to(title, Direction.DOWN, 24.0).fill(BLACK)
+c = Scene(frame=(16, 9), background=GRAY)
+title = c.text("Hola").to_edge(Direction.UP, 0.833333)
+box = c.geometry.rounded_rect(1.833333, 0.75, 0.1).next_to(title, Direction.DOWN, 0.2).fill(BLACK)
 label = c.text("Mundo").fill(WHITE).align_to(box, Anchor.CENTER)
 
 c.play(stagger(

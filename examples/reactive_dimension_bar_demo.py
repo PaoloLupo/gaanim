@@ -4,74 +4,74 @@ import os
 
 from gaanim import Easing, BLACK, GRAY, RED, WHITE, Anchor, Scene
 
-scene = Scene(1280, 720, background=WHITE)
+scene = Scene(frame=(16, 9), background=WHITE)
 
 # A nested frame proves that anchors use local bounds plus the full hierarchy.
-outer = scene.geometry.rect(720, 190).no_fill().stroke(BLACK, 7)
-inner = scene.geometry.rect(660, 130).fill(WHITE).stroke(BLACK, 4)
+outer = scene.geometry.rect(9, 2.375).no_fill().stroke(BLACK, 0.0875)
+inner = scene.geometry.rect(8.25, 1.625).fill(WHITE).stroke(BLACK, 0.05)
 frame = scene.geometry.group([outer, inner]).move_to(0, 0)
 
-left_support = (-420.0, 245.0)
-right_support = (420.0, 245.0)
+left_support = (-5.25, 3.0625)
+right_support = (5.25, 3.0625)
 left_corner = frame.anchor_point(Anchor.TOP_LEFT)
 right_corner = frame.anchor_point(Anchor.TOP_RIGHT)
 
-left_bar = scene.mechanics.bar_between(left_support, left_corner, width=10)
-right_bar = scene.mechanics.bar_between(right_support, right_corner, width=10)
-left_pin = scene.geometry.dot(9).fill(WHITE).stroke(BLACK, 5).move_to(*left_support)
-right_pin = scene.geometry.dot(9).fill(WHITE).stroke(BLACK, 5).move_to(*right_support)
+left_bar = scene.mechanics.bar_between(left_support, left_corner, width=0.125)
+right_bar = scene.mechanics.bar_between(right_support, right_corner, width=0.125)
+left_pin = scene.geometry.dot(0.1125).fill(WHITE).stroke(BLACK, 0.0625).move_to(*left_support)
+right_pin = scene.geometry.dot(0.1125).fill(WHITE).stroke(BLACK, 0.0625).move_to(*right_support)
 
-mass = scene.geometry.rect(105, 105).fill(RED).stroke(BLACK, 5).move_to(-80, 0)
+mass = scene.geometry.rect(1.3125, 1.3125).fill(RED).stroke(BLACK, 0.0625).move_to(-1, 0)
 left_spring = (
     scene.mechanics.spring_between(
-        frame.anchor_point(Anchor.LEFT, offset=(32, 0)),
+        frame.anchor_point(Anchor.LEFT, offset=(0.4, 0)),
         mass.anchor_point(Anchor.LEFT),
         coils=9,
-        amplitude=14,
+        amplitude=0.175,
         crossing=1.0,
     )
     .no_fill()
-    .stroke(BLACK, 4)
+    .stroke(BLACK, 0.05)
 )
 right_spring = (
     scene.mechanics.spring_between(
         mass.anchor_point(Anchor.RIGHT),
-        frame.anchor_point(Anchor.RIGHT, offset=(-32, 0)),
+        frame.anchor_point(Anchor.RIGHT, offset=(-0.4, 0)),
         coils=9,
-        amplitude=14,
+        amplitude=0.175,
         crossing=1.0,
     )
     .no_fill()
-    .stroke(BLACK, 4)
+    .stroke(BLACK, 0.05)
 )
 
-bob = scene.geometry.circle(27).fill(BLACK).move_to(-145, -240)
+bob = scene.geometry.circle(0.3375).fill(BLACK).move_to(-1.8125, -3)
 pendulum = scene.mechanics.bar_between(
     mass.anchor_point(Anchor.CENTER),
     bob.anchor_point(Anchor.CENTER),
-    width=9,
+    width=0.1125,
 )
 
 width_dimension = scene.mechanics.dimension_between(
     left_corner,
     right_corner,
-    105,
+    1.3125,
     label="$W_f$",
     show_value=True,
     format=".0f",
     unit="$u$",
-    label_gap=18,
+    label_gap=0.225,
     color=BLACK,
-    line_width=3,
+    line_width=0.0375,
     extension_style="dashed",
-    dash_length=12,
-    gap_length=8,
+    dash_length=0.15,
+    gap_length=0.1,
 )
 displayed_x = scene.viz.parameter(2.5)
 mass_dimension = scene.mechanics.dimension_between(
     mass.anchor_point(Anchor.TOP_LEFT),
     mass.anchor_point(Anchor.TOP_RIGHT),
-    50,
+    0.625,
     label="$x$",
     value=displayed_x,
     format=".1f",
@@ -80,7 +80,7 @@ mass_dimension = scene.mechanics.dimension_between(
     color=BLACK,
 )
 
-centerline = scene.geometry.dashed_line(-470, 0, 470, 0, dash_length=14, gap_length=10).stroke(GRAY, 2)
+centerline = scene.geometry.dashed_line(-5.875, 0, 5.875, 0, dash_length=0.175, gap_length=0.125).stroke(GRAY, 0.025)
 
 scene.play(
     [
@@ -102,9 +102,9 @@ scene.play(
 scene.wait(0.5)
 scene.play(
     [
-        frame.animate.shift_by(55, 0).duration(1.4).easing(Easing.SMOOTH),
-        mass.animate.shift_by(185, 0).duration(1.4).easing(Easing.SMOOTH),
-        bob.animate.shift_by(245, 35).duration(1.4).easing(Easing.SMOOTH),
+        frame.animate.shift_by(0.6875, 0).duration(1.4).easing(Easing.SMOOTH),
+        mass.animate.shift_by(2.3125, 0).duration(1.4).easing(Easing.SMOOTH),
+        bob.animate.shift_by(3.0625, 0.4375).duration(1.4).easing(Easing.SMOOTH),
         displayed_x.animate.set(4.0).duration(1.4),
     ]
 )

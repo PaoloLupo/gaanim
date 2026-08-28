@@ -17,7 +17,7 @@ modesto: un círculo, un punto y un título. Todavía no habrá movimiento.
 ```python
 from gaanim import BLUE, WHITE, YELLOW, Scene
 
-scene = Scene(1280, 720, background="#0f172a", margin=48)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=48)
 
 title = scene.text("Movimiento circular", role="title")
 title.fill(WHITE).move_to(0, 260)
@@ -35,7 +35,7 @@ Guarda el archivo y vuelve a la ventana de Gaanim.
 
 == El viewport
 
-`Scene(1280, 720, ...)` crea un lienzo horizontal. El origen `(0, 0)` está en
+`Scene(frame=(16, 9), ...)` crea un lienzo horizontal. El origen `(0, 0)` está en
 el centro. X crece hacia la derecha e Y hacia arriba. Por eso el título usa
 `y=260` y el sistema circular aparece a la izquierda con `x=-320`.
 

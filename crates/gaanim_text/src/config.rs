@@ -36,17 +36,16 @@ pub struct TextConfig {
 impl Default for TextConfig {
     fn default() -> Self {
         let mut roles = HashMap::new();
-        // Defaults target a 1080p canvas that may be shown inside a smaller
-        // player or presentation viewport. Title and subtitle retain their
-        // established scale while supporting copy gets a larger floor.
-        let body_size = 40.0;
+        // Sizes are authored in the same logical units as geometry. A 16x9
+        // frame therefore keeps identical typography at every resolution.
+        let body_size = 0.40;
 
         // Scientific default text face, bundled through FontRegistry.
         roles.insert(
             TextRole::Title,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 64.0,
+                size: 0.64,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -56,7 +55,7 @@ impl Default for TextConfig {
             TextRole::Subtitle,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 48.0,
+                size: 0.48,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -66,7 +65,7 @@ impl Default for TextConfig {
             TextRole::Kicker,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 32.0,
+                size: 0.32,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -75,7 +74,7 @@ impl Default for TextConfig {
             TextRole::Heading,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 48.0,
+                size: 0.48,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -95,7 +94,7 @@ impl Default for TextConfig {
             TextRole::Caption,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 32.0,
+                size: 0.32,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -104,7 +103,7 @@ impl Default for TextConfig {
             TextRole::Label,
             RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 36.0,
+                size: 0.36,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -114,7 +113,7 @@ impl Default for TextConfig {
             TextRole::Math,
             RoleStyle {
                 font_family: "New Computer Modern Math".to_string(),
-                size: 44.0,
+                size: 0.44,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );
@@ -124,7 +123,7 @@ impl Default for TextConfig {
             TextRole::Code,
             RoleStyle {
                 font_family: "Consolas".to_string(),
-                size: 36.0,
+                size: 0.36,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
         );

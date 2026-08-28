@@ -157,7 +157,7 @@ def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
-    scene = module.Scene(1280, 720, margin=48)
+    scene = module.Scene(frame=(16, 9), margin=0.48)
     signature = inspect.signature(module.SlideKit.section_header)
     if signature.parameters["rule"].default is not False:
         failures.append("Scene.section_header must hide its rule by default")
@@ -211,7 +211,7 @@ def validate_editorial_contract(module: object) -> list[str]:
 def validate_visualization_contract(module: object) -> list[str]:
     """Exercise the native builders without starting the renderer."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     x_axis = module.Axis.linear(-4.0, 4.0).ticks(1.0).label("x")
     y_axis = module.Axis.symlog(-10.0, 10.0, threshold=1.0).label("y", position="top")
     space = scene.viz.cartesian_2d(x_axis, y_axis, width=520.0, height=280.0)
@@ -666,7 +666,7 @@ def validate_visualization_contract(module: object) -> list[str]:
 def validate_layout_detach_contract(module: object) -> list[str]:
     """A reused layout child can detach and regain positional operations."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     scene.segment("cover", background=module.BLUE)
     title = scene.text("Reusable title", role="title")
     body = scene.text("Body")
@@ -687,7 +687,7 @@ def validate_layout_detach_contract(module: object) -> list[str]:
 def validate_reactive_connector_contract(module: object) -> list[str]:
     """Exercise anchored endpoints, bars, springs, and rich dimensions."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     frame = scene.geometry.rect(240.0, 120.0)
     corner = frame.anchor_point(module.Anchor.TOP_RIGHT, offset=(5.0, -3.0))
     if not isinstance(corner, module.AnchorPoint):
@@ -787,7 +787,7 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
 def validate_camera_rig_contract(module: object) -> list[str]:
     """Exercise the semantic camera facade and removed compatibility surface."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     marker = scene.geometry.dot(5.0)
     parameter = scene.viz.parameter(1.0)
     point = scene.geometry.point_ref(
@@ -847,7 +847,7 @@ def validate_camera_rig_contract(module: object) -> list[str]:
         lambda: scene.camera.state_2d(zoom=0.0),
         lambda: scene.camera.restore("missing"),
         lambda: scene.camera.save(""),
-        lambda: module.Scene(320, 180).camera.to(state_2d),
+        lambda: module.Scene(frame=(16, 9)).camera.to(state_2d),
     )
     for call in invalid_calls:
         try:
@@ -862,7 +862,7 @@ def validate_camera_rig_contract(module: object) -> list[str]:
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     matrix = scene.viz.matrix([[1, 2, 3], [4, 5, 6]], delimiters="parentheses")
     if matrix.shape != (2, 3):
         failures.append("Scene.matrix returned the wrong shape")
@@ -930,7 +930,7 @@ def validate_matrix_stub_typing() -> list[str]:
 def validate_vector_geometry_contract(module) -> list[str]:
     """Exercise the public varargs, clipping, and fill-level contracts."""
     failures: list[str] = []
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     left = scene.geometry.circle(60).move_to(-25, 0)
     right = scene.geometry.circle(60).move_to(25, 0)
 
@@ -981,7 +981,7 @@ def validate_composition_contract(module) -> list[str]:
         if hasattr(module, legacy):
             failures.append(f"legacy composition helper {legacy} remains public")
 
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     dot = scene.geometry.dot(8)
     first = dot.animate.shift_by(20, 0).duration(1.0)
     second = dot.animate.shift_by(20, 0).duration(1.0)
@@ -1100,7 +1100,7 @@ def validate_easing_contract(module) -> list[str]:
         else:
             failures.append("an Easing factory accepted an incorrect type")
 
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     dot = scene.geometry.dot(8)
     anim = dot.animate.shift_by(10, 0)
     for legacy in (
@@ -1164,13 +1164,13 @@ def validate_scene_capability_surface(module) -> list[str]:
             f"unexpected={sorted(actual - expected)}"
         )
 
-    scene = module.Scene(640, 360)
+    scene = module.Scene(frame=(16, 9))
     first = scene.geometry.circle(20)
     second = scene.geometry.circle(20).move_to(10, 0)
     if not isinstance(scene.geometry.union(first, second), module.Drawable):
         failures.append("repeated geometry capability access did not share the Scene model")
 
-    foreign = module.Scene(640, 360).geometry.circle(20)
+    foreign = module.Scene(frame=(16, 9)).geometry.circle(20)
     try:
         scene.geometry.union(first, foreign)
     except ValueError:
@@ -1184,6 +1184,20 @@ def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
     missing: list[str] = []
+
+    try:
+        module.Scene(1280, 720)
+    except TypeError:
+        pass
+    else:
+        missing.append("Scene still accepts the removed positional pixel constructor")
+
+    try:
+        module.Scene(frame=(0, 9))
+    except ValueError:
+        pass
+    else:
+        missing.append("Scene accepted a non-positive logical frame")
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):

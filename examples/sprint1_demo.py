@@ -4,16 +4,16 @@ from gaanim import Easing, BLACK, BLUE, CORAL, GOLD, RED, WHITE, YELLOW, Scene
 
 
 def main():
-    scene = Scene(1280, 720, background=BLACK)
-    title = scene.text("Math and annotations", role="title").fill(WHITE).move_to(0, 260)
-    x_axis = scene.geometry.arrow(-420, 0, 420, 0).stroke(WHITE, 3)
-    y_axis = scene.geometry.arrow(0, -220, 0, 220).stroke(WHITE, 3)
-    vector = scene.geometry.arrow(0, 0, 180, 140).stroke(CORAL, 4)
-    vector_label = scene.text("vector").fill(CORAL).move_to(220, 165)
-    formula = scene.text.equation("r = sqrt(x^2 + y^2)").fill(GOLD).move_to(-170, -170)
-    callout = scene.geometry.rounded_rect(240, 80, 12).stroke(BLUE, 3).no_fill().move_to(260, -170)
-    callout_text = scene.text("distance from origin").fill(YELLOW).move_to(260, -170)
-    point = scene.geometry.dot(12).fill(RED).move_to(180, 140)
+    scene = Scene(frame=(16, 9), background=BLACK)
+    title = scene.text("Math and annotations", role="title").fill(WHITE).move_to(0, 3.25)
+    x_axis = scene.geometry.arrow(-5.25, 0, 5.25, 0).stroke(WHITE, 0.0375)
+    y_axis = scene.geometry.arrow(0, -2.75, 0, 2.75).stroke(WHITE, 0.0375)
+    vector = scene.geometry.arrow(0, 0, 2.25, 1.75).stroke(CORAL, 0.05)
+    vector_label = scene.text("vector").fill(CORAL).move_to(2.75, 2.0625)
+    formula = scene.text.equation("r = sqrt(x^2 + y^2)").fill(GOLD).move_to(-2.125, -2.125)
+    callout = scene.geometry.rounded_rect(3, 1, 0.15).stroke(BLUE, 0.0375).no_fill().move_to(3.25, -2.125)
+    callout_text = scene.text("distance from origin").fill(YELLOW).move_to(3.25, -2.125)
+    point = scene.geometry.dot(0.15).fill(RED).move_to(2.25, 1.75)
 
     scene.play([
         title.animate.write().duration(0.8),

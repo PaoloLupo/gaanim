@@ -4,7 +4,7 @@ import os
 
 from gaanim import Anchor, BLACK, ChartSpec, Scene
 
-scene = Scene(1600, 900, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 series = {
     "id": ["a", "b", "c", "d", "e"],
     "x": [-2, -1, 0, 1, 2],
@@ -20,7 +20,7 @@ grid = {
 }
 
 specs = [
-    ("point", ChartSpec(series, key="id").mark("point", radius=18).encode(x="x", y="y")),
+    ("point", ChartSpec(series, key="id").mark("point", radius=0.18).encode(x="x", y="y")),
     ("line", ChartSpec(series, key="id").mark("line").encode(x="x", y="y")),
     ("step", ChartSpec(series, key="id").mark("step").encode(x="x", y="y")),
     ("area", ChartSpec(series, key="id").mark("area").encode(x="x", y="y")),
@@ -47,14 +47,14 @@ specs = [
 charts = []
 for index, (name, spec) in enumerate(specs):
     column, row = index % 6, index // 6
-    x, y = -650 + column * 260, 205 - row * 390
+    x, y = -6.5 + column * 2.6, 2.05 - row * 3.9
     if name == "surface":
         # The perspective camera uses world units while the 2D panels use
-        # canvas pixels. At eye.z=18 this conversion aligns the hybrid cells.
-        chart = scene.viz.chart(spec).scale_to(0.2).move_to_3d(x / 60, y / 60, 0)
+        # logical scene units. At eye.z=18 this aligns the hybrid cells.
+        chart = scene.viz.chart(spec).scale_to(0.2).move_to_3d(x, y, 0)
     else:
         chart = scene.viz.chart(spec).scale_to(0.17).move_to(x, y)
-    label = scene.text(name).hud().scale_to(0.55).move_to(x, y + 150, anchor=Anchor.CENTER)
+    label = scene.text(name).hud().scale_to(0.55).move_to(x, y + 1.5, anchor=Anchor.CENTER)
     charts.extend([chart.drawable(), label])
 
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)

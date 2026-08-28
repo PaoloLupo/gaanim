@@ -9,18 +9,18 @@ FPS = 30
 FRAME_COUNT = max(30, int(os.environ.get("GAANIM_BENCHMARK_FRAMES", "300")))
 DURATION = FRAME_COUNT / FPS
 
-scene = Scene(1920, 1080, background="#08111f", margin=48)
+scene = Scene(frame=(16, 9), background="#08111f", margin=0.4)
 colors = (BLUE, GOLD, GREEN, RED)
 objects = []
 
 for row in range(6):
     for column in range(8):
-        x = -630 + column * 180
-        y = 330 - row * 132
+        x = -5.25 + column * 1.5
+        y = 2.75 - row * 1.1
         shape = (
-            scene.geometry.circle(28 + (row + column) % 3 * 4)
+            scene.geometry.circle(0.233333 + (row + column) % 3 * 0.033333)
             .fill(colors[(row + column) % len(colors)])
-            .stroke(WHITE, 2)
+            .stroke(WHITE, 0.016667)
             .move_to(x, y)
         )
         objects.append(shape)
@@ -33,8 +33,8 @@ scene.play([shape.animate.create().duration(entry_duration) for shape in objects
 scene.play(
     [
         shape.animate.shift_by(
-            72 if index % 2 == 0 else -72,
-            54 if (index // 2) % 2 == 0 else -54,
+            0.6 if index % 2 == 0 else -0.6,
+            0.45 if (index // 2) % 2 == 0 else -0.45,
         )
         .duration(motion_duration).easing(Easing.SMOOTH)
         for index, shape in enumerate(objects)

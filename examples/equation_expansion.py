@@ -5,19 +5,19 @@ import os
 from gaanim import Anchor, BLACK, GOLD, WHITE, Scene, part
 
 
-scene = Scene(1280, 720, background=BLACK)
+scene = Scene(frame=(16, 9), background=BLACK)
 
-title = scene.text("Descomponer una masa", role="title").fill(WHITE).move_to(0, 220, anchor=Anchor.CENTER)
+title = scene.text("Descomponer una masa", role="title").fill(WHITE).move_to(0, 2.75, anchor=Anchor.CENTER)
 
 compact = (
     scene.text.equation("E =", part("mass", "m"), "c^2")
-    .move_to(0, 20, anchor=Anchor.CENTER)
+    .move_to(0, 0.25, anchor=Anchor.CENTER)
 )
 expanded = (
     scene.text.equation("E =", part("mass", "(m_1 + m_2)"), "c^2")
-    .move_to(0, 20, anchor=Anchor.CENTER)
+    .move_to(0, 0.25, anchor=Anchor.CENTER)
 )
-caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").move_to(0, -170, anchor=Anchor.CENTER)
+caption = scene.text("La masa se abre; los términos nuevos emergen desde ella.").move_to(0, -2.125, anchor=Anchor.CENTER)
 
 compact["mass"].fill(GOLD)
 expanded["mass"].fill(GOLD)

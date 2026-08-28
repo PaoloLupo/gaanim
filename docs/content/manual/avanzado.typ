@@ -30,7 +30,7 @@ Elige la herramienta más declarativa que pueda expresar la relación:
 from math import pi
 from gaanim import GOLD, Scene
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 theta = scene.viz.parameter(0.0)
 tip = scene.geometry.polar_point((0, 0), 180, theta)
 radius = scene.mechanics.bar_between((0, 0), tip).stroke(GOLD, 6)

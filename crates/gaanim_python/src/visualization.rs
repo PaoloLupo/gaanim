@@ -1237,7 +1237,7 @@ impl PyVectorField {
         self.evaluation
     }
 
-    #[pyo3(signature = (*, resolution=None, min_length=0.0, max_length=None, length_scale=1.0, width=2.0, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None))]
+    #[pyo3(signature = (*, resolution=None, min_length=0.0, max_length=None, length_scale=1.0, width=0.02, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None))]
     fn arrows(
         &self,
         resolution: Option<Bound<'_, PyAny>>,
@@ -1300,7 +1300,7 @@ impl PyVectorField {
         Ok(PyArrowVectorField { inner })
     }
 
-    #[pyo3(signature = (*, seeds=None, direction="both", tolerance=1e-4, min_step=1e-5, max_step=0.1, max_time=3.0, max_length=None, max_steps=10_000, stagnation=1e-10, padding=0.05, separation=0.035, width=2.0, opacity=1.0, color=None, colormap=None, color_range=None))]
+    #[pyo3(signature = (*, seeds=None, direction="both", tolerance=1e-4, min_step=1e-5, max_step=0.1, max_time=3.0, max_length=None, max_steps=10_000, stagnation=1e-10, padding=0.05, separation=0.035, width=0.02, opacity=1.0, color=None, colormap=None, color_range=None))]
     #[allow(clippy::too_many_arguments)]
     fn streamlines(
         &self,
@@ -1710,7 +1710,7 @@ impl PyNumberLine {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75, inputs=Vec::new()))]
+    #[pyo3(signature = (function, domain=None, *, normal_scale=1.2, reveal=None, samples=None, tolerance=0.0075, inputs=Vec::new()))]
     fn function(
         &self,
         py: Python<'_>,
@@ -2255,7 +2255,7 @@ impl PyCoordinateSpace {
         Ok(PyDrawable(handle))
     }
 
-    #[pyo3(signature = (xs, ys, *, radius=6.0, policy="gap", color=None))]
+    #[pyo3(signature = (xs, ys, *, radius=0.06, policy="gap", color=None))]
     /// Plot a data series as scatter dots in this space's data coordinates.
     ///
     /// `xs` and `ys` are matching lists of floats (`None` marks a missing
@@ -2751,7 +2751,7 @@ impl PyVisualization {
     }
 
     #[pyo3(signature = (
-        radial, *, radius=220.0, angle_divisions=12,
+        radial, *, radius=2.20, angle_divisions=12,
         grid=true, axes=true, numbers=true, labels=true, rings=None, spokes=None
     ))]
     #[allow(clippy::too_many_arguments)]

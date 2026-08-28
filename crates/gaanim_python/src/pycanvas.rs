@@ -871,23 +871,48 @@ impl PyLottie {
 #[pymethods]
 impl PyCanvas {
     #[getter]
-    fn width(&self) -> u32 {
-        self.inner.lock().expect("scene canvas poisoned").width
-    }
-
-    #[setter]
-    fn set_width(&self, width: u32) {
-        self.inner.lock().expect("scene canvas poisoned").width = width;
+    fn frame_width(&self) -> f64 {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .frame
+            .width
     }
 
     #[getter]
-    fn height(&self) -> u32 {
-        self.inner.lock().expect("scene canvas poisoned").height
+    fn frame_height(&self) -> f64 {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .frame
+            .height
     }
 
-    #[setter]
-    fn set_height(&self, height: u32) {
-        self.inner.lock().expect("scene canvas poisoned").height = height;
+    #[getter]
+    fn aspect_ratio(&self) -> f64 {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .frame
+            .aspect_ratio()
+    }
+
+    #[getter]
+    fn safe_width(&self) -> f64 {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .safe_frame()
+            .width()
+    }
+
+    #[getter]
+    fn safe_height(&self) -> f64 {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .safe_frame()
+            .height()
     }
 
     #[getter]
@@ -1023,23 +1048,26 @@ impl PyCanvas {
         Ok(())
     }
 
-    /// Apply a common output format and its conservative safe area.
+    /// Apply a common logical frame and its conservative safe area.
     fn set_preset(&self, name: &str) -> PyResult<()> {
-        let (width, height, margin) = match name.to_ascii_lowercase().as_str() {
-            "widescreen" | "youtube" | "16:9" => {
-                (1920, 1080, gaanim_api::canvas::Margin::all(96.0))
-            }
+        let (frame, margin) = match name.to_ascii_lowercase().as_str() {
+            "widescreen" | "youtube" | "16:9" => (
+                gaanim_api::canvas::SceneFrame::WIDESCREEN,
+                gaanim_api::canvas::Margin::all(0.5),
+            ),
             "vertical" | "tiktok" | "9:16" => (
-                1080,
-                1920,
+                gaanim_api::canvas::SceneFrame::VERTICAL,
                 gaanim_api::canvas::Margin {
-                    top: 192.0,
-                    right: 72.0,
-                    bottom: 320.0,
-                    left: 72.0,
+                    top: 1.0,
+                    right: 0.5,
+                    bottom: 1.5,
+                    left: 0.5,
                 },
             ),
-            "square" | "instagram" | "1:1" => (1080, 1080, gaanim_api::canvas::Margin::all(72.0)),
+            "square" | "instagram" | "1:1" => (
+                gaanim_api::canvas::SceneFrame::SQUARE,
+                gaanim_api::canvas::Margin::all(0.5),
+            ),
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "preset must be 'widescreen', 'vertical', or 'square'",
@@ -1047,8 +1075,7 @@ impl PyCanvas {
             }
         };
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
-        canvas.width = width;
-        canvas.height = height;
+        canvas.frame = frame;
         canvas.margin = margin;
         Ok(())
     }
@@ -1469,7 +1496,7 @@ impl PyCameraAnimation {
     }
 
     /// Apply a deterministic shake that settles at the original position.
-    #[pyo3(signature = (amplitude=12.0, frequency=8.0))]
+    #[pyo3(signature = (amplitude=0.12, frequency=8.0))]
     fn shake(&self, amplitude: f64, frequency: f64) -> PyResult<PyCanvasAnim> {
         if !amplitude.is_finite() || amplitude < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1823,15 +1850,17 @@ impl PySegment {
 #[pymethods]
 impl PyScene {
     #[new]
-    #[pyo3(signature = (width=1280, height=720, background=None, margin=None, theme=None))]
+    #[pyo3(signature = (*, frame=(16.0, 9.0), background=None, margin=None, theme=None))]
     fn new(
-        width: u32,
-        height: u32,
+        frame: (f64, f64),
         background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
         theme: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let mut canvas = ApiCanvas::new(width, height);
+        let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
+            .validate()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let mut canvas = ApiCanvas::new(frame.width, frame.height);
         if let Some(theme) = theme {
             if let Ok(name) = theme.extract::<String>() {
                 canvas
@@ -1963,7 +1992,7 @@ impl PySlideKit {
 #[pymethods]
 impl PyLayoutBuilder {
     /// Horizontal Layout v2 container.
-    #[pyo3(signature = (children, *, gap=24.0, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
+    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
     #[allow(clippy::too_many_arguments)]
     fn row<'py>(
         &self,
@@ -1998,7 +2027,7 @@ impl PyLayoutBuilder {
     }
 
     /// Vertical Layout v2 container.
-    #[pyo3(signature = (children, *, gap=24.0, padding=None, width=None, height=None, align="start", justify="start", wrap=false, within=None))]
+    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="start", justify="start", wrap=false, within=None))]
     #[allow(clippy::too_many_arguments)]
     fn column<'py>(
         &self,
@@ -2330,7 +2359,7 @@ impl PyGeometry {
         )
     }
     /// Create a live frame around drawable or text-selection bounds.
-    #[pyo3(signature = (targets, *, padding=None, corner_radius=8.0))]
+    #[pyo3(signature = (targets, *, padding=None, corner_radius=0.08))]
     fn surrounding_rect(
         &self,
         py: Python<'_>,
@@ -2417,7 +2446,7 @@ impl PyGeometry {
                 .arrow(x1, y1, x2, y2),
         )
     }
-    #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=16.0, gap_length=10.0))]
+    #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10))]
     fn dashed_line(
         &self,
         x1: f64,
@@ -3666,7 +3695,7 @@ impl PyTypography {
 #[pymethods]
 impl PySlideKit {
     /// Create an auto-sized editorial badge.
-    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(18.0, 10.0), radius=None, font_size=None, min_width=None, color=None, background=None, border=None))]
+    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None))]
     #[pyo3(name = "badge")]
     #[allow(clippy::too_many_arguments)]
     fn badge_py(
@@ -3693,7 +3722,7 @@ impl PySlideKit {
     }
 
     /// Create a compact chip with an optional semantic dot.
-    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(14.0, 8.0), radius=None, font_size=None, color=None, background=None, border=None))]
+    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn chip(
         &self,
@@ -3723,7 +3752,7 @@ impl PySlideKit {
     }
 
     /// Create an auto-height card with title, body, and footer slots.
-    #[pyo3(signature = (title, body=None, footer=None, *, width=420.0, min_height=180.0, padding=(28.0, 24.0), gap=14.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (title, body=None, footer=None, *, width=4.2, min_height=1.8, padding=(0.28, 0.24), gap=0.14, radius=0.18, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn card(
         &self,
@@ -3759,7 +3788,7 @@ impl PySlideKit {
     }
 
     /// Create a safe-area-aware banner at the top or bottom edge.
-    #[pyo3(signature = (title, subtitle=None, *, position="top", width=None, margin=32.0, padding=(28.0, 18.0), gap=8.0, radius=14.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (title, subtitle=None, *, position="top", width=None, margin=0.32, padding=(0.28, 0.18), gap=0.08, radius=0.14, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn banner(
         &self,
@@ -3804,7 +3833,7 @@ impl PySlideKit {
     }
 
     /// Create a lower-third card in a safe bottom corner.
-    #[pyo3(signature = (title, subtitle=None, *, kicker=None, side="left", width=520.0, margin=32.0, padding=(28.0, 20.0), gap=8.0, radius=16.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (title, subtitle=None, *, kicker=None, side="left", width=5.2, margin=0.32, padding=(0.28, 0.20), gap=0.08, radius=0.16, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn lower_third(
         &self,
@@ -3851,7 +3880,7 @@ impl PySlideKit {
     }
 
     /// Create a metric card with value, label, and optional delta.
-    #[pyo3(signature = (value, label, *, delta=None, width=280.0, min_height=170.0, padding=(24.0, 20.0), gap=8.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (value, label, *, delta=None, width=2.8, min_height=1.7, padding=(0.24, 0.20), gap=0.08, radius=0.18, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn stat_card(
         &self,
@@ -3886,7 +3915,7 @@ impl PySlideKit {
     }
 
     /// Create a wrapped quotation card with optional attribution.
-    #[pyo3(signature = (quote, attribution=None, *, width=620.0, padding=(32.0, 28.0), gap=16.0, radius=18.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (quote, attribution=None, *, width=6.2, padding=(0.32, 0.28), gap=0.16, radius=0.18, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn quote_card(
         &self,
@@ -3918,7 +3947,7 @@ impl PySlideKit {
     }
 
     /// Create a section heading with optional kicker, subtitle, and opt-in rule.
-    #[pyo3(signature = (title, *, kicker=None, subtitle=None, width=720.0, align="left", rule=false, padding=(24.0, 18.0), gap=10.0, radius=12.0, variant="neutral", appearance="soft", color=None, background=None, border=None))]
+    #[pyo3(signature = (title, *, kicker=None, subtitle=None, width=7.2, align="left", rule=false, padding=(0.24, 0.18), gap=0.10, radius=0.12, variant="neutral", appearance="soft", color=None, background=None, border=None))]
     #[allow(clippy::too_many_arguments)]
     fn section_header(
         &self,
@@ -3970,9 +3999,9 @@ impl PySlideKit {
         text,
         target,
         *,
-        offset=(160.0, 96.0),
-        width=240.0,
-        height=72.0,
+        offset=(1.60, 0.96),
+        width=2.40,
+        height=0.72,
         background=None,
         color=None,
     ))]
@@ -4011,9 +4040,9 @@ impl PySlideKit {
         let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let card = scene
-            .rounded_rect(width, height, 12.0)
+            .rounded_rect(width, height, 0.12)
             .fill(background)
-            .stroke(color, 2.0);
+            .stroke(color, 0.02);
         card.follow_to(&target.0, offset.0, offset.1);
         let label = scene.text(&text).fill(color);
         label.follow_to(&target.0, offset.0, offset.1);
@@ -4023,7 +4052,7 @@ impl PySlideKit {
                 CanvasEndpoint::Entity(card.id),
             )
             .no_fill()
-            .stroke(color, 2.0)
+            .stroke(color, 0.02)
             .z_index(-1);
         Ok(PyDrawable(scene.group(&[&connector, &card, &label])))
     }
@@ -4033,8 +4062,8 @@ impl PySlideKit {
         title,
         subtitle=None,
         *,
-        width=760.0,
-        height=320.0,
+        width=7.60,
+        height=3.20,
         panel=false,
         background=None,
         color=None,
@@ -4078,7 +4107,7 @@ impl PySlideKit {
         let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let title_y = if subtitle.is_some() { 44.0 } else { 0.0 };
+        let title_y = if subtitle.is_some() { 0.44 } else { 0.0 };
         let title_spec = gaanim_text::prelude::TextSpec::new(
             vec![title.into()],
             Some(gaanim_text::prelude::TextRole::Title),
@@ -4091,15 +4120,15 @@ impl PySlideKit {
             .fill(color)
             .move_to(0.0, title_y);
         let rule = scene
-            .line(-width * 0.28, -12.0, width * 0.28, -12.0)
-            .stroke(accent, 5.0);
+            .line(-width * 0.28, -0.12, width * 0.28, -0.12)
+            .stroke(accent, 0.05);
         let mut members = Vec::new();
         if panel {
             members.push(
                 scene
-                    .rounded_rect(width, height, 24.0)
+                    .rounded_rect(width, height, 0.24)
                     .fill(background)
-                    .stroke(accent, 3.0),
+                    .stroke(accent, 0.03),
             );
         }
         members.push(title);
@@ -4116,7 +4145,7 @@ impl PySlideKit {
                 scene
                     .text_spec(subtitle_spec)
                     .fill(color)
-                    .move_to(0.0, -64.0),
+                    .move_to(0.0, -0.64),
             );
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
@@ -4127,9 +4156,9 @@ impl PySlideKit {
     #[pyo3(signature = (
         items,
         *,
-        width=720.0,
-        gap=68.0,
-        bullet_radius=8.0,
+        width=7.20,
+        gap=0.68,
+        bullet_radius=0.08,
         bullet_color=None,
         color=None,
     ))]
@@ -4168,7 +4197,7 @@ impl PySlideKit {
         let start_y = (items.len().saturating_sub(1) as f64 * gap) * 0.5;
         let bullet_x = -width * 0.5;
         let text_left = bullet_x + bullet_radius * 4.0;
-        let text_width = (width - bullet_radius * 4.0).max(1.0);
+        let text_width = (width - bullet_radius * 4.0).max(1.0e-6);
         let label_x = text_left + text_width * 0.5;
         let mut members = Vec::with_capacity(items.len() * 2);
         for (index, item) in items.iter().enumerate() {
@@ -4201,8 +4230,8 @@ impl PySlideKit {
         headers,
         rows,
         *,
-        width=760.0,
-        row_height=58.0,
+        width=7.60,
+        row_height=0.58,
         header_background=None,
         rule_color=None,
         color=None,
@@ -4255,7 +4284,7 @@ impl PySlideKit {
 
         members.push(
             scene
-                .rounded_rect(width, row_height, 6.0)
+                .rounded_rect(width, row_height, 0.06)
                 .fill(header_background)
                 .move_to(0.0, top_y - row_height * 0.5),
         );
@@ -4264,7 +4293,7 @@ impl PySlideKit {
             members.push(
                 scene
                     .line(x, -total_height * 0.5, x, total_height * 0.5)
-                    .stroke(rule_color, 1.0),
+                    .stroke(rule_color, 0.01),
             );
         }
         for row in 0..=(rows.len() + 1) {
@@ -4272,7 +4301,7 @@ impl PySlideKit {
             members.push(
                 scene
                     .line(-width * 0.5, y, width * 0.5, y)
-                    .stroke(rule_color, if row == 0 { 2.0 } else { 1.0 }),
+                    .stroke(rule_color, if row == 0 { 0.02 } else { 0.01 }),
             );
         }
         for (column, header) in headers.iter().enumerate() {
@@ -4303,9 +4332,9 @@ impl PyTypography {
         source,
         *,
         language="text",
-        width=760.0,
-        height=300.0,
-        font_size=20.0,
+        width=7.60,
+        height=3.00,
+        font_size=0.20,
         background=None,
         color=None,
         accent=None,
@@ -4353,7 +4382,7 @@ impl PyTypography {
         let background = background.map(|color| color.0).unwrap_or(palette.panel);
         let color = color.map(|color| color.0).unwrap_or(palette.foreground);
         let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
-        let content_width = (width - 64.0).max(1.0);
+        let content_width = (width - 0.64).max(1.0e-6);
         let typst_source = format!(
             r#"#set text(font: "Consolas", size: {font_size}pt)
 #block(width: {content_width}pt)[#raw("{}", block: true, lang: "{}")]"#,
@@ -4362,27 +4391,27 @@ impl PyTypography {
         );
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         let panel = scene
-            .rounded_rect(width, height, 10.0)
+            .rounded_rect(width, height, 0.10)
             .fill(background)
-            .stroke(accent, 1.5);
+            .stroke(accent, 0.015);
         let rule = scene
             .line(
-                -width * 0.5 + 24.0,
-                height * 0.5 - 40.0,
-                width * 0.5 - 24.0,
-                height * 0.5 - 40.0,
+                -width * 0.5 + 0.24,
+                height * 0.5 - 0.40,
+                width * 0.5 - 0.24,
+                height * 0.5 - 0.40,
             )
-            .stroke(accent, 1.0);
+            .stroke(accent, 0.01);
         let label = scene
             .text(&language.to_ascii_uppercase())
             .fill(accent)
-            .move_to(-width * 0.5 + 90.0, height * 0.5 - 20.0);
+            .move_to(-width * 0.5 + 0.90, height * 0.5 - 0.20);
         // Typst hierarchies are centered on their visual bounds. Shift the
         // resulting raw block into the panel's reading column.
         let body = scene
             .typst(&typst_source)
             .fill(color)
-            .move_to(-width * 0.25, -18.0);
+            .move_to(-width * 0.25, -0.18);
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 }
@@ -4562,7 +4591,7 @@ impl PyGeometry {
         ))
     }
 
-    #[pyo3(signature = (curve, tracker, length=80.0))]
+    #[pyo3(signature = (curve, tracker, length=0.8))]
     fn tangent_on_curve(
         &self,
         curve: &PyDrawable,
@@ -4578,7 +4607,7 @@ impl PyGeometry {
         ))
     }
 
-    #[pyo3(signature = (curve, tracker, length=80.0))]
+    #[pyo3(signature = (curve, tracker, length=0.8))]
     fn normal_on_curve(
         &self,
         curve: &PyDrawable,
@@ -4639,7 +4668,7 @@ impl PyGeometry {
         ))
     }
 
-    #[pyo3(signature = (source, *, dissipating_time=None, max_points=None, min_distance=1.0))]
+    #[pyo3(signature = (source, *, dissipating_time=None, max_points=None, min_distance=0.01))]
     fn traced_path(
         &self,
         source: &PyDrawable,
@@ -4801,7 +4830,7 @@ impl PyGeometry {
 
 #[pymethods]
 impl PyMechanics {
-    #[pyo3(signature = (from, to, *, width=8.0))]
+    #[pyo3(signature = (from, to, *, width=0.08))]
     fn bar_between(
         &self,
         from: Bound<'_, PyAny>,
@@ -4823,7 +4852,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (from, to, coils=8, amplitude=12.0, crossing=0.0, start_straight=12.0, end_straight=12.0))]
+    #[pyo3(signature = (from, to, coils=8, amplitude=0.12, crossing=0.0, start_straight=0.12, end_straight=0.12))]
     fn spring_between(
         &self,
         from: Bound<'_, PyAny>,
@@ -4862,7 +4891,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=10.0, label_orientation="upright", font_size=None, color=None, line_width=3.0, extension_style="solid", dash_length=12.0, gap_length=8.0))]
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=0.10, label_orientation="upright", font_size=None, color=None, line_width=0.03, extension_style="solid", dash_length=0.12, gap_length=0.08))]
     #[allow(clippy::too_many_arguments)]
     fn dimension_between<'py>(
         &self,
@@ -4971,7 +5000,7 @@ impl PyMechanics {
         Py::new(py, PyDimension::initializer(handle))
     }
 
-    #[pyo3(signature = (vertex, from, to, *, radius=64.0, label=None, show_value=false, format=".1f", unit="deg", sweep="minor", arrowheads="both", label_gap=12.0, label_orientation="upright", show_extensions=true, font_size=None, color=None))]
+    #[pyo3(signature = (vertex, from, to, *, radius=0.64, label=None, show_value=false, format=".1f", unit="deg", sweep="minor", arrowheads="both", label_gap=0.12, label_orientation="upright", show_extensions=true, font_size=None, color=None))]
     #[allow(clippy::too_many_arguments)]
     fn angle_between<'py>(
         &self,
@@ -5065,7 +5094,7 @@ impl PyMechanics {
         Py::new(py, PyAngleDimension::initializer(handle))
     }
 
-    #[pyo3(signature = (from, to, *, label=None, show_value=false, format=".1f", unit=None, scale=1.0, label_gap=14.0, font_size=None, color=None))]
+    #[pyo3(signature = (from, to, *, label=None, show_value=false, format=".1f", unit=None, scale=1.0, label_gap=0.14, font_size=None, color=None))]
     #[allow(clippy::too_many_arguments)]
     fn vector_between(
         &self,
@@ -5111,7 +5140,7 @@ impl PyMechanics {
         Py::new(py, PyForceVector::initializer(handle))
     }
 
-    #[pyo3(signature = (origin, magnitude, *, direction=None, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=14.0, font_size=None, color=None))]
+    #[pyo3(signature = (origin, magnitude, *, direction=None, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=0.14, font_size=None, color=None))]
     #[allow(clippy::too_many_arguments)]
     fn force_at(
         &self,
@@ -5155,7 +5184,7 @@ impl PyMechanics {
         Py::new(py, PyForceVector::initializer(handle))
     }
 
-    #[pyo3(signature = (origin, fx, fy, *, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=14.0, font_size=None, color=None))]
+    #[pyo3(signature = (origin, fx, fy, *, visual_scale=1.0, label=None, show_value=false, format=".1f", unit="N", label_gap=0.14, font_size=None, color=None))]
     #[allow(clippy::too_many_arguments)]
     fn force_from_components(
         &self,
@@ -5196,7 +5225,7 @@ impl PyMechanics {
         Py::new(py, PyForceVector::initializer(handle))
     }
 
-    #[pyo3(signature = (point, *, kind="pin", direction=None, size=48.0, ground_length=70.0, color=None))]
+    #[pyo3(signature = (point, *, kind="pin", direction=None, size=0.48, ground_length=0.70, color=None))]
     fn support_at<'py>(
         &self,
         py: Python<'py>,
@@ -5243,7 +5272,7 @@ impl PyMechanics {
         Py::new(py, PySupport::initializer(handle))
     }
 
-    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    #[pyo3(signature = (point, *, direction=None, size=0.48, ground_length=0.70, color=None))]
     fn fixed_support<'py>(
         &self,
         py: Python<'py>,
@@ -5256,7 +5285,7 @@ impl PyMechanics {
         self.support_at(py, point, "fixed", direction, size, ground_length, color)
     }
 
-    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    #[pyo3(signature = (point, *, direction=None, size=0.48, ground_length=0.70, color=None))]
     fn pin_support<'py>(
         &self,
         py: Python<'py>,
@@ -5269,7 +5298,7 @@ impl PyMechanics {
         self.support_at(py, point, "pin", direction, size, ground_length, color)
     }
 
-    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    #[pyo3(signature = (point, *, direction=None, size=0.48, ground_length=0.70, color=None))]
     fn roller_support<'py>(
         &self,
         py: Python<'py>,
@@ -5282,7 +5311,7 @@ impl PyMechanics {
         self.support_at(py, point, "roller", direction, size, ground_length, color)
     }
 
-    #[pyo3(signature = (point, *, direction=None, size=48.0, ground_length=70.0, color=None))]
+    #[pyo3(signature = (point, *, direction=None, size=0.48, ground_length=0.70, color=None))]
     fn guided_support<'py>(
         &self,
         py: Python<'py>,
@@ -5295,7 +5324,7 @@ impl PyMechanics {
         self.support_at(py, point, "guided", direction, size, ground_length, color)
     }
 
-    #[pyo3(signature = (point, *, kind="revolute", axis=None, size=36.0, color=None))]
+    #[pyo3(signature = (point, *, kind="revolute", axis=None, size=0.36, color=None))]
     fn joint_at(
         &self,
         point: Bound<'_, PyAny>,
@@ -5323,7 +5352,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (radius, teeth, *, bore_radius=8.0, color=None))]
+    #[pyo3(signature = (radius, teeth, *, bore_radius=0.08, color=None))]
     fn gear(
         &self,
         radius: f64,
@@ -5367,7 +5396,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (samples, *, bore_radius=8.0, color=None))]
+    #[pyo3(signature = (samples, *, bore_radius=0.08, color=None))]
     fn cam_profile(
         &self,
         samples: Vec<(f64, f64)>,
@@ -5391,7 +5420,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (curve, tracker, *, tangent_length=80.0, normal_length=80.0))]
+    #[pyo3(signature = (curve, tracker, *, tangent_length=0.80, normal_length=0.80))]
     fn contact_on_curve(
         &self,
         curve: &PyDrawable,
@@ -5441,7 +5470,7 @@ impl PyMechanics {
         Ok(PyDrawable(handle))
     }
 
-    #[pyo3(signature = (origin, x_direction, *, length=70.0, labels=None, color=None))]
+    #[pyo3(signature = (origin, x_direction, *, length=0.70, labels=None, color=None))]
     fn coordinate_frame_at(
         &self,
         origin: Bound<'_, PyAny>,

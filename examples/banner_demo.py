@@ -5,14 +5,14 @@ import os
 from gaanim import BLACK, BLUE, WHITE, Scene
 
 
-scene = Scene(1280, 720, background=BLACK, margin=56)
+scene = Scene(frame=(16, 9), background=BLACK, margin=0.7)
 
-title = scene.text("Banners and safe areas", role="title").fill(WHITE).move_to(0, 140)
-accent = scene.geometry.circle(86).fill(BLUE).move_to(0, -40)
+title = scene.text("Banners and safe areas", role="title").fill(WHITE).move_to(0, 1.75)
+accent = scene.geometry.circle(1.075).fill(BLUE).move_to(0, -0.5)
 banner = scene.slides.banner(
     "This banner stays inside the safe area and grows with wrapped text.",
     position="bottom",
-    width=760,
+    width=9.5,
     variant="accent",
 )
 

@@ -33,7 +33,7 @@ cambiar el resultado de una búsqueda anterior en la línea de tiempo.
 ```python
 from gaanim import Axis, ChartSpec, Field, Guide, Scale, Scene, Value, BLUE
 
-scene = Scene(1280, 720)
+scene = Scene(frame=(16, 9))
 spec = (
   ChartSpec({
     "id": ["a", "b", "c"],

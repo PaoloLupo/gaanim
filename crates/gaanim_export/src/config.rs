@@ -19,6 +19,18 @@ pub enum QualityPreset {
     Production,
 }
 
+/// Mapping used when output pixels do not share the authored frame aspect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFit {
+    /// Reject an aspect mismatch larger than one raster pixel.
+    #[default]
+    Error,
+    /// Preserve the whole frame and letterbox the remainder.
+    Contain,
+    /// Fill the output and crop logical frame edges.
+    Cover,
+}
+
 impl QualityPreset {
     pub fn encoding_speed(self) -> EncodingSpeed {
         match self {
@@ -111,6 +123,7 @@ pub struct ExportConfig {
     pub height: u32,
     pub fps: u32,
     pub transparent: bool,
+    pub fit: OutputFit,
 
     pub start_time: Option<f64>,
     pub end_time: Option<f64>,
@@ -135,6 +148,7 @@ impl Default for ExportConfig {
             height: 1080,
             fps: 60,
             transparent: false,
+            fit: OutputFit::Error,
             start_time: None,
             end_time: None,
             crf: 18,

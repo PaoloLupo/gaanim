@@ -20,7 +20,7 @@ expone selecciones locales y animaciones específicas de texto.
 ```python
 from gaanim import GOLD, Scene, TextFlow, TextStyle, part
 
-scene = Scene(640, 360, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
 copy = scene.text(
     "La energía es ",
@@ -70,7 +70,7 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, TextFlow, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
 copy = scene.text(
     "La energía es ", formula,
@@ -99,7 +99,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part, parts
-scene = Scene(640, 360, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 equation = scene.text.equation(
     part("sum_force", "sum F_t"),
     "=",
@@ -181,7 +181,7 @@ animations, semantic parts, and Layout v2 measurement.
 # show-code: true
 from gaanim import GOLD, Scene
 
-scene = Scene(640, 360, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 copy = scene.text(
     "Normal, _emphasis_, *strong* and *_both_*.",
     size=36,
@@ -216,7 +216,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, parts
-scene = Scene(640, 360, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 equation = scene.text.equation(
     "-",
     parts(mass_left="m", gravity="g sin(theta)"),
@@ -247,7 +247,7 @@ scene.render()
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 formula = part(
     "formula",
     "$",
@@ -352,7 +352,7 @@ baseline through the structured Typst tree. A later fluent `text.fill(...)`,
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, TextFlow
-scene = Scene(480, 270, background="#0f172a", margin=30)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=30)
 body = scene.text(
     "El mismo texto se mide con el ancho que ofrece su tarjeta de Layout v2.",
     role="body",
@@ -406,7 +406,7 @@ transition targets raise `LayoutOwnershipError`.
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 copy = scene.text(
     "La ", part("concept", "energía"), " depende de ",
     part("formula", "$", part("mass", "m"), " c^2$"),
@@ -511,7 +511,7 @@ These operate on the complete `Text`; the typed selection proxy adds `pulse`,
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part
-scene = Scene(480, 270, background="#0f172a")
+scene = Scene(frame=(16, 9), background="#0f172a")
 before = scene.text("$x + ", part("obsolete", "3"), " = 7$").move_to(0, 0)
 after = scene.text("$x = ", part("result", "4", color=GOLD), "$").move_to(0, 0)
 scene.play([before.animate.write().duration(0.8)])
@@ -564,7 +564,7 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 ```python
 # show-code: true
 from gaanim import Anchor, Scene, TextAnchor
-scene = Scene(640, 360)
+scene = Scene(frame=(16, 9))
 scene.text("baseline left").move_to(-220, 60, anchor=TextAnchor.BASELINE_LEFT)
 scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, 0)
 scene.text("geometric corner").move_to(-220, -100, anchor=Anchor.TOP_LEFT)
@@ -593,7 +593,7 @@ stable baseline:
 ```python
 from gaanim import Scene, TextAnchor
 
-scene = Scene(960, 540)
+scene = Scene(frame=(16, 9))
 word = scene.text("Typography").move_to(0, 80)
 equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(
     0, -40, TextAnchor.BASELINE_CENTER

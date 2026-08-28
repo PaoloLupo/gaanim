@@ -22,19 +22,19 @@ from gaanim import Axis, Scene, Color, WHITE, GOLD, CYAN
 # ---------------------------------------------------------------------------
 # 1. Escena y ejes (límites Makie: -30..30, -30..30, 0..50)
 # ---------------------------------------------------------------------------
-scene = Scene(1920, 1080, background=Color(10, 10, 14))
+scene = Scene(frame=(16, 9), background=Color(10, 10, 14))
 
 axes = scene.viz.cartesian_3d(
     Axis.linear(-30, 30).ticks(10).label("x").style(color=WHITE),
     Axis.linear(-30, 30).ticks(10).label("y").style(color=WHITE),
     Axis.linear(0, 50).ticks(10).label("z").style(color=WHITE),
-    size=(60, 60, 50),
+    size=(0.5, 0.5, 0.416667),
     grid=True,
 ).move_to_3d(0, 0, 25)
 
-title = scene.text("Lorenz — GLMakie con APIs genéricas").fill(WHITE).hud().move_to(0, 500)
-subtitle = scene.text("polyline colormap + dot + updater genérico + traced_path_3d").fill(Color(180,180,190)).hud().move_to(0, 460)
-info = scene.text("azimuth oscila $1.7pi ± 0.3$ como Makie  •  colormap inferno por tiempo").fill(GOLD).hud().move_to(0, -500)
+title = scene.text("Lorenz — GLMakie con APIs genéricas").fill(WHITE).hud().move_to(0, 4.166667)
+subtitle = scene.text("polyline colormap + dot + updater genérico + traced_path_3d").fill(Color(180,180,190)).hud().move_to(0, 3.833333)
+info = scene.text("azimuth oscila $1.7pi ± 0.3$ como Makie  •  colormap inferno por tiempo").fill(GOLD).hud().move_to(0, -4.166667)
 
 # ---------------------------------------------------------------------------
 # 2. Opción A: Estático con colormap (un solo draw call, per-vertex)
@@ -72,7 +72,7 @@ static_trail.opacity(0.0)  # aparece al final como referencia tenue
 # 3. Opción B: Dinámico reactivo (fiel a Makie `record` + `push!(points, step!)`)
 #    Dot que integra Lorenz vía updater genérico + trail 3D que crece solo.
 # ---------------------------------------------------------------------------
-dot = scene.geometry.dot(7).fill(WHITE).move_to_3d(1, 1, 1).billboard()
+dot = scene.geometry.dot(0.058333).fill(WHITE).move_to_3d(1, 1, 1).billboard()
 
 def reset_lorenz():
     # El estado está en la posición del dot, que Gaanim restaura automáticamente.
@@ -101,7 +101,7 @@ trail = scene.geometry.traced_path_3d(dot, colormap="inferno", max_points=6000, 
 
 # Marcadores
 origin_tag = scene.text("origen").fill(Color(120,200,120)).move_to_3d(0,0,2).billboard().scale_to(0.45)
-head_glow = scene.geometry.dot(10).fill(Color(255,255,220)).move_to_3d(1,1,1).billboard()
+head_glow = scene.geometry.dot(0.083333).fill(Color(255,255,220)).move_to_3d(1,1,1).billboard()
 head_glow.bind_position_from(dot, "xyz")  # sigue al dot en XYZ (perspectiva)
 head_glow.opacity(0.35)
 

@@ -14,8 +14,8 @@ use crate::canvas::SceneModel;
 /// by future scripting language bindings. Bindings should not duplicate replay
 /// logic; they should construct `SceneModel` and call into this module indirectly.
 pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
-    let width = canvas.width;
-    let height = canvas.height;
+    let (width, height) = canvas.frame.preview_pixel_size();
+    let frame = canvas.frame;
 
     let mut timeline = match world.remove_resource::<Timeline>() {
         Some(res) => res,
@@ -73,7 +73,12 @@ pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
         }
 
         let mut commands = world.commands();
-        commands.insert_resource(Camera::ortho_2d(width, height));
+        commands.insert_resource(Camera::ortho_2d_frame(
+            frame.width,
+            frame.height,
+            width,
+            height,
+        ));
         // Spawn the 2D camera first. bevy_egui assigns the primary context to
         // the first camera created, so this must be the camera that renders
         // last and therefore owns the egui pass. The 3D camera still renders
